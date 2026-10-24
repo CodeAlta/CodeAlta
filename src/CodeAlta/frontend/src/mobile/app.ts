@@ -1,16 +1,19 @@
 import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
 import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
 import { coalesce, composerView } from "./composer";
-import { isBusy, type Live, type Options, type ProjectList, type Space, type TimelineEvent } from "./contract";
-import { activityLine, el, icon, iconSvg } from "./dom";
+import { isBusy, type Live, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
+import { activityLine, el, icon, iconSvg, type IconName } from "./dom";
 import { createDrafts, newSessionDraft } from "./drafts";
 import { installedApp, setUpInstall } from "./install";
 import { createLiveStream, type LinkState } from "./liveStream";
 import { createMarkdownView } from "./markdownView";
 import {
-  choiceLabel, choiceRequest, entryName, findModel, groupVariants, initialChoice, modelsOf, orderModels, pickEffort, pickModel, preferencesKey,
+  choiceLabel, choiceRequest, entryName, findModel, forgetMode, groupVariants, initialChoice, modelsOf, orderModels, pickEffort, pickModel, preferencesKey,
   providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
 } from "./models";
+import {
+  appliedSelection, chipText, modeDescription, modeName, pickedChanges, pickSessionModel, providerPermissionMode, queueFirstKey, shownSelection, type Picked,
+} from "./selection";
 import { safeColor, sessionMeta, showSpaces } from "./sessionMeta";
 import { createSheet } from "./sheet";
 import { ago, dotLabels, dotOf, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
@@ -105,7 +108,7 @@ export function startMobile(window: Window & typeof globalThis) {
 
   // The facts of a session, compact: the dot (with a word while it works), then its space, project, worktree, model and effort, agent and
   // whether it is a sub-agent; at most two lines, the time on the right.
-  function metaLine(view: SessionView, options: Readonly<{ space: boolean; live: boolean; dot: boolean; when: string | null; now: number }>): HTMLDivElement {
+  function metaLine(view: SessionView, options: Readonly<{ space: boolean; live: boolean; dot: boolean; when: string | null; now: number; selection?: boolean }>): HTMLDivElement {
     const line = make("div", "meta");
     const facts = make("div", "meta-facts");
     if (options.dot) facts.append(make("span", "dot"));
@@ -503,8 +506,8 @@ export function startMobile(window: Window & typeof globalThis) {
     if (!detail.id) return;
     const view = sessions.view(detail.id);
     $("detail-title").textContent = view?.title || "Session";
-    // What the prompt goes to: project · space · worktree · model and effort · agent.
-    const meta = view ? metaLine(view, { space: true, live: false, dot: false, when: null, now: Date.now() }) : null;
+    // Where the prompt goes: space · project · worktree · sub-agent. The chip of the composer says what it runs on.
+    const meta = view ? metaLine(view, { space: true, live: false, dot: false, when: null, now: Date.now(), selection: false }) : null;
     $("detail-meta").replaceChildren(...(meta ? Array.from(meta.querySelector(".meta-facts")!.childNodes) : []));
     showComposer();
   }
@@ -539,6 +542,7 @@ export function startMobile(window: Window & typeof globalThis) {
     pendingNotes.delete(id);
     bindComposer(id);
     showDetailHead();
+    void readChoices(id);
     if (!sessions.listed(id) || !sessions.view(id)?.title) void readSessionAlone(id);
     void readDetail().then(() => { if (detail.id === id) toBottom(); });
   }
@@ -575,24 +579,154 @@ export function startMobile(window: Window & typeof globalThis) {
     promptBox.value = id ? drafts.get(id) : "";
     grow();
   }
+  const buttonFaces: Readonly<Record<PromptMode, Readonly<{ icon: "send" | "steer" | "queue"; label: string; title: string }>>> = {
+    send: { icon: "send", label: "Send", title: "Send the prompt" },
+    steer: { icon: "steer", label: "Steer", title: "Send now, into the running turn" },
+    queue: { icon: "queue", label: "Queue", title: "Runs after this turn" },
+  };
+  function face(button: HTMLButtonElement, mode: PromptMode) {
+    const { icon: name, label, title } = buttonFaces[mode];
+    button.innerHTML = iconSvg(name);
+    button.append(make("span", null, label));
+    button.title = title;
+  }
   function showComposer() {
     const id = detail.id;
     const view = id ? sessions.view(id) : null;
     const busy = isBusy(view?.live?.live);
     if (id && !busy && stopping.has(id)) endStopping(id);
-    const state = composerView(busy, promptBox.value.trim().length > 0, !!view?.live?.canSteer);
+    const typed = promptBox.value.trim().length > 0;
+    const state = composerView(busy, typed, !!view?.live?.canSteer, queueFirst);
     sendButton.hidden = state.primary === null;
-    sendButton.innerHTML = iconSvg(state.primary === "steer" ? "steer" : "send");
-    sendButton.append(make("span", null, state.primary === "steer" ? "Steer" : "Send"));
-    sendButton.title = state.primary === "steer" ? "Send now, into the running turn" : "Send the prompt";
-    queueButton.hidden = !state.queue;
+    if (state.primary) face(sendButton, state.primary);
+    queueButton.hidden = state.secondary === null;
+    if (state.secondary) { face(queueButton, state.secondary); queueButton.dataset.mode = state.secondary; }
     abortButton.hidden = !state.stop;
     const halting = !!id && stopping.has(id);
     abortButton.disabled = halting;
     abortButton.querySelector("span")!.textContent = halting ? "Stopping…" : "Stop";
     hint.textContent = state.hint;
+    // The empty box says what the composer does now.
+    promptBox.placeholder = busy && !typed ? state.hint : "Ask for more…";
     composer.dataset.submit = state.submit;
+    showSelection();
   }
+
+  // ---- The selection of the composer: the chip (model and effort) and "⋯" (agent prompt, permissions, queue first) ----
+  // What the session runs on comes from its choices (read when it opens, after each send), else from the list. What is picked on the
+  // phone goes with the next send or queue, and then is the session's; a steer joins the running turn and leaves it for the next one.
+  const choicesOf = new Map<string, SessionChoices>(), picks = new Map<string, Picked>();
+  let queueFirst = store.get(queueFirstKey) === "1";
+  const pickModelButton = $<HTMLButtonElement>("pick-model"), pickMoreButton = $<HTMLButtonElement>("pick-more");
+  const sessionMoreSheet = createSheet(document, $("session-more-sheet"));
+  const sessionAgent = $<HTMLSelectElement>("session-agent"), sessionMode = $<HTMLSelectElement>("session-mode"), queueFirstBox = $<HTMLInputElement>("session-queue-first");
+  const readChoices = async (id: string) => {
+    const before = JSON.stringify(choicesOf.get(id) ?? null);
+    try {
+      const read = await api.choices(id);
+      choicesOf.set(id, { current: read.current, models: read.models ?? [], prompts: read.prompts ?? [], permissionModes: read.permissionModes ?? [], error: read.error ?? null });
+    } catch (error) {
+      if (error instanceof SignedOutError) return;
+      // An older CodeAlta has no choices: the chip keeps what the list says, and its sheet says why.
+      choicesOf.set(id, { current: { provider: null, providerName: null, model: null, modelName: null, reasoning: null, agent: null, agentName: null, permissionMode: null },
+        models: [], prompts: [], permissionModes: [], error: `The choices were not read: ${failureText(error, host)}` });
+    }
+    // An open sheet is drawn again only when the choices changed: drawing it moves the focus.
+    if (detail.id === id && JSON.stringify(choicesOf.get(id) ?? null) !== before) {
+      showSelection();
+      if (modelSheet.shown && modelSheetFor === id) renderSessionModels();
+      if (sessionMoreSheet.shown) renderSessionMore();
+    }
+  };
+  const sessionShown = (id: string) => shownSelection(sessions.view(id), choicesOf.get(id)?.error ? null : choicesOf.get(id), picks.get(id));
+  function tagsOf(tags: HTMLElement, items: readonly (readonly [IconName, string | null])[]) {
+    tags.replaceChildren(...items.map(([name, text]) => {
+      const tag = make("span");
+      tag.append(icon(document, name));
+      if (text) tag.append(document.createTextNode(` ${text}`));
+      return tag;
+    }));
+  }
+  function showSelection() {
+    const id = detail.id;
+    if (!id) return;
+    const choices = choicesOf.get(id), picked = picks.get(id) ?? {};
+    const shown = sessionShown(id), text = chipText(shown), changes = pickedChanges(choices, picked);
+    const modelPending = "model" in changes || "reasoning" in changes, morePending = "agent" in changes || "permissionMode" in changes;
+    $("pick-model-text").textContent = text.model;
+    pickModelButton.classList.toggle("pending", modelPending);
+    pickModelButton.setAttribute("aria-label", `Model: ${text.model}${modelPending ? ", for the next prompt" : ""}`);
+    tagsOf($("pick-more-text"), [...(text.agent ? [["bot", text.agent] as const] : []), ...(shown.permissionMode ? [["shield", null] as const] : [])]);
+    pickMoreButton.classList.toggle("pending", morePending);
+    pickMoreButton.setAttribute("aria-label", ["More options", text.agent && `agent prompt ${text.agent}`,
+      shown.permissionMode && `permissions ${modeName(shown.permissionMode, choices?.permissionModes)}`, morePending && "for the next prompt"].filter(Boolean).join(", "));
+  }
+  function pick(id: string, next: Picked) {
+    picks.set(id, next);
+    showSelection();
+  }
+
+  // The model sheet of a session: the efforts of its model, then the models of its provider.
+  function renderSessionModels() {
+    const id = modelSheetFor;
+    if (!id) return;
+    const choices = choicesOf.get(id), shown = sessionShown(id);
+    $("model-provider").textContent = shown.providerName ?? "";
+    $("tiers").hidden = true;
+    $("new-variants").hidden = true;
+    $("model-note").textContent = choices?.error ?? (choices ? "" : "Loading…");
+    const model = choices?.models.find(m => m.id === shown.model);
+    effortField(model?.efforts ?? [], shown.reasoning ?? "", effort => { pick(id, { ...picks.get(id), reasoning: effort }); renderSessionModels(); });
+    const models = choices && !choices.error ? choices.models : [];
+    const query = modelSearch.value.trim().toLowerCase();
+    modelSearch.hidden = models.length <= 8;
+    const { frontier, other } = orderModels(models.filter(m => !query || `${m.name} ${m.id}`.toLowerCase().includes(query)));
+    $("model-list").replaceChildren(...modelItems(frontier, other, m => m.id === shown.model, m => m.name, m => m.id, m => {
+      if (choices) pick(id, pickSessionModel(choices, picks.get(id) ?? {}, shown, m.id));
+      renderSessionModels();
+    }));
+  }
+  pickModelButton.addEventListener("click", () => {
+    const id = detail.id;
+    if (!id) return;
+    modelSheetFor = id;
+    modelSearch.value = "";
+    renderSessionModels();
+    modelSheet.open($("model-list").querySelector<HTMLElement>("button.on"));
+    void readChoices(id);
+  });
+
+  // "⋯" of a session: its agent prompt, its permissions (when its provider has modes), and whether a prompt typed while it works is queued.
+  function renderSessionMore() {
+    const id = detail.id;
+    if (!id) return;
+    const choices = choicesOf.get(id), shown = sessionShown(id);
+    const prompts = choices?.prompts.length ? choices.prompts : shown.agent ? [{ id: shown.agent, name: shown.agentName ?? shown.agent }] : [];
+    sessionAgent.replaceChildren(...prompts.map(p => option(p.id, p.name, p.id === shown.agent)));
+    sessionAgent.disabled = !choices?.prompts.length;
+    const modes = choices?.permissionModes ?? [];
+    $("session-mode-field").hidden = modes.length === 0;
+    sessionMode.replaceChildren(option(providerPermissionMode, modeName(null), !shown.permissionMode),
+      ...modes.map(m => option(m.id, modeName(m.id, modes), m.id === shown.permissionMode)));
+    $("session-mode-text").textContent = modeDescription(shown.permissionMode, modes);
+    queueFirstBox.checked = queueFirst;
+  }
+  pickMoreButton.addEventListener("click", () => {
+    const id = detail.id;
+    if (!id) return;
+    renderSessionMore();
+    sessionMoreSheet.open(sessionAgent);
+    void readChoices(id);
+  });
+  sessionAgent.addEventListener("change", () => { const id = detail.id; if (id) pick(id, { ...picks.get(id), agent: sessionAgent.value }); });
+  sessionMode.addEventListener("change", () => {
+    const id = detail.id;
+    if (!id) return;
+    pick(id, { ...picks.get(id), permissionMode: sessionMode.value });
+    $("session-mode-text").textContent = modeDescription(sessionMode.value === providerPermissionMode ? null : sessionMode.value, choicesOf.get(id)?.permissionModes);
+  });
+  queueFirstBox.addEventListener("change", () => { queueFirst = queueFirstBox.checked; store.set(queueFirstKey, queueFirst ? "1" : "0"); showComposer(); });
+  $("session-more-done").addEventListener("click", () => sessionMoreSheet.close());
   function endStopping(id: string) {
     window.clearTimeout(stopping.get(id));
     stopping.delete(id);
@@ -615,10 +749,20 @@ export function startMobile(window: Window & typeof globalThis) {
     const forget = () => { pendingPrompts.set(id, (pendingPrompts.get(id) ?? []).filter(p => p !== prompt)); if (detail.id === id) drawTimeline(); };
     pendingPrompts.set(id, [...pendingPrompts.get(id) ?? [], prompt]);
     if (detail.id === id) { drawTimeline(); toBottom(); }
+    // What was picked goes with a send or a queue; a steer leaves it for the next one.
+    const picked = picks.get(id) ?? {}, selection = mode === "steer" ? {} : pickedChanges(choicesOf.get(id), picked);
     try {
-      await api.prompt(id, text, mode);
+      await api.prompt(id, text, mode, selection);
+      if (mode !== "steer" && picks.get(id) === picked) picks.delete(id);
+      if (Object.keys(selection).length) {
+        // The session runs on it now: its choices say so.
+        const choices = choicesOf.get(id);
+        if (choices && !choices.error) choicesOf.set(id, { ...choices, current: appliedSelection(choices, selection) });
+        void readChoices(id);
+      }
       if (detail.id === id) {
         detailNote.textContent = "";
+        showSelection();
         toBottom();
         scheduleDetailRead(300);
       }
@@ -640,7 +784,8 @@ export function startMobile(window: Window & typeof globalThis) {
     event.preventDefault();
     void submitPrompt((composer.dataset.submit as "send" | "steer" | "queue" | undefined) ?? "send");
   });
-  queueButton.addEventListener("click", () => void submitPrompt("queue"));
+  // The second button: Queue, or Steer when the phone queues first.
+  queueButton.addEventListener("click", () => void submitPrompt(queueButton.dataset.mode === "steer" ? "steer" : "queue"));
   promptBox.addEventListener("keydown", event => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); composer.requestSubmit(); }
   });
@@ -691,15 +836,21 @@ export function startMobile(window: Window & typeof globalThis) {
     archive(id);
   });
 
-  // ---- New session: the desktop's selection form (agent prompt, provider, model with its tiers, reasoning) ----
-  // As the desktop: the provider filters the models; the model list opens with the tiers of the settings at its top, a
-  // tier fills provider, model and effort and stays marked until one of them is changed by hand; reasoning is a stepped
-  // slider over the efforts of the model, or plain text when there is nothing to choose. Choices are remembered per project.
+  // ---- New session: the project and the prompt; on the bar, the chips of the selection beside Start ----
+  // As the desktop: the model chip opens the model sheet, with the tiers of the settings at its top (a tier fills provider,
+  // model and effort and stays marked until one of them is changed by hand), the effort as a stepped slider over the
+  // efforts of the model, the variants of the model and the models of the provider. "⋯" opens the options: agent prompt,
+  // provider (it filters the models), permissions (when the provider has modes) and a worktree. Choices are remembered per project.
   const newProject = $<HTMLSelectElement>("new-project"), newAgent = $<HTMLSelectElement>("new-agent"), newProvider = $<HTMLSelectElement>("new-provider");
-  const newText = $<HTMLTextAreaElement>("new-text"), newWorktree = $<HTMLInputElement>("new-worktree");
-  const modelSheet = createSheet(document, $("model-sheet")), modelSearch = $<HTMLInputElement>("model-search");
+  const newText = $<HTMLTextAreaElement>("new-text"), newWorktree = $<HTMLInputElement>("new-worktree"), newMode = $<HTMLSelectElement>("new-mode");
+  // The model sheet serves the new session and the composer of a session: `modelSheetFor` is the session it shows, null for the new one.
+  let modelSheetFor: string | null = null;
+  const modelSheet = createSheet(document, $("model-sheet"), () => { modelSheetFor = null; }), modelSearch = $<HTMLInputElement>("model-search");
+  const newMoreSheet = createSheet(document, $("new-more-sheet"));
   let options: Options | null = null;
   let choice: Choice = { tier: null, provider: "", model: "", effort: "" };
+  // The permission mode of the new session; "" is the provider's.
+  let newPermission = "";
   const allPreferences = (): Record<string, ProjectPreferences> => { try { return JSON.parse(store.get(preferencesKey) ?? "{}") ?? {}; } catch { return {}; } };
   const projectPreferences = () => allPreferences()[newProject.value] ?? {};
   function remember(preferences: ProjectPreferences) {
@@ -708,92 +859,78 @@ export function startMobile(window: Window & typeof globalThis) {
     store.set(preferencesKey, JSON.stringify(all));
   }
   const option = (value: string, label: string, selected: boolean) => { const item = make("option", null, label); item.value = value; item.selected = selected; return item; };
+  const offeredModes = () => options?.permissionModes?.[choice.provider] ?? [];
+  const rememberNew = () => remember(rememberChoice(newAgent.value || undefined, choice, newPermission || undefined));
 
-  function setChoice(next: Choice, preferences?: ProjectPreferences) {
+  function setChoice(next: Choice) {
+    // A mode belongs to its provider.
+    if (next.provider !== choice.provider) newPermission = "";
     choice = next;
-    remember(preferences ?? rememberChoice(newAgent.value || undefined, next));
+    rememberNew();
     renderChoice();
   }
 
-  function renderChoice() {
-    if (!options) return;
-    const o = options;
-    newProvider.replaceChildren(...providers(o).map(p => option(p, providerName(o, p), p === choice.provider)));
-    $("new-model-name").textContent = choiceLabel(o, choice);
-    // The options of the model: a checkbox per variant its entry has; a combination that does not exist is disabled.
-    const group = groupVariants(modelsOf(o, choice.provider)).find(g => g.members.some(x => x.model.id === choice.model));
-    const flags = group ? group.members.find(x => x.model.id === choice.model)!.flags.filter(f => !group.fixed.includes(f)) : [];
-    const variants = $("new-variants");
-    variants.hidden = !group || group.options.length === 0;
-    variants.replaceChildren(...(group?.options ?? []).map(flag => {
-      const on = flags.includes(flag), target = group!.find(on ? flags.filter(x => x !== flag) : [...flags, flag]);
-      const label = make("label", "check"), box = make("input");
-      box.type = "checkbox"; box.checked = on; box.disabled = !target;
-      box.addEventListener("change", () => { if (target) setChoice({ tier: null, provider: choice.provider, model: target.id, effort: pickEffort(o, target, choice.effort) }); });
-      label.append(box, document.createTextNode(` ${variantLabels[flag]}`));
-      return label;
-    }));
-    const model = findModel(o, choice.provider, choice.model);
-    const efforts = model?.efforts ?? [];
-    const box = $("new-effort");
-    $("new-effort-field").hidden = efforts.length === 0 && !choice.effort; // no effort levels: no Reasoning section at all
-    if (efforts.length < 2) { box.replaceChildren(make("span", "reasoning-static", choice.effort || efforts[0] || "")); return; }
+  // The stepped slider of the efforts of a model, in the model sheet; plain text when there is nothing to choose, nothing when it has none.
+  function effortField(efforts: readonly string[], effort: string, onPick: (effort: string) => void) {
+    const box = $("sheet-effort");
+    $("sheet-effort-field").hidden = efforts.length === 0 && !effort;
+    if (efforts.length < 2) { box.replaceChildren(make("span", "reasoning-static", effort || efforts[0] || "")); return; }
     const range = make("input");
     range.type = "range"; range.min = "0"; range.max = String(efforts.length - 1); range.step = "1";
-    range.value = String(Math.max(0, efforts.indexOf(choice.effort)));
-    range.setAttribute("aria-labelledby", "new-effort-label");
-    range.setAttribute("aria-valuetext", choice.effort);
+    range.value = String(Math.max(0, efforts.indexOf(effort)));
+    range.setAttribute("aria-labelledby", "sheet-effort-label");
+    range.setAttribute("aria-valuetext", effort);
     const labels = make("div", "reasoning-labels");
-    efforts.forEach((effort, index) => {
-      const button = make("button", effort === choice.effort ? "on" : null, effort);
+    efforts.forEach((value, index) => {
+      const button = make("button", value === effort ? "on" : null, value);
       button.type = "button";
       button.style.left = `${index / (efforts.length - 1) * 100}%`;
-      button.addEventListener("click", () => setEffort(effort));
+      button.addEventListener("click", () => onPick(value));
       labels.append(button);
     });
-    range.addEventListener("input", () => setEffort(efforts[Number(range.value)]));
+    range.addEventListener("input", () => onPick(efforts[Number(range.value)]));
     box.replaceChildren(range, labels);
   }
-  function setEffort(effort: string) {
-    if (effort === choice.effort && !choice.tier) return;
-    setChoice({ ...choice, effort, tier: null });
-  }
-  newProvider.addEventListener("change", () => {
-    if (!options) return;
-    const model = pickModel(options, newProvider.value);
-    choice = { tier: null, provider: newProvider.value, model: model?.id ?? "", effort: pickEffort(options, model) };
-    // A provider choice forgets the model.
-    remember({ ...(newAgent.value ? { agentPromptId: newAgent.value } : {}), providerKey: newProvider.value });
-    renderChoice();
-  });
-  newAgent.addEventListener("change", () => remember({ ...projectPreferences(), agentPromptId: newAgent.value }));
 
-  // The model list: a bottom sheet where the desktop has a popover.
-  function renderModelList() {
-    if (!options) return;
-    const o = options, query = modelSearch.value.trim().toLowerCase();
-    const groups = groupVariants(modelsOf(o, choice.provider)), byEntry = new Map(groups.map(g => [g.entry.id, g]));
-    const { frontier, other } = orderModels(groups.filter(g => !query || g.members.some(x => `${x.model.name} ${x.model.id}`.toLowerCase().includes(query))).map(g => g.entry));
-    const items = [...frontier, ...(other.length && frontier.length ? [null] : []), ...other].map(model => {
+  // The rows of a model list: the latest of each line, then "Other models".
+  function modelItems<T>(frontier: readonly T[], other: readonly T[], on: (model: T) => boolean, name: (model: T) => string, small: (model: T) => string, onPick: (model: T) => void): HTMLLIElement[] {
+    return [...frontier, ...(other.length && frontier.length ? [null] : []), ...other].map(model => {
       if (model === null) { const item = make("li", "model-sep", "Other models"); item.setAttribute("role", "separator"); return item; }
-      const group = byEntry.get(model.id)!, mine = !choice.tier && group.members.some(x => x.model.id === choice.model);
+      const mine = on(model);
       const button = make("button", mine ? "on" : null);
       button.type = "button";
       button.setAttribute("aria-pressed", String(mine));
-      button.append(make("span", null, entryName(model)), make("small", null, model.id + (group.options.length ? ` (${[...group.options].sort().map(f => `+${f}`).join(", ")})` : "")));
-      button.addEventListener("click", () => {
-        if (!mine) setChoice({ tier: null, provider: choice.provider, model: model.id, effort: pickEffort(o, model, choice.effort) });
-        modelSheet.close();
-      });
+      button.append(make("span", null, name(model)), make("small", null, small(model)));
+      button.addEventListener("click", () => onPick(model));
       const item = make("li");
       item.append(button);
       return item;
     });
-    $("model-list").replaceChildren(...items);
   }
-  $("new-model").addEventListener("click", () => {
+
+  // The chips of the bar: the tier or the model with its effort; "⋯" with the agent prompt when it is not the default one, a branch
+  // for a worktree, a shield for a permission mode.
+  function renderChoice() {
     if (!options) return;
     const o = options;
+    const label = [choiceLabel(o, choice), choice.effort].filter(Boolean).join(" · ");
+    $("new-model-name").textContent = label;
+    $("new-model").setAttribute("aria-label", `Model: ${label}`);
+    const agent = newAgent.value && newAgent.value.toLowerCase() !== "default" ? o.prompts.find(p => p.id === newAgent.value)?.name ?? newAgent.value : null;
+    const modes = offeredModes();
+    tagsOf($("new-more-text"), [...(agent ? [["bot", agent] as const] : []), ...(newWorktree.checked ? [["branch", null] as const] : []), ...(newPermission ? [["shield", null] as const] : [])]);
+    $("new-more").setAttribute("aria-label", ["More options", agent && `agent prompt ${agent}`, newWorktree.checked && "new worktree",
+      newPermission && `permissions ${modeName(newPermission, modes)}`].filter(Boolean).join(", "));
+    if (modelSheet.shown && modelSheetFor === null) renderNewModels();
+    if (newMoreSheet.shown) renderNewMore();
+  }
+
+  // The model sheet of the new session: the tiers, the effort of the choice, the variants of its model, the models of its provider.
+  function renderNewModels() {
+    if (!options) return;
+    const o = options, query = modelSearch.value.trim().toLowerCase();
+    $("model-provider").textContent = providerName(o, choice.provider);
+    $("model-note").textContent = "";
     const tiers = $("tiers");
     tiers.replaceChildren(...o.tiers.map(tier => {
       const on = tier.tier === choice.tier;
@@ -803,31 +940,84 @@ export function startMobile(window: Window & typeof globalThis) {
       button.setAttribute("aria-pressed", String(on));
       button.append(make("span", "tier-name", tierLabel(tier.tier)), make("span", "tier-model", tierText(o, tier)));
       if (tier.error) button.title = tier.error;
-      button.addEventListener("click", () => {
-        const next = tierChoice(o, tier.tier);
-        if (next) setChoice(next);
-        modelSheet.close();
-      });
+      button.addEventListener("click", () => { const next = tierChoice(o, tier.tier); if (next) setChoice(next); });
       return button;
     }));
     tiers.hidden = o.tiers.length === 0;
+    const model = findModel(o, choice.provider, choice.model);
+    effortField(model?.efforts ?? [], choice.effort, effort => { if (effort !== choice.effort || choice.tier) setChoice({ ...choice, effort, tier: null }); });
+    // The options of the model: a checkbox per variant its entry has; a combination that does not exist is disabled.
+    const groups = groupVariants(modelsOf(o, choice.provider)), byEntry = new Map(groups.map(g => [g.entry.id, g]));
+    const group = groups.find(g => g.members.some(x => x.model.id === choice.model));
+    const flags = group ? group.members.find(x => x.model.id === choice.model)!.flags.filter(f => !group.fixed.includes(f)) : [];
+    const variants = $("new-variants");
+    variants.hidden = !group || group.options.length === 0;
+    variants.replaceChildren(...(group?.options ?? []).map(flag => {
+      const on = flags.includes(flag), target = group!.find(on ? flags.filter(x => x !== flag) : [...flags, flag]);
+      const box = make("input"), check = make("label", "check");
+      box.type = "checkbox"; box.checked = on; box.disabled = !target;
+      box.addEventListener("change", () => { if (target) setChoice({ tier: null, provider: choice.provider, model: target.id, effort: pickEffort(o, target, choice.effort) }); });
+      check.append(box, document.createTextNode(` ${variantLabels[flag]}`));
+      return check;
+    }));
+    modelSearch.hidden = groups.length <= 8;
+    const { frontier, other } = orderModels(groups.filter(g => !query || g.members.some(x => `${x.model.name} ${x.model.id}`.toLowerCase().includes(query))).map(g => g.entry));
+    $("model-list").replaceChildren(...modelItems(frontier, other, m => !choice.tier && byEntry.get(m.id)!.members.some(x => x.model.id === choice.model), entryName,
+      m => m.id + (byEntry.get(m.id)!.options.length ? ` (${[...byEntry.get(m.id)!.options].sort().map(f => `+${f}`).join(", ")})` : ""),
+      m => { if (choice.tier || !byEntry.get(m.id)!.members.some(x => x.model.id === choice.model)) setChoice({ tier: null, provider: choice.provider, model: m.id, effort: pickEffort(o, m, choice.effort) }); }));
+  }
+  $("new-model").addEventListener("click", () => {
+    if (!options) return;
+    modelSheetFor = null;
     modelSearch.value = "";
-    renderModelList();
-    modelSheet.open(modelSearch);
+    renderNewModels();
+    modelSheet.open($("model-list").querySelector<HTMLElement>("button.on") ?? $("tiers").querySelector<HTMLElement>("button.on"));
   });
-  modelSearch.addEventListener("input", renderModelList);
+  modelSearch.addEventListener("input", () => { if (modelSheetFor) renderSessionModels(); else renderNewModels(); });
+  $("model-done").addEventListener("click", () => modelSheet.close());
+
+  // "⋯" of the new session.
+  function renderNewMore() {
+    if (!options) return;
+    const o = options, modes = offeredModes();
+    newProvider.replaceChildren(...providers(o).map(p => option(p, providerName(o, p), p === choice.provider)));
+    $("new-mode-field").hidden = modes.length === 0;
+    newMode.replaceChildren(option("", modeName(null), !newPermission), ...modes.map(m => option(m.id, modeName(m.id, modes), m.id === newPermission)));
+    $("new-mode-text").textContent = modeDescription(newPermission || null, modes);
+  }
+  $("new-more").addEventListener("click", () => {
+    if (!options) return;
+    renderNewMore();
+    newMoreSheet.open(newAgent);
+  });
+  $("new-more-done").addEventListener("click", () => newMoreSheet.close());
+  newProvider.addEventListener("change", () => {
+    if (!options) return;
+    const model = pickModel(options, newProvider.value);
+    choice = { tier: null, provider: newProvider.value, model: model?.id ?? "", effort: pickEffort(options, model) };
+    newPermission = "";
+    // A provider choice forgets the model.
+    remember({ ...(newAgent.value ? { agentPromptId: newAgent.value } : {}), providerKey: newProvider.value });
+    renderChoice();
+  });
+  newAgent.addEventListener("change", () => { remember({ ...projectPreferences(), agentPromptId: newAgent.value }); renderChoice(); });
+  newMode.addEventListener("change", () => { newPermission = newMode.value; rememberNew(); renderChoice(); });
+  newWorktree.addEventListener("change", renderChoice);
 
   function initForm() {
     if (!options) return;
     const stored = projectPreferences();
     const { choice: first, remembered } = initialChoice(options, stored);
     choice = first;
+    // A remembered mode stays while its provider offers it.
+    newPermission = remembered.permissionMode && remembered.providerKey === choice.provider && offeredModes().some(m => m.id === remembered.permissionMode) ? remembered.permissionMode : "";
     // The space the session goes to, beside its project.
     const space = projects?.projects.find(p => p.id === newProject.value)?.space;
     $("new-space").replaceChildren(...(space ? [spaceMark(space)] : []));
     const agent = remembered.agentPromptId && options.prompts.some(p => p.id === remembered.agentPromptId) ? remembered.agentPromptId : options.defaults?.prompt || options.prompts[0]?.id || "";
     newAgent.value = agent;
-    if (JSON.stringify(remembered) !== JSON.stringify(stored)) remember(remembered);
+    const kept = newPermission ? remembered : forgetMode(remembered);
+    if (JSON.stringify(kept) !== JSON.stringify(stored)) remember(kept);
     renderChoice();
     // A default tier that cannot be used says why, beside the form.
     const tier = options.defaultTier ? options.tiers.find(t => t.tier === options!.defaultTier) : undefined;
@@ -839,7 +1029,10 @@ export function startMobile(window: Window & typeof globalThis) {
     newNote.textContent = options ? "" : "Loading…";
     try {
       const [projectList, read] = await Promise.all([readProjects(), options ? Promise.resolve(options) : api.options()]);
-      options = { models: read.models ?? [], prompts: read.prompts ?? [], tiers: read.tiers ?? [], defaultTier: read.defaultTier ?? null, defaults: read.defaults ?? null, error: read.error ?? null };
+      options = {
+        models: read.models ?? [], prompts: read.prompts ?? [], tiers: read.tiers ?? [], defaultTier: read.defaultTier ?? null, defaults: read.defaults ?? null,
+        permissionModes: read.permissionModes ?? {}, error: read.error ?? null,
+      };
       const keep = !fresh && projectList.projects.some(p => p.id === newProject.value) ? newProject.value : null;
       const selected = keep ?? (fresh ? projectList.default : sessions.filter || projectList.default);
       newProject.replaceChildren(...projectList.projects.map(p => option(p.id, p.name, p.id === selected)));
@@ -861,7 +1054,10 @@ export function startMobile(window: Window & typeof globalThis) {
     start.disabled = true;
     newNote.textContent = "Starting…";
     try {
-      const created = await api.create({ project: newProject.value, text, prompt: newAgent.value || undefined, ...choiceRequest(choice), worktree: newWorktree.checked });
+      const created = await api.create({
+        project: newProject.value, text, prompt: newAgent.value || undefined, ...choiceRequest(choice),
+        ...(newPermission ? { permissionMode: newPermission } : {}), worktree: newWorktree.checked,
+      });
       newText.value = "";
       drafts.clear(newSessionDraft);
       newNote.textContent = "";
@@ -871,7 +1067,7 @@ export function startMobile(window: Window & typeof globalThis) {
       window.location.hash = `#/session/${encodeURIComponent(created.id)}`;
     } catch (error) {
       if (!(error instanceof SignedOutError)) newNote.textContent = `Not started: ${failureText(error, host)}`;
-    } finally { start.disabled = false; }
+    } finally { start.disabled = false; padComposer(); }
   });
   // "+" on the new-session screen starts the form again from the settings: the choices are read again (models, prompts,
   // projects), what was remembered for the project of the form is forgotten (not the other projects'), the prompt is cleared.
@@ -886,6 +1082,7 @@ export function startMobile(window: Window & typeof globalThis) {
     drafts.clear(newSessionDraft);
     newWorktree.checked = false;
     modelSheet.close();
+    newMoreSheet.close();
     void openCreate(true);
   });
 
@@ -991,8 +1188,10 @@ export function startMobile(window: Window & typeof globalThis) {
     plus.classList.toggle("on", creating);
     if (creating) plus.setAttribute("aria-current", "page"); else plus.removeAttribute("aria-current");
     document.body.classList.toggle("with-composer", !!id);
-    // One footer: under the composer on the page of a session, at the bottom of the page elsewhere.
-    if (id) composer.append(foot); else if (foot.parentElement !== document.body) document.body.insertBefore(foot, toastElement);
+    // One footer: under the composer on the page of a session, under Start on the new-session screen, at the bottom of the list.
+    if (id) composer.append(foot);
+    else if (creating) $("create-bar").append(foot);
+    else if (foot.parentElement !== document.body) document.body.insertBefore(foot, toastElement);
     if (creating) void openCreate(false);
     if (id && id !== detail.id) openDetail(id);
     if (!id && detail.id) closeDetail();

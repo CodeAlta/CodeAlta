@@ -28,6 +28,7 @@ const options: Options = {
   ],
   defaultTier: "standard",
   defaults: { provider: "codex", model: "gpt-6.1", reasoning: "medium", prompt: "default" },
+  permissionModes: { claude: [{ id: "default", name: "Ask first" }, { id: "acceptEdits", name: "Accept edits" }, { id: "bypassPermissions", name: "Bypass permissions" }] },
   error: null,
 };
 
@@ -112,13 +113,15 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     const shown = (selector: string) => `(() => { const e = document.querySelector(${JSON.stringify(selector)}); return !!e && !e.closest("[hidden]") && e.getClientRects().length > 0; })()`;
 
     await command("Runtime.enable"); await command("Log.enable"); await command("Page.enable");
-    // A phone: 390 × 844 CSS pixels.
-    await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    // A phone: 390 × 844 CSS pixels (at the scale of a recent phone when the pictures are kept).
+    await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: shots ? 3 : 2, mobile: true });
 
     // Sign-in: the token of the link is in the fragment; it leaves the address and gets the cookie.
     await command("Page.navigate", { url: `${server.origin}/#k=${server.state.token}` });
     await waitFor(`document.querySelectorAll("#sessions .row").length === 2`, "the list of sessions");
     assert.equal(await evaluate("location.href"), `${server.origin}/`);
+    // "Not now" on the offer to install the app.
+    if (await evaluate<boolean>(shown("#install-bar"))) await click("#install-later");
     assert.equal(await evaluate("localStorage.getItem('alta.token')"), "secret");
     assert.deepEqual(server.requests.filter(r => r.path === "/api/login").map(r => r.body), [{ token: "secret" }]);
     assert.ok(server.requests.every(r => !/[?&]t=/.test(r.query)), "the token never goes in a query");
@@ -145,7 +148,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await new Promise(resolve => setTimeout(resolve, 700));
     assert.equal(count("GET", "/api/sessions"), reads + 1, "one read of the list for it");
     assert.ok((await texts('.row[data-id="s9"] .meta-item')).includes("Sub-agent"));
-    await shot("mobile-list.png");
+    await shot("01-list-dark.png");
 
     // The theme follows a tap, with the color of the browser's bar.
     await click("#theme");
@@ -159,17 +162,66 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     assert.equal(await evaluate("document.querySelector('.msg-assistant ol li strong')?.textContent"), "the grammar", "numbered lists and bold from the real renderer");
     assert.equal(await evaluate("document.querySelector('.msg-assistant pre code')?.textContent"), "const x = 1;\n");
     assert.equal(await evaluate("document.querySelector('#detail-title').textContent"), "Fix the parser");
-    assert.deepEqual(await texts("#detail-meta .meta-item"), ["Work", "parser", "GPT-6.1 Sol · low"], "what a prompt goes to, under the title");
+    assert.deepEqual(await texts("#detail-meta .meta-item"), ["Work", "parser"], "where a prompt goes, under the title");
     assert.ok(await evaluate<boolean>(shown("#composer #foot")), "the footer is under the composer on a session's page");
+    // What it runs on, on the line of the buttons: the chip of the model and its effort, and "⋯".
+    await waitUntil(() => count("GET", "/api/sessions/s1/choices") === 1, "the choices of the session read");
+    assert.equal(await evaluate("document.getElementById('pick-model-text').textContent"), "GPT-6.1 Sol · low");
+    const line = await evaluate<{ chip: number; send: number; box: number; composer: number }>(`(() => { const r = e => document.getElementById(e).getBoundingClientRect();
+      return { chip: r("pick-model").top, send: r("send").top, box: r("prompt").height, composer: r("composer").height }; })()`);
+    assert.equal(line.chip, line.send, "the chip is on the line of Send: no room taken");
+    assert.ok(line.composer <= line.box + 44 + 60, `the composer at rest is a box, one line of buttons and the footer (${JSON.stringify(line)})`);
+    assert.ok(await evaluate<number>("document.getElementById('pick-more').getBoundingClientRect().height") >= 44, "touch targets of 44 px");
     await click("#timeline .act-toggle");
     await waitFor(`document.querySelectorAll("#timeline .act-body > *").length === 2`, "the opened activity");
     assert.equal(await evaluate("document.querySelector('#timeline .tool-row')?.dataset.phase"), "completed");
+    await shot("02-session-dark.png");
 
-    // Send: the prompt leaves the composer and its draft.
+    // The chip opens the model sheet: the effort, then the models of the session's provider. A model keeps the effort shown when it has
+    // it, else takes its start effort; the sheet stays open until Done.
+    await evaluate("document.getElementById('pick-model').focus()");
+    await click("#pick-model");
+    await waitFor(shown("#model-sheet"), "the model sheet of the session");
+    assert.equal(await evaluate<boolean>(shown("#tiers")), false, "a session has no tiers");
+    assert.equal(await evaluate("document.getElementById('model-provider').textContent"), "Codex");
+    assert.deepEqual(await texts("#model-list button > span"), ["GPT-6.1 Argon", "GPT-6.1 Sol", "GPT-5.5"]);
+    assert.deepEqual(await texts("#sheet-effort .reasoning-labels button"), ["low", "medium", "high"]);
+    assert.equal(await evaluate("document.querySelector('#sheet-effort .reasoning-labels button.on').textContent"), "low");
+    await evaluate(`[...document.querySelectorAll("#model-list button")].find(b => b.textContent.includes("Argon")).click()`);
+    await waitFor(`document.querySelector('#sheet-effort .reasoning-labels button.on')?.textContent === "high"`, "the start effort of the other model");
+    assert.deepEqual(await texts("#sheet-effort .reasoning-labels button"), ["medium", "high", "xhigh"]);
+    await evaluate(`[...document.querySelectorAll("#sheet-effort .reasoning-labels button")].find(b => b.textContent === "medium").click()`);
+    await waitFor(`document.getElementById('pick-model-text').textContent === "GPT-6.1 Argon · medium"`, "the chip says the pick");
+    assert.equal(await evaluate("document.getElementById('pick-model').classList.contains('pending')"), true, "a pick waits for the next prompt");
+    await shot("03-model-sheet-dark.png");
+    await click("#model-done");
+    await waitFor(`!(${shown("#model-sheet")})`, "the model sheet closed");
+    assert.equal(await evaluate("document.activeElement?.id"), "pick-model", "the focus back on the chip");
+
+    // "⋯": the agent prompt, the permissions of the provider, and queueing rather than steering.
+    await click("#pick-more");
+    await waitFor(shown("#session-more-sheet"), "the options of the session");
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('#session-agent option')].map(o => o.textContent)"), ["Default", "Plan", "Review"]);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('#session-mode option')].map(o => o.textContent)"),
+      ["The provider's setting", "Ask first", "Accept edits", "Bypass permissions"]);
+    await evaluate(`(() => { for (const [id, value] of [["session-agent", "plan"], ["session-mode", "acceptEdits"]]) {
+      const select = document.getElementById(id); select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); } })()`);
+    await waitFor(`document.getElementById('session-mode-text').textContent === "Accept file edits; ask before commands."`, "what the mode does");
+    await shot("04-options-sheet-dark.png");
+    await click("#session-more-done");
+    await waitFor(`!(${shown("#session-more-sheet")})`, "the options closed");
+    assert.equal(await evaluate("document.getElementById('pick-more-text').textContent.trim()"), "Plan", "⋯ says the agent prompt that is not the default one");
+    assert.match(await evaluate<string>("document.getElementById('pick-more').getAttribute('aria-label')"), /agent prompt Plan, permissions Accept edits, for the next prompt/);
+
+    // Send: the prompt leaves the composer and its draft, with what was picked; then the session runs on it.
     await typeInto("#prompt", "Add a test");
     await click("#send");
     await waitUntil(() => count("POST", "/api/sessions/s1/prompt") === 1, "the prompt sent");
-    assert.deepEqual(server.requests.find(r => r.path === "/api/sessions/s1/prompt")?.body, { text: "Add a test", mode: "send" });
+    assert.deepEqual(server.requests.find(r => r.path === "/api/sessions/s1/prompt")?.body,
+      { text: "Add a test", mode: "send", model: "gpt-6.1-argon", reasoning: "medium", agent: "plan", permissionMode: "acceptEdits" });
+    await waitFor(`!document.getElementById('pick-model').classList.contains('pending') && !document.getElementById('pick-more').classList.contains('pending')`, "nothing waits any more");
+    assert.equal(await evaluate("document.getElementById('pick-model-text').textContent"), "GPT-6.1 Argon · medium", "the session's now");
+    await waitUntil(() => count("GET", "/api/sessions/s1/choices") >= 2, "the choices read again after the send");
     assert.equal(await evaluate("document.getElementById('prompt').value"), "");
     assert.equal(await evaluate("localStorage.getItem('alta.draft.s1')"), null);
     assert.deepEqual(await texts("#timeline > li.pending .msg-label"), ["You"], "the prompt shows at once");
@@ -196,10 +248,30 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     // The steered prompt is in the timeline as soon as it is accepted, and becomes the journal's message once it holds it.
     await waitFor(`document.querySelector("#timeline > li.pending")?.textContent.includes("Use the fast path")`, "the steered prompt");
     assert.deepEqual(await texts("#timeline > li.pending .msg-label"), ["You · steering"]);
-    await shot("mobile-session.png");
     server.state.events.get("s1")!.push(event("user.message", "Use the fast path"));
     server.push({ id: "s1", projectId: "p1", live: "running", kind: "user", line: "Use the fast path", at: new Date().toISOString(), activity: null, canSteer: true });
     await waitFor(`!document.querySelector("#timeline > li.pending") && [...document.querySelectorAll("#timeline > li.msg-user")].at(-1)?.textContent.includes("Use the fast path")`, "the journal's message in its place");
+
+    // Queue rather than steer, chosen in "⋯": Queue becomes the primary action, Steer the second one; a pick goes with the queue.
+    await click("#pick-more");
+    await waitFor(shown("#session-more-sheet"), "the options of the session");
+    await click("#session-queue-first");
+    await click("#session-more-done");
+    assert.equal(await evaluate("localStorage.getItem('alta.queueFirst')"), "1", "kept on the phone");
+    await typeInto("#prompt", "Then the docs");
+    assert.deepEqual([await evaluate("document.querySelector('#send span').textContent"), await evaluate("document.querySelector('#queue span').textContent")], ["Queue", "Steer"]);
+    await click("#pick-model");
+    await waitFor(shown("#model-sheet"), "the model sheet");
+    await evaluate(`[...document.querySelectorAll("#sheet-effort .reasoning-labels button")].find(b => b.textContent === "xhigh").click()`);
+    await click("#model-done");
+    await evaluate("document.getElementById('composer').requestSubmit()");
+    await waitUntil(() => count("POST", "/api/sessions/s1/prompt") === 3, "the prompt queued");
+    assert.deepEqual(server.requests.filter(r => r.path === "/api/sessions/s1/prompt").at(-1)?.body, { text: "Then the docs", mode: "queue", reasoning: "xhigh" });
+    await waitFor(`[...document.querySelectorAll("#timeline > li.pending .msg-label")].some(e => e.textContent === "You · queued")`, "the queued prompt");
+    server.state.events.get("s1")!.push(event("user.message", "Then the docs"));
+    await click("#pick-more");
+    await click("#session-queue-first");
+    await click("#session-more-done");
 
     // Stop: one tap, "Stopping…" until the session is idle.
     await click("#abort");
@@ -239,23 +311,40 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     assert.equal(await evaluate("document.activeElement?.id"), "filter");
 
     // A new session: the default tier of the settings; a prompt that did not go is back in the composer of its session.
+    // The screen is the project, the prompt, and one line of chips beside Start.
     await click("#new");
-    await waitFor(`document.getElementById('new-model-name').textContent === "Standard · GPT-6.1"`, "the default tier");
+    await waitFor(`document.getElementById('new-model-name').textContent === "Standard · GPT-6.1 · medium"`, "the default tier");
+    const bar = await evaluate<{ chip: number; more: number; start: number; height: number }>(`(() => { const r = e => document.getElementById(e).getBoundingClientRect();
+      return { chip: r("new-model").top, more: r("new-more").top, start: r("new-start").top, height: r("create-bar").height }; })()`);
+    assert.ok(bar.chip === bar.start && bar.more === bar.start, `the chips are on the line of Start (${JSON.stringify(bar)})`);
     await click("#new-model");
     await waitFor(shown("#model-sheet"), "the model sheet");
     assert.deepEqual(await evaluate("[...document.querySelectorAll('#tiers .tier')].map(b => [b.textContent, b.disabled])"),
       [["ComplexOpus 4.7", false], ["StandardGPT-6.1", false], ["QuickNo model is set for this tier.", true]]);
     await click("#tiers .tier");
-    await waitFor(`document.getElementById('new-model-name').textContent === "Complex · Opus 4.7"`, "the complex tier");
+    await waitFor(`document.getElementById('new-model-name').textContent === "Complex · Opus 4.7 · high"`, "the complex tier");
+    assert.deepEqual(await texts("#sheet-effort .reasoning-labels button"), ["low", "high"], "the efforts of the tier's model");
+    await click("#model-done");
     assert.equal(await evaluate("document.getElementById('new-space').textContent"), "Work", "the space the session goes to, beside its project");
     assert.ok(await evaluate<boolean>("document.getElementById('new-start').getBoundingClientRect().bottom <= innerHeight"), "Start is on the screen without scrolling");
     server.state.createAnswer = { sendError: "The provider is busy." };
     await typeInto("#new-text", "Make it faster");
-    await shot("mobile-new-session.png");
+    await shot("05-new-session-dark.png");
+    // "⋯": the agent prompt, the provider, the permissions its provider offers, a worktree.
+    await click("#new-more");
+    await waitFor(shown("#new-more-sheet"), "the options of the new session");
+    assert.equal(await evaluate("document.getElementById('new-provider').value"), "claude");
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('#new-mode option')].map(o => o.value)"), ["", "default", "acceptEdits", "bypassPermissions"]);
+    await evaluate(`(() => { const select = document.getElementById("new-mode"); select.value = "acceptEdits"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await click("#new-worktree");
+    await shot("06-new-options-dark.png");
+    await click("#new-more-done");
+    assert.match(await evaluate<string>("document.getElementById('new-more').getAttribute('aria-label')"), /new worktree, permissions Accept edits/);
+    assert.equal(await evaluate("JSON.parse(localStorage.getItem('codealta.mobile.newSessionPreferences.v1')).p1.permissionMode"), "acceptEdits", "remembered for the project");
     await evaluate("document.getElementById('new-form').requestSubmit()");
     await waitFor(`location.hash === "#/session/new1"`, "the page of the new session");
     assert.deepEqual(server.requests.find(r => r.method === "POST" && r.path === "/api/sessions")?.body,
-      { project: "p1", text: "Make it faster", prompt: "default", tier: "complex", worktree: false });
+      { project: "p1", text: "Make it faster", prompt: "default", tier: "complex", permissionMode: "acceptEdits", worktree: true });
     await waitFor(`document.getElementById('detail-note').textContent.includes("not sent: The provider is busy.")`, "the failed send on its page");
     assert.equal(await evaluate("document.getElementById('prompt').value"), "Make it faster");
     await waitFor(`document.querySelector('#detail-title').textContent === "New: Make it faster"`, "a session out of the list read alone");
@@ -266,6 +355,20 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
       await new Promise(resolve => setTimeout(resolve, 150));
       assert.ok(await evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth"), `no horizontal overflow on ${hash}`);
     }
+
+    // The light theme: the page of a session at rest, and the new-session screen.
+    await click("#theme");
+    await evaluate("location.hash = '#/session/s1'");
+    await waitFor(`document.querySelector('#detail-title').textContent === "Fix the parser" && document.getElementById('pick-model-text').textContent === "GPT-6.1 Argon · xhigh"`, "the session in light");
+    await typeInto("#prompt", "");
+    await evaluate("window.scrollTo(0, document.documentElement.scrollHeight)");
+    await shot("07-session-light.png");
+    await evaluate("location.hash = '#/new'");
+    await waitFor(shown("#new-model"), "the new-session screen in light");
+    await typeInto("#new-text", "Write the release notes of the parser");
+    await shot("08-new-session-light.png");
+    await typeInto("#new-text", "");
+    await click("#theme");
     await evaluate("location.hash = '#/'");
 
     // An expired cookie signs in again with the kept token; a reset token says the phone is no longer connected.

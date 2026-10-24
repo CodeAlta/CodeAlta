@@ -762,8 +762,13 @@ of the fragment of the QR code (`#k=`, never a query) through `POST /api/login`,
 needs it or a `Bearer` token, and a request that names another host than the loopback ones and the name of the computer on the
 tailnet is refused (421). The page has a strict policy (`MobileServer.PagePolicy`: no inline script, no eval). The phone sees the
 sessions of the spaces of the plugin only (`MobileSessions`), reads and acts through `alta` (`session list`, `status`, `events`,
-`create`, `send`, `steer`, `queue`, `abort`, `archive`, `restore`), and a new session goes to a space of the plugin that has its
-project. The Mobile tab (canvas `mobile`, module `PluginScript.App("mobile")`) draws the QR code and what keeps a phone from
+`choices`, `create`, `send`, `steer`, `queue`, `abort`, `archive`, `restore`), and a new session goes to a space of the plugin that has its
+project. The composer of a session reads `GET /api/sessions/<id>/choices` (`alta session choices`: the selection of now with its
+names, the models of the session's provider with their efforts, the agent prompts, the permission modes), and
+`POST /api/sessions/<id>/prompt` takes `model`, `reasoning`, `agent` and `permissionMode`, passed as `--model`, `--reasoning`,
+`--prompt-id` and `--permission-mode` to a `send` or a `queue` (a `steer` takes none). `POST /api/sessions` takes `permissionMode`
+(`session create --permission-mode`), and `GET /api/options` gives the modes of each provider (`permissionModes` of
+`provider list --detailed`). Every session route checks first that the phone sees the session (`MobileSessions.FindAsync`). The Mobile tab (canvas `mobile`, module `PluginScript.App("mobile")`) draws the QR code and what keeps a phone from
 connecting from the calls `mobile.status` and `mobile.retry` and the event `mobile.changed`. Its settings page, Settings > Extensions >
 Mobile (canvas `mobile-settings`, `PluginCanvasPlacement.Settings`, module `PluginScript.App("mobile-settings")`), has the calls
 `mobile.settings.get`, `mobile.settings.set` (the two ports, each from 1024 to 65535: they are saved, the server moves to its new

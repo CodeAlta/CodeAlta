@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelOption, Options } from "./contract";
-import { choiceLabel, choiceRequest, groupVariants, initialChoice, orderModels, parseModel, pickEffort, pickModel, rememberChoice, tierChoice, tierText } from "./models";
+import { choiceLabel, choiceRequest, forgetMode, groupVariants, initialChoice, orderModels, parseModel, pickEffort, pickModel, rememberChoice, tierChoice, tierText } from "./models";
 
 const model = (provider: string, id: string, name = id, efforts: string[] = ["low", "medium", "high"], defaultEffort: string | null = "medium"): ModelOption =>
   ({ provider, id, name, providerName: provider.toUpperCase(), efforts, defaultEffort });
@@ -100,4 +100,14 @@ test("what is remembered of a choice", () => {
   assert.deepEqual(rememberChoice("plan", { tier: "complex", provider: "claude", model: "claude-opus-4-7", effort: "high" }),
     { agentPromptId: "plan", providerKey: "claude", modelId: "claude-opus-4-7", reasoningEffort: "high", tier: "complex" });
   assert.deepEqual(rememberChoice(undefined, { tier: null, provider: "codex", model: "gpt-5", effort: "" }), { providerKey: "codex", modelId: "gpt-5" });
+});
+
+test("a permission mode is remembered with its provider, and forgotten with it", () => {
+  assert.equal(rememberChoice(undefined, { tier: null, provider: "claude", model: "claude-opus-4-7", effort: "high" }, "acceptEdits").permissionMode, "acceptEdits");
+  assert.equal(rememberChoice(undefined, { tier: null, provider: "", model: "", effort: "" }, "acceptEdits").permissionMode, undefined, "no provider, no mode");
+  const kept = initialChoice(options(), { providerKey: "claude", modelId: "claude-opus-4-7", permissionMode: "acceptEdits" });
+  assert.equal(kept.remembered.permissionMode, "acceptEdits");
+  const gone = initialChoice(options(), { providerKey: "copilot", modelId: "x", permissionMode: "acceptEdits" });
+  assert.equal(gone.remembered.permissionMode, undefined, "a provider no longer offered takes its mode with it");
+  assert.deepEqual(forgetMode({ providerKey: "claude", permissionMode: "auto" }), { providerKey: "claude" });
 });

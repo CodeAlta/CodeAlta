@@ -87,6 +87,9 @@ export type PromptOption = Readonly<{ id: string; name: string; description: str
 /** A model tier of the settings: its model, or why it has none. */
 export type TierOption = Readonly<{ tier: string; provider: string | null; model: string | null; reasoning: string | null; error: string | null }>;
 
+/** A permission mode a session can be given: its id, and the name and description alta gives it (the page names those it knows). */
+export type PermissionModeOption = Readonly<{ id: string; name?: string | null; description?: string | null }>;
+
 /** `GET /api/options`. */
 export type Options = Readonly<{
   models: readonly ModelOption[];
@@ -94,15 +97,37 @@ export type Options = Readonly<{
   tiers: readonly TierOption[];
   defaultTier: string | null;
   defaults: Readonly<{ provider: string | null; model: string | null; reasoning: string | null; prompt: string | null }> | null;
+  /** The modes a new session of each provider can start in; a provider that offers none is not there. */
+  permissionModes?: Readonly<Record<string, readonly PermissionModeOption[]>>;
+  error: string | null;
+}>;
+
+/** A model of the provider of a session, as its composer offers it. */
+export type ChoiceModel = Readonly<{ id: string; name: string; efforts: readonly string[]; startEffort: string | null }>;
+
+/** `GET /api/sessions/<id>/choices`: what the composer of the session offers, as the desktop's does. */
+export type SessionChoices = Readonly<{
+  /** What the session runs on now; a null permission mode is the provider's. */
+  current: Readonly<{
+    provider: string | null; providerName: string | null; model: string | null; modelName: string | null; reasoning: string | null;
+    agent: string | null; agentName: string | null; permissionMode: string | null;
+  }>;
+  models: readonly ChoiceModel[];
+  prompts: readonly Readonly<{ id: string; name: string }>[];
+  /** Empty when the provider offers no mode. */
+  permissionModes: readonly PermissionModeOption[];
   error: string | null;
 }>;
 
 /** How a prompt goes to a session. */
 export type PromptMode = "send" | "steer" | "queue";
 
+/** What a send or a queue changes of the session, chosen on the phone: each stays the session's. */
+export type PromptSelection = Readonly<{ model?: string; reasoning?: string; agent?: string; permissionMode?: string }>;
+
 /** `POST /api/sessions`. */
 export type NewSessionRequest = Readonly<{
-  project: string; text: string; tier?: string; provider?: string; model?: string; reasoning?: string; prompt?: string; worktree?: boolean;
+  project: string; text: string; tier?: string; provider?: string; model?: string; reasoning?: string; prompt?: string; permissionMode?: string; worktree?: boolean;
 }>;
 
 /** What `POST /api/sessions` answers. */

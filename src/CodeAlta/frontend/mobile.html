@@ -53,18 +53,16 @@
   <main id="create" hidden>
     <form id="new-form" class="composer-form">
       <div class="field"><div class="field-row"><label for="new-project">Project</label><span id="new-space" class="space-tag"></span></div><select id="new-project" required></select></div>
-      <textarea id="new-text" rows="4" placeholder="What should the agent do?" aria-label="Prompt" required></textarea>
-      <div class="field"><span class="field-label" id="new-model-label">Model</span><button id="new-model" type="button" class="model-select" aria-haspopup="dialog" aria-labelledby="new-model-label new-model-name"><span id="new-model-name"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
-      <div id="new-variants" class="variants" hidden></div>
-      <div id="new-effort-field" class="field"><span class="field-label" id="new-effort-label">Reasoning</span><div id="new-effort" class="reasoning"></div></div>
-      <div class="field-pair">
-        <label>Provider<select id="new-provider"></select></label>
-        <label>Agent prompt<select id="new-agent"></select></label>
-      </div>
-      <label class="check"><input id="new-worktree" type="checkbox"> Work in a new git worktree</label>
+      <textarea id="new-text" rows="5" placeholder="What should the agent do?" aria-label="Prompt" required></textarea>
       <div id="create-bar" class="create-bar">
         <p id="new-note" class="muted" role="status" aria-live="polite"></p>
-        <button id="new-start" class="primary" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>Start</button>
+        <div class="create-row">
+          <div class="pick-chips">
+            <button id="new-model" type="button" class="pick-chip" aria-haspopup="dialog"><span id="new-model-name" class="pick-text"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+            <button id="new-more" type="button" class="pick-more" aria-haspopup="dialog" aria-label="More options" title="More options"><span id="new-more-text" class="pick-tags"></span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+          </div>
+          <button id="new-start" class="primary" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>Start</button>
+        </div>
       </div>
     </form>
   </main>
@@ -80,7 +78,11 @@
     <ol id="timeline" class="timeline" aria-label="Timeline"></ol>
     <form id="composer" class="composer">
       <textarea id="prompt" rows="1" placeholder="Ask for more…" aria-label="Prompt"></textarea>
-      <div class="composer-actions"><span id="composer-hint" class="composer-hint" aria-live="polite"></span>
+      <div class="composer-actions"><span id="composer-hint" class="sr-only" aria-live="polite"></span>
+        <div class="pick-chips">
+          <button id="pick-model" type="button" class="pick-chip" aria-haspopup="dialog"><span id="pick-model-text" class="pick-text"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+          <button id="pick-more" type="button" class="pick-more" aria-haspopup="dialog" aria-label="More options" title="More options"><span id="pick-more-text" class="pick-tags"></span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+        </div>
         <button id="abort" type="button" class="ghost" hidden title="Stop the running turn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor"/></svg><span>Stop</span></button>
         <button id="queue" type="button" class="ghost" hidden title="Runs after this turn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 12H3M16 6H3M16 18H3M18 9v6M21 12h-6"/></svg><span>Queue</span></button>
         <button id="send" type="submit" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg><span>Send</span></button>
@@ -96,10 +98,31 @@
     </div>
   </div>
   <div id="model-sheet" class="sheet" hidden>
-    <div class="sheet-panel model-picker" role="dialog" aria-modal="true" aria-label="Model">
+    <div class="sheet-panel model-picker" role="dialog" aria-modal="true" aria-labelledby="model-title">
+      <div class="sheet-head"><h2 id="model-title">Model</h2><small id="model-provider"></small><button id="model-done" class="sheet-done" type="button">Done</button></div>
       <div id="tiers" class="tiers" role="group" aria-label="Tiers"></div>
+      <div id="sheet-effort-field" class="sheet-effort"><span class="sheet-label" id="sheet-effort-label">Reasoning</span><div id="sheet-effort" class="reasoning"></div></div>
+      <div id="new-variants" class="variants" hidden></div>
+      <p id="model-note" class="muted" role="status"></p>
       <input id="model-search" type="search" placeholder="Search models" aria-label="Search models">
       <ul id="model-list" aria-label="Models"></ul>
+    </div>
+  </div>
+  <div id="session-more-sheet" class="sheet" hidden>
+    <div class="sheet-panel more-panel" role="dialog" aria-modal="true" aria-labelledby="session-more-title">
+      <div class="sheet-head"><h2 id="session-more-title">Options</h2><button id="session-more-done" class="sheet-done" type="button">Done</button></div>
+      <label class="sheet-field">Agent prompt<select id="session-agent"></select></label>
+      <label id="session-mode-field" class="sheet-field">Permissions<select id="session-mode"></select><small id="session-mode-text"></small></label>
+      <label class="check"><input id="session-queue-first" type="checkbox"> Queue rather than steer while it works</label>
+    </div>
+  </div>
+  <div id="new-more-sheet" class="sheet" hidden>
+    <div class="sheet-panel more-panel" role="dialog" aria-modal="true" aria-labelledby="new-more-title">
+      <div class="sheet-head"><h2 id="new-more-title">Options</h2><button id="new-more-done" class="sheet-done" type="button">Done</button></div>
+      <label class="sheet-field">Agent prompt<select id="new-agent"></select></label>
+      <label class="sheet-field">Provider<select id="new-provider"></select></label>
+      <label id="new-mode-field" class="sheet-field">Permissions<select id="new-mode"></select><small id="new-mode-text"></small></label>
+      <label class="check"><input id="new-worktree" type="checkbox"> Work in a new git worktree</label>
     </div>
   </div>
   <div id="install-sheet" class="sheet" hidden>

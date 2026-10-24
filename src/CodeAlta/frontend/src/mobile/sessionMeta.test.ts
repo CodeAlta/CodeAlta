@@ -43,6 +43,8 @@ test("the facts of a session, in order, compact", () => {
   assert.deepEqual(sessionMeta(busy, { space: true, live: true }).map(item => `${item.kind}:${item.text}`),
     ["live:Tools", "space:Work", "project:parser", "worktree:fix-quotes", "model:GPT-6.1 Sol · low", "agent:Plan", "child:Sub-agent"]);
   assert.equal(sessionMeta(busy, { space: true, live: false })[0].kind, "space", "the page of a session has no live word");
+  assert.deepEqual(sessionMeta(busy, { space: true, live: false, selection: false }).map(item => item.kind), ["space", "project", "worktree", "child"],
+    "the page of a session leaves the model and the agent to the chip of its composer");
 });
 
 test("only a hex color reaches a style", () => {

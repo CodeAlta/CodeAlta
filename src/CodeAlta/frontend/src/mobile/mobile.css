@@ -126,7 +126,7 @@ main { min-width: 0; max-width: 720px; margin: 0 auto; padding: .5rem calc(.75re
 /* The footer: the computer, the state of the link and the time of its last news. Under the composer on a session's page. */
 footer { display: flex; align-items: center; justify-content: center; gap: .4rem; min-width: 0; text-align: center;
   padding: .25rem calc(.75rem + var(--safe-right)) calc(.5rem + env(safe-area-inset-bottom)) calc(.75rem + var(--safe-left)); font-size: .75rem; }
-.composer footer { justify-content: flex-start; margin: 0; padding: 0; }
+.composer footer, .create-bar footer { justify-content: flex-start; margin: 0; padding: 0; }
 .link-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #8f99a8; }
 .link-dot.live { background: #32a467; } .link-dot.connecting, .link-dot.reconnecting { background: #f0b726; } .link-dot.offline { background: #e76a6e; }
 
@@ -269,37 +269,65 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
   padding: .5rem calc(.75rem + var(--safe-right)) calc(.5rem + env(safe-area-inset-bottom)) calc(.75rem + var(--safe-left)); background: var(--panel); border-top: 1px solid var(--line); }
 .composer-actions { display: flex; justify-content: flex-end; align-items: center; gap: .5rem; flex-wrap: wrap; min-width: 0; }
 .composer-actions .ghost { padding: 0 10px; }
-.composer-hint { flex: 1 1 8rem; min-width: 0; margin-right: auto; color: var(--muted); font-size: .75rem; }
+/* What only a screen reader hears: the state of the composer, which the empty box shows as its placeholder. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
-/* The new-session form, after the desktop's composer selection form: uppercase muted labels, a model button opening
-   the list, tiers at its top, a stepped reasoning slider with a label per stop. */
+/* The selection of a prompt, on the line of its buttons: a chip with the model and its effort (it opens the model sheet), and "⋯"
+   with the agent prompt when it is not the default one and a mark of what else is set (it opens the options). The chip shrinks
+   first; while a turn runs with text typed, the buttons go to a line of their own. Accent: picked, sent with the next prompt. */
+.pick-chips { display: flex; align-items: center; gap: 2px; flex: 1 1 9.5rem; min-width: 0; margin-right: auto; }
+.pick-chip, .pick-more { display: inline-flex; align-items: center; gap: 4px; min-width: 0; min-height: 44px; padding: 0 8px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); font: inherit; font-size: .8125rem; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.pick-chip { flex: 0 1 auto; }
+.pick-more { flex: none; justify-content: center; min-width: 44px; }
+.pick-chip:active, .pick-more:active { background: var(--hover); }
+.pick-chip:focus-visible, .pick-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pick-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.pick-chip svg, .pick-more svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pick-more svg { width: 18px; height: 18px; } .pick-more svg circle { fill: currentColor; stroke: none; }
+.pick-tags { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 9rem; overflow: hidden; white-space: nowrap; }
+.pick-tags:empty { display: none; }
+.pick-tags > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pick-tags .ico svg { width: 13px; height: 13px; }
+.pick-chip.pending .pick-text, .pick-more.pending { color: var(--accent); }
+.pick-chip.pending::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+/* The new-session screen: the project and the prompt; on the bar over the keyboard, the chips of the selection beside Start. */
 #create { padding-top: .75rem; }
 .composer-form { display: flex; flex-direction: column; gap: .75rem; }
 .field-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; min-width: 0; }
 .space-tag { min-width: 0; overflow: hidden; color: var(--text); font-size: .8125rem; font-weight: normal; letter-spacing: normal; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
-.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; min-width: 0; }
-/* Start stays on the screen, over the keyboard, with what the form says beside it. */
-.create-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; align-items: center; gap: .75rem;
+.create-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; flex-direction: column; gap: .25rem;
   padding: .5rem calc(.75rem + var(--safe-right)) calc(.5rem + env(safe-area-inset-bottom)) calc(.75rem + var(--safe-left)); background: var(--panel); border-top: 1px solid var(--line); }
-.create-bar #new-note { flex: 1; min-width: 0; margin: 0; }
-.create-bar .primary { margin-left: auto; }
-#new-form > label, #new-form > .field, #new-form .field-pair > label { display: grid; gap: .3rem; min-width: 0; color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-#new-form select, .model-select { letter-spacing: normal; text-transform: none; font-weight: normal; }
-.model-select { display: flex; align-items: center; justify-content: space-between; gap: .5rem; width: 100%; min-height: 44px; padding: 0 .75rem; border: 1px solid var(--line); border-radius: 8px;
-  background: var(--panel); color: var(--text); font: inherit; font-size: 1rem; text-align: start; cursor: pointer; }
-.model-select:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
-.model-select span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-select svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
-#new-form > label.check { display: flex; align-items: center; gap: .6rem; min-height: 44px; color: var(--text); font-size: .9375rem; font-weight: normal; letter-spacing: normal; text-transform: none; }
-#new-form > label.check input { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); }
-.composer-form .primary { align-self: flex-end; min-width: 120px; }
-.variants { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; margin-top: -.25rem; }
+.create-bar #new-note { margin: 0 .25rem; }
+.create-row { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.create-row .primary { flex: none; min-width: 104px; }
+#new-form > .field { display: grid; gap: .3rem; min-width: 0; color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+#new-form select { letter-spacing: normal; text-transform: none; font-weight: normal; }
+
+/* The sheets of the selection: a head with Done, then the fields; the labels are those of the desktop's selection form. */
+.sheet-head { display: flex; align-items: center; gap: .5rem; min-width: 0; margin: 0 0 .25rem; }
+.sheet-head h2 { margin: .25rem; }
+.sheet-head small { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-panel .sheet-done { flex: none; width: auto; align-items: center; justify-content: center; min-height: 44px; margin-left: auto; padding: 0 .75rem; color: var(--accent); font-weight: 600; }
+.sheet-label, .sheet-field { color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.sheet-effort { display: grid; gap: .125rem; padding-bottom: .25rem; border-bottom: 1px solid var(--line); }
+.more-panel { display: grid; gap: .75rem; }
+.sheet-field { display: grid; gap: .3rem; min-width: 0; }
+.sheet-field select { letter-spacing: normal; text-transform: none; font-weight: normal; }
+.sheet-field small { letter-spacing: normal; text-transform: none; }
+.sheet-field small:empty { display: none; }
+.more-panel label.check { display: flex; align-items: center; gap: .6rem; min-height: 44px; color: var(--text); font-size: .9375rem; }
+.more-panel label.check input { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); }
+#model-note:empty { display: none; }
+.variants { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; }
 .variants label.check { display: flex; align-items: center; gap: .5rem; min-height: 44px; color: var(--text); font-size: .9375rem; }
 .variants input { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); }
 .variants label:has(input:disabled) { opacity: .45; }
 .reasoning { padding: .25rem .5rem 0; text-transform: none; letter-spacing: normal; font-weight: normal; }
 .reasoning input[type=range] { width: 100%; height: 32px; margin: 0; accent-color: var(--accent); }
 .reasoning-labels { position: relative; display: block; height: 44px; margin: 0 10px; }
+.sheet-panel .reasoning-labels button { display: block; width: auto; background: none; }
 .reasoning-labels button { position: absolute; top: 0; min-height: 44px; padding: 0 .375rem; transform: translateX(-50%); border: 0; background: none; color: var(--muted); font: inherit; font-size: .75rem; white-space: nowrap; cursor: pointer; }
 .reasoning-labels button:first-child { transform: translateX(-10px); } .reasoning-labels button:last-child { transform: translateX(calc(-100% + 10px)); }
 .reasoning-labels button.on { color: var(--accent); font-weight: 600; }

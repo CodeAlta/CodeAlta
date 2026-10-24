@@ -2,10 +2,12 @@ import type { PromptMode } from "./contract";
 
 /** What the composer of a session shows. */
 export type ComposerView = Readonly<{
-  /** The primary button: Send while idle, Steer while a turn runs; null when hidden. */
-  primary: "send" | "steer" | null;
-  queue: boolean;
+  /** The primary button: Send while idle; Steer (or Queue, when the phone queues first) while a turn runs; null when hidden. */
+  primary: PromptMode | null;
+  /** The second button while a turn runs: Queue, or Steer when the phone queues first; null when hidden. */
+  secondary: "queue" | "steer" | null;
   stop: boolean;
+  /** What the composer says of its state; the box shows it while it is empty. */
   hint: string;
   /** What submitting the form does (the Enter of a keyboard, the primary button). */
   submit: PromptMode;
@@ -13,19 +15,17 @@ export type ComposerView = Readonly<{
 
 /**
  * The composer, after the desktop's. Idle: Send. While a turn runs: only Stop until new text is typed, then Queue
- * (after this turn), and Steer (into it) when the server says the session can be steered.
+ * (after this turn), and Steer (into it) when the server says the session can be steered. Steer is the primary action
+ * unless the phone was set to queue first.
  */
-export function composerView(busy: boolean, typed: boolean, canSteer: boolean): ComposerView {
-  if (!busy) return { primary: "send", queue: false, stop: false, hint: "", submit: "send" };
-  const steer = canSteer && typed;
-  return {
-    primary: steer ? "steer" : null,
-    queue: typed,
-    stop: true,
-    hint: typed ? (canSteer ? "Steer: into this turn · Queue: runs after this turn" : "Queue: runs after this turn")
-      : (canSteer ? "Working… type to steer or queue" : "Working… type to queue"),
-    submit: canSteer ? "steer" : "queue",
-  };
+export function composerView(busy: boolean, typed: boolean, canSteer: boolean, queueFirst = false): ComposerView {
+  if (!busy) return { primary: "send", secondary: null, stop: false, hint: "", submit: "send" };
+  const submit: PromptMode = canSteer && !queueFirst ? "steer" : "queue";
+  if (!typed) return { primary: null, secondary: null, stop: true, hint: canSteer ? "Working… type to steer or queue" : "Working… type to queue", submit };
+  if (!canSteer) return { primary: null, secondary: "queue", stop: true, hint: "Queue: runs after this turn", submit };
+  return queueFirst
+    ? { primary: "queue", secondary: "steer", stop: true, hint: "Queue: runs after this turn · Steer: into this turn", submit }
+    : { primary: "steer", secondary: "queue", stop: true, hint: "Steer: into this turn · Queue: runs after this turn", submit };
 }
 
 /**

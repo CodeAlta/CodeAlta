@@ -83,7 +83,7 @@ export const entryName = (model: ModelOption): string => model.name.replace(/\s+
 export type Choice = Readonly<{ tier: string | null; provider: string; model: string; effort: string }>;
 
 /** What is remembered of the choices made for a project, as the desktop's `codealta.desktop.newSessionPreferences.v1`. */
-export type ProjectPreferences = Readonly<{ agentPromptId?: string; providerKey?: string; modelId?: string; reasoningEffort?: string; tier?: string }>;
+export type ProjectPreferences = Readonly<{ agentPromptId?: string; providerKey?: string; modelId?: string; reasoningEffort?: string; tier?: string; permissionMode?: string }>;
 
 export const tierLabels: Readonly<Record<string, string>> = { complex: "Complex", standard: "Standard", quick: "Quick" };
 export const tierLabel = (tier: string): string => tierLabels[tier] ?? tier;
@@ -158,7 +158,7 @@ export function initialChoice(options: Options, stored: ProjectPreferences): { c
   const effort = pickEffort(options, model, saved.reasoningEffort);
   const choice: Choice = { tier: null, provider, model: model?.id ?? "", effort };
   let remembered = forget(saved, ["tier"]);
-  if (saved.providerKey && saved.providerKey !== choice.provider) remembered = forget(remembered, ["providerKey", "modelId", "reasoningEffort"]);
+  if (saved.providerKey && saved.providerKey !== choice.provider) remembered = forget(remembered, ["providerKey", "modelId", "reasoningEffort", "permissionMode"]);
   if (saved.modelId && saved.modelId !== choice.model) remembered = forget(remembered, ["modelId", "reasoningEffort"]);
   if (saved.reasoningEffort && saved.reasoningEffort !== choice.effort) remembered = forget(remembered, ["reasoningEffort"]);
   return { choice, remembered };
@@ -170,16 +170,20 @@ function forget(preferences: ProjectPreferences, keys: readonly (keyof ProjectPr
   return copy as ProjectPreferences;
 }
 
-/** What is remembered of a choice. */
-export function rememberChoice(agentPromptId: string | undefined, choice: Choice): ProjectPreferences {
+/** What is remembered of a choice, with the permission mode chosen for its provider. */
+export function rememberChoice(agentPromptId: string | undefined, choice: Choice, permissionMode?: string): ProjectPreferences {
   const preferences: Record<string, string> = {};
   if (agentPromptId) preferences.agentPromptId = agentPromptId;
   if (choice.provider) preferences.providerKey = choice.provider;
   if (choice.model) preferences.modelId = choice.model;
   if (choice.effort) preferences.reasoningEffort = choice.effort;
   if (choice.tier) preferences.tier = choice.tier;
+  if (permissionMode && choice.provider) preferences.permissionMode = permissionMode;
   return preferences;
 }
+
+/** The remembered choices without their permission mode (one the provider no longer offers). */
+export const forgetMode = (preferences: ProjectPreferences): ProjectPreferences => forget(preferences, ["permissionMode"]);
 
 /** What the model button says: the tier and its model, or the model's entry name. */
 export function choiceLabel(options: Options, choice: Choice): string {

@@ -29,8 +29,9 @@ When something keeps a phone from connecting, the Mobile tab says what it is and
 - **The sessions**, the latest activity first, six at a time, with a dot and a line that follow each one as it runs: working, calling tools, thinking, writing. **Project** keeps the list to one project.
 - **A session**: its timeline, with the messages, the thoughts, the tool calls (without their output) and the diagrams. A diagram opens in a tab of its own, where you can zoom.
 - **The prompt** sends to an idle session. While a turn runs, **Steer** sends into that turn, **Queue** keeps the prompt until the turn ends, and **Stop** stops the turn.
-- **A new session**: the project, the agent prompt, the model (a tier of the settings, or a provider and a model), the effort, and a worktree of its own, as in the composer of the desktop.
-- **Archive** a session by swiping it to the left, or from its menu; **Undo** brings it back.
+- **The model chip**, beside the buttons of the prompt, shows the model and the effort of the session, such as `GPT-6.1 Sol · low`. Tap it to choose another model of the session's provider and its effort. **⋯** holds the agent prompt, the permissions (when the provider offers modes), and **Queue rather than steer while it works**, which makes Queue the first button while a turn runs. What you choose shows in blue until the next prompt, which takes it, and the session keeps it afterwards, as in the composer of the desktop. A steered prompt joins the turn that runs and changes nothing.
+- **A new session**: the project and the prompt, then the model chip beside **Start**: a tier of the settings or a model, and its effort. **⋯** holds the agent prompt, the provider, the permissions and a worktree of its own. The choices are remembered for each project.
+- **Archive** a session by swiping it to the right, or with the archive button of its page; **Restore** brings it back.
 
 ## Spaces
 

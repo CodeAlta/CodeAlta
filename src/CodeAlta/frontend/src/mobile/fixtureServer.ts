@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Live, Options, Session, Space, TimelineEvent } from "./contract";
+import type { Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
 
 /** The policy the plugin's server sets on the page (the contract of the phone page). */
 export const mobilePolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -19,6 +19,8 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     cookies: new Set<string>(),
     sessions: [] as Session[],
     events: new Map<string, TimelineEvent[]>(),
+    /** The choices of the sessions; a session without is on the Codex ones (`fixtureChoices`). */
+    choices: new Map<string, SessionChoices>(),
     options: null as Options | null,
     projects: [{ id: "p1", path: "C:/code/parser", name: "parser", space: fixtureSpaces[0] }, { id: "p2", path: "C:/code/site", name: "site", space: fixtureSpaces[1] }],
     /** The spaces the phone sees (empty: every space). */
@@ -46,6 +48,14 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     return text ? JSON.parse(text) as unknown : undefined;
   };
   const sessionOf = (id: string) => state.sessions.find(s => s.id === id);
+  // The choices of a session: those the test set, else the Codex ones, on what the session says it runs.
+  const choicesOf = (session: Session): SessionChoices => state.choices.get(session.id) ?? {
+    current: {
+      provider: session.model?.provider ?? "codex", providerName: session.model?.providerName ?? "Codex", model: session.model?.id ?? null, modelName: session.model?.name ?? null,
+      reasoning: session.model?.reasoning ?? null, agent: session.agent?.id ?? "default", agentName: session.agent?.name ?? "Default", permissionMode: null,
+    },
+    ...fixtureChoices,
+  };
 
   async function handle(request: IncomingMessage, response: ServerResponse) {
     const url = new URL(request.url ?? "/", "http://fixture");
@@ -88,7 +98,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     }
     if (path === "/api/projects") return send(response, 200, { projects: state.projects, default: "p1", error: null });
     if (path === "/api/options") return send(response, 200, state.options);
-    const found = /^\/api\/sessions\/([^/]+)(?:\/(events|prompt|abort|archive|restore))?$/.exec(path);
+    const found = /^\/api\/sessions\/([^/]+)(?:\/(events|prompt|abort|archive|restore|choices))?$/.exec(path);
     if (found) {
       const id = decodeURIComponent(found[1]), action = found[2];
       // An archived session is out of the list, and can still be restored.
@@ -107,7 +117,21 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         const events = (state.events.get(id) ?? []).filter(e => e.seq > since);
         return send(response, 200, { since: Math.max(since, ...events.map(e => e.seq)), events, error: null });
       }
-      if (action === "prompt") return send(response, 200, { ok: true, mode: (body as { mode: string }).mode });
+      if (action === "choices") return send(response, 200, choicesOf(target));
+      if (action === "prompt") {
+        // A send or a queue that carries a selection: the session runs on it now, as alta would say.
+        const { mode, model, reasoning, agent, permissionMode } = body as { mode: string } & PromptSelection;
+        if (mode !== "steer" && (model || reasoning || agent || permissionMode)) {
+          const choices = choicesOf(target), current = { ...choices.current };
+          if (model) Object.assign(current, { model, modelName: choices.models.find(m => m.id === model)?.name ?? model, reasoning: reasoning ?? null });
+          else if (reasoning) current.reasoning = reasoning;
+          if (agent) Object.assign(current, { agent, agentName: choices.prompts.find(p => p.id === agent)?.name ?? agent });
+          if (permissionMode) current.permissionMode = permissionMode === "provider" ? null : permissionMode;
+          state.choices.set(id, { ...choices, current });
+          Object.assign(target, { model: { ...target.model!, id: current.model, name: current.modelName, reasoning: current.reasoning }, agent: { id: current.agent!, name: current.agentName } });
+        }
+        return send(response, 200, { ok: true, mode });
+      }
       if (action === "archive") { state.sessions = state.sessions.filter(s => s.id !== id); archived.set(id, target); return send(response, 200, { ok: true }); }
       return send(response, 200, { ok: true });
     }
@@ -149,6 +173,18 @@ export function session(id: string, title: string, projectId: string, minutesAgo
     ...extra,
   };
 }
+
+/** What the composer of a Codex session offers in the fixture. */
+export const fixtureChoices: Omit<SessionChoices, "current"> = {
+  models: [
+    { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", efforts: ["low", "medium", "high"], startEffort: "medium" },
+    { id: "gpt-6.1-argon", name: "GPT-6.1 Argon", efforts: ["medium", "high", "xhigh"], startEffort: "high" },
+    { id: "gpt-5.5", name: "GPT-5.5", efforts: ["low", "medium", "high"], startEffort: "medium" },
+  ],
+  prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }, { id: "review", name: "Review" }],
+  permissionModes: [{ id: "default", name: "Ask first" }, { id: "acceptEdits", name: "Accept edits" }, { id: "bypassPermissions", name: "Bypass permissions" }],
+  error: null,
+};
 
 /** The spaces of the fixture: the projects p1 and p2 are in one each. */
 export const fixtureSpaces: readonly Space[] = [
