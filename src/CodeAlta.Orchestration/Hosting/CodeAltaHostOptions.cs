@@ -204,6 +204,12 @@ public sealed class CodeAltaHostOptions
     public Action<ModelProviderRegistry>? ConfigureModelProviders { get; init; }
 
     /// <summary>
+    /// Gets an optional callback, called after <see cref="ConfigureModelProviders"/> once the plugins started, that
+    /// registers the providers whose type a plugin contributes: it is given the plugin runtime.
+    /// </summary>
+    public Action<ModelProviderRegistry, PluginRuntimeManager>? ConfigurePluginModelProviders { get; init; }
+
+    /// <summary>
     /// Gets a prestarted plugin runtime supplied by the caller. When set, the host will not dispose it.
     /// </summary>
     public PluginRuntimeManager? PrestartedPluginRuntime { get; init; }

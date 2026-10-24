@@ -371,6 +371,10 @@ public sealed class PluginContributionRegistry
                 // A button belongs to the plugin that puts it: two plugins with the same identifier do not shadow each other.
                 yield return new ContributionConflictKey("ui-button", $"button:{registration.Handle.PluginRuntimeKey}:{button.Id}", button.Id);
                 yield break;
+            case PluginModelProviderContribution provider:
+                // One plugin runs the providers of a type: a second one with the same type shadows the first.
+                yield return new ContributionConflictKey("model-provider", $"model-provider:{provider.ProviderType}", provider.ProviderType);
+                yield break;
             case PluginLandingCardContribution card:
                 // A card belongs to the plugin that pins it: two plugins with the same identifier do not shadow each other.
                 yield return new ContributionConflictKey("landing-card", $"landing-card:{registration.Handle.PluginRuntimeKey}:{card.Id}", card.Id);
@@ -454,6 +458,7 @@ public sealed class PluginContributionRegistry
             PluginCompactionContribution _ => null,
             PluginCanvasContribution canvas => canvas.Id,
             PluginLandingCardContribution card => card.Id,
+            PluginModelProviderContribution provider => provider.ProviderType,
             _ => null,
         };
 

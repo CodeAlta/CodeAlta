@@ -427,6 +427,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             };
             modelProviderRegistry = new ModelProviderRegistry();
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
+            options.ConfigurePluginModelProviders?.Invoke(modelProviderRegistry, pluginRuntime);
             var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry, null, retentionProtection);
             agentHub = new AgentHub(modelProviderRegistry, catalogOptions.StateRoot, sessionViewCatalog.JournalStore.ProjectionCache, retentionProtection);
             var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());

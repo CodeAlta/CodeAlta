@@ -16,6 +16,7 @@
     <PackageReference Include="NuGet.Versioning" />
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Anthropic\CodeAlta.Agent.Anthropic.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Claude\CodeAlta.Agent.Claude.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Copilot\CodeAlta.Agent.Copilot.csproj" />

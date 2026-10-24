@@ -48,6 +48,8 @@ public enum PluginPoint
     Canvas,
     /// <summary>Landing card: a card that the plugin pins on the landing page.</summary>
     LandingCard,
+    /// <summary>Model provider type: the providers of a type of the configuration that the plugin runs.</summary>
+    ModelProvider,
 }
 
 /// <summary>

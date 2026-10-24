@@ -55,6 +55,67 @@ turns = 12
     }
 
     [TestMethod]
+    public void ExternalProviders_GiveTheValuesOfTheirSections()
+        => WithGlobalConfig(NewerVersionConfig, static (store, _) =>
+        {
+            var provider = store.LoadGlobalExternalProviders().Single();
+
+            Assert.AreEqual("future", provider.ProviderKey);
+            Assert.AreEqual("future-provider", provider.ProviderType);
+            Assert.AreEqual("future --serve", provider.Values["launch_command"]);
+            Assert.AreEqual(true, provider.Values["enabled"]);
+            var limits = (IReadOnlyDictionary<string, object?>)provider.Values["limits"]!;
+            Assert.AreEqual(12L, limits["turns"]);
+        });
+
+    [TestMethod]
+    public void ExternalProvider_IsWrittenAndRemovedWithoutTouchingTheOthers()
+        => WithGlobalConfig(NewerVersionConfig, static (store, options) =>
+        {
+            store.SaveGlobalExternalProvider("Copilot-Acp", "ACP", new Dictionary<string, object?>
+            {
+                ["display_name"] = "Copilot",
+                ["agent"] = "github-copilot-cli",
+                ["arguments"] = new object?[] { "--acp" },
+                ["env"] = new Dictionary<string, object?> { ["DEBUG"] = "1" },
+                ["enabled"] = false,
+                ["type"] = "ignored",
+            });
+
+            var content = File.ReadAllText(options.ConfigPath);
+            AssertFutureProviderIsUntouched(content);
+            StringAssert.Contains(content, "[providers.copilot-acp]");
+            StringAssert.Contains(content, "type = \"acp\"");
+            var written = store.LoadGlobalExternalProviders().Single(static provider => provider.ProviderKey == "copilot-acp");
+            Assert.AreEqual("acp", written.ProviderType);
+            CollectionAssert.AreEqual(new object?[] { "--acp" }, ((IEnumerable<object?>)written.Values["arguments"]!).ToArray());
+            Assert.AreEqual("1", ((IReadOnlyDictionary<string, object?>)written.Values["env"]!)["DEBUG"]);
+            Assert.AreEqual(false, written.Values["enabled"]);
+            // The built-in providers do not see it.
+            CollectionAssert.AreEqual(new[] { "codex" }, store.LoadGlobalProviderDefinitions(includeDisabled: true).Select(static provider => provider.ProviderKey).ToArray());
+
+            // Written again in its place, with new values.
+            store.SaveGlobalExternalProvider("copilot-acp", "acp", new Dictionary<string, object?> { ["agent"] = "gemini" });
+            Assert.AreEqual("gemini", store.LoadGlobalExternalProviders().Single(static provider => provider.ProviderKey == "copilot-acp").Values["agent"]);
+
+            Assert.IsTrue(store.RemoveGlobalExternalProvider("copilot-acp"));
+            Assert.IsFalse(store.RemoveGlobalExternalProvider("copilot-acp"));
+            Assert.IsFalse(store.RemoveGlobalExternalProvider("codex"));
+            content = File.ReadAllText(options.ConfigPath);
+            AssertFutureProviderIsUntouched(content);
+            StringAssert.Contains(content, "[providers.codex]");
+            Assert.IsFalse(content.Contains("copilot-acp", StringComparison.Ordinal), content);
+        });
+
+    [TestMethod]
+    public void ExternalProvider_RefusesABuiltInType()
+        => WithGlobalConfig(NewerVersionConfig, static (store, _) =>
+        {
+            Assert.ThrowsExactly<ArgumentException>(() => store.SaveGlobalExternalProvider("x", "claude-code", new Dictionary<string, object?>()));
+            Assert.ThrowsExactly<InvalidOperationException>(() => store.SaveGlobalExternalProvider("codex", "acp", new Dictionary<string, object?>()));
+        });
+
+    [TestMethod]
     public void ProviderOfATypeThisVersionDoesNotKnow_IsSetAside_AndTheFileLoads()
         => WithGlobalConfig(NewerVersionConfig, static (store, options) =>
         {

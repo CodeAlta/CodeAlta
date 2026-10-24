@@ -65,6 +65,26 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaConfigStore configStore,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog)
+        => RegisterConfiguredProviders(modelProviderRegistry, configStore, stateRootPath, modelCatalog, pluginTypes: null);
+
+    /// <summary>
+    /// Registers enabled global provider definitions with optional borrowed models.dev metadata, and the enabled
+    /// providers whose type a running plugin contributes.
+    /// </summary>
+    /// <param name="modelProviderRegistry">The borrowed registry to update; it retains the factories and owns its cached runtimes.</param>
+    /// <param name="configStore">The borrowed Catalog store from which global provider definitions are loaded, not saved.</param>
+    /// <param name="stateRootPath">The nonblank state-root path forwarded unchanged to runtime options; no directory is created by this builder.</param>
+    /// <param name="modelCatalog">Optional borrowed metadata service. The caller owns its refresh and disposal lifetime.</param>
+    /// <param name="pluginTypes">The provider types of the running plugins, or <see langword="null"/> for none.</param>
+    /// <returns>Successfully composed descriptors: the built-in ones in configuration-store order, then the ones of plugins.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The state-root path is blank or a provider value is invalid.</exception>
+    public static IReadOnlyList<ModelProviderDescriptor> RegisterConfiguredProviders(
+        ModelProviderRegistry modelProviderRegistry,
+        CodeAltaConfigStore configStore,
+        string stateRootPath,
+        ModelsDevCatalogService? modelCatalog,
+        PluginModelProviderTypes? pluginTypes)
     {
         ArgumentNullException.ThrowIfNull(modelProviderRegistry);
         ArgumentNullException.ThrowIfNull(configStore);
@@ -81,9 +101,19 @@ public static class ConfiguredModelProviderRegistryBuilder
             }
         }
 
+        if (pluginTypes is not null)
+        {
+            descriptors.AddRange(pluginTypes.RegisterOrReplace(modelProviderRegistry, configStore, stateRootPath, includeDisabled: false));
+        }
+
         // A provider of a newer version is not offered: the log says why it is missing.
         foreach (var provider in configStore.LoadGlobal().UnsupportedProviders)
         {
+            if (pluginTypes?.Find(provider.ProviderType) is not null)
+            {
+                continue;
+            }
+
             Logger.Warn($"Skipped model provider key={provider.ProviderKey} type={provider.ProviderType}: this version of CodeAlta does not know the type; its settings stay in the configuration file.");
         }
 
@@ -150,9 +180,19 @@ public static class ConfiguredModelProviderRegistryBuilder
     /// <param name="providerType">The provider type of the configuration (<c>type</c>), such as <c>claude-code</c>.</param>
     /// <returns>The modes, empty when the type has none.</returns>
     public static IReadOnlyList<string> GetPermissionModes(string? providerType)
+        => GetPermissionModes(providerType, pluginTypes: null);
+
+    /// <summary>
+    /// Gets the permission modes a provider of a type can be configured with and a session of it given: those of the
+    /// Claude Code CLI, those a plugin declares for its type, none for any other type.
+    /// </summary>
+    /// <param name="providerType">The provider type of the configuration (<c>type</c>).</param>
+    /// <param name="pluginTypes">The provider types of the running plugins, or <see langword="null"/>.</param>
+    /// <returns>The modes, empty when the type has none.</returns>
+    public static IReadOnlyList<string> GetPermissionModes(string? providerType, PluginModelProviderTypes? pluginTypes)
         => string.Equals(providerType?.Trim(), ClaudeCodeModelProviderRuntime.ProviderType, StringComparison.OrdinalIgnoreCase)
             ? ClaudeCodeModelProviderRuntimeOptions.PermissionModes
-            : [];
+            : pluginTypes?.Find(providerType)?.PermissionModes ?? [];
 
     /// <summary>
     /// Tries to compose one provider descriptor and a lazy runtime factory without registering or invoking it.

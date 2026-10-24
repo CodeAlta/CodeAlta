@@ -101,6 +101,14 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
     /// <summary>Gets the contribution registry owned by the runtime.</summary>
     public PluginContributionRegistry Registry => _registry;
 
+    /// <summary>Gets the model provider types the running plugins contribute, in their registration order.</summary>
+    /// <returns>The contributions.</returns>
+    public IReadOnlyList<PluginModelProviderContribution> GetModelProviderTypes()
+        => [.. _registry.GetSnapshot()
+            .Where(static registration => registration.Handle.Point == PluginPoint.ModelProvider)
+            .Select(static registration => registration.Contribution)
+            .OfType<PluginModelProviderContribution>()];
+
     /// <summary>
     /// Gets the services the host gave its plugins when it started the runtime, or null before the start
     /// and for a host that gave none. A host that starts its plugins before its user interface reads them

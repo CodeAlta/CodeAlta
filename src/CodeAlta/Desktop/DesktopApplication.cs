@@ -313,6 +313,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ProviderUsageService? providerUsage = null;
         SpeechService? speech = null;
         ClaudeCliService? claudeCli = null;
+        // The providers whose type a plugin runs (ACP agents), and the MCP endpoints that give them the tools of a session.
+        var toolEndpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints(LogManager.GetLogger("CodeAlta.Desktop.ToolEndpoints"));
+        var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints);
         Search.DesktopSearch? search = null;
         McpServersService? mcpServers = null;
         // The views of MCP Apps the window shows, on a scheme of their own (DesktopMcpAppViews.Scheme).
@@ -501,6 +504,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest)),
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
+                ConfigurePluginModelProviders = (registry, runtime) =>
+                {
+                    pluginProviderTypes.Attach(runtime.GetModelProviderTypes);
+                    pluginProviderTypes.RegisterOrReplace(registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, includeDisabled: false);
+                },
             }, CancellationToken.None));
             // The retained application flow reacts even while a native acquisition is awaiting.
             // No native callback awaits this work; a close during host creation waits its actual result.
@@ -518,6 +526,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "terminals", async () => { if (terminals is not null) await terminals.CloseAsync(); }); // The programs of the terminals end with the application.
                 await CloseStepAsync(closing, "reminders", async () => { if (reminders is not null) await reminders.DisposeAsync(); });
                 await CloseStepAsync(closing, "providers", async () => { if (providers is not null) await providers.DrainAsync(); });
+                await CloseStepAsync(closing, "tool endpoints", () => toolEndpoints.DisposeAsync()); // The agents of the providers of plugins ended with their sessions.
                 await CloseStepAsync(closing, "provider sign-in", async () => { if (providerLogin is not null) await providerLogin.CloseAsync(); }); // A running sign-in is canceled and joined.
                 await CloseStepAsync(closing, "provider usage", () => { providerUsage?.Dispose(); return ValueTask.CompletedTask; });
                 await CloseStepAsync(closing, "speech", async () => { if (speech is not null) await speech.CloseAsync(); }); // A download of a speech model stops, and the speech worker ends.
@@ -879,7 +888,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         ProviderStates = () => host.ModelProviderInitializationService.CurrentStates,
                         Spaces = host.SpaceCatalog,
                         SessionSpace = (sessionId, token) => host.RuntimeService.GetSessionSpaceAsync(sessionId, token),
+                        PluginProviderTypes = pluginProviderTypes,
                     };
+                    // A plugin that starts, stops or is built again brings or takes its provider types: their providers are registered again.
+                    host.PluginRuntime.Changed += (_, _) => globalConfig.ApplyPluginProviderChanges();
                     builder.AddGlobalConfigService(globalConfig);
                     providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch);
                     builder.AddProviderLoginService(providerLogin);

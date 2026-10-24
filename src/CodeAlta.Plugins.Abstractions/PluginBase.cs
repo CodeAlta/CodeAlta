@@ -201,6 +201,13 @@ public abstract class PluginBase : IAsyncDisposable
     public virtual IEnumerable<PluginLandingCardContribution> GetLandingCards() => [];
 
     /// <summary>
+    /// Gets the model provider types of the plugin: the providers of the configuration with such a <c>type</c> are
+    /// registered through it while it runs, and shown like any other provider.
+    /// </summary>
+    /// <returns>Model provider contributions.</returns>
+    public virtual IEnumerable<PluginModelProviderContribution> GetModelProviders() => [];
+
+    /// <summary>
     /// Observes or transforms prompt submission.
     /// </summary>
     /// <param name="context">The prompt submission context.</param>

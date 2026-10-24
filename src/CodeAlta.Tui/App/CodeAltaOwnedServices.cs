@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Harness;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.GoogleGenAI;
@@ -35,6 +36,8 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
     private readonly CodeAltaConfigStore _configStore;
     private readonly List<ModelProviderDescriptor> _providerDescriptors;
     private readonly ModelsDevCatalogService _modelsDevCatalogService;
+    // The providers whose type a plugin runs, and the MCP endpoints that give them the tools of a session.
+    private readonly PluginModelProviderTypes _pluginProviderTypes;
 
     private CodeAltaOwnedServices(
         bool ownsLogging,
@@ -42,9 +45,12 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         CodeAltaConfigStore configStore,
         ModelsDevCatalogService modelsDevCatalogService,
         PluginHostBridge pluginHostBridge,
-        List<ModelProviderDescriptor> providerDescriptors)
+        List<ModelProviderDescriptor> providerDescriptors,
+        PluginModelProviderTypes pluginProviderTypes,
+        LoopbackHarnessToolEndpoints toolEndpoints)
     {
         _host = host;
+        _pluginProviderTypes = pluginProviderTypes;
         _modelProviderRegistry = host.ModelProviderRegistry;
         _modelProviderInitializationService = host.ModelProviderInitializationService;
         _configStore = configStore;
@@ -62,7 +68,11 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
         ProjectFileSearchService = host.ProjectFileSearchService;
         CurrentProject = host.CurrentProject;
         _disposeTask = CreateOwnedServicesDisposal(
-            _host.DisposeAsync,
+            async () =>
+            {
+                await _host.DisposeAsync().ConfigureAwait(false);
+                await toolEndpoints.DisposeAsync().ConfigureAwait(false);
+            },
             _modelsDevCatalogService.DisposeAsync,
             LogManager.Shutdown,
             ownsLogging);
@@ -145,6 +155,8 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
             var pluginBootstrapOptions = CodeAltaCliOptions.GetPluginBootstrapOptions(rawArguments);
             var catalogOptions = new CatalogOptions { GlobalRoot = homeRoot };
             var configStore = new CodeAltaConfigStore(catalogOptions);
+            var toolEndpoints = new LoopbackHarnessToolEndpoints(LogManager.GetLogger("CodeAlta.ToolEndpoints"));
+            var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints);
             modelsDevCatalogService = new ModelsDevCatalogService(
                 new ModelsDevCatalogServiceOptions
                 {
@@ -177,6 +189,11 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                         PluginBuiltIns = CodeAltaBuiltInPlugins.All,
                         PluginServices = pluginServices,
                         ConfigureModelProviders = RegisterFrontendModelProviders,
+                        ConfigurePluginModelProviders = (registry, runtime) =>
+                        {
+                            pluginProviderTypes.Attach(runtime.GetModelProviderTypes);
+                            providerDescriptors.AddRange(pluginProviderTypes.RegisterOrReplace(registry, configStore, homeRoot, includeDisabled: false));
+                        },
                         PluginAgentEventFailurePolicy = (envelope, failure) => RuntimePluginAgentEventFailurePolicy.ReportAsync(
                             envelope.SessionId, failure,
                             (message, error) => CodeAltaApp.UiLogger.Error(error, message),
@@ -193,7 +210,9 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                 configStore,
                 modelsDevCatalogService,
                 pluginHostBridge,
-                providerDescriptors);
+                providerDescriptors,
+                pluginProviderTypes,
+                toolEndpoints);
 
             void RegisterFrontendModelProviders(ModelProviderRegistry modelProviderRegistry)
             {
@@ -401,6 +420,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                 providerDefinitions.Values.Where(static definition => definition.Enabled != false),
                 CatalogOptions.GlobalRoot,
                 _modelsDevCatalogService));
+        providerDescriptors.AddRange(_pluginProviderTypes.RegisterOrReplace(_modelProviderRegistry, _configStore, CatalogOptions.GlobalRoot, includeDisabled: false));
         foreach (var descriptor in providerDescriptors)
         {
             expectedProviderIds.Add(descriptor.ProviderId.Value);

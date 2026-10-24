@@ -114,7 +114,7 @@ internal sealed partial class GlobalConfigService
             if (!request.ApplyProviders) return new("ok", revision, null, null, null, 0);
             try
             {
-                return new("ok", revision, null, null, null, ApplyProviders(_store, _registry, _stateRoot!));
+                return new("ok", revision, null, null, null, ApplyProviders(_store, _registry, _stateRoot!, PluginProviderTypes));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
             {
@@ -592,7 +592,7 @@ internal sealed partial class GlobalConfigService
             if (!applyProviders) return new("ok", revision, null, null, null, 0);
             try
             {
-                return new("ok", revision, null, null, null, ApplyProviders(store, registry, _stateRoot!));
+                return new("ok", revision, null, null, null, ApplyProviders(store, registry, _stateRoot!, PluginProviderTypes));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
             {
@@ -636,11 +636,24 @@ internal sealed partial class GlobalConfigService
     /// </summary>
     /// <returns>The number of providers registered.</returns>
     internal static int ApplyProviders(CodeAltaConfigStore store, ModelProviderRegistry registry, string stateRoot)
+        => ApplyProviders(store, registry, stateRoot, pluginTypes: null);
+
+    /// <summary>
+    /// Re-registers the enabled provider definitions and the enabled providers whose type a running plugin
+    /// contributes, and unregisters the providers that are no longer configured, enabled or contributed.
+    /// </summary>
+    /// <returns>The number of providers registered.</returns>
+    internal static int ApplyProviders(CodeAltaConfigStore store, ModelProviderRegistry registry, string stateRoot, PluginModelProviderTypes? pluginTypes)
     {
         var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true);
         var previous = registry.ListProviders(includeDisabled: true);
         var applied = ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(
-            registry, definitions.Where(static definition => definition.Enabled != false), stateRoot);
+            registry, definitions.Where(static definition => definition.Enabled != false), stateRoot).ToList();
+        if (pluginTypes is not null)
+        {
+            applied.AddRange(pluginTypes.RegisterOrReplace(registry, store, stateRoot, includeDisabled: false));
+        }
+
         var expected = applied.Select(static descriptor => descriptor.ProviderId.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var descriptor in previous)
         {

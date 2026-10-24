@@ -34,7 +34,7 @@ public sealed record CodeAltaConfigValidationResult(bool IsValid, string? Messag
 /// <summary>
 /// Loads and persists CodeAlta TOML configuration files.
 /// </summary>
-public sealed class CodeAltaConfigStore
+public sealed partial class CodeAltaConfigStore
 {
     private const string DefaultGlobalConfigResourceName = "CodeAlta.Catalog.DefaultConfig.config.toml";
     private const string CodexProviderKey = "codex";

@@ -126,4 +126,19 @@ public sealed record ModelProviderProbeResult
     /// Gets an optional provider-specific error category suitable for diagnostics.
     /// </summary>
     public string? ErrorCategory { get; init; }
+
+    /// <summary>
+    /// Gets what the provider can and cannot do that a user of CodeAlta would otherwise find out by trying, when it
+    /// depends on what runs behind it (the agent of an ACP provider); empty when there is nothing to say.
+    /// </summary>
+    public IReadOnlyList<ModelProviderCapability> Capabilities { get; init; } = [];
 }
+
+/// <summary>
+/// One thing a provider can or cannot do, shown with it.
+/// </summary>
+/// <param name="Id">A stable identifier, such as <c>codealta-tools</c>.</param>
+/// <param name="Label">The short text shown, such as "CodeAlta tools".</param>
+/// <param name="Supported">Whether the provider can do it.</param>
+/// <param name="Detail">A sentence that says more, shown on demand; <see langword="null" /> for none.</param>
+public sealed record ModelProviderCapability(string Id, string Label, bool Supported, string? Detail = null);
