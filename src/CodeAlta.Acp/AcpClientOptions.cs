@@ -30,4 +30,11 @@ public sealed class AcpClientOptions
     /// An agent started through <c>npx</c> or <c>uvx</c> may download itself first.
     /// </summary>
     public TimeSpan InitializeTimeout { get; init; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Gets what is called on the reading loop for each notification and request of the agent, in the order of its
+    /// output, before the response that follows it completes its request: it must not wait. <see langword="null" />
+    /// to read the messages with <see cref="AcpClient.StreamAsync" />.
+    /// </summary>
+    public Action<AcpServerMessage>? MessageHandler { get; init; }
 }

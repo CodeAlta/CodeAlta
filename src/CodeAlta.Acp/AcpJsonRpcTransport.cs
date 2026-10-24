@@ -16,6 +16,7 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
     private readonly Stream _outputStream;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly Func<string?>? _describeClose;
+    private readonly Action<AcpServerMessage>? _messageHandler;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pendingRequests = new();
     private readonly Channel<AcpServerMessage> _incomingMessages;
@@ -32,12 +33,31 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
     {
     }
 
+    internal AcpJsonRpcTransport(Stream inputStream, Stream outputStream, JsonSerializerOptions jsonOptions, Logger? logger, Action<AcpServerMessage>? messageHandler)
+        : this(CreateLineReader(inputStream), outputStream, jsonOptions, logger, describeClose: null, messageHandler)
+    {
+    }
+
     internal AcpJsonRpcTransport(
         Func<CancellationToken, ValueTask<string?>> readLine,
         Stream outputStream,
         JsonSerializerOptions jsonOptions,
         Logger? logger,
         Func<string?>? describeClose)
+        : this(readLine, outputStream, jsonOptions, logger, describeClose, messageHandler: null)
+    {
+    }
+
+    // A message handler is called on the reading loop for each message of the agent, in the order of its output,
+    // before the response that follows it completes its request: it must not wait. Without one, the messages go
+    // to Messages.
+    internal AcpJsonRpcTransport(
+        Func<CancellationToken, ValueTask<string?>> readLine,
+        Stream outputStream,
+        JsonSerializerOptions jsonOptions,
+        Logger? logger,
+        Func<string?>? describeClose,
+        Action<AcpServerMessage>? messageHandler)
     {
         ArgumentNullException.ThrowIfNull(readLine);
         ArgumentNullException.ThrowIfNull(outputStream);
@@ -48,6 +68,7 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
         _jsonOptions = jsonOptions;
         _logger = logger;
         _describeClose = describeClose;
+        _messageHandler = messageHandler;
         _incomingMessages = Channel.CreateUnbounded<AcpServerMessage>(new UnboundedChannelOptions
         {
             SingleReader = false,
@@ -406,7 +427,22 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
 
         var method = methodProp.GetString() ?? string.Empty;
         var parameters = element.TryGetProperty("params", out var paramsProp) ? paramsProp.Clone() : default;
-        _incomingMessages.Writer.TryWrite(new AcpServerMessage(method, parameters, requestId));
+        var serverMessage = new AcpServerMessage(method, parameters, requestId);
+        if (_messageHandler is { } handler)
+        {
+            try
+            {
+                handler(serverMessage);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                _logger?.Error(ex, $"The handler of an ACP message '{method}' failed.");
+            }
+
+            return;
+        }
+
+        _incomingMessages.Writer.TryWrite(serverMessage);
     }
 
     private static bool TryGetResponseId(JsonElement id, out long value)

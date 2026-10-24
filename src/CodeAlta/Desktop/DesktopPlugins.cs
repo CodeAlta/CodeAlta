@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime.Plugins;
+using CodeAlta.Plugin.Acp;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugin.Mobile;
@@ -51,6 +52,12 @@ internal static class DesktopPlugins
             Id = "statistics", DisplayName = "Statistics",
             Description = "Projects transient per-turn and session statistics from normalized agent events.",
             PluginType = typeof(StatisticsPlugin), Factory = static () => new StatisticsPlugin(),
+        },
+        new()
+        {
+            Id = AcpPlugin.PluginId, DisplayName = "ACP",
+            Description = "Runs the agents of the Agent Client Protocol (ACP) as model providers: the agents of the ACP registry, installed in one step.",
+            PluginType = typeof(AcpPlugin), Factory = static () => new AcpPlugin(),
         },
     ];
 

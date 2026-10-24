@@ -1,4 +1,5 @@
 using CodeAlta.Catalog;
+using CodeAlta.Plugin.Acp;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugin.Jira;
@@ -49,6 +50,15 @@ internal static class CodeAltaBuiltInPlugins
             EnabledByDefault = true,
             PluginType = typeof(StatisticsPlugin),
             Factory = static () => new StatisticsPlugin(StatisticsTerminalContributions.DecorateProjection),
+        });
+        registry.Add(new BuiltInPluginDefinition
+        {
+            Id = AcpPlugin.PluginId,
+            DisplayName = "ACP",
+            Description = SR.T("Runs the agents of the Agent Client Protocol (ACP) as model providers."),
+            EnabledByDefault = true,
+            PluginType = typeof(AcpPlugin),
+            Factory = static () => new AcpPlugin(),
         });
         return registry;
     }

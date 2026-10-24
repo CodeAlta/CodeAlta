@@ -27,6 +27,7 @@
     <ProjectReference Include="..\CodeAlta.Acp.Generator\CodeAlta.Acp.Generator.csproj" />
     <ProjectReference Include="..\CodeAlta.LiveTool\CodeAlta.LiveTool.csproj" />
     <ProjectReference Include="..\CodeAlta.Search\CodeAlta.Search.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Acp\CodeAlta.Plugin.Acp.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Git\CodeAlta.Plugin.Git.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Jira\CodeAlta.Plugin.Jira.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Mcp\CodeAlta.Plugin.Mcp.csproj" />

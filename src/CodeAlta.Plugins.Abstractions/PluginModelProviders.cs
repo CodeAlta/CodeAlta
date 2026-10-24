@@ -368,6 +368,12 @@ public sealed record PluginModelProviderContribution
     /// <summary>Gets what checks the settings of a provider: the problems, each in a sentence; null to check nothing.</summary>
     public Func<PluginProviderSettings, IReadOnlyList<string>>? Validate { get; init; }
 
+    /// <summary>
+    /// Gets what returns the SVG of the icon of a provider (the icon of an agent of a catalog), or <see langword="null" />:
+    /// the host makes it safe before it shows it.
+    /// </summary>
+    public Func<PluginProviderSettings, string?>? GetIconSvg { get; init; }
+
     /// <summary>Gets what describes what a provider runs, for its form, or <see langword="null" />.</summary>
     public Func<PluginProviderSettings, CancellationToken, Task<PluginProviderDescription?>>? Describe { get; init; }
 

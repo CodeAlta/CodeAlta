@@ -1626,6 +1626,12 @@
   fr: "Connecte CodeAlta aux serveurs Model Context Protocol configurés."
   ja: "設定済みの Model Context Protocol サーバーに CodeAlta を接続します。"
   zh: "将 CodeAlta 连接到已配置的模型上下文协议服务器。"
+"Runs the agents of the Agent Client Protocol (ACP) as model providers.":
+  de: "Führt die Agenten des Agent Client Protocol (ACP) als Modellanbieter aus."
+  es: "Ejecuta los agentes del Agent Client Protocol (ACP) como proveedores de modelos."
+  fr: "Exécute les agents de l'Agent Client Protocol (ACP) comme fournisseurs de modèles."
+  ja: "Agent Client Protocol (ACP) のエージェントをモデルプロバイダーとして実行します。"
+  zh: "将 Agent Client Protocol (ACP) 的代理作为模型提供方运行。"
 "The issues of a Jira project, for the projects whose configuration names one.":
   de: "Die Vorgänge eines Jira-Projekts, für Projekte, deren Konfiguration eines nennt."
   es: "Las incidencias de un proyecto de Jira, para los proyectos cuya configuración indica uno."

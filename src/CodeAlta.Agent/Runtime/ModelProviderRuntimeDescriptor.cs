@@ -93,6 +93,11 @@ public enum AgentTransportKind
     /// The Claude Code CLI, driven over its stream-json input and output.
     /// </summary>
     ClaudeCodeCli,
+
+    /// <summary>
+    /// An agent driven over the Agent Client Protocol (ACP), which runs its own loop and tools.
+    /// </summary>
+    AgentClientProtocol,
 }
 
 /// <summary>

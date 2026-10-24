@@ -50,7 +50,8 @@ public sealed partial class AcpClient : IAsyncDisposable
             process.StandardInput,
             jsonOptions,
             logger,
-            () => DescribeExit(options.ProcessOptions.FileName, process));
+            () => DescribeExit(options.ProcessOptions.FileName, process),
+            options.MessageHandler);
 
         var client = new AcpClient(process, transport, jsonOptions);
         try
@@ -68,10 +69,30 @@ public sealed partial class AcpClient : IAsyncDisposable
     /// <summary>
     /// Connects an ACP client to existing streams and performs initialization.
     /// </summary>
+    public static Task<AcpClient> ConnectAsync(
+        Stream serverOutput,
+        Stream clientInput,
+        InitializeRequest initializeRequest,
+        CancellationToken cancellationToken = default)
+        => ConnectAsync(serverOutput, clientInput, initializeRequest, messageHandler: null, cancellationToken);
+
+    /// <summary>
+    /// Connects an ACP client to existing streams, gives each message of the agent to a handler, and performs initialization.
+    /// </summary>
+    /// <param name="serverOutput">What the agent writes.</param>
+    /// <param name="clientInput">What the agent reads.</param>
+    /// <param name="initializeRequest">The initialize request.</param>
+    /// <param name="messageHandler">
+    /// Called on the reading loop for each notification and request of the agent, in order, before the response that
+    /// follows it completes: it must not wait. <see langword="null" /> to read the messages with <see cref="StreamAsync" />.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the initialization.</param>
+    /// <returns>The connected client.</returns>
     public static async Task<AcpClient> ConnectAsync(
         Stream serverOutput,
         Stream clientInput,
         InitializeRequest initializeRequest,
+        Action<AcpServerMessage>? messageHandler,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(serverOutput);
@@ -80,7 +101,7 @@ public sealed partial class AcpClient : IAsyncDisposable
 
         var logger = LogManager.GetLogger("acp.client");
         var jsonOptions = CreateJsonSerializerOptions();
-        var transport = new AcpJsonRpcTransport(serverOutput, clientInput, jsonOptions, logger);
+        var transport = new AcpJsonRpcTransport(serverOutput, clientInput, jsonOptions, logger, messageHandler);
         var client = new AcpClient(process: null, transport, jsonOptions);
         try
         {

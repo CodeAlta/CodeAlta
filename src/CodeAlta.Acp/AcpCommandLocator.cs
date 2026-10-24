@@ -1,7 +1,13 @@
 namespace CodeAlta.Acp;
 
-internal static class AcpCommandLocator
+/// <summary>
+/// Finds an executable on <c>PATH</c>, with the extensions of <c>PATHEXT</c> on Windows.
+/// </summary>
+public static class AcpCommandLocator
 {
+    /// <summary>Returns the full path of a command, or <see langword="null" /> when it is not found.</summary>
+    /// <param name="command">A command name, such as <c>npx</c>, or a full path.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="command" /> is empty.</exception>
     public static string? FindCommandPath(string command)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);

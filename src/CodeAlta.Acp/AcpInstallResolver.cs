@@ -65,7 +65,9 @@ public sealed class AcpInstallResolver
         throw new InvalidOperationException($"ACP agent '{manifest.Id}' does not define a supported distribution for the current platform.");
     }
 
-    internal static string GetCurrentTargetId()
+    /// <summary>Returns the target of the registry this process runs on, such as <c>windows-x86_64</c>.</summary>
+    /// <exception cref="PlatformNotSupportedException">Thrown on another system or architecture.</exception>
+    public static string GetCurrentTargetId()
     {
         var os = OperatingSystem.IsWindows()
             ? "windows"
