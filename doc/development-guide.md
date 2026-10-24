@@ -59,6 +59,8 @@ Coverage to keep: `SessionJournalSqliteCacheTests`, `AgentSessionCatalogTests`, 
 
 Rules for each new session fact kept in the database (queued prompts, relations, notes, turn positions...) go here, one bullet each, with the test that locks the journals.
 
+- **Relations come from the session rows.** Parent, children, descendants, the sessions of a project, space or worktree (delete, archive or move of a tree, the Explorer, `alta session` commands, retention) are read from `session_projection_cache` through `FileSystemAgentSessionStore.ListSessionsAsync`/`GetSessionAsync` or the runtime's catalog over them; never by enumerating or reading journals. Destructive operations still delete the files they found. Test: `WorkspaceSessionChildrenTests.DeletingATreeOrAProjectAfterARestart_FindsTheSessionsInTheSessionRows_NeverInAJournal`.
+
 ## Threading and async
 
 - `ConfigureAwait(false)` is for background/infrastructure code (libraries, SDKs, transport, persistence, I/O, workers, startup code that marshals back). Keep the boundary from UI flow narrow and explicit; no workaround abstractions for wrong `ConfigureAwait` use.

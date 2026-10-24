@@ -43,10 +43,7 @@ public sealed partial class SessionRuntimeService
     private async Task<OwnedSessionTreeDeletion> DeleteOwnedCatalogSessionTreeBodyAsync(string sessionId, string? projectId, string workspacePath,
         string confirmedTitle, IReadOnlyCollection<string> expectedDescendants, Func<string, bool> isBusy)
     {
-        var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
-        var all = new List<AgentSessionMetadata>();
-        await foreach (var metadata in store.ListSessionsForDeletionAsync(CancellationToken.None).ConfigureAwait(false))
-            all.Add(metadata);
+        var all = await ListSessionRowsAsync(_sessionViewCatalog.JournalStore.CreateSessionStore()).ConfigureAwait(false);
         var root = all.FirstOrDefault(metadata => metadata.SessionId == sessionId);
         if (root is null || await ValidateListedSessionAsync(root, projectId, workspacePath, confirmedTitle, CancellationToken.None).ConfigureAwait(false) != "ok")
             return OwnedSessionTreeDeletion.Refused("session_missing");

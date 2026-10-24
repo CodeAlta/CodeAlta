@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 
 namespace CodeAlta.Orchestration.Runtime;
@@ -69,9 +70,7 @@ public sealed partial class SessionRuntimeService
             if (project is null || project.Id != projectId || project.ProjectPath != projectPath
                 || project.DisplayName != confirmedName || project.Archived != expectedArchived) return "scope_missing";
             var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
-            var all = new List<AgentSessionMetadata>();
-            await foreach (var metadata in store.ListSessionsForDeletionAsync(CancellationToken.None).ConfigureAwait(false))
-                all.Add(metadata);
+            var all = await ListSessionRowsAsync(store).ConfigureAwait(false);
             var sessions = all.Where(metadata => ProjectSession(metadata, projectPath)).ToArray();
             var ids = sessions.Select(metadata => metadata.SessionId).ToHashSet(StringComparer.OrdinalIgnoreCase);
             // Do not orphan descendants in another project or global scope.
@@ -98,9 +97,9 @@ public sealed partial class SessionRuntimeService
                 removed = true;
                 lock (_identityGate) _retiredSessionIds.Add(session.SessionId);
             }
-            // Never remove the catalog entry while a newly discovered journal still belongs to it.
-            await foreach (var metadata in store.ListSessionsForDeletionAsync(CancellationToken.None).ConfigureAwait(false))
-                if (ProjectSession(metadata, projectPath) || HasProjectParent(metadata, ids)) return "delete_unconfirmed";
+            // Never remove the catalog entry while a session that came meanwhile still belongs to it.
+            if ((await ListSessionRowsAsync(store).ConfigureAwait(false)).Any(metadata => ProjectSession(metadata, projectPath) || HasProjectParent(metadata, ids)))
+                return "delete_unconfirmed";
             var current = await _projectCatalog.GetByIdAsync(projectId, CancellationToken.None).ConfigureAwait(false);
             if (current is null || current.ProjectPath != projectPath || current.DisplayName != confirmedName || current.Archived != expectedArchived)
                 return removed ? "delete_unconfirmed" : "scope_missing";
@@ -143,6 +142,17 @@ public sealed partial class SessionRuntimeService
             && (entry.HasActiveRun || entry.QueueDrainInProgress || entry.BackgroundTasks.Any(task => task.Outcome is null))), CancellationToken.None).ConfigureAwait(false);
     }
 
+    // Every session with its parent, its creator and its folder, as the list of sessions in the application database has
+    // them: a deletion finds what it deletes there and reads no journal, whatever their number. A journal changed since its
+    // row was written is read again by the listing; the rows are rebuilt from the journals only when the database is new.
+    private static async Task<List<AgentSessionMetadata>> ListSessionRowsAsync(FileSystemAgentSessionStore store)
+    {
+        var all = new List<AgentSessionMetadata>();
+        await foreach (var metadata in store.ListSessionsAsync(filter: null, cancellationToken: CancellationToken.None).ConfigureAwait(false))
+            all.Add(metadata);
+        return all;
+    }
+
     private static bool ProjectSession(AgentSessionMetadata metadata, string projectPath)
         => (metadata.Context?.Cwd ?? metadata.WorkspacePath) is { Length: > 0 } path
             && string.Equals(NormalizePath(path), NormalizePath(projectPath), StringComparison.OrdinalIgnoreCase);
@@ -171,8 +181,8 @@ public sealed partial class SessionRuntimeService
             }
             else if (await ValidateListedSessionAsync(metadata, projectId, workspacePath, confirmedTitle, token).ConfigureAwait(false) != "ok")
                 return "session_missing";
-            // The project worker already checked every descendant from disk and holds all
-            // lineage claims. Do not reparse the entire store once for every batch member.
+            // The project or tree worker already checked every descendant in the session rows and
+            // holds all lineage claims. Do not list the store again for every batch member.
             if (projectSessions is not null) return "ok";
             await foreach (var candidate in store.ListSessionsAsync(filter: null, cancellationToken: token).ConfigureAwait(false))
             {
