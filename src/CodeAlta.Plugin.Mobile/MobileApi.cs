@@ -67,13 +67,16 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
             });
         }
 
+        var providerItems = (await providers.ConfigureAwait(false)).OfType("alta.provider.item").ToArray();
         var modelList = new JsonArray();
         foreach (var model in (await models.ConfigureAwait(false)).OfType("alta.model.item"))
         {
+            var providerKey = MobileAlta.Text(model, "providerKey");
             modelList.Add(new JsonObject
             {
-                ["provider"] = MobileAlta.Text(model, "providerKey"), ["id"] = MobileAlta.Text(model, "modelId"),
-                ["name"] = MobileAlta.Text(model, "displayName") ?? MobileAlta.Text(model, "modelId"), ["providerName"] = MobileAlta.Text(model, "provider"),
+                ["provider"] = providerKey, ["id"] = MobileAlta.Text(model, "modelId"),
+                ["name"] = MobileAlta.Text(model, "displayName") ?? MobileAlta.Text(model, "modelId"),
+                ["providerName"] = providerKey is null ? null : await sessions.ProviderNameAsync(providerKey, cancellationToken).ConfigureAwait(false),
                 ["efforts"] = model["supportedReasoningEfforts"]?.DeepClone() ?? new JsonArray(), ["defaultEffort"] = MobileAlta.Text(model, "defaultReasoningEffort"),
             });
         }
@@ -84,7 +87,7 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
 
         // The modes a new session of a provider can start in; a provider that offers none is left out.
         var permissionModes = new JsonObject();
-        foreach (var provider in (await providers.ConfigureAwait(false)).OfType("alta.provider.item"))
+        foreach (var provider in providerItems)
         {
             if (MobileAlta.Text(provider, "providerKey") is { } key && Modes(provider) is { Count: > 0 } modes) permissionModes[key] = modes;
         }

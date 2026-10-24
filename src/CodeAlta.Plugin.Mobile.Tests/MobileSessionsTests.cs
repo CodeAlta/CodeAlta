@@ -250,6 +250,21 @@ public sealed class MobileSessionsTests
         Assert.AreEqual(("default", "Ask first", "acceptEdits", null), ((string?)modes["claude"]![0]!["id"], (string?)modes["claude"]![0]!["name"], (string?)modes["claude"]![1]!["id"], (string?)modes["claude"]![1]!["name"]));
     }
 
+    [TestMethod]
+    public async Task Options_NameTheProviderOfAModel_AsTheWindowNamesIt()
+    {
+        var alta = new FakeAlta()
+            .Answer("model list --detailed",
+                new JsonObject { ["type"] = "alta.model.item", ["providerKey"] = "codex", ["provider"] = "codex", ["modelId"] = "gpt-6.1-sol" },
+                new JsonObject { ["type"] = "alta.model.item", ["providerKey"] = "local", ["provider"] = "local", ["modelId"] = "qwen" })
+            .Answer("provider list --detailed", new JsonObject { ["type"] = "alta.provider.item", ["providerKey"] = "codex", ["displayName"] = "Codex" });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()));
+
+        var models = (JsonArray)(await api.OptionsAsync(default))["models"]!;
+
+        CollectionAssert.AreEqual(new[] { "Codex", "local" }, models.Select(static model => (string?)model!["providerName"]).ToArray(), "A provider without a name keeps the one of its models.");
+    }
+
     private static JsonObject Event(int sequence, string kind, string text, string? activity = null)
         => new()
         {

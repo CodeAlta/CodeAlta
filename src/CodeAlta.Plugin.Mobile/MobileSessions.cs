@@ -151,7 +151,8 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         var spaceList = MobileAlta.RunAsync(alta, ["space", "list"], null, cancellationToken);
         var models = MobileAlta.RunAsync(alta, ["model", "list", "--detailed"], null, cancellationToken);
         var prompts = MobileAlta.RunAsync(alta, ["prompt", "list"], null, cancellationToken);
-        await Task.WhenAll(projects, spaceList, models, prompts).ConfigureAwait(false);
+        var providers = MobileAlta.RunAsync(alta, ["provider", "list", "--detailed"], null, cancellationToken);
+        await Task.WhenAll(projects, spaceList, models, prompts, providers).ConfigureAwait(false);
         var names = new MobileNames(DateTimeOffset.UtcNow);
         foreach (var project in (await projects.ConfigureAwait(false)).OfType("alta.project.item"))
             if (MobileAlta.Text(project, "projectId") is { } id) names.Projects[id] = MobileAlta.Text(project, "displayName") ?? MobileAlta.Text(project, "name") ?? MobileAlta.Text(project, "slug") ?? id;
@@ -163,6 +164,10 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
             if (MobileAlta.Text(model, "provider") is { } providerName) names.Providers[provider] = providerName;
             if (MobileAlta.Text(model, "modelId") is { } modelId) names.Models[(provider, modelId)] = MobileAlta.Text(model, "displayName") ?? modelId;
         }
+
+        // A provider is named as the window names it; the provider of a model record is its configured name, or its key.
+        foreach (var provider in (await providers.ConfigureAwait(false)).OfType("alta.provider.item"))
+            if (MobileAlta.Text(provider, "providerKey") is { } key && MobileAlta.Text(provider, "displayName") is { } name) names.Providers[key] = name;
 
         foreach (var prompt in (await prompts.ConfigureAwait(false)).OfType("alta.prompt"))
             if (MobileAlta.Text(prompt, "promptId") is { } id) names.Prompts[id] = MobileAlta.Text(prompt, "name") ?? id;
