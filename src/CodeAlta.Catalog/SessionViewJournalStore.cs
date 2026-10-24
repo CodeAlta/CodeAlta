@@ -521,7 +521,7 @@ public sealed partial class SessionViewJournalStore
         var handledCount = 0;
         foreach (var prompt in queued)
         {
-            if (IsPendingQueueState(prompt.State))
+            if (SessionViewQueuedPrompt.IsPendingState(prompt.State))
             {
                 pendingIds.Add(prompt.QueueItemId);
             }
@@ -535,7 +535,7 @@ public sealed partial class SessionViewJournalStore
         var compactQueue = new List<SessionViewQueuedPrompt>(queued.Count - dropHandled);
         foreach (var prompt in queued)
         {
-            if (IsPendingQueueState(prompt.State))
+            if (SessionViewQueuedPrompt.IsPendingState(prompt.State))
             {
                 compactQueue.Add(prompt);
             }
@@ -603,10 +603,6 @@ public sealed partial class SessionViewJournalStore
             QueuedPrompts = compactQueue,
         };
     }
-
-    private static bool IsPendingQueueState(string? state)
-        => string.Equals(state, "queued", StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(state, "submitting", StringComparison.OrdinalIgnoreCase);
 
     internal static async Task<SessionViewJournalHeader?> ReadHeaderFromPathAsync(string path, CancellationToken cancellationToken)
         => (await ReadHeaderRawFromPathAsync(path, cancellationToken).ConfigureAwait(false))?.Deserialize(

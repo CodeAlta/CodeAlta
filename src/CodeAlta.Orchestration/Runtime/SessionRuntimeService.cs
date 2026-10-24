@@ -3443,11 +3443,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     private static int QueuedPromptCount(SessionViewLocalState localState)
-        => localState.QueuedPrompts.Count(static prompt => IsPendingQueuedPromptState(prompt.State));
-
-    private static bool IsPendingQueuedPromptState(string? state)
-        => string.Equals(state, "queued", StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(state, "submitting", StringComparison.OrdinalIgnoreCase);
+        => localState.QueuedPrompts.Count(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State));
 
     private static string CreatePromptPreview(string prompt)
         => prompt.Length <= 160 ? prompt : prompt[..160];

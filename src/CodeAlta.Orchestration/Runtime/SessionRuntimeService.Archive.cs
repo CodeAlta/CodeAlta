@@ -126,7 +126,7 @@ public sealed partial class SessionRuntimeService
             || (await Permissions.ListOwnedUserInputsAsync(sessionId, token).ConfigureAwait(false)).Entries.Count != 0) return "interaction_pending";
         if (await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false) is not { } session) return "session_missing";
         var local = await _sessionViewCatalog.JournalStore.ReadLatestStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false);
-        return local?.QueuedPrompts.Any(static prompt => IsPendingQueuedPromptState(prompt.State)) == true ? "queue_pending" : null;
+        return local?.HasPendingQueuedPrompts() == true ? "queue_pending" : null;
     }
 
     private async Task<string> SetOneSessionArchivedAsync(string sessionId, bool archived, Func<string, bool> ownerBusy, List<string> changed)

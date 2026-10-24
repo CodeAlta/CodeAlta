@@ -616,7 +616,12 @@ claim to repair the legacy live cross-provider transfer path or its separate pre
 
 The owned command service reserves mutation admission and the session actor validates runtime,
 attachment and selection guards, active/draining/queued work, asks, permissions and user inputs.
-Persisted unfinished turns and queued work also prevent switching. Summary, continuation and
+Persisted unfinished turns and pending queued prompts (`queued`, `submitting`) also prevent
+switching, reported as `turn_unfinished` and `queue_pending` and shown by the chooser as what to
+do first. A queue item that was submitted, failed or was canceled is a record of work that ended:
+it never blocks a switch, a move, a change of space or a fallback
+(`SessionViewLocalState.HasPendingQueuedPrompts`). Any other failure is logged and reported as
+`selection_unconfirmed`. Summary, continuation and
 local selection share a flushed same-directory journal replacement; a stale revision or failed
 replacement leaves the original journal intact. Derived-cache reads check file stamps. The old
 attachment is retired only after that durable decision. Cleanup failure retains a blocked

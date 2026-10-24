@@ -4,6 +4,15 @@ import { sessionOperations, type SessionProviderChoices } from "#neoastra";
 import { useShellLanguage } from "./shellLanguage";
 import { modalDialogOpen } from "./modalDialogs";
 
+/** What keeps a session on its provider, for the refusals the user can do something about; null for the others. */
+export function providerSelectionMessage(status: string) {
+  switch (status) {
+    case "queue_pending": return "A prompt is queued in this session. Send or remove it, then change the provider." as const;
+    case "turn_unfinished": return "A turn of this session has not ended. Wait until it ends, then change the provider." as const;
+    default: return null;
+  }
+}
+
 export function ProviderChooser({ epoch, sessionId, providerKey, disabled, current, onSelected, onBusyChange }: {
   epoch: string; sessionId: string; providerKey: string; disabled: boolean;
   current: () => boolean; onSelected: () => Promise<void>;
@@ -62,6 +71,7 @@ export function ProviderChooser({ epoch, sessionId, providerKey, disabled, curre
     } catch { if (admitted(controller)) { setStatus("selection_unconfirmed"); setChoices(null); } }
     finally { if (scope.current === controller) { submitting.current = false; setBusy(false); } }
   }
+  const refusal = status ? providerSelectionMessage(status) : null;
   return <span className="provider-chooser">
     <HTMLSelect fill className="current-provider" aria-label={t("Change provider")} value={providerKey} disabled={disabled || busy}
       title={t("History and draft are kept. The provider connects on your next Send.")}
@@ -71,6 +81,6 @@ export function ProviderChooser({ epoch, sessionId, providerKey, disabled, curre
       {choices?.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
     </HTMLSelect>
     {busy && <span role="status">{t("Switching provider…")}</span>}
-    {status && <span role="alert">{t("Provider selection unavailable ({status}).", { status })}</span>}
+    {status && <span role="alert">{refusal ? t(refusal) : t("Provider selection unavailable ({status}).", { status })}</span>}
   </span>;
 }

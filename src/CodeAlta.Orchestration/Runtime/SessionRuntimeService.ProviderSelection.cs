@@ -55,10 +55,17 @@ public sealed partial class SessionRuntimeService
                 if (!IsProviderInSpace(target.ProviderId.Value, await ResolveSpaceIdAsync(session.SpaceId, session.ProjectRef, token).ConfigureAwait(false)))
                     return ProviderOutsideSpace;
                 if (entry?.PendingAgentPromptId is not null) return "pending_selection";
+                // A prompt that waits in the queue cannot follow the session to another provider. One that failed or
+                // was canceled is a record of work that ended, and does not hold the session.
+                var local = await _sessionViewCatalog.JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt, token).ConfigureAwait(false);
+                if (local?.HasPendingQueuedPrompts() == true) return Catalog.SessionViewChangeRefusedException.QueuePending;
                 // The original attachment stays intact through preparation and the atomic durable decision.
                 var family = await RuntimeFamilyOfKeyWrittenAsFamilyAsync(
                     await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionSummaryAsync(session.SessionId, token).ConfigureAwait(false), token).ConfigureAwait(false);
-                await _sessionViewCatalog.JournalStore.SelectProviderAsync(session, expected.ProviderKey, target, carryOver, family, token).ConfigureAwait(false);
+                // The journal tells what it holds that keeps the session where it is: a turn that did not end, or a
+                // prompt queued since the check above.
+                try { await _sessionViewCatalog.JournalStore.SelectProviderAsync(session, expected.ProviderKey, target, carryOver, family, token).ConfigureAwait(false); }
+                catch (Catalog.SessionViewChangeRefusedException refused) { return refused.Code; }
                 if (entry is not null)
                 {
                     retirement = _forwarding.RetireAsync(entry.Attachment);

@@ -15,8 +15,8 @@ public sealed partial class SessionViewJournalStore
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="ArgumentNullException">The session is null.</exception>
     /// <exception cref="ArgumentException">The space is not the identifier of a space.</exception>
-    /// <exception cref="InvalidOperationException">The session is not a global or project session, changed, contains queued
-    /// work, or requires recovery.</exception>
+    /// <exception cref="SessionViewChangeRefusedException">The session has a turn that did not end or a pending queued prompt.</exception>
+    /// <exception cref="InvalidOperationException">The session is not a global or project session, changed, or requires recovery.</exception>
     /// <exception cref="IOException">Preparing or replacing the journal failed.</exception>
     /// <exception cref="OperationCanceledException">Canceled before the commit point.</exception>
     public Task MoveSessionToSpaceAsync(SessionViewDescriptor session, string spaceId, CancellationToken cancellationToken = default)
@@ -46,14 +46,9 @@ public sealed partial class SessionViewJournalStore
         if (await ReadHeaderAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) is not { } header
             || header.SessionId != session.SessionId || header.Kind != session.Kind)
             throw new InvalidOperationException("The session requires a valid catalog header before it changes space.");
-        if (original.History.OfType<AgentActivityEvent>().Where(activity => activity.Kind == AgentActivityKind.Turn)
-            .GroupBy(activity => (activity.ProviderId, activity.RunId, activity.ActivityId))
-            .Any(turn => turn.Last().Phase is not (AgentActivityPhase.Completed or AgentActivityPhase.Failed or AgentActivityPhase.Canceled)))
-            throw new InvalidOperationException("An unfinished persisted turn must be resolved before the session changes space.");
         var local = await ReadLatestStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false)
             ?? new SessionViewLocalState();
-        if (local.QueuedPrompts.Any(prompt => prompt.State != "submitted"))
-            throw new InvalidOperationException("Queued work must be resolved before the session changes space.");
+        ThrowIfWorkPending(original.History, local, "the session changes space");
         // The header keeps everything else it says: who created the session, when, where and on which provider.
         var moved = header.ToDescriptor();
         moved.SpaceId = spaceId;

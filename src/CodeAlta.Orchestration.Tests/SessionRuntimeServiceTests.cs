@@ -129,7 +129,7 @@ public sealed class SessionRuntimeServiceTests
         Assert.AreEqual("provider_unavailable", await runtime.SelectOwnedProviderAsync(before, "missing"));
         await journal.AppendStateAsync(descriptor, new() { ProviderKey = "original", QueuedPrompts = [new()
             { QueueItemId = "keep", Kind = "prompt", Prompt = "Retain this queued prompt", State = "queued", CreatedAt = now }] });
-        await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.SelectOwnedProviderAsync(before, "target"));
+        Assert.AreEqual("queue_pending", await runtime.SelectOwnedProviderAsync(before, "target"));
         Assert.AreEqual("original", (await store.GetSessionSummaryAsync(descriptor.SessionId))!.ProviderKey);
         Assert.AreEqual("opaque-original", (await store.GetStateAsync(descriptor.SessionId))!.ProviderSessionId);
         await journal.AppendStateAsync(descriptor, new() { ProviderKey = "original", AgentPromptId = "default" });
@@ -149,7 +149,7 @@ public sealed class SessionRuntimeServiceTests
         var turn = new AgentActivityEvent(new("original"), descriptor.SessionId, now, new("incomplete"),
             AgentActivityKind.Turn, AgentActivityPhase.Started, "turn", null, "Turn", null);
         await store.AppendEventsAsync("original", "original", descriptor.SessionId, [turn]);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.SelectOwnedProviderAsync(before, "target"));
+        Assert.AreEqual("turn_unfinished", await runtime.SelectOwnedProviderAsync(before, "target"));
         await store.AppendEventsAsync("original", "original", descriptor.SessionId, [turn with { Phase = AgentActivityPhase.Completed }]);
         Assert.AreEqual("ok", await runtime.SelectOwnedProviderAsync(before, "target"));
         var fresh = journal.CreateSessionStore();
@@ -162,6 +162,37 @@ public sealed class SessionRuntimeServiceTests
         Assert.AreEqual("target", (await journal.ReadLatestStateAsync(descriptor.SessionId, now))!.ProviderKey);
         Assert.AreEqual("stale_selection", await runtime.SelectOwnedProviderAsync(before, "target"));
         Assert.AreEqual("target", (await runtime.ReadProviderSelectionAsync(descriptor.SessionId))!.ProviderKey);
+    }
+
+    [TestMethod]
+    [DataRow("failed")]
+    [DataRow("canceled")]
+    [DataRow("submitted")]
+    public async Task ProviderSelection_SwitchesASessionWhoseQueueHoldsOnlyWorkThatEnded(string state)
+    {
+        using var temp = new TempDirectory();
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(new(new("target"), "Target", "openai-responses"), () => throw new AssertFailedException("Selection must not activate a provider."));
+        await using var hub = new AgentHub(registry, temp.Path);
+        await using var runtime = CreateRuntime(temp.Path, hub);
+        var journal = new SessionViewCatalog(new CatalogOptions { GlobalRoot = temp.Path }).JournalStore;
+        var store = journal.CreateSessionStore();
+        var now = DateTimeOffset.UtcNow;
+        var descriptor = new SessionViewDescriptor { SessionId = "provider-ended-queue", Kind = SessionViewKind.GlobalSession,
+            ProviderId = "original", ProviderKey = "original", Title = "Ended", WorkingDirectory = temp.Path, CreatedAt = now, UpdatedAt = now };
+        await journal.EnsureHeaderAsync(descriptor);
+        await store.UpsertSessionAsync(new() { SessionId = descriptor.SessionId, ProviderId = new("original"), ProviderKey = "original",
+            ProtocolFamily = "original", WorkingDirectory = temp.Path, Title = "Ended", CreatedAt = now, UpdatedAt = now });
+        await store.UpsertStateAsync(new() { SessionId = descriptor.SessionId, ProviderKey = "original", ProtocolFamily = "original", UpdatedAt = now });
+        // What a prompt that failed or was cancelled leaves in the queue: a record, not work that waits.
+        await journal.AppendStateAsync(descriptor, new() { ProviderKey = "original", AgentPromptId = "default", QueuedPrompts = [new()
+            { QueueItemId = "ended", Kind = "send", Prompt = "Ended work", State = state, LastError = "The operation was canceled.", CreatedAt = now }] });
+        var before = await runtime.ReadProviderSelectionAsync(descriptor.SessionId);
+        Assert.IsNotNull(before);
+
+        Assert.AreEqual("ok", await runtime.SelectOwnedProviderAsync(before, "target"));
+
+        Assert.AreEqual("target", (await journal.ReadLatestStateAsync(descriptor.SessionId, now))!.ProviderKey);
     }
 
     [TestMethod]

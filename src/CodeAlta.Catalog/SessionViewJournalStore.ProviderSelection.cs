@@ -17,7 +17,8 @@ public sealed partial class SessionViewJournalStore
     /// Existing history is retained. The target is attached lazily on the next send.
     /// The caller must hold idle-session mutation admission.</remarks>
     /// <exception cref="ArgumentNullException">The session or target is null.</exception>
-    /// <exception cref="InvalidOperationException">The session changed, contains queued work, or requires recovery.</exception>
+    /// <exception cref="SessionViewChangeRefusedException">The session has a turn that did not end or a pending queued prompt.</exception>
+    /// <exception cref="InvalidOperationException">The session changed or requires recovery.</exception>
     /// <exception cref="IOException">Preparing or replacing the journal failed.</exception>
     /// <exception cref="OperationCanceledException">Canceled before the commit point.</exception>
     public Task SelectProviderAsync(SessionViewDescriptor session, string expectedProvider, ModelProviderDescriptor target,
@@ -67,14 +68,9 @@ public sealed partial class SessionViewJournalStore
         if (await ReadHeaderAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) is not { } header
             || header.SessionId != session.SessionId)
             throw new InvalidOperationException("The session requires a valid catalog header before provider selection.");
-        if (original.History.OfType<AgentActivityEvent>().Where(activity => activity.Kind == AgentActivityKind.Turn)
-            .GroupBy(activity => (activity.ProviderId, activity.RunId, activity.ActivityId))
-            .Any(turn => turn.Last().Phase is not (AgentActivityPhase.Completed or AgentActivityPhase.Failed or AgentActivityPhase.Canceled)))
-            throw new InvalidOperationException("An unfinished persisted turn must be resolved before provider selection.");
         var local = await ReadLatestStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false)
             ?? new SessionViewLocalState();
-        if (local.QueuedPrompts.Any(prompt => prompt.State != "submitted"))
-            throw new InvalidOperationException("Queued work must be resolved before switching providers.");
+        ThrowIfWorkPending(original.History, local, "switching providers");
         var now = DateTimeOffset.UtcNow;
         var summary = original.Summary with { ProviderId = target.ProviderId, ProviderKey = target.ProviderId.Value,
             ProtocolFamily = target.ProviderType, ModelId = carryOver?.ModelId, ReasoningEffort = carryOver?.ReasoningEffort, UpdatedAt = now };
@@ -94,5 +90,17 @@ public sealed partial class SessionViewJournalStore
         await store.CommitProviderSelectionAsync(original, summary, state, CreateHeaderEvent(selected).ToJson(),
             [CreateStateEvent(selected, local).ToJson()], cancellationToken).ConfigureAwait(false);
         InvalidateLatestStateCache(GetPath(session.SessionId, session.CreatedAt));
+    }
+
+    // What keeps an idle session on its provider, in its project and in its space: a turn of its history that did not
+    // end, or a prompt of its queue that waits or is being submitted. A prompt that failed or was canceled does not.
+    private static void ThrowIfWorkPending(IEnumerable<AgentEvent> history, SessionViewLocalState local, string change)
+    {
+        if (history.OfType<AgentActivityEvent>().Where(activity => activity.Kind == AgentActivityKind.Turn)
+            .GroupBy(activity => (activity.ProviderId, activity.RunId, activity.ActivityId))
+            .Any(turn => turn.Last().Phase is not (AgentActivityPhase.Completed or AgentActivityPhase.Failed or AgentActivityPhase.Canceled)))
+            throw new SessionViewChangeRefusedException(SessionViewChangeRefusedException.TurnUnfinished, $"An unfinished persisted turn must be resolved before {change}.");
+        if (local.HasPendingQueuedPrompts())
+            throw new SessionViewChangeRefusedException(SessionViewChangeRefusedException.QueuePending, $"Queued work must be resolved before {change}.");
     }
 }

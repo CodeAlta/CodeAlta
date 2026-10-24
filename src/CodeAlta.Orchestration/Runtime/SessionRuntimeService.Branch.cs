@@ -190,7 +190,7 @@ public sealed partial class SessionRuntimeService
                 || (await Permissions.ListOwnedUserInputsAsync(sessionId, token).ConfigureAwait(false)).Entries.Count != 0)
                 return ("interaction_pending", null);
             var local = await _sessionViewCatalog.JournalStore.ReadLatestStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false);
-            if (local?.QueuedPrompts.Any(static prompt => prompt.State is "queued" or "submitting") == true) return ("queue_pending", null);
+            if (local?.HasPendingQueuedPrompts() == true) return ("queue_pending", null);
             // A command that runs for the session, or a task of its provider, reports to a conversation that would no longer be there.
             if (Jobs.CountRunning(sessionId) != 0) return ("background_work", null);
             return ("ok", session);
