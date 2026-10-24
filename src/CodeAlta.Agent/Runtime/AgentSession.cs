@@ -2513,6 +2513,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
         var statistics = CreateSystemPromptStatistics(systemMessage, developerInstructions);
         var agentPromptUsage = ResolveAgentPromptUsage(NormalizeOptionalText(_options.AgentPromptId));
+        // A provider that runs its own harness may give the instructions another way (appended to its own system
+        // prompt, or with the first prompt): the record says how.
+        var channel = (_turnExecutor as IAgentProviderInstructionsChannel)?.GetInstructionsChannel(SessionId) ?? DefaultInstructionsChannel;
         var promptEvent = new AgentSystemPromptEvent(
             ProviderId,
             SessionId,
@@ -2523,8 +2526,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             NormalizeOptionalText(_options.AgentPromptId),
             systemMessage,
             developerInstructions,
-            new AgentSystemPromptProviderPayloadSummary("native-system-and-developer", AppliedToProvider: true, Lossy: false),
-            CreateSystemPromptManifest(effectivePromptHash, agentPromptUsage, statistics, _options.InstructionTransformations),
+            new AgentSystemPromptProviderPayloadSummary(channel, AppliedToProvider: true, Lossy: false),
+            CreateSystemPromptManifest(effectivePromptHash, agentPromptUsage, statistics, _options.InstructionTransformations, channel),
             statistics,
             new AgentSystemPromptChangeSummary(
                 previousHash is null ? "initial" : "changed",
@@ -2559,7 +2562,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private static int EstimatePromptTokens(string? text)
         => checked((int)TokenEstimator.Estimate(text));
 
-    private static JsonElement CreateSystemPromptManifest(string effectivePromptHash, AgentPromptUsageInfo? agentPromptUsage, AgentSystemPromptStatistics statistics, IReadOnlyList<AgentInstructionTransformationInfo> transformations)
+    private const string DefaultInstructionsChannel = "native-system-and-developer";
+
+    private static JsonElement CreateSystemPromptManifest(string effectivePromptHash, AgentPromptUsageInfo? agentPromptUsage, AgentSystemPromptStatistics statistics, IReadOnlyList<AgentInstructionTransformationInfo> transformations, string instructionsChannel)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -2590,7 +2595,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             }
 
             writer.WriteStartObject("provider");
-            writer.WriteString("channelMapping", "native-system-and-developer");
+            writer.WriteString("channelMapping", instructionsChannel);
             writer.WriteBoolean("appliedToProvider", true);
             writer.WriteBoolean("lossy", false);
             writer.WriteEndObject();

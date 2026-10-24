@@ -21,6 +21,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderExternalConversations,
     IAgentProviderSharedConversation,
     IAgentProviderStateUpdates,
+    IAgentProviderInstructionsChannel,
     IAsyncDisposable
 {
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -287,6 +288,10 @@ internal sealed class ClaudeCodeTurnExecutor :
             };
         }, cancellationToken);
     }
+
+    /// <summary>The instructions of CodeAlta are appended to the system prompt of Claude Code.</summary>
+    /// <inheritdoc />
+    public string? GetInstructionsChannel(string sessionId) => "appended-system-prompt";
 
     /// <inheritdoc />
     public JsonElement? TakeProviderState(string sessionId)

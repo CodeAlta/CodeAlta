@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent.Runtime;
@@ -11,12 +10,7 @@ namespace CodeAlta.Agent.Claude;
 /// </summary>
 internal static class ClaudeCodePrompts
 {
-    private const int HistoryPreambleLimit = 120_000;
-    private const int HistoryToolArgumentsLimit = 600;
-    private const int HistoryToolResultLimit = 1_500;
-
     private const string InstructionsUpdateOpening = "<codealta_instructions_update>";
-    private const int RemovedParagraphPreview = 120;
 
     /// <summary>The command gateway of CodeAlta, which its instructions name.</summary>
     public const string GatewayTool = "alta";
@@ -117,53 +111,7 @@ internal static class ClaudeCodePrompts
     /// <param name="previous">The instructions the conversation was given, or <see langword="null" /> when they are not known.</param>
     /// <param name="current">The instructions of the prompt that starts.</param>
     public static string CreateInstructionsUpdate(string? previous, string current)
-    {
-        ArgumentNullException.ThrowIfNull(current);
-
-        var builder = new StringBuilder();
-        builder.AppendLine(InstructionsUpdateOpening);
-        if (previous is null)
-        {
-            builder.AppendLine("The instructions of CodeAlta for this session are no longer the ones this conversation was given. This note is not a request of the user. The text below replaces all the instructions of CodeAlta you were given before, the `# CodeAlta` part of your system prompt and earlier notes like this one:");
-            builder.AppendLine();
-            builder.AppendLine(current.Trim());
-        }
-        else
-        {
-            // The parts are the paragraphs: what the text is made of does not have to be known to compare it.
-            var before = SplitParagraphs(previous);
-            var after = SplitParagraphs(current);
-            var kept = before.ToHashSet(StringComparer.Ordinal);
-            var present = after.ToHashSet(StringComparer.Ordinal);
-            var removed = before.Where(paragraph => !present.Contains(paragraph)).ToArray();
-            var added = after.Where(paragraph => !kept.Contains(paragraph)).ToArray();
-
-            builder.AppendLine("The instructions of CodeAlta for this session changed. This note is not a request of the user: it updates the `# CodeAlta` part of your system prompt, and earlier notes like this one, for what follows. What it does not name still applies.");
-            if (removed.Length > 0)
-            {
-                builder.AppendLine();
-                builder.AppendLine("These parts no longer apply (each is named by how it starts):");
-                foreach (var paragraph in removed)
-                {
-                    builder.Append("- ").AppendLine(FirstWords(paragraph));
-                }
-            }
-
-            if (added.Length > 0)
-            {
-                builder.AppendLine();
-                builder.AppendLine(removed.Length > 0 ? "These parts are new, or replace the ones above:" : "These parts are new:");
-                foreach (var paragraph in added)
-                {
-                    builder.AppendLine();
-                    builder.AppendLine(paragraph);
-                }
-            }
-        }
-
-        builder.Append("</codealta_instructions_update>");
-        return builder.ToString();
-    }
+        => Harness.HarnessInstructions.CreateUpdate(previous, current, "the `# CodeAlta` part of your system prompt");
 
     /// <summary>
     /// Creates the note that gives the instructions of CodeAlta to a conversation started outside CodeAlta (in VS Code
@@ -187,68 +135,14 @@ internal static class ClaudeCodePrompts
 
     /// <summary>The value by which two versions of the instructions are told apart.</summary>
     public static string HashInstructions(string instructions)
-        => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(instructions)), 0, 8);
+        => Harness.HarnessInstructions.Hash(instructions);
 
     /// <summary>
     /// Renders the part of a session Claude Code did not take part in (another provider answered it), to give
     /// it as context with the next prompt.
     /// </summary>
     public static string? CreateHistoryPreamble(IReadOnlyList<AgentConversationMessage> history)
-    {
-        ArgumentNullException.ThrowIfNull(history);
-
-        var builder = new StringBuilder();
-        foreach (var message in history)
-        {
-            foreach (var part in message.Parts)
-            {
-                switch (part)
-                {
-                    case AgentMessagePart.Text text when !string.IsNullOrWhiteSpace(text.Value):
-                        builder.Append(message.Role switch
-                        {
-                            AgentConversationRole.User => "[user]\n",
-                            AgentConversationRole.Assistant => "[assistant]\n",
-                            AgentConversationRole.System => "[system]\n",
-                            _ => "[tool]\n",
-                        });
-                        builder.AppendLine(text.Value.Trim());
-                        builder.AppendLine();
-                        break;
-                    case AgentMessagePart.ToolCall toolCall:
-                        builder.Append("[assistant called tool ").Append(toolCall.Name).Append("]\n");
-                        builder.AppendLine(Truncate(toolCall.Arguments.GetRawText(), HistoryToolArgumentsLimit));
-                        builder.AppendLine();
-                        break;
-                    case AgentMessagePart.ToolResult toolResult:
-                        builder.Append(toolResult.Result.Success ? "[tool result]\n" : "[tool error]\n");
-                        builder.AppendLine(Truncate(RenderToolResult(toolResult.Result), HistoryToolResultLimit));
-                        builder.AppendLine();
-                        break;
-                    case AgentMessagePart.Data or AgentMessagePart.Uri:
-                        builder.AppendLine(message.Role is AgentConversationRole.User ? "[user attached a file]" : "[attachment]");
-                        builder.AppendLine();
-                        break;
-                }
-            }
-        }
-
-        if (builder.Length == 0)
-        {
-            return null;
-        }
-
-        var transcript = builder.ToString().TrimEnd();
-        if (transcript.Length > HistoryPreambleLimit)
-        {
-            transcript = "(the beginning of the conversation is omitted)\n\n" + transcript[^HistoryPreambleLimit..];
-        }
-
-        return "<codealta_previous_conversation>\n" +
-               "The conversation below took place earlier in this CodeAlta session, before you joined it. It is context for the request that follows, not a request by itself.\n\n" +
-               transcript +
-               "\n</codealta_previous_conversation>";
-    }
+        => Harness.HarnessHistory.CreatePreviousConversation(history);
 
     /// <summary>
     /// Writes the <c>content</c> array of a user message: the attachments, then one text block. Claude Code
@@ -303,44 +197,7 @@ internal static class ClaudeCodePrompts
 
     /// <summary>Joins the text of a tool result; an image is named, not included.</summary>
     public static string RenderToolResult(AgentToolResult result)
-    {
-        var builder = new StringBuilder();
-        foreach (var item in result.Items)
-        {
-            switch (item)
-            {
-                case AgentToolResultItem.Text text:
-                    AppendLine(builder, text.Value);
-                    break;
-                case AgentToolResultItem.ImageUrl imageUrl:
-                    AppendLine(builder, imageUrl.Url);
-                    break;
-                case AgentToolResultItem.Image image:
-                    AppendLine(builder, $"[image {image.MediaType}]");
-                    break;
-                case AgentToolResultItem.LocalImage localImage:
-                    AppendLine(builder, $"[image {localImage.Path}]");
-                    break;
-            }
-        }
-
-        return builder.Length == 0 ? result.Error ?? string.Empty : builder.ToString();
-    }
-
-    private static string[] SplitParagraphs(string text)
-        => [.. text.ReplaceLineEndings("\n").Split("\n\n", StringSplitOptions.RemoveEmptyEntries).Select(static paragraph => paragraph.Trim()).Where(static paragraph => paragraph.Length > 0)];
-
-    private static string FirstWords(string paragraph)
-    {
-        var line = paragraph.AsSpan();
-        var end = line.IndexOf('\n');
-        if (end >= 0)
-        {
-            line = line[..end];
-        }
-
-        return line.Length <= RemovedParagraphPreview ? line.ToString() : string.Concat(line[..RemovedParagraphPreview], " …");
-    }
+        => Harness.HarnessHistory.RenderToolResult(result);
 
     private static void WriteTextBlock(Utf8JsonWriter writer, string text)
     {
@@ -384,6 +241,4 @@ internal static class ClaudeCodePrompts
         => value.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
            value.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
 
-    private static string Truncate(string value, int limit)
-        => value.Length <= limit ? value : value[..limit] + " …";
 }

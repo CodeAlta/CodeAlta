@@ -18,9 +18,30 @@ public interface IModelProviderModelCatalog
         CancellationToken cancellationToken = default);
 }
 
-internal interface IAgentProviderSessionCleanup
+/// <summary>
+/// A turn executor that keeps something for each session (a process of an agent CLI): the session releases it when
+/// it is closed.
+/// </summary>
+public interface IAgentProviderSessionCleanup
 {
+    /// <summary>Releases what the executor keeps for a session.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>A task that ends once it is released.</returns>
     ValueTask DisposeProviderSessionAsync(string sessionId);
+}
+
+/// <summary>
+/// A turn executor that tells how the instructions of CodeAlta reach the model of a session, when it is not as a
+/// system and a developer message: recorded with the system prompt of the session, so that the user sees it.
+/// </summary>
+public interface IAgentProviderInstructionsChannel
+{
+    /// <summary>
+    /// Returns how the instructions of a session reach the model, such as <c>appended-system-prompt</c> or
+    /// <c>first-prompt</c>, or <see langword="null" /> for a system and a developer message.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    string? GetInstructionsChannel(string sessionId);
 }
 
 /// <summary>
@@ -35,7 +56,7 @@ internal interface IAgentProviderSessionCleanup
 /// Asks the user what to do when the conversation the run is to continue is held by another process; null when the run
 /// has nobody to ask: the run then fails with a message that says how to go on.
 /// </param>
-internal sealed record AgentProviderRunContext(
+public sealed record AgentProviderRunContext(
     string SessionId,
     AgentRunId RunId,
     AgentPermissionRequestHandler OnPermissionRequest,
@@ -70,7 +91,7 @@ internal interface IAgentProviderInitiatedTurns
 /// A turn executor whose provider can put the turn of a session that runs now in another permission mode (an agent
 /// CLI that decides by itself what it asks before using a tool).
 /// </summary>
-internal interface IAgentProviderPermissionMode
+public interface IAgentProviderPermissionMode
 {
     /// <summary>
     /// Puts the process of a session in a permission mode now, during a turn or between turns, without starting it again.
@@ -162,11 +183,12 @@ internal interface IAgentProviderPromptSuggestions
 /// A turn executor whose provider runs tools itself (an agent CLI): the session still shows and records each
 /// tool call, but the definition that "runs" it comes from the executor.
 /// </summary>
-internal interface IAgentProviderToolHost
+public interface IAgentProviderToolHost
 {
     /// <summary>
     /// Gives the handlers of a run before its first turn.
     /// </summary>
+    /// <param name="context">The handlers of the run.</param>
     void AttachRun(AgentProviderRunContext context);
 
     /// <summary>
@@ -193,11 +215,14 @@ internal interface IAgentProviderToolHost
 /// <summary>
 /// A turn executor whose provider keeps the context of a session and compacts it itself.
 /// </summary>
-internal interface IAgentProviderCompaction
+public interface IAgentProviderCompaction
 {
     /// <summary>
     /// Compacts the context the provider keeps for the session of <paramref name="request" />.
     /// </summary>
+    /// <param name="request">What the session runs with, without a prompt.</param>
+    /// <param name="cancellationToken">A token to cancel the compaction.</param>
+    /// <returns>What the compaction did.</returns>
     Task<AgentCompactionOutcome> CompactAsync(AgentTurnRequest request, CancellationToken cancellationToken);
 }
 
