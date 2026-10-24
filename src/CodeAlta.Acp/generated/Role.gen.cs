@@ -9,11 +9,7 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// The sender or recipient of messages and data in a conversation.
 /// </summary>
-[JsonConverter(typeof(JsonStringEnumConverter<Role>))]
-public enum Role
+public partial struct Role
 {
-    [JsonStringEnumMemberName("assistant")]
-    Assistant,
-    [JsonStringEnumMemberName("user")]
-    User
+    public JsonElement Value { get; set; }
 }

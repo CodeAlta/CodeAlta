@@ -31,6 +31,9 @@ public sealed partial record ToolCallUpdate
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
+    /// <summary>Update the programmatic name of the tool being invoked.  This field is optional. Omitting it or sending `null` both mean that the existing name is left unchanged.</summary>
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
     /// <summary>Update the raw input.</summary>
     [JsonPropertyName("rawInput")]
     public JsonElement? RawInput { get; set; }

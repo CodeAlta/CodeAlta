@@ -11,10 +11,13 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record AudioContent
 {
+    /// <summary>Base64-encoded media payload.</summary>
     [JsonPropertyName("data")]
     public string Data { get; set; } = string.Empty;
+    /// <summary>MIME type describing the encoded media payload.</summary>
     [JsonPropertyName("mimeType")]
     public string MimeType { get; set; } = string.Empty;
+    /// <summary>Optional annotations that help clients decide how to display or route this content.</summary>
     [JsonPropertyName("annotations")]
     public Annotations? Annotations { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>

@@ -7,17 +7,13 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Request parameters for closing an active session.
 /// 
 /// If supported, the agent **must** cancel any ongoing work related to the session
 /// (treat it as if `session/cancel` was called) and then free up any resources
 /// associated with the session.
 /// 
-/// Only available if the Agent supports the `session.close` capability.
+/// Only available if the Agent supports the `sessionCapabilities.close` capability.
 /// </summary>
 public sealed partial record CloseSessionRequest
 {

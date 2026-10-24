@@ -7,29 +7,29 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Terminal-based authentication method.
 /// 
-/// The client runs an interactive terminal for the user to authenticate via a TUI.
+/// The client runs the configured agent program as a separate interactive
+/// process for the user to authenticate via a TUI. Agents MUST advertise this
+/// method only when the client enabled its terminal authentication capability.
+/// A zero exit status signals success; any other termination signals failure.
+/// The client MUST NOT pass this method to `authenticate`.
 /// </summary>
 public sealed partial record AuthMethodTerminal
 {
     /// <summary>Unique identifier for this authentication method.</summary>
     [JsonPropertyName("id")]
-    public string Id { get; set; } = string.Empty;
+    public AuthMethodId Id { get; set; } = default!;
     /// <summary>Human-readable name of the authentication method.</summary>
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
-    /// <summary>Additional arguments to pass when running the agent binary for terminal auth.</summary>
+    /// <summary>Additional arguments to append to the configured agent invocation for terminal auth.</summary>
     [JsonPropertyName("args")]
     public List<string>? Args { get; set; }
     /// <summary>Optional description providing more details about this authentication method.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
-    /// <summary>Additional environment variables to set when running the agent binary for terminal auth.</summary>
+    /// <summary>Additional environment variables to set on the configured agent invocation for terminal auth. These values override same-named variables in the base launch configuration.</summary>
     [JsonPropertyName("env")]
     public Dictionary<string, string>? Env { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>

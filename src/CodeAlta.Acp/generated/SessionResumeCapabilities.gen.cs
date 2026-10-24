@@ -7,13 +7,9 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Capabilities for the `session/resume` method.
 /// 
-/// By supplying `{}` it means that the agent supports resuming of sessions.
+/// Supplying `{}` means the agent supports resuming sessions.
 /// </summary>
 public sealed partial record SessionResumeCapabilities
 {

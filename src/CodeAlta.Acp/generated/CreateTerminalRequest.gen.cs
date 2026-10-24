@@ -20,7 +20,7 @@ public sealed partial record CreateTerminalRequest
     /// <summary>Array of command arguments.</summary>
     [JsonPropertyName("args")]
     public List<string>? Args { get; set; }
-    /// <summary>Working directory for the command (absolute path).</summary>
+    /// <summary>Working directory for the command. Must be an absolute path.</summary>
     [JsonPropertyName("cwd")]
     public string? Cwd { get; set; }
     /// <summary>Environment variables for the command.</summary>

@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// Agent handles authentication itself.
+/// Agent handles authentication itself through `authenticate`.
 /// 
 /// This is the default authentication method type.
 /// </summary>
@@ -15,7 +15,7 @@ public sealed partial record AuthMethodAgent
 {
     /// <summary>Unique identifier for this authentication method.</summary>
     [JsonPropertyName("id")]
-    public string Id { get; set; } = string.Empty;
+    public AuthMethodId Id { get; set; } = default!;
     /// <summary>Human-readable name of the authentication method.</summary>
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;

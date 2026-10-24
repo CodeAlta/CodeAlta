@@ -19,10 +19,13 @@ public sealed partial record NewSessionRequest
     /// <summary>List of MCP (Model Context Protocol) servers the agent should connect to.</summary>
     [JsonPropertyName("mcpServers")]
     public List<McpServer> McpServers { get; set; } = [];
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Additional workspace roots for this session. Each path must be absolute.  These expand the session's filesystem scope without changing `cwd`, which remains the base for relative paths. When omitted or empty, no additional roots are activated for the new session.</summary>
+    /// <summary>Additional workspace roots for this session. Each path must be absolute.  These expand the session's filesystem scope without changing `cwd`, which remains the base for relative paths. When omitted or empty, no additional roots are activated for the new session.</summary>
     [JsonPropertyName("additionalDirectories")]
     public List<string>? AdditionalDirectories { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  System-level instructions for the new session.  Optional. Omitted and `null` are equivalent and mean the Agent uses its own default instructions. Clients MUST only send this when the Agent advertises `sessionCapabilities.systemPrompt`.</summary>
+    [JsonPropertyName("systemPrompt")]
+    public SystemPrompt? SystemPrompt { get; set; }
 }

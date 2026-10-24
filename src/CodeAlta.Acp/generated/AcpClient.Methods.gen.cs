@@ -17,61 +17,6 @@ public sealed partial class AcpClient
     }
 
     /// <summary>
-    /// Sends the ACP `document/didChange` call.
-    /// </summary>
-    public Task DocumentDidChangeAsync(
-        DidChangeDocumentNotification parameters,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendNotificationAsync("document/didChange", parameters, cancellationToken);
-    }
-
-    /// <summary>
-    /// Sends the ACP `document/didClose` call.
-    /// </summary>
-    public Task DocumentDidCloseAsync(
-        DidCloseDocumentNotification parameters,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendNotificationAsync("document/didClose", parameters, cancellationToken);
-    }
-
-    /// <summary>
-    /// Sends the ACP `document/didFocus` call.
-    /// </summary>
-    public Task DocumentDidFocusAsync(
-        DidFocusDocumentNotification parameters,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendNotificationAsync("document/didFocus", parameters, cancellationToken);
-    }
-
-    /// <summary>
-    /// Sends the ACP `document/didOpen` call.
-    /// </summary>
-    public Task DocumentDidOpenAsync(
-        DidOpenDocumentNotification parameters,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendNotificationAsync("document/didOpen", parameters, cancellationToken);
-    }
-
-    /// <summary>
-    /// Sends the ACP `document/didSave` call.
-    /// </summary>
-    public Task DocumentDidSaveAsync(
-        DidSaveDocumentNotification parameters,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendNotificationAsync("document/didSave", parameters, cancellationToken);
-    }
-
-    /// <summary>
     /// Sends the ACP `initialize` call.
     /// </summary>
     public Task<InitializeResponse> InitializeAsync(
@@ -94,58 +39,47 @@ public sealed partial class AcpClient
     }
 
     /// <summary>
-    /// Sends the ACP `nes/accept` call.
+    /// Sends the ACP `mcp/message` call.
     /// </summary>
-    public Task NesAcceptAsync(
-        AcceptNesNotification parameters,
+    public Task McpMessageAsync(
+        MessageMcpNotification parameters,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendNotificationAsync("nes/accept", parameters, cancellationToken);
+        return _transport.SendNotificationAsync("mcp/message", parameters, cancellationToken);
     }
 
     /// <summary>
-    /// Sends the ACP `nes/close` call.
+    /// Sends the ACP `providers/disable` call.
     /// </summary>
-    public Task<CloseNesResponse> NesCloseAsync(
-        CloseNesRequest parameters,
+    public Task<DisableProviderResponse> ProvidersDisableAsync(
+        DisableProviderRequest parameters,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendRequestAsync<CloseNesRequest, CloseNesResponse>("nes/close", parameters, cancellationToken);
+        return _transport.SendRequestAsync<DisableProviderRequest, DisableProviderResponse>("providers/disable", parameters, cancellationToken);
     }
 
     /// <summary>
-    /// Sends the ACP `nes/reject` call.
+    /// Sends the ACP `providers/list` call.
     /// </summary>
-    public Task NesRejectAsync(
-        RejectNesNotification parameters,
+    public Task<ListProvidersResponse> ProvidersListAsync(
+        ListProvidersRequest parameters,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendNotificationAsync("nes/reject", parameters, cancellationToken);
+        return _transport.SendRequestAsync<ListProvidersRequest, ListProvidersResponse>("providers/list", parameters, cancellationToken);
     }
 
     /// <summary>
-    /// Sends the ACP `nes/start` call.
+    /// Sends the ACP `providers/set` call.
     /// </summary>
-    public Task<StartNesResponse> NesStartAsync(
-        StartNesRequest parameters,
+    public Task<SetProviderResponse> ProvidersSetAsync(
+        SetProviderRequest parameters,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendRequestAsync<StartNesRequest, StartNesResponse>("nes/start", parameters, cancellationToken);
-    }
-
-    /// <summary>
-    /// Sends the ACP `nes/suggest` call.
-    /// </summary>
-    public Task<SuggestNesResponse> NesSuggestAsync(
-        SuggestNesRequest parameters,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendRequestAsync<SuggestNesRequest, SuggestNesResponse>("nes/suggest", parameters, cancellationToken);
+        return _transport.SendRequestAsync<SetProviderRequest, SetProviderResponse>("providers/set", parameters, cancellationToken);
     }
 
     /// <summary>
@@ -168,6 +102,17 @@ public sealed partial class AcpClient
     {
         ArgumentNullException.ThrowIfNull(parameters);
         return _transport.SendRequestAsync<CloseSessionRequest, CloseSessionResponse>("session/close", parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends the ACP `session/delete` call.
+    /// </summary>
+    public Task<DeleteSessionResponse> SessionDeleteAsync(
+        DeleteSessionRequest parameters,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        return _transport.SendRequestAsync<DeleteSessionRequest, DeleteSessionResponse>("session/delete", parameters, cancellationToken);
     }
 
     /// <summary>
@@ -256,17 +201,6 @@ public sealed partial class AcpClient
     {
         ArgumentNullException.ThrowIfNull(parameters);
         return _transport.SendRequestAsync<SetSessionModeRequest, SetSessionModeResponse>("session/set_mode", parameters, cancellationToken);
-    }
-
-    /// <summary>
-    /// Sends the ACP `session/set_model` call.
-    /// </summary>
-    public Task<SetSessionModelResponse> SessionSetModelAsync(
-        SetSessionModelRequest parameters,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(parameters);
-        return _transport.SendRequestAsync<SetSessionModelRequest, SetSessionModelResponse>("session/set_model", parameters, cancellationToken);
     }
 
 }

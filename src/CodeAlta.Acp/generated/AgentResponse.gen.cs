@@ -6,6 +6,9 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.Acp;
 
+/// <summary>
+/// A JSON-RPC response object.
+/// </summary>
 public partial struct AgentResponse
 {
     public JsonElement Value { get; set; }

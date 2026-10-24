@@ -15,7 +15,7 @@ public sealed partial record AuthenticateRequest
 {
     /// <summary>The ID of the authentication method to use. Must be one of the methods advertised in the initialize response.</summary>
     [JsonPropertyName("methodId")]
-    public string MethodId { get; set; } = string.Empty;
+    public AuthMethodId MethodId { get; set; } = default!;
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }

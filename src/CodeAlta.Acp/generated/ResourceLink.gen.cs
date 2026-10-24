@@ -11,21 +11,28 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record ResourceLink
 {
+    /// <summary>Human-readable name shown for this protocol object.</summary>
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+    /// <summary>URI associated with this resource or media payload.</summary>
     [JsonPropertyName("uri")]
     public string Uri { get; set; } = string.Empty;
+    /// <summary>Optional annotations that help clients decide how to display or route this content.</summary>
     [JsonPropertyName("annotations")]
     public Annotations? Annotations { get; set; }
+    /// <summary>Optional human-readable details shown with this protocol object.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
+    /// <summary>MIME type describing the encoded media payload.</summary>
     [JsonPropertyName("mimeType")]
     public string? MimeType { get; set; }
+    /// <summary>Optional size of the linked resource in bytes, if known.</summary>
     [JsonPropertyName("size")]
     public long? Size { get; set; }
+    /// <summary>Optional display title for end-user UI.</summary>
     [JsonPropertyName("title")]
     public string? Title { get; set; }
 }

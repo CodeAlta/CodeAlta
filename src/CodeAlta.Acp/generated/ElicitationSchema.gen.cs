@@ -14,16 +14,19 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record ElicitationSchema
 {
-    /// <summary>Optional description of what this schema represents.</summary>
+    /// <summary>Optional description of what this schema represents.  Optional. Omitted and `null` are equivalent and mean no schema description is provided.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  Optional. Omitted and `null` are equivalent and mean no metadata.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    [JsonPropertyName("_meta")]
+    public Dictionary<string, JsonElement>? Meta { get; set; }
     /// <summary>Property definitions (must be primitive types).</summary>
     [JsonPropertyName("properties")]
     public Dictionary<string, ElicitationPropertySchema>? Properties { get; set; }
-    /// <summary>List of required property names.</summary>
+    /// <summary>List of required property names.  Optional. Omitted and `null` are equivalent and mean no property names are required.</summary>
     [JsonPropertyName("required")]
     public List<string>? Required { get; set; }
-    /// <summary>Optional title for the schema.</summary>
+    /// <summary>Optional title for the schema.  Optional. Omitted and `null` are equivalent and mean no title is provided.</summary>
     [JsonPropertyName("title")]
     public string? Title { get; set; }
     /// <summary>Type discriminator. Always `"object"`.</summary>

@@ -7,14 +7,12 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Capabilities for additional session directories support.
 /// 
-/// By supplying `{}` it means that the agent supports the `additionalDirectories` field on
-/// supported session lifecycle requests and `session/list`.
+/// Supplying `{}` means the agent supports the `additionalDirectories` field on
+/// supported session lifecycle requests. Agents that also support
+/// `session/list` may return `SessionInfo.additionalDirectories` to report the
+/// complete ordered additional-root list associated with a listed session.
 /// </summary>
 public sealed partial record SessionAdditionalDirectoriesCapabilities
 {

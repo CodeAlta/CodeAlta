@@ -15,7 +15,7 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record LoadSessionRequest
 {
-    /// <summary>The working directory for this session.</summary>
+    /// <summary>The working directory for this session. Must be an absolute path.</summary>
     [JsonPropertyName("cwd")]
     public string Cwd { get; set; } = string.Empty;
     /// <summary>List of MCP servers to connect to for this session.</summary>
@@ -24,10 +24,13 @@ public sealed partial record LoadSessionRequest
     /// <summary>The ID of the session to load.</summary>
     [JsonPropertyName("sessionId")]
     public SessionId SessionId { get; set; } = default!;
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Additional workspace roots to activate for this session. Each path must be absolute.  When omitted or empty, no additional roots are activated. When non-empty, this is the complete resulting additional-root list for the loaded session.</summary>
+    /// <summary>Additional workspace roots to activate for this session. Each path must be absolute.  When omitted or empty, no additional roots are activated. When non-empty, this is the complete resulting additional-root list for the loaded session. It may differ from any previously used or reported list as long as the request `cwd` matches the session's `cwd`.</summary>
     [JsonPropertyName("additionalDirectories")]
     public List<string>? AdditionalDirectories { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  System-level instructions for the loaded session.  Optional. Omitted and `null` are equivalent; the Agent may then keep a system prompt it stored with the session or use its default instructions. Clients MUST only send this when the Agent advertises `sessionCapabilities.systemPrompt`, and SHOULD send the same value they used when the session was created.</summary>
+    [JsonPropertyName("systemPrompt")]
+    public SystemPrompt? SystemPrompt { get; set; }
 }

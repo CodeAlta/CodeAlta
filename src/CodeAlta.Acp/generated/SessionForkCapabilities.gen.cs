@@ -13,7 +13,7 @@ namespace CodeAlta.Acp;
 /// 
 /// Capabilities for the `session/fork` method.
 /// 
-/// By supplying `{}` it means that the agent supports forking of sessions.
+/// Supplying `{}` means the agent supports forking sessions.
 /// </summary>
 public sealed partial record SessionForkCapabilities
 {

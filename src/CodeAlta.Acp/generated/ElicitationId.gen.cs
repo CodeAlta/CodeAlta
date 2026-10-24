@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Unique identifier for an elicitation.
 /// </summary>
 internal sealed class ElicitationIdJsonConverter : JsonConverter<ElicitationId>

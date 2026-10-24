@@ -7,13 +7,9 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Logout capabilities supported by the agent.
 /// 
-/// By supplying `{}` it means that the agent supports the logout method.
+/// Supplying `{}` means the agent supports the logout method.
 /// </summary>
 public sealed partial record LogoutCapabilities
 {

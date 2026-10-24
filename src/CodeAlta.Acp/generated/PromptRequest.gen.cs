@@ -21,9 +21,6 @@ public sealed partial record PromptRequest
     /// <summary>The ID of the session to send this user message to</summary>
     [JsonPropertyName("sessionId")]
     public SessionId SessionId { get; set; } = default!;
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  A client-generated unique identifier for this user message.  If provided, the Agent SHOULD echo this value as `userMessageId` in the [`PromptResponse`] to confirm it was recorded. Both clients and agents MUST use UUID format for message IDs.</summary>
-    [JsonPropertyName("messageId")]
-    public string? MessageId { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }

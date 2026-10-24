@@ -16,7 +16,7 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record ToolCallLocation
 {
-    /// <summary>The file path being accessed or modified.</summary>
+    /// <summary>The absolute file path being accessed or modified.</summary>
     [JsonPropertyName("path")]
     public string Path { get; set; } = string.Empty;
     /// <summary>Optional line number within the file.</summary>

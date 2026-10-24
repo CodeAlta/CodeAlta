@@ -6,6 +6,9 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.Acp;
 
+/// <summary>
+/// Allowed wire representations for [`ElicitationContentValue`].
+/// </summary>
 public partial struct ElicitationContentValue
 {
     public JsonElement Value { get; set; }

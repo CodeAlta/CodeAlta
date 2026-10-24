@@ -6,10 +6,15 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.Acp;
 
+/// <summary>
+/// A JSON-RPC notification object.
+/// </summary>
 public sealed partial record AgentNotification
 {
+    /// <summary>The notification method name.</summary>
     [JsonPropertyName("method")]
     public string Method { get; set; } = string.Empty;
+    /// <summary>Method-specific notification parameters.</summary>
     [JsonPropertyName("params")]
     public JsonElement? Params { get; set; }
 }

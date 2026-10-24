@@ -11,6 +11,9 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record McpCapabilities
 {
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Agent supports [`McpServer::Acp`].</summary>
+    [JsonPropertyName("acp")]
+    public bool? Acp { get; set; }
     /// <summary>Agent supports [`McpServer::Http`].</summary>
     [JsonPropertyName("http")]
     public bool? Http { get; set; }

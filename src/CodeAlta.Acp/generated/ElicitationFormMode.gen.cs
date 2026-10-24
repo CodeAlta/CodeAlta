@@ -7,15 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Form-based elicitation mode where the client renders a form from the provided schema.
 /// </summary>
-public sealed partial record ElicitationFormMode
-{
-    /// <summary>A JSON Schema describing the form fields to present to the user.</summary>
-    [JsonPropertyName("requestedSchema")]
-    public ElicitationSchema RequestedSchema { get; set; } = default!;
-}
+public abstract partial record ElicitationFormMode;

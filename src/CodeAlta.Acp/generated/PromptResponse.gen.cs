@@ -22,7 +22,4 @@ public sealed partial record PromptResponse
     /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Token usage for this turn (optional).</summary>
     [JsonPropertyName("usage")]
     public Usage? Usage { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  The acknowledged user message ID.  If the client provided a `messageId` in the [`PromptRequest`], the agent echoes it here to confirm it was recorded. If the client did not provide one, the agent MAY assign one and return it here. Absence of this field indicates the agent did not record a message ID.</summary>
-    [JsonPropertyName("userMessageId")]
-    public string? UserMessageId { get; set; }
 }

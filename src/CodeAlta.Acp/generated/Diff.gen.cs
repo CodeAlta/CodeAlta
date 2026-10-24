@@ -18,7 +18,7 @@ public sealed partial record Diff
     /// <summary>The new content after modification.</summary>
     [JsonPropertyName("newText")]
     public string NewText { get; set; } = string.Empty;
-    /// <summary>The file path being modified.</summary>
+    /// <summary>The absolute file path being modified.</summary>
     [JsonPropertyName("path")]
     public string Path { get; set; } = string.Empty;
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>

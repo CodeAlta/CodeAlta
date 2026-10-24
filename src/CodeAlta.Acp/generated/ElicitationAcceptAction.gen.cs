@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// The user accepted the elicitation and provided content.
 /// </summary>
 public sealed partial record ElicitationAcceptAction

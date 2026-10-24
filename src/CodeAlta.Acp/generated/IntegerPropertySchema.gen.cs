@@ -11,19 +11,22 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record IntegerPropertySchema
 {
-    /// <summary>Default value.</summary>
+    /// <summary>Default value.  Optional. Omitted and `null` are equivalent and mean no default value is provided.</summary>
     [JsonPropertyName("default")]
     public long? Default { get; set; }
-    /// <summary>Human-readable description.</summary>
+    /// <summary>Human-readable description.  Optional. Omitted and `null` are equivalent and mean no description is provided.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
-    /// <summary>Maximum value (inclusive).</summary>
+    /// <summary>Maximum value (inclusive).  Optional. Omitted and `null` are equivalent and mean there is no inclusive upper bound.</summary>
     [JsonPropertyName("maximum")]
     public long? Maximum { get; set; }
-    /// <summary>Minimum value (inclusive).</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  Optional. Omitted and `null` are equivalent and mean no metadata.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    [JsonPropertyName("_meta")]
+    public Dictionary<string, JsonElement>? Meta { get; set; }
+    /// <summary>Minimum value (inclusive).  Optional. Omitted and `null` are equivalent and mean there is no inclusive lower bound.</summary>
     [JsonPropertyName("minimum")]
     public long? Minimum { get; set; }
-    /// <summary>Optional title for the property.</summary>
+    /// <summary>Optional title for the property.  Optional. Omitted and `null` are equivalent and mean no title is provided.</summary>
     [JsonPropertyName("title")]
     public string? Title { get; set; }
 }

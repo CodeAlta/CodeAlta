@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Cost information for a session.
 /// </summary>
 public sealed partial record Cost
@@ -21,4 +17,7 @@ public sealed partial record Cost
     /// <summary>ISO 4217 currency code (e.g., "USD", "EUR").</summary>
     [JsonPropertyName("currency")]
     public string Currency { get; set; } = string.Empty;
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    [JsonPropertyName("_meta")]
+    public Dictionary<string, JsonElement>? Meta { get; set; }
 }

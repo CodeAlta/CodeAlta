@@ -14,7 +14,7 @@ public sealed partial record McpServerStdio
     /// <summary>Command-line arguments to pass to the MCP server.</summary>
     [JsonPropertyName("args")]
     public List<string> Args { get; set; } = [];
-    /// <summary>Path to the MCP server executable.</summary>
+    /// <summary>Absolute path to the MCP server executable.</summary>
     [JsonPropertyName("command")]
     public string Command { get; set; } = string.Empty;
     /// <summary>Environment variables to set when launching the MCP server.</summary>

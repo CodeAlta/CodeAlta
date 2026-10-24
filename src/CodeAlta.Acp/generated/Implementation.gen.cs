@@ -8,7 +8,7 @@ namespace CodeAlta.Acp;
 
 /// <summary>
 /// Metadata about the implementation of the client or agent.
-/// Describes the name and version of an MCP implementation, with an optional
+/// Describes the name and version of an ACP implementation, with an optional
 /// title for UI representation.
 /// </summary>
 public sealed partial record Implementation

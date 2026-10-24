@@ -16,7 +16,7 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record AgentCapabilities
 {
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Authentication-related capabilities supported by the agent.</summary>
+    /// <summary>Authentication-related capabilities supported by the agent.</summary>
     [JsonPropertyName("auth")]
     public AgentAuthCapabilities Auth { get; set; } = default!;
     /// <summary>Whether the agent supports `session/load`.</summary>
@@ -28,15 +28,13 @@ public sealed partial record AgentCapabilities
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  NES (Next Edit Suggestions) capabilities supported by the agent.</summary>
-    [JsonPropertyName("nes")]
-    public NesCapabilities? Nes { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  The position encoding selected by the agent from the client's supported encodings.</summary>
-    [JsonPropertyName("positionEncoding")]
-    public PositionEncodingKind? PositionEncoding { get; set; }
     /// <summary>Prompt capabilities supported by the agent.</summary>
     [JsonPropertyName("promptCapabilities")]
     public PromptCapabilities PromptCapabilities { get; set; } = default!;
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Provider configuration capabilities supported by the agent.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports provider configuration methods.</summary>
+    [JsonPropertyName("providers")]
+    public ProvidersCapabilities? Providers { get; set; }
+    /// <summary>Session lifecycle and prompt capabilities advertised by the agent.</summary>
     [JsonPropertyName("sessionCapabilities")]
     public SessionCapabilities SessionCapabilities { get; set; } = default!;
 }

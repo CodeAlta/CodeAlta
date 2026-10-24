@@ -7,15 +7,11 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// Authentication-related capabilities supported by the agent.
 /// </summary>
 public sealed partial record AgentAuthCapabilities
 {
-    /// <summary>Whether the agent supports the logout method.  By supplying `{}` it means that the agent supports the logout method.</summary>
+    /// <summary>Whether the agent supports the logout method.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports the logout method.</summary>
     [JsonPropertyName("logout")]
     public LogoutCapabilities? Logout { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>

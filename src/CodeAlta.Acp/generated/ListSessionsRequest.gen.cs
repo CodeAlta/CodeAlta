@@ -13,9 +13,6 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record ListSessionsRequest
 {
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Filter sessions by the exact ordered additional workspace roots. Each path must be absolute.  This filter applies only when the field is present and non-empty. When omitted or empty, no additional-root filter is applied.</summary>
-    [JsonPropertyName("additionalDirectories")]
-    public List<string>? AdditionalDirectories { get; set; }
     /// <summary>Opaque cursor token from a previous response's nextCursor field for cursor-based pagination</summary>
     [JsonPropertyName("cursor")]
     public string? Cursor { get; set; }

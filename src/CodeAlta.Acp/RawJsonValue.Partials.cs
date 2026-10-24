@@ -32,10 +32,22 @@ public partial struct AgentResponse : IRawJsonValue<AgentResponse>
     public static AgentResponse FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
+[JsonConverter(typeof(RawJsonValueConverter<AvailableCommandInput>))]
+public partial record struct AvailableCommandInput : IRawJsonValue<AvailableCommandInput>
+{
+    public static AvailableCommandInput FromJsonElement(JsonElement value) => new() { Value = value };
+}
+
 [JsonConverter(typeof(RawJsonValueConverter<ClientResponse>))]
 public partial struct ClientResponse : IRawJsonValue<ClientResponse>
 {
     public static ClientResponse FromJsonElement(JsonElement value) => new() { Value = value };
+}
+
+[JsonConverter(typeof(RawJsonValueConverter<CompactionStatus>))]
+public partial struct CompactionStatus : IRawJsonValue<CompactionStatus>
+{
+    public static CompactionStatus FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
 [JsonConverter(typeof(RawJsonValueConverter<ContentBlock>))]
@@ -44,22 +56,22 @@ public partial struct ContentBlock : IRawJsonValue<ContentBlock>
     public static ContentBlock FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
-[JsonConverter(typeof(RawJsonValueConverter<ElicitationAction>))]
-public partial struct ElicitationAction : IRawJsonValue<ElicitationAction>
+[JsonConverter(typeof(RawJsonValueConverter<CreateElicitationRequest>))]
+public partial struct CreateElicitationRequest : IRawJsonValue<CreateElicitationRequest>
 {
-    public static ElicitationAction FromJsonElement(JsonElement value) => new() { Value = value };
+    public static CreateElicitationRequest FromJsonElement(JsonElement value) => new() { Value = value };
+}
+
+[JsonConverter(typeof(RawJsonValueConverter<CreateElicitationResponse>))]
+public partial struct CreateElicitationResponse : IRawJsonValue<CreateElicitationResponse>
+{
+    public static CreateElicitationResponse FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
 [JsonConverter(typeof(RawJsonValueConverter<ElicitationContentValue>))]
 public partial struct ElicitationContentValue : IRawJsonValue<ElicitationContentValue>
 {
     public static ElicitationContentValue FromJsonElement(JsonElement value) => new() { Value = value };
-}
-
-[JsonConverter(typeof(RawJsonValueConverter<ElicitationRequest>))]
-public partial struct ElicitationRequest : IRawJsonValue<ElicitationRequest>
-{
-    public static ElicitationRequest FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
 [JsonConverter(typeof(RawJsonValueConverter<ElicitationPropertySchema>))]
@@ -74,28 +86,46 @@ public partial struct ErrorCode : IRawJsonValue<ErrorCode>
     public static ErrorCode FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
-[JsonConverter(typeof(RawJsonValueConverter<NesDiagnosticSeverity>))]
-public partial struct NesDiagnosticSeverity : IRawJsonValue<NesDiagnosticSeverity>
+[JsonConverter(typeof(RawJsonValueConverter<ExtNotification>))]
+public partial record struct ExtNotification : IRawJsonValue<ExtNotification>
 {
-    public static NesDiagnosticSeverity FromJsonElement(JsonElement value) => new() { Value = value };
+    public static ExtNotification FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
-[JsonConverter(typeof(RawJsonValueConverter<NesRejectReason>))]
-public partial struct NesRejectReason : IRawJsonValue<NesRejectReason>
+[JsonConverter(typeof(RawJsonValueConverter<ExtRequest>))]
+public partial record struct ExtRequest : IRawJsonValue<ExtRequest>
 {
-    public static NesRejectReason FromJsonElement(JsonElement value) => new() { Value = value };
+    public static ExtRequest FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
-[JsonConverter(typeof(RawJsonValueConverter<NesSuggestion>))]
-public partial struct NesSuggestion : IRawJsonValue<NesSuggestion>
+[JsonConverter(typeof(RawJsonValueConverter<ExtResponse>))]
+public partial record struct ExtResponse : IRawJsonValue<ExtResponse>
 {
-    public static NesSuggestion FromJsonElement(JsonElement value) => new() { Value = value };
+    public static ExtResponse FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
-[JsonConverter(typeof(RawJsonValueConverter<NesTriggerKind>))]
-public partial struct NesTriggerKind : IRawJsonValue<NesTriggerKind>
+[JsonConverter(typeof(RawJsonValueConverter<IdleStateUpdate>))]
+public partial struct IdleStateUpdate : IRawJsonValue<IdleStateUpdate>
 {
-    public static NesTriggerKind FromJsonElement(JsonElement value) => new() { Value = value };
+    public static IdleStateUpdate FromJsonElement(JsonElement value) => new() { Value = value };
+}
+
+[JsonConverter(typeof(RawJsonValueConverter<LlmProtocol>))]
+public partial struct LlmProtocol : IRawJsonValue<LlmProtocol>
+{
+    public static LlmProtocol FromJsonElement(JsonElement value) => new() { Value = value };
+}
+
+[JsonConverter(typeof(RawJsonValueConverter<MessageMcpResponse>))]
+public partial struct MessageMcpResponse : IRawJsonValue<MessageMcpResponse>
+{
+    public static MessageMcpResponse FromJsonElement(JsonElement value) => new() { Value = value };
+}
+
+[JsonConverter(typeof(RawJsonValueConverter<NoticeSeverity>))]
+public partial struct NoticeSeverity : IRawJsonValue<NoticeSeverity>
+{
+    public static NoticeSeverity FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
 [JsonConverter(typeof(RawJsonValueConverter<PermissionOptionKind>))]
@@ -116,10 +146,10 @@ public partial struct PlanEntryStatus : IRawJsonValue<PlanEntryStatus>
     public static PlanEntryStatus FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
-[JsonConverter(typeof(RawJsonValueConverter<PositionEncodingKind>))]
-public partial struct PositionEncodingKind : IRawJsonValue<PositionEncodingKind>
+[JsonConverter(typeof(RawJsonValueConverter<PlanUpdateContent>))]
+public partial struct PlanUpdateContent : IRawJsonValue<PlanUpdateContent>
 {
-    public static PositionEncodingKind FromJsonElement(JsonElement value) => new() { Value = value };
+    public static PlanUpdateContent FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
 [JsonConverter(typeof(RawJsonValueConverter<ProtocolVersion>))]
@@ -138,6 +168,12 @@ public partial struct RequestId : IRawJsonValue<RequestId>
 public partial struct RequestPermissionOutcome : IRawJsonValue<RequestPermissionOutcome>
 {
     public static RequestPermissionOutcome FromJsonElement(JsonElement value) => new() { Value = value };
+}
+
+[JsonConverter(typeof(RawJsonValueConverter<Role>))]
+public partial struct Role : IRawJsonValue<Role>
+{
+    public static Role FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
 [JsonConverter(typeof(RawJsonValueConverter<SessionConfigOption>))]
@@ -170,6 +206,12 @@ public partial struct SetSessionConfigOptionRequest : IRawJsonValue<SetSessionCo
     public static SetSessionConfigOptionRequest FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
+[JsonConverter(typeof(RawJsonValueConverter<StateUpdate>))]
+public partial struct StateUpdate : IRawJsonValue<StateUpdate>
+{
+    public static StateUpdate FromJsonElement(JsonElement value) => new() { Value = value };
+}
+
 [JsonConverter(typeof(RawJsonValueConverter<StopReason>))]
 public partial struct StopReason : IRawJsonValue<StopReason>
 {
@@ -182,10 +224,10 @@ public partial struct StringFormat : IRawJsonValue<StringFormat>
     public static StringFormat FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
-[JsonConverter(typeof(RawJsonValueConverter<TextDocumentSyncKind>))]
-public partial struct TextDocumentSyncKind : IRawJsonValue<TextDocumentSyncKind>
+[JsonConverter(typeof(RawJsonValueConverter<SystemPromptMode>))]
+public partial struct SystemPromptMode : IRawJsonValue<SystemPromptMode>
 {
-    public static TextDocumentSyncKind FromJsonElement(JsonElement value) => new() { Value = value };
+    public static SystemPromptMode FromJsonElement(JsonElement value) => new() { Value = value };
 }
 
 [JsonConverter(typeof(RawJsonValueConverter<ToolCallContent>))]

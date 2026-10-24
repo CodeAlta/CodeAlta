@@ -14,31 +14,34 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record StringPropertySchema
 {
-    /// <summary>Default value.</summary>
+    /// <summary>Default value.  Optional. Omitted and `null` are equivalent and mean no default value is provided.</summary>
     [JsonPropertyName("default")]
     public string? Default { get; set; }
-    /// <summary>Human-readable description.</summary>
+    /// <summary>Human-readable description.  Optional. Omitted and `null` are equivalent and mean no description is provided.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
-    /// <summary>Enum values for untitled single-select enums.</summary>
+    /// <summary>Enum values for untitled single-select enums. Optional. Omitted and `null` are equivalent and mean no untitled single-select choices are declared by `enum`.</summary>
     [JsonPropertyName("enum")]
     public List<string>? Enum { get; set; }
-    /// <summary>String format.</summary>
+    /// <summary>String format.  Optional. Omitted and `null` are equivalent and mean there is no format constraint.</summary>
     [JsonPropertyName("format")]
     public StringFormat? Format { get; set; }
-    /// <summary>Maximum string length.</summary>
+    /// <summary>Maximum string length.  Optional. Omitted and `null` are equivalent and mean there is no maximum length constraint.</summary>
     [JsonPropertyName("maxLength")]
     public uint? MaxLength { get; set; }
-    /// <summary>Minimum string length.</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  Optional. Omitted and `null` are equivalent and mean no metadata.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    [JsonPropertyName("_meta")]
+    public Dictionary<string, JsonElement>? Meta { get; set; }
+    /// <summary>Minimum string length.  Optional. Omitted and `null` are equivalent and mean there is no minimum length constraint.</summary>
     [JsonPropertyName("minLength")]
     public uint? MinLength { get; set; }
-    /// <summary>Titled enum options for titled single-select enums.</summary>
+    /// <summary>Titled enum options for titled single-select enums. Optional. Omitted and `null` are equivalent and mean no titled single-select choices are declared by `oneOf`.</summary>
     [JsonPropertyName("oneOf")]
     public List<EnumOption>? OneOf { get; set; }
-    /// <summary>Pattern the string must match.</summary>
+    /// <summary>Pattern the string must match.  Optional. Omitted and `null` are equivalent and mean there is no pattern constraint.</summary>
     [JsonPropertyName("pattern")]
     public string? Pattern { get; set; }
-    /// <summary>Optional title for the property.</summary>
+    /// <summary>Optional title for the property.  Optional. Omitted and `null` are equivalent and mean no title is provided.</summary>
     [JsonPropertyName("title")]
     public string? Title { get; set; }
 }

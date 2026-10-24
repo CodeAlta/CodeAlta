@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// A titled enum option with a const value and human-readable title.
+/// A titled enum option with a const value, human-readable title, and optional description.
 /// </summary>
 public sealed partial record EnumOption
 {
@@ -17,4 +17,10 @@ public sealed partial record EnumOption
     /// <summary>Human-readable title for this option.</summary>
     [JsonPropertyName("title")]
     public string Title { get; set; } = string.Empty;
+    /// <summary>Human-readable description.  Optional. Omitted and `null` are equivalent and mean no description is provided.</summary>
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  Optional. Omitted and `null` are equivalent and mean no metadata.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    [JsonPropertyName("_meta")]
+    public Dictionary<string, JsonElement>? Meta { get; set; }
 }

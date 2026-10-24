@@ -17,7 +17,7 @@ public sealed partial record SessionInfo
     /// <summary>Unique identifier for the session</summary>
     [JsonPropertyName("sessionId")]
     public SessionId SessionId { get; set; } = default!;
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Authoritative ordered additional workspace roots for this session. Each path must be absolute.  When omitted or empty, there are no additional roots for the session.</summary>
+    /// <summary>Additional workspace roots reported for this session. Each path must be absolute.  When present, this is the complete ordered additional-root list reported by the Agent. Omitted and empty values are equivalent: the response reports no additional roots.</summary>
     [JsonPropertyName("additionalDirectories")]
     public List<string>? AdditionalDirectories { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>

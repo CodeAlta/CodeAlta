@@ -11,13 +11,16 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record Annotations
 {
+    /// <summary>Intended recipients for this content, such as the user or assistant.</summary>
     [JsonPropertyName("audience")]
     public List<Role>? Audience { get; set; }
+    /// <summary>Timestamp indicating when the underlying resource was last modified.</summary>
     [JsonPropertyName("lastModified")]
     public string? LastModified { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
+    /// <summary>Relative importance of this content when clients choose what to surface.</summary>
     [JsonPropertyName("priority")]
     public double? Priority { get; set; }
 }

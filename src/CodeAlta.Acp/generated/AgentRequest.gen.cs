@@ -6,12 +6,18 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.Acp;
 
+/// <summary>
+/// A JSON-RPC request object.
+/// </summary>
 public sealed partial record AgentRequest
 {
+    /// <summary>The request id used to correlate the matching response.</summary>
     [JsonPropertyName("id")]
     public RequestId Id { get; set; } = default!;
+    /// <summary>The method name to invoke.</summary>
     [JsonPropertyName("method")]
     public string Method { get; set; } = string.Empty;
+    /// <summary>Method-specific request parameters.</summary>
     [JsonPropertyName("params")]
     public JsonElement? Params { get; set; }
 }

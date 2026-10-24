@@ -9,7 +9,7 @@ namespace CodeAlta.Acp;
 /// <summary>
 /// Capabilities for the `session/list` method.
 /// 
-/// By supplying `{}` it means that the agent supports listing of sessions.
+/// Supplying `{}` means the agent supports listing sessions.
 /// </summary>
 public sealed partial record SessionListCapabilities
 {

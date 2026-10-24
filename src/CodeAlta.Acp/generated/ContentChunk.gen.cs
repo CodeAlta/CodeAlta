@@ -14,9 +14,9 @@ public sealed partial record ContentChunk
     /// <summary>A single item of content</summary>
     [JsonPropertyName("content")]
     public ContentBlock Content { get; set; } = default!;
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  A unique identifier for the message this chunk belongs to.  All chunks belonging to the same message share the same `messageId`. A change in `messageId` indicates a new message has started. Both clients and agents MUST use UUID format for message IDs.</summary>
+    /// <summary>A unique identifier for the message this chunk belongs to.  All chunks belonging to the same message share the same `messageId`. A change in `messageId` indicates a new message has started.</summary>
     [JsonPropertyName("messageId")]
-    public string? MessageId { get; set; }
+    public MessageId? MessageId { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }

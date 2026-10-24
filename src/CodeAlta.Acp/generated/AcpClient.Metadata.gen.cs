@@ -11,8 +11,8 @@ public sealed partial class AcpClient
     public const string CompiledAgainstSchemaSource = "C:\\code\\agent-client-protocol";
     public const string CompiledAgainstRepository = "https://github.com/agentclientprotocol/agent-client-protocol";
     public const string CompiledAgainstSurface = "unstable";
-    public const string CompiledAgainstSchemaPath = "C:\\code\\agent-client-protocol\\schema\\schema.unstable.json";
-    public const string CompiledAgainstGitRef = "";
-    public static DateTimeOffset CompiledAtUtc { get; } = DateTimeOffset.Parse("2026-04-06T14:46:39.1970544+00:00", null, System.Globalization.DateTimeStyles.RoundtripKind);
+    public const string CompiledAgainstSchemaPath = "C:\\code\\agent-client-protocol\\schema\\v1\\schema.unstable.json";
+    public const string CompiledAgainstGitRef = "v1.12.0";
+    public static DateTimeOffset CompiledAtUtc { get; } = DateTimeOffset.Parse("2026-10-24T09:59:15.5966414+00:00", null, System.Globalization.DateTimeStyles.RoundtripKind);
     public const int CompiledAgainstMethodMapVersion = 1;
 }

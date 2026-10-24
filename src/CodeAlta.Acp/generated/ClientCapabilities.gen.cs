@@ -16,10 +16,10 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record ClientCapabilities
 {
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Authentication capabilities supported by the client. Determines which authentication method types the agent may include in its `InitializeResponse`.</summary>
+    /// <summary>Authentication capabilities supported by the client. Determines which authentication method types the agent may include in its `InitializeResponse`.</summary>
     [JsonPropertyName("auth")]
     public AuthCapabilities Auth { get; set; } = default!;
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Elicitation capabilities supported by the client. Determines which elicitation modes the agent may use.</summary>
+    /// <summary>Elicitation capabilities supported by the client. Determines which elicitation modes the agent may use.  Optional. Omitted or `null` both mean the client does not advertise elicitation support.</summary>
     [JsonPropertyName("elicitation")]
     public ElicitationCapabilities? Elicitation { get; set; }
     /// <summary>File system capabilities supported by the client. Determines which file operations the agent can request.</summary>
@@ -28,12 +28,15 @@ public sealed partial record ClientCapabilities
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  NES (Next Edit Suggestions) capabilities supported by the client.</summary>
-    [JsonPropertyName("nes")]
-    public ClientNesCapabilities? Nes { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  The position encodings supported by the client, in order of preference.</summary>
-    [JsonPropertyName("positionEncodings")]
-    public List<PositionEncodingKind>? PositionEncodings { get; set; }
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the client supports `plan_update` and `plan_removed` session updates.  Optional. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means the client can receive both update types.</summary>
+    [JsonPropertyName("plan")]
+    public PlanCapabilities? Plan { get; set; }
+    /// <summary>Session-related capabilities supported by the client.  Optional. Omitted or `null` both mean the client does not advertise any session-related extensions.</summary>
+    [JsonPropertyName("session")]
+    public ClientSessionCapabilities? Session { get; set; }
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the client understands exposed subagent sessions.  Optional and nullable. Omitted or `null` both mean the client does not advertise support. Supplying `{}` means the client understands child associations, work-state snapshots, session-directed messages, and restricted-session semantics.</summary>
+    [JsonPropertyName("subagents")]
+    public SubagentCapabilities? Subagents { get; set; }
     /// <summary>Whether the Client support all `terminal/*` methods.</summary>
     [JsonPropertyName("terminal")]
     public bool? Terminal { get; set; }

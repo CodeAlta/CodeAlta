@@ -19,22 +19,28 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record SessionCapabilities
 {
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `additionalDirectories` on supported session lifecycle requests and `session/list`.</summary>
+    /// <summary>Whether the agent supports `additionalDirectories` on supported session lifecycle requests.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports `additionalDirectories` on supported session lifecycle requests.  Agents that also support `session/list` may return `SessionInfo.additionalDirectories` to report the complete ordered additional-root list associated with a listed session.</summary>
     [JsonPropertyName("additionalDirectories")]
     public SessionAdditionalDirectoriesCapabilities? AdditionalDirectories { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `session/close`.</summary>
+    /// <summary>Whether the agent supports `session/close`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports closing sessions.</summary>
     [JsonPropertyName("close")]
     public SessionCloseCapabilities? Close { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `session/fork`.</summary>
+    /// <summary>Whether the agent supports `session/delete`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports deleting sessions from `session/list`.</summary>
+    [JsonPropertyName("delete")]
+    public SessionDeleteCapabilities? Delete { get; set; }
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `session/fork`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports forking sessions.</summary>
     [JsonPropertyName("fork")]
     public SessionForkCapabilities? Fork { get; set; }
-    /// <summary>Whether the agent supports `session/list`.</summary>
+    /// <summary>Whether the agent supports `session/list`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports listing sessions.</summary>
     [JsonPropertyName("list")]
     public SessionListCapabilities? List { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
     [JsonPropertyName("_meta")]
     public Dictionary<string, JsonElement>? Meta { get; set; }
-    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `session/resume`.</summary>
+    /// <summary>Whether the agent supports `session/resume`.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports resuming sessions.</summary>
     [JsonPropertyName("resume")]
     public SessionResumeCapabilities? Resume { get; set; }
+    /// <summary>**UNSTABLE**  This capability is not part of the spec yet, and may be removed or changed at any point.  Whether the agent supports `systemPrompt` on session lifecycle requests.  Optional. Omitted or `null` both mean the agent does not advertise support. Supplying `{}` means the agent supports `systemPrompt` in `append` mode.</summary>
+    [JsonPropertyName("systemPrompt")]
+    public SessionSystemPromptCapabilities? SystemPrompt { get; set; }
 }

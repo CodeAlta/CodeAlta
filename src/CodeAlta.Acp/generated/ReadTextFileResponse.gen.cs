@@ -11,6 +11,7 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record ReadTextFileResponse
 {
+    /// <summary>Content payload returned by this response.</summary>
     [JsonPropertyName("content")]
     public string Content { get; set; } = string.Empty;
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>

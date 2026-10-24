@@ -7,18 +7,6 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// **UNSTABLE**
-/// 
-/// This capability is not part of the spec yet, and may be removed or changed at any point.
-/// 
 /// URL-based elicitation mode where the client directs the user to a URL.
 /// </summary>
-public sealed partial record ElicitationUrlMode
-{
-    /// <summary>The unique identifier for this elicitation.</summary>
-    [JsonPropertyName("elicitationId")]
-    public ElicitationId ElicitationId { get; set; } = default!;
-    /// <summary>The URL to direct the user to.</summary>
-    [JsonPropertyName("url")]
-    public string Url { get; set; } = string.Empty;
-}
+public abstract partial record ElicitationUrlMode;

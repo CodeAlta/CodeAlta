@@ -11,13 +11,16 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record BooleanPropertySchema
 {
-    /// <summary>Default value.</summary>
+    /// <summary>Default value.  Optional. Omitted and `null` are equivalent and mean no default value is provided.</summary>
     [JsonPropertyName("default")]
     public bool? Default { get; set; }
-    /// <summary>Human-readable description.</summary>
+    /// <summary>Human-readable description.  Optional. Omitted and `null` are equivalent and mean no description is provided.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
-    /// <summary>Optional title for the property.</summary>
+    /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  Optional. Omitted and `null` are equivalent and mean no metadata.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
+    [JsonPropertyName("_meta")]
+    public Dictionary<string, JsonElement>? Meta { get; set; }
+    /// <summary>Optional title for the property.  Optional. Omitted and `null` are equivalent and mean no title is provided.</summary>
     [JsonPropertyName("title")]
     public string? Title { get; set; }
 }

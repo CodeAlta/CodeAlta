@@ -13,10 +13,13 @@ namespace CodeAlta.Acp;
 /// </summary>
 public sealed partial record SessionMode
 {
+    /// <summary>Stable identifier used to refer to this protocol object in later messages.</summary>
     [JsonPropertyName("id")]
     public SessionModeId Id { get; set; } = default!;
+    /// <summary>Human-readable name shown for this protocol object.</summary>
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+    /// <summary>Optional human-readable details shown with this protocol object.</summary>
     [JsonPropertyName("description")]
     public string? Description { get; set; }
     /// <summary>The _meta property is reserved by ACP to allow clients and agents to attach additional metadata to their interactions. Implementations MUST NOT make assumptions about values at these keys.  See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)</summary>
