@@ -114,7 +114,15 @@ public static class ConfiguredModelProviderRegistryBuilder
                 continue;
             }
 
-            Logger.Warn($"Skipped model provider key={provider.ProviderKey} type={provider.ProviderType}: this version of CodeAlta does not know the type; its settings stay in the configuration file.");
+            if (pluginTypes is not null)
+            {
+                // The plugins may not run yet at startup: a plugin that gives the type registers its providers when it starts.
+                Logger.Info($"Model provider key={provider.ProviderKey} type={provider.ProviderType} waits for a running plugin that gives its type; its settings stay in the configuration file.");
+            }
+            else
+            {
+                Logger.Warn($"Skipped model provider key={provider.ProviderKey} type={provider.ProviderType}: this version of CodeAlta does not know the type; its settings stay in the configuration file.");
+            }
         }
 
         return descriptors;
