@@ -174,8 +174,8 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             CREATE TABLE search_chunk (
               id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, ordinal INTEGER NOT NULL,
               title TEXT NOT NULL, text TEXT NOT NULL, words TEXT NOT NULL, embed_hash BLOB NOT NULL, embed_title TEXT);
-            CREATE INDEX search_chunk_item ON search_chunk(item_id);
-            CREATE INDEX search_chunk_embed ON search_chunk(embed_hash);
+            CREATE INDEX search_chunk_of_item ON search_chunk(item_id, embed_hash);
+            CREATE INDEX search_chunk_hash ON search_chunk(embed_hash, item_id);
             CREATE VIRTUAL TABLE search_fts USING fts5(title, text, words,
               content='search_chunk', content_rowid='id', tokenize='unicode61 remove_diacritics 2', prefix='2 3');
             CREATE TABLE search_vector_set (
@@ -184,6 +184,7 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             CREATE TABLE search_vector (
               set_id INTEGER NOT NULL, embed_hash BLOB NOT NULL, scale REAL NOT NULL, code BLOB NOT NULL,
               PRIMARY KEY (set_id, embed_hash)) WITHOUT ROWID;
+            CREATE INDEX search_vector_key ON search_vector(set_id, embed_hash);
             CREATE TABLE search_activity (
               at INTEGER NOT NULL, origin INTEGER NOT NULL, session_id TEXT, kinds INTEGER NOT NULL, mode INTEGER NOT NULL,
               hits INTEGER NOT NULL, words_ms REAL, meaning_ms REAL, tokens INTEGER NOT NULL DEFAULT 0);

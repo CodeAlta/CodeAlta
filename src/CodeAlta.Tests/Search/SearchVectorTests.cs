@@ -541,6 +541,59 @@ public sealed class SearchVectorStoreTests
     }
 
     [TestMethod]
+    public async Task AnIndexWrittenBeforeTheNarrowIndexes_GetsThemAtItsFirstVectorQuery_AndKeepsItsVersion()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-search-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(root, "search.sqlite3");
+        try
+        {
+            await using (var store = new SearchIndexStore(path))
+            {
+                await store.ApplyAsync(new SearchSourceUpdate(Source("docs"), [Doc("doc:a", "worktree cleanup"), Doc("doc:b", "provider settings")]) { Complete = true });
+                // The indexes of the chunks as the first builds of version 3 made them, and none of the vectors.
+                await store.WriteAsync(async (connection, token) =>
+                {
+                    await SearchIndexStore.ExecuteAsync(connection, """
+                        DROP INDEX search_chunk_of_item; DROP INDEX search_chunk_hash; DROP INDEX search_vector_key;
+                        CREATE INDEX search_chunk_item ON search_chunk(item_id); CREATE INDEX search_chunk_embed ON search_chunk(embed_hash);
+                        """, token);
+                    return 0;
+                }, default);
+            }
+
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            await using (var store = new SearchIndexStore(path))
+            {
+                var set = await store.OpenVectorSetAsync(ModelA);
+                Assert.AreEqual(2, await EmbedAllAsync(store, set));
+                Assert.AreEqual(new SearchVectorCoverage(2, 2), await store.GetVectorCoverageAsync(set.Id));
+                Assert.IsTrue(await store.CompleteVectorSetAsync(set.Id));
+                Assert.AreEqual(2, (await store.LoadVectorIndexAsync(set.Id))!.Count);
+                var (indexes, version) = await store.ReadAsync(async (connection, token) =>
+                {
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('search_chunk', 'search_vector') AND sql IS NOT NULL ORDER BY name";
+                    var names = new List<string>();
+                    await using (var reader = await command.ExecuteReaderAsync(token))
+                    {
+                        while (await reader.ReadAsync(token)) names.Add(reader.GetString(0));
+                    }
+
+                    command.CommandText = $"SELECT version FROM app_meta WHERE owner = '{SearchIndexStore.Owner}'";
+                    return (names, Convert.ToInt32(await command.ExecuteScalarAsync(token), System.Globalization.CultureInfo.InvariantCulture));
+                }, default);
+                CollectionAssert.AreEqual(new[] { "search_chunk_hash", "search_chunk_of_item", "search_vector_key" }, indexes);
+                Assert.AreEqual(3, version, "an older build opens the file as it is");
+            }
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [TestMethod]
     public async Task Open_MakesAVersion1IndexAgain_WithTheColumnsOfVersion2()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-search-" + Guid.NewGuid().ToString("N"));
