@@ -227,8 +227,17 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
     internal static string? PlainSummary(string? markdown)
     {
         if (string.IsNullOrWhiteSpace(markdown)) return null;
-        var text = string.Join(' ', markdown.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .Where(static line => !line.StartsWith("```", StringComparison.Ordinal)).Select(MobileActivity.PlainLine).Where(static line => line.Length > 0));
+        // The prose only: the lines of a code block are left out with its fences.
+        var prose = new List<string>();
+        var inCode = false;
+        foreach (var line in markdown.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.StartsWith("```", StringComparison.Ordinal)) inCode = !inCode;
+            else if (!inCode && MobileActivity.PlainLine(line) is { Length: > 0 } plain) prose.Add(plain);
+        }
+
+        var text = string.Join(' ', prose);
+        if (text.Length == 0) return null;
         return text.Length <= MaximumSummary ? text : text[..(MaximumSummary - 1)] + "…";
     }
 
