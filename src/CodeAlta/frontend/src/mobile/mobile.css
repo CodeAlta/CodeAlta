@@ -60,7 +60,7 @@ main { min-width: 0; max-width: 720px; margin: 0 auto; padding: .5rem calc(.75re
 
 /* The list. The outline of a card is the color of its dot. While the session works, a conic gradient of that color runs
    around the rounded border (a pseudo-element masked to the border); a done or inactive card has a still outline. */
-.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .375rem; }
 @property --angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 @property --tone { syntax: "<color>"; inherits: true; initial-value: transparent; }
 .card { --tone: color-mix(in srgb, var(--muted) 35%, transparent); position: relative; min-width: 0; background: var(--panel); border-radius: 10px; transition: --tone .5s ease; }
@@ -78,7 +78,7 @@ main { min-width: 0; max-width: 720px; margin: 0 auto; padding: .5rem calc(.75re
   .card:is(.running, .tools, .thinking)::before { background: var(--tone); animation: outline-pulse 2.4s ease-in-out infinite; }
   .card .dot, .spinner { animation: none !important; }
 }
-.card-link { display: block; min-width: 0; padding: .75rem .875rem; color: inherit; text-decoration: none; border-radius: inherit; -webkit-tap-highlight-color: transparent; }
+.card-link { display: block; min-width: 0; min-height: 44px; padding: .5rem .75rem; color: inherit; text-decoration: none; border-radius: inherit; -webkit-tap-highlight-color: transparent; }
 .card-link:active { background: var(--hover); }
 .card-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* The archive of a swipe for a keyboard, a mouse and a screen reader: seen when focused or hovered. */
@@ -87,10 +87,19 @@ main { min-width: 0; max-width: 720px; margin: 0 auto; padding: .5rem calc(.75re
 .card-archive:focus-visible { opacity: 1; pointer-events: auto; outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (hover: hover) { .card:hover .card-archive { opacity: .85; pointer-events: auto; } }
 .card-archive .ico svg { width: 20px; height: 20px; }
-.title { min-width: 0; font-weight: 600; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.meta { display: flex; flex-wrap: wrap; gap: .375rem .625rem; min-width: 0; margin-top: .375rem; color: var(--muted); font-size: .8125rem; }
-.meta > span { min-width: 0; overflow-wrap: anywhere; }
-.tag { display: inline-flex; align-items: center; gap: .375rem; padding: 1px .5rem; border-radius: 999px; background: var(--panel-2); }
+.title { min-width: 0; font-weight: 600; line-height: 1.3; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* The facts of a session: the dot (and a word while it works), space, project, worktree, model · effort, agent, sub-agent; at most
+   two lines, broken between facts, the time on the right. */
+.meta { display: flex; align-items: baseline; gap: .5rem; min-width: 0; margin-top: .1875rem; color: var(--muted); font-size: .75rem; line-height: 1.4; }
+.meta-facts { flex: 1; min-width: 0; max-height: 2lh; overflow: hidden; }
+.meta-item { white-space: nowrap; }
+.meta-item:has(~ .meta-item)::after { content: "·"; margin-left: .35em; color: color-mix(in srgb, var(--muted) 70%, transparent); }
+.meta-facts > .dot { display: inline-block; margin-right: .1em; vertical-align: .05em; }
+.meta-live { color: var(--text); font-weight: 600; }
+.meta-project { color: var(--text); }
+.meta-item .ico { display: inline-flex; margin-right: .2em; vertical-align: -.1em; }
+.meta .ago { flex: none; }
+.space-dot { display: inline-block; width: .5rem; height: .5rem; margin-right: .3em; border-radius: 2px; background: var(--space, var(--muted)); vertical-align: .05em; }
 .dot { flex: none; width: .5rem; height: .5rem; border-radius: 50%; background: var(--muted); }
 .running .dot { background: var(--green); animation: pulse 1.2s infinite; }
 .tools .dot { background: var(--yellow); animation: pulse 1.2s infinite; }
@@ -98,10 +107,17 @@ main { min-width: 0; max-width: 720px; margin: 0 auto; padding: .5rem calc(.75re
 .answered .dot { background: var(--accent); } .inactive .dot { background: var(--muted); opacity: .6; }
 @keyframes pulse { 50% { opacity: .35; } }
 /* Colors of the desktop timeline: assistant = accent, reasoning = accent 35% into muted, user = user-accent. */
-.line { min-width: 0; margin-top: .375rem; font-size: .8125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.line { min-width: 0; margin-top: .1875rem; font-size: .8125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .line[data-kind="assistant"], .line[data-kind="writing"] { color: var(--accent); } .line[data-kind="user"] { color: var(--user-accent); }
 .line[data-kind="error"] { color: var(--red); }
-.chip { display: inline-flex; align-items: center; gap: .25rem; max-width: 100%; min-height: 44px; margin: 0 0 .5rem; padding: 0 0 0 .75rem; border-radius: 999px;
+/* Where the phone is, over the list: the computer and the spaces it sees, then the project filter. */
+.scope { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .5rem; min-width: 0; margin: 0 .125rem .375rem; }
+.scope-where { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .625rem; min-width: 0; margin: 0; color: var(--muted); font-size: .75rem; }
+.scope-where:empty { display: none; }
+.scope-where .ico svg { width: .875rem; height: .875rem; }
+.scope-machine { margin-left: -.375rem; color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.scope-space { white-space: nowrap; }
+.chip { display: inline-flex; align-items: center; gap: .25rem; max-width: 100%; min-height: 44px; margin: 0 0 0 auto; padding: 0 0 0 .75rem; border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--text); font-size: .8125rem; }
 .chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip button { flex: none; min-width: 44px; min-height: 44px; border: 0; background: transparent; color: var(--muted); font-size: 1.125rem; border-radius: 999px; cursor: pointer; }
@@ -129,7 +145,12 @@ footer { display: flex; align-items: center; justify-content: center; gap: .4rem
 
 /* The page of a session. */
 .detail-head { display: flex; align-items: flex-start; gap: .25rem; min-width: 0; }
-.detail-title { flex: 1; min-width: 0; font-size: 1.0625rem; margin: .625rem .25rem .75rem; overflow-wrap: anywhere; }
+.detail-title { flex: 1; min-width: 0; font-size: 1.0625rem; line-height: 1.3; margin: .625rem .25rem .25rem; overflow-wrap: anywhere; }
+/* What a prompt goes to, under the title: every fact, broken between facts. */
+.detail-meta { display: block; overflow: visible; margin: 0 .25rem .625rem; color: var(--muted); font-size: .75rem; line-height: 1.5; }
+.detail-meta:empty { display: none; }
+.msg.pending { border-style: dashed; }
+.msg.pending .msg-label { font-style: italic; }
 .detail-head .icon-btn { flex: none; color: var(--muted); }
 .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
 /* As .timeline-message on the desktop: 1px border, radius 4px, padding 6px 12px and an 8% tint of the card color. */
@@ -254,7 +275,15 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
    the list, tiers at its top, a stepped reasoning slider with a label per stop. */
 #create { padding-top: .75rem; }
 .composer-form { display: flex; flex-direction: column; gap: .75rem; }
-#new-form > label, #new-form > .field { display: grid; gap: .3rem; min-width: 0; color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.field-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; min-width: 0; }
+.space-tag { min-width: 0; overflow: hidden; color: var(--text); font-size: .8125rem; font-weight: normal; letter-spacing: normal; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; min-width: 0; }
+/* Start stays on the screen, over the keyboard, with what the form says beside it. */
+.create-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; align-items: center; gap: .75rem;
+  padding: .5rem calc(.75rem + var(--safe-right)) calc(.5rem + env(safe-area-inset-bottom)) calc(.75rem + var(--safe-left)); background: var(--panel); border-top: 1px solid var(--line); }
+.create-bar #new-note { flex: 1; min-width: 0; margin: 0; }
+.create-bar .primary { margin-left: auto; }
+#new-form > label, #new-form > .field, #new-form .field-pair > label { display: grid; gap: .3rem; min-width: 0; color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 #new-form select, .model-select { letter-spacing: normal; text-transform: none; font-weight: normal; }
 .model-select { display: flex; align-items: center; justify-content: space-between; gap: .5rem; width: 100%; min-height: 44px; padding: 0 .75rem; border: 1px solid var(--line); border-radius: 8px;
   background: var(--panel); color: var(--text); font: inherit; font-size: 1rem; text-align: start; cursor: pointer; }

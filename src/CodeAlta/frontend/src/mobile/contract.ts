@@ -29,12 +29,26 @@ export type Live = Readonly<{
   canSteer: boolean;
 }>;
 
+/** A space of the computer: its name, and the color and icon the desktop shows it with. */
+export type Space = Readonly<{ id: string; name: string; color: string | null; icon: string | null }>;
+
+/** What a session runs on: the provider, the model and the reasoning effort, with the names the desktop shows. */
+export type SessionModel = Readonly<{ provider: string; providerName: string | null; id: string | null; name: string | null; reasoning: string | null }>;
+
 /** A session of the list, or one read alone. */
 export type Session = Readonly<{
   id: string;
   title: string | null;
   projectId: string | null;
   project: string | null;
+  space?: Space | null;
+  model?: SessionModel | null;
+  /** The agent prompt. */
+  agent?: Readonly<{ id: string; name: string | null }> | null;
+  /** The folder name of the git worktree the session works in. */
+  worktree?: string | null;
+  /** The session that started this one: a sub-agent. */
+  parentId?: string | null;
   summary: string | null;
   lastActivity: string | null;
   live: Live | null;
@@ -47,6 +61,8 @@ export type SessionPage = Readonly<{
   hasMore: boolean;
   project: string | null;
   machine: string;
+  /** The spaces the phone sees; empty when it sees every space. */
+  spaces?: readonly Space[];
   error: string | null;
 }>;
 
@@ -57,7 +73,7 @@ export type TimelineEvent = Readonly<{ seq: number; at: string | null; kind: str
 export type EventPage = Readonly<{ since: number; events: readonly TimelineEvent[]; error: string | null }>;
 
 /** A project a session can be started in. */
-export type Project = Readonly<{ id: string; path: string; name: string }>;
+export type Project = Readonly<{ id: string; path: string; name: string; /** The space a new session of the project goes to. */ space?: Space | null }>;
 
 /** `GET /api/projects`. */
 export type ProjectList = Readonly<{ projects: readonly Project[]; default: string | null; error: string | null }>;

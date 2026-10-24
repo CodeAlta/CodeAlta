@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Live, Options, Session, TimelineEvent } from "./contract";
+import type { Live, Options, Session, Space, TimelineEvent } from "./contract";
 
 /** The policy the plugin's server sets on the page (the contract of the phone page). */
 export const mobilePolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -20,7 +20,9 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     sessions: [] as Session[],
     events: new Map<string, TimelineEvent[]>(),
     options: null as Options | null,
-    projects: [{ id: "p1", path: "C:/code/parser", name: "parser" }, { id: "p2", path: "C:/code/site", name: "site" }],
+    projects: [{ id: "p1", path: "C:/code/parser", name: "parser", space: fixtureSpaces[0] }, { id: "p2", path: "C:/code/site", name: "site", space: fixtureSpaces[1] }],
+    /** The spaces the phone sees (empty: every space). */
+    spaces: [...fixtureSpaces] as Space[],
     created: 0,
     /** What the next `POST /api/sessions` answers besides its id. */
     createAnswer: {} as Record<string, unknown>,
@@ -76,7 +78,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       const project = url.searchParams.get("project");
       const all = state.sessions.filter(s => !project || s.projectId === project).sort((a, b) => Date.parse(b.lastActivity!) - Date.parse(a.lastActivity!));
       const page = all.slice(offset, offset + limit);
-      return send(response, 200, { sessions: page, next: offset + page.length, hasMore: offset + page.length < all.length, project, machine: "FIXTURE-PC", error: null });
+      return send(response, 200, { sessions: page, next: offset + page.length, hasMore: offset + page.length < all.length, project, machine: "FIXTURE-PC", spaces: state.spaces, error: null });
     }
     if (path === "/api/sessions" && request.method === "POST") {
       const id = `new${++state.created}`;
@@ -137,13 +139,22 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
 }
 
 /** A session of the fixture. */
-export function session(id: string, title: string, projectId: string, minutesAgo: number, live: Partial<Live> = {}): Session {
+export function session(id: string, title: string, projectId: string, minutesAgo: number, live: Partial<Live> = {}, extra: Partial<Session> = {}): Session {
   const at = new Date(Date.now() - minutesAgo * 60_000).toISOString();
   return {
-    id, title, projectId, project: projectId === "p1" ? "parser" : "site", summary: `Summary of ${title}`, lastActivity: at,
+    id, title, projectId, project: projectId === "p1" ? "parser" : "site", space: projectId === "p1" ? fixtureSpaces[0] : fixtureSpaces[1],
+    model: { provider: "codex", providerName: "Codex", id: "gpt-6.1-sol", name: "GPT-6.1 Sol", reasoning: "low" }, agent: { id: "default", name: "Default" },
+    worktree: null, parentId: null, summary: `Summary of ${title}`, lastActivity: at,
     live: { id, projectId, live: "idle", kind: "assistant", line: `Last answer of ${title}`, at, activity: null, canSteer: false, ...live },
+    ...extra,
   };
 }
+
+/** The spaces of the fixture: the projects p1 and p2 are in one each. */
+export const fixtureSpaces: readonly Space[] = [
+  { id: "work", name: "Work", color: "#2d72d2", icon: null },
+  { id: "home", name: "Home", color: "#d1980b", icon: null },
+];
 
 /** The files of the page, read from the sources: `mobile.html` with the bundle in place of its module, and `public/mobile`. */
 export async function pageFiles(script: string, style: string) {
