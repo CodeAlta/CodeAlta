@@ -58,6 +58,30 @@ public sealed class SearchStatusCountsTests
         Assert.AreEqual((0, 0L), (counts.Items.Count, counts.Chunks), "a reset");
     }
 
+    [TestMethod]
+    public async Task TheChunksOfTheWholeIndex_AreCountedOnTheirIndex_WithoutReadingTheItems()
+    {
+        await using var fixture = new SearchFixture();
+        var store = fixture.Store;
+        var now = DateTimeOffset.UtcNow;
+        // Items whose rows fill hundreds of pages: long titles, as the messages of real sessions have.
+        var title = new string('t', 900);
+        await store.ApplyAsync(new SearchSourceUpdate(Source("journal:s1"),
+            [.. Enumerable.Range(0, 1500).Select(i => Message($"msg:s1/{i}", $"message {i} about the start", "s1", i % 2 == 0 ? "p1" : "p2", now) with { Title = title })]) { Complete = true });
+        var counts = await store.CountAsync();
+        Assert.AreEqual(1500, counts.Chunks);
+        Assert.AreEqual(750, (await store.CountAsync(new SearchScope { ProjectId = "p1" }, null)).Chunks, "a scope still counts its own chunks");
+
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(fixture.Root, "data", "search.sqlite3")}");
+        connection.Open();
+        using var command = SearchIndexStore.ChunkCountCommand(connection, new SearchScope());
+        Assert.AreEqual(1500L, Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture));
+        SQLitePCL.raw.sqlite3_db_status(connection.Handle, SQLitePCL.raw.SQLITE_DBSTATUS_CACHE_MISS, out var pages, out _, 0);
+        // Joined to the items, the count read every item page: over 300 of them here.
+        Assert.IsLessThan(30, pages, $"{pages} pages read to count the chunks");
+    }
+
     // The counts kept are those a read of the tables gives now.
     private static async Task<SearchIndexCounts> AssertSameAsync(SearchIndexStore store, SearchIndexCounts kept)
     {

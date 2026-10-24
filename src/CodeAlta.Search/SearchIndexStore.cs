@@ -746,7 +746,7 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             }
 
             long chunks, sessions, recent = 0;
-            await using (var command = Scoped("1 = 1", "SELECT count(*) FROM search_chunk c JOIN search_item i ON i.id = c.item_id"))
+            await using (var command = ChunkCountCommand(connection, scope))
             {
                 chunks = Convert.ToInt64(await command.ExecuteScalarAsync(token).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
             }
@@ -766,6 +766,20 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             return new SearchIndexCounts { Items = items, Projects = projects, Days = days, Chunks = chunks, Sessions = sessions, Recent = recent };
         }, cancellationToken).ConfigureAwait(false);
         return counts with { Bytes = FileSize() };
+    }
+
+    // The count of the chunks of a scope. The whole index is counted on the index of the chunks alone: joined to their
+    // items, every item row would be read for nothing, a chunk being removed with its item. A scope needs the items for
+    // its conditions.
+    internal static SqliteCommand ChunkCountCommand(SqliteConnection connection, SearchScope scope)
+    {
+        var command = connection.CreateCommand();
+        var conditions = new StringBuilder();
+        AppendScope(command, conditions, scope);
+        command.CommandText = conditions.Length == 0
+            ? "SELECT count(*) FROM search_chunk"
+            : $"SELECT count(*) FROM search_chunk c JOIN search_item i ON i.id = c.item_id WHERE 1 = 1{conditions}";
+        return command;
     }
 
     /// <summary>Lists the items of a scope, the newest first and then by title, each with the start of its text: what is indexed, kind by kind.</summary>

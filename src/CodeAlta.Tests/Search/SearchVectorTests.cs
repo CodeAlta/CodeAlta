@@ -570,6 +570,55 @@ public sealed class SearchVectorStoreTests
     }
 
     [TestMethod]
+    public async Task TheChangesOfOneChunk_AreReadFromAFewPages_NotFromEveryVectorOfTheSet()
+    {
+        await using var fixture = new SearchFixture();
+        var store = fixture.Store;
+        // Vectors of a real model's width: the set fills hundreds of pages.
+        var wide = new SearchVectorSetIdentity("model-wide", "r1", 1024, "p1", "ort-1.28.2");
+        var docs = Enumerable.Range(0, 1500).Select(static i => Doc($"doc:{i}", $"note {i} about worktree {i % 7} and provider {i % 11}")).ToList();
+        await store.ApplyAsync(new SearchSourceUpdate(Source("docs"), docs) { Complete = true });
+        var set = await store.OpenVectorSetAsync(wide);
+        await EmbedAllAsync(store, set);
+        Assert.IsTrue(await store.CompleteVectorSetAsync(set.Id));
+        var since = await LastChangeAsync(store);
+
+        // A turn adds one message: one chunk, then its vector.
+        docs.Add(Doc("doc:new", "a new note about the start-up screen"));
+        await store.ApplyAsync(new SearchSourceUpdate(Source("docs"), docs) { Complete = true });
+        Assert.AreEqual(1, await EmbedAllAsync(store, set));
+        var last = await LastChangeAsync(store);
+
+        // What a reader of the vectors reads to apply that change, from the file, with nothing in its cache.
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(fixture.Root, "data", "search.sqlite3")}");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = SearchIndexStore.VectorChangeRowsSelect;
+        command.Parameters.AddWithValue("$set", set.Id);
+        command.Parameters.AddWithValue("$since", since);
+        command.Parameters.AddWithValue("$last", last);
+        var rows = new List<long>();
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read()) rows.Add(reader.GetInt64(0));
+        }
+
+        SQLitePCL.raw.sqlite3_db_status(connection.Handle, SQLitePCL.raw.SQLITE_DBSTATUS_CACHE_MISS, out var pages, out _, 0);
+        Assert.AreEqual("doc:new", await RefOfAsync(fixture, rows.Single()));
+        // The set takes hundreds of pages: read as a filter of its rows, the change cost 241 of them.
+        Assert.IsLessThan(40, pages, $"{pages} pages read for one changed chunk");
+    }
+
+    private static ValueTask<long> LastChangeAsync(SearchIndexStore store)
+        => store.ReadAsync(async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT coalesce(max(seq), 0) FROM search_change";
+            return (long)(await command.ExecuteScalarAsync(token))!;
+        }, default);
+
+    [TestMethod]
     public async Task MeaningIndex_LoadsAgain_WhenTheChangesItNeedsWereTrimmed_OrTheIndexWasCleared()
     {
         await using var fixture = new SearchFixture();

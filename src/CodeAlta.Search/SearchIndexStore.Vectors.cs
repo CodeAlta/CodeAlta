@@ -600,6 +600,21 @@ public sealed partial class SearchIndexStore
         }
     }
 
+    // The rows of the chunks a window of the log names, and of those whose vector it names. The log drives the join, which
+    // CROSS JOIN keeps in that order: written as a filter of the rows (`c.id IN (…) OR c.embed_hash IN (…)`), SQLite walks
+    // every vector of the set, the whole of their codes, to find the few that changed.
+    internal const string VectorChangeRowsSelect = """
+        SELECT c.id, i.kind, i.role, i.at, i.space_id, i.project_id, i.session_id, v.scale, v.code
+        FROM (SELECT chunk_id AS id FROM search_change WHERE seq > $since AND seq <= $last AND chunk_id IS NOT NULL
+              UNION
+              SELECT h_chunk.id FROM search_change h JOIN search_chunk h_chunk ON h_chunk.embed_hash = h.embed_hash
+              WHERE h.seq > $since AND h.seq <= $last AND h.set_id = $set) t
+        CROSS JOIN search_chunk c ON c.id = t.id
+        CROSS JOIN search_item i ON i.id = c.item_id
+        CROSS JOIN search_vector v ON v.set_id = $set AND v.embed_hash = c.embed_hash
+        ORDER BY c.id
+        """;
+
     /// <summary>Reads what changed for the vectors of a set since a cursor of the log.</summary>
     /// <param name="setId">The set the reader holds.</param>
     /// <param name="epoch">The epoch of the log the reader's cursor belongs to.</param>
@@ -648,12 +663,7 @@ public sealed partial class SearchIndexStore
             var rows = new List<SearchVectorRow>();
             await using (var command = connection.CreateCommand())
             {
-                command.CommandText = $"""
-                    {VectorRowSelect}
-                    WHERE c.id IN (SELECT chunk_id FROM search_change WHERE seq > $since AND seq <= $last AND chunk_id IS NOT NULL)
-                       OR c.embed_hash IN (SELECT embed_hash FROM search_change WHERE seq > $since AND seq <= $last AND set_id = $set)
-                    ORDER BY c.id
-                    """;
+                command.CommandText = VectorChangeRowsSelect;
                 command.Parameters.AddWithValue("$set", setId);
                 command.Parameters.AddWithValue("$since", since);
                 command.Parameters.AddWithValue("$last", last);
