@@ -20,7 +20,10 @@ public enum SearchVectorSetState : byte
     /// <summary>The set queries use; there is at most one.</summary>
     Active = 2,
 
-    /// <summary>Replaced by another set; kept until it is deleted.</summary>
+    /// <summary>
+    /// Replaced by a set of another model; kept until it is deleted with its model, since choosing that model again brings
+    /// it back. A set replaced by one of the same model (another revision, prompts or runtime) is deleted at once.
+    /// </summary>
     Retired = 3,
 }
 
@@ -228,7 +231,14 @@ public sealed partial class SearchIndexStore
                 hasActive = (long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))! != 0;
             }
 
-            if (found is { State: SearchVectorSetState.Active } || found is { State: SearchVectorSetState.Building } && hasActive) return found;
+            if (found is { State: SearchVectorSetState.Active })
+            {
+                // What an older build kept of the sets this one replaced.
+                await DeleteReplacedSetsAsync(connection, found.Id, token).ConfigureAwait(false);
+                return found;
+            }
+
+            if (found is { State: SearchVectorSetState.Building } && hasActive) return found;
             var state = hasActive ? SearchVectorSetState.Building : SearchVectorSetState.Active;
             if (found is not null)
             {
@@ -298,8 +308,24 @@ public sealed partial class SearchIndexStore
             }
 
             await SetStateAsync(connection, setId, SearchVectorSetState.Active, token).ConfigureAwait(false);
+            await DeleteReplacedSetsAsync(connection, setId, token).ConfigureAwait(false);
             return true;
         }, recoverDamagedFile: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    // The sets of the model of the active set with another identity (an older revision, prompts or runtime) are never
+    // opened again, the window opening a model with its identity of now: they go with their vectors. The sets of the
+    // other models stay.
+    private static async ValueTask DeleteReplacedSetsAsync(SqliteConnection connection, long activeId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM search_vector WHERE set_id IN (SELECT id FROM search_vector_set
+              WHERE id <> $set AND model = (SELECT model FROM search_vector_set WHERE id = $set) COLLATE NOCASE);
+            DELETE FROM search_vector_set WHERE id <> $set AND model = (SELECT model FROM search_vector_set WHERE id = $set) COLLATE NOCASE;
+            """;
+        command.Parameters.AddWithValue("$set", activeId);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Deletes a set and its vectors.</summary>

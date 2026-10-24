@@ -352,6 +352,59 @@ public sealed class SearchVectorStoreTests
     }
 
     [TestMethod]
+    public async Task ASetReplacedByANewerOneOfTheSameModel_IsDeleted_WithItsVectors()
+    {
+        await using var fixture = new SearchFixture();
+        var store = fixture.Store;
+        await store.ApplyAsync(new SearchSourceUpdate(Source("docs"), [Doc("doc:a", "worktree cleanup"), Doc("doc:b", "provider settings")]) { Complete = true });
+        var old = await store.OpenVectorSetAsync(ModelA);
+        await EmbedAllAsync(store, old);
+        var other = await store.OpenVectorSetAsync(ModelB);
+        await EmbedAllAsync(store, other);
+
+        // The same model with another runtime: its vectors differ, and the set of the old runtime is never opened again.
+        var newer = await store.OpenVectorSetAsync(ModelA with { Runtime = "ort-1.29.0" });
+        Assert.AreEqual(SearchVectorSetState.Building, newer.State);
+        await EmbedAllAsync(store, newer);
+        Assert.IsTrue(await store.CompleteVectorSetAsync(newer.Id));
+        var sets = await store.GetVectorSetsAsync();
+        CollectionAssert.AreEquivalent(new[] { other.Id, newer.Id }, sets.Select(static set => set.Id).ToArray(), "the set of the old runtime is gone");
+        Assert.AreEqual(0, await VectorsOfAsync(store, old.Id), "with its vectors");
+        Assert.AreEqual(2, await VectorsOfAsync(store, other.Id), "the set of another model stays: it comes back when that model is chosen again");
+    }
+
+    [TestMethod]
+    public async Task ARetiredSetOfTheSameModel_LeftByAnOlderBuild_IsDeletedWhenTheActiveSetOpens()
+    {
+        await using var fixture = new SearchFixture();
+        var store = fixture.Store;
+        await store.ApplyAsync(new SearchSourceUpdate(Source("docs"), [Doc("doc:a", "worktree cleanup")]) { Complete = true });
+        var old = await store.OpenVectorSetAsync(ModelA);
+        await EmbedAllAsync(store, old);
+        var newer = await store.OpenVectorSetAsync(ModelA with { Runtime = "ort-1.29.0" });
+        await EmbedAllAsync(store, newer);
+        // What an older build did once the new set was complete: it made it active, and kept the old one retired.
+        await store.WriteAsync(async (connection, token) =>
+        {
+            await SearchIndexStore.ExecuteAsync(connection, $"UPDATE search_vector_set SET state = CASE id WHEN {old.Id} THEN 'retired' ELSE 'active' END", token);
+            return 0;
+        }, default);
+        Assert.AreEqual(1, await VectorsOfAsync(store, old.Id));
+
+        var opened = await store.OpenVectorSetAsync(ModelA with { Runtime = "ort-1.29.0" });
+        Assert.AreEqual((newer.Id, SearchVectorSetState.Active), (opened.Id, opened.State));
+        Assert.AreEqual(newer.Id, (await store.GetVectorSetsAsync()).Single().Id);
+        Assert.AreEqual(0, await VectorsOfAsync(store, old.Id));
+    }
+
+    private static Task<long> VectorsOfAsync(SearchIndexStore store, long setId) => store.ReadAsync(async (connection, token) =>
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT count(*) FROM search_vector WHERE set_id = {setId}";
+        return (long)(await command.ExecuteScalarAsync(token))!;
+    }, default).AsTask();
+
+    [TestMethod]
     public async Task Vectors_AreKeyedByTheirText_AndKeptWhenItemsAreWrittenAgain()
     {
         await using var fixture = new SearchFixture();
