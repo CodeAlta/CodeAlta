@@ -65,17 +65,16 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private int _historyDeltaCount;
     private readonly IDisposable? _backgroundTasksRegistration;
     private readonly IDisposable? _remoteControlRegistration;
-    private readonly IDisposable? _promptSuggestionRegistration;
     private readonly SemaphoreSlim _stateGate = new(initialCount: 1, maxCount: 1);
     // Turns release the state gate while they run. Serialize their summary snapshots with live Rename separately.
     private readonly SemaphoreSlim _summaryGate = new(initialCount: 1, maxCount: 1);
     // How the session titles itself: read by the runs, set from any thread.
     private int _titleMode;
-    // Whether the session takes the suggestions of its provider for the next prompt.
+    // Whether the session suggests the next prompt of the user, as the model proposes it at the end of a turn.
     private readonly bool _promptSuggestions;
     // The title the first prompt of the session gives it; null until a prompt a person or an agent wrote had text.
     private string? _firstPromptTitle;
-    // The assistant texts that stream now, by content: a title tag is never shown, not even in part.
+    // The assistant texts that stream now, by content: a title or next prompt tag is never shown, not even in part.
     private readonly Dictionary<(string? Attempt, string Content), AgentSessionTitleTag.Filter> _titleFilters = [];
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
@@ -166,9 +165,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             : null;
         _backgroundTasksRegistration = turnExecutor is IAgentProviderBackgroundTasks background
             ? background.OnBackgroundTasksChanged(summary.SessionId, PublishBackgroundTasks)
-            : null;
-        _promptSuggestionRegistration = turnExecutor is IAgentProviderPromptSuggestions suggestions
-            ? suggestions.OnPromptSuggestion(summary.SessionId, PublishPromptSuggestion)
             : null;
     }
 
@@ -334,6 +330,20 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private string? TitleInstructions()
         => TitleMode is AgentSessionTitleMode.Model && _summary.TitleSource is AgentSessionTitleSource.Auto ? _options.TitleInstructions : null;
 
+    // Whether the model is asked now to suggest the next prompt: a session somebody writes in, while the user wants it.
+    private bool SuggestsNextPrompt()
+        => _promptSuggestions && !string.IsNullOrWhiteSpace(_options.PromptSuggestionInstructions) && (_options.PromptSuggestionsEnabled?.Invoke() ?? true);
+
+    // What the session adds to the instructions for the state it is in now: how it is titled, then whether it
+    // suggests the next prompt. Each is a paragraph of its own, which a change of that state adds or removes.
+    private string? SessionInstructions(bool suggestsNextPrompt)
+    {
+        var title = TitleInstructions();
+        var suggestion = suggestsNextPrompt ? _options.PromptSuggestionInstructions : null;
+        if (string.IsNullOrWhiteSpace(suggestion)) return title;
+        return string.IsNullOrWhiteSpace(title) ? suggestion : title.Trim() + Environment.NewLine + Environment.NewLine + suggestion.Trim();
+    }
+
     private static string? FirstPromptTitle(IReadOnlyList<AgentEvent> history)
     {
         foreach (var @event in history)
@@ -453,7 +463,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills, TitleInstructions());
+            var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills, SessionInstructions(SuggestsNextPrompt()));
             // Remote control may be changed during a run: like its status, warnings are live feedback,
             // not concurrent writes to the run-owned history.
             foreach (var diagnostic in instructionBundle.Diagnostics)
@@ -486,13 +496,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
     }
 
-    // A suggestion answers the turn that just ended: told, never recorded, and only while no run goes on. One
-    // that comes while a run goes on was made for the turn before it: nobody is to send it after the answer that
-    // follows.
-    private void PublishPromptSuggestion(string suggestion)
+    // A suggestion answers the turn that just ended: told once the run said it is idle, never recorded. The next
+    // run makes it say nothing any more.
+    private void PublishPromptSuggestion(string? suggestion)
     {
-        if (!_disposed && _promptSuggestions && Volatile.Read(ref _activeRun) is null
-            && AgentPromptSuggestionEvent.Normalize(suggestion) is { } text)
+        if (!_disposed && AgentPromptSuggestionEvent.Normalize(suggestion) is { } text)
         {
             Publish(new AgentPromptSuggestionEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, text));
         }
@@ -609,7 +617,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             if (!string.IsNullOrWhiteSpace(_summary.WorktreeDirectory) && !Directory.Exists(_summary.WorktreeDirectory))
                 throw new InvalidOperationException($"The git worktree this session works in, '{_summary.WorktreeDirectory}', no longer exists.");
             var fileChangeTracker = new AgentTurnFileChangeTracker(_summary.ExecutionDirectory);
-            var instructionBundle = AgentInstructionComposer.Compose(_options, GetPromptIntegratedLoadedSkills(), TitleInstructions());
+            // Read once: the run is asked for a suggestion, and tells it, or neither.
+            var suggestsNextPrompt = SuggestsNextPrompt();
+            string? nextPrompt = null;
+            var instructionBundle = AgentInstructionComposer.Compose(_options, GetPromptIntegratedLoadedSkills(), SessionInstructions(suggestsNextPrompt));
             await AppendInstructionWarningsAsync(instructionBundle, runId, linkedCts.Token).ConfigureAwait(false);
             var requestDeveloperInstructions = CombineDeveloperInstructions(
                 instructionBundle.DeveloperInstructions,
@@ -691,7 +702,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         linkedCts.Token)
                     .ConfigureAwait(false);
 
-                await AppendAssistantMessageAsync(
+                // The suggestion is the one of the last answer: an answer without one suggests nothing.
+                nextPrompt = await AppendAssistantMessageAsync(
                         response,
                         runId,
                         instructionBundle.SystemMessage,
@@ -740,6 +752,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         null,
                         Usage: _state.Usage);
                     await AppendEventsAsync([idleEvent], linkedCts.Token).ConfigureAwait(false);
+                    // After the idle event: those who listen take a suggestion only between the runs.
+                    if (suggestsNextPrompt) PublishPromptSuggestion(nextPrompt);
                     return runId;
                 }
 
@@ -1193,7 +1207,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
     private async Task<AgentCompactionOutcome> CompactGateHeldAsync(CancellationToken cancellationToken)
     {
-        var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills, TitleInstructions());
+        var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills, SessionInstructions(SuggestsNextPrompt()));
         await AppendInstructionWarningsAsync(instructionBundle, null, cancellationToken).ConfigureAwait(false);
         var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
         if (_turnExecutor is IAgentProviderCompaction providerCompaction)
@@ -1335,7 +1349,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         run?.SignalCancellation();
         _backgroundTasksRegistration?.Dispose();
         _remoteControlRegistration?.Dispose();
-        _promptSuggestionRegistration?.Dispose();
         List<Exception> failures = [];
         // Start cancellation before joining operation scopes, which include actual hooks and all
         // registration/traversal disposal. No new operation can enter after _disposed was published.
@@ -1756,7 +1769,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // A run has the mode it started with, or the one it was given since (ApplyPermissionModeNowAsync); what
             // runs outside one takes the current mode.
             PermissionMode = _activeRun is { } active && active.Id == runId ? active.PermissionMode : PermissionMode,
-            PromptSuggestions = _promptSuggestions,
             DisabledTools = _options.DisabledBuiltInTools,
             WriteGuard = _options.WriteGuard,
             CommandGuard = _options.CommandGuard,
@@ -2047,7 +2059,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         await AppendEventsAsync([diffUpdated], cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task AppendAssistantMessageAsync(
+    // Returns the next prompt the last text of the message suggests (its next prompt tag), or null.
+    private async Task<string?> AppendAssistantMessageAsync(
         AgentTurnResponse response,
         AgentRunId runId,
         string? systemMessage,
@@ -2063,8 +2076,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         // The message is complete: what its streamed texts still held back is in the texts that follow.
         ForgetTitleFilters();
         // The conversation and the raw message keep what the model wrote, which it is sent again. Everything that is
-        // shown (the content events, the preview) is without its title tags, whatever the mode of the session.
+        // shown (the content events, the preview) is without its title and next prompt tags, whatever the mode of the session.
         string? modelTitle = null;
+        string? nextPrompt = null;
         var providerConversation = CreateProviderConversation();
         var effectiveUsage = CreateConversationUsageSnapshot(
             systemMessage,
@@ -2109,9 +2123,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             switch (part)
             {
                 case AgentMessagePart.Text text:
-                    var shown = AgentSessionTitleTag.Strip(text.Value, out var tagged) ?? string.Empty;
+                    var shown = AgentSessionTitleTag.Strip(text.Value, out var tagged, out var suggested) ?? string.Empty;
                     modelTitle = tagged ?? modelTitle;
-                    // A text that was only its title tag shows nothing.
+                    // The suggestion ends the answer: a text that follows without one takes it back.
+                    nextPrompt = suggested;
+                    // A text that was only its tags shows nothing.
                     if (!ReferenceEquals(shown, text.Value) && string.IsNullOrWhiteSpace(shown)) break;
                     events.Add(new AgentContentCompletedEvent(
                         ProviderId,
@@ -2191,6 +2207,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Usage = effectiveUsage ?? summary.Usage,
             UpdatedAt = DateTimeOffset.UtcNow,
         }, cancellationToken).ConfigureAwait(false);
+        return nextPrompt;
     }
 
     // An activity the provider ran itself (a hosted web search) goes before the part it came before, as it happened.
@@ -2234,7 +2251,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         var text = delta.Text;
         if (delta.Kind is AgentContentKind.Assistant && text.Length > 0)
         {
-            // A title tag is never shown, not even in part: what could be one is held back until it is known.
+            // A title or next prompt tag is never shown, not even in part: what could be one is held back until it is known.
             text = TitleFilter(delta).Append(text);
             if (text.Length == 0) return;
         }

@@ -69,13 +69,6 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     public ClaudeCodeApiKeyPolicy ApiKeyPolicy { get; init; }
 
     /// <summary>
-    /// Gets or initializes whether the CLI is asked to suggest the next prompt of the user after each turn
-    /// (<c>--prompt-suggestions</c>), for the sessions that take suggestions
-    /// (<see cref="Runtime.AgentTurnRequest.PromptSuggestions"/>). A suggestion costs a request of its own.
-    /// </summary>
-    public bool PromptSuggestions { get; init; }
-
-    /// <summary>
     /// Reads the <c>anthropic_api_key</c> setting of a provider: <c>use</c>, <c>ignore</c>, or empty to follow the
     /// answer Claude Code saved.
     /// </summary>

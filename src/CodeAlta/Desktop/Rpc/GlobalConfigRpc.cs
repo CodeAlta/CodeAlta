@@ -228,6 +228,38 @@ internal sealed partial class GlobalConfigService
         }
     }
 
+    /// <summary>Reads whether the model suggests the next prompt at the end of a turn (<c>[sessions] prompt_suggestions</c>).</summary>
+    [NeoRpcMethod("promptSuggestionSettings")]
+    public GlobalConfigPromptSuggestionSettingsResponse PromptSuggestionSettings(GlobalConfigSessionTitlesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", true);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", true);
+        lock (_gate) return new("ok", _store.LoadGlobalPromptSuggestions());
+    }
+
+    /// <summary>Saves whether the model suggests the next prompt at the end of a turn; a session takes it with its next prompt.</summary>
+    [NeoRpcMethod("savePromptSuggestionSettings")]
+    public GlobalConfigPromptSuggestionSettingsResponse SavePromptSuggestionSettings(GlobalConfigSavePromptSuggestionSettingsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", true);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", true);
+        lock (_gate)
+        {
+            try
+            {
+                _store.SaveGlobalPromptSuggestions(request.Enabled);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or FormatException)
+            {
+                return new("write_failed", _store.LoadGlobalPromptSuggestions());
+            }
+
+            return new("ok", _store.LoadGlobalPromptSuggestions());
+        }
+    }
+
     /// <summary>Reads the tools every session does without (<c>[tools] disabled</c>), and the names of the built-in tools.</summary>
     [NeoRpcMethod("disabledTools")]
     public GlobalConfigDisabledToolsResponse DisabledTools(GlobalConfigSessionTitlesRequest request)
@@ -297,7 +329,7 @@ internal sealed partial class GlobalConfigService
                             Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
                         { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
-                          PromptSuggestions = definition?.PromptSuggestions == true, ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command) };
+                          ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command) };
                     }).Concat(ListPluginProviders(document)).ToArray();
                 var pluginTypes = DescribePluginTypes();
                 // The providers CodeAlta knows how to configure that this configuration does not have yet.
@@ -415,9 +447,7 @@ internal sealed partial class GlobalConfigService
             definition.ApiKeyEnv = Optional(edit.ApiKeyEnv);
             // Only the CLI of Claude Code reads that variable by itself.
             definition.AnthropicApiKey = definition.ProviderType == "claude-code" ? anthropicApiKey : null;
-            // So are its prompt suggestions; off is the absence of the setting.
-            definition.PromptSuggestions = definition.ProviderType == "claude-code" && edit.PromptSuggestions ? true : null;
-            // And its configuration folder: the account it runs with.
+            // So is its configuration folder: the account it runs with.
             definition.ConfigDir = definition.ProviderType == "claude-code" ? Optional(edit.ConfigDir) : null;
             // The settings of the TOML that only the anthropic type reads are kept for it, and left behind otherwise.
             definition.RefusalFallback = definition.ProviderType == "anthropic" ? definition.RefusalFallback : null;
@@ -810,6 +840,14 @@ internal sealed record GlobalConfigSaveCommitSettingsRequest(string? ExpectedEpo
 /// <param name="CoAuthor">Whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta.</param>
 internal sealed record GlobalConfigCommitSettingsResponse(string Status, bool CoAuthor);
 
+/// <param name="ExpectedEpoch">The host epoch the page was loaded with.</param>
+/// <param name="Enabled">Whether the model suggests the next prompt at the end of a turn.</param>
+internal sealed record GlobalConfigSavePromptSuggestionSettingsRequest(string? ExpectedEpoch, bool Enabled);
+
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c> or <c>write_failed</c>.</param>
+/// <param name="Enabled">Whether the model suggests the next prompt at the end of a turn.</param>
+internal sealed record GlobalConfigPromptSuggestionSettingsResponse(string Status, bool Enabled);
+
 /// <summary>The tools every session does without.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>
 /// <param name="Tools">The names of the tools.</param>
@@ -886,9 +924,6 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     /// </summary>
     public string? PermissionMode { get; init; }
 
-    /// <summary>Whether a <c>claude-code</c> provider asks the CLI to suggest the next prompt after each turn.</summary>
-    public bool PromptSuggestions { get; init; }
-
     /// <summary>
     /// The configuration folder a <c>claude-code</c> provider gives its CLI (<c>config_dir</c>), as the file writes it;
     /// null for the folder of Claude Code itself.
@@ -924,9 +959,6 @@ internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool 
     /// CLI. A provider of another type sends null: the configuration file takes the field for no other type.
     /// </summary>
     public string? PermissionMode { get; init; }
-
-    /// <summary>Whether the CLI suggests the next prompt after each turn. Kept for <c>claude-code</c> only.</summary>
-    public bool PromptSuggestions { get; init; }
 
     /// <summary>
     /// The configuration folder of the CLI (<c>config_dir</c>), a full path or one that starts with <c>~</c>; blank for

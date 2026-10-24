@@ -346,13 +346,6 @@ public sealed class CodeAltaProviderDocument
     public string? AnthropicApiKey { get; set; }
 
     /// <summary>
-    /// Gets or sets whether a <c>claude-code</c> provider asks the CLI to suggest the next prompt of the user after
-    /// each turn; false when absent. A suggestion costs a request of its own.
-    /// </summary>
-    [JsonPropertyName("prompt_suggestions")]
-    public bool? PromptSuggestions { get; set; }
-
-    /// <summary>
     /// Gets or sets whether an <c>anthropic</c> provider asks the Claude API to run a request its safety classifiers
     /// decline again on another model (<c>fallbacks: "default"</c>), for the models that take it; true when absent.
     /// </summary>

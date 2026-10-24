@@ -248,7 +248,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.ApiKeyEnv = supportsApiKeyField && !UseDefaultApiKeyEnv ? NormalizeText(ApiKeyEnv) : null;
         definition.ApiUrl = UseDefaultApiUrl ? null : NormalizeText(ApiUrl);
         definition.GitHubEnterpriseUrl = ProviderType == "copilot" && !UseDefaultGitHubEnterpriseUrl ? NormalizeText(GitHubEnterpriseUrl) : null;
-        // The settings of a provider that runs a CLI: the arguments, anthropic_api_key, prompt_suggestions and config_dir are edited in the TOML of the provider.
+        // The settings of a provider that runs a CLI: the arguments, anthropic_api_key and config_dir are edited in the TOML of the provider.
         var runsCli = ProviderType == "claude-code";
         definition.ConfigDir = runsCli ? definition.ConfigDir : null;
         definition.CodexHome = ProviderType == "codex" ? definition.CodexHome : null;
@@ -256,7 +256,6 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.PermissionMode = runsCli && !UseDefaultPermissionMode ? NormalizeText(PermissionMode) : null;
         definition.Arguments = runsCli ? definition.Arguments : null;
         definition.AnthropicApiKey = runsCli ? definition.AnthropicApiKey : null;
-        definition.PromptSuggestions = runsCli ? definition.PromptSuggestions : null;
         // Edited in the TOML of the provider too; only the anthropic type reads it.
         definition.RefusalFallback = ProviderType == "anthropic" ? definition.RefusalFallback : null;
         definition.PromptCacheTtl = ProviderType == "anthropic" ? definition.PromptCacheTtl : null;
@@ -379,7 +378,6 @@ internal sealed partial class ModelProviderEditorItemViewModel
             Arguments = definition.Arguments is null ? null : [.. definition.Arguments],
             PermissionMode = definition.PermissionMode,
             AnthropicApiKey = definition.AnthropicApiKey,
-            PromptSuggestions = definition.PromptSuggestions,
             RefusalFallback = definition.RefusalFallback,
             PromptCacheTtl = definition.PromptCacheTtl,
             ConfigDir = definition.ConfigDir,

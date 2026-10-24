@@ -135,6 +135,57 @@ public sealed class AgentSessionTitleTests
         }
     }
 
+    [TestMethod]
+    public void NextPromptTag_IsRemovedLikeTheTitle_AndGivesTheLastSuggestion()
+    {
+        foreach (var (text, expected, expectedTitle, expectedNextPrompt) in new[]
+                 {
+                     ("Done.\n<next_prompt>run the tests</next_prompt>", "Done.\n", null, "run the tests"),
+                     ("Done.\n<next_prompt> commit it </next_prompt>\n", "Done.\n", null, "commit it"),
+                     ("<session_title>Login fix</session_title>\nDone.\n<next_prompt>go ahead</next_prompt>", "Done.\n", "Login fix", "go ahead"),
+                     ("A <next_prompt>first</next_prompt> then\n<next_prompt>second</next_prompt>", "A  then\n", null, "second"),
+                     ("An empty one.\n<next_prompt> </next_prompt>", "An empty one.\n", null, null),
+                     ("Not one: <next_prompts> and <next_prompt", "Not one: <next_prompts> and <next_prompt", null, null),
+                     ("Unfinished <next_prompt>never closed", "Unfinished <next_prompt>never closed", null, null),
+                     ("A suggestion too long to be one is still not shown.\n<next_prompt>" + new string('x', AgentPromptSuggestionEvent.MaximumLength + 1) + "</next_prompt>",
+                         "A suggestion too long to be one is still not shown.\n", null, new string('x', AgentPromptSuggestionEvent.MaximumLength + 1)),
+                 })
+        {
+            Assert.AreEqual(expected, AgentSessionTitleTag.Strip(text, out var title, out var nextPrompt), text);
+            Assert.AreEqual(expectedTitle, title, text);
+            Assert.AreEqual(expectedNextPrompt, nextPrompt, text);
+            for (var split = 0; split <= text.Length; split++)
+            {
+                AssertFiltered([text[..split], text[split..]], expected, expectedTitle, expectedNextPrompt);
+            }
+
+            AssertFiltered([.. text.Select(static character => character.ToString())], expected, expectedTitle, expectedNextPrompt);
+        }
+
+        // Quoted, it is text.
+        foreach (var quoted in new[] { "Write `<next_prompt>go</next_prompt>` at the end.", "```\n<next_prompt>go</next_prompt>\n```" })
+        {
+            Assert.AreSame(quoted, AgentSessionTitleTag.Strip(quoted, out _, out var nextPrompt));
+            Assert.IsNull(nextPrompt);
+        }
+    }
+
+    private static void AssertFiltered(IReadOnlyList<string> chunks, string expected, string? expectedTitle, string? expectedNextPrompt)
+    {
+        var filter = new AgentSessionTitleTag.Filter();
+        var shown = new System.Text.StringBuilder();
+        foreach (var chunk in chunks)
+        {
+            shown.Append(filter.Append(chunk));
+            Assert.IsTrue(expected.StartsWith(shown.ToString(), StringComparison.Ordinal), $"'{shown}' is not the start of '{expected}' for [{string.Join("|", chunks)}]");
+        }
+
+        shown.Append(filter.Flush());
+        Assert.AreEqual(expected, shown.ToString(), string.Join("|", chunks));
+        Assert.AreEqual(expectedTitle, filter.Title, string.Join("|", chunks));
+        Assert.AreEqual(expectedNextPrompt, filter.NextPrompt, string.Join("|", chunks));
+    }
+
     private static void AssertFiltered(IReadOnlyList<string> chunks, string expected, string? expectedTitle)
     {
         var filter = new AgentSessionTitleTag.Filter();

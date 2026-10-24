@@ -90,9 +90,10 @@ public sealed class CodeAltaHostOptions
     public bool SessionPermissionModes { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether the host shows the prompts a provider suggests
-    /// (<see cref="CodeAlta.Agent.AgentPromptSuggestionEvent"/>). Default false: a provider is not asked for
-    /// suggestions nobody would see, each of which costs a request.
+    /// Gets a value indicating whether the host shows the prompts the model suggests
+    /// (<see cref="CodeAlta.Agent.AgentPromptSuggestionEvent"/>). Default false: the model is not asked for
+    /// suggestions nobody would see. Where it is true, the setting <c>[sessions] prompt_suggestions</c> of the user
+    /// turns them on and off.
     /// </summary>
     public bool ShowsPromptSuggestions { get; init; }
 

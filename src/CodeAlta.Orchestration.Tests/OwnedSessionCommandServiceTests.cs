@@ -298,6 +298,8 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.IsNotNull(first.Receipt);
         await f.ObserveReadiness(f.Provider.SendStarted.Task, first.Receipt, "first send");
         Assert.IsTrue(f.Provider.Options!.PromptSuggestions, "A session somebody writes in takes suggestions.");
+        StringAssert.StartsWith(f.Provider.Options.PromptSuggestionInstructions, "Next prompt suggestion:");
+        Assert.IsTrue(f.Provider.Options.PromptSuggestionsEnabled!(), "On by default.");
         Assert.IsNull(await SuggestionAsync());
         f.Provider.ReleaseSend.TrySetResult();
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(first.Receipt.Completion)).Outcome);
@@ -2343,7 +2345,7 @@ public sealed class OwnedSessionCommandServiceTests
                 // The host of the desktop: it approves by itself, and the mode of a session comes first.
                 AutoApproveOwnedPermissions = sessionPermissionModes,
                 SessionPermissionModes = sessionPermissionModes,
-                // Like the desktop, the host of the fixture shows what a provider suggests.
+                // Like the desktop, the host of the fixture shows what the model suggests.
                 ShowsPromptSuggestions = true,
                 ReviewOwnedPermissionsPolicy = sessionPermissionModes ? () => ReviewByDefault : null,
                 InheritPermissionModePolicy = () => InheritPermissions,

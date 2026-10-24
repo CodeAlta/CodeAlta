@@ -1,9 +1,10 @@
 namespace CodeAlta.Agent;
 
 /// <summary>
-/// A provider suggested what the user may write next in a session, once a turn ended (for Claude Code, its prompt
-/// suggestion). Like the background tasks, it is told to those who listen to the session and is never recorded:
-/// a suggestion answers the turn that just ended, and says nothing once another one started.
+/// The model suggested what the user may write next in a session, once a turn ended: the
+/// <see cref="AgentNextPromptTag"/> that ends its final answer. Like the background tasks, it is told to those who
+/// listen to the session and is never recorded: a suggestion answers the turn that just ended, and says nothing once
+/// another one started.
 /// </summary>
 /// <param name="ProviderId">The model provider identifier.</param>
 /// <param name="SessionId">The session identifier.</param>
@@ -23,10 +24,10 @@ public sealed record AgentPromptSuggestionEvent(
     public const int MaximumLength = 256;
 
     /// <summary>
-    /// Returns what a provider suggested as a session tells it: trimmed, or <see langword="null" /> when it is not
+    /// Returns what a model suggested as a session tells it: trimmed, or <see langword="null" /> when it is not
     /// one line of text of at most <see cref="MaximumLength"/> characters.
     /// </summary>
-    /// <param name="suggestion">What the provider suggested.</param>
+    /// <param name="suggestion">What the model suggested.</param>
     public static string? Normalize(string? suggestion)
     {
         var text = suggestion?.Trim();

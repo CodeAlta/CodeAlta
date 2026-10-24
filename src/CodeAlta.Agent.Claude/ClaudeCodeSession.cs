@@ -122,8 +122,6 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private bool _mcpInitialized;
     private Task? _interrupt;
     private bool _showReasoning = true;
-    // The CLI refused to start with the option of the prompt suggestions: it is not given it again.
-    private bool _promptSuggestionsRefused;
     private bool _withoutApiKey;
     private int _disposed;
 
@@ -449,7 +447,6 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             string.IsNullOrWhiteSpace(request.WorkingDirectory) ? null : request.WorkingDirectory,
             ClaudeCodeLauncher.ToModelOption(request.ModelId),
             effort,
-            _options.PromptSuggestions && request.PromptSuggestions && !_promptSuggestionsRefused,
             request.Environment is { IsEmpty: false } environment ? environment : null,
             request.DisabledTools?.Contains(ShellCommandTool) == true);
         var permissionMode = ClaudeCodeLauncher.PermissionMode(NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode), key.WithoutShell);
@@ -564,8 +561,6 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
 
         var newSessionId = Guid.NewGuid().ToString();
-        // A resume the CLI refused the suggestions for does not ask for them again.
-        key = key with { PromptSuggestions = key.PromptSuggestions && !_promptSuggestionsRefused };
         try
         {
             await StartConnectionAsync(resolution.Path, key, newSessionId, resumeSessionId: null, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
@@ -753,12 +748,6 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             {
                 // The session runs without the summaries of the thinking.
                 _showReasoning = false;
-            }
-            catch (IOException) when (key.PromptSuggestions && Refused(ClaudeCodeLauncher.PromptSuggestionsOption))
-            {
-                // The session runs without the prompt suggestions.
-                _promptSuggestionsRefused = true;
-                key = key with { PromptSuggestions = false };
             }
 
             await CloseConnectionAsync().ConfigureAwait(false);

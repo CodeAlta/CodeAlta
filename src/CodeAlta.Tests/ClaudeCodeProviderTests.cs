@@ -153,21 +153,15 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [TestMethod]
-    public void Launcher_AsksForPromptSuggestionsOnlyWhenTheKeySaysSo()
+    public void Launcher_NeverAsksTheCliForPromptSuggestions()
     {
-        var options = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", ExtraArguments = ["--add-dir", "/data"] };
+        // The model suggests the next prompt with its answer, as CodeAlta asks it: a suggestion of the CLI would be a
+        // request of its own.
+        var options = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code" };
 
-        var with = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null, PromptSuggestions: true), null, null, withTools: true);
-        var without = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null), null, null, withTools: true);
+        var launch = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null), null, null, withTools: true);
 
-        // Before the arguments of the user, which can still say otherwise.
-        var arguments = with.Arguments.ToArray();
-        Assert.IsTrue(Array.IndexOf(arguments, "--prompt-suggestions=true") is >= 0 and var index && index < Array.IndexOf(arguments, "--add-dir"));
-        // The option takes an optional value: given with it, it does not take the first argument of the user for one.
-        CollectionAssert.DoesNotContain(arguments, "--prompt-suggestions");
-        Assert.IsFalse(without.Arguments.Any(static argument => argument.StartsWith("--prompt-suggestions", StringComparison.Ordinal)));
-        // A process started with the suggestions is not the one a session without them goes on with.
-        Assert.AreNotEqual(new ClaudeCodeLaunchKey(null, null, null), new ClaudeCodeLaunchKey(null, null, null, PromptSuggestions: true));
+        Assert.IsFalse(launch.Arguments.Any(static argument => argument.StartsWith("--prompt-suggestions", StringComparison.Ordinal)));
     }
 
     [TestMethod]

@@ -27,9 +27,18 @@ test("the three title modes are the ones of the configuration file, each with it
 });
 
 test("the settings of the sessions are read before they are shown", () => {
-  const html = render(createElement(SessionSettings, { epoch: "e", api: { sessionTitles: silent, saveSessionTitles: never, reviewSettings: silent, saveReviewSettings: never, commitSettings: silent, saveCommitSettings: never } }));
+  const html = render(createElement(SessionSettings, { epoch: "e", api: { sessionTitles: silent, saveSessionTitles: never, reviewSettings: silent, saveReviewSettings: never,
+    commitSettings: silent, saveCommitSettings: never, promptSuggestionSettings: silent, savePromptSuggestionSettings: never } }));
   assert.match(html, /<span class="eyebrow">Agent &amp; models<\/span><h1>Sessions<\/h1>/);
   assert.match(html, /How CodeAlta titles your sessions, reviews their changes and shows them in tabs\./);
   assert.match(html, /Loading…/);
   assert.equal(html.includes("settings-session-title-mode"), false);
+  assert.equal(html.includes("settings-prompt-suggestions"), false);
+});
+
+test("the card of the prompt suggestions is named and explained in every language", () => {
+  for (const key of ["Prompt suggestions", "Suggest the next prompt", "After a turn, the model suggests what you may write next, in the empty prompt: Tab or → takes it."] as const) {
+    assert.ok(key in messages, key);
+    for (const locale of locales) assert.ok(translate(locale, key).trim(), `${locale}: ${key}`);
+  }
 });

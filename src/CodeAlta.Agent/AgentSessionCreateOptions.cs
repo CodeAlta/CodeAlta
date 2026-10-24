@@ -58,11 +58,25 @@ public class AgentSessionCreateOptions
     public string? TitleInstructions { get; init; }
 
     /// <summary>
-    /// Gets or initializes whether the session takes the suggestions its provider makes for the next prompt of the
-    /// user (<see cref="AgentPromptSuggestionEvent"/>): a session somebody writes in, not one an agent drives.
-    /// Whether the provider makes suggestions is its own setting; one that has none ignores this.
+    /// Gets or initializes whether the session suggests the next prompt of the user once a turn ended
+    /// (<see cref="AgentPromptSuggestionEvent"/>): a session somebody writes in, in a host that shows suggestions, not
+    /// one an agent drives. The model is asked for a <see cref="AgentNextPromptTag"/> with
+    /// <see cref="PromptSuggestionInstructions"/>, while <see cref="PromptSuggestionsEnabled"/> says so.
     /// </summary>
     public bool PromptSuggestions { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the instructions that ask the model to end its final answer of a turn with a
+    /// <see cref="AgentNextPromptTag"/>. They are part of the developer instructions of a run only while the session
+    /// suggests the next prompt (<see cref="PromptSuggestions"/> and <see cref="PromptSuggestionsEnabled"/>).
+    /// </summary>
+    public string? PromptSuggestionInstructions { get; init; }
+
+    /// <summary>
+    /// Gets or initializes what says, when a run starts, whether the user wants suggestions now (their setting), so
+    /// that a change of the setting reaches the session with its next prompt. Null is always.
+    /// </summary>
+    public Func<bool>? PromptSuggestionsEnabled { get; init; }
 
     /// <summary>
     /// Gets or initializes the configured provider key.
