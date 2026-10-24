@@ -439,6 +439,8 @@ public sealed partial class SearchIndexStore
                 return command;
             }
 
+            // Each chunk looks its item up for the scope: its pages are read once with a cache that holds them.
+            await UseLargeCacheAsync(connection, token).ConfigureAwait(false);
             SearchVectorCoverage whole;
             await using (var command = Scoped("1 = 1", "SELECT count(*), count(v.embed_hash)"))
             {
@@ -555,13 +557,8 @@ public sealed partial class SearchIndexStore
             }
 
             var index = new SearchVectorIndex(set.Identity.Dimensions, (int)Math.Min(chunks, int.MaxValue / set.Identity.Dimensions));
-            await using (var command = connection.CreateCommand())
-            {
-                // Each vector looks its chunk and its item up: with the default cache of a few megabytes, the pages of the
-                // items are read again and again. The connection is this read's own, and closed after it.
-                command.CommandText = "PRAGMA cache_size = -65536";
-                await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
-            }
+            // Each vector looks its chunk and its item up.
+            await UseLargeCacheAsync(connection, token).ConfigureAwait(false);
 
             await using (var command = connection.CreateCommand())
             {
@@ -573,6 +570,11 @@ public sealed partial class SearchIndexStore
             return new SearchVectorLoad(set, index, epoch, cursor, chunks);
         }, cancellationToken).ConfigureAwait(false);
     }
+
+    // With the default cache of a few megabytes, a read that looks the items up chunk by chunk reads their pages again and
+    // again. The connection is the read's own, and closed after it.
+    private static ValueTask UseLargeCacheAsync(SqliteConnection connection, CancellationToken cancellationToken)
+        => ExecuteAsync(connection, "PRAGMA cache_size = -65536", cancellationToken);
 
     private const string VectorRowSelect = """
         SELECT c.id, i.kind, i.role, i.at, i.space_id, i.project_id, i.session_id, v.scale, v.code
