@@ -21,6 +21,10 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     // Which copy the file was when the rows were last known to be those of this file (ApplicationDatabase.ReadCopyNumberAsync).
     private const string CopySeenMetadataKey = "session_projection_cache_copy";
 
+    // A number every write of the rows raises, in its own transaction: a listing that reads it with the rows knows whether a
+    // writer this instance does not know of changed them since its copy in memory was made.
+    private const string RowsWrittenMetadataKey = "session_projection_cache_rows_written";
+
     private readonly ApplicationDatabase _database;
     private readonly SemaphoreSlim _schemaGate = new(initialCount: 1, maxCount: 1);
     // The view of each journal (its header and its last view state) as last read whole, with the stamp it was read at: an
@@ -37,6 +41,16 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     // file that was never replaced is generation 0. And the number of times the tables were made or made again.
     private int _rowsGeneration;
     private int _schemaEpoch;
+
+    // The rows of the list as last read, by session (copied on write: a reader enumerates the dictionary it took), for the
+    // file and the tables they were read from and the number of row writes they include. A listing reads again only the
+    // sessions this instance wrote since (_staleRows); a write it does not know of, other tables or another file drop the
+    // copy. _rowsChanges moves at every write of this instance: a read that saw it move does not keep what it read.
+    private readonly Lock _rowsGate = new();
+    private Dictionary<string, SqliteSessionProjectionRow>? _rowsCopy;
+    private (int Generation, int Epoch, long Written) _rowsCopyKey;
+    private readonly HashSet<string> _staleRows = new(StringComparer.OrdinalIgnoreCase);
+    private long _rowsChanges;
 
     public SessionJournalSqliteCache(CatalogOptions options)
         : this(ApplicationDatabase.Create(options ?? throw new ArgumentNullException(nameof(options))))
@@ -67,6 +81,11 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
     // How many times an upsert read the header and the last view state of a journal, for tests.
     internal int JournalViewReadCount => Volatile.Read(ref _journalViewReadCount);
+
+    // How many rows were read from the database, for tests.
+    internal int RowReadCount => Volatile.Read(ref _rowReadCount);
+
+    private int _rowReadCount;
 
     private int _journalViewReadCount;
 
@@ -205,6 +224,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             if (writeBack.Headers.Count > 0)
             {
                 await WriteAsync(
+                        [.. writeBack.Headers.Select(static header => header.Row.Summary.SessionId)],
                         async (connection, token) =>
                         {
                             foreach (var (row, json) in writeBack.Headers)
@@ -301,6 +321,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             try
             {
                 await WriteAsync(
+                        [.. batch.Select(static pending => pending.Projection.Projection.Summary.SessionId)],
                         async (connection, token) =>
                         {
                             foreach (var pending in batch)
@@ -324,6 +345,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     try
                     {
                         await WriteAsync(
+                                [pending.Projection.Projection.Summary.SessionId],
                                 (connection, token) => UpsertSessionCoreAsync(connection, transaction: null, pending.Projection, token),
                                 CancellationToken.None)
                             .ConfigureAwait(false);
@@ -362,6 +384,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         }
 
         await WriteAsync(
+                [sessionId],
                 async (connection, token) =>
                 {
                     await using var command = connection.CreateCommand();
@@ -461,6 +484,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         ArgumentNullException.ThrowIfNull(header);
 
         await WriteAsync(
+                [sessionId],
                 async (connection, token) =>
                 {
                     await using var command = connection.CreateCommand();
@@ -511,6 +535,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         ArgumentNullException.ThrowIfNull(write.State);
 
         await WriteAsync(
+                [write.SessionId],
                 async (connection, token) =>
                 {
                     await using var command = connection.CreateCommand();
@@ -604,6 +629,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         try
         {
             await WriteAsync(
+                    [sessionId],
                     async (connection, token) =>
                     {
                         await using var command = connection.CreateCommand();
@@ -796,6 +822,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     // share the file keep theirs. When the damage is not in these tables, the file itself is replaced.
     private async Task ClearTablesAsync(int generation, CancellationToken cancellationToken)
     {
+        MarkRowsChanged(sessionIds: null, written: null);
         try
         {
             try
@@ -821,53 +848,116 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
     // A write of the session list: it makes the tables when they are missing, and when SQLite finds them damaged
     // it clears them and runs the write once more.
-    private async Task WriteAsync(Func<SqliteConnection, CancellationToken, Task> write, CancellationToken cancellationToken)
+    private Task WriteAsync(Func<SqliteConnection, CancellationToken, Task> write, CancellationToken cancellationToken)
+        => WriteAsync(sessionIds: null, write, cancellationToken);
+
+    // sessionIds: the sessions whose rows the write changes, read again by the next listing; null when it is not known (the
+    // copy of the rows in memory is dropped).
+    private async Task WriteAsync(IReadOnlyCollection<string>? sessionIds, Func<SqliteConnection, CancellationToken, Task> write,
+        CancellationToken cancellationToken)
     {
         await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
-        await WriteCoreAsync(write, schemaOwned: false, cancellationToken).ConfigureAwait(false);
+        await WriteCoreAsync(write, schemaOwned: false, cancellationToken, sessionIds).ConfigureAwait(false);
     }
 
     // schemaOwned: the caller is making the schema and holds its gate, so a damage it meets is its own to handle.
-    private async Task WriteCoreAsync(Func<SqliteConnection, CancellationToken, Task> write, bool schemaOwned, CancellationToken cancellationToken)
+    // sessionIds: as for WriteAsync; null drops the copy of the rows in memory.
+    private async Task WriteCoreAsync(Func<SqliteConnection, CancellationToken, Task> write, bool schemaOwned, CancellationToken cancellationToken,
+        IReadOnlyCollection<string>? sessionIds = null)
     {
-        for (var attempt = 0; ; attempt++)
+        // Marked before, so that a listing that reads meanwhile does not keep what it read; and after, for one that read
+        // the rows as they were before the commit.
+        MarkRowsChanged(sessionIds, written: null);
+        long? written = null;
+        try
         {
-            var generation = _database.Generation;
-            var epoch = Volatile.Read(ref _schemaEpoch);
-            try
+            for (var attempt = 0; ; attempt++)
             {
-                await _database.WriteAsync<object?>(
-                        Owner,
-                        async (connection, token) =>
-                        {
-                            await write(connection, token).ConfigureAwait(false);
-                            return null;
-                        },
-                        recoverDamagedFile: false,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                return;
-            }
-            catch (SqliteException exception) when (attempt == 0 && !schemaOwned && ApplicationDatabase.IsDamaged(exception))
-            {
-                await RepairSchemaAsync(generation, epoch, cancellationToken).ConfigureAwait(false);
-                await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (SqliteException exception) when (ApplicationDatabase.IsLocked(exception))
-            {
-                throw CreateLockedException(exception);
-            }
-            catch (SqliteException) when (attempt == 0 && !schemaOwned && _database.Generation != generation)
-            {
-                // The file was replaced while the write ran (another owner met the damage, or the file went): the
-                // write ran on a file that has none of these tables. They are made, and the write runs once more.
-                await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (IsFileError(exception))
-            {
-                throw CreateFileException(exception);
+                var generation = _database.Generation;
+                var epoch = Volatile.Read(ref _schemaEpoch);
+                try
+                {
+                    written = await _database.WriteAsync<long?>(
+                            Owner,
+                            async (connection, token) =>
+                            {
+                                await write(connection, token).ConfigureAwait(false);
+                                return await CountRowsWrittenCoreAsync(connection, token).ConfigureAwait(false);
+                            },
+                            recoverDamagedFile: false,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                }
+                catch (SqliteException exception) when (attempt == 0 && !schemaOwned && ApplicationDatabase.IsDamaged(exception))
+                {
+                    await RepairSchemaAsync(generation, epoch, cancellationToken).ConfigureAwait(false);
+                    await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (SqliteException exception) when (ApplicationDatabase.IsLocked(exception))
+                {
+                    throw CreateLockedException(exception);
+                }
+                catch (SqliteException) when (attempt == 0 && !schemaOwned && _database.Generation != generation)
+                {
+                    // The file was replaced while the write ran (another owner met the damage, or the file went): the
+                    // write ran on a file that has none of these tables. They are made, and the write runs once more.
+                    await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (IsFileError(exception))
+                {
+                    throw CreateFileException(exception);
+                }
             }
         }
+        finally
+        {
+            MarkRowsChanged(sessionIds, written);
+        }
+    }
+
+    // Raises the number of row writes in the transaction of a write, and gives it.
+    private static async Task<long?> CountRowsWrittenCoreAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO session_projection_cache_metadata (key, value) VALUES ($key, '1')
+            ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT);
+            SELECT CAST(value AS INTEGER) FROM session_projection_cache_metadata WHERE key = $key;
+            """;
+        AddParameter(command, "$key", RowsWrittenMetadataKey);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is long written ? written : null;
+    }
+
+    // A write of the rows begins (written null) or ended (written: the number of row writes it made, null when it failed or
+    // is not known). The sessions it names are read again by the next listing; a write that names none drops the copy, and
+    // so does one whose number says that another writer wrote in between.
+    private void MarkRowsChanged(IReadOnlyCollection<string>? sessionIds, long? written)
+    {
+        lock (_rowsGate)
+        {
+            _rowsChanges++;
+            if (_rowsCopy is null) return;
+            if (sessionIds is null)
+            {
+                DropRowsCopy();
+                return;
+            }
+
+            foreach (var sessionId in sessionIds) _staleRows.Add(sessionId.Trim());
+            if (written is { } count)
+            {
+                if (count == _rowsCopyKey.Written + 1) _rowsCopyKey = _rowsCopyKey with { Written = count };
+                else DropRowsCopy();
+            }
+        }
+    }
+
+    // Under _rowsGate.
+    private void DropRowsCopy()
+    {
+        _rowsCopy = null;
+        _staleRows.Clear();
     }
 
     // A read of the session list; null when SQLite finds its tables damaged: the caller lists the journals again.
@@ -1015,44 +1105,160 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         CancellationToken cancellationToken)
         => await TryQuerySessionRowsAsync(sessionId, cancellationToken).ConfigureAwait(false) ?? [];
 
-    private Task<IReadOnlyList<SqliteSessionProjectionRow>?> TryQuerySessionRowsAsync(
+    private async Task<IReadOnlyList<SqliteSessionProjectionRow>?> TryQuerySessionRowsAsync(
         string? sessionId,
         CancellationToken cancellationToken)
-        => TryReadAsync<IReadOnlyList<SqliteSessionProjectionRow>?>(
-            async (connection, token) =>
-            {
-                await using var command = connection.CreateCommand();
-                command.CommandText = sessionId is null
-                    ? """
-                        SELECT *
-                        FROM session_projection_cache
-                        ORDER BY updated_at_utc_ticks DESC, session_id COLLATE NOCASE DESC;
-                        """
-                    : """
-                        SELECT *
-                        FROM session_projection_cache
-                        WHERE session_id = $session_id
-                        LIMIT 1;
-                        """;
-                if (sessionId is not null)
-                {
-                    AddParameter(command, "$session_id", sessionId.Trim());
-                }
+    {
+        if (sessionId is not null)
+        {
+            // One row is a few pages: it is read from the database.
+            return await TryReadAsync<IReadOnlyList<SqliteSessionProjectionRow>?>(
+                    async (connection, token) => await QueryRowsCoreAsync(connection, [sessionId.Trim()], token).ConfigureAwait(false),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
 
-                var rows = new List<SqliteSessionProjectionRow>();
-                await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, token).ConfigureAwait(false);
-                while (await reader.ReadAsync(token).ConfigureAwait(false))
+        // The list: from the copy in memory, with only the rows this instance wrote since read again; whole when the copy is
+        // not that of the rows as they are (another writer, other tables, another file).
+        Dictionary<string, SqliteSessionProjectionRow>? copy;
+        (int Generation, int Epoch, long Written) copyKey;
+        string[] stale;
+        long changes;
+        var generation = _database.Generation;
+        var epoch = Volatile.Read(ref _schemaEpoch);
+        lock (_rowsGate)
+        {
+            copy = _rowsCopy;
+            copyKey = _rowsCopyKey;
+            stale = [.. _staleRows];
+            changes = _rowsChanges;
+        }
+
+        var read = await TryReadAsync<(long Written, IReadOnlyList<SqliteSessionProjectionRow> Rows, bool Whole)?>(
+                async (connection, token) =>
                 {
-                    var row = ReadRow(reader);
-                    if (row is not null)
+                    // The number of row writes and the rows are read from one snapshot of the database.
+                    using var transaction = connection.BeginTransaction(deferred: true);
+                    var written = await ReadRowsWrittenCoreAsync(connection, token).ConfigureAwait(false);
+                    if (copy is not null && copyKey == (generation, epoch, written))
                     {
-                        rows.Add(row);
+                        return (written, stale.Length == 0 ? [] : await QueryRowsCoreAsync(connection, stale, token).ConfigureAwait(false), false);
                     }
-                }
 
-                return rows;
-            },
-            cancellationToken);
+                    return (written, await QueryRowsCoreAsync(connection, sessionIds: null, token).ConfigureAwait(false), true);
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (read is not { } result)
+        {
+            return null;
+        }
+
+        Dictionary<string, SqliteSessionProjectionRow> rows;
+        if (result.Whole)
+        {
+            rows = new Dictionary<string, SqliteSessionProjectionRow>(result.Rows.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var row in result.Rows) rows[row.Summary.SessionId.Trim()] = row;
+        }
+        else
+        {
+            rows = new Dictionary<string, SqliteSessionProjectionRow>(copy!, StringComparer.OrdinalIgnoreCase);
+            foreach (var id in stale) rows.Remove(id);
+            foreach (var row in result.Rows) rows[row.Summary.SessionId.Trim()] = row;
+        }
+
+        lock (_rowsGate)
+        {
+            // Kept only when no write of this instance began or ended meanwhile: a write that did is read again next time.
+            if (_rowsChanges == changes && _database.Generation == generation && Volatile.Read(ref _schemaEpoch) == epoch)
+            {
+                _rowsCopy = rows;
+                _rowsCopyKey = (generation, epoch, result.Written);
+                _staleRows.ExceptWith(stale);
+            }
+        }
+
+        return result.Whole ? result.Rows : OrderRows(rows.Values);
+    }
+
+    // The list in the order of the query of the whole list: the most recently updated first, then by session without case.
+    private static List<SqliteSessionProjectionRow> OrderRows(IEnumerable<SqliteSessionProjectionRow> rows)
+        => [.. rows.OrderByDescending(static row => row.Summary.UpdatedAt.UtcTicks)
+            .ThenByDescending(static row => row.Summary.SessionId.Trim(), NoCaseComparer.Instance)];
+
+    // The rows of some sessions, or of all (sessionIds null, in the order of the list).
+    private async ValueTask<IReadOnlyList<SqliteSessionProjectionRow>> QueryRowsCoreAsync(
+        SqliteConnection connection,
+        IReadOnlyList<string>? sessionIds,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        if (sessionIds is null)
+        {
+            command.CommandText = """
+                SELECT *
+                FROM session_projection_cache
+                ORDER BY updated_at_utc_ticks DESC, session_id COLLATE NOCASE DESC;
+                """;
+        }
+        else
+        {
+            var names = new string[sessionIds.Count];
+            for (var index = 0; index < sessionIds.Count; index++)
+            {
+                names[index] = "$session_" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                AddParameter(command, names[index], sessionIds[index].Trim());
+            }
+
+            command.CommandText = $"SELECT * FROM session_projection_cache WHERE session_id IN ({string.Join(", ", names)});";
+        }
+
+        var rows = new List<SqliteSessionProjectionRow>();
+        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            Interlocked.Increment(ref _rowReadCount);
+            var row = ReadRow(reader);
+            if (row is not null)
+            {
+                rows.Add(row);
+            }
+        }
+
+        return rows;
+    }
+
+    private static async Task<long> ReadRowsWrittenCoreAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT CAST(value AS INTEGER) FROM session_projection_cache_metadata WHERE key = $key;";
+        AddParameter(command, "$key", RowsWrittenMetadataKey);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is long written ? written : 0;
+    }
+
+    // The order of SQLite's NOCASE: ASCII letters compared without case, every other character as it is.
+    private sealed class NoCaseComparer : IComparer<string>
+    {
+        public static readonly NoCaseComparer Instance = new();
+
+        public int Compare(string? x, string? y)
+        {
+            if (ReferenceEquals(x, y)) return 0;
+            if (x is null) return -1;
+            if (y is null) return 1;
+            var length = Math.Min(x.Length, y.Length);
+            for (var index = 0; index < length; index++)
+            {
+                var left = Lower(x[index]);
+                var right = Lower(y[index]);
+                if (left != right) return left.CompareTo(right);
+            }
+
+            return x.Length.CompareTo(y.Length);
+        }
+
+        private static char Lower(char value) => value is >= 'A' and <= 'Z' ? (char)(value + 32) : value;
+    }
 
     private async Task<int> PruneRowsMissingFromDiskAsync(
         HashSet<string> journalPathsOnDisk,

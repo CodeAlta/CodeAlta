@@ -527,6 +527,8 @@ Each row also keeps the whole last state of its session (`local_state_json`, ver
 | Read from the journal | Only for a session without a row, a row that is not the projection of its journal as it is (another process wrote it), a row of a cache of version 6 (no state yet), or a database that cannot be read now. When the row is the projection of the journal at the stamp of the read, the state read is written to it (`FillLocalStateAsync`, with the count of pending queued prompts of a row of version 5), so that the next read, also after a restart, takes it from the row. The rows of a cache of version 6 stay when the column is added. |
 | Authority | The journal stays the record of the session: the row is made again from it when the database is created, deleted, damaged or replaced. Nothing keeps the state in memory beside the row. |
 
+The rows of the list are kept in memory once read (`SessionJournalSqliteCache`): a listing reads again from the database only the rows of the sessions this instance wrote since, which each write names (`WriteAsync(sessionIds, …)`; a write that names none, such as a rebuild or a repair, drops the copy). Every write of the rows raises `session_projection_cache_rows_written` in the metadata table in its own transaction, and a listing reads it in the same snapshot as the rows: when another writer changed them, the copy is dropped and every row is read again. A lookup of one session reads its row from the database.
+
 The session index (`SessionJournalIndexStore`, owner and table prefix `session_journal_index`, version 1, behind `IAgentSessionJournalIndex`) keeps what normal operation needs of a journal without reading it:
 
 | Table | Content |
