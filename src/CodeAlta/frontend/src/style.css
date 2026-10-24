@@ -2214,10 +2214,16 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .rename-form .bp6-form-helper-text { overflow-wrap: anywhere; }
 .rename-actions { display: flex; justify-content: flex-end; gap: 6px; }
 /* The form of a new session beside the row of its project, or of the chats: wider, for the chips of its choices. */
-.new-session-form { grid-template-columns: minmax(0, 1fr); width: min(380px, calc(100vw - 32px)); }
+.new-session-form { grid-template-columns: minmax(0, 1fr); width: min(420px, calc(100vw - 32px)); }
 .new-session-form > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .new-session-choices { display: grid; gap: 8px; justify-items: start; min-width: 0; }
 .new-session-choices > .bp6-popover-target, .new-session-choices .project-context { max-width: 100%; }
+/* The chip of the choices names each one whole, the provider of the model too: where the line is too short, it goes on
+   on a second line rather than cut a name. */
+.new-session-choices .composer-selection.bp6-button { height: auto; }
+.new-session-choices .composer-selection .bp6-button-text { flex-wrap: wrap; gap: 2px 0; overflow: visible; }
+.new-session-choices .composer-selection-part { flex: none; max-width: 100%; }
+.new-session-choices .composer-selection-model-line { flex-wrap: nowrap; height: auto; }
 /* The two rows of chips start at the same place: the first one is drawn without its border until it is used. */
 .new-session-choices > .bp6-popover-target { margin-left: -6px; }
 /* The heading names the project: its chips say where the session works, not what is changed there now. */
@@ -2781,8 +2787,7 @@ span.workspace-chip-part.workspace-chip-changes { display: inline-flex; align-it
 .composer-selection-part + .composer-selection-part::before { content: "·"; margin: 0 3px 0 4px; color: var(--muted); }
 .composer-selection-agent svg { color: var(--accent); }
 /* `Provider / Model` in reverse order, one line high: the provider wraps whole to the hidden second line where there is
-   no room for it, never cut beside a cut model name. Elsewhere than in the prompt surface (the form of a new session),
-   it gives way before the other parts are cut. */
+   no room for it, never cut beside a cut model name. The form of a new session shows it always (above). */
 .composer-selection-model { flex-shrink: 1000; }
 .composer-selection-model-line { display: inline-flex; flex: 0 1 auto; flex-flow: row-reverse wrap; justify-content: flex-end; align-items: center; gap: 4px 5px; min-width: 0; height: 18px; overflow: hidden; }
 .composer-selection-model-unit, .composer-selection-provider { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }

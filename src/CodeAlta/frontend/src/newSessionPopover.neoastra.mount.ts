@@ -34,6 +34,11 @@ const permissionModes = (providerId: string | null) => providerId === "alternate
 const defaultPermissionMode = (providerId: string | null) => providerId === "alternate" ? "acceptEdits" : null;
 export const workspace = {
   ...baseWorkspace,
+  // An agent prompt with a name too long for the chip to hold on one line.
+  draftPrompts: async (request: { expectedHostEpoch: string; projectId: string | null; projectPath: string | null }) => ({
+    status: "ok", hostEpoch: request.expectedHostEpoch, projectId: request.projectId, projectPath: request.projectPath,
+    prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }, { id: "reviewer", name: "Reviewer of pull requests" }],
+  }),
   draftPermissionModes: async (request: WorkspaceDraftPermissionModesRequest): Promise<WorkspaceDraftPermissionModesResponse> => {
     fixture.permissionReads.push(request.providerId);
     return { status: "ok", hostEpoch: request.expectedHostEpoch, providerId: request.providerId,

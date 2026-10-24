@@ -136,7 +136,7 @@ test("a new session is created from a form beside the row of its project or of t
     assert.ok(wide.left >= row.right && wide.left - row.right < 24 && Math.abs(wide.top - row.top) < 24, `beside its row: ${JSON.stringify({ row, wide })}`);
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(projectPlus)}).getAttribute("aria-expanded")`), "true");
     assert.equal(await overflows(), false, "nothing overflows the form");
-    assert.equal(wide.width, 380, "the width the form is given");
+    assert.equal(wide.width, 420, "the width the form is given");
     assert.equal(await remembered(), null, "the defaults that are shown are not stored as choices");
 
     // The pickers of the chips are popovers and lists of their own: a choice in one of them keeps the form open.
@@ -179,6 +179,20 @@ test("a new session is created from a form beside the row of its project or of t
     await press(".composer-reasoning-slider .bp6-slider-track", 0.01);
     await until(`/Plan.*New model.*Low.*Bypass permissions$/.test(document.querySelector(${JSON.stringify(chip)}).textContent)
       && document.querySelector(${JSON.stringify(chip)}).title.includes("Provider: Alternate")`, "the chip names what was chosen, the provider in its tooltip");
+    // A name too long for one line is not cut: the chip goes on on a second line, and names the provider of the model whole.
+    await select("#composer-agent-create", "reviewer");
+    await until(`/^Reviewer of pull requests.*New model.*Alternate.*Low/.test(document.querySelector(${JSON.stringify(chip)}).textContent)`, "the long agent prompt");
+    assert.equal(await overflows(), false, "no name of the chip is cut");
+    // A name cut with an ellipsis is as wide as its box, not wider: the width of its text tells.
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll(${JSON.stringify(`${chip} .composer-selection-part > span, ${chip} .composer-selection-model-name, ${chip} .composer-selection-provider-name`)})]
+      .filter(node => { const range = document.createRange(); range.selectNodeContents(node); return range.getBoundingClientRect().width > node.getBoundingClientRect().width + 1; })
+      .map(node => node.textContent)`), [], "every name of the chip is whole");
+    assert.equal(await evaluate(`(() => { const chip = document.querySelector(${JSON.stringify(chip)}), name = chip.querySelector(".composer-selection-provider-name"),
+      line = name.closest(".composer-selection-model-line").getBoundingClientRect(), box = name.getBoundingClientRect();
+      return box.width > 0 && box.top >= line.top - 1 && box.bottom <= line.bottom + 1 && chip.getBoundingClientRect().height > 40; })()`), true,
+      "the provider is shown beside its model, and the chip has two lines");
+    await select("#composer-agent-create", "plan");
+    await until(`/^Plan.*New model.*Low.*Bypass permissions$/.test(document.querySelector(${JSON.stringify(chip)}).textContent)`, "the agent prompt chosen before");
     assert.equal(await shown(form), true, "the form stayed open through every choice");
     // Escape in the choices closes them alone.
     await escape();
@@ -342,7 +356,7 @@ test("a new session is created from a form beside the row of its project or of t
     const narrow = (await box(".new-session-popover"))!;
     assert.ok(narrow.left >= 0 && narrow.top >= 0 && narrow.right <= 900 && narrow.bottom <= 650, `in the page: ${JSON.stringify(narrow)}`);
     assert.equal(await overflows(), false, "nothing overflows the narrow form");
-    assert.equal(narrow.width, 380);
+    assert.equal(narrow.width, 420);
     // The choices of a chip open over the form, and are whole in the page too.
     await press(chip);
     await until("!!document.querySelector('#composer-agent-create')", "the choices of the chip");
