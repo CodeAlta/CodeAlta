@@ -168,13 +168,16 @@ internal sealed class ModelCatalogService(
     }
 
     // Why a provider is not ready, as one of the codes the page has a text for: the message of the provider stays here.
-    private static string? Reason(ModelProviderStateSnapshot state)
+    internal static string? Reason(ModelProviderStateSnapshot state)
         => state.Availability is ModelProviderAvailability.Failed or ModelProviderAvailability.Unsupported
             ? state.ErrorCategory switch
             {
                 "claude-code-signed-out" => "claude-code-signed-out",
                 "claude-code-not-found" => "claude-code-not-found",
                 "claude-code-unavailable" => "claude-code-unavailable",
+                "acp-signed-out" => "acp-signed-out",
+                "acp-not-installed" => "acp-not-installed",
+                "acp-unavailable" => "acp-unavailable",
                 _ => null,
             }
             : null;
