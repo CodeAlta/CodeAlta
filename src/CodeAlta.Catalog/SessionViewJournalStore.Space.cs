@@ -55,6 +55,5 @@ public sealed partial class SessionViewJournalStore
         if (string.IsNullOrWhiteSpace(header.Title)) moved.Title = string.Empty;
         await store.CommitProviderSelectionAsync(original, original.Summary, original.State, CreateHeaderEvent(moved).ToJson(),
             [CreateStateEvent(moved, local).ToJson()], cancellationToken).ConfigureAwait(false);
-        InvalidateLatestStateCache(GetPath(session.SessionId, session.CreatedAt));
     }
 }

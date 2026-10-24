@@ -154,6 +154,52 @@ internal sealed class AgentSessionJournalFile
             .ConfigureAwait(false);
     }
 
+    // Appends like AppendLinesWithRequiredFirstLineAsync, under the journal gate, and says what the journal was just before
+    // and just after. `isFirstLineKnown` is asked with the stamp of the journal before the write: when it answers that the
+    // journal is known to start with the expected line at that stamp, the first line is not read again. Otherwise it is
+    // checked (and written when it is missing), and the result gives the line the journal starts with.
+    public async Task<JournalFirstLineAppend> AppendLinesWithRequiredFirstLineTrackedAsync(
+        string path,
+        string firstLine,
+        IReadOnlyList<string> lines,
+        Encoding encoding,
+        Func<string?, bool> isExpectedFirstLine,
+        Func<JournalStamp?, bool> isFirstLineKnown,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(firstLine);
+        ArgumentNullException.ThrowIfNull(lines);
+        ArgumentNullException.ThrowIfNull(encoding);
+        ArgumentNullException.ThrowIfNull(isExpectedFirstLine);
+        ArgumentNullException.ThrowIfNull(isFirstLineKnown);
+
+        var directory = Path.GetDirectoryName(path)
+            ?? throw new InvalidOperationException($"Path '{path}' did not resolve to a parent directory.");
+        Directory.CreateDirectory(directory);
+
+        return await WithPathLockAsync(
+                path,
+                async () =>
+                {
+                    var before = JournalStamp.Read(path);
+                    string? first = null;
+                    if (!isFirstLineKnown(before))
+                    {
+                        first = await EnsureFirstLineCoreAsync(path, firstLine, encoding, isExpectedFirstLine, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    if (lines.Count > 0)
+                    {
+                        await AppendLinesCoreAsync(path, lines, encoding, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    return new JournalFirstLineAppend(before, JournalStamp.Read(path), first);
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public Task AppendLineAsync(
         string path,
         string line,
@@ -377,7 +423,8 @@ internal sealed class AgentSessionJournalFile
             .ConfigureAwait(false);
     }
 
-    private static async Task EnsureFirstLineCoreAsync(
+    // Returns the line the journal starts with afterwards: the expected one it had, or the one written.
+    private static async Task<string> EnsureFirstLineCoreAsync(
         string path,
         string firstLine,
         Encoding encoding,
@@ -387,7 +434,7 @@ internal sealed class AgentSessionJournalFile
         var directory = Path.GetDirectoryName(path)
             ?? throw new InvalidOperationException($"Path '{path}' did not resolve to a parent directory.");
 
-        await RetryFileOperationAsync(
+        return await RetryFileOperationAsync(
                 async () =>
                 {
                     await using var stream = new FileStream(
@@ -408,17 +455,18 @@ internal sealed class AgentSessionJournalFile
 
                     if (isExpectedFirstLine(existingFirstLine))
                     {
-                        return;
+                        return existingFirstLine!;
                     }
 
                     stream.Position = 0;
                     if (stream.Length == 0)
                     {
                         await WriteFirstLineAsync(stream, firstLine, encoding, cancellationToken).ConfigureAwait(false);
-                        return;
+                        return firstLine;
                     }
 
                     await PrependFirstLineAsync(stream, directory, path, firstLine, encoding, cancellationToken).ConfigureAwait(false);
+                    return firstLine;
                 },
                 cancellationToken)
             .ConfigureAwait(false);
@@ -597,6 +645,10 @@ internal readonly record struct JournalStamp(DateTime LastWriteTimeUtc, long Len
         return info.Exists ? new JournalStamp(info.LastWriteTimeUtc, info.Length) : null;
     }
 }
+
+// An append that required a first line, seen from its journal gate: the stamps of the journal just before and just after,
+// and the line the journal starts with when it was read or written (null when it was known and not read).
+internal readonly record struct JournalFirstLineAppend(JournalStamp? Before, JournalStamp? After, string? FirstLine);
 
 // An append seen from its journal gate: the stamps of the journal just before and just after, and the bytes written.
 internal readonly record struct JournalAppend(JournalStamp? Before, JournalStamp? After, long Written)
