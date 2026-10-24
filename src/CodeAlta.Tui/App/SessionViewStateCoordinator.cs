@@ -391,6 +391,8 @@ internal sealed class SessionViewStateCoordinator
             CreatedAt = prompt.CreatedAt,
             DrainedAt = prompt.DrainedAt,
             LastError = prompt.LastError,
+            SubmittingRuntime = prompt.SubmittingRuntime,
+            InterruptedSends = prompt.InterruptedSends,
         }).ToList() ?? [];
 
     private static string? NormalizeThemeSchemeName(string? themeSchemeName)

@@ -288,6 +288,8 @@ public sealed partial class SessionViewJournalStore
                 CreatedAt = prompt.CreatedAt,
                 DrainedAt = prompt.DrainedAt,
                 LastError = prompt.LastError,
+                SubmittingRuntime = prompt.SubmittingRuntime,
+                InterruptedSends = prompt.InterruptedSends,
             }).ToList() ?? [],
         };
     }
@@ -577,6 +579,7 @@ public sealed partial class SessionViewJournalStore
                     CreatedAt = prompt.CreatedAt,
                     DrainedAt = prompt.DrainedAt,
                     LastError = prompt.LastError,
+                    InterruptedSends = prompt.InterruptedSends,
                 });
             }
         }

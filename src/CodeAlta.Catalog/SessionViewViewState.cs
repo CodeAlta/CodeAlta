@@ -482,6 +482,19 @@ public sealed class SessionViewQueuedPrompt
     public string? LastError { get; set; }
 
     /// <summary>
+    /// Gets or sets the runtime that marked the prompt <c>submitting</c>: a runtime that finds the mark of another one, or
+    /// none, knows that the send was cut by the end of the process that made it.
+    /// </summary>
+    [JsonPropertyName("submitting_runtime")]
+    public string? SubmittingRuntime { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many sends of the prompt were cut by the end of the process that made them; null for none.
+    /// </summary>
+    [JsonPropertyName("interrupted_sends")]
+    public int? InterruptedSends { get; set; }
+
+    /// <summary>
     /// Validates the queued prompt record.
     /// </summary>
     /// <exception cref="ArgumentException">Thrown when required fields are invalid.</exception>
