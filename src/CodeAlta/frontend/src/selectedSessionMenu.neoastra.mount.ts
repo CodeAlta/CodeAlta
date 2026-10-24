@@ -14,7 +14,7 @@ const statistics: PluginUiWindowButton = {
   badge: "none", count: 0, tone: "Info", hidden: false, disabled: false, tooltip: null,
 };
 const board: CanvasItem = { pluginKey: "builtin:fixture", plugin: "Fixture", package: null, id: "board", title: "Board",
-  description: null, icon: null, iconData: null, scope: "Session", input: false, actions: 0, describes: false };
+  description: null, icon: null, iconData: null, scope: "Session", input: false, actions: 0, describes: false, placement: "Tab" };
 const state = {
   reads: [] as PluginUiButtonsRequest[], invoked: [] as PluginUiInvokeRequest[], hold: false,
   pending: [] as { request: PluginUiButtonsRequest; signal?: AbortSignal; resolve: (reply: PluginUiButtonsResponse) => void }[],

@@ -236,6 +236,89 @@ public sealed partial class PluginRuntimeManager
         return results;
     }
 
+    /// <summary>
+    /// Starts or stops a built-in plugin as the configuration says now, so that turning it on or off in the settings applies
+    /// without a restart: one that is turned on and does not run is started, one that is turned off is stopped.
+    /// </summary>
+    /// <param name="id">The id of the built-in plugin, the one <c>[plugins.&lt;id&gt;]</c> of the configuration names.</param>
+    /// <param name="cancellationToken">Stops the wait for another change; once the change began, it runs to its end.</param>
+    /// <returns>
+    /// <see cref="PluginPackageChange.Started"/> or <see cref="PluginPackageChange.Stopped"/> when it changed,
+    /// <see cref="PluginPackageChange.StartFailed"/> when it did not start, <see cref="PluginPackageChange.Disabled"/> when it is
+    /// turned off and was not running, and <see cref="PluginPackageChange.Unchanged"/> when it already runs or the host has no
+    /// built-in plugin of that id.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is empty.</exception>
+    /// <exception cref="InvalidOperationException">The runtime has not started, is closing, or the caller is a plugin that is being started or a callback of a plugin.</exception>
+    public async ValueTask<PluginPackageChange> ApplyBuiltInAsync(string id, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        var change = PluginPackageChange.Unchanged;
+        string? changed = null;
+        await ChangeAsync(async options =>
+        {
+            if (options.BuiltIns.FirstOrDefault(definition => string.Equals(definition.Id, id, StringComparison.OrdinalIgnoreCase)) is not { } builtIn) return;
+            var descriptor = builtIn.CreateDescriptor();
+            ActivePluginInstance[] running;
+            lock (_lock) running = [.. _activePlugins.Where(plugin => plugin.SourcePackage is null && string.Equals(plugin.Descriptor.RuntimeKey, descriptor.RuntimeKey, StringComparison.Ordinal))];
+            var config = LoadConfig(options);
+            var enabled = config.Succeeded && new PluginRuntimeConfigResolver().ResolveBuiltInPlugin(builtIn, config.GlobalConfig!, options.SafeMode).Enabled;
+            var diagnostics = new List<PluginRuntimeDiagnostic>(config.Diagnostics);
+            if (!enabled)
+            {
+                if (running.Length == 0)
+                {
+                    change = PluginPackageChange.Disabled;
+                    return;
+                }
+
+                await RetireAsync(running, builtIn.Id, path: null, diagnostics).ConfigureAwait(false);
+                change = PluginPackageChange.Stopped;
+            }
+            else if (running.Length > 0)
+            {
+                return;
+            }
+            else if (CreateUnsupportedFrontendDiagnostic(descriptor, options.Frontend, builtIn.Id, null) is { } unsupported)
+            {
+                diagnostics.Add(unsupported);
+                change = PluginPackageChange.Disabled;
+            }
+            else
+            {
+                // From here the change runs to its end, whatever happens to the caller.
+                var activation = await new PluginRuntimeActivator(_registry).ActivateAsync(
+                        new DiscoveredPluginType { Type = builtIn.ResolvePluginType(), Descriptor = descriptor },
+                        sourcePackage: null,
+                        loadContext: null,
+                        new PluginActivationOptions { HostInfo = _hostInfo!, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments },
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                diagnostics.AddRange(activation.Diagnostics);
+                if (activation.ActivePlugin is { } active)
+                {
+                    OwnActivation(active);
+                    var startup = await Adapter.RunStartupAsync([active], options.RawArguments, CreateAdapterOptions(options), CancellationToken.None).ConfigureAwait(false);
+                    diagnostics.AddRange(startup.Diagnostics);
+                    change = PluginPackageChange.Started;
+                }
+                else
+                {
+                    change = PluginPackageChange.StartFailed;
+                }
+            }
+
+            // What was said of the plugin before (skipped at the start, an activation that failed) goes with this change. A
+            // built-in plugin has no file: its diagnostics name no path, and those of a source package of the same id do.
+            _diagnostics.RemoveWhere(diagnostic => string.Equals(diagnostic.RuntimeKey, descriptor.RuntimeKey, StringComparison.Ordinal)
+                || (diagnostic.Path is null && string.Equals(diagnostic.PackageId, builtIn.Id, StringComparison.OrdinalIgnoreCase)));
+            _diagnostics.AddRange(diagnostics);
+            changed = builtIn.Id;
+        }, cancellationToken).ConfigureAwait(false);
+        if (changed is not null && change is PluginPackageChange.Started or PluginPackageChange.Stopped or PluginPackageChange.StartFailed) RaiseChanged([changed]);
+        return change;
+    }
+
     // One change at a time, owned like the start: see RunOwnedChangeAsync.
     private async Task ChangeAsync(Func<PluginRuntimeManagerOptions, Task> body, CancellationToken cancellationToken)
     {
@@ -415,7 +498,7 @@ public sealed partial class PluginRuntimeManager
                     discovered,
                     package,
                     load.LoadContext,
-                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), ApplicationDatabase = ApplicationDatabase },
+                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments },
                     cancellationToken)
                 .ConfigureAwait(false);
             if (activation.ActivePlugin is not null)
@@ -466,21 +549,29 @@ public sealed partial class PluginRuntimeManager
 
     // Stops the active plugins of a package and returns their keys. One that does not stop in time, or fails
     // to, is left to end by itself: the close of the runtime still joins it.
-    private async Task<IReadOnlyList<string>> RetireAsync(SourcePluginPackage package, List<PluginRuntimeDiagnostic> diagnostics)
+    private Task<IReadOnlyList<string>> RetireAsync(SourcePluginPackage package, List<PluginRuntimeDiagnostic> diagnostics)
     {
         ActivePluginInstance[] previous;
+        lock (_lock) previous = [.. _activePlugins.Where(plugin => SamePackage(plugin.SourcePackage, package))];
+        return RetireAsync(previous, package.PackageId, package.PackageDirectory, diagnostics);
+    }
+
+    // Stops the given active plugins, those of a package or a built-in plugin, and returns their keys.
+    private async Task<IReadOnlyList<string>> RetireAsync(ActivePluginInstance[] plugins, string packageId, string? path, List<PluginRuntimeDiagnostic> diagnostics)
+    {
+        var previous = new List<ActivePluginInstance>();
         lock (_lock)
         {
-            previous = [.. _activePlugins.Where(plugin => SamePackage(plugin.SourcePackage, package))];
-            foreach (var plugin in previous)
+            foreach (var plugin in plugins)
             {
-                _activePlugins.Remove(plugin);
+                if (!_activePlugins.Remove(plugin)) continue;
+                previous.Add(plugin);
                 _retired.Add(plugin);
             }
         }
 
         var keys = new List<string>();
-        foreach (var plugin in previous.Reverse())
+        foreach (var plugin in Enumerable.Reverse(previous))
         {
             keys.Add(plugin.Descriptor.RuntimeKey);
             // The session that asked for the change may hold a tool of this version: no wait for its collection.
@@ -493,8 +584,8 @@ public sealed partial class PluginRuntimeManager
                     diagnostics.Add(PluginRuntimeDiagnostic.Warning(
                         PluginRuntimeDiagnosticSource.Unload,
                         $"The previous version of '{plugin.Descriptor.DisplayName ?? plugin.Descriptor.TypeName}' did not stop within {PreviousVersionWait.TotalSeconds:0} seconds: it is left to end by itself.",
-                        package.PackageId,
-                        package.PackageDirectory));
+                        packageId,
+                        path));
                     continue;
                 }
 
@@ -505,8 +596,8 @@ public sealed partial class PluginRuntimeManager
                 diagnostics.Add(PluginRuntimeDiagnostic.Warning(
                     PluginRuntimeDiagnosticSource.Unload,
                     $"The previous version of '{plugin.Descriptor.DisplayName ?? plugin.Descriptor.TypeName}' failed to stop: {exception.Message}",
-                    package.PackageId,
-                    package.PackageDirectory) with
+                    packageId,
+                    path) with
                 {
                     Exception = PluginExceptionInfo.FromException(exception),
                 });
@@ -602,7 +693,12 @@ public sealed partial class PluginRuntimeManager
         string[] changed = [.. results
             .Where(static result => result.Change is PluginPackageChange.Started or PluginPackageChange.Reloaded or PluginPackageChange.Stopped or PluginPackageChange.StartFailed)
             .Select(static result => result.Status.Package.PackageId)];
-        if (changed.Length == 0) return;
+        if (changed.Length > 0) RaiseChanged(changed);
+    }
+
+    // A listener that fails does not fail the change: it is a diagnostic of the runtime.
+    private void RaiseChanged(IReadOnlyList<string> changed)
+    {
         try
         {
             Changed?.Invoke(this, new PluginRuntimeChangedEventArgs(changed));

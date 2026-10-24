@@ -499,6 +499,7 @@ You do not write anything to make a canvas easy to find:
 - The search (`Ctrl+P`) has a command "Open canvas: <title>" for each canvas.
 - The menu of a project row lists the canvases about a project, and the menu of a session row those about a session.
 - Settings > Plugins lists the canvases of each plugin.
+- A canvas can be the settings page of its plugin instead of a tab (see "A settings page" below).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-canvases.webp" alt="The Canvases page of CodeAlta Desktop: a card for Statistics, for the board and for the three checklists of the samples, each with its scope, Application, Project or Session, and an Open button" loading="lazy">
@@ -506,6 +507,29 @@ You do not write anything to make a canvas easy to find:
 </figure>
 
 Agents use `alta canvas`: `list` and `show` read what canvases exist and what each shows, `invoke` runs an action, and `open`, `focus` and `close` act on a tab. A tab belongs to a space. When an agent opens a canvas for a space that you are not looking at, the tab is added to that space and the window stays where it is.
+
+### A settings page
+
+A plugin whose settings do not fit a line of configuration gives them a page of Settings: a canvas declared with `Placement = PluginCanvasPlacement.Settings`. Settings lists it in its **Extensions** group, after Plugins and MCP Servers, with the title and the icon of the canvas, and the row of the plugin in **Settings > Plugins** gets a gear button that goes to it. The page is drawn as a tab is (the fragment, a script, the calls of `canvas.Rpc`, Blueprint), under the title and the description of the canvas:
+
+```csharp
+yield return new PluginCanvasContribution
+{
+    Id = "settings",
+    Title = "Board",
+    Description = "The columns of the board and who sees it.",
+    Icon = "kanban",
+    Placement = PluginCanvasPlacement.Settings,
+    Open = (canvas, ct) =>
+    {
+        canvas.Rpc.Handle<NoInput, BoardSettings>("board.settings.get", (_, _) => ValueTask.FromResult(_settings));
+        canvas.Rpc.Handle<BoardSettings, BoardSettings>("board.settings.set", async (value, ct) => await SaveAsync(value, ct));
+        return ValueTask.FromResult(PluginCanvasView.Html("<div></div>") with { Script = PluginScript.File("ui/settings.js") });
+    },
+};
+```
+
+A settings page is about the application (`Scope` stays `Application`) and has one instance, whatever the space you look at. A plugin has one at most: CodeAlta leaves out a second one, or one of another scope, with a warning in its log. The page is listed while the plugin runs, and it is not on the Canvases page, in the search or in the menus. `Services.Canvases.OpenAsync("settings")`, `alta.host.openCanvas("settings")` and `alta canvas open` open Settings on it. The settings page of the Mobile plugin is one: **Settings > Extensions > Mobile**.
 
 ## Agent tools and `alta` commands
 
@@ -567,6 +591,7 @@ Override `InitializeAsync`, `OnActivatedAsync`, `OnDeactivatingAsync` and `Dispo
   ```
 
   `ReadAsync` reads without waiting for anyone, and `WriteAsync` writes in one transaction, in turn with the other writers: keep a write short. The data is kept when the plugin is turned off.
+- `Services.Spaces.GetAssignedSpaces()` gives the [spaces](../spaces.md#what-a-space-has) the plugin is assigned to, as Settings says them now; an empty list is every space. CodeAlta already leaves the plugin out of the other spaces: read it for what the plugin serves itself. Do not read `config.toml` yourself.
 - `Logger` writes to the CodeAlta log.
 - Do not keep static references to host objects, and do not put secrets in plugin source.
 

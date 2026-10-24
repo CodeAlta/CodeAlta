@@ -32,6 +32,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             group,
             "A canvas is declared by a plugin and shows what the plugin keeps: a board, a checklist, a dashboard. The plugin holds the state, so an action works whether the tab is open or not.",
             "<id> is `plugin-key/canvas-id`, or the canvas id alone when only one plugin declares it. A canvas is about the application, a project (`--project`) or a session (`--session`).",
+            "A canvas listed with `placement: settings` is the settings page of its plugin: `open` opens Settings on that page instead of a tab.",
             "Create a canvas with `alta plugin create`, as the `codealta-plugin-runtime` skill says; the window lists what plugins declare in its Canvases page.",
             "Examples: `alta canvas list`; `alta canvas show checklist`; `alta canvas open checklist --project CodeAlta`; `alta canvas invoke checklist tick --project CodeAlta --stdin`.");
         return group;
@@ -292,7 +293,11 @@ internal sealed partial class BuiltInAltaCommandContributor
             ["input"] = canvas.InputSchema is not null,
             ["actions"] = canvas.Actions.Count,
             ["describes"] = canvas.Describes,
+            ["placement"] = PlacementOf(canvas),
         };
+
+    // A tab is what a canvas is unless it says otherwise: only another placement is written.
+    private static string? PlacementOf(AltaCanvasDeclaration canvas) => canvas.Placement == AltaCanvasPlacements.Tab ? null : canvas.Placement;
 
     private static bool CanvasOfPlugin(AltaCanvasDeclaration canvas, string? plugin)
         => plugin is null || string.Equals(canvas.PluginKey, plugin, StringComparison.OrdinalIgnoreCase) || string.Equals(canvas.Plugin, plugin, StringComparison.OrdinalIgnoreCase);
@@ -545,6 +550,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             ["pluginKey"] = canvas.PluginKey,
             ["canvasId"] = canvas.Id,
             ["instanceId"] = opened.InstanceId,
+            ["placement"] = PlacementOf(canvas),
             ["spaceId"] = opened.SpaceId,
             ["space"] = spaceName,
             ["shown"] = opened.Shown,

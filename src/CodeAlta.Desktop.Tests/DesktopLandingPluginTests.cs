@@ -108,7 +108,7 @@ public sealed class DesktopLandingPluginTests
     [TestMethod]
     public async Task TurnedOffInConfiguration_ThePageIsGone_AndThePluginsPageWritesThatEntry()
     {
-        // What the switch of the row "Landing page" of Settings > Plugins writes, for the next start.
+        // What the switch of the row "Landing page" of Settings > Plugins writes, and does at once.
         var settings = await Fixture.CreateAsync();
         string global;
         await using (settings)
@@ -116,10 +116,15 @@ public sealed class DesktopLandingPluginTests
             global = settings.Global;
             var plugins = new PluginsService(settings.Projects, Epoch, settings.Runtime);
             var saved = await plugins.SetEnabledAsync(new(Epoch, null, "Global", AltaLanding.PluginId, false), default);
-            Assert.AreEqual("ok", saved.Status, saved.Message);
+            Assert.AreEqual(("ok", true), (saved.Status, saved.Applied), saved.Message);
             StringAssert.Contains(File.ReadAllText(Path.Combine(global, "config.toml")).ReplaceLineEndings("\n"), "[plugins.landing]\nenabled = false");
-            // A plugin that ships with CodeAlta follows at the next start: the page that is open stays for this run.
+            // A plugin that ships with CodeAlta stops at once, as a source plugin does, and starts again when it is turned on.
+            Assert.IsFalse(settings.Runtime.ActivePlugins.Any(static plugin => plugin.Descriptor.RuntimeKey == AltaLanding.PluginKey));
+            Assert.IsNull(settings.Broker.Find(AltaLanding.PluginKey, AltaLanding.CanvasId));
+            Assert.IsTrue((await plugins.SetEnabledAsync(new(Epoch, null, "Global", AltaLanding.PluginId, true), default)).Applied);
+            Assert.IsTrue(settings.Runtime.ActivePlugins.Any(static plugin => plugin.Descriptor.RuntimeKey == AltaLanding.PluginKey));
             Assert.IsNotNull(settings.Broker.Find(AltaLanding.PluginKey, AltaLanding.CanvasId));
+            await plugins.SetEnabledAsync(new(Epoch, null, "Global", AltaLanding.PluginId, false), default);
         }
 
         await using var fixture = await Fixture.CreateAsync(configuration: "[plugins.landing]\nenabled = false\n");

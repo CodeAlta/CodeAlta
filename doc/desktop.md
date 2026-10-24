@@ -2832,6 +2832,7 @@ A plugin can provide tabs, called canvases (see "Canvases" in [Plugins](plugins.
 - **The search and the palette.** The command **Canvases** (`/canvases`) opens the page. Each declared canvas is also a command, "Open canvas: <title>" with the slash name `open_<id>`, listed with the commands of plugins and found by its title, its description or its plugin; it opens the canvas for the project or the session in front, and is listed but cannot be run when its scope needs a project or a session that is not selected. A plugin writes none of this.
 - **The menus of the Explorer.** The menu of a project row ends, after its own lines, with a separator and **Open <title>** for the first four canvases of scope Project, then **More…** (the page) when there are others. The menu of a session row does the same with the canvases of scope Session. Every session row has them, the rows of the selected scope and those of a scope that is open and not selected: the canvas opens for the session of the row and the project of its row (`sessionCanvasTarget`, `canvasPages.ts`), so a session of another project takes its own project and a chat takes none, whatever project is in front, and nothing is selected.
 - **Settings > Plugins.** The row of each plugin lists the canvases it declares, with their scope, so that one sees what a plugin brings before opening anything.
+- **Settings > Extensions.** A canvas of placement Settings is the settings page of its plugin, not a tab: see "Settings of a plugin" under "Settings". The Canvases page, the search, the palette and the menus leave it out (`tabCanvases`, `canvasPages.ts`).
 - **Agents.** `alta canvas` lists, shows, opens, focuses, closes and invokes (see `doc/live-tool.md`). A request for a space that is not the shown one adds the tab to the tabs of that space, in memory when the window left that space during the run and in storage otherwise, and does not move the window; the answer says `shown: false`.
 
 What a canvas tab shows is an HTML fragment that its plugin writes, drawn with the components of the window as the content of a plugin dialog is. The page asks the host for the instance each time the tab is shown, so what the plugin pushed while the tab was away is there. The page keeps one `canvases.watch` channel for all the canvases of the window: the requests of plugins for a tab, the pushes to the tabs, the title and status of each tab, and the news that plugins changed.
@@ -2858,7 +2859,7 @@ The landing page is the start page of the window: a tab titled **Welcome**. It i
 - **The accent.** A field of pixels in the colors of the Alta logo, at the right of the hero and faded toward the text: a `<canvas>` of one pixel for each cell (96 by 40 at most), stretched without smoothing, painted about nine times a second by a timer that the page owns. It is a part of the hero, not the background of the page, and nothing of React is drawn again for a frame. It does not move, and no timer runs, when the animation is turned off, when the system asks for less motion (`prefers-reduced-motion`), when the tab is not in front, when the window is hidden (`document.hidden`) or when the hero is scrolled away: one still frame is drawn. It is hidden in forced colors. It needs no library and no change of the content security policy.
 - **Preferences.** Two switches at the bottom of the page, kept in the window on this computer (`localStorage`, so the developer instance has its own): **Show at startup** (`codealta.desktop.landing.startup.v1`, on by default) and **Animation** (`codealta.desktop.landing.animation.v1`, on by default). The same two are in Settings → General → Welcome page (**Show the welcome page at startup**, **Animate the welcome page**, `LandingSettings`), so the page can be turned back on after its tab was closed; both places read one store and follow each other at once.
 - **At startup.** When **Show at startup** is on, the page is opened in front once, when the application starts, in the space the window shows then (`useLandingAtStartup`): after the tabs are restored and once the plugins declare the canvas, within twenty seconds. It does not open again in the same run: not when another space is shown, not when the switch is turned on later, and not after the user closed the tab. A tab of the page that was left open is restored like any tab, whatever the switch. With the plugin `landing` turned off nothing opens.
-- **Settings > Plugins.** The page has a row among the plugins that ship with CodeAlta, **Landing page**, with its description, its canvas (Welcome, Application) and the switch of every such plugin: off writes `[plugins.landing] enabled = false`, and the page is gone at the next start (no tab, no command, `alta landing open` answers `landing.unavailable`).
+- **Settings > Plugins.** The page has a row among the plugins that ship with CodeAlta, **Landing page**, with its description, its canvas (Welcome, Application) and the switch of every such plugin: off writes `[plugins.landing] enabled = false`, and the page is gone at once (no tab, no command, `alta landing open` answers `landing.unavailable`).
 
 `alta landing` is described in `doc/live-tool.md`.
 
@@ -2986,6 +2987,20 @@ organization changes no preference keys, defaults or state owners.
 A page name longer than the navigation (200 px) goes on a second line, broken between its words; one longer
 still, or a word wider than the navigation (a narrow window), is cut with an ellipsis and shown whole by the
 same tip as the session titles of the Explorer, drawn in the window of Settings.
+
+### Settings of a plugin
+
+A plugin that declares a canvas of placement Settings (see "A settings page" under "Canvases" in [Plugins](plugins.md#canvases))
+has a page of its own in the **Extensions** group, after Plugins and MCP Servers, named and iconed as the canvas
+(`pluginSettingsPages`, `canvasPages.ts`). The group lists the pages of the plugins that run and that the space the window shows
+has, in the order of their declarations, and follows the plugins as they start and stop. The page is the usual frame of a page of
+Settings (the group, the title and the description of the canvas, and **Reload**, which asks the plugin for the page again) around
+a `CanvasPanel` (`PluginCanvasSettingsPage`): the same fragment, script, calls and libraries as a tab, with one instance that has no
+space, which the window closes when the page is left or Settings is closed. In **Settings > Plugins** the row of such a plugin has a
+gear button, **Settings of <plugin>**, beside its switch, while the plugin is on. A plugin that stops takes its page out of the
+list; a page that is shown then says that the plugin is off, with what a tab offers (build it again, open its source), and **Close**
+goes to Settings > Plugins. A plugin, its script (`alta.host.openCanvas`) or an agent (`alta canvas open`) that opens the canvas opens
+Settings on the page, in the main window: the open event names `placement: "settings"`.
 
 ### General
 
@@ -3886,6 +3901,12 @@ window's page loads:
   [Plugins](plugins.md#two-applications-desktop-and-terminal).
 - A build or load failure raises one notice at start and shows the error under the plugin in
   **Settings > Plugins**.
+- The switch of a built-in plugin in **Settings > Plugins** starts or stops it at once
+  (`PluginRuntimeManager.ApplyBuiltInAsync`, called by `plugins.setEnabled`), with the same notice to the page as a reload.
+  The window has one built-in plugin that is off until it is turned on, `mobile` (see `doc/plugins.md`, "Built-in plugins",
+  and `site/docs/plugins/mobile.md`): its page for phones is the second entry of the frontend build (`mobile.html`,
+  `src/mobile`), which the plugin serves itself from the files of the application (`IPluginServices.AppFiles`). Its ports and
+  **Reset access** are its settings page, Settings > Extensions > Mobile (module `mobile-settings`, `src/mobile/settings`).
 - A source plugin is built again and replaced while the application runs, from **Settings > Plugins**
   or by a session (`alta plugin reload`, see "Plugins written by a session" below). The host tells the
   page (`plugins-changed`, a notice of the shell): the page reads the commands, shortcuts and pickers of

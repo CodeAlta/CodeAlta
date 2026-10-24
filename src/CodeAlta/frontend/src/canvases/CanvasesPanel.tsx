@@ -6,7 +6,7 @@ import type { FileTab } from "../fileTabs";
 import { useShellLanguage } from "../shellLanguage";
 import { CanvasIcon } from "./CanvasIcon";
 import type { CanvasHub } from "./canvasHub";
-import { canvasRef, canvasScope, defaultCanvasTarget, openCanvases, type CanvasProject, type CanvasScope, type CanvasSelection, type CanvasTarget } from "./canvasPages";
+import { canvasRef, canvasScope, defaultCanvasTarget, openCanvases, tabCanvases, type CanvasProject, type CanvasScope, type CanvasSelection, type CanvasTarget } from "./canvasPages";
 
 /** A session the page can open a canvas for. */
 export type CanvasSessionChoice = Readonly<{ id: string; title: string; project: CanvasProject | null; projectName: string | null }>;
@@ -35,7 +35,9 @@ export function CanvasesPanel({ hub, tabs, projects, sessions, selection, visibl
   onNew: (() => void) | null;
 }) {
   const { t } = useShellLanguage();
-  const canvases = useSyncExternalStore(hub.subscribeCatalog, hub.getCatalog);
+  // A settings page of a plugin is in Settings, not here.
+  const catalog = useSyncExternalStore(hub.subscribeCatalog, hub.getCatalog);
+  const canvases = useMemo(() => tabCanvases(catalog), [catalog]);
   // The declarations are read again when the tab comes to the screen; a hidden tab reads nothing.
   useEffect(() => { if (visible) void hub.refresh(); }, [hub, visible]);
   return <div className="work-page canvases-page" onPointerDown={onActivate} data-visible={visible || undefined}>

@@ -312,6 +312,41 @@ public sealed class PluginsRpcTests
         }
     }
 
+    [TestMethod]
+    public async Task SetEnabled_StartsAndStopsABuiltInPluginOfTheRunningHost()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-plugins-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName });
+            await using var runtime = new PluginRuntimeManager();
+            await runtime.StartAsync(new PluginRuntimeManagerOptions
+            {
+                GlobalRoot = projects.Options.GlobalRoot, IsHeadless = true,
+                BuiltIns = [new BuiltInPluginDefinition { Id = "phone", DisplayName = "Phone", EnabledByDefault = false, PluginType = typeof(QuietPlugin), Factory = static () => new QuietPlugin() }],
+            });
+            var service = new PluginsService(projects, Epoch, runtime);
+            bool Runs() => runtime.ActivePlugins.Any(static plugin => plugin.Descriptor.RuntimeKey == "builtin:phone");
+            Assert.IsFalse(Runs(), "Off until it is turned on.");
+
+            var on = await service.SetEnabledAsync(new(Epoch, null, "Global", "phone", true), default);
+            Assert.AreEqual(("ok", true), (on.Status, on.Applied), "Applied at once: no restart.");
+            Assert.IsTrue(Runs());
+
+            var off = await service.SetEnabledAsync(new(Epoch, null, "Global", "phone", false), default);
+            Assert.AreEqual(("ok", true), (off.Status, off.Applied));
+            Assert.IsFalse(Runs());
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { /* Best-effort cleanup of a temporary directory. */ }
+        }
+    }
+
+    /// <summary>A built-in plugin that contributes nothing.</summary>
+    public sealed class QuietPlugin : PluginBase;
+
     private sealed class Fixture : IDisposable
     {
         private readonly string _root;

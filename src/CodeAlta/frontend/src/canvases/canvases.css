@@ -14,6 +14,11 @@
 .canvas-placeholder .canvas-placeholder-detail { display: block; max-width: 520px; margin: 10px auto 0; padding: 6px 8px; overflow-wrap: anywhere; text-align: left; white-space: pre-wrap; font-size: 12px; color: var(--red); background: var(--panel-2); border-radius: 4px; }
 .canvas-placeholder-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
+/* The settings page of a plugin: the canvas flows in the page of Settings, which scrolls, with the margins of the page. */
+.plugin-canvas-settings .canvas-panel { height: auto; overflow: visible; background: transparent; }
+.plugin-canvas-settings .canvas-panel > .canvas-html { max-width: none; margin: 0; padding: 0; }
+.plugin-canvas-settings :is(.canvas-loading, .canvas-placeholder.bp6-non-ideal-state) { height: auto; min-height: 220px; }
+
 /* The status the plugin gives beside the title of its tab. */
 .canvas-tab-status { margin-left: 8px; color: var(--muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
 

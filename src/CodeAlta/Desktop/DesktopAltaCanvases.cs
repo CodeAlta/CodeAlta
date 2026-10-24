@@ -23,7 +23,8 @@ internal sealed class DesktopAltaCanvases(DesktopCanvases canvases) : IAltaCanva
                 string.IsNullOrWhiteSpace(canvas.Description) ? null : canvas.Description, string.IsNullOrWhiteSpace(canvas.Icon) ? null : canvas.Icon, ScopeName(canvas.Scope),
                 string.IsNullOrWhiteSpace(canvas.InputSchema) ? null : canvas.InputSchema, canvas.Describe is not null,
                 [.. canvas.Actions.Select(static action => new AltaCanvasAction(action.Name, string.IsNullOrWhiteSpace(action.Description) ? null : action.Description,
-                    string.IsNullOrWhiteSpace(action.InputSchema) ? null : action.InputSchema))]);
+                    string.IsNullOrWhiteSpace(action.InputSchema) ? null : action.InputSchema))],
+                canvas.Placement == PluginCanvasPlacement.Settings ? AltaCanvasPlacements.Settings : AltaCanvasPlacements.Tab);
         })];
 
     /// <inheritdoc />
@@ -60,7 +61,7 @@ internal sealed class DesktopAltaCanvases(DesktopCanvases canvases) : IAltaCanva
 
         // A tab of a space that is not shown has no page to open its instance until the user shows that space: the instance opens now,
         // hidden, so that the canvas is listed, can be described and closed, and the tab finds it when the space is shown.
-        if (!result.Shown && DesktopCanvases.Normalize(new CanvasIdentity(target.PluginKey, target.CanvasId, result.SpaceId, target.ProjectId, target.SessionId, target.Key), declaration.Canvas.Scope) is { } identity)
+        if (!result.Shown && DesktopCanvases.Normalize(new CanvasIdentity(target.PluginKey, target.CanvasId, result.SpaceId, target.ProjectId, target.SessionId, target.Key), declaration.Canvas) is { } identity)
         {
             await canvases.OpenAsync(identity, visible: false, cancellationToken).ConfigureAwait(false);
         }
@@ -75,7 +76,7 @@ internal sealed class DesktopAltaCanvases(DesktopCanvases canvases) : IAltaCanva
         if (canvases.Find(target.PluginKey, target.CanvasId) is not { } declaration) return false;
         var space = target.SpaceId;
         // The window says which space it shows only after it said so: without a space the instance of the shown one is meant.
-        var identity = DesktopCanvases.Normalize(new CanvasIdentity(target.PluginKey, target.CanvasId, space, target.ProjectId, target.SessionId, target.Key), declaration.Canvas.Scope);
+        var identity = DesktopCanvases.Normalize(new CanvasIdentity(target.PluginKey, target.CanvasId, space, target.ProjectId, target.SessionId, target.Key), declaration.Canvas);
         if (identity is not { } named) return false;
         var open = canvases.OpenInstances().FirstOrDefault(instance => Same(instance.Identity, named)
             || space is null && Same(instance.Identity with { SpaceId = null }, named));

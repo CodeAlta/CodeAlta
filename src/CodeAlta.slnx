@@ -45,6 +45,7 @@
     <Project Path="CodeAlta.Plugin.Git/CodeAlta.Plugin.Git.csproj" />
     <Project Path="CodeAlta.Plugin.Jira/CodeAlta.Plugin.Jira.csproj" />
     <Project Path="CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
+    <Project Path="CodeAlta.Plugin.Mobile/CodeAlta.Plugin.Mobile.csproj" />
     <Project Path="CodeAlta.Plugin.Statistics/CodeAlta.Plugin.Statistics.csproj" />
     <Project Path="CodeAlta.Plugins.Abstractions/CodeAlta.Plugins.Abstractions.csproj" />
     <Project Path="CodeAlta.Plugins.Tui/CodeAlta.Plugins.Tui.csproj" />
@@ -59,6 +60,7 @@
     <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
     <Project Path="CodeAlta.Hosting.Tests/CodeAlta.Hosting.Tests.csproj" />
     <Project Path="CodeAlta.Orchestration.Tests/CodeAlta.Orchestration.Tests.csproj" />
+    <Project Path="CodeAlta.Plugin.Mobile.Tests/CodeAlta.Plugin.Mobile.Tests.csproj" />
     <Project Path="CodeAlta.Plugin.Statistics.Tests/CodeAlta.Plugin.Statistics.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Tests/CodeAlta.Plugins.Tests.csproj" />

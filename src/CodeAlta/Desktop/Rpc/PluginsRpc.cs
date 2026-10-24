@@ -15,8 +15,8 @@ namespace CodeAlta.Desktop.Rpc;
 /// </summary>
 /// <remarks>
 /// The page lists the built-in plugins itself, so one is returned here only when configuration names
-/// it. Enablement can be saved for any well-formed plugin id; a source plugin of the running host is started or
-/// stopped at once, and the plugin runtime reads the rest when the host starts.
+/// it. Enablement can be saved for any well-formed plugin id; a source plugin or a built-in plugin of the running
+/// host is started or stopped at once, and the plugin runtime reads the rest when the host starts.
 /// </remarks>
 [NeoRpcService("plugins", Version = 1)]
 internal sealed class PluginsService
@@ -236,6 +236,20 @@ internal sealed class PluginsService
             try
             {
                 await _runtime!.ReloadPackageAsync(package.Package, force: false, cancellationToken).ConfigureAwait(false);
+                applied = true;
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException)
+            {
+                // The host is closing: the saved configuration is read at the next start.
+            }
+        }
+
+        // A built-in plugin of the running host follows as well; the global configuration alone turns one on or off.
+        if (!projectScope && _runtime?.StartOptions?.BuiltIns.Any(builtIn => string.Equals(builtIn.Id, request.Id, StringComparison.OrdinalIgnoreCase)) == true)
+        {
+            try
+            {
+                await _runtime.ApplyBuiltInAsync(request.Id!, cancellationToken).ConfigureAwait(false);
                 applied = true;
             }
             catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException)

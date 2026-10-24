@@ -25,6 +25,8 @@ export type CanvasOpenRequest = Readonly<{
   pluginKey: string; canvasId: string; spaceId: string | null; projectId: string | null; sessionId: string | null; key: string | null;
   /** The id of the folder of the plugin package, or null for a built-in plugin. */
   plugin: string | null; focus: boolean; title: string | null; icon: string | null;
+  /** `settings` when the canvas is the settings page of its plugin, which the window opens in Settings; absent for a tab. */
+  placement?: "settings";
 }>;
 
 /** What happened to an instance a tab shows. `update` carries only what changed. */
@@ -59,7 +61,8 @@ function readNamed(event: CanvasEvent) {
 /** Reads an `open` event of the host as a request for a tab; anything that is not well formed is null. */
 export function readOpenRequest(event: CanvasEvent): CanvasOpenRequest | null {
   const named = event.kind === "open" ? readNamed(event) : null;
-  return named && { ...named, plugin: optional(event.package, 512) ?? null, focus: event.focus, title: optional(event.title, 200) ?? null, icon: optional(event.icon, 64) ?? null };
+  return named && { ...named, plugin: optional(event.package, 512) ?? null, focus: event.focus, title: optional(event.title, 200) ?? null, icon: optional(event.icon, 64) ?? null,
+    ...event.placement === "settings" ? { placement: "settings" as const } : {} };
 }
 
 /** Reads from a `closed` event of the host which tab the instance had; null when the event does not name it well. */

@@ -1,0 +1,1079 @@
+import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
+import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
+import { coalesce, composerView } from "./composer";
+import { isBusy, type Live, type Options, type ProjectList, type Space, type TimelineEvent } from "./contract";
+import { activityLine, el, icon, iconSvg } from "./dom";
+import { createDrafts, newSessionDraft } from "./drafts";
+import { installedApp, setUpInstall } from "./install";
+import { createLiveStream, type LinkState } from "./liveStream";
+import { createMarkdownView } from "./markdownView";
+import {
+  choiceLabel, choiceRequest, entryName, findModel, groupVariants, initialChoice, modelsOf, orderModels, pickEffort, pickModel, preferencesKey,
+  providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
+} from "./models";
+import { safeColor, sessionMeta, showSpaces } from "./sessionMeta";
+import { createSheet } from "./sheet";
+import { ago, dotLabels, dotOf, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
+import {
+  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, stillPending, type ActivityBlock, type PendingPrompt, type TimelineBlock, type ToolRow,
+} from "./timeline";
+
+/** Starts the phone page in a window whose document is `mobile.html`. */
+export function startMobile(window: Window & typeof globalThis) {
+  const document = window.document;
+  const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+  const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string | null, text?: string | number | null) => el(document, tag, className, text);
+  const store = browserStore(() => window.localStorage);
+  const drafts = createDrafts(store);
+  const sessions = createSessionStore();
+  let signedOut = false;
+  const api = createApi({ fetch: (input, init) => window.fetch(input, init), store, onSignedOut: () => showSignedOut() });
+  const host = window.location.host;
+
+  // ---- Appearance: the theme and the text size, kept on the phone ----
+  let theme: Theme = readTheme(store, window.matchMedia("(prefers-color-scheme: light)").matches);
+  let fontStep = readFontStep(store);
+  const themeButton = $<HTMLButtonElement>("theme"), fontButton = $<HTMLButtonElement>("font");
+  function showAppearance() {
+    applyAppearance(document, theme, fontStep);
+    themeButton.innerHTML = iconSvg(theme === "dark" ? "sun" : "moon"); // the icon shows what a tap switches to
+    themeButton.title = theme === "dark" ? "Light mode" : "Dark mode";
+    themeButton.setAttribute("aria-label", themeButton.title);
+    fontButton.querySelector(".font-step")!.textContent = String(fontStep);
+    fontButton.title = `Text size ${fontStep} of 5`;
+    fontButton.setAttribute("aria-label", fontButton.title);
+  }
+  themeButton.addEventListener("click", () => {
+    theme = theme === "dark" ? "light" : "dark";
+    store.set(themeKey, theme);
+    showAppearance();
+    redrawDiagrams();
+  });
+  fontButton.addEventListener("click", () => { fontStep = nextFontStep(fontStep); store.set(fontStepKey, String(fontStep)); showAppearance(); padComposer(); });
+  showAppearance();
+
+  // ---- The link to the computer: one state, in the footer (under the composer on a session's page) and on the logo ----
+  const foot = $("foot"), linkDot = $("link-dot");
+  const link = { machine: "", state: "connecting" as LinkState | "signed-out", at: null as Date | null };
+  function showLink() {
+    const word = { connecting: "Connecting…", live: "Live", reconnecting: "Reconnecting…", offline: "Offline", "signed-out": "Not connected" }[link.state];
+    const text = [link.machine, word, link.state === "live" && link.at ? link.at.toLocaleTimeString() : null].filter(Boolean).join(" · ");
+    foot.replaceChildren(make("span", `link-dot ${link.state}`), document.createTextNode(text));
+    linkDot.className = `link-dot ${link.state}`;
+    linkDot.setAttribute("aria-label", text);
+    linkDot.title = text;
+  }
+  showLink();
+
+  // ---- Notes and the toast ----
+  const note = $("note"), detailNote = $("detail-note"), newNote = $("new-note");
+  const toastElement = $("toast");
+  let toast: { id: string; timer: number } | null = null;
+  function showToast(text: string, action?: { label: string; run: () => void }, ms = 5000) {
+    toastElement.replaceChildren(make("span", "toast-text", text));
+    if (action) {
+      const button = make("button", "toast-action", action.label);
+      button.type = "button";
+      button.addEventListener("click", action.run);
+      toastElement.append(button);
+    }
+    toastElement.hidden = false;
+    toastElement.classList.remove("toast-in");
+    void toastElement.offsetWidth;
+    toastElement.classList.add("toast-in");
+    if (toast) window.clearTimeout(toast.timer);
+    toast = { id: "", timer: window.setTimeout(hideToast, ms) };
+  }
+  function hideToast() { if (toast) window.clearTimeout(toast.timer); toast = null; toastElement.classList.remove("toast-in"); toastElement.hidden = true; }
+
+  function showSignedOut() {
+    if (signedOut) return;
+    signedOut = true;
+    stream.stop();
+    link.state = "signed-out";
+    showLink();
+    sessions.setFilter(sessions.filter);
+    list.replaceChildren();
+    moreButton.hidden = true;
+    note.textContent = signedOutMessage;
+    if (window.location.hash) window.location.hash = "#/";
+  }
+
+  // ---- The list of sessions ----
+  const list = $<HTMLUListElement>("sessions"), moreButton = $<HTMLButtonElement>("more");
+  const markdown = createMarkdownView({ window, upload: body => api.diagram(body), installed: () => installedApp(window), note: text => noteHere(text) });
+
+  // The facts of a session, compact: the dot (with a word while it works), then its space, project, worktree, model and effort, agent and
+  // whether it is a sub-agent; at most two lines, the time on the right.
+  function metaLine(view: SessionView, options: Readonly<{ space: boolean; live: boolean; dot: boolean; when: string | null; now: number }>): HTMLDivElement {
+    const line = make("div", "meta");
+    const facts = make("div", "meta-facts");
+    if (options.dot) facts.append(make("span", "dot"));
+    for (const item of sessionMeta(view, options)) {
+      const span = make("span", `meta-item meta-${item.kind}`);
+      if (item.kind === "space") {
+        const mark = make("span", "space-dot");
+        const color = safeColor(item.color);
+        if (color) mark.style.setProperty("--space", color);
+        span.append(mark);
+      }
+      if (item.kind === "worktree") span.append(icon(document, "branch"));
+      if (item.kind === "child") span.append(icon(document, "child"));
+      if (item.kind === "agent") span.append(icon(document, "bot"));
+      span.append(document.createTextNode(item.text));
+      // A space between facts: where the line may break.
+      if (facts.lastChild) facts.append(document.createTextNode(" "));
+      facts.append(span);
+    }
+    line.append(facts);
+    if (options.when) line.append(make("span", "ago", ago(options.when, options.now)));
+    return line;
+  }
+
+  function card(view: SessionView, now: number): { element: HTMLDivElement; version: string } {
+    const state = dotOf(view, now);
+    const live = view.live;
+    const when = live?.at ?? view.lastActivity;
+    const lineText = live?.line ?? view.summary;
+    const space = showSpaces(sessions.spaces);
+    const version = JSON.stringify([state, view.title, ago(when, now), live?.kind, lineText, live?.activity, sessionMeta(view, { space, live: true }), space]);
+    const element = make("div", `card ${state}`);
+    const anchor = make("a", "card-link");
+    anchor.href = `#/session/${encodeURIComponent(view.id)}`;
+    anchor.append(make("div", "title", view.title || "(untitled session)"));
+    const meta = metaLine(view, { space, live: true, dot: true, when, now });
+    meta.title = dotLabels[state];
+    anchor.append(meta);
+    if (live?.kind === "activity" && live.activity) anchor.append(activityLine(document, live.activity, live.activity.state === "running", now));
+    else if (lineText) {
+      const line = make("div", "line", lineText);
+      line.dataset.kind = live?.line ? (live.kind ?? "assistant") : "summary";
+      anchor.append(line);
+    }
+    // The archive of a swipe, for a keyboard and a screen reader: shown when it has the focus.
+    const archive = make("button", "card-archive");
+    archive.type = "button";
+    archive.setAttribute("aria-label", `Archive “${view.title || "untitled session"}”`);
+    archive.append(icon(document, "archive"));
+    element.append(anchor, archive);
+    return { element, version };
+  }
+
+  function row(view: SessionView, now: number): HTMLLIElement {
+    const item = make("li", "row");
+    item.dataset.id = view.id;
+    const under = make("div", "swipe-under");
+    under.setAttribute("aria-hidden", "true");
+    const action = make("span", "swipe-act archive");
+    action.append(icon(document, "archive"), make("span", null, "Archive"));
+    under.append(action);
+    const { element, version } = card(view, now);
+    item.dataset.version = version;
+    item.append(under, element);
+    return item;
+  }
+
+  // Rows are kept by id, and a card is drawn again only when what it shows changed: a state change transitions the
+  // outline color instead of redrawing it, and the focus stays where it is.
+  function renderList() {
+    if (signedOut) return;
+    const now = Date.now();
+    const views = sessions.list();
+    const old = new Map(Array.from(list.children as HTMLCollectionOf<HTMLLIElement>).map(item => [item.dataset.id!, item]));
+    const rows = views.map(view => {
+      const item = old.get(view.id);
+      if (!item) return row(view, now);
+      const fresh = card(view, now);
+      if (item.dataset.version !== fresh.version) {
+        const current = item.querySelector<HTMLElement>(".card")!;
+        current.className = fresh.element.className + (current.classList.contains("springing") ? " springing" : "");
+        current.replaceChildren(...Array.from(fresh.element.childNodes));
+        item.dataset.version = fresh.version;
+      }
+      return item;
+    });
+    rows.forEach((item, index) => { if (list.children[index] !== item) list.insertBefore(item, list.children[index] ?? null); });
+    Array.from(list.children).slice(rows.length).forEach(item => item.remove());
+    moreButton.hidden = !sessions.hasMore;
+    if (views.length) note.textContent = "";
+  }
+
+  let listError: string | null = null;
+  const readList = coalesce(async () => {
+    if (signedOut) return;
+    const filter = sessions.filter, startedAt = sessions.beginRead();
+    if (!sessions.count) note.textContent = "Loading…";
+    try {
+      let offset = 0, append = false;
+      for (const size of readSizes(sessions.count)) {
+        const page = await api.sessions(offset, size, filter);
+        if (filter !== sessions.filter) return;
+        sessions.applyPage(page, startedAt, append);
+        listError = page.error ?? null;
+        if (page.machine && page.machine !== link.machine) { link.machine = page.machine; showLink(); }
+        append = true;
+        offset = page.next;
+        if (!page.hasMore) break;
+      }
+      renderList();
+      showScope();
+      if (!sessions.list().length) note.textContent = listError || (filter ? "No sessions in this project." : "No sessions yet.");
+    } catch (error) {
+      if (error instanceof SignedOutError) return;
+      note.textContent = `CodeAlta is not reachable: ${failureText(error, host)}`;
+    }
+  });
+  let reloadTimer = 0;
+  function scheduleListRead(ms: number) { window.clearTimeout(reloadTimer); reloadTimer = window.setTimeout(() => void readList(), ms); }
+
+  moreButton.addEventListener("click", async () => {
+    moreButton.disabled = true;
+    moreButton.textContent = "Loading…";
+    const filter = sessions.filter, startedAt = sessions.beginRead();
+    try {
+      const page = await api.sessions(sessions.next, pageSize, filter);
+      if (filter === sessions.filter) { sessions.applyPage(page, startedAt, true); renderList(); }
+    } catch (error) {
+      if (!(error instanceof SignedOutError)) showToast(`Not loaded: ${failureText(error, host)}`);
+    } finally {
+      moreButton.disabled = false;
+      moreButton.textContent = "More";
+      moreButton.hidden = !sessions.hasMore || signedOut;
+    }
+  });
+
+  // ---- The project filter: a sheet of the projects and "All projects"; the choice is kept ----
+  const projectKey = "alta.project";
+  let projects: ProjectList | null = null;
+  async function readProjects(): Promise<ProjectList> {
+    if (!projects) {
+      const read = await api.projects();
+      projects = { projects: read.projects ?? [], default: read.default ?? null, error: read.error ?? null };
+    }
+    return projects;
+  }
+  const filterButton = $<HTMLButtonElement>("filter"), chip = $("chip");
+  const filterSheet = createSheet(document, $("sheet"));
+  function showFilter() {
+    const project = sessions.filter;
+    const name = project ? projects?.projects.find(p => p.id === project)?.name ?? project : "";
+    filterButton.querySelector<HTMLElement>(".badge")!.hidden = !project;
+    filterButton.setAttribute("aria-label", project ? `Filter by project: ${name}` : "Filter by project");
+    chip.hidden = !project;
+    chip.querySelector("span")!.textContent = name;
+    showScope();
+  }
+  // Where the phone is, at the top of the list: the computer and the spaces it sees (beside the project filter, when one is set).
+  const spaceMark = (space: Space) => {
+    const item = make("span", "scope-space");
+    const dot = make("span", "space-dot");
+    const color = safeColor(space.color);
+    if (color) dot.style.setProperty("--space", color);
+    item.append(dot, document.createTextNode(space.name));
+    return item;
+  };
+  function showScope() {
+    const where = $("scope-where");
+    where.replaceChildren();
+    if (!sessions.machine) return;
+    where.append(icon(document, "computer"), make("span", "scope-machine", sessions.machine));
+    const spaces = sessions.spaces;
+    if (spaces.length) where.append(...spaces.map(spaceMark));
+    else where.append(make("span", "scope-space", "All spaces"));
+  }
+  function chooseProject(project: string) {
+    store.set(projectKey, project);
+    sessions.setFilter(project);
+    filterSheet.close();
+    list.replaceChildren();
+    showFilter();
+    void readList();
+  }
+  filterButton.addEventListener("click", async () => {
+    let data: ProjectList;
+    try { data = await readProjects(); }
+    catch (error) { if (!(error instanceof SignedOutError)) showToast(`Projects not read: ${failureText(error, host)}`); return; }
+    const items = [{ id: "", name: "All projects", path: "" }, ...data.projects];
+    $("sheet-list").replaceChildren(...items.map(project => {
+      const item = make("li"), button = make("button", project.id === sessions.filter ? "on" : null, project.name);
+      button.type = "button";
+      if (project.id === sessions.filter) button.setAttribute("aria-current", "true");
+      // Its space when the phone sees several, then its folder.
+      const space = showSpaces(sessions.spaces) && "space" in project ? project.space : null;
+      if (project.path || space) {
+        const small = make("small");
+        if (space) small.append(spaceMark(space));
+        if (project.path) small.append(document.createTextNode(project.path));
+        button.append(small);
+      }
+      button.addEventListener("click", () => chooseProject(project.id));
+      item.append(button);
+      return item;
+    }));
+    filterSheet.open();
+  });
+  chip.querySelector("button")!.addEventListener("click", () => chooseProject(""));
+
+  // ---- The page of a session: its timeline, folded as the desktop folds it, drawn block by block ----
+  type Drawn = { element: HTMLLIElement; version: string; diagram: boolean };
+  const timeline = $<HTMLOListElement>("timeline");
+  const detail = {
+    id: null as string | null, generation: 0, since: 0, replace: false, events: [] as TimelineEvent[],
+    expanded: new Set<string>(), drawn: new Map<string, Drawn>(), loaded: false, blocks: [] as TimelineBlock[],
+  };
+  const pendingNotes = new Map<string, string>();
+  // The prompts each session accepted that its timeline does not hold yet (a steered one reaches the journal later): shown at once.
+  const pendingPrompts = new Map<string, PendingPrompt[]>();
+  let pendingSeq = 0;
+  const pendingLabels: Readonly<Record<PendingPrompt["mode"], string>> = { send: "You", steer: "You · steering", queue: "You · queued" };
+  let working: HTMLLIElement | null = null;
+  markdown.handle(timeline);
+
+  const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 40;
+  const toBottom = () => window.scrollTo(0, document.documentElement.scrollHeight);
+  function noteHere(text: string) { if (detail.id) detailNote.textContent = text; else showToast(text); }
+
+  function messageBlock(block: Extract<TimelineBlock, { kind: "message" }>, pending?: PendingPrompt): Drawn {
+    const item = make("li", `msg msg-${block.role}${pending ? " pending" : ""}`);
+    item.dataset.key = block.key;
+    item.append(make("div", "msg-label", pending ? pendingLabels[pending.mode] : block.role === "user" ? "You" : block.role === "assistant" ? "Agent" : "Error"));
+    const content = make("div", "markdown-content");
+    const fill = () => markdown.fill(content, block.text, fill);
+    const diagram = fill();
+    item.append(content);
+    return { element: item, version: block.key, diagram };
+  }
+
+  function toolRow(tool: ToolRow): HTMLDivElement {
+    const element = make("div", "tool-row");
+    element.dataset.key = tool.key;
+    element.dataset.phase = tool.phase;
+    element.append(make("span", "tool-dot"), make("strong", null, tool.title), make("span", "tool-phase", tool.phase));
+    return element;
+  }
+
+  function activityBody(block: ActivityBlock, body: HTMLElement) {
+    // Rows are kept by key: a thought never changes, a tool changes its phase; new rows are added after.
+    const existing = new Map(Array.from(body.children as HTMLCollectionOf<HTMLElement>).map(child => [child.dataset.key!, child]));
+    let previous: Element | null = null;
+    for (const entry of block.rows) {
+      let element = existing.get(entry.key);
+      if (!element) {
+        if (entry.type === "thought") {
+          element = make("div", "msg msg-reasoning");
+          element.dataset.key = entry.key;
+          const content = make("div", "markdown-content");
+          const fill = () => markdown.fill(content, entry.text, fill);
+          fill();
+          element.append(make("div", "msg-label", "Thinking"), content);
+        } else element = toolRow(entry);
+      } else if (entry.type === "tool" && element.dataset.phase !== entry.phase) {
+        element.dataset.phase = entry.phase;
+        element.querySelector(".tool-phase")!.textContent = entry.phase;
+      }
+      const expected: ChildNode | null = previous ? previous.nextSibling : body.firstChild;
+      if (expected !== element) body.insertBefore(element, expected);
+      previous = element;
+    }
+  }
+
+  function drawActivity(item: HTMLLIElement, block: ActivityBlock, live: boolean, open: boolean) {
+    const facts = activityFacts(block, live);
+    item.dataset.state = facts.state;
+    item.dataset.expanded = String(open);
+    let toggle = item.querySelector<HTMLButtonElement>(":scope > .act-toggle");
+    if (!toggle) {
+      toggle = make("button", "act-toggle");
+      toggle.type = "button";
+      toggle.append(icon(document, "chevron", "act-chevron"));
+      item.append(toggle);
+    }
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.querySelector(".act-line")?.remove();
+    toggle.append(activityLine(document, facts, live, Date.now()));
+    let body = item.querySelector<HTMLElement>(":scope > .act-body");
+    if (open) {
+      if (!body) { body = make("div", "act-body"); item.append(body); }
+      activityBody(block, body);
+    } else body?.remove();
+  }
+
+  function drawTimeline() {
+    if (!detail.id) return;
+    const view = sessions.view(detail.id);
+    const busy = isBusy(view?.live?.live);
+    const blocks = detail.blocks = foldEvents(detail.events);
+    type Entry = { block: TimelineBlock; live: boolean; open: boolean; key: string; version: string; prompt?: PendingPrompt };
+    const entries: Entry[] = blocks.map((block, index) => {
+      const live = liveBlock(blocks, index, busy), open = detail.expanded.has(block.key);
+      return { block, live, open, key: block.key, version: blockVersion(block, live, open) };
+    });
+    const pending = stillPending(pendingPrompts.get(detail.id) ?? [], detail.events, busy, Date.now());
+    pendingPrompts.set(detail.id, pending);
+    const all: Entry[] = [...entries, ...pending.map(prompt => ({ block: pendingBlock(prompt), live: false, open: false, key: prompt.key, version: `${prompt.key}|${prompt.mode}`, prompt }))];
+    const follow = nearBottom();
+    const plan = planTimeline(new Map([...detail.drawn].map(([key, drawn]) => [key, drawn.version])), all);
+    for (const key of plan.removed) { detail.drawn.get(key)?.element.remove(); detail.drawn.delete(key); }
+    let previous: Element | null = null;
+    plan.steps.forEach((step, index) => {
+      const entry = all[index];
+      let drawn = detail.drawn.get(step.key);
+      if (step.action === "create" || !drawn) {
+        if (entry.block.kind === "message") drawn = messageBlock(entry.block, entry.prompt);
+        else {
+          const item = make("li", "activity");
+          item.dataset.key = entry.key;
+          drawActivity(item, entry.block, entry.live, entry.open);
+          drawn = { element: item, version: entry.version, diagram: false };
+        }
+        detail.drawn.set(step.key, drawn);
+      } else if (step.action === "update" && entry.block.kind === "activity") {
+        drawActivity(drawn.element, entry.block, entry.live, entry.open);
+        drawn.version = entry.version;
+      }
+      const expected: ChildNode | null = previous ? previous.nextSibling : timeline.firstChild;
+      if (expected !== drawn.element) timeline.insertBefore(drawn.element, expected);
+      previous = drawn.element;
+    });
+    // While a turn runs and its activity has no event yet: a line that says it works.
+    const placeholder = busy && !entries.at(-1)?.live;
+    if (placeholder) {
+      working ??= (() => {
+        const item = make("li", "activity working");
+        item.dataset.state = "running";
+        const line = make("div", "act-toggle");
+        line.append(activityLine(document, { headline: "Working…", thoughts: 0, tools: 0, succeeded: 0, failed: 0 }, true, Date.now()));
+        item.append(line);
+        return item;
+      })();
+      // Before the prompts that wait for their turn.
+      timeline.insertBefore(working, pending.length ? detail.drawn.get(pending[0].key)?.element ?? null : null);
+    } else { working?.remove(); working = null; }
+    if (!all.length && !detailNote.textContent) detailNote.textContent = detail.loaded ? "No messages yet." : "Loading…";
+    else if (all.length && (detailNote.textContent === "Loading…" || detailNote.textContent === "No messages yet.")) detailNote.textContent = "";
+    padComposer();
+    if (follow) toBottom();
+  }
+
+  // The running activity's time goes on between events.
+  function tickLive() {
+    if (!detail.id) return;
+    const blocks = detail.blocks;
+    const last = blocks.at(-1);
+    if (!last || last.kind !== "activity" || !liveBlock(blocks, blocks.length - 1, isBusy(sessions.view(detail.id)?.live?.live))) return;
+    const toggle = detail.drawn.get(last.key)?.element.querySelector(":scope > .act-toggle");
+    const line = toggle?.querySelector(".act-line");
+    if (line) line.replaceWith(activityLine(document, activityFacts(last, true), true, Date.now()));
+  }
+
+  timeline.addEventListener("click", event => {
+    const toggle = (event.target as Element | null)?.closest<HTMLButtonElement>("button.act-toggle");
+    const key = toggle?.closest<HTMLElement>("li.activity")?.dataset.key;
+    if (!key) return;
+    if (detail.expanded.has(key)) detail.expanded.delete(key); else detail.expanded.add(key);
+    drawTimeline();
+  });
+
+  // A read gives the events after the last one held; a refresh reads them all again and replaces them once they come,
+  // so the timeline is never drawn from half of them. A read of another generation (another session, a refresh since)
+  // is dropped.
+  const readDetail = coalesce(async () => {
+    const id = detail.id;
+    if (!id || signedOut) return;
+    const generation = detail.generation, replace = detail.replace, since = replace ? 0 : detail.since;
+    try {
+      const page = await api.events(id, since);
+      if (detail.id !== id || detail.generation !== generation) return;
+      detail.events = replace ? appendEvents([], page.events ?? []) : appendEvents(detail.events, page.events ?? []);
+      detail.since = Math.max(replace ? 0 : detail.since, page.since ?? since, detail.events.at(-1)?.seq ?? 0);
+      detail.replace = false;
+      detail.loaded = true;
+      if (page.error) detailNote.textContent = page.error;
+      drawTimeline();
+    } catch (error) {
+      if (detail.id !== id || error instanceof SignedOutError) return;
+      detailNote.textContent = `Could not read the session: ${failureText(error, host)}`;
+    }
+  });
+  let detailTimer = 0;
+  function scheduleDetailRead(ms: number) { window.clearTimeout(detailTimer); detailTimer = window.setTimeout(() => void readDetail(), ms); }
+  function refreshDetail() { if (!detail.id) return Promise.resolve(); detail.generation++; detail.replace = true; return readDetail(); }
+
+  function showDetailHead() {
+    if (!detail.id) return;
+    const view = sessions.view(detail.id);
+    $("detail-title").textContent = view?.title || "Session";
+    // What the prompt goes to: project · space · worktree · model and effort · agent.
+    const meta = view ? metaLine(view, { space: true, live: false, dot: false, when: null, now: Date.now() }) : null;
+    $("detail-meta").replaceChildren(...(meta ? Array.from(meta.querySelector(".meta-facts")!.childNodes) : []));
+    showComposer();
+  }
+
+  // A session that is not in the list (filtered out, older, just created) is read alone, for its title and state.
+  async function readSessionAlone(id: string) {
+    try {
+      const session = await api.session(id);
+      sessions.applySession(session);
+      if (detail.id === id) { showDetailHead(); drawTimeline(); }
+    } catch (error) {
+      if (detail.id !== id || error instanceof SignedOutError) return;
+      detailNote.textContent = error instanceof ApiError && error.status === 404
+        ? "This session is not on this phone: it was archived, or it is in a space the Mobile plugin is not in."
+        : `Could not read the session: ${failureText(error, host)}`;
+    }
+  }
+
+  function openDetail(id: string) {
+    detail.id = id;
+    detail.generation++;
+    detail.since = 0;
+    detail.replace = false;
+    detail.events = [];
+    detail.blocks = [];
+    detail.expanded = new Set();
+    detail.drawn = new Map();
+    detail.loaded = false;
+    timeline.replaceChildren();
+    working = null;
+    detailNote.textContent = pendingNotes.get(id) ?? "";
+    pendingNotes.delete(id);
+    bindComposer(id);
+    showDetailHead();
+    if (!sessions.listed(id) || !sessions.view(id)?.title) void readSessionAlone(id);
+    void readDetail().then(() => { if (detail.id === id) toBottom(); });
+  }
+  function closeDetail() {
+    bindComposer(null);
+    detail.id = null;
+    detail.generation++;
+    detail.drawn = new Map();
+    detail.blocks = [];
+    timeline.replaceChildren();
+    working = null;
+  }
+
+  function redrawDiagrams() {
+    for (const drawn of detail.drawn.values()) {
+      if (!drawn.diagram) continue;
+      const content = drawn.element.querySelector<HTMLElement>(":scope > .markdown-content");
+      const key = drawn.element.dataset.key!;
+      const block = detail.blocks.find(b => b.key === key);
+      if (content && block?.kind === "message") { const fill = () => markdown.fill(content, block.text, fill); fill(); }
+    }
+  }
+
+  // ---- The composer: its text is the draft of the session it was typed for ----
+  const composer = $<HTMLFormElement>("composer"), promptBox = $<HTMLTextAreaElement>("prompt");
+  const sendButton = $<HTMLButtonElement>("send"), queueButton = $<HTMLButtonElement>("queue"), abortButton = $<HTMLButtonElement>("abort");
+  const hint = $("composer-hint");
+  let composerFor: string | null = null;
+  const stopping = new Map<string, number>(), stoppedAt = new Map<string, number>();
+
+  function bindComposer(id: string | null) {
+    if (composerFor) drafts.set(composerFor, promptBox.value);
+    composerFor = id;
+    promptBox.value = id ? drafts.get(id) : "";
+    grow();
+  }
+  function showComposer() {
+    const id = detail.id;
+    const view = id ? sessions.view(id) : null;
+    const busy = isBusy(view?.live?.live);
+    if (id && !busy && stopping.has(id)) endStopping(id);
+    const state = composerView(busy, promptBox.value.trim().length > 0, !!view?.live?.canSteer);
+    sendButton.hidden = state.primary === null;
+    sendButton.innerHTML = iconSvg(state.primary === "steer" ? "steer" : "send");
+    sendButton.append(make("span", null, state.primary === "steer" ? "Steer" : "Send"));
+    sendButton.title = state.primary === "steer" ? "Send now, into the running turn" : "Send the prompt";
+    queueButton.hidden = !state.queue;
+    abortButton.hidden = !state.stop;
+    const halting = !!id && stopping.has(id);
+    abortButton.disabled = halting;
+    abortButton.querySelector("span")!.textContent = halting ? "Stopping…" : "Stop";
+    hint.textContent = state.hint;
+    composer.dataset.submit = state.submit;
+  }
+  function endStopping(id: string) {
+    window.clearTimeout(stopping.get(id));
+    stopping.delete(id);
+    if (detail.id === id) showComposer();
+  }
+
+  async function submitPrompt(mode: "send" | "steer" | "queue") {
+    const id = composerFor, text = promptBox.value.trim();
+    if (!id || !text) return;
+    composer.classList.add("sending");
+    // The prompt leaves the input (and its draft) as it is sent: the request can take a while to return while the
+    // turn already runs. If it fails, the text goes back to the session it was written for.
+    promptBox.value = "";
+    drafts.clear(id);
+    grow();
+    showComposer();
+    const sentAt = Date.now();
+    // The prompt shows in the timeline at once, as the user's message: it goes when the journal holds it, or when the send fails.
+    const prompt: PendingPrompt = { key: `p${++pendingSeq}`, text, mode, sentAt, after: detail.id === id ? detail.events.at(-1)?.seq ?? 0 : 0 };
+    const forget = () => { pendingPrompts.set(id, (pendingPrompts.get(id) ?? []).filter(p => p !== prompt)); if (detail.id === id) drawTimeline(); };
+    pendingPrompts.set(id, [...pendingPrompts.get(id) ?? [], prompt]);
+    if (detail.id === id) { drawTimeline(); toBottom(); }
+    try {
+      await api.prompt(id, text, mode);
+      if (detail.id === id) {
+        detailNote.textContent = "";
+        toBottom();
+        scheduleDetailRead(300);
+      }
+    } catch (error) {
+      // A turn the user stopped ends its request with an error: that prompt was sent, and is not given back.
+      if ((stoppedAt.get(id) ?? 0) >= sentAt) { if (detail.id === id) detailNote.textContent = "Stopped."; return; }
+      forget();
+      if (composerFor === id && !promptBox.value.trim()) { promptBox.value = text; drafts.set(id, text); grow(); }
+      else drafts.giveBack(id, text);
+      if (error instanceof SignedOutError) return;
+      if (detail.id === id) detailNote.textContent = `Not sent: ${failureText(error, host)}`;
+      else showToast(`Not sent to “${sessions.view(id)?.title || "the session"}”: ${failureText(error, host)} The text is kept as its draft.`, undefined, 8000);
+    } finally {
+      composer.classList.remove("sending");
+      showComposer();
+    }
+  }
+  composer.addEventListener("submit", event => {
+    event.preventDefault();
+    void submitPrompt((composer.dataset.submit as "send" | "steer" | "queue" | undefined) ?? "send");
+  });
+  queueButton.addEventListener("click", () => void submitPrompt("queue"));
+  promptBox.addEventListener("keydown", event => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); composer.requestSubmit(); }
+  });
+  // Stop: one tap, no confirmation; the button says "Stopping…" until the turn leaves the running state (or 15 s).
+  abortButton.addEventListener("click", async () => {
+    const id = detail.id;
+    if (!id || stopping.has(id)) return;
+    stoppedAt.set(id, Date.now());
+    stopping.set(id, window.setTimeout(() => endStopping(id), 15_000));
+    showComposer();
+    try { await api.abort(id); }
+    catch (error) {
+      if (error instanceof SignedOutError) return;
+      if (detail.id === id) detailNote.textContent = `Not stopped: ${failureText(error, host)}`;
+      endStopping(id);
+    }
+  });
+  // The box grows with its text up to 160 px; its borders count in its height (border-box), not in its scroll height.
+  function grow() {
+    promptBox.style.height = "auto";
+    const borders = promptBox.offsetHeight - promptBox.clientHeight;
+    promptBox.style.height = `${Math.min(promptBox.scrollHeight + borders, 160)}px`;
+    padComposer();
+  }
+  promptBox.addEventListener("input", () => { if (composerFor) drafts.set(composerFor, promptBox.value); grow(); showComposer(); });
+  // The composer sits on the keyboard: the visual viewport says how much of the layout viewport the keyboard covers.
+  // The composer of a session, and the Start bar of a new one, sit on the keyboard: the visual viewport says how much of the layout
+  // viewport the keyboard covers.
+  function padComposer() {
+    // The page of a session holds the footer in its composer; the new-session page has the footer under it, so the body makes the room.
+    const creating = !$("create").hidden;
+    const page = !$("detail").hidden ? $("detail") : creating ? document.body : null;
+    if (!creating) document.body.style.paddingBottom = "";
+    if (!page) return;
+    const bar = creating ? $("create-bar") : composer;
+    const viewport = window.visualViewport;
+    const covered = viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0;
+    bar.style.bottom = `${covered}px`;
+    page.style.paddingBottom = `${bar.offsetHeight + covered + (creating ? 0 : 16)}px`;
+  }
+  window.visualViewport?.addEventListener("resize", padComposer);
+  window.visualViewport?.addEventListener("scroll", padComposer);
+
+  $("detail-archive").addEventListener("click", () => {
+    const id = detail.id;
+    if (!id) return;
+    window.location.hash = "#/";
+    archive(id);
+  });
+
+  // ---- New session: the desktop's selection form (agent prompt, provider, model with its tiers, reasoning) ----
+  // As the desktop: the provider filters the models; the model list opens with the tiers of the settings at its top, a
+  // tier fills provider, model and effort and stays marked until one of them is changed by hand; reasoning is a stepped
+  // slider over the efforts of the model, or plain text when there is nothing to choose. Choices are remembered per project.
+  const newProject = $<HTMLSelectElement>("new-project"), newAgent = $<HTMLSelectElement>("new-agent"), newProvider = $<HTMLSelectElement>("new-provider");
+  const newText = $<HTMLTextAreaElement>("new-text"), newWorktree = $<HTMLInputElement>("new-worktree");
+  const modelSheet = createSheet(document, $("model-sheet")), modelSearch = $<HTMLInputElement>("model-search");
+  let options: Options | null = null;
+  let choice: Choice = { tier: null, provider: "", model: "", effort: "" };
+  const allPreferences = (): Record<string, ProjectPreferences> => { try { return JSON.parse(store.get(preferencesKey) ?? "{}") ?? {}; } catch { return {}; } };
+  const projectPreferences = () => allPreferences()[newProject.value] ?? {};
+  function remember(preferences: ProjectPreferences) {
+    const all = allPreferences();
+    all[newProject.value] = preferences;
+    store.set(preferencesKey, JSON.stringify(all));
+  }
+  const option = (value: string, label: string, selected: boolean) => { const item = make("option", null, label); item.value = value; item.selected = selected; return item; };
+
+  function setChoice(next: Choice, preferences?: ProjectPreferences) {
+    choice = next;
+    remember(preferences ?? rememberChoice(newAgent.value || undefined, next));
+    renderChoice();
+  }
+
+  function renderChoice() {
+    if (!options) return;
+    const o = options;
+    newProvider.replaceChildren(...providers(o).map(p => option(p, providerName(o, p), p === choice.provider)));
+    $("new-model-name").textContent = choiceLabel(o, choice);
+    // The options of the model: a checkbox per variant its entry has; a combination that does not exist is disabled.
+    const group = groupVariants(modelsOf(o, choice.provider)).find(g => g.members.some(x => x.model.id === choice.model));
+    const flags = group ? group.members.find(x => x.model.id === choice.model)!.flags.filter(f => !group.fixed.includes(f)) : [];
+    const variants = $("new-variants");
+    variants.hidden = !group || group.options.length === 0;
+    variants.replaceChildren(...(group?.options ?? []).map(flag => {
+      const on = flags.includes(flag), target = group!.find(on ? flags.filter(x => x !== flag) : [...flags, flag]);
+      const label = make("label", "check"), box = make("input");
+      box.type = "checkbox"; box.checked = on; box.disabled = !target;
+      box.addEventListener("change", () => { if (target) setChoice({ tier: null, provider: choice.provider, model: target.id, effort: pickEffort(o, target, choice.effort) }); });
+      label.append(box, document.createTextNode(` ${variantLabels[flag]}`));
+      return label;
+    }));
+    const model = findModel(o, choice.provider, choice.model);
+    const efforts = model?.efforts ?? [];
+    const box = $("new-effort");
+    $("new-effort-field").hidden = efforts.length === 0 && !choice.effort; // no effort levels: no Reasoning section at all
+    if (efforts.length < 2) { box.replaceChildren(make("span", "reasoning-static", choice.effort || efforts[0] || "")); return; }
+    const range = make("input");
+    range.type = "range"; range.min = "0"; range.max = String(efforts.length - 1); range.step = "1";
+    range.value = String(Math.max(0, efforts.indexOf(choice.effort)));
+    range.setAttribute("aria-labelledby", "new-effort-label");
+    range.setAttribute("aria-valuetext", choice.effort);
+    const labels = make("div", "reasoning-labels");
+    efforts.forEach((effort, index) => {
+      const button = make("button", effort === choice.effort ? "on" : null, effort);
+      button.type = "button";
+      button.style.left = `${index / (efforts.length - 1) * 100}%`;
+      button.addEventListener("click", () => setEffort(effort));
+      labels.append(button);
+    });
+    range.addEventListener("input", () => setEffort(efforts[Number(range.value)]));
+    box.replaceChildren(range, labels);
+  }
+  function setEffort(effort: string) {
+    if (effort === choice.effort && !choice.tier) return;
+    setChoice({ ...choice, effort, tier: null });
+  }
+  newProvider.addEventListener("change", () => {
+    if (!options) return;
+    const model = pickModel(options, newProvider.value);
+    choice = { tier: null, provider: newProvider.value, model: model?.id ?? "", effort: pickEffort(options, model) };
+    // A provider choice forgets the model.
+    remember({ ...(newAgent.value ? { agentPromptId: newAgent.value } : {}), providerKey: newProvider.value });
+    renderChoice();
+  });
+  newAgent.addEventListener("change", () => remember({ ...projectPreferences(), agentPromptId: newAgent.value }));
+
+  // The model list: a bottom sheet where the desktop has a popover.
+  function renderModelList() {
+    if (!options) return;
+    const o = options, query = modelSearch.value.trim().toLowerCase();
+    const groups = groupVariants(modelsOf(o, choice.provider)), byEntry = new Map(groups.map(g => [g.entry.id, g]));
+    const { frontier, other } = orderModels(groups.filter(g => !query || g.members.some(x => `${x.model.name} ${x.model.id}`.toLowerCase().includes(query))).map(g => g.entry));
+    const items = [...frontier, ...(other.length && frontier.length ? [null] : []), ...other].map(model => {
+      if (model === null) { const item = make("li", "model-sep", "Other models"); item.setAttribute("role", "separator"); return item; }
+      const group = byEntry.get(model.id)!, mine = !choice.tier && group.members.some(x => x.model.id === choice.model);
+      const button = make("button", mine ? "on" : null);
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(mine));
+      button.append(make("span", null, entryName(model)), make("small", null, model.id + (group.options.length ? ` (${[...group.options].sort().map(f => `+${f}`).join(", ")})` : "")));
+      button.addEventListener("click", () => {
+        if (!mine) setChoice({ tier: null, provider: choice.provider, model: model.id, effort: pickEffort(o, model, choice.effort) });
+        modelSheet.close();
+      });
+      const item = make("li");
+      item.append(button);
+      return item;
+    });
+    $("model-list").replaceChildren(...items);
+  }
+  $("new-model").addEventListener("click", () => {
+    if (!options) return;
+    const o = options;
+    const tiers = $("tiers");
+    tiers.replaceChildren(...o.tiers.map(tier => {
+      const on = tier.tier === choice.tier;
+      const button = make("button", `tier${on ? " on" : ""}${tier.error ? " failed" : ""}`);
+      button.type = "button";
+      button.disabled = !tierReady(tier);
+      button.setAttribute("aria-pressed", String(on));
+      button.append(make("span", "tier-name", tierLabel(tier.tier)), make("span", "tier-model", tierText(o, tier)));
+      if (tier.error) button.title = tier.error;
+      button.addEventListener("click", () => {
+        const next = tierChoice(o, tier.tier);
+        if (next) setChoice(next);
+        modelSheet.close();
+      });
+      return button;
+    }));
+    tiers.hidden = o.tiers.length === 0;
+    modelSearch.value = "";
+    renderModelList();
+    modelSheet.open(modelSearch);
+  });
+  modelSearch.addEventListener("input", renderModelList);
+
+  function initForm() {
+    if (!options) return;
+    const stored = projectPreferences();
+    const { choice: first, remembered } = initialChoice(options, stored);
+    choice = first;
+    // The space the session goes to, beside its project.
+    const space = projects?.projects.find(p => p.id === newProject.value)?.space;
+    $("new-space").replaceChildren(...(space ? [spaceMark(space)] : []));
+    const agent = remembered.agentPromptId && options.prompts.some(p => p.id === remembered.agentPromptId) ? remembered.agentPromptId : options.defaults?.prompt || options.prompts[0]?.id || "";
+    newAgent.value = agent;
+    if (JSON.stringify(remembered) !== JSON.stringify(stored)) remember(remembered);
+    renderChoice();
+    // A default tier that cannot be used says why, beside the form.
+    const tier = options.defaultTier ? options.tiers.find(t => t.tier === options!.defaultTier) : undefined;
+    newNote.textContent = options.error || (tier && !tierReady(tier) && !choice.tier && !stored.providerKey
+      ? `The ${tierLabel(tier.tier)} tier is not ready: ${tier.error || "it has no model"}.` : "");
+  }
+
+  async function openCreate(fresh: boolean) {
+    newNote.textContent = options ? "" : "Loading…";
+    try {
+      const [projectList, read] = await Promise.all([readProjects(), options ? Promise.resolve(options) : api.options()]);
+      options = { models: read.models ?? [], prompts: read.prompts ?? [], tiers: read.tiers ?? [], defaultTier: read.defaultTier ?? null, defaults: read.defaults ?? null, error: read.error ?? null };
+      const keep = !fresh && projectList.projects.some(p => p.id === newProject.value) ? newProject.value : null;
+      const selected = keep ?? (fresh ? projectList.default : sessions.filter || projectList.default);
+      newProject.replaceChildren(...projectList.projects.map(p => option(p.id, p.name, p.id === selected)));
+      newAgent.replaceChildren(...options.prompts.map(p => option(p.id, p.name, p.id === options!.defaults?.prompt)));
+      if (!newText.value) newText.value = drafts.get(newSessionDraft);
+      initForm();
+      padComposer();
+    } catch (error) {
+      if (!(error instanceof SignedOutError)) newNote.textContent = `Could not read the choices: ${failureText(error, host)}`;
+    }
+  }
+  newProject.addEventListener("change", initForm);
+  newText.addEventListener("input", () => drafts.set(newSessionDraft, newText.value));
+  $("new-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const text = newText.value.trim();
+    if (!text || !newProject.value) return;
+    const start = $<HTMLButtonElement>("new-start");
+    start.disabled = true;
+    newNote.textContent = "Starting…";
+    try {
+      const created = await api.create({ project: newProject.value, text, prompt: newAgent.value || undefined, ...choiceRequest(choice), worktree: newWorktree.checked });
+      newText.value = "";
+      drafts.clear(newSessionDraft);
+      newNote.textContent = "";
+      // A prompt that did not go is shown on the page of its session, back in its composer.
+      if (created.sendError) { drafts.set(created.id, text); pendingNotes.set(created.id, `Created, but the prompt was not sent: ${created.sendError}`); }
+      scheduleListRead(0);
+      window.location.hash = `#/session/${encodeURIComponent(created.id)}`;
+    } catch (error) {
+      if (!(error instanceof SignedOutError)) newNote.textContent = `Not started: ${failureText(error, host)}`;
+    } finally { start.disabled = false; }
+  });
+  // "+" on the new-session screen starts the form again from the settings: the choices are read again (models, prompts,
+  // projects), what was remembered for the project of the form is forgotten (not the other projects'), the prompt is cleared.
+  $("new").addEventListener("click", () => {
+    if (window.location.hash !== "#/new") { window.location.hash = "#/new"; return; }
+    const all = allPreferences();
+    delete all[newProject.value];
+    store.set(preferencesKey, JSON.stringify(all));
+    options = null;
+    projects = null;
+    newText.value = "";
+    drafts.clear(newSessionDraft);
+    newWorktree.checked = false;
+    modelSheet.close();
+    void openCreate(true);
+  });
+
+  // ---- Swipe a card for its action, Gmail-style: the drag is the action ----
+  // Right: Archive, on green. Past 40% of the width a release archives and the card leaves; short of it the card springs
+  // back. A drag that starts vertical is the page's scroll (touch-action: pan-y). A toast offers Restore for 5 s.
+  let swipe: { row: HTMLElement; card: HTMLElement; x: number; y: number; dx: number; dragging: boolean; pointer: number } | null = null;
+  function place(item: HTMLElement, x: number, how?: "spring" | "out") {
+    const element = item.querySelector<HTMLElement>(".card")!;
+    element.classList.toggle("springing", how === "spring");
+    element.classList.toggle("leaving-x", how === "out");
+    element.style.transform = x ? `translateX(${x}px)` : "";
+    item.dataset.dir = x > 0 ? "archive" : "";
+    item.dataset.armed = String(Math.abs(x) >= item.offsetWidth * 0.4);
+  }
+  list.addEventListener("pointerdown", event => {
+    const element = (event.target as Element).closest<HTMLElement>(".card");
+    if (!element || event.button || swipe || (event.target as Element).closest(".card-archive")) return;
+    swipe = { row: element.parentElement!, card: element, x: event.clientX, y: event.clientY, dx: 0, dragging: false, pointer: event.pointerId };
+  });
+  list.addEventListener("pointermove", event => {
+    if (!swipe || event.pointerId !== swipe.pointer) return;
+    const dx = event.clientX - swipe.x, dy = event.clientY - swipe.y;
+    if (!swipe.dragging) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; } // a scroll
+      if (Math.abs(dx) < 10) return;
+      swipe.dragging = true;
+      try { swipe.card.setPointerCapture(event.pointerId); } catch { /* the pointer is gone */ }
+    }
+    swipe.dx = dx;
+    place(swipe.row, dx > 0 ? dx : dx * 0.15); // left resists: it has no action
+  });
+  function endSwipe(event: PointerEvent) {
+    if (!swipe || event.pointerId !== swipe.pointer) return;
+    const done = swipe;
+    swipe = null;
+    if (!done.dragging) return;
+    done.row.dataset.dragged = "1";
+    window.setTimeout(() => delete done.row.dataset.dragged, 0);
+    if (event.type === "pointerup" && done.dx >= done.row.offsetWidth * 0.4) {
+      place(done.row, done.row.offsetWidth + 24, "out");
+      archive(done.row.dataset.id!);
+    } else place(done.row, 0, "spring");
+  }
+  list.addEventListener("pointerup", endSwipe);
+  list.addEventListener("pointercancel", endSwipe);
+  // The tap that ends a drag does not open the session.
+  list.addEventListener("click", event => { if ((event.target as Element).closest<HTMLElement>(".row")?.dataset.dragged) { event.preventDefault(); event.stopPropagation(); } }, true);
+  list.addEventListener("click", event => {
+    const button = (event.target as Element).closest<HTMLButtonElement>(".card-archive");
+    const id = button?.closest<HTMLElement>(".row")?.dataset.id;
+    if (id) archive(id);
+  });
+
+  const rowOf = (id: string) => list.querySelector<HTMLElement>(`.row[data-id="${CSS.escape(id)}"]`);
+  function collapse(item: HTMLElement) { item.style.height = `${item.offsetHeight}px`; void item.offsetHeight; item.classList.add("collapsing"); item.style.height = "0px"; }
+  function bringBack(id: string) {
+    sessions.bringBack(id);
+    const item = rowOf(id);
+    if (item) { item.classList.remove("collapsing"); item.style.height = ""; place(item, 0, "spring"); }
+    renderList();
+  }
+  function archive(id: string) {
+    const title = sessions.view(id)?.title || "Session";
+    sessions.hide(id);
+    const item = rowOf(id);
+    if (item) window.setTimeout(() => collapse(item), 180); else renderList();
+    const archiving = api.archive(id).then(() => sessions.settled(id));
+    archiving.catch(error => {
+      if (toast?.id === id) hideToast();
+      bringBack(id);
+      if (!(error instanceof SignedOutError)) showToast(`Not archived: ${failureText(error, host)}`);
+    });
+    const restore = async () => {
+      if (toast?.id !== id) return;
+      hideToast();
+      try { await archiving; await api.restore(id); }
+      catch (error) { if (!(error instanceof SignedOutError)) showToast(`Not restored: ${failureText(error, host)}`); return; }
+      bringBack(id);
+      scheduleListRead(0);
+    };
+    showToast(`Archived “${title.length > 40 ? `${title.slice(0, 39)}…` : title}”`, { label: "Restore", run: () => void restore() });
+    toast!.id = id;
+  }
+
+  // ---- Routes: #/ is the list, #/session/<id> a session, #/new the new-session form ----
+  const back = $<HTMLButtonElement>("back");
+  function route() {
+    const hash = window.location.hash;
+    // The link of the QR code opened in a page that already runs: sign in with it, then show the list.
+    if (hash.startsWith("#k=")) { void signInFromAddress().then(ok => { if (ok) route(); }); return; }
+    const found = /^#\/session\/(.+)$/u.exec(hash);
+    let id: string | null = null;
+    if (found) { try { id = decodeURIComponent(found[1]); } catch { id = null; } }
+    const creating = hash === "#/new" && !signedOut;
+    if (signedOut) id = null;
+    $("home").hidden = !!id || creating;
+    $("detail").hidden = !id;
+    $("create").hidden = !creating;
+    back.hidden = !id && !creating;
+    filterButton.hidden = !!id || creating;
+    const plus = $("new");
+    plus.classList.toggle("on", creating);
+    if (creating) plus.setAttribute("aria-current", "page"); else plus.removeAttribute("aria-current");
+    document.body.classList.toggle("with-composer", !!id);
+    // One footer: under the composer on the page of a session, at the bottom of the page elsewhere.
+    if (id) composer.append(foot); else if (foot.parentElement !== document.body) document.body.insertBefore(foot, toastElement);
+    if (creating) void openCreate(false);
+    if (id && id !== detail.id) openDetail(id);
+    if (!id && detail.id) closeDetail();
+    if (!id) renderList();
+    padComposer();
+  }
+  back.addEventListener("click", () => { window.location.hash = "#/"; });
+  window.addEventListener("hashchange", route);
+
+  // ---- Live updates ----
+  function onSession(update: Live) {
+    link.at = new Date();
+    if (link.state === "live") showLink();
+    const decision = sessions.applyLive(update);
+    if (decision === "reload") scheduleListRead(500);
+    else if (decision === "listed" && !$("home").hidden) renderList();
+    if (detail.id === update.id) { showDetailHead(); drawTimeline(); scheduleDetailRead(400); }
+  }
+  function readAgain() { void readList(); if (detail.id) void readDetail(); }
+  const stream = createLiveStream({
+    create: () => new window.EventSource("/api/events"),
+    onSession,
+    onState: state => { if (signedOut) return; link.state = state; if (state === "live") link.at = new Date(); showLink(); },
+    onReconnected: readAgain,
+    check: async () => {
+      try { await api.sessions(0, 1, ""); return "ok"; }
+      catch (error) { return error instanceof SignedOutError ? "signed-out" : error instanceof ApiError ? "ok" : "unreachable"; }
+    },
+    setTimer: (callback, ms) => window.setTimeout(callback, ms),
+    clearTimer: timer => window.clearTimeout(timer as number),
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden || signedOut) return;
+    if (stream.open) readAgain(); else stream.wake();
+  });
+  window.addEventListener("online", () => stream.wake());
+  window.addEventListener("offline", () => { if (!signedOut) { link.state = "offline"; showLink(); } });
+  // "min ago", the hour after which a dot turns gray; the running time of an activity.
+  window.setInterval(() => { if (!$("home").hidden) renderList(); }, 60_000);
+  window.setInterval(tickLive, 1000);
+
+  $<HTMLButtonElement>("refresh").addEventListener("click", async event => {
+    const button = event.currentTarget as HTMLButtonElement;
+    button.classList.add("spin");
+    if (signedOut) { button.classList.remove("spin"); return; }
+    try { await Promise.all([readList(), refreshDetail()]); } finally { button.classList.remove("spin"); }
+  });
+
+  // ---- Sign-in: the token of the QR link (#k=) gets the cookie; without it, the cookie or the kept token is used ----
+  async function signInFromAddress(): Promise<boolean> {
+    const token = takeFragmentToken(window.location.hash, () => window.history.replaceState(null, "", window.location.pathname + window.location.search));
+    if (!token) return true;
+    try {
+      if (!await api.signIn(token)) { showSignedOut(); return false; }
+    } catch (error) {
+      note.textContent = `CodeAlta is not reachable: ${failureText(error, host)}`;
+      return true;
+    }
+    if (signedOut) {
+      signedOut = false;
+      link.state = "connecting";
+      showLink();
+      note.textContent = "";
+      route();
+      void readList();
+      stream.start();
+    }
+    return true;
+  }
+
+  async function start() {
+    setUpInstall(window, store);
+    const kept = store.get(projectKey) ?? "";
+    sessions.setFilter(kept);
+    showFilter();
+    if (!await signInFromAddress()) return;
+    route();
+    await readList();
+    if (signedOut) return;
+    stream.start();
+    readProjects().then(showFilter, () => { /* the chip shows the id until the projects are read */ });
+  }
+  void start();
+}

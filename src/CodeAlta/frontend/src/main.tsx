@@ -312,6 +312,8 @@ import "./mcpHost/mcpHost.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
 import "./landing/landing.css";
+import "./mobile/canvas/canvas.css";
+import "./mobile/settings/settings.css";
 import "./documentation/documentation.css";
 import "./promptInheritance/promptInheritance.css";
 import { DocumentationPanel } from "./documentation/DocumentationPanel";
@@ -330,11 +332,13 @@ import { createBranchRequests, readKeepRemovedTurns, saveKeepRemovedTurns, type 
 import { lineageTitle, sessionLineage } from "./sessionBranch/lineage";
 import { branchTarget, createSessionBranch, readSessionTurns, type ForkResult, type RewindResult } from "./sessionBranch/sessionBranchRpc";
 import { CanvasPanel } from "./canvases/CanvasPanel";
+import { CanvasIcon } from "./canvases/CanvasIcon";
+import { PluginCanvasSettingsPage } from "./canvases/PluginCanvasSettingsPage";
 import { PluginHostBridgeContext, type PluginHostBridge } from "./pluginScript/hostBridge";
 import { createCanvasHub, type CanvasClosedInstance, type CanvasOpenRequest } from "./canvases/canvasHub";
 import { createCanvasInstances } from "./canvases/canvasInstances";
 import { CanvasesPanel } from "./canvases/CanvasesPanel";
-import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasRequestSpace, canvasStatusKey, canvasTabOf, closedCanvasTab, defaultCanvasTarget, newCanvasPrompt, removeCanvasTabFromSpace, sessionCanvasMenuEntries, withCanvasStatus, type CanvasScopeProject, type CanvasSelection, type CanvasTarget } from "./canvases/canvasPages";
+import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasPlacement, canvasRequestSpace, canvasStatusKey, canvasTabOf, closedCanvasTab, defaultCanvasTarget, newCanvasPrompt, pluginSettingsPage, pluginSettingsPages, pluginSettingsTab, removeCanvasTabFromSpace, samePluginSettingsPage, sessionCanvasMenuEntries, tabCanvases, withCanvasStatus, type CanvasScopeProject, type CanvasSelection, type CanvasTarget, type PluginSettingsPage } from "./canvases/canvasPages";
 import { createCanvasPluginControl, type CanvasPluginControl } from "./canvases/canvasPlugin";
 import { PluginButtons } from "./pluginButtons/PluginButtons";
 import { SessionRowMenu } from "./pluginButtons/pluginMenu";
@@ -393,7 +397,7 @@ const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 if (!demoMode) installLocalCallPolicy(createSlowCallWatch(reportToHost));
 const noSubscription = () => () => { };
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
-type View = "workspace" | "appearance" | "general" | "windows" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage" | "speech" | "search";
+type View = "workspace" | "appearance" | "general" | "windows" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage" | "speech" | "search" | "plugin";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse | null }) {
@@ -659,6 +663,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
   // The space whose page Settings > Spaces shows, at which section; null for the cards of every space.
   const [spacePage, setSpacePage] = useState<SpacePageTarget | null>(null);
+  // The settings page of a plugin that Settings > Extensions shows, when the section is `plugin`.
+  const [pluginPage, setPluginPage] = useState<PluginSettingsPage | null>(null);
   const currentSettingsSection = useRef<SettingsSection>(settingsSection);
   currentSettingsSection.current = settingsSection;
   const settingsOrigin = useRef<HTMLElement | null>(null);
@@ -695,6 +701,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       settingsVisible.current = true;
       setSettingsOpen(true);
     }
+  }
+  // Settings on the settings page of a plugin: from its entry in Extensions, the gear of its row, or a request of the plugin or an agent.
+  function openPluginSettings(page: PluginSettingsPage) {
+    setPluginPage(page);
+    navigate("plugin");
   }
   // A control outside the shell (a composer status item) asks for a Settings page by name.
   const openSettingsPage = useRef<(page: string) => void>(() => {});
@@ -1654,6 +1665,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const canvasTabsOf = useRef<(space: string) => readonly FileTab[]>(() => []);
   canvasTabsOf.current = space => space === shownSpace.current ? fileTabs.open : spaceTabs.current.get(space)?.files.open ?? [];
   const [canvasInstances] = useState(() => createCanvasInstances(canvasHub, space => canvasTabsOf.current(space)));
+  // The settings page of a plugin that Settings shows now, as the tab its canvas is drawn as: what is not shown has its instance closed.
+  const shownPluginPage = useRef<FileTab | null>(null);
+  shownPluginPage.current = settingsOpen && settingsSection === "plugin" && pluginPage ? pluginSettingsTab(pluginPage) : null;
+  const [settingsCanvasInstances] = useState(() => createCanvasInstances(canvasHub, () => shownPluginPage.current ? [shownPluginPage.current] : []));
   const changeCanvasLook = useCallback((tab: FileTab, space: string, look: Readonly<{ title?: string; status?: string | null; icon?: string; plugin?: string }>) => {
     if (look.title !== undefined || look.icon !== undefined || look.plugin !== undefined) setFileTabs(state => refreshCanvasTab(state, tab, { title: look.title, icon: look.icon, plugin: look.plugin }));
     // The same canvas in another space has an instance of its own: the status is the one of the tab of this space.
@@ -1668,6 +1683,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   };
   // A plugin asks for a tab: it opens in the space the window shows, or joins the tabs of the space it names without moving the window.
   function openCanvasRequest(request: CanvasOpenRequest) {
+    // The settings page of a plugin opens in Settings, in the main window, whatever space the window shows.
+    const declared = canvasHub.getCatalog().find(item => item.pluginKey === request.pluginKey && item.id === request.canvasId);
+    if (request.placement === "settings" || declared && canvasPlacement(declared) === "Settings") {
+      if (!secondary && owned) openPluginSettings(declared ? pluginSettingsPage(declared)
+        : { pluginKey: request.pluginKey, canvasId: request.canvasId, title: request.title ?? request.canvasId, description: null, icon: request.icon, plugin: request.plugin });
+      return;
+    }
     const full = catalog.current ?? currentSnapshot.current;
     if (!full) return;
     const session = request.sessionId ? full.sessions.find(candidate => candidate.id === request.sessionId) : undefined;
@@ -1711,11 +1733,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     // The tabs of a space that was just shown are not drawn yet: the tab leaves them all the same.
     else setFileTabs(state => { const late = state.open.find(value => sameFileTab(value, tab)); return late ? closeFileTab(state, late) : state; });
   }
-  // The canvases the plugins declare now, read again whenever the plugins change.
-  const canvasCatalog = useSyncExternalStore(canvasHub.subscribeCatalog, canvasHub.getCatalog);
-  // Opens the tab of a canvas in the space that is shown: one tab for each canvas, project, session and key.
+  // The canvases the plugins declare now, read again whenever the plugins change: the tabs, which the page of the canvases, the search and
+  // the menus list, and the settings pages of the plugins, which Settings > Extensions lists.
+  const declaredCanvases = useSyncExternalStore(canvasHub.subscribeCatalog, canvasHub.getCatalog);
+  const canvasCatalog = useMemo(() => tabCanvases(declaredCanvases), [declaredCanvases]);
+  const pluginPages = useMemo(() => pluginSettingsPages(declaredCanvases), [declaredCanvases]);
+  // Opens the tab of a canvas in the space that is shown: one tab for each canvas, project, session and key. A settings page opens in Settings.
   function openCanvas(item: CanvasItem, target: CanvasTarget) {
     if (!owned) return;
+    if (canvasPlacement(item) === "Settings") { if (!secondary) openPluginSettings(pluginSettingsPage(item)); return; }
     openFile(canvasTabOf(item, target));
   }
   // What the menu of a session row offers of the plugins: their canvases about a session, a few lines and then the page of the canvases.
@@ -5331,7 +5357,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}
-      spaces={spacesState.available ? spacesState.spaces : []} spacePage={spacePage} onSpacePage={setSpacePage}>
+      spaces={spacesState.available ? spacesState.spaces : []} spacePage={spacePage} onSpacePage={setSpacePage}
+      pluginPages={owned ? pluginPages : []} pluginPage={pluginPage} onPluginPage={openPluginSettings}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
@@ -5351,7 +5378,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         page={spacePage} onPage={setSpacePage} onOpenPage={owned ? navigate : undefined} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
-      : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={canvasCatalog} spaceScope={resourceScope}
+      : settingsSection === "plugin" && pluginPage ? <PluginCanvasSettingsPage key={`${pluginPage.pluginKey}/${pluginPage.canvasId}`} page={pluginPage} hub={canvasHub}
+        control={canvasControl(pluginSettingsTab(pluginPage))} onLeave={() => navigate("plugins")}
+        onInstance={instance => instance ? settingsCanvasInstances.opened(pluginSettingsTab(pluginPage), "settings", instance) : settingsCanvasInstances.released(pluginSettingsTab(pluginPage), "settings")}
+        onAbandoned={instance => settingsCanvasInstances.abandoned(pluginSettingsTab(pluginPage), "settings", instance)}
+        onOpenSource={folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); }} />
+      : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={declaredCanvases} spaceScope={resourceScope}
+        onOpenSettings={owned ? openPluginSettings : undefined}
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined}
         onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "sessions" ? <SessionSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
@@ -5526,12 +5559,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
 // browser-managed focus trapping and nested native About dialog top-layer ordering.
-function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpacePage, children }: {
+function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpacePage, pluginPages, pluginPage, onPluginPage, children }: {
   section: SettingsSection; onSection: (section: SettingsSection) => void;
   onClose: () => void;
   /** The spaces, each a page of the Spaces group; empty in a window whose host keeps none. */
   spaces: readonly Space[];
   spacePage: SpacePageTarget | null; onSpacePage: (page: SpacePageTarget | null) => void;
+  /** The settings pages of the plugins that run in the space the window shows, each a page of the Extensions group. */
+  pluginPages: readonly PluginSettingsPage[];
+  pluginPage: PluginSettingsPage | null; onPluginPage: (page: PluginSettingsPage) => void;
   children: ReactNode;
 }) {
   const { t } = useShellLanguage();
@@ -5564,6 +5600,10 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
             <h3>{t(group)}</h3>
             {pages.map(([value, label, icon]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined}
               data-settings-section={value} onClick={() => onSection(value)}><AppIcon name={icon} size={16} /><span>{t(label)}</span></button>)}
+            {/* Each plugin that has a settings page has its own, after the pages of the extensions, named and iconed as its canvas. */}
+            {group === "Extensions" && pluginPages.map(page => <button key={`${page.pluginKey}/${page.canvasId}`} type="button"
+              aria-current={section === "plugin" && samePluginSettingsPage(pluginPage, page) ? "page" : undefined} data-settings-plugin={`${page.pluginKey}/${page.canvasId}`}
+              onClick={() => onPluginPage(page)}><CanvasIcon name={page.icon} pluginKey={page.pluginKey} size={16} /><span>{page.title}</span></button>)}
           </div>
           {/* Each space is a setup of its own: the group lists them after the overview, right after Personalization. */}
           {index === 0 && <div className="settings-dialog-group settings-dialog-spaces">

@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { CanvasItem, PluginsEntry } from "#neoastra";
 import { locales, translate } from "./localization";
-import { PluginProblems, PluginRows, pluginCanvases, pluginFailure, pluginRows } from "./PluginSettings";
+import { PluginProblems, PluginRows, pluginCanvases, pluginFailure, pluginRows, pluginSettingsPageOf } from "./PluginSettings";
 import { ShellLanguageContext } from "./shellLanguage";
 
 const never = () => assert.fail("rendering must not act");
@@ -26,17 +26,29 @@ test("the plugins that ship with CodeAlta come first and are on until configurat
   const rows = pluginRows([entry("notes", { name: "Notes", description: "Keeps notes." }), entry("bare", { name: "" }),
     entry("git", { kind: "BuiltIn", enabled: false, folder: null, path: null, loadable: false })], english);
   assert.deepEqual(rows.map(row => [row.id, row.name, row.enabled, row.builtIn]),
-    [["mcp", "MCP", true, true], ["git", "Git", false, true], ["jira", "Jira", true, true], ["statistics", "Statistics", true, true], ["landing", "Landing page", true, true], ["ui", "UI tools", true, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
+    [["mcp", "MCP", true, true], ["git", "Git", false, true], ["jira", "Jira", true, true], ["statistics", "Statistics", true, true], ["landing", "Landing page", true, true], ["ui", "UI tools", true, true],
+      ["mobile", "Mobile", false, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
   assert.equal(rows[0].entry, null);
   assert.equal(rows[1].entry?.id, "git");
-  assert.equal(rows[6].description, "Keeps notes.");
-  assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "jira", "statistics", "landing", "ui"]);
+  assert.equal(rows[7].description, "Keeps notes.");
+  assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "jira", "statistics", "landing", "ui", "mobile"]);
+});
+
+test("the Mobile plugin is off until the global configuration turns it on", () => {
+  const mobile = (listed: readonly PluginsEntry[]) => pluginRows(listed, english).find(row => row.id === "mobile") ?? assert.fail("no row for Mobile");
+  assert.equal(mobile([]).enabled, false, "Nothing configured: off.");
+  // [plugins.mobile] with its spaces only: the host lists the id, enabled by default for a plugin it does not know.
+  assert.equal(mobile([entry("mobile", { kind: "Config", enabled: true, enabledGlobal: null, folder: null, path: null, loadable: false })]).enabled, false);
+  assert.equal(mobile([entry("mobile", { kind: "Config", enabled: true, enabledGlobal: true, folder: null, path: null, loadable: false })]).enabled, true);
+  assert.equal(mobile([entry("mobile", { kind: "Config", enabled: false, enabledGlobal: false, folder: null, path: null, loadable: false })]).enabled, false);
+  assert.equal(mobile([]).icon, "smartphone");
 });
 
 test("a source plugin with the id of a plugin that ships with CodeAlta keeps its own row and its actions", () => {
   const rows = pluginRows([entry("git", { enabledGlobal: false, enabled: false, state: "Disabled", runtime: null })], english);
   assert.deepEqual(rows.map(row => [row.id, row.builtIn, row.entry?.kind ?? null, row.enabled]),
-    [["mcp", true, null, true], ["git", true, null, false], ["jira", true, null, true], ["statistics", true, null, true], ["landing", true, null, true], ["ui", true, null, true], ["git", false, "Source", false]]);
+    [["mcp", true, null, true], ["git", true, null, false], ["jira", true, null, true], ["statistics", true, null, true], ["landing", true, null, true], ["ui", true, null, true],
+      ["mobile", true, null, false], ["git", false, "Source", false]]);
   const html = render([entry("git")]);
   assert.equal(cards(html).filter(value => value.includes("<strong>git</strong>") && value.includes('aria-label="Edit git"')).length, 1, html);
   assert.ok(!card(html, "Git").includes("Edit Git"), html);
@@ -158,7 +170,7 @@ test("a change that did not succeed says why in the words of plugins", () => {
 });
 
 const canvas = (id: string, plugin: Partial<CanvasItem>): CanvasItem => ({ pluginKey: "k", plugin: "P", package: null, id, title: id[0].toUpperCase() + id.slice(1), description: null, icon: null,
-  iconData: null, scope: "Application", input: false, actions: 0, describes: false, ...plugin });
+  iconData: null, scope: "Application", input: false, actions: 0, describes: false, placement: "Tab", ...plugin });
 
 test("a row lists the canvases its plugin declares, with their scope, before anything is opened", () => {
   const declared = [canvas("board", { pluginKey: "global:notes", package: "plugin:global:notes", scope: "Project" }), canvas("run", { pluginKey: "global:notes", package: "plugin:global:notes", scope: "Session" }),
@@ -180,6 +192,30 @@ test("a row lists the canvases its plugin declares, with their scope, before any
   }
   const html = render([entry("notes")]);
   assert.ok(!html.includes("plugin-canvas"), "Nothing is listed where nothing is declared.");
+});
+
+test("a plugin with a settings page has a gear beside its switch while it is on, and its page is not listed as a canvas", () => {
+  const declared = [canvas("mobile", { pluginKey: "builtin:mobile", plugin: "Mobile", title: "Mobile" }),
+    canvas("mobile-settings", { pluginKey: "builtin:mobile", plugin: "Mobile", title: "Mobile", icon: "smartphone", description: "The ports.", placement: "Settings" })];
+  const on = [entry("mobile", { kind: "BuiltIn", enabled: true, enabledGlobal: true, folder: null, path: null, loadable: false })];
+  const mobile = pluginRows(on, english).find(row => row.id === "mobile") ?? assert.fail("no row for Mobile");
+  assert.deepEqual(pluginSettingsPageOf(mobile, declared),
+    { pluginKey: "builtin:mobile", canvasId: "mobile-settings", title: "Mobile", description: "The ports.", icon: "smartphone", plugin: null });
+  assert.equal(pluginSettingsPageOf(mobile, declared.slice(0, 1)), null, "a plugin without a settings page has none");
+  const opened: unknown[] = [];
+  for (const locale of locales) {
+    const draw = (listed: readonly PluginsEntry[], onOpenSettings?: (page: unknown) => void) => card(renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+      createElement(PluginRows, { rows: pluginRows(listed, key => translate(locale, key)), canvases: declared, disabled: false, onToggle: never, onReload: never,
+        platform: "windows", onReveal: never, onOpenSettings }))), "Mobile");
+    const label = translate(locale, "Settings of {name}", { name: "Mobile" });
+    const row = draw(on, page => opened.push(page));
+    assert.ok(row.includes(`aria-label="${label}"`), `${locale}: ${row}`);
+    assert.ok(row.indexOf(`aria-label="${label}"`) < row.indexOf("bp6-switch"), "the gear comes before the switch");
+    assert.equal((row.match(/class="plugin-canvas"/gu) ?? []).length, 1, "the tab is listed, the settings page is not");
+    assert.ok(!draw(on).includes(`aria-label="${label}"`), "without a way to go there, no gear");
+    assert.ok(!draw([]).includes(`aria-label="${label}"`), "a plugin that is off has no gear");
+  }
+  assert.equal(opened.length, 0, "drawing goes nowhere");
 });
 
 test("the landing page is a plugin that ships with CodeAlta: its row has its switch, its canvas and its description, in every language", () => {

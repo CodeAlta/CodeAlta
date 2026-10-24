@@ -22,6 +22,7 @@
     <PackageVersion Include="NuGet.Versioning" Version="7.9.0" />
     <PackageVersion Include="Google.GenAI" Version="1.27.0" />
     <PackageVersion Include="OpenAI" Version="2.14.0" />
+    <PackageVersion Include="QRCoder" Version="1.8.1" />
     <PackageVersion Include="org.k2fsa.sherpa.onnx" Version="2.0.0" />
     <!-- Search by meaning: the managed binding must not be newer than the ONNX Runtime sherpa-onnx ships (1.28.2). -->
     <PackageVersion Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.28.0" />

@@ -24,12 +24,14 @@ import { timelineActivityMessages } from "./timelineActivity/messages";
 import { localSearchMessages } from "./search/localSearchMessages";
 import { skillSearchMessages } from "./search/skillMessages";
 import { searchCanvasMessages } from "./search/canvas/messages";
+import { mobileSettingsMessages } from "./mobile/settings/messages";
 import { promptInheritanceMessages } from "./promptInheritance/messages";
 import { reviewMessages } from "./review/messages";
 import { conversationHeldMessages } from "./conversationHeld/messages";
 import { claudeCodeImportMessages } from "./claudeCodeImport/messages";
 import { claudeCodeOpenMessages } from "./claudeCodeOpen/messages";
 import { mcpAppMessages } from "./mcpApps/messages";
+import { mobileCanvasMessages } from "./mobile/canvas/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -351,6 +353,7 @@ export const messages = dictionary({
   "Connects Model Context Protocol servers and exposes their tools.": ["Conecta servidores Model Context Protocol y expone sus herramientas.", "Connecte les serveurs Model Context Protocol et expose leurs outils.", "Verbindet Model-Context-Protocol-Server und stellt deren Werkzeuge bereit.", "Model Context Protocol サーバーに接続し、そのツールを公開します。", "连接 Model Context Protocol 服务器并提供其工具。"],
   "Issues and pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, and their CLIs when available.": ["Incidencias y pull requests de repositorios de GitHub, GitLab, Azure DevOps y Bitbucket, y sus CLI cuando están disponibles.", "Tickets et pull requests des dépôts GitHub, GitLab, Azure DevOps et Bitbucket, et leurs CLI lorsqu'elles sont disponibles.", "Issues und Pull Requests von GitHub-, GitLab-, Azure-DevOps- und Bitbucket-Repositories sowie deren CLIs, sofern verfügbar.", "GitHub、GitLab、Azure DevOps、Bitbucket のリポジトリの Issue とプルリクエスト、および利用可能な場合はそれらの CLI。", "GitHub、GitLab、Azure DevOps 和 Bitbucket 仓库的议题与拉取请求，以及可用时的相应 CLI。"],
   "The issues of a Jira project, for the projects whose configuration names one.": ["Las incidencias de un proyecto de Jira, para los proyectos cuya configuración indica uno.", "Les tickets d'un projet Jira, pour les projets dont la configuration en nomme un.", "Die Vorgänge eines Jira-Projekts, für Projekte, deren Konfiguration eines nennt.", "設定で Jira プロジェクトを指定しているプロジェクト向けの、その課題。", "Jira 项目的事务，适用于在配置中指定了 Jira 项目的项目。"],
+  "The sessions of this computer on a phone, through Tailscale.": ["Las sesiones de esta computadora en un teléfono, mediante Tailscale.", "Les sessions de cet ordinateur sur un téléphone, via Tailscale.", "Die Sitzungen dieses Computers auf einem Telefon, über Tailscale.", "このコンピューターのセッションをスマートフォンで、Tailscale 経由で。", "通过 Tailscale 在手机上查看这台电脑的会话。"],
   "Tools an agent sees and drives this window with, when its session asks for them.": [
     "Herramientas con las que un agente ve y controla esta ventana, cuando su sesión las solicita.",
     "Outils avec lesquels un agent voit et pilote cette fenêtre, lorsque sa session les demande.",
@@ -2698,6 +2701,7 @@ export const messages = dictionary({
   "Open canvas: {title}": ["Abrir lienzo: {title}", "Ouvrir le canevas : {title}", "Canvas öffnen: {title}", "キャンバスを開く: {title}", "打开画布：{title}"],
   "A canvas of {plugin}.": ["Un lienzo de {plugin}.", "Un canevas de {plugin}.", "Ein Canvas von {plugin}.", "{plugin} のキャンバス。", "{plugin} 提供的画布。"],
   "More…": ["Más…", "Plus…", "Mehr …", "その他…", "更多…"],
+  "Settings of {name}": ["Configuración de {name}", "Paramètres de {name}", "Einstellungen von {name}", "{name} の設定", "{name} 的设置"],
   "Canvas: {title} ({scope})": ["Lienzo: {title} ({scope})", "Canevas : {title} ({scope})", "Canvas: {title} ({scope})", "キャンバス: {title}（{scope}）", "画布：{title}（{scope}）"],
   ...landingMessages,
   ...statisticsMessages,
@@ -2725,12 +2729,14 @@ export const messages = dictionary({
   ...skillSearchMessages,
   ...localSearchMessages,
   ...searchCanvasMessages,
+  ...mobileSettingsMessages,
   ...promptInheritanceMessages,
   ...reviewMessages,
   ...conversationHeldMessages,
   ...claudeCodeImportMessages,
   ...claudeCodeOpenMessages,
   ...mcpAppMessages,
+  ...mobileCanvasMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

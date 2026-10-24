@@ -196,6 +196,7 @@ CODEALTA_DISABLE_PLUGINS=1
 - A plugin of a project follows its project and is not filtered by space.
 - What a plugin observes of the agents (`ObserveAgentEventAsync`), its background tasks and the session-event projections of history are not of one space and keep running.
 - Canvases follow their plugin: `DesktopCanvases.DeclarationsIn` lists and `RequestOpen` opens only the canvases of the plugins of the space.
+- A plugin that serves something of its own beyond the operations of the window (the Mobile plugin, a page another device opens) reads its own spaces with `IPluginServices.Spaces.GetAssignedSpaces()`: the ids of its spaces, empty for every space, read through the same `SpaceAssignments` of the adapter when it asks (`PluginRuntimeServices.AssignedSpaces`, given by `PluginActivationOptions.SpaceAssignments`). A plugin of a project, and a host without spaces (`NoopPluginSpaceService`), get an empty list. A plugin never reads `config.toml` itself.
 
 ## Runtime lifecycle
 
@@ -228,6 +229,7 @@ In the terminal application, open plugin management with `Ctrl+G Ctrl+N` or the 
 | `BuildPackageAsync(package, force)` | Builds without loading: the plugins that run keep running, and the result says whether the source on disk compiles. |
 | `ReloadPackageAsync(package, force)` | Builds, then replaces the running plugins of the package by those of the new build, or starts them. The `PluginPackageChange` of the result is `Started`, `Reloaded`, `BuildFailed`, `StartFailed`, `Disabled`, `Stopped` or `Unchanged`. |
 | `RefreshPackagesAsync()` | Applies what changed on disk and in the configuration since the plugins were started: starts the packages that are new or turned on, replaces those whose source changed, stops those that were removed or turned off. A package whose last build failed is built again only when its source changed. |
+| `ApplyBuiltInAsync(id)` | Starts or stops a built-in plugin of `StartOptions.BuiltIns` as the global configuration says now (`ResolveBuiltInPlugin`, `EnabledByDefault`): `Started`, `Stopped`, `StartFailed`, `Disabled` (off and not running, or made for another application) or `Unchanged` (it runs already, or the host has no built-in plugin of that id). A new activation is a new instance from the factory, with its startup hooks, as at the start; a stopped one is deactivated as a reload retires a package. The diagnostics of the id (the "skipped" line of the start included) are replaced. Settings > Plugins of the desktop calls it after it saved the switch of a built-in plugin. |
 | `Changed` | Raised after plugins were started, replaced or stopped, with the ids of their packages, so a host reads again what it keeps of the contributions (commands, shortcuts, pickers). |
 
 A reload keeps the application usable while a plugin is being written:
@@ -323,6 +325,8 @@ public override IEnumerable<PluginCanvasContribution> GetCanvases()
 **Asking for a tab.** `Services.Canvases` is the service of the calling plugin: `OpenAsync(canvasId, options)` asks the window to open the tab, or to bring it to the front when it is open, and tells whether the request was taken (`PluginCanvasOpenResult`: the status, the instance, the space and whether that space is the one shown). Without options the project and the session are those of the operation that asks (the pane a command runs in); `PluginCanvasOpenOptions` names a space, a project, a session, a key, an input, and whether to take the focus. A session canvas takes its session and its project from the same place: a session that the options name gets the project of the pane only when the pane is about that session, and the window gives the tab the project of the session otherwise. The session alone names the instance, so both mean the same one. A request for a space that is not shown adds the tab to the tabs of that space and does not move the window; the tab is there when the space is shown. `CloseAsync(instanceId)` closes an instance and its tab, and `GetOpen()` lists the open instances of the plugin.
 
 **Where a canvas is found.** Nothing is shown until someone opens it, and the author writes none of what lists it: the Canvases page of CodeAlta Desktop has a card for each declared canvas, the search and the palette have a command "Open canvas: <title>" for each, the menu of a project row lists the canvases of scope Project and the menu of a session row those of scope Session, Settings > Plugins names them under their plugin, and agents use `alta canvas list`, `show`, `open`, `focus`, `close` and `invoke` (see `doc/live-tool.md`). They follow the plugins as they are built, started and stopped.
+
+**A settings page.** A canvas declared with `Placement = PluginCanvasPlacement.Settings` is the settings page of its plugin instead of a tab: Settings lists it in its **Extensions** group, after Plugins and MCP Servers, with the title and the icon of the canvas, and the row of its plugin in Settings > Plugins has a gear button (`Settings of <plugin>`) that goes to it. It is drawn exactly as a tab is (the fragment, the script of `PluginScript.App`, `File` or `Inline`, the calls of `canvas.Rpc`, the lent libraries), inside the frame of a page of Settings that shows its title and its description. A settings page is of scope `Application` and has one instance, whatever the space the window shows: its context has no space, project, session or key. A plugin has at most one; the runtime leaves out a second one, or one of another scope, with a warning (`PluginCanvasValidation`). The page is listed only while its plugin runs and is available in the space the window shows; a page that is shown when its plugin stops says so, as a tab does, and it is gone from the list. It is not on the Canvases page, in the search or in the menus of the rows. `Services.Canvases.OpenAsync`, `alta.host.openCanvas` and `alta canvas open` open Settings on the page (the options other than the input do not apply to it; the open event of the page has `placement: "settings"`), and `alta canvas list` names it with `placement: settings`. The window closes the instance when the page is left or Settings is closed.
 
 **Lifetime.** An instance exists from the first time a tab shows it, and stays while the tab is in the window or its space is not shown (the tab is taken out of the page then, and the plugin sees `IsVisible` false). Closing the tab closes the instance: `Closed` is cancelled, then the `Closed` handler runs. The window keeps at most 64 instances and closes the oldest hidden one beyond that: its plugin is told as for a tab that was closed (`Closed` is cancelled, then the `Closed` handler runs), its tab stays, and the tab opens the instance again when it is shown. When a plugin is built again, each open instance is opened again by the new version and the tab shows the result; a build that fails leaves the version that runs and its tabs alone. A plugin that stops, or a new version without the canvas, leaves its tabs waiting: each says so and offers to build the plugin again, to open its source and to close, and comes back by itself when the plugin runs again. A canvas of a project plugin is listed everywhere the plugin is loaded.
 
@@ -744,7 +748,28 @@ application and holds no state; the cards on it are the landing cards of the oth
 `[plugins.landing]` and `enabled = false`, which also takes the page out of the Canvases page and makes
 `alta landing open` answer `landing.unavailable`; see `doc/desktop.md`, "The landing page". Settings > Plugins lists it
 with the other plugins that ship with CodeAlta ("Landing page", in the list of `PluginSettings.tsx`), with the same
-switch, which writes that entry; like every plugin that ships with CodeAlta it follows at the next start.
+switch, which writes that entry; like every plugin that ships with CodeAlta it starts or stops at once (`ApplyBuiltInAsync`).
+
+The desktop application has the built-in plugin `mobile` ("Mobile", `CodeAlta.Plugin.Mobile`, `DesktopPlugins.MobileDefinition`),
+which is **off until the user turns it on** (`EnabledByDefault = false`, and the row of `PluginSettings.tsx` is marked `off`): it
+publishes the computer on the tailnet. It serves the sessions to a phone from a Kestrel server on `127.0.0.1` (port 2584), published
+by Tailscale Serve on an HTTPS port of its own (2584, `tailscale serve --bg --https=2584 http://127.0.0.1:2584`); it never replaces
+what the port serves when it serves something else (`port-taken`), and takes off only the handler that points at its server. The page
+of the phones is written with the frontend of the desktop (`frontend/mobile.html`, `src/mobile`) and given by
+`IPluginServices.AppFiles` (`IPluginAppFileService`): the files of the application's page, those the asset manifest lists, checked
+against it (`DesktopPluginAppFiles`); a host without a page has none (`NoopPluginAppFileService`). The phone signs in with the token
+of the fragment of the QR code (`#k=`, never a query) through `POST /api/login`, which sets an HttpOnly cookie; every `/api` call
+needs it or a `Bearer` token, and a request that names another host than the loopback ones and the name of the computer on the
+tailnet is refused (421). The page has a strict policy (`MobileServer.PagePolicy`: no inline script, no eval). The phone sees the
+sessions of the spaces of the plugin only (`MobileSessions`), reads and acts through `alta` (`session list`, `status`, `events`,
+`create`, `send`, `steer`, `queue`, `abort`, `archive`, `restore`), and a new session goes to a space of the plugin that has its
+project. The Mobile tab (canvas `mobile`, module `PluginScript.App("mobile")`) draws the QR code and what keeps a phone from
+connecting from the calls `mobile.status` and `mobile.retry` and the event `mobile.changed`. Its settings page, Settings > Extensions >
+Mobile (canvas `mobile-settings`, `PluginCanvasPlacement.Settings`, module `PluginScript.App("mobile-settings")`), has the calls
+`mobile.settings.get`, `mobile.settings.set` (the two ports, each from 1024 to 65535: they are saved, the server moves to its new
+port, and what Tailscale served with the old ports is taken off before the view is published with the new ones, in the background)
+and `mobile.reset` (a new token: every phone scans again), and the event `mobile.settings.changed`. The token, the port and the HTTPS
+port are kept in the plugin's user state (`mobile.json`), which nobody has to edit. See `site/docs/plugins/mobile.md`.
 
 The statistics plugin is packaged as `CodeAlta.Plugin.Statistics`, is enabled by default, can be disabled with:
 

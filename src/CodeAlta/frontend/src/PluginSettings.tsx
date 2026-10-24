@@ -1,8 +1,8 @@
 import { useContext, useEffect, useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Switch, Tag, type Intent } from "@blueprintjs/core";
 import { plugins, projectFiles, type CanvasItem, type PluginsEntry, type PluginsProblem } from "#neoastra";
-import { canvasScope } from "./canvases/canvasPages";
-import { AppIcon } from "./AppIcon";
+import { canvasPlacement, canvasScope, pluginSettingsPage, type PluginSettingsPage } from "./canvases/canvasPages";
+import { AppIcon, type IconName } from "./AppIcon";
 import { BrandIcon } from "./BrandIcon";
 import { pluginBrand } from "./brands";
 import { PluginButtonSwitches } from "./pluginButtons/PluginButtonSwitches";
@@ -15,15 +15,17 @@ import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 
-// The plugins that ship with CodeAlta are enabled unless configuration says otherwise, and the host
-// lists them only once configuration names them.
-const builtIn: readonly { id: string; name: string; description: MessageKey }[] = [
+// The plugins that ship with CodeAlta are enabled unless configuration says otherwise, except the ones that are off until
+// the user turns them on (`off`), and the host lists them only once configuration names them.
+const builtIn: readonly { id: string; name: string; description: MessageKey; icon?: IconName; off?: true }[] = [
   { id: "mcp", name: "MCP", description: "Connects Model Context Protocol servers and exposes their tools." },
   { id: "git", name: "Git", description: "Issues and pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, and their CLIs when available." },
   { id: "jira", name: "Jira", description: "The issues of a Jira project, for the projects whose configuration names one." },
   { id: "statistics", name: "Statistics", description: "Per-turn and session statistics." },
   { id: "landing", name: "Landing page", description: "The welcome page: recent sessions and projects, the documentation and the cards of plugins." },
   { id: "ui", name: "UI tools", description: "Tools an agent sees and drives this window with, when its session asks for them." },
+  // It publishes this computer on the tailnet: off until the user turns it on.
+  { id: "mobile", name: "Mobile", description: "The sessions of this computer on a phone, through Tailscale.", icon: "smartphone", off: true },
 ];
 const stateIntent: Record<string, Intent> = { Enabled: "success", Failed: "danger", Changed: "warning", Disabled: "none", Configured: "none" };
 // What the running application did with an enabled plugin, when that is not simply "running".
@@ -50,7 +52,7 @@ export function pluginFailure(status: string, message?: string | null): Settings
 }
 
 /** One row of the page: a plugin that ships with CodeAlta, or one that configuration or a plugin folder names. */
-export type PluginRow = Readonly<{ id: string; name: string; description: string | null; enabled: boolean; entry: PluginsEntry | null; builtIn: boolean }>;
+export type PluginRow = Readonly<{ id: string; name: string; description: string | null; enabled: boolean; entry: PluginsEntry | null; builtIn: boolean; icon?: IconName }>;
 
 /**
  * The rows of what the host lists: the plugins that ship with CodeAlta first, enabled until configuration says
@@ -60,9 +62,11 @@ export function pluginRows(listed: readonly PluginsEntry[], t: (key: MessageKey)
   const source = (entry: PluginsEntry) => entry.kind === "Source";
   return [
     ...builtIn.map(plugin => { const entry = listed.find(value => value.id === plugin.id && !source(value)) ?? null;
-      // Configuration has one switch per id: the package of that id says what it holds for the built-in one.
-      const configured = entry?.enabled ?? listed.find(value => value.id === plugin.id)?.enabledGlobal ?? true;
-      return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: configured, entry, builtIn: true }; }),
+      // Configuration has one switch per id: the package of that id says what it holds for the built-in one. One that is off
+      // until it is turned on follows the global switch alone, which is the one its host reads.
+      const global = listed.find(value => value.id === plugin.id)?.enabledGlobal;
+      const configured = plugin.off ? global ?? false : entry?.enabled ?? global ?? true;
+      return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: configured, entry, builtIn: true, icon: plugin.icon }; }),
     ...listed.filter(entry => source(entry) || !builtIn.some(plugin => plugin.id === entry.id))
       .map(entry => ({ id: entry.id, name: entry.name || entry.id, description: entry.description, enabled: entry.enabled, entry, builtIn: false })),
   ];
@@ -75,6 +79,12 @@ export function pluginRows(listed: readonly PluginsEntry[], t: (key: MessageKey)
 export function pluginCanvases(row: PluginRow, canvases: readonly CanvasItem[]): readonly CanvasItem[] {
   const folder = row.entry?.kind === "Source" && !row.builtIn ? row.entry.folder : null;
   return canvases.filter(canvas => row.builtIn ? canvas.pluginKey === `builtin:${row.id}` : !!folder && canvas.package === folder);
+}
+
+/** The settings page of a row's plugin, in Settings > Extensions: its canvas of placement Settings, or null when it has none or does not run. */
+export function pluginSettingsPageOf(row: PluginRow, canvases: readonly CanvasItem[]): PluginSettingsPage | null {
+  const page = pluginCanvases(row, canvases).find(canvas => canvasPlacement(canvas) === "Settings");
+  return page ? pluginSettingsPage(page) : null;
 }
 
 const problemText: Record<string, MessageKey> = {
@@ -104,7 +114,7 @@ export function PluginProblems({ problems, omitted, files }: { problems: readonl
  * The list of the page. A source plugin says what the running application did with it and what its last build
  * reported; it is built again in the running application while it is turned on, and opened in the code editor.
  */
-export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null }: {
+export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null, onOpenSettings }: {
   rows: readonly PluginRow[]; disabled: boolean;
   /** The spaces of the plugins of the user, which each row shows and changes; null with the default space alone. */
   spaceScope?: ResourceSpaces;
@@ -119,14 +129,17 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
   platform?: string | null;
   /** Shows the folder of a source plugin in the file manager. */
   onReveal?: (folder: PluginFolder) => void;
+  /** Goes to the settings page of a plugin; without it the rows have no gear button. */
+  onOpenSettings?: (page: PluginSettingsPage) => void;
 }) {
   const { t } = useShellLanguage();
   return <CardList compact className="settings-editor-rows" aria-label={t("Plugins")}>
     {rows.map(row => { const entry = row.entry; const source = entry?.kind === "Source" && !row.builtIn ? entry : null; const errors = entry?.errors ?? [];
+      const settings = row.enabled && onOpenSettings ? pluginSettingsPageOf(row, canvases) : null;
       return <Card key={`${entry?.scope ?? ""}:${row.id}`}>
-      <span className="settings-editor-logo">{pluginBrand(row.id) ? <BrandIcon name={pluginBrand(row.id)!} size={20} /> : <AppIcon name="plugin" size={18} />}</span>
+      <span className="settings-editor-logo">{pluginBrand(row.id) ? <BrandIcon name={pluginBrand(row.id)!} size={20} /> : <AppIcon name={row.icon ?? "plugin"} size={18} />}</span>
       <span className="settings-editor-name"><strong>{row.name}</strong><small>{row.description || row.id}</small>
-        {pluginCanvases(row, canvases).map(canvas => <small key={canvas.id} className="plugin-canvas">{t("Canvas: {title} ({scope})", { title: canvas.title, scope: t(canvasScope(canvas)) })}</small>)}
+        {pluginCanvases(row, canvases).filter(canvas => canvasPlacement(canvas) === "Tab").map(canvas => <small key={canvas.id} className="plugin-canvas">{t("Canvas: {title} ({scope})", { title: canvas.title, scope: t(canvasScope(canvas)) })}</small>)}
         {errors.map((error, index) => <small key={index} className="plugin-failure">{error}</small>)}
         {errors.length === 0 && entry?.runtime === "failed" && entry.runtimeMessage && <small className="plugin-failure">{entry.runtimeMessage}</small>}
         {source?.path && <SettingsFileLocation path={source.path} platform={platform}
@@ -145,6 +158,8 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
           onClick={() => onEdit({ id: source.folder!, path: source.path!, name: source.id })} />}
         {source && onDelete && <RemoveButton name={row.name} disabled={disabled} onRemove={() => onDelete(source)} />}
         {entry?.scope !== "Project" && <ResourceSpaceChip scope={spaceScope} kind="plugin" resourceKey={row.id} name={row.name} disabled={disabled} />}
+        {settings && <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={15} />} aria-label={t("Settings of {name}", { name: row.name })}
+          title={t("Settings of {name}", { name: row.name })} onClick={() => onOpenSettings?.(settings)} />}
         <Switch checked={row.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: row.name })} onChange={event => onToggle(row.id, event.currentTarget.checked)} /></span>
     </Card>; })}
   </CardList>;
@@ -154,12 +169,14 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
  * Settings page for plugins: one list with an enable switch per plugin. A source plugin is also opened in the
  * code editor, built again in the running application, and created from here.
  */
-export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases, spaceScope = null }: {
+export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases, spaceScope = null, onOpenSettings }: {
   epoch: string | null; project: SettingsProject;
   /** The spaces of the plugins of the user, which each row shows and changes; null with the default space alone. */
   spaceScope?: ResourceSpaces;
   /** The canvases the running plugins declare, which each row lists. */
   canvases?: readonly CanvasItem[];
+  /** Goes to the settings page of a plugin, in Settings > Extensions. */
+  onOpenSettings?: (page: PluginSettingsPage) => void;
   /** Changes when the application started, replaced or stopped plugins: the list is read again. */
   revision?: number;
   /** Opens the code editor on the folder of a source plugin. */
@@ -249,7 +266,7 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={disabled} onChange={setScope} /></div>}
       <SettingsFileLocations files={files} disabled={disabled} />
       <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} files={files} />
-      <PluginRows spaceScope={spaceScope} rows={rows} canvases={canvases} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} />
+      <PluginRows spaceScope={spaceScope} rows={rows} canvases={canvases} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} onOpenSettings={onOpenSettings} />
     </>}
   </SettingsPage>;
 }

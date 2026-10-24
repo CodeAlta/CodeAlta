@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#252a31">
+  <meta name="color-scheme" content="dark light">
+  <link rel="manifest" href="/mobile/manifest.webmanifest">
+  <link rel="icon" href="/mobile/icon-192.png">
+  <link rel="apple-touch-icon" href="/mobile/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="CodeAlta">
+  <title>CodeAlta</title>
+  <script src="/mobile/boot.js"></script>
+  <script type="module" src="/src/mobile/main.ts"></script>
+</head>
+<body>
+  <header class="bar">
+    <button id="back" class="icon-btn" type="button" aria-label="Back to the sessions" title="Sessions" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <span class="brand" id="brand"><img src="/mobile/icon-192.png" alt="CodeAlta" width="30" height="30"><span id="link-dot" class="link-dot connecting" role="img" aria-label="Connecting…"></span></span>
+    <nav class="actions" aria-label="Commands">
+      <button id="install" class="icon-btn" type="button" aria-label="Install the app" title="Install CodeAlta" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+      </button>
+      <button id="new" class="icon-btn" type="button" aria-label="New session" title="New session">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button id="filter" class="icon-btn" type="button" aria-label="Filter by project" title="Filter by project" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg><span class="badge" hidden></span>
+      </button>
+      <button id="font" class="icon-btn" type="button" aria-label="Text size"><span class="font-a" aria-hidden="true">A</span><span class="font-step" aria-hidden="true"></span></button>
+      <button id="theme" class="icon-btn" type="button" aria-label="Theme"></button>
+      <button id="refresh" class="icon-btn" type="button" aria-label="Refresh" title="Refresh">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg>
+      </button>
+    </nav>
+  </header>
+  <div id="install-bar" class="install-bar" role="region" aria-label="Install the app" hidden>
+    <img src="/mobile/icon-192.png" alt="" width="32" height="32">
+    <div><b>Install CodeAlta</b><small>On the home screen, without the browser</small></div>
+    <button id="install-go" class="primary" type="button">Install</button>
+    <button id="install-later" class="icon-btn" type="button" aria-label="Not now"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <main id="home">
+    <p id="note" class="muted" role="status" aria-live="polite"></p>
+    <div class="scope"><p id="scope-where" class="scope-where"></p><p id="chip" class="chip" hidden><span></span><button type="button" aria-label="Show all projects">×</button></p></div>
+    <ul id="sessions" class="list" aria-label="Sessions"></ul>
+    <button id="more" class="more" type="button" hidden>More</button>
+  </main>
+  <main id="create" hidden>
+    <form id="new-form" class="composer-form">
+      <div class="field"><div class="field-row"><label for="new-project">Project</label><span id="new-space" class="space-tag"></span></div><select id="new-project" required></select></div>
+      <textarea id="new-text" rows="4" placeholder="What should the agent do?" aria-label="Prompt" required></textarea>
+      <div class="field"><span class="field-label" id="new-model-label">Model</span><button id="new-model" type="button" class="model-select" aria-haspopup="dialog" aria-labelledby="new-model-label new-model-name"><span id="new-model-name"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
+      <div id="new-variants" class="variants" hidden></div>
+      <div id="new-effort-field" class="field"><span class="field-label" id="new-effort-label">Reasoning</span><div id="new-effort" class="reasoning"></div></div>
+      <div class="field-pair">
+        <label>Provider<select id="new-provider"></select></label>
+        <label>Agent prompt<select id="new-agent"></select></label>
+      </div>
+      <label class="check"><input id="new-worktree" type="checkbox"> Work in a new git worktree</label>
+      <div id="create-bar" class="create-bar">
+        <p id="new-note" class="muted" role="status" aria-live="polite"></p>
+        <button id="new-start" class="primary" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>Start</button>
+      </div>
+    </form>
+  </main>
+  <main id="detail" hidden>
+    <div class="detail-head">
+      <h1 id="detail-title" class="detail-title"></h1>
+      <button id="detail-archive" class="icon-btn" type="button" aria-label="Archive the session" title="Archive">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></svg>
+      </button>
+    </div>
+    <div id="detail-meta" class="meta-facts detail-meta"></div>
+    <p id="detail-note" class="muted" role="status" aria-live="polite"></p>
+    <ol id="timeline" class="timeline" aria-label="Timeline"></ol>
+    <form id="composer" class="composer">
+      <textarea id="prompt" rows="1" placeholder="Ask for more…" aria-label="Prompt"></textarea>
+      <div class="composer-actions"><span id="composer-hint" class="composer-hint" aria-live="polite"></span>
+        <button id="abort" type="button" class="ghost" hidden title="Stop the running turn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor"/></svg><span>Stop</span></button>
+        <button id="queue" type="button" class="ghost" hidden title="Runs after this turn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 12H3M16 6H3M16 18H3M18 9v6M21 12h-6"/></svg><span>Queue</span></button>
+        <button id="send" type="submit" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg><span>Send</span></button>
+      </div>
+    </form>
+  </main>
+  <footer id="foot" class="muted" role="status" aria-live="polite"></footer>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <h2 id="sheet-title">Project</h2>
+      <ul id="sheet-list"></ul>
+    </div>
+  </div>
+  <div id="model-sheet" class="sheet" hidden>
+    <div class="sheet-panel model-picker" role="dialog" aria-modal="true" aria-label="Model">
+      <div id="tiers" class="tiers" role="group" aria-label="Tiers"></div>
+      <input id="model-search" type="search" placeholder="Search models" aria-label="Search models">
+      <ul id="model-list" aria-label="Models"></ul>
+    </div>
+  </div>
+  <div id="install-sheet" class="sheet" hidden>
+    <div class="sheet-panel install-panel" role="dialog" aria-modal="true" aria-labelledby="install-title">
+      <div class="install-head"><img src="/mobile/icon-192.png" alt="" width="44" height="44">
+        <div><h2 id="install-title">Put it on the home screen</h2><small>Three taps.</small></div>
+        <button id="install-close" class="icon-btn" type="button" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <ol id="install-ios" class="install-steps">
+        <li><span class="n">1</span><span>Tap <b>Share</b><small id="install-share-where"></small></span></li>
+        <li><span class="n">2</span><span><b>Add to Home Screen</b><small>If it is not there, scroll the list</small></span></li>
+        <li><span class="n">3</span><span>Tap <b>Add</b></span></li>
+      </ol>
+      <p id="install-safari">This browser cannot add it to the home screen. Open this page in <b>Safari</b> (Share, then Safari).</p>
+      <p id="install-menu">In the browser menu (⋮) choose <b>Install app</b> or <b>Add to Home screen</b>.</p>
+      <button id="install-not-now" class="link" type="button">Not now</button>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Built-in plugin of CodeAlta Desktop that serves the sessions of the computer to a phone, through Tailscale Serve.</Description>
+    <Authors>Daniel Cazzulino, Alexandre Mutel</Authors>
+    <PackageTags>codealta;plugin;mobile;agentic;ai</PackageTags>
+    <PackageProjectUrl>https://github.com/xoofx/CodeAlta</PackageProjectUrl>
+    <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Kestrel, the same shared framework the desktop MCP server uses. The page of the phones is built with the frontend of
+         the desktop (src/CodeAlta/frontend/mobile.html) and given by the host (IPluginServices.AppFiles). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="QRCoder" />
+    <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
+    <InternalsVisibleTo Include="CodeAlta.Plugin.Mobile.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
+  </ItemGroup>
+</Project>
