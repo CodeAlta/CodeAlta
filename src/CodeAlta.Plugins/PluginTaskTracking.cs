@@ -267,7 +267,9 @@ internal sealed class PluginRuntimeServices : IPluginServices
         IPluginServices inner,
         IPluginTaskService tasks,
         IPluginStateStore? state = null,
-        IPluginDatabase? database = null)
+        IPluginDatabase? database = null,
+        string? pluginId = null,
+        Func<CodeAlta.Catalog.SpaceAssignments>? spaceAssignments = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginRuntimeKey);
@@ -282,6 +284,10 @@ internal sealed class PluginRuntimeServices : IPluginServices
         // The host that shows canvases tells each plugin's service apart: a plugin only sees its own.
         Canvases = inner.Canvases is IPluginCanvasRuntimeService canvases ? canvases.ForPlugin(pluginRuntimeKey) : inner.Canvases;
         Ui = inner.Ui is IPluginUiRuntimeService ui ? ui.ForPlugin(pluginRuntimeKey) : inner.Ui;
+        // A plugin of the user is assigned to spaces by its id; a plugin of a project follows its project.
+        Spaces = scope == PluginScope.Global && spaceAssignments is not null
+            ? new AssignedSpaces(pluginId ?? PluginContributionRegistry.PluginIdOf(pluginRuntimeKey, null), spaceAssignments)
+            : inner.Spaces;
     }
 
     public Logger Logger { get; }
@@ -310,6 +316,16 @@ internal sealed class PluginRuntimeServices : IPluginServices
     public IPluginCanvasService Canvases { get; }
 
     public IPluginIdentityService Identity => _inner.Identity;
+
+    public IPluginSpaceService Spaces { get; }
+
+    public IPluginAppFileService AppFiles => _inner.AppFiles;
+
+    // The spaces of the plugin as the global configuration says them when they are asked.
+    private sealed class AssignedSpaces(string pluginId, Func<CodeAlta.Catalog.SpaceAssignments> read) : IPluginSpaceService
+    {
+        public IReadOnlyList<string> GetAssignedSpaces() => read().Of(CodeAlta.Catalog.SpaceResourceKind.Plugin, pluginId);
+    }
 
     private sealed class PluginRuntimeAltaService(
         string pluginRuntimeKey,

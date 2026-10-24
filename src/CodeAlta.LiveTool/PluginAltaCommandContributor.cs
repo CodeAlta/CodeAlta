@@ -203,5 +203,9 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         public IPluginCanvasService Canvases => inner.Canvases;
 
         public IPluginIdentityService Identity => inner.Identity;
+
+        public IPluginSpaceService Spaces => inner.Spaces;
+
+        public IPluginAppFileService AppFiles => inner.AppFiles;
     }
 }

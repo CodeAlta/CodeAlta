@@ -85,11 +85,15 @@ internal static class DesktopPlugins
         return reviewsCommands ? builtIns : [.. builtIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
     }
 
-    /// <summary>The plugin that serves the mobile view of the sessions and the QR code a phone connects with.</summary>
+    /// <summary>
+    /// The plugin that serves the sessions to a phone and the QR code a phone connects with. It is off until the user turns it
+    /// on: it publishes this computer on the tailnet.
+    /// </summary>
     internal static BuiltInPluginDefinition MobileDefinition { get; } = new()
     {
         Id = "mobile", DisplayName = "Mobile",
-        Description = "Serves a mobile view of the sessions on this computer and, through Tailscale Serve, on your tailnet.",
+        Description = "The sessions of this computer on a phone, through Tailscale.",
+        EnabledByDefault = false, Frontends = PluginFrontends.Desktop,
         PluginType = typeof(MobilePlugin), Factory = static () => new MobilePlugin(),
     };
 
@@ -195,7 +199,8 @@ internal static class DesktopPlugins
 /// pane where a plugin command was started; outside both there is none, and a plugin uses the project its
 /// operation context carries.
 /// </remarks>
-internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null, DesktopPluginIdentities? identities = null) : IPluginServices
+internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null, DesktopPluginIdentities? identities = null,
+    IPluginAppFileService? appFiles = null) : IPluginServices
 {
     private readonly NoopPluginServices _inner = NoopPluginServices.Create();
     private readonly DesktopPluginUi _ui = ui ?? throw new ArgumentNullException(nameof(ui));
@@ -225,6 +230,9 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
 
     // The identity of each session, of the space shown and of a project, once the host runs.
     public IPluginIdentityService Identity { get; } = (IPluginIdentityService?)identities ?? NoopPluginIdentityService.Instance;
+
+    // The files of the window's page, which a plugin serves to a browser of its own (the page of the phones).
+    public IPluginAppFileService AppFiles { get; } = appFiles ?? NoopPluginAppFileService.Instance;
 
     private sealed class RunWorkspace(DesktopPluginUi ui) : IPluginWorkspaceService
     {

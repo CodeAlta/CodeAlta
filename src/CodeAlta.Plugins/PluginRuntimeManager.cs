@@ -262,7 +262,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
                     discovered,
                     sourcePackage: null,
                     loadContext: null,
-                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase },
+                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments },
                     cancellationToken)
                 .ConfigureAwait(false);
             if (activation.ActivePlugin is not null)
@@ -430,6 +430,9 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
             return false; // A path that names no folder is the folder of nothing.
         }
     }
+
+    // The spaces of the plugins as the adapter reads them when a plugin asks; none read puts every plugin in every space.
+    private SpaceAssignments ReadSpaceAssignments() => Adapter.SpaceAssignments is { } read ? read() : SpaceAssignments.Empty;
 
     private static PluginHostInfo CreateHostInfo(PluginRuntimeManagerOptions options)
         => new()

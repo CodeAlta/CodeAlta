@@ -167,6 +167,12 @@ public sealed record PluginActivationOptions
 
     /// <summary>Gets the explicitly composed built-in factory; source plugins retain type-based activation.</summary>
     internal Func<PluginBase>? BuiltInFactory { get; init; }
+
+    /// <summary>
+    /// Gets where the spaces of the plugins are read from, the global configuration; <see langword="null"/> puts every plugin in
+    /// every space, as the host services say it.
+    /// </summary>
+    public Func<SpaceAssignments>? SpaceAssignments { get; init; }
 }
 
 /// <summary>
@@ -271,7 +277,9 @@ public sealed class PluginRuntimeActivator
                 hostServices,
                 taskService,
                 state,
-                database);
+                database,
+                PluginContributionRegistry.PluginIdOf(discoveredType.Descriptor.RuntimeKey, sourcePackage?.PackageId),
+                options.SpaceAssignments);
             dependencies.Add(services);
             var context = new PluginRuntimeContext
             {

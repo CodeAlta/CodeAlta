@@ -52,6 +52,18 @@ public interface IPluginServices
     /// that was written before spaces had identities gives the usual settings.
     /// </summary>
     IPluginIdentityService Identity => NoopPluginIdentityService.Instance;
+
+    /// <summary>
+    /// Gets the spaces the plugin is assigned to. A host that was written before plugins were assigned to spaces puts every
+    /// plugin in every space.
+    /// </summary>
+    IPluginSpaceService Spaces => NoopPluginSpaceService.Instance;
+
+    /// <summary>
+    /// Gets the files of the application's page that a plugin serves to a browser of its own, such as a page a phone opens.
+    /// A host without such a page has none.
+    /// </summary>
+    IPluginAppFileService AppFiles => NoopPluginAppFileService.Instance;
 }
 
 /// <summary>
