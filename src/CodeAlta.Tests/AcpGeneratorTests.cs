@@ -36,6 +36,72 @@ public sealed class AcpGeneratorTests
     }
 
     [TestMethod]
+    public async Task ResolveAsync_LocalRepo_PrefersVersionOneFolderAndRecordsSourceRef()
+    {
+        using var temp = TestTempDirectory.Create();
+        var v1Dir = Path.Combine(temp.Path, "schema", "v1");
+        var v2Dir = Path.Combine(temp.Path, "schema", "v2");
+        Directory.CreateDirectory(v1Dir);
+        Directory.CreateDirectory(v2Dir);
+        foreach (var dir in new[] { v1Dir, v2Dir })
+        {
+            await File.WriteAllTextAsync(Path.Combine(dir, "schema.unstable.json"), CreateMinimalSchemaJson()).ConfigureAwait(false);
+            await File.WriteAllTextAsync(Path.Combine(dir, "meta.unstable.json"), CreateMinimalMetaJson()).ConfigureAwait(false);
+        }
+
+        var source = await AcpSchemaSourceResolver.ResolveAsync(
+                new GeneratorCliOptions(
+                    schemaFile: null,
+                    acpRepoDir: temp.Path,
+                    zipFile: null,
+                    githubRef: null,
+                    AcpSurface.Unstable,
+                    "CodeAlta.Acp",
+                    "agentclientprotocol/agent-client-protocol",
+                    outputDir: null,
+                    cacheDir: null,
+                    forceDownload: false,
+                    sourceRef: "v1.12.0"),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(Path.Combine(v1Dir, "schema.unstable.json"), source.SchemaPath);
+        Assert.AreEqual(Path.Combine(v1Dir, "meta.unstable.json"), source.MetaPath);
+        Assert.AreEqual("v1.12.0", source.GitRef);
+    }
+
+    [TestMethod]
+    public async Task ResolveAsync_LocalZip_PrefersVersionOneFolder()
+    {
+        using var temp = TestTempDirectory.Create();
+        var zipPath = Path.Combine(temp.Path, "acp.zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            WriteArchiveFile(archive, "agent-client-protocol-v-test/schema/v2/schema.json", CreateMinimalSchemaJson());
+            WriteArchiveFile(archive, "agent-client-protocol-v-test/schema/v2/meta.json", CreateMinimalMetaJson());
+            WriteArchiveFile(archive, "agent-client-protocol-v-test/schema/v1/schema.json", CreateMinimalSchemaJson());
+            WriteArchiveFile(archive, "agent-client-protocol-v-test/schema/v1/meta.json", CreateMinimalMetaJson());
+        }
+
+        var source = await AcpSchemaSourceResolver.ResolveAsync(
+                new GeneratorCliOptions(
+                    schemaFile: null,
+                    acpRepoDir: null,
+                    zipFile: zipPath,
+                    githubRef: null,
+                    AcpSurface.Stable,
+                    "CodeAlta.Acp",
+                    "agentclientprotocol/agent-client-protocol",
+                    outputDir: null,
+                    cacheDir: null,
+                    forceDownload: false),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual("v1", Path.GetFileName(Path.GetDirectoryName(source.SchemaPath)));
+    }
+
+    [TestMethod]
     public async Task ResolveAsync_LocalZip_ExtractsUnstableSchema()
     {
         using var temp = TestTempDirectory.Create();

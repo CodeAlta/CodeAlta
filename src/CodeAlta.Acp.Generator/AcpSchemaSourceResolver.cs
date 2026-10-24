@@ -5,6 +5,8 @@ namespace CodeAlta.Acp.Generator;
 
 internal static class AcpSchemaSourceResolver
 {
+    private const string ProtocolVersionFolder = "v1";
+
     public static async Task<AcpSchemaSourceInfo> ResolveAsync(
         GeneratorCliOptions options,
         CancellationToken cancellationToken)
@@ -18,8 +20,8 @@ internal static class AcpSchemaSourceResolver
             return new AcpSchemaSourceInfo(
                 "local-file",
                 schemaPath,
-                options.GithubRepo,
-                null,
+                $"https://github.com/{options.GithubRepo}",
+                options.SourceRef,
                 schemaPath,
                 metaPath,
                 Path.GetDirectoryName(schemaPath) ?? Directory.GetCurrentDirectory());
@@ -34,7 +36,7 @@ internal static class AcpSchemaSourceResolver
                 "local-repo",
                 repoDir,
                 $"https://github.com/{options.GithubRepo}",
-                null,
+                options.SourceRef,
                 schemaPath,
                 metaPath,
                 repoDir);
@@ -50,7 +52,7 @@ internal static class AcpSchemaSourceResolver
                 "local-zip",
                 zipPath,
                 $"https://github.com/{options.GithubRepo}",
-                null,
+                options.SourceRef,
                 schemaPath,
                 metaPath,
                 extractedRoot);
@@ -123,13 +125,20 @@ internal static class AcpSchemaSourceResolver
         return true;
     }
 
+    // The repository keeps the schema of protocol version 1 in schema/v1 since the v2 draft; older checkouts have it in schema.
     private static string ResolveRepoSchemaPath(string repoDir, AcpSurface surface)
     {
         var schemaName = GetSchemaFileName(surface);
+        var versionedPath = Path.Combine(repoDir, "schema", ProtocolVersionFolder, schemaName);
+        if (File.Exists(versionedPath))
+        {
+            return versionedPath;
+        }
+
         var schemaPath = Path.Combine(repoDir, "schema", schemaName);
         if (!File.Exists(schemaPath))
         {
-            throw new FileNotFoundException($"ACP schema file not found: {schemaPath}");
+            throw new FileNotFoundException($"ACP schema file not found: {versionedPath}");
         }
 
         return schemaPath;
@@ -138,10 +147,14 @@ internal static class AcpSchemaSourceResolver
     private static string ResolveExtractedSchemaPath(string extractedRoot, AcpSurface surface)
     {
         var schemaName = GetSchemaFileName(surface);
-        var candidates = Directory
-            .EnumerateFiles(extractedRoot, schemaName, SearchOption.AllDirectories)
-            .Where(path => string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), "schema", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        var all = Directory.EnumerateFiles(extractedRoot, schemaName, SearchOption.AllDirectories).ToArray();
+        var candidates = all.Where(IsVersionedSchemaPath).ToArray();
+        if (candidates.Length == 0)
+        {
+            candidates = all
+                .Where(static path => string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), "schema", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
 
         return candidates.Length switch
         {
@@ -149,6 +162,13 @@ internal static class AcpSchemaSourceResolver
             0 => throw new FileNotFoundException($"Unable to locate '{schemaName}' under '{extractedRoot}'."),
             _ => candidates.OrderBy(static path => path.Length).First(),
         };
+    }
+
+    private static bool IsVersionedSchemaPath(string path)
+    {
+        var directory = Path.GetDirectoryName(path);
+        return string.Equals(Path.GetFileName(directory), ProtocolVersionFolder, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Path.GetFileName(Path.GetDirectoryName(directory)), "schema", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveMetaPath(string schemaPath, AcpSurface surface)

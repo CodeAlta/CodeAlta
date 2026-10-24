@@ -19,7 +19,8 @@ internal sealed class GeneratorCliOptions
         string githubRepo,
         string? outputDir,
         string? cacheDir,
-        bool forceDownload)
+        bool forceDownload,
+        string? sourceRef = null)
     {
         SchemaFile = schemaFile;
         AcpRepoDir = acpRepoDir;
@@ -31,6 +32,7 @@ internal sealed class GeneratorCliOptions
         OutputDir = outputDir;
         CacheDir = cacheDir;
         ForceDownload = forceDownload;
+        SourceRef = sourceRef;
     }
 
     public string? SchemaFile { get; }
@@ -52,6 +54,9 @@ internal sealed class GeneratorCliOptions
     public string? CacheDir { get; }
 
     public bool ForceDownload { get; }
+
+    /// <summary>The tag or commit of a local source, recorded in the generated metadata.</summary>
+    public string? SourceRef { get; }
 
     public static CommandApp CreateCommandApp(Func<GeneratorCliOptions, ValueTask<int>> execute)
     {
@@ -90,6 +95,7 @@ internal sealed class GeneratorCliOptions
             { "acp-repo-dir=", "Local ACP checkout {DIR}", value => state.AcpRepoDir = value },
             { "zip-file=", "Local ACP archive {FILE}", value => state.ZipFile = value },
             { "github-ref=", "Pinned GitHub tag or branch {REF}", value => state.GithubRef = value },
+            { "source-ref=", "Tag or commit {REF} of a local source, recorded in the metadata", value => state.SourceRef = value },
             _,
             "Generation:",
             { "surface=", "ACP {SURFACE}: stable or unstable", value => state.Surface = value },
@@ -146,7 +152,8 @@ internal sealed class GeneratorCliOptions
             string.IsNullOrWhiteSpace(state.GithubRepo) ? DefaultGithubRepo : state.GithubRepo.Trim(),
             string.IsNullOrWhiteSpace(state.OutputDir) ? null : state.OutputDir.Trim(),
             string.IsNullOrWhiteSpace(state.CacheDir) ? null : state.CacheDir.Trim(),
-            state.ForceDownload);
+            state.ForceDownload,
+            string.IsNullOrWhiteSpace(state.SourceRef) ? null : state.SourceRef.Trim());
         error = null;
         return true;
     }
@@ -196,5 +203,7 @@ internal sealed class GeneratorCliOptions
         public string? CacheDir { get; set; }
 
         public bool ForceDownload { get; set; }
+
+        public string? SourceRef { get; set; }
     }
 }
