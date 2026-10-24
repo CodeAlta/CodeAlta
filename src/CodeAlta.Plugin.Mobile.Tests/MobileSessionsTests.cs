@@ -180,12 +180,14 @@ public sealed class MobileSessionsTests
             .Answer("session choices a", new JsonObject
             {
                 ["type"] = "alta.session.choices", ["sessionId"] = "a",
-                ["current"] = new JsonObject { ["providerKey"] = "claude", ["modelId"] = "opus", ["reasoningEffort"] = "high", ["agentPromptId"] = "plan", ["permissionMode"] = null },
+                // As alta writes it: a null field is left out (no permission mode: the provider's).
+                ["current"] = new JsonObject { ["providerKey"] = "claude", ["modelId"] = "opus", ["reasoningEffort"] = "high", ["agentPromptId"] = "plan" },
                 ["models"] = new JsonArray(
-                    new JsonObject { ["id"] = "opus", ["name"] = "Opus 5.5", ["efforts"] = new JsonArray("low", "high"), ["startEffort"] = "high", ["imageInput"] = true },
-                    new JsonObject { ["id"] = "haiku", ["name"] = null, ["efforts"] = new JsonArray() }),
+                    new JsonObject { ["id"] = "opus", ["name"] = "Opus 5.5", ["efforts"] = new JsonArray("low", "high"), ["startEffort"] = "high", ["imageInput"] = true, ["effortsComplete"] = true },
+                    new JsonObject { ["id"] = "haiku", ["efforts"] = new JsonArray() }),
                 ["prompts"] = new JsonArray(new JsonObject { ["id"] = "default", ["name"] = "Default" }, new JsonObject { ["id"] = "plan", ["name"] = "Plan" }),
-                ["permissionModes"] = new JsonArray(new JsonObject { ["id"] = "default", ["name"] = "Ask first", ["description"] = null }, new JsonObject { ["id"] = "acceptEdits", ["name"] = "Accept edits" }),
+                ["permissionModes"] = new JsonArray(new JsonObject { ["id"] = "default", ["name"] = "Ask first" }, new JsonObject { ["id"] = "acceptEdits", ["name"] = "Accept edits", ["description"] = "Accept file edits." }),
+                ["defaultPermissionMode"] = "default", ["tier"] = "complex",
             });
         var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
 
