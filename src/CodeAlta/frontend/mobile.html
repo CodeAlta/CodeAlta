@@ -3,23 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#252a31" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon-192.png">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="theme-color" content="#252a31">
+  <meta name="color-scheme" content="dark light">
+  <link rel="manifest" href="/mobile/manifest.webmanifest">
+  <link rel="icon" href="/mobile/icon-192.png">
+  <link rel="apple-touch-icon" href="/mobile/apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="CodeAlta">
   <title>CodeAlta</title>
-  <script src="/prefs.js"></script>
-  <link rel="stylesheet" href="/app.css">
+  <script src="/mobile/boot.js"></script>
+  <script type="module" src="/src/mobile/main.ts"></script>
 </head>
 <body>
   <header class="bar">
     <button id="back" class="icon-btn" type="button" aria-label="Back to the sessions" title="Sessions" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
-    <span class="brand" id="brand"><img src="/icon-192.png" alt="CodeAlta" width="30" height="30"></span>
+    <span class="brand" id="brand"><img src="/mobile/icon-192.png" alt="CodeAlta" width="30" height="30"><span id="link-dot" class="link-dot connecting" role="img" aria-label="Connecting…"></span></span>
     <nav class="actions" aria-label="Commands">
       <button id="install" class="icon-btn" type="button" aria-label="Install the app" title="Install CodeAlta" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
@@ -27,10 +28,10 @@
       <button id="new" class="icon-btn" type="button" aria-label="New session" title="New session">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       </button>
-      <button id="filter" class="icon-btn" type="button" aria-label="Filter by project" title="Filter by project">
+      <button id="filter" class="icon-btn" type="button" aria-label="Filter by project" title="Filter by project" aria-haspopup="dialog">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg><span class="badge" hidden></span>
       </button>
-      <button id="font" class="icon-btn" type="button" aria-label="Text size"><span class="font-a">A</span><span class="font-step"></span></button>
+      <button id="font" class="icon-btn" type="button" aria-label="Text size"><span class="font-a" aria-hidden="true">A</span><span class="font-step" aria-hidden="true"></span></button>
       <button id="theme" class="icon-btn" type="button" aria-label="Theme"></button>
       <button id="refresh" class="icon-btn" type="button" aria-label="Refresh" title="Refresh">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg>
@@ -38,15 +39,15 @@
     </nav>
   </header>
   <div id="install-bar" class="install-bar" role="region" aria-label="Install the app" hidden>
-    <img src="/icon-192.png" alt="" width="32" height="32">
+    <img src="/mobile/icon-192.png" alt="" width="32" height="32">
     <div><b>Install CodeAlta</b><small>On the home screen, without the browser</small></div>
     <button id="install-go" class="primary" type="button">Install</button>
     <button id="install-later" class="icon-btn" type="button" aria-label="Not now"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </div>
   <main id="home">
-    <p id="note" class="muted"></p>
+    <p id="note" class="muted" role="status" aria-live="polite"></p>
     <p id="chip" class="chip" hidden><span></span><button type="button" aria-label="Show all projects">×</button></p>
-    <ul id="sessions" class="list"></ul>
+    <ul id="sessions" class="list" aria-label="Sessions"></ul>
     <button id="more" class="more" type="button" hidden>More</button>
   </main>
   <main id="create" hidden>
@@ -54,46 +55,51 @@
       <label>Project<select id="new-project" required></select></label>
       <label>Agent prompt<select id="new-agent"></select></label>
       <label>Provider<select id="new-provider"></select></label>
-      <label>Model<button id="new-model" type="button" class="model-select" aria-haspopup="listbox"><span id="new-model-name"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></label>
+      <div class="field"><span class="field-label" id="new-model-label">Model</span><button id="new-model" type="button" class="model-select" aria-haspopup="dialog" aria-labelledby="new-model-label new-model-name"><span id="new-model-name"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
       <div id="new-variants" class="variants" hidden></div>
-      <div id="new-effort-field" class="field"><span class="field-label">Reasoning</span><div id="new-effort" class="reasoning"></div></div>
+      <div id="new-effort-field" class="field"><span class="field-label" id="new-effort-label">Reasoning</span><div id="new-effort" class="reasoning"></div></div>
       <label class="check"><input id="new-worktree" type="checkbox"> Work in a new git worktree</label>
-      <textarea id="new-text" rows="5" placeholder="What should the agent do?" required></textarea>
-      <p id="new-note" class="muted"></p>
+      <textarea id="new-text" rows="5" placeholder="What should the agent do?" aria-label="Prompt" required></textarea>
+      <p id="new-note" class="muted" role="status" aria-live="polite"></p>
       <button id="new-start" class="primary" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>Start</button>
     </form>
   </main>
-  <div id="sheet" class="sheet" hidden>
-    <div class="sheet-panel" role="dialog" aria-label="Filter by project">
-      <h2>Project</h2>
-      <ul id="sheet-list"></ul>
-    </div>
-  </div>
-  <div id="model-sheet" class="sheet" hidden>
-    <div class="sheet-panel model-picker" role="dialog" aria-label="Model">
-      <div id="tiers" class="tiers" role="group" aria-label="Tiers"></div>
-      <input id="model-search" type="search" placeholder="Search models" aria-label="Search models">
-      <ul id="model-list" role="listbox" aria-label="Models"></ul>
-    </div>
-  </div>
   <main id="detail" hidden>
-    <h1 id="detail-title" class="detail-title"></h1>
-    <p id="detail-note" class="muted"></p>
-    <ol id="timeline" class="timeline"></ol>
+    <div class="detail-head">
+      <h1 id="detail-title" class="detail-title"></h1>
+      <button id="detail-archive" class="icon-btn" type="button" aria-label="Archive the session" title="Archive">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></svg>
+      </button>
+    </div>
+    <p id="detail-note" class="muted" role="status" aria-live="polite"></p>
+    <ol id="timeline" class="timeline" aria-label="Timeline"></ol>
     <form id="composer" class="composer">
       <textarea id="prompt" rows="1" placeholder="Ask for more…" aria-label="Prompt"></textarea>
-      <div class="composer-actions"><span id="composer-hint" class="composer-hint"></span>
-        <button id="abort" type="button" class="ghost" hidden title="Stop the running turn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor"/></svg>Stop</button>
-        <button id="queue" type="button" class="ghost" hidden title="Runs after this turn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 12H3M16 6H3M16 18H3M18 9v6M21 12h-6"/></svg>Queue</button>
+      <div class="composer-actions"><span id="composer-hint" class="composer-hint" aria-live="polite"></span>
+        <button id="abort" type="button" class="ghost" hidden title="Stop the running turn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor"/></svg><span>Stop</span></button>
+        <button id="queue" type="button" class="ghost" hidden title="Runs after this turn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 12H3M16 6H3M16 18H3M18 9v6M21 12h-6"/></svg><span>Queue</span></button>
         <button id="send" type="submit" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg><span>Send</span></button>
       </div>
     </form>
   </main>
-  <footer id="foot" class="muted"></footer>
+  <footer id="foot" class="muted" role="status" aria-live="polite"></footer>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <h2 id="sheet-title">Project</h2>
+      <ul id="sheet-list"></ul>
+    </div>
+  </div>
+  <div id="model-sheet" class="sheet" hidden>
+    <div class="sheet-panel model-picker" role="dialog" aria-modal="true" aria-label="Model">
+      <div id="tiers" class="tiers" role="group" aria-label="Tiers"></div>
+      <input id="model-search" type="search" placeholder="Search models" aria-label="Search models">
+      <ul id="model-list" aria-label="Models"></ul>
+    </div>
+  </div>
   <div id="install-sheet" class="sheet" hidden>
     <div class="sheet-panel install-panel" role="dialog" aria-modal="true" aria-labelledby="install-title">
-      <div class="install-head"><img src="/icon-192.png" alt="" width="44" height="44">
+      <div class="install-head"><img src="/mobile/icon-192.png" alt="" width="44" height="44">
         <div><h2 id="install-title">Put it on the home screen</h2><small>Three taps.</small></div>
         <button id="install-close" class="icon-btn" type="button" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <ol id="install-ios" class="install-steps">
@@ -106,8 +112,5 @@
       <button id="install-not-now" class="link" type="button">Not now</button>
     </div>
   </div>
-  <script src="/install.js" defer></script>
-  <script src="/modelorder.js" defer></script>
-  <script src="/app.js" defer></script>
 </body>
 </html>
