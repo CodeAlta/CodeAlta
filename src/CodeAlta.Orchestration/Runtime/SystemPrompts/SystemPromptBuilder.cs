@@ -783,6 +783,7 @@ public sealed class SystemPromptBuilder
         var builder = new StringBuilder();
         builder.AppendLine("Tool schemas and handlers are supplied separately by the host. Use only tools that are actually available in the current runtime.");
         builder.AppendLine("Treat tool results as evidence, do not fabricate tool output, and respect host permission or approval prompts before acting.");
+        builder.AppendLine("When you write in an external system on the user's behalf (a pull request comment or review, an issue, a reply in an issue tracker, chat or email), end the text with a short italic line saying that it comes from CodeAlta, so readers do not take it for the user's own words, for example `_This review was written by [CodeAlta](https://codealta.github.io), an AI coding agent._` or `_This issue was created by [CodeAlta](https://codealta.github.io), an AI coding agent._`; this does not apply to commit messages.");
         if (request.Tools.Count > 0)
         {
             builder.Append("Available host tool count: ").Append(request.Tools.Count.ToString(CultureInfo.InvariantCulture)).AppendLine(".");
