@@ -201,6 +201,11 @@ internal sealed class SessionJournalIndexStore : IAgentSessionJournalIndex
                 // The file was replaced while the operation ran: the tables are made in the new one.
                 Volatile.Write(ref _schemaGeneration, -1);
             }
+            catch (SqliteException exception) when (attempt == 0 && IsMissingTable(exception))
+            {
+                // The file was made again without these tables (deleted, then made by another owner of it): they are made now.
+                Volatile.Write(ref _schemaGeneration, -1);
+            }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException)
             {
                 // The file cannot be used now, or the database was closed with the application: the journals are read.
@@ -303,6 +308,9 @@ internal sealed class SessionJournalIndexStore : IAgentSessionJournalIndex
             _schemaGate.Release();
         }
     }
+
+    private static bool IsMissingTable(SqliteException exception)
+        => exception.SqliteErrorCode == 1 && exception.Message.Contains("no such table", StringComparison.Ordinal);
 
     // Drops the tables, to be made again empty; the file itself is replaced when the damage is not in these tables.
     private async Task ClearAsync(SqliteException? failure, int generation, CancellationToken cancellationToken)
