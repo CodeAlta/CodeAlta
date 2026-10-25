@@ -27,6 +27,8 @@ internal sealed class McpConfigCache
     private readonly McpConfigDiscovery _discovery = new();
     private readonly McpPolicyLoader _policyLoader = new();
     private readonly TimeProvider _time;
+    // The servers given in memory for sessions, with every discovery.
+    private IReadOnlyList<McpServerDefinition> _sessionServers = [];
     private long _generation;
     private int _configReads;
     private int _policyReads;
@@ -74,8 +76,25 @@ internal sealed class McpConfigCache
                 UserHomeDirectory = home,
                 ProbeWritability = false,
                 BoundedRead = false,
+                SessionServers = SessionServers,
             });
         });
+    }
+
+    /// <summary>Gets the servers given in memory for sessions, which every discovery has.</summary>
+    public IReadOnlyList<McpServerDefinition> SessionServers => Volatile.Read(ref _sessionServers);
+
+    /// <summary>Adds servers given in memory for sessions, or replaces those of the same keys; the next discoveries have them.</summary>
+    public void AddSessionServers(IReadOnlyList<McpServerDefinition> servers)
+    {
+        ArgumentNullException.ThrowIfNull(servers);
+        lock (_gate)
+        {
+            var keys = servers.Select(static server => server.Key).ToHashSet(StringComparer.Ordinal);
+            _sessionServers = [.. _sessionServers.Where(server => !keys.Contains(server.Key)), .. servers];
+        }
+
+        Invalidate();
     }
 
     /// <summary>Loads the MCP policy of the global and the project <c>config.toml</c>, as <see cref="McpPolicyLoader.Load"/> does.</summary>

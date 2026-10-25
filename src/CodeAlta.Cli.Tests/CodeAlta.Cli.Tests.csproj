@@ -20,5 +20,6 @@
     <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="..\CodeAlta.Tests.TinyMcpServer\CodeAlta.Tests.TinyMcpServer.csproj" />
   </ItemGroup>
 </Project>

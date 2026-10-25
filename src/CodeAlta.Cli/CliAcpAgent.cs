@@ -9,6 +9,7 @@ using CodeAlta.Catalog;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Plugin.Mcp;
 using static CodeAlta.Cli.CodeAltaAcpExtensions;
 
 namespace CodeAlta.Cli;
@@ -39,6 +40,8 @@ internal sealed record CliAcpDefaults
 /// The sessions of a client stay open (and leased) until it closes them or the connection ends.</item>
 /// <item><c>session/prompt</c> runs a turn to its settlement (the sessions it started and the jobs included), sends every
 /// update of the run, then answers with the stop reason and the usage of the run.</item>
+/// <item>The <c>mcpServers</c> of a session (stdio, HTTP, SSE) are given to the MCP plugin in memory and activated for that
+/// session (<see cref="McpPlugin.AddSessionServers"/>); no configuration file is written.</item>
 /// <item>The agent prompts of a session (<c>default</c>, <c>plan</c>...) are its modes; the model and the reasoning effort are
 /// configuration options, which <c>session/set_config_option</c> changes for the next prompts.</item>
 /// <item>Only the updates of the sessions of the client are sent as <c>session/update</c>: a session a run started is announced
@@ -118,7 +121,8 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
                 LoadSession = true,
                 Auth = new AgentAuthCapabilities(),
                 PromptCapabilities = new PromptCapabilities { Image = true, EmbeddedContext = true, Audio = false },
-                McpCapabilities = new McpCapabilities { Http = false, Sse = false },
+                // Servers over stdio are taken by every agent; the MCP plugin also connects to HTTP ones, falling back to SSE.
+                McpCapabilities = new McpCapabilities { Http = _host.Mcp is not null, Sse = _host.Mcp is not null },
                 SessionCapabilities = new SessionCapabilities
                 {
                     List = new SessionListCapabilities(),
@@ -147,6 +151,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
     {
         ArgumentNullException.ThrowIfNull(request);
         var cwd = RequireFolder(request.Cwd);
+        var servers = ReadMcpServers(request.McpServers);
         var opened = await _driver.OpenAsync(new HeadlessSessionRequest
         {
             ProjectFolder = cwd,
@@ -157,6 +162,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
             DisabledToolPatterns = _defaults.DisabledToolPatterns,
         }, cancellationToken).ConfigureAwait(false);
         var state = await RegisterAsync(opened, null, cancellationToken).ConfigureAwait(false);
+        await AttachMcpServersAsync(state, servers, cwd).ConfigureAwait(false);
         var (modes, options) = await DescribeAsync(state.Session, cancellationToken).ConfigureAwait(false);
         return new NewSessionResponse { SessionId = state.Session.SessionId, Modes = modes, ConfigOptions = options };
     }
@@ -165,7 +171,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
     public override async Task<LoadSessionResponse> LoadSessionAsync(LoadSessionRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var state = await OpenExistingAsync(request.SessionId.Value, cancellationToken).ConfigureAwait(false);
+        var state = await OpenExistingAsync(request.SessionId.Value, request.McpServers, cancellationToken).ConfigureAwait(false);
         var runtime = _host.Host.RuntimeService;
         var history = await runtime.TryReadStoredHistoryAsync(state.Session.Descriptor, cancellationToken).ConfigureAwait(false) ?? [];
         // A projection of its own: the one of the live events is the driver's reader's alone.
@@ -178,7 +184,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
     public override async Task<ResumeSessionResponse> ResumeSessionAsync(ResumeSessionRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var state = await OpenExistingAsync(request.SessionId.Value, cancellationToken).ConfigureAwait(false);
+        var state = await OpenExistingAsync(request.SessionId.Value, request.McpServers, cancellationToken).ConfigureAwait(false);
         var (modes, options) = await DescribeAsync(state.Session, cancellationToken).ConfigureAwait(false);
         return new ResumeSessionResponse { Modes = modes, ConfigOptions = options };
     }
@@ -188,6 +194,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
     {
         ArgumentNullException.ThrowIfNull(request);
         var sourceId = NormalizeSessionId(request.SessionId.Value);
+        var servers = ReadMcpServers(request.McpServers);
         var fork = await _host.Host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = sourceId }, cancellationToken).ConfigureAwait(false);
         if (fork is not { Status: "ok", Session: { } forked })
         {
@@ -200,6 +207,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
             cancellationToken).ConfigureAwait(false);
         // CodeAlta Desktop does not know the fork: it is marked as a new session is.
         var state = await RegisterAsync(opened, created: true, cancellationToken).ConfigureAwait(false);
+        await AttachMcpServersAsync(state, servers, state.Session.Descriptor.WorkingDirectory).ConfigureAwait(false);
         var (modes, options) = await DescribeAsync(state.Session, cancellationToken).ConfigureAwait(false);
         return new ForkSessionResponse { SessionId = state.Session.SessionId, Modes = modes, ConfigOptions = options };
     }
@@ -402,14 +410,61 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         await _projector.ProjectAsync(item, cancellationToken).ConfigureAwait(false);
     }
 
-    // Opens a session that exists, for session/load and session/resume.
-    private async Task<AcpSession> OpenExistingAsync(string sessionId, CancellationToken cancellationToken)
+    // Opens a session that exists, for session/load and session/resume, with the MCP servers the client gives it.
+    private async Task<AcpSession> OpenExistingAsync(string sessionId, IReadOnlyList<McpServer>? mcpServers, CancellationToken cancellationToken)
     {
         var id = NormalizeSessionId(sessionId);
         if (_sessions.ContainsKey(id)) throw Error(AcpErrorCodes.InternalError, $"Session '{id}' is already open in this connection.", "session_in_use", id);
+        var servers = ReadMcpServers(mcpServers);
         var opened = await _driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id, DisabledToolPatterns = _defaults.DisabledToolPatterns },
             cancellationToken).ConfigureAwait(false);
-        return await RegisterAsync(opened, created: false, cancellationToken).ConfigureAwait(false);
+        var state = await RegisterAsync(opened, created: false, cancellationToken).ConfigureAwait(false);
+        await AttachMcpServersAsync(state, servers, state.Session.Descriptor.WorkingDirectory).ConfigureAwait(false);
+        return state;
+    }
+
+    // The MCP servers of a request, as the MCP plugin takes them; refused when this run starts no MCP server.
+    private List<McpSessionServer> ReadMcpServers(IReadOnlyList<McpServer>? servers)
+    {
+        if (servers is not { Count: > 0 }) return [];
+        if (_host.Mcp is null)
+            throw Error(AcpErrorCodes.InvalidParams, "This run starts no MCP server (--no-mcp or --no-plugins): the session cannot connect to the servers it is given.", "mcp_off", null);
+        var read = new List<McpSessionServer>(servers.Count);
+        foreach (var server in servers)
+        {
+            read.Add(server switch
+            {
+                McpServerStdio stdio => new McpSessionServer { Name = stdio.Name, Command = stdio.Command, Args = [.. stdio.Args], Env = Pairs(stdio.Env.Select(static variable => (variable.Name, variable.Value))) },
+                McpServerHttp http => new McpSessionServer { Name = http.Name, Url = http.Url, Headers = Pairs(http.Headers.Select(static header => (header.Name, header.Value))) },
+                McpServerSse sse => new McpSessionServer { Name = sse.Name, Url = sse.Url, Headers = Pairs(sse.Headers.Select(static header => (header.Name, header.Value))) },
+                _ => throw Error(AcpErrorCodes.InvalidParams, "An MCP server of the request has a transport CodeAlta does not know.", "invalid_request", null),
+            });
+        }
+
+        return read;
+
+        // The last of the values of a name wins.
+        static Dictionary<string, string> Pairs(IEnumerable<(string Name, string Value)> pairs)
+        {
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var (name, value) in pairs) values[name] = value;
+            return values;
+        }
+    }
+
+    // Gives a session its MCP servers: they are activated for it, and their tools are offered from its next prompt on.
+    private async Task AttachMcpServersAsync(AcpSession state, List<McpSessionServer> servers, string? folder)
+    {
+        if (servers.Count == 0 || _host.Mcp is not { } mcp) return;
+        try
+        {
+            mcp.AddSessionServers(state.Id, string.IsNullOrWhiteSpace(folder) ? null : folder, servers);
+        }
+        catch (ArgumentException exception)
+        {
+            if (_sessions.TryRemove(state.Id, out _)) await CloseAsync(state).ConfigureAwait(false);
+            throw Error(AcpErrorCodes.InvalidParams, exception.Message, "invalid_request", state.Id);
+        }
     }
 
     // The session of an opening, as the client knows it from now on; the error of the opening otherwise.

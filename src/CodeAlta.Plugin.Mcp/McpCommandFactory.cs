@@ -835,7 +835,12 @@ internal static class McpCommandFactory
     internal static McpConfigSnapshot Discover(PluginAltaCommandContext context, McpCommandFactoryOptions options)
     {
         var projectPath = ResolveProjectDirectory(context, options);
-        return new McpConfigDiscovery().Discover(new McpConfigPathOptions { UserHomeDirectory = options.UserHomeDirectory, ProjectDirectory = projectPath });
+        return new McpConfigDiscovery().Discover(new McpConfigPathOptions
+        {
+            UserHomeDirectory = options.UserHomeDirectory,
+            ProjectDirectory = projectPath,
+            SessionServers = options.ConfigCache?.SessionServers ?? [],
+        });
     }
 
     // A session's call uses the project of the session's runs, which their servers were started for.

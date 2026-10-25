@@ -171,6 +171,10 @@ internal sealed record McpConfigPathOptions
     public string? UserHomeDirectory { get; init; }
 
     public string? ProjectDirectory { get; init; }
+
+    // The servers a host was given in memory for its sessions (McpPlugin.AddSessionServers): a source of the project that no
+    // file holds, read after the file of CodeAlta of the project.
+    public IReadOnlyList<McpServerDefinition> SessionServers { get; init; } = [];
 }
 
 internal sealed record McpConfigMutationResult

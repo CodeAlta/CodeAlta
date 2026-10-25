@@ -681,6 +681,7 @@ public sealed class McpManagementService
             ProjectDirectory = projectDirectory,
             UserHomeDirectory = request.UserHomeDirectory,
             ProbeWritability = request.ProbeWritability,
+            SessionServers = _configCache?.SessionServers ?? [],
         });
         var globalPolicyPath = McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
         var projectPolicyPath = projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory);
@@ -1205,6 +1206,7 @@ public sealed class McpManagementService
         {
             ProjectDirectory = projectDirectory,
             UserHomeDirectory = request.UserHomeDirectory,
+            SessionServers = _configCache?.SessionServers ?? [],
         });
         return snapshot.EffectiveServers.FirstOrDefault(server => string.Equals(server.Definition.Key, serverKey, StringComparison.Ordinal));
     }

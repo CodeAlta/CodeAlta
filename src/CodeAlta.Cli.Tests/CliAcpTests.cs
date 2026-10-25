@@ -314,6 +314,53 @@ public sealed class CliAcpTests
     }
 
     [TestMethod]
+    public async Task NewSession_ConnectsTheSessionToTheMcpServersItIsGiven_WithoutWritingAConfiguration()
+    {
+        using var root = new CliTestRoot();
+        var log = Path.Combine(root.Root, "mcp.log");
+        var provider = new FakeProvider();
+        provider.Turns.Enqueue(FakeProvider.CallTool("mcp__tiny__echo", """{"text":"hi"}"""));
+        provider.Turns.Enqueue(FakeProvider.Reply("Echoed."));
+        // The server is started with dotnet, found on the PATH of the process.
+        await using var acp = await AcpHarness.StartAsync(root, root.Environment(provider) with { PluginEnvironment = null }, plugins: true);
+        Assert.IsTrue(acp.Client.InitializeResponse.AgentCapabilities.McpCapabilities.Http);
+        Assert.IsTrue(acp.Client.InitializeResponse.AgentCapabilities.McpCapabilities.Sse);
+        var server = new McpServerStdio
+        {
+            Name = "tiny",
+            Command = "dotnet",
+            Args = [Path.Combine(AppContext.BaseDirectory, "CodeAlta.Tests.TinyMcpServer.dll")],
+            Env = [new EnvVariable { Name = "MCP_TEST_LOG", Value = log }],
+        };
+
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot, McpServers = [server] }).WaitAsync(Timeout)).SessionId.Value;
+        var response = await acp.PromptAsync(sessionId, "echo hi");
+
+        Assert.AreEqual("end_turn", response.StopReason.Value.GetString());
+        CollectionAssert.Contains(provider.Requests.First().Tools.Select(static tool => tool.Spec.Name).ToArray(), "mcp__tiny__echo",
+            "The session has the tools of its server from its first prompt.");
+        StringAssert.Contains(File.ReadAllText(log), "CALL echo");
+        var call = acp.Updates(sessionId).First(static update => Kind(update) == "tool_call");
+        StringAssert.StartsWith(call.GetProperty("title").GetString(), "mcp__tiny__echo");
+        Assert.IsFalse(File.Exists(Path.Combine(root.ProjectRoot, ".alta", "mcp.json")), "No configuration is written.");
+        Assert.IsFalse(File.Exists(Path.Combine(root.Profile, "mcp.json")), "No configuration is written.");
+
+        var invalid = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() => acp.Client.SessionNewAsync(new NewSessionRequest
+        {
+            Cwd = root.ProjectRoot,
+            McpServers = [new McpServerHttp { Name = "remote", Url = "not an address" }],
+        }).WaitAsync(Timeout));
+        Assert.AreEqual(AcpErrorCodes.InvalidParams, invalid.Code);
+
+        // A run that starts no MCP server refuses the servers rather than ignoring them.
+        await using var off = await AcpHarness.StartAsync(root, provider);
+        Assert.AreNotEqual(true, off.Client.InitializeResponse.AgentCapabilities.McpCapabilities.Http);
+        var refused = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
+            off.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot, McpServers = [server] }).WaitAsync(Timeout));
+        Assert.AreEqual("mcp_off", refused.ErrorData!.Value.GetProperty("kind").GetString());
+    }
+
+    [TestMethod]
     public async Task ProviderErrors_AreAuthRequiredForASignIn_AndInternalErrorsWithTheirKind()
     {
         using var root = new CliTestRoot();
@@ -436,7 +483,10 @@ public sealed class CliAcpTests
         public static Task<AcpHarness> StartAsync(CliTestRoot root, FakeProvider provider, params string[] args)
             => StartAsync(root, root.Environment(provider), args);
 
-        public static async Task<AcpHarness> StartAsync(CliTestRoot root, CliEnvironment environment, params string[] args)
+        public static Task<AcpHarness> StartAsync(CliTestRoot root, CliEnvironment environment, params string[] args)
+            => StartAsync(root, environment, plugins: false, args);
+
+        public static async Task<AcpHarness> StartAsync(CliTestRoot root, CliEnvironment environment, bool plugins, params string[] args)
         {
             ArgumentNullException.ThrowIfNull(root);
             var toAgent = new Pipe();
@@ -453,7 +503,7 @@ public sealed class CliAcpTests
             {
                 try
                 {
-                    return await CliApplication.RunAsync(["acp", "--no-plugins", .. args], streams, environment);
+                    return await CliApplication.RunAsync(["acp", .. plugins ? Array.Empty<string>() : ["--no-plugins"], .. args], streams, environment);
                 }
                 finally
                 {

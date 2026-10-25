@@ -69,6 +69,9 @@ internal sealed class CliHost : IAsyncDisposable
     /// <summary>Gets the dispatcher of the <c>alta</c> commands, the one of the <c>alta</c> tool of the sessions.</summary>
     public AltaCommandDispatcher Alta { get; }
 
+    /// <summary>Gets the MCP plugin that runs, which takes the servers of a session (<c>altacli acp</c>); null when MCP is off.</summary>
+    public McpPlugin? Mcp { get; private init; }
+
     /// <summary>Creates the host of a run.</summary>
     /// <exception cref="Exception">The host could not be created; what was acquired is released first.</exception>
     public static async Task<CliHost> CreateAsync(CliHostRequest request, CliEnvironment environment, CancellationToken cancellationToken)
@@ -83,6 +86,7 @@ internal sealed class CliHost : IAsyncDisposable
             CacheFilePath = Path.Combine(storage.GlobalRoot, "cache", "model-catalog", "models_dev_db.json"),
         });
         CodeAltaHost? host = null;
+        McpPlugin? mcp = null;
         try
         {
             // A test gives its own providers and stays off the network.
@@ -112,7 +116,7 @@ internal sealed class CliHost : IAsyncDisposable
                 PluginEnvironment = environment.PluginEnvironment,
                 StartPlugins = request.StartPlugins,
                 PluginFrontend = PluginFrontends.Cli,
-                PluginBuiltIns = BuiltInPlugins(request),
+                PluginBuiltIns = BuiltInPlugins(request, plugin => Volatile.Write(ref mcp, plugin)),
                 RawArguments = [],
                 ConfigureModelProviders = environment.ConfigureModelProviders ?? (registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), storage.GlobalRoot, modelsDev, pluginProviderTypes)),
@@ -124,7 +128,9 @@ internal sealed class CliHost : IAsyncDisposable
             }, cancellationToken).ConfigureAwait(false);
             var alta = ComposeAlta(host, request.ListsSkills);
             host.Commands.SessionTools = CreateSessionTools(alta);
-            return new CliHost(storage, host, alta, database, modelsDev, toolEndpoints);
+            // The MCP plugin that runs: one that was created but did not start is not used.
+            var started = Volatile.Read(ref mcp) is { } created && host.PluginRuntime.ActivePlugins.Any(plugin => ReferenceEquals(plugin.Instance, created)) ? created : null;
+            return new CliHost(storage, host, alta, database, modelsDev, toolEndpoints) { Mcp = started };
         }
         catch
         {
@@ -137,7 +143,9 @@ internal sealed class CliHost : IAsyncDisposable
     }
 
     /// <summary>The built-in plugins of the command-line application: Git, Jira, MCP (unless <c>--no-mcp</c>) and ACP.</summary>
-    internal static IReadOnlyList<BuiltInPluginDefinition> BuiltInPlugins(CliHostRequest request)
+    /// <param name="request">What the host is composed with.</param>
+    /// <param name="mcpCreated">Told the MCP plugin once it is created; null for nothing.</param>
+    internal static IReadOnlyList<BuiltInPluginDefinition> BuiltInPlugins(CliHostRequest request, Action<McpPlugin>? mcpCreated = null)
     {
         var plugins = new List<BuiltInPluginDefinition>
         {
@@ -164,7 +172,12 @@ internal sealed class CliHost : IAsyncDisposable
                 Id = "mcp", DisplayName = "MCP",
                 Description = "Connects CodeAlta to configured Model Context Protocol servers.",
                 // No window shows the views of MCP Apps; the skills of the servers are loaded like the others, without asking.
-                PluginType = typeof(McpPlugin), Factory = () => new McpPlugin(new McpPluginOptions { ShowsApps = false, LoadsSkills = loadsSkills }),
+                PluginType = typeof(McpPlugin), Factory = () =>
+                {
+                    var plugin = new McpPlugin(new McpPluginOptions { ShowsApps = false, LoadsSkills = loadsSkills });
+                    mcpCreated?.Invoke(plugin);
+                    return plugin;
+                },
                 Frontends = PluginFrontends.All | PluginFrontends.Cli,
             });
         }

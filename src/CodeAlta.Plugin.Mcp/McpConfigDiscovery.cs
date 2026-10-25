@@ -7,6 +7,9 @@ internal readonly record struct McpConfigSourceFile(McpConfigScope Scope, McpCon
 
 internal sealed class McpConfigDiscovery
 {
+    // The path of the source of the servers given in memory for sessions: no file is read or written there.
+    internal const string SessionServersPath = "session:mcpServers";
+
     public McpConfigSnapshot Discover(McpConfigPathOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -26,6 +29,19 @@ internal sealed class McpConfigDiscovery
             {
                 AddExternalSource(external, file.Scope, file.Origin, file.Path, context);
             }
+        }
+
+        if (options.SessionServers.Count > 0)
+        {
+            external.Insert(0, new McpConfigSource
+            {
+                Scope = McpConfigScope.Project,
+                Origin = McpConfigOrigin.Common,
+                Path = SessionServersPath,
+                Exists = true,
+                DirectoryExists = true,
+                Servers = options.SessionServers,
+            });
         }
 
         var (effective, shadowed) = BuildOverlay(sources, external);
