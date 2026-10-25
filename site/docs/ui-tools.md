@@ -4,14 +4,14 @@ title: UI tools and MCP server
 
 # UI tools and MCP server
 
-An agent can see and drive the window of CodeAlta Desktop: it takes a screenshot, reads what the window shows, clicks and types. A session of CodeAlta does it for the window it runs in. Another application, such as Claude Code or Codex, does it through the MCP server of CodeAlta.
+An agent can see and drive the window of CodeAlta Desktop: take a screenshot, read what the window shows, click and type. A CodeAlta session does it for its own window; another application, such as Claude Code or Codex, does it through CodeAlta's MCP server.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-ui-tools.webp" alt="A session of CodeAlta Desktop that took a screenshot of its window: the tool calls, the picture and the answer of the agent" loading="lazy">
   <figcaption class="small text-secondary mt-2">A session that looks at its own window.</figcaption>
 </figure>
 
-The tools are in CodeAlta Desktop only. They have the names of [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp), which agents already know.
+The tools exist in CodeAlta Desktop only, with the names of [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp), which agents already know.
 
 ## Let an agent look at the window
 
@@ -65,16 +65,14 @@ The application then has the tools of the window, and `alta`, which runs the com
 | `evaluate_script` | Runs JavaScript in the page of the window. |
 | `list_console_messages`, `list_network_requests` | Read the console and the requests of the page. |
 | `resize_page` | Gives the window a size. |
-| `list_pages`, `select_page` | List the [windows](workspace.md#windows-desktop) of CodeAlta Desktop, and choose the one the other tools act on. |
+| `list_pages`, `select_page` | List the [windows](workspace/readme.md#windows) of CodeAlta Desktop, and choose the one the other tools act on. |
 | `alta` | Runs a command of CodeAlta. In the MCP server only: a session has it already. |
 
 ## Several windows
 
-When you have moved tabs into [other windows](workspace.md#windows-desktop), each window is a page for the tools. `list_pages` lists them, the main window first, and marks the selected one. The other tools act on the selected window, which is the main one until an agent chooses another with `select_page`.
+With tabs moved into [other windows](workspace/readme.md#windows), each window is a page. `list_pages` lists them, main window first, and marks the selected one. The other tools act on the selected window: the main one until an agent picks another with `select_page`.
 
-There is one selection for everyone: every session and every application connected to the server act on the same window. An agent that selects another window changes it for the others too. Ask an agent to select the window it needs before it acts, and to come back to the main window when it is done.
-
-To know what each window holds, an agent uses `alta window list --tabs`.
+The selection is shared by every session and connected application. Ask an agent to select the window it needs before acting, and to return to the main window when done. `alta window list --tabs` tells what each window holds.
 
 ## Address of the server
 
@@ -88,5 +86,5 @@ To know what each window holds, an agent uses `alta window list --tabs`.
 - An application connected to the server can do in CodeAlta what you can do. Turn the server off on a computer you share with other people.
 - An agent saves a screenshot with `filePath`. A session saves in the folder it works in.
 - To keep sessions from driving the window, turn off the **UI tools** plugin in **Settings**, **Plugins**.
-- A session whose [permission mode](workspace.md#tool-permissions) asks before commands does not have the tools: it could answer its own requests in the window.
+- A session whose [permission mode](workspace/settings.md#tool-permissions) asks before commands does not have the tools: it could answer its own requests in the window.
 - The buttons of the title bar are drawn by the system: a screenshot does not show them.

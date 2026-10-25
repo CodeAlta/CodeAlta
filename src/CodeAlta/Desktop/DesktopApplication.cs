@@ -880,6 +880,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 128 * 1024 * 1024,
                         // A channel the limit refuses is refused after its handler ran, so the page cannot send it again:
                         // the limit is far above what the page opens (the panes, the observations, the retention lifetime).
+                        // Two items wait for the page's acknowledgement at most: a slow page holds its stream back
+                        // instead of letting the items pile up in the host.
                         MaximumChannelsPerSession = 512, MaximumUnacknowledgedChannelItems = 2,
                         // The page waits for every call, so the calls it makes while the host is busy add up instead of
                         // timing out: up to 32 open session panes and their observations must all wait, never be refused.

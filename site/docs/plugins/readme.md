@@ -4,76 +4,56 @@ title: Plugins
 
 # Plugins
 
-CodeAlta plugins are trusted source packages and built-in extensions that can
-extend the shell, prompt flow, agent runtime, timeline projections, and the
-in-session `alta` live tool.
-
-Plugins are for local automation you choose to run. Building a source plugin
-can execute SDK/NuGet/MSBuild logic, and loading it executes .NET code inside
-the CodeAlta process.
+Plugins extend CodeAlta with commands, dialogs, status items, timeline cards, agent tools, `alta` commands and prompt text. CodeAlta ships built-in plugins, and you can write your own source plugins in C#.
 
 > [!WARNING]
-> Install and enable only plugins you trust. Source plugins are built on your
-> machine and loaded into the CodeAlta process, so a plugin has the same
-> practical risk profile as running local code.
+> Enable only plugins you trust. A source plugin is built on your machine and loaded into CodeAlta: it has the same risk as running local code.
 
 > [!IMPORTANT]
-> The plugin API can change between CodeAlta releases, and some CodeAlta
-> capabilities are not exposed to plugins yet.
+> The plugin API can change between CodeAlta releases.
 
-## Extensibility layers
-
-Plugins are one part of CodeAlta extensibility, not the first tool for every workflow.
+## When to use a plugin
 
 {.table}
 | Need | Prefer |
 |---|---|
 | A repeatable session workflow or mode | [Agent prompts](../prompts.md) |
-| Agent coordination with sessions, asks, notes, reminders, prompts, providers, or skills | [Advanced agent workflows](../advanced-agent-workflows.md) |
+| Agents coordinating sessions, questions, notes and reminders | [Delegation](../sessions/delegation.md) |
 | External tools from a standard protocol | [MCP servers](mcp.md) |
-| Reusable context that does not execute code | Skills from the [workspace skills dialog](../workspace.md#skills-management) |
-| Host UI, runtime, prompt, timeline, resource, or custom live-tool command extension | Trusted source plugins |
+| Reusable context that runs no code | [Skills](../workspace/settings.md#skills-management) |
+| Host UI, runtime, prompt, timeline or `alta` command extensions | Source plugins |
 
-Use plugins when you need trusted .NET code loaded into CodeAlta. If a workflow can be expressed as an agent prompt, MCP configuration, or skill package, that path is usually easier to inspect and review.
+A prompt, an MCP server or a skill is easier to inspect and review. Use a plugin when you need .NET code inside CodeAlta.
 
 ## Built-in plugins
-
-CodeAlta ships trusted built-in plugins through the same plugin runtime used
-for source plugins:
 
 {.table}
 | Plugin | What it adds |
 |---|---|
-| [ACP agents](../model-providers.md#agents-of-the-acp-registry) | The coding agents of the Agent Client Protocol registry (GitHub Copilot, Gemini CLI, Cursor…) as model providers, added from **Add provider** in **Settings > Providers**. |
-| [Git](git.md) | The issues and the pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, the `#` lookup in a prompt, and the `gh`, `glab` and `az` agent tools when these CLIs are installed. |
-| [Jira](jira.md) | The issues of a Jira project, for the projects that name one in their configuration. |
-| [MCP](mcp.md) | Model Context Protocol server configuration, `alta mcp` commands, session-activated MCP agent tools, and MCP server management. |
-| [Mobile](mobile.md) | In CodeAlta Desktop: the sessions of the computer on a phone, through Tailscale. Off until you turn it on. |
-| [Statistics](statistics.md) | A statistics card for each turn, the `alta statistics` commands, and in CodeAlta Desktop the Statistics page with the numbers of all your sessions. |
-| [UI tools](../ui-tools.md) | In CodeAlta Desktop: the tools an agent sees and drives the window with, when its session asks for them. |
+| [ACP agents](../model-providers/acp-agents.md) | The coding agents of the Agent Client Protocol registry (GitHub Copilot, Gemini CLI, Cursor…) as model providers, from **Add provider** in **Settings > Providers**. |
+| [Git](git.md) | Issues and pull requests of GitHub, GitLab, Azure DevOps and Bitbucket, the `#` lookup in a prompt, and the `gh`, `glab` and `az` agent tools. |
+| [Jira](jira.md) | The issues of a Jira project, for projects that name one. |
+| [MCP](mcp.md) | Model Context Protocol servers, their tools for agents, `alta mcp` and the MCP Servers page. |
+| [Mobile](mobile.md) | In CodeAlta Desktop: your sessions on a phone, through Tailscale. Off until you turn it on. |
+| [Statistics](statistics.md) | A statistics card for each turn, `alta statistics`, and in CodeAlta Desktop the Statistics page. |
+| [UI tools](../ui-tools.md) | In CodeAlta Desktop: tools an agent uses to see and drive the window. |
 
 ## Manage plugins
 
-Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`.
+Open plugin management with `Ctrl+G Ctrl+N`, `/plugins` or `/plugin`.
 
 {{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management with the list of plugins" "Plugin management lists the plugins of the global and project scopes and lets you enable or disable them." }}
 
-The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A plugin starts or stops at once. A source plugin also has a button to build and reload it while CodeAlta runs, one to edit it in the code editor and a red one to remove it, and **New plugin** creates one. A plugin that failed to build shows the compiler errors there, and a plugin made for the TUI only is marked as not supported. Turning off or reloading a plugin whose agents are at work in a session (an agent of the ACP registry, for instance) asks first, below its row: the turns of those sessions are stopped, and they can go on later.
+In CodeAlta Desktop, **Settings > Plugins** lists the plugins:
 
-With more than the Default space, a plugin of the user also has a chip with its [spaces](../spaces.md#what-a-space-has). A plugin adds nothing (tools, buttons, canvases, prompt text) to the sessions of the other spaces; what it does in the background keeps running. A plugin of a project follows its project.
+- A switch starts or stops each plugin at once.
+- A source plugin also has **Build and reload**, **Edit in the code editor** and a red **Remove**; **New plugin** creates one (see [Plugin development](developers.md#build-and-reload)).
+- A failed build shows its compiler errors; a plugin made for the TUI only is marked as not supported.
+- Turning off or reloading a plugin whose agents are working (an ACP agent, for instance) asks first: the turns of those sessions stop, and they can go on later.
+- With more than the Default space, a user plugin has a chip with its [spaces](../spaces.md#what-a-space-has). It adds nothing (tools, buttons, canvases, prompt text) to sessions of other spaces; its background work keeps running. A project plugin follows its project.
+- A configuration file that does not parse, an unreadable plugin folder, or a folder whose name is not a plugin id is named in red above the list.
 
-When a configuration file does not parse, or a plugin folder cannot be read, the page names that file or folder in red above the list and still lists the other plugins. A plugin folder whose name is not a plugin id (letters, digits, `.`, `_` and `-`) is named there too.
-
-The TUI dialog shows:
-
-- plugin scope and state;
-- diagnostics from discovery, config, build, load, activation, contributions,
-  callbacks, source changes, and unload;
-- contribution summaries;
-- unknown config entries;
-- source and README open actions when available.
-
-You can also use a headless status summary:
+The CodeAlta TUI dialog shows each plugin's scope and state, its diagnostics (discovery, build, load, contributions, unload), what it contributes, unknown config entries, and actions to open its source and README. For a summary without the interface:
 
 ```sh
 altatui --plugins-status
@@ -81,62 +61,34 @@ altatui --plugins-status
 
 ## Plugins in both apps
 
-CodeAlta Desktop and CodeAlta TUI load the same built-in and source plugins. Agent tools, instructions for agents, `alta` commands, commands, keyboard shortcuts, status items, dialogs, prompt pickers and timeline cards work in both.
+CodeAlta Desktop and CodeAlta TUI load the same plugins. Agent tools, instructions, `alta` commands, commands, shortcuts, status items, dialogs, prompt pickers and timeline cards work in both. Each app draws plugin UI its own way, and a plugin can target one app only.
 
-Each app shows plugin user interface its own way: the desktop app with its own components and HTML fragments from the plugin, the TUI with terminal controls. A plugin can also be made for one app only; the other app then does not start it.
-
-A source plugin is built when CodeAlta starts. The desktop start-up screen names the plugin being built, and the TUI shows the build in the console before its interface. When a build fails, the desktop app shows a notice and the error in **Settings > Plugins**; the TUI prints it and lists it in `/plugins`.
-
-CodeAlta Desktop also builds a source plugin again while it runs, from **Settings > Plugins** or from a session. An agent can write a plugin for you: see [Plugin development](developers.md#ask-an-agent-to-write-it).
+Source plugins are built when CodeAlta starts. The desktop start-up screen names the plugin being built; the TUI shows the build in the console. A failed build shows a notice and the error in **Settings > Plugins** on the desktop, and in the console and `/plugins` in the TUI. CodeAlta Desktop also rebuilds a plugin while it runs.
 
 ## Source plugins
 
-Dynamic source plugins are discovered from:
+CodeAlta finds source plugins in:
 
-- `~/.alta/plugins/<package-id>/plugin.cs` for global plugins;
-- `<project>/.alta/plugins/<package-id>/plugin.cs` for project-scoped plugins.
+- `~/.alta/plugins/<package-id>/plugin.cs`, for all projects;
+- `<project>/.alta/plugins/<package-id>/plugin.cs`, for one project, loaded when CodeAlta starts in it.
 
-Project-scoped plugins apply only to the matching project, and are loaded when
-CodeAlta is started in it. Global plugins apply
-across workspaces. For source-plugin layout, examples, contribution points,
-resource roots, prompt editor attachments, `alta` command integration, and safe
-authoring guidance, see [Plugin development](developers.md).
+An agent can write a plugin for you. See [Plugin development](developers.md) for the workflow and the API, and [Plugin UI](ui.md) for what a plugin shows in the window.
 
 ## Disable or bypass plugins
 
-Source plugins and built-in plugins are enabled by default when discovered, except the
-[Mobile](mobile.md) plugin, which is off until you turn it on.
-Disable a plugin in TOML when you do not want it built or loaded:
+Plugins are enabled when discovered, except [Mobile](mobile.md), which is off until you turn it on. Disable one in `config.toml`; built-in plugin ids are lowercase:
 
 ```toml
 [plugins.HelloWorld]
 enabled = false
-```
 
-Built-in plugin IDs are lowercase, for example:
-
-```toml
 [plugins.git]
 enabled = false
-
-[plugins.mcp]
-enabled = false
-
-[plugins.statistics]
-enabled = false
 ```
 
-When a plugin is broken, start the TUI with a bypass:
+When a plugin is broken, start without plugins:
 
-```sh
-altatui --no-plugins
-altatui --plugin-safe-mode
-```
+- Set the environment variable `CODEALTA_DISABLE_PLUGINS=1`. It works for both apps.
+- Start the TUI with `altatui --no-plugins` or `altatui --plugin-safe-mode`.
 
-Or set this environment variable, which is also the way to start the desktop app without plugins:
-
-```sh
-CODEALTA_DISABLE_PLUGINS=1
-```
-
-These bypasses are recognized before plugin-contributed command-line options.
+These bypasses are read before any plugin's command-line options.

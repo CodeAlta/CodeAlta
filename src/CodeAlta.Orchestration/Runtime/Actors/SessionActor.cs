@@ -36,6 +36,11 @@ internal sealed record SessionActorSupervisorEvent(
     Exception? Exception = null,
     string? Message = null);
 
+/// <summary>
+/// The single writer of the runtime state of one session: its commands and its provider events are applied in the order
+/// they are posted, without locks, while other sessions run in parallel. Long work (provider calls, tools, decisions of
+/// the user, joins) runs outside the mailbox, and its result comes back as a command.
+/// </summary>
 internal sealed class SessionActor : IAsyncDisposable
 {
     private readonly OrchestrationMailboxActor _mailbox;

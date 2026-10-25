@@ -4,58 +4,58 @@ title: MCP plugin
 
 # MCP plugin
 
-The built-in MCP plugin connects CodeAlta to configured Model Context Protocol servers. It supports stdio servers and remote HTTP/SSE servers, exposes MCP **tools**, adds the `alta mcp` live-tool command root, provides compact prompt guidance for active/inactive servers, and includes the MCP Servers dialog.
+The built-in MCP plugin connects CodeAlta to Model Context Protocol servers, local (stdio) or remote (HTTP/SSE). It gives agents the tools of these servers, the `alta mcp` commands, and the MCP Servers page.
 
 {{ alta_shot "alta-desktop-mcp.webp" "alta-plugin-mcp.png" "MCP server configuration" "MCP server management keeps server configuration and connection details in one place." }}
 
 ## Typical flow
 
-The `alta mcp ...` surface is an in-session live tool for the agent/LLM. Users cannot invoke those live-tool commands directly from the terminal. Instead, edit MCP files yourself, use the MCP Servers dialog, or ask the agent to perform MCP operations in a prompt. For the broader live-tool workflow model, see [Advanced Agent Workflows](../advanced-agent-workflows.md).
+`alta mcp` is a tool of the agent, not a terminal command. You edit the MCP files, use the MCP Servers page, or ask the agent in a prompt:
 
-1. Add server connection definitions to `~/.alta/mcp.json` or `<project>/.alta/mcp.json`, or ask the agent to add one:
+1. Add a server, in `~/.alta/mcp.json` or `<project>/.alta/mcp.json`, or by asking:
 
    ```text
    Add a project MCP server named memory that runs npx -y
    @modelcontextprotocol/server-memory.
    ```
 
-2. Ask the agent to inspect configuration without connecting to servers:
+2. Check the configuration, without connecting:
 
    ```text
    Check which MCP servers are configured and show me the config sources.
    ```
 
-3. Ask the agent to discover tools or call a tool on demand:
+3. Find tools or call one:
 
    ```text
    Search the memory MCP server for graph tools.
    ```
 
-4. Ask the agent to activate servers for the current session and to use them, in one prompt:
+4. Activate a server and use it, in one prompt:
 
    ```text
    Activate the memory MCP server and summarize the graph.
    ```
 
-   The tools of an activated server are available at once: the agent calls them in the same turn. The server stays active for the session.
+   The tools of an activated server join the running turn, and the server stays active for the session.
 
-## Configuration paths and overlay
+## Configuration files
 
-CodeAlta keeps MCP connection definitions in two JSON files:
+CodeAlta keeps server definitions in two JSON files:
 
 {.table}
-| Scope | File | Notes |
-|---|---|---|
-| Global | `~/.alta/mcp.json` | Available in every project. |
-| Project | `<project>/.alta/mcp.json` | For that project only. |
+| Scope | File |
+|---|---|
+| Global | `~/.alta/mcp.json` |
+| Project | `<project>/.alta/mcp.json` |
 
-Server keys and tool names are matched exactly and case-sensitively. When two files define the same server key, one definition is used and the others are shown as overridden and are not connected: a project comes before your global file.
+Server keys and tool names are case-sensitive. When two files define the same key, one definition is used and the others are shown as overridden and not connected; a project comes before the global file.
 
-New files created by CodeAlta use the `mcpServers` root. Existing supported formats are detected and preserved when CodeAlta edits a file. Unknown root/server fields are preserved, but CodeAlta only uses the fields documented below.
+New files use the `mcpServers` root. CodeAlta keeps the format of an existing file, and the fields it does not use, when it edits it.
 
 ## Servers of other tools
 
-CodeAlta also reads the MCP files other tools keep. A server you defined for GitHub Copilot, Visual Studio Code or Claude Code works in CodeAlta without being copied.
+CodeAlta also reads the MCP files of other tools, so a server defined for GitHub Copilot, Visual Studio Code or Claude Code works without being copied:
 
 {.table}
 | Scope | File | Kept by |
@@ -65,66 +65,56 @@ CodeAlta also reads the MCP files other tools keep. A server you defined for Git
 | Project | `<project>/.vscode/mcp.json` | Visual Studio Code |
 | Global | `~/.copilot/mcp-config.json` | GitHub Copilot CLI, Visual Studio Code |
 
-These servers are listed with the others, with the name of their file, or the **Copilot** mark for the two files of GitHub Copilot. You enable, disable, activate and authorize them like any server.
+These servers are listed with the name of their file, or the **Copilot** mark for the GitHub Copilot files. You enable, disable, activate and authorize them like any server. CodeAlta never changes these files:
 
-CodeAlta never changes these files:
+- Such a server has no **Remove**: disable it, or remove it in its own tool.
+- Editing and saving one writes a server of the same name to CodeAlta's file, which is used from then on. Remove yours to go back.
 
-- A server of such a file has no **Remove**. Disable it, or remove it in the tool it belongs to.
-- When you edit one and save it, CodeAlta writes a server of the same name to its own file. That one is used from then on, and the other is shown as overridden. Remove yours to go back to the original.
+Order of precedence: CodeAlta's file, then `.mcp.json`, `.github/mcp.json` and `.vscode/mcp.json`; project files before global ones.
 
-When several files define the same server, the file of CodeAlta comes first, then `.mcp.json`, `.github/mcp.json` and `.vscode/mcp.json`. The files of a project come before the global ones.
-
-A file of another tool can contain comments and trailing commas, as Visual Studio Code writes them. A server of a project starts in the folder of the project. The variables of these files work as follows:
+These files can contain comments and trailing commas. A project server starts in the project folder. Variables:
 
 {.table}
 | Variable | In CodeAlta |
 |---|---|
-| `${env:NAME}`, `${NAME}`, `${NAME:-default}` | The environment variable `NAME` of the CodeAlta process, or the default. |
-| `${workspaceFolder}`, `${workspaceFolderBasename}` | The folder of the project, and its name. |
+| `${env:NAME}`, `${NAME}`, `${NAME:-default}` | The environment variable `NAME` of CodeAlta, or the default. |
+| `${workspaceFolder}`, `${workspaceFolderBasename}` | The project folder, and its name. |
 | `${userHome}` | Your home folder. |
-| `${input:...}` | The server is not loaded: only Visual Studio Code can ask for this value. |
+| `${input:...}` | Not supported: only Visual Studio Code can ask for it. |
 
-A server that uses `${input:...}`, an `envFile` or another variable CodeAlta does not know is listed as **Not supported**, with the reason. To use it, add a server of the same name to CodeAlta with the value it needs, for example from an environment variable.
+A server that uses `${input:...}`, an `envFile` or an unknown variable is listed as **Not supported**, with the reason. To use it, add a server of the same name to CodeAlta with the value it needs.
 
-The `tools` list of a GitHub Copilot file is not applied. To limit the tools of a server, use the [TOML policy](#toml-policy-fields) or the tool switches of the MCP Servers dialog of CodeAlta TUI.
+The `tools` list of a GitHub Copilot file is not applied. Limit tools with the [TOML policy](#toml-policy-fields) or the tool switches of the CodeAlta TUI dialog.
 
-## Supported JSON formats
+## Server definitions
 
-Each MCP JSON file of CodeAlta must be a JSON object with exactly one supported server-map root. JSON comments are not allowed in it.
-
-{.table}
-| Format detected by CodeAlta | Root key | How it is detected | Notes when CodeAlta writes it |
-|---|---|---|---|
-| CodeAlta/default | `mcpServers` | No Copilot `tools` entries, no explicit stdio `type`, and no untyped URL-only server. | New files use this format. Remote servers are written with `type = "http"` in JSON. |
-| GitHub Copilot-style | `mcpServers` | At least one server object contains `tools`. | Existing `tools` fields are preserved; new servers get `"tools": ["*"]` when needed to keep the flavor. CodeAlta MCP policy still comes from TOML, not this `tools` field. |
-| VS Code-style | `servers` | The file uses the `servers` root. | Stdio servers are written with `type = "stdio"`; remote servers keep `type = "http"` if already HTTP, otherwise `type = "sse"`. |
-| Claude-style | `mcpServers` | At least one server has `type = "stdio"`. | Stdio servers keep `type = "stdio"`; remote servers are written with `type = "http"`. |
-| IntelliJ-style | `mcpServers` | At least one URL server has no `type`. | Remote servers are written without adding `type`. |
-
-A single file containing both `mcpServers` and `servers` is invalid because the root format would be ambiguous.
-
-## Supported server fields
-
-A server entry must be an object under the selected root key. It must define exactly one transport: stdio with `command`, or remote HTTP/SSE with `url`.
+A CodeAlta MCP file is a JSON object with one server root (no comments). CodeAlta detects the style of a file and keeps it when it writes:
 
 {.table}
-| Field | Type | Used with | Meaning |
+| Style | Root | Detected by | When CodeAlta writes |
 |---|---|---|---|
-| `command` | string | stdio | Executable or command to launch. Required for stdio servers and mutually exclusive with `url`. May reference environment variables with `${NAME}`. |
-| `args` | array of strings | stdio | Arguments passed as separate argument values. Use this instead of embedding arguments in `command`. Values may reference environment variables with `${NAME}`. |
-| `cwd` | string | stdio | Working directory passed to the stdio transport. May reference environment variables with `${NAME}`. |
-| `env` | object with string values | stdio | Environment variables for the launched server. Values may reference process environment variables with `${NAME}`. |
-| `url` | string | HTTP/SSE | Remote MCP endpoint. Runtime validation requires an absolute `http` or `https` URL. Mutually exclusive with `command`. May reference environment variables with `${NAME}`. |
-| `headers` | object with string values | HTTP/SSE | Static HTTP headers for remote servers. Values may reference process environment variables with `${NAME}`. Header names must be valid HTTP token names; values cannot contain CR/LF after expansion. |
-| `auth` | object | HTTP/SSE | Optional CodeAlta OAuth/Authv2 browser-login settings. Use `{ "type": "oauth" }` for dynamic client registration, or include `clientId`, optional `clientSecret`, `scopes`, and `redirectUri` when the authorization server requires a pre-registered client. Tokens are not stored in MCP JSON. |
-| `type` | string | both | Optional transport hint. Supported values are `stdio`, `local` (the name GitHub Copilot CLI gives to stdio), `http`, and `sse`. `command` can only be combined with `stdio` or `local`; `url` cannot be combined with them. |
-| `tools` | any existing JSON value | Copilot-style files | Preserved for flavor compatibility. CodeAlta does not use it to enable/disable tools; use TOML policy instead. |
+| CodeAlta (default) | `mcpServers` | none of the marks below | Remote servers get `type = "http"`. |
+| GitHub Copilot | `mcpServers` | a server has `tools` | New servers get `"tools": ["*"]`. |
+| VS Code | `servers` | the `servers` root | Stdio gets `type = "stdio"`; remote keeps `http`, else `sse`. |
+| Claude | `mcpServers` | a server has `type = "stdio"` | Stdio keeps `stdio`; remote gets `http`. |
+| IntelliJ | `mcpServers` | a URL server has no `type` | Remote servers get no `type`. |
 
-Array and map fields are strict: `args` must be an array of strings, and `env`/`headers` must be objects whose values are strings.
+A file with both `mcpServers` and `servers` is invalid. A server defines exactly one transport: `command` (stdio) or `url` (remote).
 
-### CodeAlta/default examples
+{.table}
+| Field | Used with | Meaning |
+|---|---|---|
+| `command` | stdio | The program to start. |
+| `args` | stdio | Array of strings, passed as separate arguments. |
+| `cwd` | stdio | Working directory. |
+| `env` | stdio | Object of string values: environment of the server. |
+| `url` | remote | Absolute `http` or `https` endpoint. |
+| `headers` | remote | Object of string values: static HTTP headers. |
+| `auth` | remote | Browser sign-in settings (below). Tokens are never stored in the file. |
+| `type` | both | `stdio`, `local` (Copilot's name for stdio), `http` or `sse`. |
+| `tools` | Copilot files | Kept as is; not used by CodeAlta. |
 
-Stdio server:
+`${NAME}` and `${NAME:-default}` are expanded in `command`, `args`, `cwd`, `url`, and the values of `env` and `headers`. A missing variable without a default is reported (`environment_variable_not_found`), and the placeholder is never sent.
 
 ```json
 {
@@ -132,15 +122,20 @@ Stdio server:
     "memory": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-memory"],
-      "env": {
-        "MEMORY_TOKEN": "${MEMORY_TOKEN}"
-      }
+      "env": { "MEMORY_TOKEN": "${MEMORY_TOKEN}" }
+    },
+    "docs": {
+      "type": "http",
+      "url": "https://example.test/mcp",
+      "headers": { "Authorization": "Bearer ${MCP_TOKEN}" }
     }
   }
 }
 ```
 
-Remote server:
+## Sign in to a server
+
+For remote servers that follow the MCP authorization flow, prefer browser sign-in to bearer tokens in JSON. Add an `auth` block:
 
 ```json
 {
@@ -148,42 +143,23 @@ Remote server:
     "docs": {
       "type": "http",
       "url": "https://example.test/mcp",
-      "headers": {
-        "Authorization": "Bearer ${MCP_TOKEN}"
-      }
+      "auth": { "type": "oauth", "scopes": ["read", "search"] }
     }
   }
 }
 ```
 
-`${NAME}` placeholders are expanded in `command`, `args`, `cwd`, `url`, `env` values and `headers` values. `${NAME:-default}` uses the default when the variable is not set. If a referenced environment variable is missing and has no default, CodeAlta reports an `environment_variable_not_found` diagnostic and does not send the literal placeholder to the server.
+`{ "type": "oauth" }` uses dynamic client registration. Add `clientId`, `clientSecret`, `scopes` and `redirectUri` when the server needs a pre-registered client; set `redirectUri` only when it requires a fixed callback.
 
-### Remote OAuth/Authv2 browser login
+- **CodeAlta Desktop**: save and enable the server, then use the **Authorization** block of its form: **Authorize** opens the browser and shows the address to copy, **Cancel** stops a stuck sign-in, **Sign out** removes the tokens.
+- **CodeAlta TUI**: **Authorize/Login** in the MCP Servers dialog, with **Cancel Login** (`Esc` or `Ctrl+G Ctrl+C`) and **Logout**.
+- **Agents**: `alta mcp auth login <server>`, `alta mcp auth status`, `alta mcp auth logout <server>`.
 
-For HTTP/SSE MCP servers that follow the MCP authorization flow, prefer CodeAlta-managed browser login over committing bearer tokens to JSON. Configure the server with an OAuth auth block, then use the MCP Servers dialog **Authorize/Login** action (**Authorize** on the MCP Servers page of the desktop app) or ask the agent to run `alta mcp auth login <server>`:
+The browser has **5 minutes** to come back; the time left is shown during sign-in. Tokens are stored under `~/.alta/auth/mcp/`, never in MCP JSON or TOML. Agent runs use cached or refreshed tokens and never open a browser on their own.
 
-```json
-{
-  "mcpServers": {
-    "docs": {
-      "type": "http",
-      "url": "https://example.test/mcp",
-      "auth": {
-        "type": "oauth",
-        "scopes": ["read", "search"]
-      }
-    }
-  }
-}
-```
+## GitHub MCP server
 
-CodeAlta stores OAuth access/refresh tokens in local user state under `~/.alta/auth/mcp/`; it does not write tokens, authorization codes, or refresh tokens to `.alta/mcp.json` or TOML policy. Browser login uses a loopback callback with a per-login state value and an ephemeral port by default; set `redirectUri` only when an authorization server requires a pre-registered fixed callback. CodeAlta waits **5 minutes** for the browser to come back to that callback; after that the login stops and you start it again. The time left is shown while you sign in: in the login dialog's text, with a countdown on the desktop page, and as `expiresAt` in the progress record of `alta mcp auth login`. The MCP Servers dialog opens a small modal login dialog for **Authorize/Login**, shows/copies the login URL when available, and supports **Cancel Login** (`Esc` or `Ctrl+G Ctrl+C`) for stuck browser flows. In the desktop app, the form of a saved HTTP server has an **Authorization** block: **Authorize** opens the browser and shows the address to copy, **Cancel** stops a login that is stuck, and **Sign out** removes the stored tokens. Save the server and enable it first. Dialogs and `alta mcp auth status` show only cache status and expiry. Non-interactive agent runs and ordinary MCP tool commands use cached/refreshable tokens only and will not open a browser unexpectedly. Use **Logout** in the dialog or `alta mcp auth logout <server>` to delete cached tokens.
-
-### GitHub MCP server example
-
-The [GitHub MCP server](https://github.com/github/github-mcp-server) can run as
-a remote HTTP server. A CodeAlta project can configure it like this in
-`.alta/mcp.json`:
+The [GitHub MCP server](https://github.com/github/github-mcp-server) runs as a remote server. In `.alta/mcp.json`:
 
 ```json
 {
@@ -191,17 +167,13 @@ a remote HTTP server. A CodeAlta project can configure it like this in
     "github": {
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/",
-      "headers": {
-        "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
-      }
+      "headers": { "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}" }
     }
   }
 }
 ```
 
-Store the token outside the JSON file. If the
-[GitHub CLI](https://cli.github.com/) is already authenticated, you can reuse
-its token for the CodeAlta process:
+Keep the token out of the file. With the [GitHub CLI](https://cli.github.com/) signed in, reuse its token for the CodeAlta process:
 
 ```powershell
 $env:GITHUB_PERSONAL_ACCESS_TOKEN = gh auth token
@@ -213,29 +185,11 @@ export GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token)"
 alta      # or altatui
 ```
 
-> [!NOTE]
-> Environment variables set this way are only available to that shell and the
-> CodeAlta process launched from it. Use your operating system's secret storage
-> or environment-variable configuration when you need persistence, and never
-> commit the resolved token to MCP JSON.
-
-> [!TIP]
-> For many GitHub tasks, installing and authenticating `gh` is simpler than
-> adding the GitHub MCP server. CodeAlta's [Git plugin](git.md) can expose `gh` as an
-> agent tool, and GitHub operations can then go through the official CLI. Use
-> the GitHub MCP server when you specifically want its MCP toolsets.
+The variable lasts for that shell only. For many GitHub tasks, the `gh` tool of the [Git plugin](git.md) is simpler; use the MCP server when you want its toolsets.
 
 ## TOML policy fields
 
-Connection fields stay in JSON. Enablement, tool filtering, prompt limits, timeouts, and direct-tool policy live in `config.toml` under `[plugins.mcp]` and `[plugins.mcp.servers.<server>]`:
-
-{.table}
-| Scope | File |
-|---|---|
-| Global policy | `~/.alta/config.toml` |
-| Project policy | `<project>/.alta/config.toml` |
-
-Project policy overlays global policy. Server policy keys are matched to the raw MCP server key.
+Connections stay in JSON. Enablement, tool filters, timeouts and prompt limits live in `config.toml` (`~/.alta/config.toml`, overlaid by `<project>/.alta/config.toml`), under `[plugins.mcp]` and `[plugins.mcp.servers.<server>]`:
 
 ```toml
 [plugins.mcp]
@@ -245,86 +199,62 @@ tool_timeout_ms = 60000
 max_tool_output_chars = 120000
 discover_in_prompt = true
 prompt_max_servers = 10
-prompt_max_tools = 20
 
 [plugins.mcp.servers.memory]
 enabled = true
 allowed_tools = ["read_graph", "write_graph"]
 disabled_tools = ["delete_graph"]
-startup_timeout_ms = 10000
 tool_timeout_ms = 30000
 ```
 
 {.table}
 | Global key | Default | Effect |
 |---|---:|---|
-| `enabled` | `true` | Disables MCP runtime exposure when `false`. |
-| `startup_timeout_ms` | `30000` | Maximum time for server startup and tool discovery. Non-positive values fall back to the default. |
-| `tool_timeout_ms` | `60000` | Maximum time for one MCP tool call. Non-positive values fall back to the default. |
-| `max_tool_output_chars` | `120000` | Character budget for MCP tool text/structured output before truncation. |
-| `discover_in_prompt` | `true` | Adds compact active/inactive MCP server guidance to the developer prompt. |
-| `prompt_max_servers` | `10` | Maximum number of server keys shown in prompt guidance. |
-| `prompt_max_tools` | `20` | Loaded and shown in management policy state; current prompt guidance lists servers, not individual tools. |
-| `direct_exposure` | `"auto"` | For a model that loads tools on demand (Claude 4.5 or later on the Claude API): which tools of a server stay loaded instead of being found by tool search. `"all"` keeps every tool loaded, `"none"` none, `"allowlist"` and `"auto"` the tools of `direct_tools` (or of `allowed_tools` when the server has no `direct_tools`). |
-| `direct_tool_threshold` | `40` | The most MCP tools that stay loaded in all for such a model; the others are found by tool search. |
+| `enabled` | `true` | `false` turns MCP off. |
+| `startup_timeout_ms` | `30000` | Time for a server to start and list its tools. |
+| `tool_timeout_ms` | `60000` | Time for one tool call. |
+| `max_tool_output_chars` | `120000` | Output budget of a tool call before truncation. |
+| `discover_in_prompt` | `true` | Lists active and inactive servers in the prompt. |
+| `prompt_max_servers` | `10` | Most servers listed in the prompt. |
+| `prompt_max_tools` | `20` | Shown in the policy; the prompt lists servers, not tools. |
+| `direct_exposure` | `"auto"` | For a model that loads tools on demand (Claude 4.5 or later on the Claude API): which tools stay loaded instead of found by tool search. `"all"`, `"none"`, or `"allowlist"`/`"auto"` for `direct_tools` (else `allowed_tools`). |
+| `direct_tool_threshold` | `40` | Most MCP tools that stay loaded for such a model. |
 
 {.table}
 | Server key | Effect |
 |---|---|
-| `enabled` | When `false`, the server is not connected and reports `server_disabled`. |
-| `allowed_tools` | If non-empty, only these raw MCP tool names are enabled. |
-| `disabled_tools` | Raw MCP tool names to disable. |
-| `disabled_skills` | [Skills of the server](#skills-of-mcp-servers) that sessions are not offered, by the address of their `SKILL.md` or by name. The switches of the Skills page write the address. |
-| `startup_timeout_ms` | Per-server startup/tool-list timeout override. |
-| `tool_timeout_ms` | Per-server tool-call timeout override. |
-| `direct_exposure` | Per-server override of `direct_exposure`. |
-| `direct_tools` | Raw tool names of the server that stay loaded for a model that loads tools on demand. |
-| `spaces` | The [spaces](../spaces.md#what-a-space-has) whose sessions can use the server; absent for every space. Read from the global `config.toml` only. A session of another space does not see the server, and `alta mcp activate` and `alta mcp server enable` refuse it with `server_not_in_space`; turning a server off is always allowed. |
+| `enabled` | `false`: not connected (`server_disabled`). |
+| `allowed_tools` | When not empty, only these tools. |
+| `disabled_tools` | Tools to turn off. |
+| `disabled_skills` | [Server skills](#skills-of-mcp-servers) not offered, by address or name. |
+| `startup_timeout_ms`, `tool_timeout_ms` | Per-server timeouts. |
+| `direct_exposure`, `direct_tools` | Per-server tool loading for models that load tools on demand. |
+| `spaces` | The [spaces](../spaces.md#what-a-space-has) whose sessions can use the server; absent for all. Global `config.toml` only. Other spaces get `server_not_in_space`. |
 
-The loader also accepts compatibility/display keys such as `connect_on_startup`, `config_scopes`, `preferred_write_scope`, and per-server `required`. Configuration inspection does not connect to servers, MCP tool discovery connects lazily, and agent tools are exposed through session activation. Once a session calls a server's tools, that server stays connected for the session, so a tool can rely on what an earlier call did (a browser snapshot, an opened document). An unused connection is closed after fifteen minutes and opened again at the next call.
+Once a session calls a server's tools, the server stays connected for the session, so a tool can rely on an earlier call (a browser snapshot, an opened document). An unused connection closes after fifteen minutes and reopens at the next call.
 
-## Managing servers through prompts
+## Agents and servers
 
-The agent can use MCP live-tool commands to add, update, remove, enable, or disable servers. Phrase the request in terms of the desired result.
+Ask for the result you want; the agent uses `alta mcp`.
 
-Add or update stdio servers by asking, for example:
+**Manage servers.**
 
 ```text
-Add a project MCP server named memory that runs npx with arguments -y
-and @modelcontextprotocol/server-memory.
-
 Add a project MCP server named local-docs that runs node server.js from
 C:\repo and sets API_TOKEN from ${DOCS_TOKEN}.
-```
 
-Add or update remote servers by asking, for example:
-
-```text
 Add a project MCP server named docs at https://example.test/mcp with
 Authorization set to Bearer ${MCP_TOKEN}.
-```
 
-By default, the agent writes to project scope when a project is active, otherwise to global scope. Ask explicitly for global or project scope when it matters. Adding/removing servers mutates only JSON MCP config files. Enabling/disabling servers mutates only TOML policy and preserves the JSON server definition:
-
-```text
 Disable the memory MCP server in project policy.
-
-Enable the memory MCP server in project policy.
 ```
 
-When removing from inside a project, a global-only server requires explicit global scope so a project context does not accidentally delete global user configuration. Ask for that directly: "Remove the global MCP server named memory."
+- The agent writes to the project when one is active, else globally. Name the scope when it matters.
+- Adding and removing change the JSON files; enabling and disabling change only the TOML policy.
+- From a project, removing a global server needs an explicit request: "Remove the global MCP server named memory."
+- The agent never removes a [server of another tool](#servers-of-other-tools): it disables it or overrides it.
 
-The agent adds and removes servers in the files of CodeAlta only. It can disable a [server of another tool](#servers-of-other-tools), or add a server of the same name that replaces it, but it does not remove it from that tool's file.
-
-## Discovering and calling tools through prompts
-
-When you ask the agent to discover MCP tools, it can use its MCP live tool to connect to enabled effective servers, list tools, apply `allowed_tools`/`disabled_tools`, and report enabled tools plus diagnostics. Ask for one server or a query when you want a smaller result:
-
-```text
-Search the memory MCP server for graph tools.
-```
-
-Tool descriptions and manual tool calls require the raw server key and raw MCP tool name. Prompt examples:
+**Discover and call tools.** Name the server and the tool:
 
 ```text
 Describe the read_graph tool on the memory MCP server.
@@ -333,113 +263,91 @@ Call the read_graph tool on the memory MCP server with an empty JSON
 argument object.
 ```
 
-The MCP live-tool call operation requires a JSON object argument payload and defaults to `{}`. Tool-call results preserve MCP `isError`, include text content when available, summarize image/audio/resource content instead of embedding it, redact likely secrets, and mark output as truncated when it exceeds `max_tool_output_chars`.
+Results keep the server's error flag, include text, summarize images, audio and resources, hide likely secrets, and are marked truncated past `max_tool_output_chars`.
 
-## Activating tools for agents
-
-MCP tools are not registered for agents merely because a server is configured. Ask the agent to activate one or more servers for the current session:
+**Activate servers.** A configured server gives no tools until a session activates it:
 
 ```text
-Activate the memory MCP server.
-
 Activate the memory and docs MCP servers.
 ```
 
-When the agent activates a server, its tools join the running turn: the agent calls them in its next step, and you do not need to send another prompt. You can ask for the activation and the work in one message, such as "Activate the memory MCP server and summarize the graph."
+- The tools join the running turn, and every later turn of the session.
+- An agent can activate one tool, `alta mcp activate github/create_issue`, or load tools it found with `alta search load` in CodeAlta Desktop.
+- Activations stay with the session, also after a restart.
+- With a Claude API model that loads tools on demand (Claude 4.5 or later), no activation is needed: the tools of enabled servers already listed are found with `tool_search`, and a server starts at its first call. **Test** in Settings lists a server never listed.
+- Tools are named `mcp__<server>__<tool>`, with other characters than ASCII letters and digits replaced by `_`.
+- An image returned by a tool (a screenshot) reaches models that accept images. CodeAlta Desktop shows it in an **Image read** card.
+- A stdio server gets the Git and GitHub identity of the session's [space](../spaces.md#identity); sessions of two identities each start their own server.
+- A server that cannot start, connect, authenticate or list tools gives diagnostics and no tools for that run.
 
-With a model of the Claude API that loads tools on demand (Claude 4.5 or later), the agent does not need to activate servers: the tools of every enabled server CodeAlta has listed before are sent to the model without filling its context, and it finds and loads the ones it needs with its `tool_search` tool. A tool starts its server at its first call. A server CodeAlta never listed is listed once by **Test** in Settings, or by an activation.
-
-An agent can also activate a single tool of a server, `alta mcp activate github/create_issue`, or load the tools it found with `alta search load` in CodeAlta Desktop: the session gets those tools only, not the other tools of the server. What a session activated stays with it, also when you resume it after restarting CodeAlta.
-
-Custom [agent prompts](../prompts.md) can include MCP activation or discovery habits for workflows that use the same servers repeatedly.
-
-Activation records the server keys for the session and lists their tools. The server stays active for that session: each later turn starts with its tools. CodeAlta registers enabled tools as deterministic aliases:
-
-```text
-mcp__<server>__<tool>
-```
-
-Alias parts keep ASCII letters and digits and replace other characters with `_`. If sanitized server or tool names collide, CodeAlta appends a stable hash suffix. The MCP tool input schema is passed through to the agent tool definition when it fits CodeAlta's strict/OpenAI-compatible tool schema subset. If an MCP schema uses dynamic object maps or required names outside local `properties`, CodeAlta exposes a strict-safe `arguments_json` string parameter instead; the string must contain the raw MCP argument JSON object and is unwrapped before the MCP call. Direct agent calls delegate to the same runtime path as the MCP live-tool call operation.
-
-When a tool returns an image, such as a browser screenshot, the agent sees it with the text of the result when the selected model supports image input. CodeAlta Desktop shows the image in an **Image read** card of the timeline, and the CodeAlta TUI shows a line that names it.
-
-A stdio server that a session starts gets, in its environment, the Git and GitHub identity of the session's [space](../spaces.md#identity). Sessions of two identities do not share a server: each starts its own.
-
-If a server cannot start, connect, authenticate, or list tools, it contributes diagnostics for that request and no agent tools for that run. For protected HTTP servers, complete browser login from the dialog or with `alta mcp auth login <server>`, or configure static headers in JSON when the provider requires them.
+[Agent prompts](../prompts.md) can include activation habits for servers you use often.
 
 ## Views of MCP Apps
 
-Some MCP servers show a view for the calls of their tools: a chart, a form or a dashboard drawn by the server, following the [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) extension. CodeAlta Desktop shows that view in the timeline, under the work of the turn that made the call, in the colors of its theme: you see it without opening the tool calls, and its title opens the call.
+Some servers show a view for their tool calls (a chart, a form, a dashboard), following the [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) extension. CodeAlta Desktop shows the view in the timeline, under the turn that made the call, in its theme colors; its title opens the call.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-mcp-app.webp" alt="A session of CodeAlta Desktop with the Budget Allocator view of an MCP server under the tool call that opened it: a donut chart and a slider for each part of the budget" loading="lazy">
   <figcaption class="small text-secondary mt-2">The view of the budget allocator, an example server of MCP Apps, under the call of its tool.</figcaption>
 </figure>
 
-- A call of the tool shows its view whether the agent calls the tool itself, after `alta mcp activate`, or through `alta mcp tool call`: the view is then under that `alta` call.
-- A call made while the session is open shows its view as soon as its row is in sight. A call from the history, or from before a restart of CodeAlta, shows a **Show view** button. Pressing it starts the server again if it stopped.
-- A view can call the tools its server keeps for views, read the resources of its server, open a link in your browser, and send a message to the session as if you had typed it. A view sends a message only while you work in it, after a press in the view, and at most one every two seconds. The message is queued while the agent is working.
-- A view can ask for a larger window: it opens over CodeAlta, and closing the window returns the view to the timeline.
-- A view reaches only its own server, never the other servers of the session nor CodeAlta itself. It loads nothing from the web but the addresses its server declares, and every request it makes is written to the log of CodeAlta.
-- Tools that a server keeps for its views are not offered to the agent.
-- At most four views are live in a session pane. Opening another sends the oldest back to its button.
+- A view shows for direct calls and for `alta mcp tool call`.
+- A call of the open session shows its view when it scrolls into sight. A call from history shows **Show view**, which restarts the server if needed.
+- A view can call its server's view tools, read its resources, open a link in your browser, and send a message to the session after a press in the view (at most one every two seconds, queued while the agent works).
+- A view can ask for a larger window over CodeAlta; closing it returns the view to the timeline.
+- A view reaches only its own server, loads only the addresses its server declares, and every request is logged.
+- Tools a server keeps for its views are not offered to the agent.
+- At most four views are live in a session pane; another sends the oldest back to its button.
 
-The CodeAlta TUI does not show views: the servers then answer it with text, as they do for any other client. The views of the servers that the Claude Code CLI runs itself (from its own `.mcp.json`) are not shown: CodeAlta does not see those calls.
+CodeAlta TUI shows no views: servers answer it with text. Views of servers the Claude Code CLI runs itself are not shown.
 
 ## Skills of MCP servers
 
-Some MCP servers publish [skills](../workspace.md#skills-management) beside their tools: instructions for a task, with the templates, references or scripts they need, following the [MCP Skills](https://github.com/modelcontextprotocol/ext-skills) extension. CodeAlta Desktop offers them to its agents.
+Some servers publish [skills](../workspace/settings.md#skills-management) beside their tools, following the [MCP Skills](https://github.com/modelcontextprotocol/ext-skills) extension. CodeAlta Desktop offers them to agents.
 
-- **Where they come from.** When CodeAlta connects to such a server (an activation, a run, a **Test**), it lists its skills. The prompt of a session then lists them under the name of their server, and says that they come from that server, not from your computer. A server CodeAlta never started has none listed yet.
-- **Loading one.** An agent loads a skill with `alta mcp skill activate --server <server> <skill>`. CodeAlta asks you first, on the card of the session, in every permission mode, Bypass included. The card names the skill, its server, its files and their size. **Show the skill** shows its `SKILL.md` before you answer.
-  - **Allow this skill** allows it from now on, in every session, for the files it has now. If the server changes a file of the skill, adds one or removes one, you are asked again.
-  - **Allow once** allows it for this load only.
-  - **Deny** loads nothing, and the agent goes on without it.
-  - A skill whose server generates its files cannot be checked: it can only be allowed once.
+- **Listing.** When CodeAlta connects to such a server (activation, run, **Test**), it lists its skills. The session prompt lists them under their server.
+- **Loading.** An agent runs `alta mcp skill activate --server <server> <skill>`, and CodeAlta asks you first on the session card, in every permission mode. The card names the skill, its server, its files and their size; **Show the skill** shows its `SKILL.md`.
+  - **Allow this skill**: from now on, in every session, while its files stay the same.
+  - **Allow once**: this load only. The only choice for a skill whose files the server generates.
+  - **Deny**: nothing is loaded.
 
   <figure class="alta-figure my-4">
     <img src="{{site.basepath}}/img/alta-desktop-mcp-skill.webp" alt="A session asks to load the skill transformers-js from the MCP server hf: the card shows its files and size, its SKILL.md opened with Show the skill, and the answers Allow this skill, Allow once and Deny" loading="lazy">
     <figcaption class="small text-secondary mt-2">An agent asks to load a skill of the Hugging Face MCP server: <strong>Show the skill</strong> shows its <code>SKILL.md</code> before you answer.</figcaption>
   </figure>
 
-- **Reading its files.** The agent reads the files of a skill with `alta mcp skill read`, from its server, never from disk. CodeAlta checks every file against the size and the SHA-256 the server published for it: a file that does not match, or that the skill did not list when it was loaded, is refused, and the agent is told to load the skill again.
-- **What a skill cannot do.** A skill of a server is named by its server and its address, so it never replaces one of your skills of the same name, and `alta skill activate` still loads your own skills only. Its instructions never override yours or those of the project. CodeAlta ignores `allowed-tools` and any other field that would widen what the agent may do. A skill reads only the files of its own server.
-- **Settings.** The [Skills page](../workspace.md#skills-management) of Settings shows them after your skills, in a section for each server, **From the MCP server** and its name: the switch of a skill turns it off for the sessions (it writes `disabled_skills` in the policy of its server), and its details show its files, whether you allowed it, with **Forget approval**, and **Show content**.
+- **Files.** The agent reads skill files with `alta mcp skill read`, from the server. Each file is checked against its published size and SHA-256; a mismatch is refused.
+- **Limits.** A server skill never replaces one of yours, never overrides your instructions, and reads only its server's files. `allowed-tools` and fields that widen permissions are ignored.
+- **Settings.** The Skills page lists them after your skills, under **From the MCP server**. A switch turns a skill off (`disabled_skills`); its details show its files, its approval with **Forget approval**, and **Show content**.
 
   <figure class="alta-figure my-4">
     <img src="{{site.basepath}}/img/alta-desktop-mcp-skills-settings.webp" alt="The Skills page of Settings: the section From the MCP server hf under the skills of the computer, and the details of the skill transformers-js with its address, its approval and its files" loading="lazy">
     <figcaption class="small text-secondary mt-2">The skills of the Hugging Face MCP server on the Skills page, after the skills of your computer.</figcaption>
   </figure>
 
-- **After a compaction**, a skill of a server is not put back into the conversation: the agent is told it was unloaded, and loads it again if it still needs it. A skill you allowed from now on loads again without asking.
+- **Compaction.** A server skill is not restored after a compaction; the agent loads it again if needed.
 
-The CodeAlta TUI does not load the skills of servers. The skills of the servers that the Claude Code CLI runs itself are not shown either.
+CodeAlta TUI does not load server skills, and skills of servers run by the Claude Code CLI are not shown.
 
-## MCP Servers dialog
+## MCP Servers page
 
-Open it from `/mcp`, the command **MCP Servers**, or the MCP status of the prompt (above the editor in CodeAlta Desktop). In CodeAlta Desktop it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope, and authorize or sign out of an HTTP server. The page lists the files the servers are read from, each with a button to open it in the code editor. With more than the Default space, the chip of a server shows its spaces and changes them; a server of a project follows its project. The TUI dialog can:
+Open it with `/mcp`, the command **MCP Servers**, or the MCP status of the prompt. In CodeAlta Desktop it is **Settings > MCP Servers** (`Ctrl+G Ctrl+Y`):
 
-- show global and project MCP definitions, the servers of other tools with the file they come from, and the definitions that are overridden;
-- add, edit, save, and remove server JSON definitions in the files of CodeAlta;
-- toggle server enablement through TOML policy;
-- discover tools in the background when a configured server is selected;
-- test a server with configured timeouts;
-- authorize/login or logout HTTP OAuth/Authv2 servers without storing tokens in MCP JSON;
-- toggle individual tools by writing/removing raw tool names in `disabled_tools`.
+- Add, edit, enable and remove global or project servers; authorize or sign out of remote servers.
+- The files the servers come from, each with a button to open it in the code editor.
+- With more than the Default space, a chip shows and changes a server's spaces; a project server follows its project.
 
-Use **Open JSON Config**, or ask the agent to add/remove/update MCP servers, for advanced JSON shapes that the dialog form does not expose.
+The CodeAlta TUI dialog shows global, project, other-tool and overridden definitions; adds, edits and removes servers in CodeAlta's files; toggles servers and individual tools (`disabled_tools`); tests a server; discovers tools in the background; and signs in or out. Use **Open JSON Config**, or ask the agent, for shapes the form does not offer.
 
-## Current boundaries
+## Limits and disabling
 
-Current MCP support focuses on tools, the [views of MCP Apps](#views-of-mcp-apps) and the [skills of servers](#skills-of-mcp-servers). MCP resources beyond those, prompts, elicitation/user-interaction flows, and automatic `tool-list-changed` refresh are not part of the shipped user workflow. Diagnostics are redacted before display.
+MCP support covers tools, [views of MCP Apps](#views-of-mcp-apps) and [server skills](#skills-of-mcp-servers). Other resources, MCP prompts, elicitation and automatic tool-list refresh are not supported. Diagnostics are redacted before display.
 
-## Disable it
-
-Disable MCP runtime exposure and MCP command paths with:
+Turn MCP off with:
 
 ```toml
 [plugins.mcp]
 enabled = false
 ```
 
-The MCP plugin remains a built-in trusted plugin, so the global plugin bypasses on the [plugins overview](readme.md#disable-or-bypass-plugins) are still available for startup recovery.
+The [plugin bypasses](readme.md#disable-or-bypass-plugins) still apply for startup recovery.

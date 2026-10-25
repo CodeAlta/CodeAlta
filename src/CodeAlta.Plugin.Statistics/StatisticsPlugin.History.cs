@@ -126,7 +126,8 @@ public sealed partial class StatisticsPlugin
     public override ValueTask OnAgentEventAsync(PluginAgentEventContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
-        // The event is a signal, nothing more: the numbers are read from the journal a moment later, and the callback returns at once.
+        // The event is a signal, nothing more: the numbers are read from the journal a moment later, and the callback returns at once,
+        // since a slow callback holds the event pipeline of its session and callbacks beyond the plugin's budget are dropped.
         _engine?.Signal(context.Event.SessionId);
         return ValueTask.CompletedTask;
     }

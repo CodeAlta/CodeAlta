@@ -15,7 +15,7 @@ public sealed partial class ShippedUserGuideTests
     {
         var guide = GuideRoot;
         Assert.AreEqual(Path.Combine(Path.GetFullPath(AppContext.BaseDirectory), "content", "user-guide"), guide);
-        foreach (var page in new[] { "readme.md", "getting-started.md", "workspace.md", "sessions.md", "issues.md", Path.Combine("plugins", "readme.md") })
+        foreach (var page in new[] { "readme.md", "getting-started.md", Path.Combine("workspace", "readme.md"), Path.Combine("sessions", "readme.md"), "issues.md", Path.Combine("plugins", "readme.md") })
         {
             Assert.IsTrue(File.Exists(Path.Combine(guide, page)), page);
         }
@@ -36,7 +36,7 @@ public sealed partial class ShippedUserGuideTests
         var others = Directory.GetFiles(guide, "*", SearchOption.AllDirectories)
             .Where(file => !file.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && !file.StartsWith(Path.Combine(guide, "img") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             .Select(file => Path.GetRelativePath(guide, file).Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
-        CollectionAssert.AreEqual(new[] { "menu.yml", "plugins/menu.yml" }, others);
+        CollectionAssert.AreEqual(new[] { "menu.yml", "model-providers/menu.yml", "plugins/menu.yml", "sessions/menu.yml", "workspace/menu.yml" }, others);
     }
 
     [TestMethod]
@@ -55,12 +55,17 @@ public sealed partial class ShippedUserGuideTests
         Assert.AreEqual("book", menu[0].Icon);
         Assert.IsTrue(menu.All(static item => item.Title.Length > 0 && !item.Title.Contains('<') && item.Icon is { Length: > 0 }));
 
-        // The folder of the plugins has its own menu, whose first entry is the page of the folder.
-        var plugins = menu.Single(static item => item.Path == "plugins/readme.md");
-        var pluginsWritten = MenuEntry().Matches(File.ReadAllText(Path.Combine(GuideRoot, "plugins", "menu.yml"))).Select(static match => "plugins/" + match.Groups[1].Value).ToArray();
-        CollectionAssert.AreEqual(pluginsWritten.Where(static path => path != "plugins/readme.md").ToArray(), plugins.Children.Select(static item => item.Path).ToArray());
-        Assert.IsTrue(plugins.Children.Count >= 4);
-        Assert.IsTrue(menu.Where(static item => item.Path != "plugins/readme.md").All(static item => item.Children.Count == 0));
+        // A folder has its own menu, whose first entry is the page of the folder.
+        var folders = new[] { "model-providers", "workspace", "sessions", "plugins" };
+        foreach (var folder in folders)
+        {
+            var item = menu.Single(item => item.Path == folder + "/readme.md");
+            var folderWritten = MenuEntry().Matches(File.ReadAllText(Path.Combine(GuideRoot, folder, "menu.yml"))).Select(match => folder + "/" + match.Groups[1].Value).ToArray();
+            CollectionAssert.AreEqual(folderWritten.Where(path => path != folder + "/readme.md").ToArray(), item.Children.Select(static child => child.Path).ToArray(), folder);
+            Assert.IsTrue(item.Children.Count >= 2, folder);
+        }
+
+        Assert.IsTrue(menu.Where(item => !folders.Any(folder => item.Path == folder + "/readme.md")).All(static item => item.Children.Count == 0));
 
         // Every page that ships is in the navigation: none can only be reached by a link.
         var named = menu.SelectMany(static item => item.Children.Prepend(item)).Select(static item => item.Path).ToHashSet(StringComparer.Ordinal);

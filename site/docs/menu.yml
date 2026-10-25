@@ -3,22 +3,21 @@ doc:
   - {path: getting-started.md, title: "<i class='bi bi-rocket-takeoff' aria-hidden='true'></i> Getting Started"}
   - {path: desktop-and-tui.md, title: "<i class='bi bi-window-split' aria-hidden='true'></i> Desktop and TUI"}
   - {path: principles.md, title: "<i class='bi bi-compass' aria-hidden='true'></i> Principles"}
-  - {path: model-providers.md, title: "<i class='bi bi-cpu' aria-hidden='true'></i> Model Providers"}
-  - {path: model-tiers.md, title: "<i class='bi bi-layers' aria-hidden='true'></i> Model Tiers and Fallback"}
+  - {path: model-providers/readme.md, title: "<i class='bi bi-cpu' aria-hidden='true'></i> Model Providers", folder: true}
+  - {path: model-tiers.md, title: "<i class='bi bi-layers' aria-hidden='true'></i> Model Tiers"}
   - {path: prompts.md, title: "<i class='bi bi-chat-square-text' aria-hidden='true'></i> Agent Prompts"}
-  - {path: workspace.md, title: "<i class='bi bi-display' aria-hidden='true'></i> Workspace and Dialogs"}
+  - {path: workspace/readme.md, title: "<i class='bi bi-display' aria-hidden='true'></i> Workspace", folder: true}
+  - {path: sessions/readme.md, title: "<i class='bi bi-diagram-3' aria-hidden='true'></i> Sessions", folder: true}
   - {path: spaces.md, title: "<i class='bi bi-collection' aria-hidden='true'></i> Spaces"}
-  - {path: sessions.md, title: "<i class='bi bi-diagram-3' aria-hidden='true'></i> Sessions and Delegation"}
-  - {path: speech.md, title: "<i class='bi bi-mic' aria-hidden='true'></i> Speech to Prompt"}
-  - {path: search.md, title: "<i class='bi bi-search' aria-hidden='true'></i> Search"}
   - {path: worktrees.md, title: "<i class='bi bi-tree' aria-hidden='true'></i> Worktrees"}
-  - {path: automations.md, title: "<i class='bi bi-lightning-charge' aria-hidden='true'></i> Automations"}
-  - {path: work-items.md, title: "<i class='bi bi-list-check' aria-hidden='true'></i> Work Items"}
   - {path: reviews.md, title: "<i class='bi bi-chat-square-quote' aria-hidden='true'></i> Reviews"}
+  - {path: work-items.md, title: "<i class='bi bi-list-check' aria-hidden='true'></i> Work Items"}
   - {path: bookmarks.md, title: "<i class='bi bi-bookmark' aria-hidden='true'></i> Bookmarks"}
-  - {path: issues.md, title: "<i class='bi bi-record-circle' aria-hidden='true'></i> Issues and Pull Requests"}
-  - {path: copilot-layout.md, title: "<i class='bi bi-github' aria-hidden='true'></i> GitHub Copilot Layout"}
-  - {path: ui-tools.md, title: "<i class='bi bi-cursor' aria-hidden='true'></i> UI Tools and MCP Server"}
-  - {path: advanced-agent-workflows.md, title: "<i class='bi bi-stars' aria-hidden='true'></i> Advanced Agent Workflows"}
+  - {path: automations.md, title: "<i class='bi bi-lightning-charge' aria-hidden='true'></i> Automations"}
+  - {path: search.md, title: "<i class='bi bi-search' aria-hidden='true'></i> Search"}
+  - {path: speech.md, title: "<i class='bi bi-mic' aria-hidden='true'></i> Speech to Prompt"}
+  - {path: issues.md, title: "<i class='bi bi-record-circle' aria-hidden='true'></i> Issues and PRs"}
+  - {path: copilot-layout.md, title: "<i class='bi bi-github' aria-hidden='true'></i> Copilot Layout"}
+  - {path: ui-tools.md, title: "<i class='bi bi-cursor' aria-hidden='true'></i> UI Tools and MCP"}
   - {path: plugins/readme.md, title: "<i class='bi bi-puzzle' aria-hidden='true'></i> Plugins", folder: true}
   - {path: troubleshooting.md, title: "<i class='bi bi-life-preserver' aria-hidden='true'></i> Troubleshooting"}

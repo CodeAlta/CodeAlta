@@ -4,9 +4,7 @@ title: Automations
 
 # Automations
 
-An automation is a prompt that CodeAlta Desktop sends by itself: at a time you choose, when an issue or a pull request is opened, when a command of yours succeeds, or when you click **Run now**. Each run starts a new session, so you read the result like any other work.
-
-Automations are in CodeAlta Desktop only.
+An automation is a prompt that CodeAlta Desktop sends by itself: at a time you choose, when an issue or a pull request is opened, when a command of yours succeeds, or when you click **Run now**. Each run starts a new session, so you read the result like any other work. Automations are in CodeAlta Desktop only.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-automations.webp" alt="CodeAlta Desktop Automations tab with the next 24 hours, six automations of a project and the details of the selected one" loading="lazy">
@@ -56,12 +54,10 @@ An automation can have several triggers. Times are read on the clock of your com
 
 A **Command** trigger is for a tool that waits for something and then ends: a script that waits for a file, or `gh run watch 123 --exit-status`, which waits for a workflow run of GitHub.
 
-- CodeAlta starts the command and keeps it running. Each time it ends with the exit code 0, the automation starts a session, and the command is started again to wait for the next time.
-- What the command printed is sent after your prompt.
-- Another exit code starts no session. The command is started again as well.
+- CodeAlta starts the command and keeps it running. Each time it ends with exit code 0, the automation starts a session with your prompt followed by what the command printed. Another exit code starts no session. Either way, the command is started again.
 - The command runs in the shell agents use: PowerShell on Windows, your shell on macOS and Linux. It runs in the folder of the project, or in your home folder for a chat. Type a folder next to the command to run it there.
 - A command that ends in less than five seconds is started again after a pause, which grows up to five minutes. When it keeps failing, the automation shows its last line.
-- When the command succeeds again while the session of the last time still works, the new session starts when that one ends.
+- When the command succeeds while the last session still works, the new session starts after it.
 - Turning off the automation, or the **Running** switch at the top, ends the command.
 
 ```toml
@@ -86,7 +82,7 @@ triggers = [
 - Automations run while CodeAlta Desktop is open, also when it [stays in the notification area](desktop-and-tui.md#runs-in-the-background).
 - What was due while CodeAlta was closed is skipped. Turn on **Catch up on what was missed while CodeAlta was closed** in an automation to run it at the next start.
 - An automation is stored in **My configuration** (`~/.alta/config.toml`) or in **The project** (`.alta/config.toml` of its folder), which you can commit to share it with your team.
-- An automation that came with a project, written by someone else, waits for you: read its prompt and click **Allow**. It asks again when its prompt or its triggers change, the command of a trigger included.
+- An automation that came with a project, written by someone else, waits until you read its prompt and click **Allow**. It asks again when its prompt or triggers change, including the command of a trigger.
 - An agent can list, create and run automations. Ask in your own words, for example:
 
 ```text

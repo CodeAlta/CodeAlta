@@ -4,35 +4,32 @@ title: Spaces
 
 # Spaces
 
-A space is a named group of projects that you work on together: your job, your personal projects, the open source you contribute to. CodeAlta Desktop shows one space at a time, with its projects, its sessions and its tabs. A [window you move tabs into](workspace.md#windows-desktop) keeps its own space, so you can see two spaces side by side.
+A space is a named group of projects you work on together: your job, your personal projects, the open source you contribute to. CodeAlta Desktop shows one space at a time, with its projects, sessions and tabs. A [window you move tabs into](workspace/readme.md#windows) keeps its own space, so you can see two spaces side by side.
 
-A space is also a setup: the providers, MCP servers, skills, agent prompts and plugins its sessions use, what its new sessions start with, the tools they do without, and the Git, GitHub, Jira and command line identity they work under. Switch from Work to Personal and all of it switches with the space.
+A space is also a setup: the providers, MCP servers, skills, agent prompts and plugins its sessions use, how its new sessions start, the tools they do without, and the Git, GitHub, Jira and command line identity they work under. Switch from Work to Personal and all of it switches.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="CodeAlta Desktop showing the Open source space with its four projects, and the list of the space switch open: Default, Work, Personal and Open source, each with its key, then New space and Organize spaces" loading="lazy">
   <figcaption class="small text-secondary mt-2">The window shows the Open source space. The list of the space switch has the other spaces, with marks for a session that waits in Work and one that runs in Personal.</figcaption>
 </figure>
 
-- The **Default** space is always there and cannot be deleted. Every project is in it, but it shows only the projects and the chats that belong to no other space.
-- You create the other spaces. A project can be in several spaces at once.
+- The **Default** space always exists. Every project is in it, but it shows only the projects and chats that belong to no other space. To see everything there, turn on **Show what belongs to other spaces** in **Settings > Spaces**, or click **Show all** in the message shown the first time Default hides something.
+- You create the other spaces. A project can be in several spaces.
 - A space has a name, an icon, a color and a line that says what it is for.
-- Every session belongs to one space: the one you created it in. A **chat**, a session that belongs to no project, is listed in its own space only, and so is a session of a project, also after its project was moved to another space: the project is then shown in the session's space too, with the sessions of that space.
-- A session of an earlier version of CodeAlta records no space. A session of a project is listed in every space of its project; a chat is listed in the Default space only. **Move to space…** puts it in another space (see [Move a session to another space](#move-a-session-to-another-space)).
-- To see everything in the **Default** space, turn on **Show what belongs to other spaces** in **Settings > Spaces**. The first time the Default space hides something, a message says so, with **Show all**.
+- Every session belongs to the space you created it in. A chat is listed in its space only. A project session is listed in its space, also after its project moved to another space: the project is then shown in both.
+- A session from before spaces existed is listed in every space of its project, or in Default for a chat. **Move to space…** puts it in one space.
 
-The first time CodeAlta Desktop starts, it creates two empty spaces, **Work** and **Personal**. Fill them, rename them or delete them: a space you delete does not come back.
+On its first start, CodeAlta Desktop creates two empty spaces, **Work** and **Personal**. Fill them, rename them or delete them.
 
 ## The space switch
 
-The space switch is in the title bar of the main window, before the zoom and the theme switch. It shows the icon and the name of the space the window shows. With the Default space alone, it is an icon. It changes the space of the main window only: the other windows keep theirs.
+The space switch is in the title bar of the main window, before the zoom and the theme switch. It shows the icon and name of the space the window shows (only an icon while Default is the only space), and changes the space of the main window only. Click it, or press `Ctrl+G Ctrl+V`:
 
-Click it, or press `Ctrl+G Ctrl+V`, to open the list of your spaces:
-
-- choose a space to show it. Each space has its key beside it, from `Ctrl+G 1` to `Ctrl+G 9`, and marks that say what its sessions are doing;
+- choose a space to show it. Each space has its key, `Ctrl+G 1` to `Ctrl+G 9`, and marks that say what its sessions are doing;
 - **New space…** creates a space;
 - **Organize spaces…** opens **Settings > Spaces**.
 
-When you show another space, the Explorer lists the projects of that space, and the tabs change to the ones you left there: sessions, code editors, Changes, terminals, and the Work items, Issues and Automations tabs, with their layout. Each space has its own tabs, and they come back when you show the space again, also after a restart.
+When you show another space, the Explorer lists its projects and the tabs you left there come back (sessions, code editors, Changes, terminals, Work items, Issues, Automations), with their layout, also after a restart.
 
 - Sessions keep running while their space is not shown.
 - A prompt you were typing is kept.
@@ -42,59 +39,35 @@ When you show another space, the Explorer lists the projects of that space, and 
 
 Choose **New space…** in the space switch, or run `/new_space`.
 
-- A row of ready-made spaces sets a name, an icon and a color in one click: **Work**, **Personal**, **Open source**, **Experiments**, **Learning** and **Clients**. A name you already use is not offered.
-- Or type a **Name** and choose an **Icon** and a **Color**. The icons are the general icons and the brand logos.
-- **What it is for** is a line for you and for the agents, for example "Projects of the Contoso contract".
-- **Start from** is **Empty** unless you choose **Copy the setup of** a space: the new space then gets the resources of that space, the agent prompt, the model tiers and the fallback of its new sessions, and the tools it turns off. Its identity and its projects are not copied.
-- Tick the projects of the space in the list.
+- A ready-made space sets the name, icon and color in one click: **Work**, **Personal**, **Open source**, **Experiments**, **Learning** or **Clients**. Or type a **Name** and choose an **Icon** (general icons and brand logos) and a **Color**.
+- **What it is for** is a line for you and for the agents, such as "Projects of the Contoso contract".
+- **Start from** is **Empty**, or **Copy the setup of** another space: its resources, the agent prompt, model tiers and fallback of its new sessions, and the tools it turns off. Its identity and projects are not copied.
+- Tick the projects of the space.
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
   <img src="{{site.basepath}}/img/alta-desktop-space-new.webp" alt="The New space window with a name, a description, Start from: Copy the setup of Open source, and two projects ticked" loading="lazy">
   <figcaption class="small text-secondary mt-2">A new space from the ready-made Experiments, with the setup of another space and two projects ticked.</figcaption>
 </figure>
 
-A space created from the title bar is shown at once.
+A space created from the title bar is shown at once. An empty space has an **Add projects…** button, which opens the folder picker.
 
-An empty space says **No project in this space yet.** Its **Add projects…** button opens the folder picker, just like `+` in the Projects sidebar. To manage spaces, use **Organize spaces…** in the space switch.
+### Add a project
 
-### Add a project folder to a space
-
-Add a folder with the `+` button of the Explorer, or with [Open project](workspace.md#open-project-dialog), while a space is shown: the new project joins that space. A folder that is already a project of another space joins the shown one too.
+A folder you add with the `+` of the Explorer, or with [Open project](workspace/readme.md#open-a-project), joins the space the window shows, also when it is already a project of another space.
 
 ## Organize spaces
 
-**Spaces** is a group of Settings of its own: its **Overview**, then a page for each space. Open it with **Organize spaces…** in the space switch, or with `/spaces`.
+**Settings > Spaces** opens with **Organize spaces…** in the space switch, or `/spaces`. Its **Overview** is a map of your setups:
 
-The overview is a map of your setups:
-
-- On the left, the Default space lists every project, each with the icons of the spaces it is in. Its switch **Show what belongs to other spaces** makes the Default space show everything again.
-- On the right, each space has a card: its icon, its name, **What it is for**, its projects, and one line that sums up its setup, such as `2 projects · Claude Business · 3 MCP · alex@contoso.example`: its projects, what it has by name (its first provider, then how many MCP servers, skills, agent prompts and plugins), and the email it works under.
+- On the left, the Default space lists every project, with the icons of the spaces it is in.
+- On the right, each space has a card: its icon, name, description, projects, and a line that sums up its setup, such as `2 projects · Claude Business · 3 MCP · alex@contoso.example`.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-space-settings.webp" alt="The Overview of Settings > Spaces: the Default space with every project on the left, and the cards of the Work, Personal and Open source spaces with their descriptions, projects and the line that sums up their setup" loading="lazy">
   <figcaption class="small text-secondary mt-2">Settings > Spaces: every project on the left, and a card for each space with what it is for, its projects and its setup.</figcaption>
 </figure>
 
-Click a card, or a space in the navigation, to open the page of that space. **Spaces**, above its title, brings you back to the cards. The page has a tab per section, and each tab says what the section sets, so you see the whole setup before you open one:
-
-{.table}
-| Section | What you set there | What its tab says |
-|---|---|---|
-| **General** | Its name, icon, color and **What it is for** | |
-| **Projects** | A checklist of all the projects, to tick the ones the space holds | How many |
-| **Resources** | The providers, MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has)) | What it has by name, or **All shared** |
-| **New sessions** | The agent prompt, the model tiers and the fallback of its new sessions | The prompt, **Own model tiers**, or **Usual settings** |
-| **Tools** | The built-in tools its sessions do without | How many are off |
-| **Identity** | The Git, GitHub and Jira identity of its sessions and the profiles of their command line tools (see [Identity](#identity)) | The email, or **Usual settings** |
-
-<figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-space-page.webp" alt="The page of the Open source space in Settings > Spaces: the tabs General, Projects, Resources, New sessions, Tools and Identity, each with what its section sets, and the Resources section open with a tab per kind and a switch per resource" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The page of a space: each tab says what its section sets, here the resources its sessions can use.</figcaption>
-</figure>
-
-**Show** shows that space in the window, and **Delete** asks before it deletes the space. The Default space has a page too, with every project in it. Every change is saved at once.
-
-To choose the projects of a space with the mouse, on the cards:
+Drag projects to choose the spaces they are in:
 
 {.table}
 | Drag a project | What happens |
@@ -103,13 +76,30 @@ To choose the projects of a space with the mouse, on the cards:
 | From a card onto another card | The project moves to the other space. With `Ctrl` or `Alt` held, it stays in both. |
 | From a card back to the list | The project leaves that space. |
 
-The `×` of a project on a card removes it from that space. A card also has **Show**, and two arrows that move the space before or after its neighbor in the list.
+The `×` of a project on a card also removes it. A card has **Show**, and arrows that move the space up or down the list.
 
-Deleting a space leaves its projects, their folders and their sessions alone. The projects stay in the Default space and in their other spaces, and the chats of the space go to the Default space: the question before the deletion says how many.
+Click a card to open the page of its space. Each tab of the page says what its section sets:
 
-## Move a session to another space
+{.table}
+| Section | What you set there | What its tab says |
+|---|---|---|
+| **General** | Name, icon, color and **What it is for** | |
+| **Projects** | The projects of the space | How many |
+| **Resources** | The providers, MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has)) | What it has, or **All shared** |
+| **New sessions** | The agent prompt, model tiers and fallback of its new sessions | The prompt, **Own model tiers**, or **Usual settings** |
+| **Tools** | The built-in tools its sessions do without | How many are off |
+| **Identity** | Its Git, GitHub and Jira identity and its CLI profiles (see [Identity](#identity)) | The email, or **Usual settings** |
 
-**Move to space…** in the menu of a session lists the other spaces: choose one and the session goes there, with the sessions it started. Its next turn uses what the new space sets up. A session that is running or waits for an answer cannot move until it is idle.
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-space-page.webp" alt="The page of the Open source space in Settings > Spaces: the tabs General, Projects, Resources, New sessions, Tools and Identity, each with what its section sets, and the Resources section open with a tab per kind and a switch per resource" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The page of a space: each tab says what its section sets, here the resources its sessions can use.</figcaption>
+</figure>
+
+Changes are saved at once. **Show** shows the space in the window, and **Delete** deletes it after a question. Deleting a space keeps its projects, folders and sessions: projects stay in Default and in their other spaces, and its chats go to Default.
+
+## Move a session
+
+**Move to space…** in the menu of a session lists the other spaces. The session moves with the sessions it started, and its next turn uses the setup of the new space. A session that runs or waits for an answer moves once it is idle.
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
   <img src="{{site.basepath}}/img/alta-desktop-move-to-space.webp" alt="The Move to space window of a session, listing the other spaces" loading="lazy">
@@ -118,14 +108,14 @@ Deleting a space leaves its projects, their folders and their sessions alone. Th
 
 ## What a space has
 
-Each session belongs to one space. It uses the providers, MCP servers, skills, agent prompts and plugins of that space, whatever space the window shows. A Business session keeps the tools of Business when you switch to Personal.
+A session uses the providers, MCP servers, skills, agent prompts and plugins of its own space, whatever space the window shows.
 
-A resource is in every space until you choose its spaces. Choose them in either place:
+A resource is in every space until you choose its spaces, in either place:
 
-- on its page of Settings (**Providers**, **MCP Servers**, **Skills**, **Agent prompts**, **Plugins**): the chip on its row says **All spaces**, or **Only:** and its spaces. Click it to pick **All spaces** or some spaces, Default among them. The form of a provider has the same chip, under **Spaces**;
-- on the page of a space, in **Resources**: one tab per kind, with a switch per resource. Shared items are in every space: turn one off to keep it out of this space. A small popover asks first: the other spaces keep it, and a space you create later will not get it.
+- on its page of Settings (**Providers**, **MCP Servers**, **Skills**, **Agent prompts**, **Plugins**): the chip of its row says **All spaces** or **Only:** and its spaces. Click it to choose. The provider form has the same chip, under **Spaces**;
+- in **Resources** on the page of a space: a tab per kind and a switch per resource. Turn a shared resource off to keep it out of this space: the other spaces keep it, and spaces you create later will not get it. When it would be left in no space, CodeAlta offers to turn it off instead.
 
-When a resource would be left in no space, the popover offers to turn it off instead. A resource you give every space again, on the page of a space or in its chip, is shared again: a space you create later gets it too. A kind you have nothing of yet links to its page, such as **Add an MCP server…**.
+A resource you give every space again is shared again, also with spaces you create later.
 
 {.table}
 | Spaces of a resource | Available in |
@@ -134,54 +124,46 @@ When a resource would be left in no space, the popover offers to turn it off ins
 | Business | Business only, not Default |
 | Business, Default | Business and Default |
 
-What a session cannot use in its space:
+What a session's space does not have:
 
-- is not in the instructions of its agent: its MCP servers, skills and agent prompts are not listed, and what its plugins add (tools, buttons, prompt text) is left out;
-- cannot be reached by its agent: `alta mcp activate`, `alta skill activate` and `alta session set_agent` refuse it and say why. No `alta` command changes the spaces of a resource: only you do, in the window or in the files;
-- is dropped from the session when you take it out of the space: an MCP server it activated is gone at its next turn.
+- is not in the instructions of its agent: no MCP servers, skills or agent prompts listed, nothing its plugins add;
+- is refused to its agent: `alta mcp activate`, `alta skill activate` and `alta session set_agent` say why. Only you change the spaces of a resource;
+- leaves the session when you take it out of the space: an MCP server it activated is gone at its next turn.
 
-An agent also creates, forks, archives and sends prompts only to sessions of its own space: a session it creates is in its space, and `alta session create --space` naming another space is refused. It still reaches the sessions it created, and theirs, when its own space changed afterwards: a session of CodeAlta 1.8.0 or before follows its project into a space you add the project to, while its children stay where they were created. You reach every session.
+An agent creates, forks, archives and sends prompts only to sessions of its own space, plus the sessions it created. You reach every session. A resource of a project (in its `.alta` folder) cannot bring into a space what the space excludes. **Session info** shows the space of a session and what it can use there.
 
 ### Providers of a space
 
-A space can have its own provider: a Claude Code account for Business and another one for Personal, for example (see [several accounts](model-providers.md#claude-code)).
+A space can have its own provider, such as a Claude Code account for Business and another for Personal (see [several accounts](model-providers/setup.md#claude-code)).
 
-- A new session, a task or an issue you start, and an automation run start with a provider of their space: the default provider when it is in the space, else the first provider of the space. The provider chooser of a new session lists the providers of the space the window shows.
-- A provider of another space is refused, also when an agent asks for it with `alta session create`.
-- A session whose provider you take out of its space sends nothing more: its status line says why and the provider chooser opens when you open the session, to pick a provider of the space. A run that fails does not fall back to a provider of another space.
-- The composer of a session reports the errors of the providers of its space only.
+- New sessions, tasks, issues you start and automation runs use the default provider when it is in the space, else the first provider of the space. The provider chooser lists the providers of the space the window shows.
+- A provider of another space is refused, also to an agent.
+- A session whose provider leaves its space sends nothing more: its status line says why, and the provider chooser opens. A failed run never falls back to a provider of another space.
+- The composer reports the errors of the providers of its space only.
 
-A resource of a project (in its `.alta` folder) follows its project, which is already in its spaces. A project cannot bring into a space what the space does not have: a skill or an MCP server assigned to Business stays out of Personal, also when a project of Personal defines one with the same name.
+### New sessions and tools
 
-**Session info** shows the space of a session and what it can use there.
-
-### New sessions
-
-In **New sessions**, choose the agent prompt a new session of the space starts with: from the window, from an agent with `alta session create`, from a work item, an automation or a question about the guide. A prompt you or the agent choose still wins. **Model tiers** uses the global tiers and fallback of Settings > Models, or tiers and a fallback of the space's own with **Customize**: they replace the global ones for the sessions of the space, also for a tier they leave empty. Its tiers offer the providers of the space, a provider you keep for it alone included, and its fallback follows the global one until you change it there (see [Tiers of a space](model-tiers.md#tiers-of-a-space)).
-
-### Tools
-
-In **Tools**, turn off built-in tools for the sessions of the space, such as `shell_command`. What Settings > Permissions turns off for every session is shown beside them. See [Tools turned off](workspace.md#tools-turned-off).
+- **New sessions** sets the agent prompt a new session of the space starts with, from the window, an agent, a work item, an automation or a question about the guide. A prompt you or the agent choose still wins.
+- **Model tiers** there uses the global tiers and fallback of **Settings > Models**, or tiers and a fallback of its own with **Customize** (see [Tiers of a space](model-tiers.md#tiers-of-a-space)).
+- **Tools** turns off built-in tools, such as `shell_command`, for the sessions of the space. What **Settings > Permissions** turns off for every session is shown beside them. See [Tools turned off](workspace/settings.md#tools-turned-off).
 
 ## Identity
 
-A space can have its own Git, GitHub and Jira identity, so that the sessions of Work commit and sign as you do at work, and those of Personal as you do at home, and its own profiles of other command line tools (see [Command line tools](#command-line-tools)). Open the page of the space in **Settings > Spaces**: its **Identity** section has three cards, and the profiles below them.
+A space can have its own Git, GitHub and Jira identity, so the sessions of Work commit as you do at work and those of Personal as you do at home, and its own profiles of other command line tools. The **Identity** section of the page of a space has three cards and the CLI profiles:
 
 | Card | Fields |
 | --- | --- |
-| **Git** | Name and email of your commits, the SSH key to fetch and push with, how commits are signed (SSH or GPG, with the key), and **Signed-off-by** |
+| **Git** | Name and email of your commits, the SSH key to fetch and push, how commits are signed (SSH or GPG, with the key), and **Signed-off-by** |
 | **GitHub** | The folder of a profile of the GitHub CLI (`gh`), with the command that signs it in |
-| **Jira** | The site, the email of your account, and the name of the environment variable that holds your API token |
+| **Jira** | The site, your account email, and the environment variable that holds your API token |
 
-A field you leave empty keeps your usual settings, which it shows in gray: a space without identity changes nothing. The Default space can have an identity too. Each card is saved when you leave a field.
+- An empty field keeps your usual settings, shown in gray. The Default space can have an identity too. Each card saves when you leave a field.
+- **Signed-off-by** makes the agents of the space commit with `git commit --signoff`.
+- **Check** tries a card: who Git commits as and whether the keys exist, which GitHub account the profile uses, whether Jira accepts your account. For a new GitHub profile, run the command of the card in a terminal and follow `gh auth login`.
 
-**Signed-off-by** asks the agents of the space to commit with `git commit --signoff`, which adds a `Signed-off-by` line to each of their commits. A commit you make yourself does not get the line.
+A session works under the identity of its space: its commands, the Claude Code CLI, its background jobs, `gh` and `az`, the MCP servers it starts and the Jira commands. A running session keeps its identity until it starts again. Terminals, and the issues and pull requests the window looks up, use the identity of the space the window shows. **Session info** shows the identity of a session.
 
-**Check** on a card tries it: who Git commits as and whether the keys exist, which GitHub account the profile is signed in to, and whether Jira accepts your account. For a new GitHub profile, copy the command of the card, run it in a terminal, and follow `gh auth login`.
-
-A session works under the identity of its space: its commands, the Claude Code CLI, its background jobs, the `gh` and `az` tools, the MCP servers it starts and the Jira commands. A session that runs keeps its identity when you show another space or change the identity; it takes the new one the next time it starts. Terminals, and the issues and pull requests you look up in the window, take the identity of the space the window shows, with the CLI profiles of their project. **Session info** shows the identity of a session.
-
-In the file of the space, the identity looks like this:
+In the file of the space:
 
 ```markdown
 ---
@@ -204,20 +186,13 @@ identity:
 ---
 ```
 
-Only paths and names of variables are kept, never a token. A project that names its Jira in its `.alta/config.toml` keeps what it writes there: the space gives the site, the email and the token variable it leaves out.
+Only paths and variable names are kept, never a token. A project that names its Jira in its `.alta/config.toml` keeps it; the space fills in what it leaves out.
 
 ### Command line tools
 
-Most cloud and infrastructure tools keep their login and their current context in a folder of your home: `az login` in `~/.azure`, the AWS profile in `~/.aws`, `kubectl config use-context` in `~/.kube/config`. Without a profile, the sessions of every space, and your own terminals, share one login and one context: a session of Work can run `terraform plan` or `kubectl` against the subscription or the cluster you switched to somewhere else.
+Cloud tools keep their login and current context in your home folder: `az login` in `~/.azure`, AWS profiles in `~/.aws`, `kubectl config use-context` in `~/.kube/config`. Without a profile, every space and your own terminals share one login and one context, so a session of Work could run `terraform plan` against the subscription you switched to elsewhere.
 
-A **CLI profile** gives one tool the environment variables that choose its configuration for the sessions of the space. Under **Command line tools**, choose a tool in **Add a CLI profile…**: Azure CLI, AWS CLI, Google Cloud CLI, kubectl, Helm, Terraform, Docker and GitLab CLI fill in their variables with the name of the space, and **Other tool** gives an empty profile for any tool that reads its configuration from a variable. Each profile has:
-
-| Field | |
-| --- | --- |
-| **Name** | A name for the tool, such as `azure` or `kubectl` |
-| **Variables** | The variables to set, a name and a value each: a path, the name of a profile or a context |
-| **Check command** | Optional: a command that says who or what the tool is signed in to, such as `az account show` |
-| **Login command** | Optional: the command that signs the tool in with this profile, such as `az login` |
+A **CLI profile** sets the environment variables that choose a tool's configuration for the sessions of the space. Under **Command line tools**, **Add a CLI profile…** fills in the variables for a tool, using the name of the space; **Other tool** starts an empty profile.
 
 | Tool | Variables |
 | --- | --- |
@@ -230,17 +205,17 @@ A **CLI profile** gives one tool the environment variables that choose its confi
 | Docker | `DOCKER_CONFIG` |
 | GitLab CLI | `GLAB_CONFIG_DIR` |
 
-A tool without a profile keeps its usual configuration, and a space without profiles changes nothing. The profiles are saved together when you leave a field.
+A profile has a **Name** (such as `azure`), its **Variables**, and optionally a **Check command** (such as `az account show`) and a **Login command** (such as `az login`). Profiles save when you leave a field.
 
 - `~` at the start of a value, or of each path of a list such as `KUBECONFIG`, is your home folder.
-- `${env:NAME}` is the value of a variable of the environment of CodeAlta, for a name you keep out of the file. A variable it refers to that is not set is left out, and the tool keeps its own value; **Check** and **Session info** say so.
-- A variable whose name says it holds a secret (a token, a password, a secret or API key, such as `AWS_SECRET_ACCESS_KEY`) can only be given as `${env:NAME}`: the secret itself is refused. A name that ends in `FILE`, `PATH`, `DIR` or `HOME`, such as `AZURE_FEDERATED_TOKEN_FILE`, holds where a secret is, and takes a path.
-- The variables of the Git and GitHub cards (`GIT_AUTHOR_NAME`, `GIT_SSH_COMMAND`, `GH_CONFIG_DIR`…) are set with those cards, not with a profile.
-- Two profiles of a space cannot give a variable two values.
+- `${env:NAME}` is the value of a variable of CodeAlta's environment. When that variable is not set, the tool keeps its own value, and **Check** and **Session info** say so.
+- A variable named like a secret (token, password, secret or API key, such as `AWS_SECRET_ACCESS_KEY`) takes only `${env:NAME}`. A name ending in `FILE`, `PATH`, `DIR` or `HOME` takes a path.
+- Git and GitHub variables (`GIT_AUTHOR_NAME`, `GIT_SSH_COMMAND`, `GH_CONFIG_DIR`…) are set by their cards, not by a profile.
+- Two profiles of a space cannot set the same variable.
 
-**Check** on a profile shows what its variables are given, then runs its check command with them, in the shell of the sessions, and shows what it writes. For a new profile, copy the command shown under **Sign in with this profile**, run it in a terminal, and sign in.
+**Check** on a profile shows its variables, runs its check command in the shell of the sessions and shows the output. For a new profile, run the command under **Sign in with this profile** in a terminal.
 
-A project can give its sessions other profiles than the rest of its space: in one Work space, `infra-prod` and `infra-dev` can target two subscriptions or two clusters. Its `.alta/config.toml` adds profiles, or variables to a profile of the same name, which replace those of the space:
+A project can give its sessions other profiles than its space, for example `infra-prod` and `infra-dev` on two clusters. Its `.alta/config.toml` adds profiles, or replaces variables of a profile of the same name:
 
 ```toml
 [identity.cli.kubectl.env]
@@ -253,38 +228,34 @@ check = "aws sts get-caller-identity"
 AWS_PROFILE = "contoso-prod"
 ```
 
-The project comes first, then the space, then your usual environment. Since a project can set any variable for its sessions this way, open only projects you trust, as for their `AGENTS.md` and their plugins. A terminal listed under a project takes the profiles of that project too. **Session info** lists the profiles of a session, with their variables as written and the ones its project gives.
+The project comes first, then the space, then your usual environment. A terminal listed under a project uses its profiles too. Since a project can set any variable this way, open only projects you trust, as for their `AGENTS.md` and plugins.
 
-A profile is a separation, not a sandbox: an agent can still set another value in a command. A tool that keeps its credentials in the keychain of the system rather than in a folder (the `osxkeychain` helper of Docker, the Atlassian CLI) keeps one login for your computer, and a variable of your environment that a tool reads first (such as `AWS_ACCESS_KEY_ID` before `AWS_PROFILE`) keeps its effect, unless the profile sets it too.
+A profile separates logins; it is not a sandbox: an agent can still set another value in a command. A tool that keeps its credentials in the system keychain (Docker's `osxkeychain` helper, the Atlassian CLI) keeps one login for your computer, and a variable of your environment that a tool reads first (such as `AWS_ACCESS_KEY_ID` before `AWS_PROFILE`) still applies unless the profile sets it.
 
-### What an identity does not change
+### What it does not change
 
 - the settings a repository writes in its own `.git/config`;
-- an `env` block in the `settings.json` of a Claude Code profile, which can replace what CodeAlta gives the CLI;
+- an `env` block in the `settings.json` of a Claude Code profile, which can override what CodeAlta gives the CLI;
 - a `GITHUB_TOKEN` or `GH_TOKEN` of your environment, which comes before the GitHub profile;
 - the HTTPS accounts of Git Credential Manager;
-- the issues and pull requests an [automation](automations.md) event trigger watches, which are read with your usual GitHub profile;
-- the Atlassian CLI keeps one login for your computer: when two spaces use two Jira accounts, their sessions take turns and the CLI switches between them.
+- the issues and pull requests an [automation](automations.md) trigger watches, read with your usual GitHub profile;
+- the Atlassian CLI, which keeps one login for your computer: two spaces with two Jira accounts take turns.
 
-## What follows the shown space
+## The shown space
 
-Everything the window lists is what the shown space has:
+The window lists what the shown space has:
 
-- the Explorer, with the sessions, the terminals and the [work item](work-items.md) marks of its projects;
+- the Explorer, with the sessions, terminals and [work item](work-items.md) marks of its projects;
 - the search (`Ctrl+P`): projects, sessions and files;
 - **Open project** and the browser of saved sessions;
-- **All projects** in the [Work items](work-items.md) tab, and the project list of the [Issues](issues.md) tab;
+- **All projects** in the [Work items](work-items.md) tab, and the projects of the [Issues](issues.md) tab;
 - the previous and next project keys.
 
-[Automations](automations.md) belong to the application: their tab lists every project in every space.
+[Automations](automations.md) are not in a space: their tab lists every project. When you open a session whose project is not in the shown space, from a link, a work item or an automation, the window shows the Default space first.
 
-When you open a session whose project is not in the shown space, from a link, a work item or an automation, the window shows the Default space first.
+## Activity in other spaces
 
-## What happens in the other spaces
-
-With more than the Default space, the foot of the Explorer has one small button for each space, with its icon. The shown space is marked. Click a button to show its space.
-
-A mark on a button says what the sessions of that space are doing:
+With more than one space, the foot of the Explorer has a button for each space. Click one to show its space. A mark on a button says what its sessions are doing:
 
 {.table}
 | Mark | Meaning |
@@ -294,11 +265,7 @@ A mark on a button says what the sessions of that space are doing:
 | Running | Sessions are running. |
 | Background | A provider works in the background. |
 
-When a session waits for you or failed in a space that is not shown:
-
-- a line above the buttons names the space and the session. Click it to show that space and open that session;
-- a dot appears on the space switch of the title bar;
-- a message says so once when a session starts to wait, with a **Show** button.
+When a session waits for you or fails in a space that is not shown, a line above the buttons names it (click it to open the session), a dot appears on the space switch, and a message with **Show** says so once.
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
   <img src="{{site.basepath}}/img/alta-desktop-space-activity.webp" alt="The foot of the Explorer: a line that says the session Draft the release notes waits in the Work space, above the buttons of the four spaces with their marks" loading="lazy">
@@ -316,29 +283,24 @@ When a session waits for you or failed in a space that is not shown:
 | Create a space | `/new_space` |
 | Organize spaces | `/spaces` |
 
-The previous and next space keys also work while a terminal has the keyboard. All of these commands are in the search (`Ctrl+P`) and in the help (`F1`).
+The previous and next space keys also work in a terminal. All these commands are in the search (`Ctrl+P`) and the help (`F1`).
 
 ## Agents and spaces
 
-Sessions read and change spaces with `alta space`. Ask in your own words:
-
-```text
-Which projects are in my Work space?
-```
+Agents read and change spaces with `alta space`. Ask in your own words:
 
 ```text
 Create a space named Clients for the two Contoso projects, and show it.
 ```
 
-An agent reads **What it is for** of each space, so a clear description helps it choose the right projects. When a session lists the projects, it gets those of the space the window shows, unless you ask for another space or for all of them.
-
-An agent shows another space in the window only when you ask for it.
-
-A session keeps working while its space is not shown. When its agent wants to show you a file or the changes of a project that the shown space does not have, the window stays where you are: a message says in which space it opens, with a **Show** button. Click it to show that space with the editor or the Changes tab open. The agent is told that nothing was opened, so it can say so in its answer.
+- An agent reads **What it is for** of each space to choose the right projects.
+- When it lists projects, it gets those of the shown space, unless you ask for another space or all of them.
+- It shows another space only when you ask.
+- When it wants to show you a file or changes of a project the shown space does not have, the window stays where it is: a message names the space, with **Show**.
 
 ## Files
 
-Each space is a Markdown file in `~/.alta/spaces/`, named after the id of the space. The id comes from the first name of the space, in lower case with `-` between words, and stays the same when you rename the space.
+Each space is a Markdown file in `~/.alta/spaces/`, named after its id. The id comes from its first name (lower case, `-` between words) and does not change when you rename it. The Default space has a file, `default.md`, only once you change it.
 
 ```markdown
 ---
@@ -360,17 +322,18 @@ tools:
 Libraries I maintain and the projects I contribute to.
 ```
 
-The text under the header is **What it is for**. `order` is the place of the space in the list. `new_sessions.agent_prompt` is the agent prompt of **New sessions**, `new_sessions.tiers` the tiers of its **Customize** (`complex`, `standard` and `quick`, written as in [Model tiers](model-tiers.md#in-the-file)), `new_sessions.fallback` its fallback (`enabled`, and `on` with `quota` or `unavailable` when it falls back on one failure only), and `tools.disabled` the tools of **Tools**. The Default space has a file, `default.md`, only once you change its name, its icon, its color or its description.
+| Key | What it is |
+| --- | --- |
+| text under the header | **What it is for** |
+| `order` | The place of the space in the list |
+| `new_sessions.agent_prompt` | The agent prompt of **New sessions** |
+| `new_sessions.tiers` | Its own `complex`, `standard` and `quick` tiers, as in [Model tiers](model-tiers.md#in-the-file) |
+| `new_sessions.fallback` | Its fallback: `enabled`, and `on` with `quota` or `unavailable` to fall back on one failure only |
+| `tools.disabled` | The tools of **Tools** |
 
-The spaces of a project are written in the file of the project, `~/.alta/projects/<name>.md`, as one line of its header that lists the ids of its spaces:
+The spaces of a project are one line of its file, `~/.alta/projects/<name>.md`: `spaces: [work, open-source]`. A project only in Default has no `spaces` line, and an unknown id is ignored.
 
-```yaml
-spaces: [work, open-source]
-```
-
-A project that is only in the Default space has no `spaces` line. An id that no space has is ignored.
-
-The spaces of the providers, MCP servers, skills, agent prompts and plugins are in `~/.alta/config.toml`, beside their settings. A resource without a `spaces` list is in every space:
+The spaces of providers, MCP servers, skills, agent prompts and plugins are in `~/.alta/config.toml`. A resource without a `spaces` list is in every space:
 
 ```toml
 [providers.claude-business]
@@ -391,10 +354,6 @@ terraform = ["business", "default"]
 reviewer = ["business"]
 ```
 
-Only the global `config.toml` assigns spaces: a `spaces` list in the `config.toml` of a project is ignored.
+Only the global `config.toml` assigns spaces: a `spaces` list in a project's `config.toml` is ignored. The space each window shows, and the tabs of each space, are kept with the window.
 
-Which space the window shows, and the tabs of each space, are kept with the window, like its theme.
-
-## CodeAlta TUI
-
-CodeAlta TUI does not show spaces: it lists every project. Its sessions use no space identity (nor the CLI profiles of their project) and record no space: CodeAlta Desktop lists them like the sessions of an earlier version. Its agents still have the `alta space` commands, to read and organize the spaces that CodeAlta Desktop shows.
+CodeAlta TUI does not show spaces: it lists every project. Its sessions record no space, so CodeAlta Desktop lists them in every space of their project, and they use no space identity or CLI profile. Its agents still have `alta space`.

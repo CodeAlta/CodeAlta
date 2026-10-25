@@ -2,16 +2,17 @@
   <Folder Name="/doc/">
     <File Path="../doc/readme.md" />
     <File Path="../doc/architecture.md" />
-    <File Path="../doc/catalog-and-config.md" />
+    <File Path="../doc/development-guide.md" />
     <File Path="../doc/runtime.md" />
+    <File Path="../doc/catalog-and-config.md" />
     <File Path="../doc/providers.md" />
     <File Path="../doc/live-tool.md" />
-    <File Path="../doc/acp.md" />
     <File Path="../doc/plugins.md" />
+    <File Path="../doc/mcp.md" />
     <File Path="../doc/skills.md" />
-    <File Path="../doc/orchestration-actor-model.md" />
-    <File Path="../doc/development-guide.md" />
-    <File Path="../doc/specs/readme.md" />
+    <File Path="../doc/desktop.md" />
+    <File Path="../doc/statistics.md" />
+    <File Path="../doc/review.md" />
   </Folder>
   <Folder Name="/general/">
     <File Path="../.editorconfig" />

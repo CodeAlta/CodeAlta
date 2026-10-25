@@ -15,12 +15,11 @@ Work items are what is left to do in a project: the **tasks** agents propose, th
 
 While an agent works, it can find something that is not part of what you asked: a gap, a problem, or an improvement. Before it ends its turn it proposes a follow-up task for it. The session shows the proposal at once, as a card beside Notes:
 
-- a title, what kind of finding it is, and a short summary;
+- a title, the kind of finding, and a short summary;
 - **Details** opens the full description;
 - with several proposals, the arrows go from one to the next.
 
-Cards stay to the left of Notes when there is room. In a narrow pane they appear in a scrollable strip
-below Notes, so both remain readable. Your saved Notes position and each panel's open or collapsed state are kept.
+The cards sit to the left of Notes, or below them in a narrow pane.
 
 You decide on each card:
 
@@ -33,15 +32,13 @@ You decide on each card:
 | **Later** | The task is kept, out of the way. |
 | **Dismiss** | The task is not worth doing. |
 
-When the session that proposed a task starts it itself, because you asked it to, its card says **Task in progress** instead: click **OK** to put it away. The task stays in Work items, and the card goes away by itself once the task is done.
-
-Agents are told to propose a task only for something concrete they verified, and not to start it themselves. A session has at most five proposals waiting.
-
-A new session started from a card runs with the provider, the model and the reasoning effort of the session that shows the card.
+- A new session started from a card uses the provider, model and reasoning effort of the session that shows the card.
+- When you ask the proposing session to do the task itself, its card says **Task in progress**: **OK** puts it away, and it goes away by itself once the task is done.
+- Agents propose a task only for something concrete they verified, and never start it themselves. A session has at most five proposals waiting.
 
 ## Plans
 
-A plan is a document you review before the work starts. In [Plan mode](prompts.md) the agent researches, writes the plan and asks for your [review](reviews.md): the plan opens as a formatted page where you comment on its blocks, then approve it or ask for changes. A plan that is not done can also be reviewed from its details here.
+A plan is a document you review before the work starts. In [Plan mode](prompts.md) the agent researches, writes the plan and asks for your [review](reviews.md): you comment on its blocks, then approve it or ask for changes. A plan that is not done can also be reviewed from its details in the Work items tab.
 
 Once you approve it, the session shows the plan as a card with the same choices as a task. Nothing starts until you choose.
 
@@ -50,10 +47,10 @@ Once you approve it, the session shows the plan as a card with the same choices 
 Open it with **Work items** in the title bar (in its **…** menu when the window is narrow), with `Ctrl+G Ctrl+I`, or with the mark of a project in the Explorer.
 
 - **To do**, **In progress**, **Later** and **Closed** separate what waits from what is done.
-- **Runs with** says which provider, model and reasoning effort the new session will use. It starts with those of the session that proposed the item. When that is not known (a task written by hand, or on another computer), it starts with the [default provider](model-providers.md) and its model. Change any of the three before you start.
-- Filter by tasks, plans or [reviews](reviews.md#all-your-reviews), by project, or by text. **All projects** are the projects of the [space](spaces.md) the window shows.
+- **Runs with** is the provider, model and reasoning effort of the new session: those of the session that proposed the item, else the [default provider](model-providers/readme.md) and its model. Change them before you start.
+- Filter by tasks, plans or [reviews](reviews.md#all-your-reviews), by project, or by text. **All projects** are those of the [space](spaces.md) the window shows.
 - Select an item to read it, start it, mark it done, open its file, or remove it.
-- Start several items at once: a spinner marks each one in the list while its worktree is made. When its session is ready, it opens if you still read that item; otherwise a notification offers it with **Show**.
+- Start several items at once: a spinner marks each while its worktree is made. A ready session opens if you still read its item; otherwise a notification offers it with **Show**.
 
 In the Explorer, a project shows how many work items wait for you, and a dot while a session works on one.
 
@@ -88,7 +85,7 @@ A completed or dismissed task is deleted, and a completed plan is kept. **Settin
 
 ## From an agent
 
-Sessions use the same work items with `alta task` and `alta plan`, in CodeAlta Desktop and CodeAlta TUI:
+Agents use the same work items with `alta task` and `alta plan`, also in CodeAlta TUI, which has no cards and no tab:
 
 ```text
 Show me the open tasks of this project and do the one about the model list.
@@ -97,5 +94,3 @@ Show me the open tasks of this project and do the one about the model list.
 ```text
 Mark the plan 2026-10-07-task-cards as done.
 ```
-
-CodeAlta TUI has the commands; the cards and the tab are in CodeAlta Desktop.

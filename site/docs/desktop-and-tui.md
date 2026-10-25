@@ -15,21 +15,7 @@ Both apps run the same agents: the same providers, tools, agent prompts, skills,
 
 ## Install
 
-Install CodeAlta Desktop:
-
-```sh
-dotnet tool install -g CodeAlta
-alta
-```
-
-The TUI is a separate tool. You can install both:
-
-```sh
-dotnet tool install -g CodeAlta.Tui
-altatui
-```
-
-See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements and first launch.
+`dotnet tool install -g CodeAlta` installs CodeAlta Desktop (`alta`); `dotnet tool install -g CodeAlta.Tui` installs the TUI (`altatui`). You can install both. See [Getting Started](getting-started.md#install) for the requirements and the first launch.
 
 ## Compare the two apps
 
@@ -61,7 +47,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
   <tbody>
     <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Workspace</th></tr>
     <tr><th scope="row">Session tabs</th><td>{{ alta_yes }} <small>Reorder, split and merge panes</small></td><td>{{ alta_part }} <small>One visible at a time</small></td></tr>
-    <tr><th scope="row"><a href="{{site.basepath}}/docs/workspace/#windows-desktop">Several windows</a>: tabs moved or dragged out of the main window, named, colored, and back on their monitor at the next start</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row"><a href="{{site.basepath}}/docs/workspace/#windows">Several windows</a>: tabs moved or dragged out of the main window, named, colored, and back on their monitor at the next start</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Several projects open in the sidebar, favorites first</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>No favorites</small></td></tr>
     <tr><th scope="row">Spaces: a setup for each kind of work, with its projects, chats, tabs, resources and identity</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
     <tr><th scope="row">One search for sessions, projects, files and commands</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Command palette</small></td></tr>
@@ -100,9 +86,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
 
 ## Which one to use
 
-Use CodeAlta Desktop for daily work: it shows more at once, and it has features that the TUI does not have.
-
-Use CodeAlta TUI when you want to stay in a terminal.
+Use CodeAlta Desktop for daily work: it shows more at once, and it has features that the TUI does not have. Use CodeAlta TUI when you want to stay in a terminal.
 
 ## What is shared
 
@@ -113,15 +97,15 @@ Everything under `~/.alta/` is common to both apps:
 - agent prompts, system prompts and skills;
 - MCP server configuration and plugins.
 
-A session started in one app can be opened and continued in the other. Only one CodeAlta runs on a profile at a time, so close one app before starting the other.
+A session started in one app can be continued in the other. Only one CodeAlta runs on a profile at a time: close one app before starting the other.
 
-Appearance is not shared. The desktop app keeps its theme, color scheme, open tabs and window layout in its own application data, and the TUI keeps its theme and navigator settings in `~/.alta/ui-state.yaml`.
+Appearance is not shared: the desktop app keeps its theme, color scheme, open tabs and window layout in its own application data, and the TUI keeps its theme and navigator settings in `~/.alta/ui-state.yaml`.
 
 ## What the desktop app adds
 
-### Arrange sessions in the window
+### Panes and windows
 
-Session tabs can be dragged along the tab strip to reorder them, to the edge of a pane to split the window, or to the center of another pane to merge. The tab menu also has **Split right** and **Split below**. Tabs from different projects stay open together, and each pane has its own prompt. A tab can also move to a window of its own, for example on a second monitor: see [Windows](workspace.md#windows-desktop).
+Drag a session tab along the tab strip to reorder it, to the edge of a pane to split the window, or to the center of another pane to merge; the tab menu also has **Split right** and **Split below**. Each pane has its own prompt, and tabs of different projects stay open together. A tab can also move to a window of its own, for example on a second monitor: see [Windows](workspace/readme.md#windows).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-split-three.webp" alt="CodeAlta Desktop with a parent session and its two child sessions in three panes" loading="lazy">
@@ -143,9 +127,9 @@ Session tabs can be dragged along the tab strip to reorder them, to the edge of 
   </div>
 </div>
 
-### A code editor for each project
+### Code editor
 
-The `</>` button of a project in the sidebar, or `Ctrl+E` `Ctrl+E`, opens the code editor of the project: its folders and files, a search in files, and the files you open as tabs. You can create, rename, move and delete files there, and pictures are shown as pictures. See [Code editor](workspace.md#code-editor).
+The `</>` button of a project in the sidebar, or `Ctrl+E` `Ctrl+E`, opens the code editor of the project: its files, a search in files, and the open files as tabs. You can create, rename, move and delete files there. See [Code editor](workspace/code.md#code-editor).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-code-editor.webp" alt="CodeAlta Desktop code editor with the files of a project on the left and a source file on the right" loading="lazy">
@@ -159,9 +143,9 @@ The `</>` button of a project in the sidebar, or `Ctrl+E` `Ctrl+E`, opens the co
   <figcaption class="small text-secondary mt-2">A session and a file of the project, side by side.</figcaption>
 </figure>
 
-### A terminal next to your sessions
+### Terminals
 
-The terminal button of a project in the sidebar, or ``Ctrl+` ``, opens a terminal in the folder of the project. It keeps running when its tab is closed, and agents can use it too. See [Terminal](workspace.md#terminal-desktop).
+The terminal button of a project in the sidebar, or ``Ctrl+` ``, opens a terminal in the folder of the project. It keeps running when its tab is closed, and agents can use it too. See [Terminal](workspace/code.md#terminals).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-terminal.webp" alt="CodeAlta Desktop with a session at the top and a terminal under it" loading="lazy">
@@ -181,15 +165,15 @@ An automation sends a prompt by itself: every morning, every Friday, or when an 
 
 A session can work in its own git worktree, on its own branch, so that several sessions change the same project at the same time. See [Worktrees](worktrees.md).
 
-### UI tools and MCP server
+### UI tools
 
 An agent can take a screenshot of the window, read what it shows, click and type. Other applications do the same through the MCP server of CodeAlta Desktop. See [UI tools and MCP server](ui-tools.md).
 
 ### Review changes
 
-Click the `+` / `−` numbers of the **Workspace** chip above the prompt, choose **View changes** in its popover, or click the changes button of a project in the sidebar, to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
+The Changes tab of a project lists the changed files and recent commits, with the diff of the selected file. Open it from the `+` / `−` numbers of the **Workspace** chip above the prompt, or the changes button of a project in the sidebar. See [Changes](workspace/code.md#changes).
 
-Click **Review** in the header of the tab for review mode: comment on the lines of the diffs as in a pull request, mark the files you have read, and send your comments to a session with a verdict. With [Review before commit](reviews.md#review-before-commit), agents wait for your approval before they commit. See [Reviews](reviews.md).
+**Review** in its header comments on the lines of the diffs as in a pull request and sends your comments to a session with a verdict. With [Review before commit](reviews.md#review-before-commit), agents wait for your approval before they commit. See [Reviews](reviews.md).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-changes.webp" alt="CodeAlta Desktop with the Changes tab of a project and a side-by-side diff" loading="lazy">
@@ -198,11 +182,11 @@ Click **Review** in the header of the tab for review mode: comment on the lines 
 
 ### Projects at hand
 
-Several projects can stay open in the sidebar, each with its sessions, and CodeAlta shows them the same way at the next start. Favorite projects are listed first. See [Projects sidebar](workspace.md#projects-sidebar-desktop).
+Several projects can stay open in the sidebar, each with its sessions, and CodeAlta shows them the same way at the next start. Favorite projects are listed first. See [Projects sidebar](workspace/readme.md#explorer).
 
 ### Spaces
 
-A space is a setup for one kind of work, such as **Work** or **Personal**: its projects and chats, the providers, MCP servers, skills, agent prompts and plugins its sessions use, and the Git, GitHub, Jira and command line identity they work under. The window shows one space at a time, each with its own projects and tabs, and tells you when a session waits for you in another one. CodeAlta TUI has no spaces: it lists every project. See [Spaces](spaces.md).
+A space is a setup for one kind of work, such as **Work** or **Personal**: its projects and chats, the providers, MCP servers, skills, agent prompts and plugins of its sessions, and the Git, GitHub, Jira and command line identity they work under. The window shows one space at a time and tells you when a session waits for you in another. CodeAlta TUI has no spaces: it lists every project. See [Spaces](spaces.md).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="CodeAlta Desktop showing the Open source space, with the list of the space switch open: Default, Work, Personal and Open source" loading="lazy">
@@ -211,30 +195,33 @@ A space is a setup for one kind of work, such as **Work** or **Personal**: its p
 
 ### One Settings window
 
-The TUI opens a dialog for each area. The desktop app groups them as pages of one window, including **Appearance**, **General**, **Windows**, **Speech**, **Spaces**, **Sessions** (with review before commit), **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. Appearance remains the opening page. Spaces is a group of its own, with a page for each space.
+The TUI opens a dialog for each area. The desktop app has them as pages of one window: **Appearance** (the opening page), **General**, **Windows**, **Speech**, **Spaces** (a page for each space), **Sessions**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page with the list of pages on the left" loading="lazy">
   <figcaption class="small text-secondary mt-2">Settings pages on the left, the selected page on the right.</figcaption>
 </figure>
 
-### Floating windows over the session
+### Floating windows
 
-Tool details, file diffs, context usage, session info, the session browser and the Notes of a session open as windows that you can move and resize over the workspace.
-
-The window of a tool call follows the call while it runs. A command shows its output in a terminal, a file that was read or changed shows its lines or its diff in the colors of its language, and a patch that changes several files has a tab per file. See [Tool calls](workspace.md#tool-calls).
+Tool details, file diffs, context usage, session info, the session browser and the Notes of a session open as windows you can move and resize over the workspace. The window of a tool call follows it while it runs: a command shows its output in a terminal, a file its lines or its diff, and a patch a tab per file. See [Tool calls](workspace/prompt.md#tool-calls).
 
 ### Runs in the background
 
-Closing the main window can keep CodeAlta running in the notification area, with its sessions. CodeAlta asks whether to keep running or to exit, and remembers the answer if you tick **Remember my choice**. Use the tray icon to open the window again or to exit. On Windows, the taskbar button shows indeterminate progress while a session runs or queued prompts are being sent. On macOS, CodeAlta started from the Applications folder, Launchpad, Spotlight or the Dock has no icon in the menu bar: it stays in the Dock, and its Dock icon opens the window again. **Settings > General > Startup and closing > When the window is closed** changes the choice. Exiting while sessions are running asks for confirmation first. While CodeAlta runs, the computer does not go to sleep on its own (the display still turns off), so that automations and reminders keep going: **Keep computer awake when CodeAlta is running** in the same place turns it off.
+Closing the main window can keep CodeAlta running in the notification area, with its sessions. CodeAlta asks whether to keep running or to exit, and remembers the answer with **Remember my choice**; **Settings > General > Startup and closing > When the window is closed** changes it.
 
-On macOS the menu bar has the standard items and shortcuts: **Quit CodeAlta** (⌘Q), **Hide** (⌘H), **Minimize** (⌘M), **Close** (⌘W), and **Undo**, **Redo**, **Cut**, **Copy**, **Paste** and **Select All** in the **Edit** menu. ⌘W closes the window as its close button does, with the same choice between keeping CodeAlta running and exiting; ⌘Q exits.
+- The tray icon opens the window again or exits. Exiting while sessions run asks first.
+- On Windows, the taskbar button shows progress while a session runs or queued prompts are sent.
+- On macOS, CodeAlta started from the Applications folder, Launchpad, Spotlight or the Dock stays in the Dock, without a menu bar icon; its Dock icon opens the window again.
+- While CodeAlta runs, the computer does not go to sleep on its own (the display still turns off), so automations and reminders keep going. **Keep computer awake when CodeAlta is running**, in the same place, turns it off.
+
+On macOS the menu bar has the standard items: **Quit CodeAlta** (⌘Q), **Hide** (⌘H), **Minimize** (⌘M), **Close** (⌘W), and the **Edit** menu. ⌘W closes the window as its close button does; ⌘Q exits.
 
 ### Updates from the app
 
-The desktop app checks for new versions at startup and every ten minutes, even while it is in the notification area. When a new version is available, it shows a bottom-right notice with **Update and restart** that stays until you dismiss it. You do not need to open About; if the window was hidden, the notice appears when you return. Settings → About keeps the update available after you dismiss the notice. The TUI shows the `dotnet tool update` command to run.
+The desktop app checks for new versions at startup and every ten minutes, also from the notification area. A new version shows a notice with **Update and restart** in the bottom-right corner until you dismiss it; **Settings > About** keeps the update available afterwards. The TUI shows the `dotnet tool update` command to run.
 
-On macOS, the desktop app also warns at startup when it runs on a .NET runtime older than 10.0.13, which can make it crash hours after it started. The warning stays until you dismiss it; **Download .NET** opens the [.NET 10 download page](https://dotnet.microsoft.com/en-us/download/dotnet/10.0). Install the latest .NET 10 runtime, then start CodeAlta again.
+On macOS, the desktop app warns at startup when it runs on a .NET runtime older than 10.0.13, which can make it crash hours later. **Download .NET** opens the [.NET 10 download page](https://dotnet.microsoft.com/en-us/download/dotnet/10.0): install the latest .NET 10 runtime, then start CodeAlta again.
 
 ## Same feature, another name
 
@@ -244,7 +231,7 @@ On macOS, the desktop app also warns at startup when it runs on a .NET runtime o
 | Sessions of no project | **Chats**, first in the sidebar | **Global sessions** |
 | Queue every prompt, also when idle | **Enqueue until idle** in the Send options | **AlwaysQueue** checkbox |
 
-## Current desktop limitations
+## Desktop limitations
 
 The `--no-plugins` and `--plugin-safe-mode` options belong to the TUI. Set `CODEALTA_DISABLE_PLUGINS=1` to start the desktop app without plugins.
 

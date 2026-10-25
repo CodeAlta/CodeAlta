@@ -19,6 +19,9 @@ namespace CodeAlta.Orchestration.Runtime;
 /// (<see cref="OwnedSessionCommandAdmissionKind.Capacity"/>) only when every kept receipt is pending. The key of
 /// a receipt that made room is remembered, so that a retry with it is answered
 /// <see cref="OwnedSessionCommandAdmissionKind.Expired"/> and never runs its command a second time.
+/// Requests name the exact identities they act on (session, runtime instance, attachment, run) and are refused, never
+/// retargeted, when those changed: the page that sends them may show a stale attachment or run, and a steer, an abort
+/// or a decision made about one run must not apply to another.
 /// </remarks>
 public sealed partial class OwnedSessionCommandService : IAsyncDisposable
 {

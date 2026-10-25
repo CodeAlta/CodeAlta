@@ -47,7 +47,8 @@ browser rendering, keyboard navigation and the reduced-motion and no-JavaScript 
 - Keep this site end-user focused: installation, configuration, workspace usage, providers, sessions, plugins, and troubleshooting.
 - Keep internal specifications and implementation notes in `../doc/**`, not on the public site.
 - Pages use Markdown with YAML front matter (`title` required).
-- Navigation is defined in `menu.yml` files; update the relevant menu when adding or moving pages.
+- Navigation is defined in `menu.yml` files; update the relevant menu when adding or moving pages. A folder of pages has a `readme.md` and a `menu.yml`, and `folder: true` on its entry in `docs/menu.yml`; the app ships `docs/**` as its user guide, and `ShippedUserGuideTests` lists the folders.
+- Page length, headings and when to split a page: see "Documentation" in `../AGENTS.md`.
 - Keep examples short, correct, and copy-pasteable. Avoid undocumented future behavior unless it is clearly presented as a planned screenshot/media slot.
 - Write short, plain sentences. Describe what the user can do and how; leave out implementation limits, edge-case guarantees and development status.
 

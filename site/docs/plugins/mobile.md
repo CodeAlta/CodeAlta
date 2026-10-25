@@ -25,16 +25,21 @@ The plugin is off until you turn it on: it publishes your computer on your tailn
 2. Open the **Mobile** tab with the phone button of the title bar, `Ctrl+G M`, or **Mobile: connect a phone** in the search of the window (`Ctrl+P`).
 3. Scan the QR code with the camera of the phone.
 
+<figure class="alta-figure my-4" style="max-width: 40rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-mobile-tab.webp" alt="The Mobile tab of CodeAlta Desktop with the QR code of the phone page and its address on the tailnet, both blurred" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Mobile tab: the QR code to scan and the address of the page on your tailnet (blurred here).</figcaption>
+</figure>
+
 The phone opens the page of the sessions and stays signed in. Add it to the home screen to open it as an app.
 
 When something keeps a phone from connecting, the Mobile tab says what it is and how to fix it: Tailscale is not installed, not signed in, Serve is not enabled on the tailnet, or the port is used by something else. **Try again** asks Tailscale again once it is fixed.
 
 ## On the phone
 
-- **The sessions**, the latest activity first, six at a time, with a dot and a line that follow each one as it runs: working, calling tools, thinking, writing. **Project** keeps the list to one project.
+- **The sessions**, latest activity first, six at a time, each with a dot and a line that show what it does: working, calling tools, thinking, writing. **Project** keeps the list to one project.
 - **A session**: its timeline, with the messages, the thoughts, the tool calls (without their output) and the diagrams. A diagram opens in a tab of its own, where you can zoom.
 - **The prompt** sends to an idle session. While a turn runs, **Steer** sends into that turn, **Queue** keeps the prompt until the turn ends, and **Stop** stops the turn.
-- **The model chip**, beside the buttons of the prompt, shows the model and the effort of the session, such as `GPT-6.1 Sol · low`. Tap it to choose another model of the session's provider and its effort. **⋯** holds the agent prompt, the permissions (when the provider offers modes), and **Queue rather than steer while it works**, which makes Queue the first button while a turn runs. What you choose shows in blue until the next prompt, which takes it, and the session keeps it afterwards, as in the composer of the desktop. A steered prompt joins the turn that runs and changes nothing.
+- **The model chip**, beside the prompt buttons, shows the session's model and effort, such as `GPT-6.1 Sol · low`. Tap it to choose another model of the provider and its effort. **⋯** holds the agent prompt, the permissions (when the provider has modes), and **Queue rather than steer while it works**, which makes Queue the first button during a turn. A choice shows in blue until the next prompt takes it, and the session keeps it. A steered prompt changes none of these.
 - **A new session**: the project and the prompt, then the model chip beside **Start**: a tier of the settings or a model, and its effort. **⋯** holds the agent prompt, the provider, the permissions and a worktree of its own. The choices are remembered for each project.
 - **Archive** a session by swiping it to the right, or with the archive button of its page; **Restore** brings it back.
 
@@ -53,9 +58,14 @@ With more than the Default space, the **Mobile** row of **Settings > Plugins** h
 
 **Settings > Extensions > Mobile** is there while the plugin is on. The gear button of the **Mobile** row of **Settings > Plugins** goes to it too.
 
+<figure class="alta-figure my-4" style="max-width: 44rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-mobile-settings.webp" alt="Settings, Mobile page of CodeAlta Desktop: the two ports, the address on the tailnet (blurred) and Reset access" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Mobile page of Settings.</figcaption>
+</figure>
+
 - **Port on this computer**: the port of the page on `127.0.0.1`, 2584 at first.
 - **Port on the tailnet**: the HTTPS port Tailscale Serve publishes the page on, 2584 at first.
 - **Address on the tailnet**: the address of the page while Tailscale serves it.
 - **Reset access**: a new access token. Every phone has to scan the new code.
 
-**Apply** moves the page to the new ports at once: what Tailscale served on the old port is taken off, the page is published on the new one, and the phones scan the new QR code of the Mobile tab. A port is a number from 1024 to 65535.
+**Apply** moves the page to the new ports at once: Tailscale stops serving the old port and publishes the new one, and phones scan the new QR code of the Mobile tab. A port is a number from 1024 to 65535.

@@ -4,15 +4,13 @@ title: CodeAlta Principles
 
 # CodeAlta Principles
 
-CodeAlta is designed around a small set of product and engineering principles. They are meant to keep the workspace efficient, inspectable, and practical for real development work as the feature set grows. They were written for the terminal UI and they guide the desktop app in the same way.
+A few product and engineering principles keep CodeAlta efficient, inspectable and practical for real development work as it grows. They guide CodeAlta Desktop and CodeAlta TUI alike.
 
 **Efficient. Transparent. Keyboard-first. Session-oriented. Provider-agnostic. Native .NET. Error-aware. Extensible.**
 
 ## <span class="principle-doc-icon" style="--accent: #f472ff; --accent-2: #38bdf8;"><i class="bi bi-arrows-collapse"></i></span> Efficient interface
 
-CodeAlta should use terminal space efficiently: high signal, low ceremony, no chat-bubble padding. The main timeline should be a full-width working stream where user prompts, assistant messages, reasoning and status entries, tool calls, statistics, and file-change summaries share the same surface.
-
-XenoAtom.Terminal.UI makes this practical inside a terminal: compact layouts, dynamic controls, dialogs, tabs, popups, syntax-highlighted editors, selectable color themes, and interactive timeline entries.
+High signal, low ceremony, no chat-bubble padding. The timeline is a full-width working stream where prompts, answers, reasoning, tool calls, statistics and file changes share one surface.
 
 <figure class="principle-doc-shot">
   <a href="{{site.basepath}}/img/alta-theme-multi.png" target="_blank" rel="noopener">
@@ -23,16 +21,16 @@ XenoAtom.Terminal.UI makes this practical inside a terminal: compact layouts, dy
 
 **What this means in practice:**
 
-- Important event types should be visually distinct through icons, colors, and headers.
-- Tool calls should be grouped as compact chips instead of expanding into noisy logs by default.
-- Summaries should show status, tool name, output size, line counts, and file-change totals.
-- Details should stay available through expandable sections and dialogs.
-- Color themes should be easy to select so the information-rich surface fits the user and terminal environment.
-- Compactness should reduce wasted space, not hide state.
+- Event types are told apart by icons, colors and headers.
+- Tool calls are compact chips, not noisy logs.
+- Summaries show status, tool name, output size, line counts and file-change totals.
+- Details stay one click away, in expandable sections and dialogs.
+- Color themes are easy to choose.
+- Compactness removes wasted space, never state.
 
 ## <span class="principle-doc-icon" style="--accent: #60a5fa; --accent-2: #c084fc;"><i class="bi bi-eye"></i></span> Transparent execution
 
-CodeAlta should keep agent execution inspectable. Verbose details can be collapsed by default, but they should remain reachable when they affect review, debugging, or trust.
+Agent work stays inspectable. Verbose details can be collapsed, but stay reachable when they matter for review, debugging or trust.
 
 <figure class="principle-doc-shot">
   <a href="{{site.basepath}}/img/alta-tool-input-output-dialog.png" target="_blank" rel="noopener">
@@ -43,16 +41,15 @@ CodeAlta should keep agent execution inspectable. Verbose details can be collaps
 
 **What this means in practice:**
 
-- System prompts should be visible and expandable.
-- System-prompt changes should be able to show diffs.
-- Compaction events should be represented explicitly and their summaries should be inspectable.
-- Model and provider changes should be visible in session history.
-- Tool results and modified files should be inspectable after the fact.
-- Usage and context information should be available without leaving the app.
+- System prompts are visible, and their changes show as diffs.
+- Compactions appear in the timeline, with their summaries.
+- Model and provider changes are visible in the session history.
+- Tool results and changed files can be inspected afterwards.
+- Usage and context are a shortcut away.
 
 ## <span class="principle-doc-icon" style="--accent: #34d399; --accent-2: #facc15;"><i class="bi bi-keyboard"></i></span> Keyboard-first workflow
 
-CodeAlta should support normal work from the keyboard, with mouse interactions as convenience rather than requirement. Commands, slash aliases, command discovery, and shortcuts should cover the common development loop.
+Normal work is done from the keyboard; the mouse is a convenience. Commands, slash commands, command discovery and shortcuts cover the development loop.
 
 <figure class="principle-doc-shot">
   <a href="{{site.basepath}}/img/alta-command-bar-with-shortcuts.png" target="_blank" rel="noopener">
@@ -63,17 +60,17 @@ CodeAlta should support normal work from the keyboard, with mouse interactions a
 
 **What this means in practice:**
 
-- Open management dialogs such as providers, models, plugins, settings, logs, usage, session reports, and theme or workspace preferences.
-- Move focus between the sidebar, prompt, model selector, editor tabs, and session tabs.
-- Switch tabs and open or reopen project and session surfaces.
-- Navigate the timeline by previous or next user or assistant message, first message, and latest message.
-- Open files, attach project files and folders to prompts, and inspect editor tabs.
-- Send, queue, steer, abort, compact, or delegate session work.
-- Close popups and return to the prompt without rebuilding the working context.
+- Open providers, models, plugins, settings, logs, usage and session reports.
+- Move between the sidebar, the prompt, the model selector and the tabs.
+- Switch, open and reopen tabs.
+- Go to the previous or next message, the first or the latest.
+- Open files, and attach files and folders to prompts.
+- Send, queue, steer, abort, compact or delegate.
+- Close a popup and be back at the prompt.
 
 ## <span class="principle-doc-icon" style="--accent: #22d3ee; --accent-2: #a78bfa;"><i class="bi bi-diagram-3"></i></span> Session-oriented workspace
 
-CodeAlta should model agent work as durable sessions rather than disposable chat scrollback. Sessions keep history, provider state, queue state, journals, and project scope together, including parent and child relationships when multiple agents cooperate on the same goal.
+Agent work is a durable session, not disposable chat scrollback. A session keeps its history, provider state, queue and project together, with its parent and children when several agents work on one goal.
 
 <figure class="principle-doc-shot">
   <a href="{{site.basepath}}/img/alta-theme-default.png" target="_blank" rel="noopener">
@@ -84,16 +81,15 @@ CodeAlta should model agent work as durable sessions rather than disposable chat
 
 **What this means in practice:**
 
-- Global sessions should support planning, cross-project coordination, and multi-agent delegation.
-- Project sessions should keep project context, prompt history, provider state, queues, and session journals together.
-- Closing a tab should not have to stop running work.
-- Delegated child sessions should be visible and able to report back to the parent session.
-- Parent sessions should make it possible to compare, merge, or route results from multiple agents without losing which child session produced which answer.
-- Busy sessions should preserve prompts through queues and steering fallback behavior.
+- Sessions of no project plan and coordinate work across projects.
+- Closing a tab does not stop running work.
+- Child sessions are visible and report back to their parent.
+- A parent compares, merges or routes the results of several agents and knows which child gave which answer.
+- A busy session keeps your prompts in its queue.
 
 ## <span class="principle-doc-icon" style="--accent: #fb923c; --accent-2: #38bdf8;"><i class="bi bi-cpu"></i></span> Provider-agnostic runtime
 
-CodeAlta should model LLM execution as providers, not as a single-vendor integration. Credentials, endpoints, model discovery, selected model, reasoning effort, capabilities, and context metadata should fit the same workspace model where possible.
+Models run through providers, not a single-vendor integration. Credentials, endpoints, models, reasoning effort, capabilities and context limits work the same way for every provider.
 
 <figure class="principle-doc-shot">
   <a href="{{site.basepath}}/img/alta-model-providers.png" target="_blank" rel="noopener">
@@ -104,15 +100,15 @@ CodeAlta should model LLM execution as providers, not as a single-vendor integra
 
 **What this means in practice:**
 
-- Hosted APIs, subscription-backed providers, cloud providers, and compatible or custom endpoints should fit the same UI model.
-- Local models should be reachable through whichever supported provider adapter or API shape fits them; no single protocol should be the default assumption.
-- Model, reasoning, tool and image capability, and context metadata should be visible in selectors and dialogs.
-- Provider setup should work through dialogs or TOML.
-- Project-local provider configuration should be able to override global defaults.
+- Hosted APIs, subscriptions, cloud providers and custom endpoints are set up the same way.
+- Local models are reached through whichever supported API fits them.
+- Reasoning, tool and image support, and context limits are shown where you choose a model.
+- Providers are set up in the app or in TOML.
+- A project can override the global provider defaults.
 
 ## <span class="principle-doc-icon" style="--accent: #818cf8; --accent-2: #2dd4bf;"><i class="bi bi-braces-asterisk"></i></span> Native .NET foundation
 
-CodeAlta should stay native to C#/.NET and keep the runtime and dependency surface easy to understand, audit, and control.
+CodeAlta stays native to C#/.NET, with a runtime and dependencies that are easy to understand, audit and control.
 
 <figure class="principle-doc-shot">
   <a href="{{site.basepath}}/img/alta-code-editor.png" target="_blank" rel="noopener">
@@ -123,15 +119,15 @@ CodeAlta should stay native to C#/.NET and keep the runtime and dependency surfa
 
 **What this means in practice:**
 
-- The main app, orchestration libraries, plugin abstractions, and tests should live in the .NET ecosystem.
-- XenoAtom libraries are first-party dependencies owned by the same author as CodeAlta.
-- Major external dependencies should come from established vendors, platform owners, model providers, and other well-maintained .NET libraries.
-- A narrower dependency graph should reduce supply-chain exposure compared with large transitive dependency stacks, without pretending to eliminate supply-chain risk.
-- Cross-platform terminal behavior should be a core product constraint, not an afterthought.
+- The app, its libraries, its plugin interfaces and its tests are .NET.
+- The XenoAtom libraries come from the author of CodeAlta.
+- Other major dependencies come from established vendors, platform owners, model providers and well-maintained .NET libraries.
+- A narrower dependency graph reduces supply-chain exposure, without claiming to remove it.
+- Working the same on every platform is a core constraint, not an afterthought.
 
 ## <span class="principle-doc-icon" style="--accent: #f43f5e; --accent-2: #fbbf24;"><i class="bi bi-life-preserver"></i></span> Actionable errors
 
-CodeAlta should turn setup and runtime failures into visible repair paths. Errors should appear close to the workflow that produced them, with enough context to fix or investigate.
+A failure comes with a way to repair it, shown where it happened, with enough context to fix or investigate.
 
 <figure class="principle-doc-shot">
   <a href="{{site.basepath}}/img/alta-config-recovery.png" target="_blank" rel="noopener">
@@ -142,17 +138,16 @@ CodeAlta should turn setup and runtime failures into visible repair paths. Error
 
 **What this means in practice:**
 
-- First launch should open the Model Providers dialog when no usable provider configuration exists.
-- Provider configuration should give immediate feedback about missing or conflicting settings.
-- Provider tests should validate credentials and endpoints before applying changes.
-- Invalid `~/.alta/config.toml` should open a TOML recovery editor with live parse feedback.
-- Errors from agent runs should appear in the timeline, not only in log files.
-- Logs should be available in-app for provider, credential, plugin, and startup troubleshooting.
-- Plugin safe modes and bypasses should exist for startup recovery when extension code breaks.
+- Without a usable provider, the first launch opens the provider setup.
+- The provider editor flags missing or conflicting settings at once, and tests credentials and endpoints.
+- An invalid `~/.alta/config.toml` opens a recovery editor that checks it as you type.
+- Errors of agent runs appear in the timeline, not only in the logs.
+- The logs are in the app.
+- A plugin that breaks the startup can be turned off for a run.
 
 ## <span class="principle-doc-icon" style="--accent: #a3e635; --accent-2: #06b6d4;"><i class="bi bi-puzzle"></i></span> Extensible workflows
 
-CodeAlta should let users compose workflows before they reach for trusted code. Agent prompts define modes, the in-session `alta` live tool lets agents coordinate CodeAlta-managed state, MCP servers and skills add external or reusable context, and plugins remain available when the host itself needs trusted .NET extension code.
+Workflows are composed before any code is written: agent prompts define modes, the `alta` tool lets agents drive CodeAlta, MCP servers and skills add tools and reusable context, and plugins add trusted .NET code when the app itself must change.
 
 <figure class="principle-doc-shot">
   <a href="{{site.basepath}}/img/alta-system-prompt-and-user-prompt.png" target="_blank" rel="noopener">
@@ -163,12 +158,12 @@ CodeAlta should let users compose workflows before they reach for trusted code. 
 
 **What this means in practice:**
 
-- Agent prompts should make workflow modes such as Default, Plan, review, triage, and release assistance selectable and project-overridable.
-- The `alta` live tool should let agents inspect projects/sessions, ask structured questions, keep notes, schedule reminders, switch prompts, and coordinate child sessions through prompt-driven workflows.
-- MCP servers should add external tool ecosystems without turning every integration into a CodeAlta plugin.
-- Skills should provide reusable context packages that can be enabled, inspected, and activated without executing source code.
-- Trusted plugins should remain source-visible and manageable for cases that need host UI, runtime, prompt, timeline, resource, tool, or live-tool command extensions.
-- Extension state, diagnostics, and recovery paths should stay inspectable so advanced workflows do not become opaque.
+- Modes such as Default, Plan, review, triage or release are agent prompts you choose, and a project can override them.
+- With `alta`, agents inspect projects and sessions, ask questions, keep notes, set reminders, switch prompts and coordinate child sessions.
+- MCP servers bring other tools without a CodeAlta plugin for each.
+- Skills are reusable context that runs no code.
+- Plugins stay source-visible and manageable, for what needs the app's interface, runtime, prompts, timeline, tools or `alta` commands.
+- The state, diagnostics and recovery of extensions stay inspectable.
 
 <style>
 .principle-doc-icon {

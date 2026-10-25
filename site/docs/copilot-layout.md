@@ -43,11 +43,11 @@ CodeAlta does not put the text of these files in every prompt. It tells the sess
 
 ## Skills
 
-A Copilot skill is read as Copilot writes it: `allowed-tools` can be a list, and any field CodeAlta does not know is left unread. The fields Copilot writes beside the Agent Skills ones, such as `disable-model-invocation`, are accepted in every skill folder: see [Skills management](workspace.md#skills-management).
+A Copilot skill is read as Copilot writes it: `allowed-tools` can be a list, and unknown fields are ignored. Copilot's extra fields, such as `disable-model-invocation`, are accepted in every skill folder: see [Skills](workspace/settings.md#skills-management).
 
 When a project has a skill of the same name in `.alta/skills` or `.agents/skills`, that one is used and the Copilot one is shown as overridden.
 
-You can enable, disable and edit a Copilot skill in **Settings > Skills**. See [Workspace and Dialogs](workspace.md#skills-management).
+You can enable, disable and edit a Copilot skill in **Settings > Skills**.
 
 ## Custom agents
 
@@ -61,7 +61,7 @@ description: Reviews a change for security problems and reports them by severity
 You review changes for security problems. You do not change files.
 ```
 
-Select it with the **Agent** chip below the prompt of a session (the agent selector in CodeAlta TUI), like any agent prompt. A session can also give it to a [sub-agent](sessions.md#sub-agents).
+Select it with the **Agent** chip below the prompt of a session (the agent selector in CodeAlta TUI), like any agent prompt. A session can also give it to a [sub-agent](sessions/delegation.md#sub-agents).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-copilot-agents.webp" alt="The Agent prompts page of Settings with two custom agents of the .github folder marked Copilot, and one of them open" loading="lazy">
@@ -70,7 +70,7 @@ Select it with the **Agent** chip below the prompt of a session (the agent selec
 
 The session keeps its model and the tools of CodeAlta: the `tools`, `model` and `handoffs` of the file are for Copilot and are not used.
 
-CodeAlta does not change these files. To change an agent for CodeAlta only, open it in **Settings > Agent prompts** and select **Customize a copy**: the copy is a prompt of yours with the same name, and it is the one that is used. A prompt of the same name in `.alta/prompts/agents` or `~/.alta/prompts/agents` also comes first, and so do the built-in **Default** and **Plan**.
+CodeAlta does not change these files. To change an agent for CodeAlta only, open it in **Settings > Agent prompts** and select **Customize a copy**: your copy, with the same name, is used instead. A prompt of the same name in `.alta/prompts/agents` or `~/.alta/prompts/agents`, and the built-in **Default** and **Plan**, also come first.
 
 In CodeAlta TUI, a custom agent is in the prompt selector, marked Copilot.
 
@@ -103,11 +103,9 @@ They are listed in **Settings > MCP Servers**, marked Copilot. A session activat
   <figcaption class="small text-secondary mt-2">Two servers of <code>.github/mcp.json</code> in Settings > MCP Servers, marked Copilot.</figcaption>
 </figure>
 
-You can enable, disable and authorize such a server. CodeAlta does not change the file: when you edit a server and save it, the server is written to `.alta/mcp.json` with the same name, and that one is used. A server of the same name in `.alta/mcp.json` or `~/.alta/mcp.json` always comes first.
+You can enable, disable and authorize such a server. CodeAlta does not change the file: saving an edited server writes it to `.alta/mcp.json` under the same name, and that one is used. A server of the same name in `.alta/mcp.json` or `~/.alta/mcp.json` always comes first.
 
-The `tools` list of the file is for Copilot. To limit the tools of a server in CodeAlta, use its [policy](plugins/mcp.md#toml-policy-fields).
-
-CodeAlta reads the MCP files of other tools the same way: `.mcp.json` and `.vscode/mcp.json` of a project. See [Servers of other tools](plugins/mcp.md#servers-of-other-tools).
+The `tools` list of the file is for Copilot; limit a server's tools in CodeAlta with its [policy](plugins/mcp.md#toml-policy-fields). CodeAlta reads `.mcp.json` and `.vscode/mcp.json` the same way: see [Servers of other tools](plugins/mcp.md#servers-of-other-tools).
 
 In CodeAlta TUI, these servers are in the MCP Servers dialog, with the name of their file.
 

@@ -6,205 +6,187 @@ title: Troubleshooting
 
 ## Open logs
 
-Use `Ctrl+G Ctrl+L` or `/logs`. CodeAlta also writes rolling diagnostic logs. The TUI writes them under:
+Use `Ctrl+G Ctrl+L` or `/logs`. Logs are the first place to look for provider, credential, plugin and startup errors. CodeAlta also writes them to files:
 
-```text
-~/.alta/logs/
-```
+- CodeAlta Desktop: `CodeAlta/desktop/logs` in the local application data folder, such as `%LOCALAPPDATA%\CodeAlta\desktop\logs` on Windows;
+- CodeAlta TUI: `~/.alta/logs/`.
 
-The desktop app writes them under `CodeAlta/desktop/logs` in the local application data folder, for example `%LOCALAPPDATA%\CodeAlta\desktop\logs` on Windows.
+## The desktop app does not start
 
-Logs are the first place to check for provider startup, credential, plugin build, and runtime errors.
+When the window of `alta` cannot open, CodeAlta says why and what to do: in the terminal you started it from, in a message box on Windows, or in a notification on Linux and macOS when you started it from the applications menu or the Dock. The log has the full report.
 
-## A session's history cannot be read
+- **A library is missing (Linux).** The window needs GTK 4 and WebKitGTK 6.0; the message names the missing library. On Ubuntu 24.04 or later and Debian: `sudo apt-get install libgtk-4-1 libwebkitgtk-6.0-4`. Ubuntu 22.04 and older systems do not have WebKitGTK 6.0: use `altatui`.
+- **No display (Linux).** Over SSH or in a console without an X11 or Wayland session, there is no window to open. Use `altatui`.
+- **The window aborts at once on Ubuntu 24.04 or later.** WebKitGTK's sandbox needs unprivileged user namespaces, which Ubuntu restricts for programs without an AppArmor profile, such as `alta` installed with `dotnet tool`. The terminal says so. Choose one:
+  - turn the sandbox off for CodeAlta only: `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 alta`. The window loads only CodeAlta's local pages, but it is a sandbox turned off;
+  - give `alta` an AppArmor profile that allows user namespaces, as Ubuntu does for its browsers; the message gives the path of the executable;
+  - use `altatui`, which has no web view.
+- **The WebView2 Runtime is missing (Windows).** Install or repair the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (Evergreen).
+- **The Visual C++ runtime is missing (Windows).** Install the latest [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist) for your processor.
+- **The files of CodeAlta are missing or damaged.** Reinstall: `dotnet tool uninstall -g CodeAlta`, then `dotnet tool install -g CodeAlta`.
 
-When the desktop app shows that a history page could not be read, the session file itself is left untouched. The desktop [logs](#open-logs) contain a `CodeAlta.Desktop.History` warning with the session id and the underlying error; include it when you report the problem.
+## Another instance is running
 
-## Glyphs or tree icons look wrong
+Only one CodeAlta runs on a profile at a time, desktop or TUI. It holds the lock file `~/.alta/alta.lock`.
 
-This applies to the TUI only. CodeAlta's terminal UI uses Nerd Fonts icons for tree expanders, status indicators, and other compact symbols. If these appear as empty boxes, question marks, unrelated icons, or misaligned glyphs, the terminal is usually not using a current Nerd Font-compatible font.
+> [!CAUTION]
+> Do not delete the lock file of a running process: two instances would share sessions and state unsafely.
 
-Check the font setup in this order:
+- A second `altatui` exits with the PID of the running instance.
+- A second `alta` shows the window of the running desktop app; `alta .` or `alta <folder>` adds the folder as a project there.
+- `alta --exit` asks the running desktop app to exit.
 
-1. Install the latest version of your preferred font from [Nerd Fonts](https://www.nerdfonts.com/font-downloads). Nerd Fonts v3.0.0 included breaking glyph code-point changes, so an older v2-era Nerd Font can be installed and still display the wrong symbols.
-2. Uninstall or delete older copies of the same patched font before reinstalling. Having both old and new variants installed can make the terminal keep selecting the outdated font.
-3. Select the updated Nerd Font in the terminal profile that runs `altatui`; changing an editor font does not affect CodeAlta. For example, `CaskaydiaCove Nerd Font` is expected to work when the installed font files are current.
-4. Close all terminal windows and start a fresh terminal before launching `altatui` again. On Linux, refresh the font cache if needed with `fc-cache -f -v`.
+The desktop app can keep running in the notification area after its window is closed. If the TUI reports a running instance and you see no window, look for the CodeAlta icon in the notification area (on macOS, in the Dock), or run `alta --exit`.
 
-Platform-specific places to check for stale font copies include Windows **Settings > Personalization > Fonts**, `%LOCALAPPDATA%\Microsoft\Windows\Fonts`, `C:\Windows\Fonts`, macOS **Font Book**, and Linux user font directories such as `~/.local/share/fonts` or `~/.fonts`.
+## The window is busy
 
-If only some icons are wrong after updating, verify that the active terminal profile is not falling back to a different font family.
+The window of CodeAlta Desktop waits for every answer of CodeAlta, so a very busy computer (a build, many agents, a wake from sleep) slows it down without making anything fail.
 
-## Windows Terminal shortcuts do not reach CodeAlta
+- **CodeAlta is busy**: CodeAlta has not answered for ten seconds. The notice says for how long and goes away once it answers; sessions, prompts and drafts are as they were.
+- **This window lost its link to CodeAlta**: the window can no longer reach its host. **Reload** opens it again, with your tabs and drafts.
+- **Closing**: while CodeAlta exits, the window says what it waits for. After ten seconds, **Force exit** ends CodeAlta at once, as the task manager would.
 
-Windows Terminal can reserve shortcuts for its own paste, pane, and navigation actions before CodeAlta can receive them. CodeAlta uses `Ctrl+Alt+Left` and `Ctrl+Alt+Right` for tab switching so Windows Terminal's default `Alt+Left` and `Alt+Right` pane switching can remain enabled. If `Ctrl+V` or another CodeAlta shortcut does not behave as expected, review your Windows Terminal settings and unbind only the terminal-level shortcuts that CodeAlta needs to receive directly.
-
-Add entries like this to the `keybindings` array in Windows Terminal's `settings.json` when a key is currently assigned to a terminal action:
-
-```json
-{ "keys": "ctrl+v", "id": "unbound" }
-```
-
-## Windows Terminal feels slow after a long session
-
-> [!NOTE]
-> A small known issue can affect Windows Terminal after CodeAlta has been running in the same tab for many hours, such as a full day. The UI may begin to feel sluggish. Restarting `altatui` in the same Windows Terminal tab may not restore normal responsiveness, but opening a new tab or window and launching `altatui` there usually does.
-
-This appears to be related to how Windows Terminal handles long-running, high-refresh terminal rendering. CodeAlta uses XenoAtom.Terminal.UI for an interactive interface that can render at up to 60 FPS. If you notice slowdown after a long session, move to a fresh Windows Terminal tab or window.
+The log records what the window waited for and for how long, and each step of the exit: attach it to a report.
 
 ## Invalid `config.toml`
 
-CodeAlta validates `~/.alta/config.toml` before creating providers or sessions. If the file is invalid at startup, CodeAlta opens a TOML recovery editor with syntax highlighting, an error marker, live parse feedback, `Ctrl+S` Save and Continue when valid, and `Ctrl+Q` Exit.
+CodeAlta checks `~/.alta/config.toml` before it creates providers or sessions. When the file is invalid at startup, a recovery editor opens with the error marked; `Ctrl+S` saves and continues once the file is valid, `Ctrl+Q` exits.
 
-If the file was written by a newer CodeAlta than the one you started, do not edit it: update instead. When a newer version is published, the desktop recovery editor says so above the file and has **Update and restart**.
-
-A provider whose `type` your version does not know does not make the file invalid. CodeAlta leaves that provider out, says so in Settings → Providers and in the application log, and keeps its section in the file as written, so a newer version can still use it. Versions up to 1.3.0 refuse the whole file instead.
-
-> [!IMPORTANT]
-> Fix configuration parse errors before starting agent work. Provider creation, project overrides, and plugin configuration depend on a valid TOML file.
+- A file written by a newer CodeAlta should not be edited: update CodeAlta. When a newer version is published, the desktop recovery editor offers **Update and restart**.
+- A provider whose `type` your version does not know does not make the file invalid: CodeAlta leaves that provider out, says so in **Settings > Providers** and in the log, and keeps its table as written.
 
 Common fixes:
 
 - keep table names unique;
 - quote string values;
-- use `enabled = true` or `enabled = false` booleans, not quoted strings;
+- write `enabled = true` or `enabled = false`, not quoted strings;
 - put provider settings under `[providers.<provider-key>]`;
-- use `[chat] default_provider = "<provider-key>"` only for an enabled provider.
+- set `[chat] default_provider` only to an enabled provider.
 
-## No providers are enabled
+## Providers and sign-in
 
-If no provider is enabled, CodeAlta opens the provider setup automatically: the Model Providers dialog in the TUI, or **Settings > Providers** in the desktop app. Configure credentials, test the provider, then save. A successful test enables the provider automatically; Codex/Copilot browser or device login also enables its provider automatically.
+### No providers are enabled
 
-For API-key providers, verify that the environment variable exists in the shell that launches CodeAlta. When the desktop app is started from the Start Menu or the applications menu, it sees the environment variables of your user session, not those of a terminal.
+Without an enabled provider, CodeAlta opens the provider setup: **Settings > Providers** in the desktop app, the Model Providers dialog in the TUI. Give the credentials, test the provider, then save; a successful test or sign-in enables it. See [Model Providers](model-providers/readme.md).
 
-## Claude Code is not found or not signed in
+For an API-key provider, check that the environment variable exists where CodeAlta starts. Started from the Start Menu or the applications menu, the desktop app sees the variables of your user session, not those of a terminal.
 
-The `claude-code` provider runs the Claude Code CLI: the version CodeAlta is tested with once you downloaded it, else the one you installed. CodeAlta has no sign-in for it.
+### Sign-in is pending
 
-- **Claude Code was not found**: in CodeAlta Desktop, select the provider in **Settings > Providers** and choose **Download** in its **Claude Code CLI** box. You can also install Claude Code yourself, or set `command` of the provider to the path of the executable. The desktop app started from the Dock or the Start menu does not have the `PATH` of your shell; CodeAlta also looks in `~/.local/bin`, Homebrew and npm folders. On Windows the `claude.cmd` of an npm installation is not run: download the tested version, or install the native Claude Code (`irm https://claude.ai/install.ps1 | iex`).
-- **The download of Claude Code fails**: the box says why. A network failure goes on where it stopped when you choose **Download** again. "Another CodeAlta is downloading Claude Code" means the other instance (the normal or the developer one) holds the download: wait for it. A download that does not match the tested version is removed; download it again.
-- **Test says this Claude Code is another version**: CodeAlta runs the Claude Code you installed, and is tested with another version. It usually works; download the tested version to run that one instead.
-- **Claude Code is not signed in**: the test of the provider says so. Copy the command of the **Claude Code CLI** box in CodeAlta Desktop, run it in a terminal, type `/login`, then use **Test selected provider**; in CodeAlta TUI, run `claude` and `/login`, then **Refresh** in the provider editor. A provider with an **Account folder** is signed in in that folder only: the command of its box starts Claude Code with it. `claude auth status`, run the same way, shows what the CLI is signed in with. Being signed in to the Claude desktop application does not sign in the CLI.
-- **A second Claude provider has none of my settings, memory or MCP servers**: its account folder starts empty. Copy what you want from your usual folder (`~/.claude`) into it.
-- **A turn fails with a usage limit or a billing message**: the message comes from Claude Code and the account it uses. Limits are those of that account's plan. A message about the usage limits of an API *workspace* means Claude Code used an API key (`ANTHROPIC_API_KEY`), not your login: see the next point.
-- **A session says `ANTHROPIC_API_KEY is set`**: the variable is set, and Claude Code has no answer saved for that key. Choose whether Claude Code uses it: **ANTHROPIC_API_KEY** in the provider editor of CodeAlta Desktop, or `anthropic_api_key = "use"` or `"ignore"` in the configuration. With `ignore`, Claude Code signs in with your login. If the key is only meant for other tools, removing it from your user environment also works.
-- **A resumed session starts without its context**: Claude Code keeps its transcript per folder under `projects` of the account folder (`~/.claude/projects` by default), so changing the **Account folder** of a provider leaves its sessions' transcripts behind. When it is missing, CodeAlta starts a new Claude Code conversation and gives it the recorded conversation as context.
-- **A turn fails with "Claude Code did not start in time to resume the conversation"**: Claude Code was slow to start, but the conversation is kept. Send the message again: CodeAlta no longer starts a new conversation when Claude Code is slow to start.
-- **The card "This Claude Code conversation is open in VS Code" appears**: another Claude process of this computer has the conversation open, VS Code or `claude` in a terminal. Close it there and choose **Wait until it is free**, or continue a copy, or open it here anyway. See [A conversation open elsewhere](sessions.md#a-conversation-open-elsewhere). In VS Code, the Claude Code panel of that conversation keeps it open while it is shown.
-- **A turn fails with "The Claude Code conversation … is open in …"** or **"Claude Code refused to resume the conversation …: a background session of Claude Code is running it"**: the run had nobody to ask what to do (a compaction, Remote Control that connects, or a background session of Claude Code that still runs it). Close the conversation in the other program, or wait for the background session to end, then send the message again.
-- **The prompt came back with "Not sent: the conversation changed while waiting"**: turns were added to the conversation in the other program while the prompt waited for it. They are added to the session before your next message: send it again.
-- **The timeline says "This conversation was changed outside CodeAlta in a way it cannot follow"**: the conversation was rewound, or resumed at an earlier point, in VS Code or a terminal. Claude Code has the whole conversation and goes on from it; the timeline of CodeAlta misses only what changed there.
-- **VS Code does not list a session of CodeAlta**: the session list of VS Code leaves out the conversations that programs run through the Claude Code SDK, as CodeAlta runs Claude Code, and has no setting to show them. Use **Open in VS Code** in the menu of the session. A conversation started in VS Code stays listed there after CodeAlta continued it.
-- **Open in VS Code says that VS Code opens conversations from its own account folder**: the provider of the session has an **Account folder** of its own, where the conversation is. Use **Run in terminal** or **Copy resume command**, which set `CLAUDE_CONFIG_DIR` to that folder. See [Open a session in VS Code or a terminal](sessions.md#open-a-session-in-vs-code-or-a-terminal).
-- **VS Code says the conversation is open in another Claude process**: CodeAlta keeps Claude Code running up to ten minutes after a turn. **Open in VS Code**, **Run in terminal** and **Copy resume command** in the menu of the session close it first; when **Copy resume command** says that CodeAlta still has the conversation open, do what its message says, then copy the command again.
+- **CodeAlta Desktop**: use **Sign in with the browser** or **Sign in with a device code** on the provider in **Settings > Providers**.
+- **CodeAlta TUI**: the Model Providers dialog shows the sign-in instructions while it waits. `Ctrl+G Ctrl+C` cancels; `Ctrl+G Ctrl+U` and `Ctrl+G Ctrl+D` copy the sign-in URL and the device code.
+- ChatGPT signs in with the browser only; Copilot and xAI also take a device code.
 
-## Codex or Copilot login is pending
+For ChatGPT:
 
-In the TUI, the Model Providers dialog keeps browser sign-in and supported device-login instructions visible while authorization is pending. ChatGPT uses **Continue with ChatGPT** (browser only); Copilot and xAI also support device login. The current operation can be canceled from the dialog or with `Ctrl+G Ctrl+C`. Use `Ctrl+G Ctrl+U` / `Ctrl+G Ctrl+D` to copy the current login URL or device code. In the desktop app, use **Sign in with the browser** or **Sign in with a device code** on the provider in **Settings > Providers**.
+- Credentials of an older CodeAlta cannot be reused: sign in again, remove an old `auth_source`, and keep the `https://api.openai.com/v1` endpoint.
+- The browser returns to `127.0.0.1` on the computer that runs CodeAlta; a remote computer needs a browser that reaches it.
+- Signed in without plan access: choose **Continue with ChatGPT** to grant it, or use an API-key provider.
+- `invalid_grant` at the first sign-in: choose **Continue with ChatGPT** again. `invalid_client` during model discovery: check the registration; the static model list does not fix a sign-in.
+- A network failure keeps the credentials; a refresh token that no longer works needs another sign-in. When sign-out cannot confirm the revocation, disconnect CodeAlta in ChatGPT Settings.
 
-For ChatGPT, legacy Codex credentials cannot be reused or imported. Sign in again, remove old credential-import `auth_source` settings, and use the public `https://api.openai.com/v1` endpoint. The callback must reach `127.0.0.1` on the machine running CodeAlta; remote/headless setups need browser access to that loopback listener. If sign-in succeeds without plan permission, choose **Continue with ChatGPT** to enable plan access or configure an API-key provider. Temporary refresh/network failures retain credentials; an unusable refresh token requires another sign-in with the saved registration. If sign-out reports unconfirmed revocation, disconnect CodeAlta in ChatGPT Settings.
+See [Codex (ChatGPT)](model-providers/setup.md#codex-chatgpt).
 
-If the first authorization-code exchange reports `invalid_grant`, choose **Continue with ChatGPT** again to get a fresh code using the retained registration ID. This incomplete registration cannot run model requests until identity validation succeeds. If discovery reports `invalid_client`, check the issued client registration rather than expecting static model fallback to repair authentication.
+## Claude Code
+
+The `claude-code` provider runs the Claude Code CLI: the tested version once downloaded, else the one you installed. CodeAlta has no sign-in of its own for it. See [Claude Code](model-providers/setup.md#claude-code).
+
+### Install and sign-in
+
+- **Claude Code was not found**: in CodeAlta Desktop, choose **Download** in the **Claude Code CLI** box of the provider, or set `command` to the path of the executable. The desktop app started from the Dock or the Start menu does not have the `PATH` of your shell; CodeAlta also looks in `~/.local/bin`, Homebrew and npm folders. On Windows, the `claude.cmd` of npm is not run: download the tested version, or install the native Claude Code (`irm https://claude.ai/install.ps1 | iex`).
+- **The download fails**: the box says why. **Download** again goes on where it stopped. "Another CodeAlta is downloading Claude Code" means the other instance (normal or developer) holds the download: wait for it. A download that does not match the tested version is removed: download again.
+- **Test says this Claude Code is another version**: CodeAlta runs the Claude Code you installed. It usually works; download the tested version to run that one.
+- **Claude Code is not signed in**: in CodeAlta Desktop, run the command of the **Claude Code CLI** box in a terminal, type `/login`, then **Test selected provider**. In CodeAlta TUI, run `claude` and `/login`, then **Refresh**. A provider with an **Account folder** is signed in in that folder only. `claude auth status`, run the same way, shows the sign-in; the Claude desktop application does not sign in the CLI.
+- **A second Claude provider has none of my settings**: its account folder starts empty. Copy what you want from `~/.claude`.
+- **A usage limit or billing message**: it comes from Claude Code and its account. A message about the limits of an API *workspace* means Claude Code used `ANTHROPIC_API_KEY`, not your login.
+- **A session says `ANTHROPIC_API_KEY is set`**: Claude Code has no saved answer for that key. Choose **ANTHROPIC_API_KEY** in the provider editor, or set `anthropic_api_key = "use"` or `"ignore"`. With `ignore`, Claude Code uses your login. Removing the key from your user environment works too.
+
+### Conversations elsewhere
+
+- **A resumed session starts without its context**: the transcript is under `projects` of the account folder, so changing the **Account folder** leaves it behind. CodeAlta then starts a new conversation with the recorded history.
+- **"Claude Code did not start in time to resume the conversation"**: the conversation is kept. Send the message again.
+- **The card "This Claude Code conversation is open in VS Code"**: another Claude process has it open, VS Code or `claude` in a terminal. Close it there and choose **Wait until it is free**, continue a copy, or open it here anyway. See [A conversation open elsewhere](sessions/claude-code.md#a-conversation-open-elsewhere). In VS Code, the Claude Code panel keeps the conversation open while it is shown.
+- **"The Claude Code conversation … is open in …"** or **"Claude Code refused to resume the conversation …"**: the run had nobody to ask (a compaction, Remote Control connecting, or a background session of Claude Code still running it). Close the conversation in the other program, or wait for the background session to end, then send again.
+- **"Not sent: the conversation changed while waiting"**: turns were added in the other program while the prompt waited. They are added to the session: send again.
+- **"This conversation was changed outside CodeAlta in a way it cannot follow"**: it was rewound, or resumed at an earlier point, elsewhere. Claude Code goes on from the whole conversation; only CodeAlta's timeline misses what changed there.
+- **VS Code does not list a session of CodeAlta**: VS Code leaves out the conversations run through the Claude Code SDK. Use **Open in VS Code** in the menu of the session.
+- **Open in VS Code refers to its own account folder**: the provider has an **Account folder** of its own. Use **Run in terminal** or **Copy resume command**, which set `CLAUDE_CONFIG_DIR`. See [Open a session in VS Code or a terminal](sessions/claude-code.md#open-in-vs-code).
+- **VS Code says the conversation is open in another Claude process**: CodeAlta keeps Claude Code running up to ten minutes after a turn. **Open in VS Code**, **Run in terminal** and **Copy resume command** close it first; when **Copy resume command** says CodeAlta still has it open, do what its message says, then copy again.
+
+## Sessions
+
+### A prompt did not send
+
+CodeAlta keeps the text of a prompt that could not be sent. Check that:
+
+- the provider is enabled and ready, and in the [space](spaces.md#providers-of-a-space) of the session;
+- its credentials are still valid, and the model exists for it;
+- the session is not waiting for a sign-in or for the provider to start;
+- the logs show no provider error.
+
+A busy session puts the prompt in its waiting list instead of sending it.
+
+### A provider or tool is missing
+
+- **The session sends nothing and the provider chooser opens**: its provider was taken out of the session's space. Choose a provider of the space, or give the provider that space again (**Settings > Providers**, the chip of its row).
+- **"… is no longer available: choose another provider to send"**: the provider was deleted or turned off. Choose another one in the configuration of the session, or turn it on again.
+- **An agent says `server_not_in_space`, or does not see a skill or an agent prompt**: the resource is not in the session's space. See [What a space has](spaces.md#what-a-space-has).
+- **The Default space no longer shows some projects or chats**: they belong to another space. **Show what belongs to other spaces** in **Settings > Spaces** shows everything there.
+- **An agent has no `shell_command`**: it is turned off in **Settings > Permissions > Tools**, in the **Tools** of the space, or in the agent prompt. See [Tools turned off](workspace/settings.md#tools-turned-off).
+- **Commits have the wrong author**: open the space in **Settings > Spaces**, then **Identity**, and **Check** on the Git card. A running session keeps the identity it started with, and a repository's own `.git/config` comes first. See [Identity](spaces.md#identity).
+- **A session did not fall back after a quota error**: the fallback is off until you turn it on, and uses only the models of the session's tier whose provider is in its space. See [Model tiers and fallback](model-tiers.md#fallback-when-a-provider-fails).
+
+### History cannot be read
+
+When the desktop app cannot read a page of a session's history, the session file is left untouched. The desktop [logs](#open-logs) have a `CodeAlta.Desktop.History` warning with the session id and the error: include it in your report.
+
+### Context is too large
+
+Open the context usage with `Ctrl+G Ctrl+U`. Press `Ctrl+F11` to compact an idle session. If compaction keeps missing its target, check the size of attached files and the [context limits of the model](model-providers/configuration.md#model-metadata-overrides).
 
 ## A plugin is broken
 
 > [!WARNING]
-> Broken plugins can fail during discovery, build, load, activation, or callbacks. Use safe mode or `--no-plugins` first if CodeAlta cannot start normally.
+> A broken plugin can fail when it is found, built, loaded or run. If CodeAlta cannot start, start it without plugins first.
 
-Start the TUI without dynamic plugins:
+- CodeAlta TUI: `altatui --no-plugins`, or `altatui --plugin-safe-mode`.
+- Both apps: set `CODEALTA_DISABLE_PLUGINS=1` before starting CodeAlta. This is the way for the desktop app, which has no such options.
 
-```sh
-altatui --no-plugins
-```
+Then turn off the failing plugin in plugin management, or read the [logs](#open-logs) for its build and load errors.
 
-Or with plugin safe mode:
+**Plugin build says `plugin.cs` was treated as a project file**: source plugins need a .NET SDK that builds single C# files. Install a supported SDK, restore the files CodeAlta generated in the plugin folder if they were deleted, or start without plugins and fix the plugin.
 
-```sh
-altatui --plugin-safe-mode
-```
+## The microphone
 
-For both apps, you can also set this environment variable before starting CodeAlta. The desktop app does not have the two options above, so this is the way to start it without plugins:
-
-```sh
-CODEALTA_DISABLE_PLUGINS=1
-```
-
-Then open plugin management, disable the failing plugin, or inspect the [logs](#open-logs) for build/load diagnostics.
-
-## Plugin build says `plugin.cs` was treated as a project file
-
-Source plugins require a .NET SDK that supports native file-based C# builds. Restore CodeAlta-generated plugin-root files if they were deleted, install the supported SDK, or start with `--plugin-safe-mode` / `--no-plugins` and fix the plugin package.
-
-## The desktop app does not start
-
-When the window of `alta` cannot open, CodeAlta says why and what to do: in the terminal you started `alta` from, in a message box on Windows, or in a notification on Linux and macOS when you started it from the applications menu or the Dock. The log has the full report: see [Open logs](#open-logs).
-
-- **A library is missing (Linux).** The desktop app draws its window with GTK 4 and WebKitGTK 6.0. The message names the missing library. On Ubuntu 24.04 or later and Debian, install them with `sudo apt-get install libgtk-4-1 libwebkitgtk-6.0-4`. Ubuntu 22.04 and older systems do not have WebKitGTK 6.0: use the terminal app, `altatui`.
-- **No display (Linux).** Over SSH or in a console without an X11 or Wayland session, the desktop app cannot open a window. Use `altatui`.
-- **The window aborts at once on Ubuntu 24.04 or later.** WebKitGTK runs its pages in a sandbox that needs unprivileged user namespaces, which Ubuntu restricts for programs without an AppArmor profile, such as `alta` installed with `dotnet tool`. The terminal you started `alta` from says so. Choose one of these:
-  - Turn the sandbox off for CodeAlta only: `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 alta`. The window loads only the local pages of CodeAlta, but it is a sandbox turned off.
-  - Give CodeAlta an AppArmor profile that allows user namespaces, as Ubuntu does for its browsers. The message gives the path of the `alta` executable to put in it.
-  - Use the terminal app, `altatui`, which has no web view.
-- **The WebView2 Runtime is missing (Windows).** Install or repair the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (Evergreen). It is part of Windows 11 and of an up-to-date Windows 10.
-- **The Visual C++ runtime is missing (Windows).** Install the latest [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist) for your processor.
-- **The files of CodeAlta are missing or damaged.** Reinstall it: `dotnet tool uninstall -g CodeAlta`, then `dotnet tool install -g CodeAlta`.
-
-## Another CodeAlta instance is already running
-
-Only one CodeAlta instance can run on a profile at a time, desktop or TUI. CodeAlta uses:
-
-> [!CAUTION]
-> Do not delete the lock file for a running process. Multiple active instances would share user state, sessions, and provider/runtime files unsafely.
-
-```text
-~/.alta/alta.lock
-```
-
-A second `altatui` exits with the PID of the already-running instance because multiple instances would share session state unsafely. A second `alta` shows the window of the running desktop app instead, and `alta .` or `alta <folder>` adds the folder as a project of the running app. `alta --exit` asks the running desktop app to exit.
-
-The desktop app can keep running in the notification area after its window is closed. If the TUI reports a running instance and you see no window, look for the CodeAlta icon in the notification area (on macOS, in the Dock), or run `alta --exit`.
-
-## The window says CodeAlta is busy, lost its link or is closing
-
-The window of CodeAlta Desktop waits for every answer of CodeAlta: nothing it asks is given up after a delay, so a computer that is very busy (a build, many agents, a machine that was asleep) slows the window down without making anything fail. When CodeAlta has not answered for ten seconds, the window says **CodeAlta is busy** and for how long; the notice goes away by itself once it answers, and your sessions, prompts and drafts are as they were.
-
-**This window lost its link to CodeAlta** says the window can no longer reach its host: **Reload** opens it again, with your tabs and drafts.
-
-While CodeAlta exits, it closes its sessions, terminals and services one after the other, and the window says what it waits for. When that lasts more than ten seconds, **Force exit** ends CodeAlta at once, as ending it from the task manager would. The log (`%LOCALAPPDATA%\CodeAlta\desktop\logs` on Windows) records what the window waited for and how long, the moments CodeAlta did not run, each step of the exit, and every failure of the host: attach it to a report.
-
-## A prompt did not send
-
-CodeAlta preserves prompt text when dispatch fails. Check:
-
-- the selected provider is enabled and ready;
-- the provider is in the [space](spaces.md#providers-of-a-space) of the session;
-- credentials are still valid;
-- the selected model exists for that provider;
-- the session is not waiting for a login or provider startup operation;
-- logs for provider-specific failures.
-
-If the session is busy, the prompt may be in the waiting list rather than sent immediately.
-
-## A session cannot use a provider, a server or a tool
-
-- **The session sends nothing and the provider chooser opens**: its provider was taken out of the session's space. Choose a provider of the space, or give the provider that space again (**Settings > Providers**, the chip of its row).
-- **"… is no longer available: choose another provider to send"**: the provider of the session was deleted or turned off. Choose another provider in the configuration of the session, or turn the provider on again. A session of a deleted provider switches by itself to the default provider when one is set.
-- **An agent says `server_not_in_space`, or does not see a skill or an agent prompt**: the resource is not in the session's space. See [What a space has](spaces.md#what-a-space-has).
-- **The Default space no longer shows some projects or chats**: they belong to another space. Turn on **Show what belongs to other spaces** in **Settings > Spaces** to see everything there.
-- **An agent has no `shell_command`**: it is turned off in **Settings > Permissions > Tools**, in the **Tools** section of the space, or in the agent prompt. See [Tools turned off](workspace.md#tools-turned-off).
-- **Commits have the wrong author**: open the space in **Settings > Spaces**, then **Identity**, and **Check** on the Git card. A running session keeps the identity it started with, and the settings of a repository in its own `.git/config` come first. See [Identity](spaces.md#identity).
-- **A session did not fall back after a quota error**: the fallback is off until you turn it on (**Settings > Models > Model tiers**, or the **New sessions** section of a space with tiers of its own). It uses only the models of the session's tier whose provider is in its space, and a session on a model of no tier does not fall back. See [Model tiers and fallback](model-tiers.md#fallback-when-a-provider-fails).
-
-## The microphone button is missing or hears nothing
-
-[Speech to prompt]({{site.basepath}}/docs/speech/) is a feature of CodeAlta Desktop.
+[Speech to prompt](speech.md) is a feature of CodeAlta Desktop.
 
 - **No microphone button beside Send**: speech to prompt is turned off in **Settings > Personalization > Speech**, or the system gives the window no microphone support.
-- **It records but nothing is written**: CodeAlta is listening to a device that hears nothing, often the default device of the system when it is a virtual microphone or one that is not plugged in. Open **Settings > Personalization > Speech**, choose your microphone and press **Test**: the bar must move when you speak.
-- **"The microphone is not available"**: the system refuses the microphone. On Windows, turn on **Settings > Privacy & security > Microphone > Let desktop apps access your microphone**. On macOS, allow CodeAlta (or the terminal it was started from) in **System Settings > Privacy & Security > Microphone**. Check also that a microphone is plugged in and is the input device of the system.
-- **The download fails**: the model comes from `huggingface.co` and the speech engine from `api.nuget.org`. Both must be reachable. Start the download again: it goes on from where it stopped.
-- **"The speech model could not be loaded"**: the engine refused the model, which happens with a custom model it does not support. Choose another model, and delete this one on the Speech page. The application log has what the engine said.
+- **It records but writes nothing**: CodeAlta listens to a device that hears nothing, often a virtual microphone or one that is unplugged. In **Settings > Personalization > Speech**, choose your microphone and press **Test**: the bar must move when you speak.
+- **"The microphone is not available"**: the system refuses it. On Windows, turn on **Settings > Privacy & security > Microphone > Let desktop apps access your microphone**. On macOS, allow CodeAlta (or the terminal it was started from) in **System Settings > Privacy & Security > Microphone**.
+- **The download fails**: the model comes from `huggingface.co` and the speech engine from `api.nuget.org`; both must be reachable. Start the download again: it goes on where it stopped.
+- **"The speech model could not be loaded"**: the engine refused the model, as with a custom model it does not support. Choose another model and delete this one on the Speech page. The log has what the engine said.
 
-## Context is too large
+## The TUI in a terminal
 
-Open the context usage popup with `Ctrl+G Ctrl+U`. For idle started sessions, press `Ctrl+F11` to run manual compaction. If compaction repeatedly misses its target, review attached file sizes and provider context metadata in the provider configuration.
+### Glyphs look wrong
+
+CodeAlta TUI uses Nerd Fonts icons for tree expanders, status marks and other symbols. Boxes, question marks or wrong icons mean the terminal is not using a current Nerd Font.
+
+1. Install the latest version of your font from [Nerd Fonts](https://www.nerdfonts.com/font-downloads). Version 3 moved many icons, so a v2-era Nerd Font shows wrong symbols.
+2. Remove older copies of the same font first: with both installed, the terminal can keep the old one.
+3. Select the font in the terminal profile that runs `altatui`, such as `CaskaydiaCove Nerd Font`; an editor font does not count.
+4. Close every terminal window and start a new one. On Linux, refresh the font cache with `fc-cache -f -v` if needed.
+
+Old copies can hide in Windows **Settings > Personalization > Fonts**, `%LOCALAPPDATA%\Microsoft\Windows\Fonts`, `C:\Windows\Fonts`, macOS **Font Book**, and `~/.local/share/fonts` or `~/.fonts` on Linux. If only some icons are wrong, check that the profile does not fall back to another font.
+
+### Windows Terminal shortcuts
+
+Windows Terminal can keep shortcuts for its own paste, pane and navigation actions. CodeAlta switches tabs with `Ctrl+Alt+Left` and `Ctrl+Alt+Right`, so Windows Terminal keeps `Alt+Left` and `Alt+Right` for its panes. When `Ctrl+V` or another shortcut does not reach CodeAlta, unbind it in the `keybindings` array of Windows Terminal's `settings.json`:
+
+```json
+{ "keys": "ctrl+v", "id": "unbound" }
+```
+
+### Windows Terminal is slow
+
+After CodeAlta TUI has run in the same Windows Terminal tab for many hours, the terminal can become sluggish, even after restarting `altatui` in that tab. Open a new tab or window and start `altatui` there.

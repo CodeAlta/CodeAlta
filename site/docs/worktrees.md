@@ -4,7 +4,7 @@ title: Worktrees
 
 # Worktrees
 
-A session can work in a git worktree: a second folder of the same repository, on a branch of its own. The agent changes files there, and your project folder stays as it is. Several sessions can then work on the same project at the same time.
+A session can work in a git worktree: a second folder of the same repository, on a branch of its own. The agent changes files there, and your project folder stays as it is, so several sessions can work on one project at the same time.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-worktrees.webp" alt="CodeAlta Desktop with a session that works in a worktree, and the Changes tab listing the worktrees of the project" loading="lazy">
@@ -13,42 +13,37 @@ A session can work in a git worktree: a second folder of the same repository, on
 
 You create and remove worktrees in CodeAlta Desktop. A session that works in one also runs in CodeAlta TUI.
 
-## Start a session in a worktree
+## Start in a worktree
 
 1. Open a new session in a project that is a git repository.
-2. Above the prompt, in the **Workspace** chip, click **Project folder** and choose **New worktree**.
+2. Above the prompt, click **Project folder** in the **Workspace** chip and choose **New worktree**.
 3. Keep **Current commit**, or choose the branch to start from.
-4. Write your prompt. CodeAlta starts the worktree as soon as you type.
-5. Send it once the worktree is ready.
+4. Write your prompt. CodeAlta starts making the worktree as soon as you type.
+5. Send it: the session starts once the worktree is ready.
 
-The form that the **+** on the row of a project opens has the same **Project folder** choice: see [Starting and reopening work](sessions.md#starting-and-reopening-work).
+The form opened by **+** on the row of a project has the same choice: see [Starting and reopening work](sessions/readme.md#starting-and-reopening-work).
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
   <img src="{{site.basepath}}/img/alta-desktop-worktree-new.webp" alt="The Workspace chip above the prompt of a new session, with its choice open: Project folder or New worktree, and the branch to start from" loading="lazy">
   <figcaption class="small text-secondary mt-2">The <strong>Workspace</strong> chip of a new session: where it will work.</figcaption>
 </figure>
 
-CodeAlta creates the worktree on a new branch, `alta/<name>`, and starts the session in it. A worktree starts from a commit: changes you have not committed stay in the project folder.
+- The worktree is on a new branch, `alta/<name>`, and starts from a commit: changes you have not committed stay in the project folder.
+- Submodules are checked out in the worktree too, with their own submodules.
+- While it is made, a card under the welcome of the tab shows the step git is at, its last line, a progress bar and the time so far. You can work in other tabs meanwhile.
+- If git fails, the card says why, with **Retry** and **Close**; after **Close**, sending makes the worktree then. If only a submodule fails, the worktree is ready anyway and the card shows what git said.
+- Choosing **Project folder** again, another branch, or closing the tab removes the prepared worktree and its branch.
+- The choice is kept for the project: the chip shows **New worktree** in turquoise while it is chosen.
 
-A repository with submodules gets them in the new worktree as well, with the submodules they contain.
+## Where a session works
 
-A large repository takes a while to check out. You do not wait for it: the worktree is made while you write. Under the welcome of the tab, a card shows the step git is at (creating the worktree, checking out the files, updating the submodules when there are some), the last line git wrote, a bar of its progress and the time so far. **Send** waits until the worktree is ready, then the session starts in it at once. Meanwhile you can go to other tabs and other projects, and start other sessions.
-
-If git cannot make the worktree, the card shows why, with **Retry** and **Close**. After **Close**, sending makes the worktree then. If git cannot check a submodule out, for example because you cannot reach its repository, the worktree is ready anyway, and the card shows what git said.
-
-When you choose **Project folder** again, choose another branch to start from, or close the tab, the worktree that was made for the next session is removed, with its branch.
-
-The choice is kept for the project, and the chip shows **New worktree** in turquoise while it is chosen. Choose **Project folder** to go back. In a narrow window the chip keeps the turquoise worktree icon; hover it to read the choice.
-
-## Know where a session works
-
-- Above the prompt, the **Workspace** chip shows **Worktree** and the name of the worktree in turquoise. Hover it for the project, the branch and the folder; click it for the **Workspace** popover. A narrow window keeps the icon and the name. Beside it, the `+` / `−` numbers open the changes of the worktree, and the code editor button opens the code editor on the worktree.
-- In the sidebar, a session that works in a worktree has a tree mark.
+- The **Workspace** chip above the prompt shows **Worktree** and its name in turquoise. Hover it for the project, branch and folder; click it for the **Workspace** popover. Beside it, the `+` / `−` numbers open the changes of the worktree, and the code editor button opens the code editor on it.
+- In the Explorer, a session in a worktree has a tree mark.
 - **Session info** shows the folder of the worktree.
 
 ## Manage worktrees
 
-Run `/worktree`, or right-click a project in the sidebar and choose **Worktrees…**. The window lists every worktree of the project that git knows, also the ones whose session you deleted.
+Run `/worktree`, or right-click a project in the Explorer and choose **Worktrees…**. The window lists every worktree git knows for the project, also those whose session you deleted.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-worktree-manager.webp" alt="The Worktrees window in CodeAlta Desktop, with the project folder, worktree branches, last-used sessions and actions for each checkout" loading="lazy">
@@ -61,30 +56,30 @@ Run `/worktree`, or right-click a project in the sidebar and choose **Worktrees�
 | **Project folder** | The folder of the project. It is never removed. |
 | **In use** | A session is working there now. Wait for it to finish, or stop it. |
 | **Locked** | Git keeps this worktree. Run `git worktree unlock` to remove it. |
-| **Folder gone** | Git still lists the worktree, and its folder was deleted. Removing it makes git forget it. |
-| **Last used** | When the last session of the worktree was active. **Unknown** when none of its sessions is left. |
+| **Folder gone** | Git still lists the worktree, but its folder was deleted. Removing it makes git forget it. |
+| **Last used** | When the last session of the worktree was active, or **Unknown** when none is left. |
 
-- To remove worktrees, tick one, several, or all of them with the box of the header, then click **Remove**. CodeAlta shows the list again before it removes anything.
-- A worktree with changes that are not committed stays, also when the changes are in a submodule. CodeAlta lists it afterwards and asks about it on its own. Files that git ignores are deleted with the folder.
-- **Outcome unknown** means CodeAlta could not confirm what happened. Check the refreshed list before trying again. **Stop** lets the removal in progress finish without starting the next group.
-- Branches are kept. Tick the box of the confirmation to also delete the `alta/` branches that have no commit of their own.
-- The buttons of a row open the worktree in the code editor or in your [external editor](workspace.md#external-editor), show its changes, copy its path, and open its folder in the file manager of your system.
+- To remove worktrees, tick them (the header box ticks all), then click **Remove**. CodeAlta shows the list again before it removes anything.
+- A worktree with uncommitted changes, also in a submodule, is kept, and CodeAlta asks about it separately. Files that git ignores are deleted with the folder.
+- Branches are kept, unless you tick the box of the confirmation that also deletes the `alta/` branches with no commit of their own.
+- **Outcome unknown** means CodeAlta could not confirm what happened: check the refreshed list before trying again. **Stop** lets the current removal finish without starting the next.
+- The buttons of a row open the worktree in the code editor or your [external editor](workspace/code.md#external-editor), show its changes, copy its path, or open its folder.
 
-You cannot remove a worktree, or change its branch, while a session is working in it.
+You cannot remove a worktree, or change its branch, while a session works in it.
 
-Deleting a session keeps its worktree and its branch: the question of the deletion says where they are, and **Also remove the worktree** removes the worktree with the session, with the same rules as this window. Its `alta/` branch goes only when it has no commit of its own.
+Deleting a session keeps its worktree and branch, unless you tick **Also remove the worktree** in the question, which follows the same rules. Its `alta/` branch goes only when it has no commit of its own.
 
 ### In the Changes tab
 
-The [Changes](workspace.md#changes-desktop) tab lists the worktrees of the project above the files.
+The [Changes](workspace/code.md#changes) tab lists the worktrees of the project above the files.
 
-- Click a worktree to see its changes and its commits.
-- Click the trash button of a worktree to remove it. CodeAlta asks first, and asks again when the worktree has changes that are not committed. Its `alta/` branch goes with it when it has no commit of its own.
-- Click the branch, there or in the **Workspace** popover above the prompt, to switch to another branch or to create one.
+- Click a worktree to see its changes and commits.
+- Click its trash button to remove it. CodeAlta asks first, and again when it has uncommitted changes. Its `alta/` branch goes with it when it has no commit of its own.
+- Click the branch, there or in the **Workspace** popover, to switch to another branch or create one.
 
 ## Where worktrees are stored
 
-Open **Settings**, then **Worktrees**.
+Choose in **Settings > Worktrees**:
 
 {.table}
 | Choice | Folder |
@@ -93,13 +88,13 @@ Open **Settings**, then **Worktrees**.
 | Inside each project | `<project>/.alta/worktrees/<name>`, which git ignores |
 | In a folder you choose | `<folder>/<project>/<name>` |
 
-A worktree gets a name of two words and four random characters, such as `quiet-heron-7k2m` or `amber-denali-x4pq`. Its branch has the same name, after `alta/`. The characters keep two worktrees apart when they are created at the same time by agents that do not see each other, for example in two clones of the repository.
+A worktree gets a name of two words and four random characters, such as `quiet-heron-7k2m`, and its branch is `alta/` and that name. The random characters keep apart worktrees created at the same time by agents that do not see each other.
 
 ## Good to know
 
 - When a worktree is removed, its sessions continue in the project folder.
-- The code editor of a project shows the files of the project folder. To edit the files of a worktree, click the code editor button of the **Workspace** chip of its session, **Open editor** in the **Workspace** popover, or the code editor button of its row in the Worktrees window: it gets a tab of its own, with the name of the worktree.
-- A branch that has commits that are in no other branch is always kept.
+- The code editor of a project shows the project folder. To edit the files of a worktree, use the code editor button of the **Workspace** chip, **Open editor** in the **Workspace** popover, or the button of its row in the Worktrees window: it opens a tab named after the worktree.
+- A branch with commits that are in no other branch is always kept.
 - A session started by an agent that works in a worktree works in the same worktree.
 - An agent can start sessions in worktrees. Ask in your own words, for example:
 

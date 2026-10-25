@@ -1,0 +1,5 @@
+doc:
+  - {path: readme.md, title: "<i class='bi bi-display' aria-hidden='true'></i> Overview"}
+  - {path: prompt.md, title: "Prompt and timeline"}
+  - {path: code.md, title: "Code and terminals"}
+  - {path: settings.md, title: "Settings"}

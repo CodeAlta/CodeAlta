@@ -1,141 +1,21 @@
 # CodeAlta internal documentation
 
-This folder documents the current CodeAlta implementation. It is not a backlog, comparison document, or archive of earlier design drafts. Public user documentation lives under `site/`; the files here are for maintainers who need to understand the code, runtime boundaries, and extension points.
+The architecture of CodeAlta for maintainers and agents: what each part owns, how the parts fit, and why. The user guide is in `site/docs`; the repository rules are in [AGENTS.md](../AGENTS.md) and the [development guide](development-guide.md).
 
-## Reading path
-
-See [new-session provider choice](new-session-provider.md) for cached descriptor-only
-selection, exact enabled-host admission, original uncertainty retention and fresh
-catalog confirmation. Existing-session provider switching remains separate.
-
-See [commands, help and keyboard shortcuts](desktop.md#commands-help-and-keyboard-shortcuts)
-for the Desktop search, help and key map; the commands and the keys follow the TUI's.
-
-Provider/timeline localization and its scroll correction are independently accepted;
-Settings inventory translation is also independently accepted. Static project/session
-workflow translation awaits independent review.
-See [WebView shell language](webview-localization.md) for the bounded local-language
-shell/composer/palette/tab/browsing/inspection and static
-batch-deletion/Reminder/caller-ask/Settings inventory/project-session workflow controls, persistence semantics, untranslated areas and
-review limitations.
-Static About/log/reference presentation and its native-modal lifetime publication
-correction have scoped independent acceptance, with the split-layout process-exit gap
-retained. Advanced-session/retained-action/archived recovery presentation has bounded
-independent acceptance; see the localization evidence and literal-diagnostic boundary linked there.
-Selected-language relative session times and absolute timeline dates are implemented
-and independently accepted within bounded tests. The narrow App locale-switch check now tests
-reader-position retention separately from follow-to-bottom after legitimate translated
-notice wrapping; bounded verification passes. Exact source tooltips and literal recorded-date/Copy boundaries are documented
-in the same localization guide.
-See [short-window composer layout](responsive-composer.md) for the scroll policy,
-retained-owner guarantees and responsive validation scope.
-
-Read the documents in this order when onboarding or reviewing architecture-sensitive changes:
-
-| Step | Document | Purpose |
-| --- | --- | --- |
-| 1 | [Architecture overview](architecture.md) | Process composition, project layering, frontend/runtime boundaries, and the main data flow. |
-| 2 | [Catalog, configuration, and state](catalog-and-config.md) | `~/.alta` layout, project-local state, TOML configuration, projects, sessions, legacy session metadata, and prompt drafts. |
-| 3 | [Runtime and agent sessions](runtime.md) | `AgentHub`, `SessionRuntimeService`, active sessions, provider runtime adapters, system prompts, tools, compaction, and journals. |
-| 4 | [Model providers](providers.md) | Provider registration, configured provider types, agent-runtime adapters, model metadata, credentials, and protocol tracing. |
-| 5 | [`alta` live tool](live-tool.md) | In-process command registry, JSONL output contract, session control commands, queueing, delegated work, and plugin commands. |
-| 6 | [MCP support](mcp.md) | Fixed MCP config paths, JSON/TOML overlay rules, controlled direct MCP tools, `alta mcp` commands, runtime behavior, and dialog/status surfaces. |
-| 7 | [ACP integration](acp.md) | Current ACP protocol-library status, legacy config preservation, and future server-adapter direction. |
-| 8 | [Plugins](plugins.md) | Trusted source plugins, public authoring API, runtime build/load flow, building and reloading a plugin while the application runs, plugin data, contributions, safe mode, and built-in plugins. |
-| 9 | [Skills](skills.md) | Filesystem `SKILL.md` discovery, validation, precedence, UI/live-tool activation, and runtime injection. |
-| 10 | [Orchestration actor model](orchestration-actor-model.md) | Internal mailbox/actor ownership rules for runtime mutation and event backpressure. |
-| 11 | [CodeAlta Desktop](desktop.md) | Desktop window, workspace, composer, timeline, Settings pages, host RPC services, and isolated-root launches. |
-| 12 | [Development guide](development-guide.md) | Repository-wide rules that contributors and automation should follow: strict rules first, then one section per area. |
-| 13 | [Development contracts](development-contracts.md) | Detailed contracts of specific components referenced by the guide: session database paths, host lifetime, Hosting and authentication, owned session commands, catalog stores, native engines, the TUI shell. |
-| 14 | [Specs index](specs/readme.md) | Current policy for adding focused implementation specs. |
-| 15 | [Statistics: the journal reader and the facts](statistics-facts.md) | The streaming reader of session journals, the facts a session is reduced to, the journal catalog of the store, and how the numbers differ from `alta session metrics`. |
-| 16 | [Statistics: the store, the history and the questions](statistics.md) | The tables of the statistics in the application database and their roll-ups, the history job and its choice, the flow of the sessions that write, the questions a page and `alta statistics` ask, and the measured cost of reading a profile. |
-| 17 | [Reviews](review.md) | The reviews of the user: threads on plans, files and changes, the store per checkout, anchoring, rounds and the prompt of a round, `alta review`, review before commit (the setting, the note of a prompt, the commit guard), and the Reviews page. |
-
-## System map
-
-> **In development:** [Dual-head desktop parity and baseline](dual-head-desktop-parity.md) tracks the approved desktop/TUI work separately from the current implementation documented here. Pending acceptance criteria are not shipped features or platform-support claims.
-
-The isolated desktop boot entrypoint and its test-owned native fixtures are described in [desktop native qualification](desktop-native-qualification.md), including preserved M0 evidence and explicit platform gaps.
-
-The scoped [Desktop prompt-image path](prompt-images.md) documents PNG paste/preview/removal, editable local display titles, observed capability, typed owned image-only Send and its retention/filesystem limits.
-
-```mermaid
-flowchart TD
-    Program[CodeAlta.Tui executable - altatui - Program + CodeAltaOwnedServices]
-    Host[CodeAltaHost - shared runtime composition]
-    Frontend[CodeAlta TUI frontend - CodeAltaApp + views + coordinators]
-    LiveTool[CodeAlta.LiveTool - alta registry + dispatcher]
-    Orchestration[CodeAlta.Orchestration - AgentHub + SessionRuntimeService]
-    Agent[CodeAlta.Agent - session catalog, provider contracts, events, agent runtime]
-    Providers[Provider packages - OpenAI-compatible, Anthropic, Google, direct HTTP]
-    Catalog[CodeAlta.Catalog - projects, config, sessions, skills]
-    Plugins[CodeAlta.Plugins - runtime + adapters]
-    PluginApi[CodeAlta.Plugins.Abstractions - public authoring API]
-    State[(~/.alta - config, cache, sessions, projects)]
-
-    Program --> Host
-    Program --> Frontend
-    Program --> LiveTool
-    Host --> Catalog
-    Host --> Plugins
-    Host --> Orchestration
-    Host --> Agent
-    Orchestration --> Agent
-    Orchestration --> Catalog
-    Orchestration --> Plugins
-    Agent --> Providers
-    Frontend --> Orchestration
-    Frontend --> Catalog
-    Frontend --> LiveTool
-    Plugins --> PluginApi
-    Catalog --> State
-    Agent --> State
-```
-
-The `altatui` executable is the interactive terminal host, packaged as `CodeAlta.Tui`. The `alta` executable is the desktop host, packaged as `CodeAlta` and described in [CodeAlta Desktop](desktop.md); the in-process agent tool is also named `alta`. Reusable session orchestration lives in runtime libraries, not in terminal controls. `CodeAltaHost.CreateAsync` is the shared composition entry point: it creates the catalog, plugin runtime, skill catalog, model-provider registry/initialization service, session catalog, `AgentHub`, `SessionRuntimeService`, and project-file search service. The TUI then composes views and frontend coordinators around those services.
-
-## Current source roles
-
-| Source root | Role |
+| Document | What it covers |
 | --- | --- |
-| `src/CodeAlta` | `alta` executable: the desktop window, its React frontend, and the RPC services between them. |
-| `src/CodeAlta.Tui` | `altatui` executable, terminal UI composition, shell controller, dialogs, view models, provider-management UI, and owned process services. |
-| `src/CodeAlta.Orchestration` | Headless runtime composition and session orchestration. It references `CodeAlta.Agent`, `CodeAlta.Catalog`, and `CodeAlta.Plugins`, not the TUI. |
-| `src/CodeAlta.Agent` | Session catalog/store contracts, normalized session/event contracts, model-provider runtime contracts, local raw-API session runtime, tools, journals, prompt instruction composition, and compaction. |
-| `src/CodeAlta.Agent.*` | Provider-specific adapters that implement model-provider runtimes, model discovery, credentials, and turn execution. |
-| `src/CodeAlta.Catalog` | Global/project catalog, config loading/normalization, project descriptors, session-view metadata, and skill discovery. |
-| `src/CodeAlta.LiveTool` | In-process `alta` command contributors, registry, dispatcher, transcript formatter, and agent-tool wrapper. |
-| `src/CodeAlta.Plugins.Abstractions` | Public plugin authoring contracts. |
-| `src/CodeAlta.Plugins` | Trusted plugin discovery, source builds, loading, activation, contribution registry, adapters, and plugin resource roots. |
-| `src/CodeAlta.Plugin.Git`, `src/CodeAlta.Plugin.Statistics`, `src/CodeAlta.Plugin.Mcp` | Built-in plugins implemented through the same plugin model used by source plugins. MCP-specific contracts are in [MCP support](mcp.md). |
-| `src/CodeAlta.Acp` | ACP JSON-RPC, protocol models, and generated protocol helpers kept for future server exposure. |
-| `src/CodeAlta.Tests`, `src/CodeAlta.*.Tests` | MSTest suites, including architecture guardrails for frontend/runtime boundaries and concurrency decisions. |
+| [Architecture](architecture.md) | Principles, composition, projects and their layers, a turn, where new code goes. Start here. |
+| [Development guide](development-guide.md) | Rules that hold across the repository, tests, and how the docs are kept. |
+| [Runtime](runtime.md) | Sessions, turns, the session actor, journals and the session database, tools, compaction, fork and rewind. |
+| [Catalog and configuration](catalog-and-config.md) | `~/.alta` and project `.alta`, instance state, configuration, projects and spaces. |
+| [Model providers](providers.md) | The provider model, API providers, agents that run their own loop (Claude Code, ACP), credentials. |
+| [`alta` live tool](live-tool.md) | The commands agents call, their contract and their safety rules. |
+| [Plugins](plugins.md) | Source plugins, contributions, the plugin side of the window, built-in plugins. |
+| [MCP](mcp.md) | MCP servers: configuration, tools, apps and skills of servers. |
+| [Skills](skills.md) | Skill discovery, precedence and activation. |
+| [CodeAlta Desktop](desktop.md) | The host, the RPC, the React page, windows, security boundaries, native workers. |
+| [Statistics](statistics.md) | How the statistics read journals and keep their facts. |
+| [Reviews](review.md) | Review threads on plans, files and changes. |
+| [Site screenshots](site-screenshots.md) | How the pictures of the website are taken, for releases. |
 
-`src/CodeAlta.Hosting` is not an active project in the solution. Shared host composition is `CodeAlta.Orchestration.Hosting.CodeAltaHost`.
-
-## Durable state quick reference
-
-CodeAlta's default global root is `~/.alta`. Important roots are:
-
-- `config.toml` for global chat/provider/plugin configuration;
-- `projects/` for project descriptors;
-- `spaces/` for the spaces that group the projects, one Markdown file each;
-- `sessions/yyyy/MM/dd/<session-id>.jsonl` for CodeAlta-owned session journals and legacy session-view headers/state;
-- `sessions/traces/<session-id>.trace` for optional protocol traces;
-- `cache/` for machine-local caches such as refreshed model metadata;
-- `auth/` for provider credential/token stores owned by provider auth managers;
-- `saved_prompts/` for unsent prompt drafts;
-- `ui-state.yaml` for frontend view/session selection state;
-- `plugins/` and `skills/` for user-scoped source plugins and skills;
-- `mcp.json` for user-scoped MCP server connection definitions.
-
-Project-local configuration and extensions live under `<project>/.alta/`, including `<project>/.alta/config.toml`, `<project>/.alta/mcp.json`, `<project>/.alta/plugins/`, and `<project>/.alta/skills/`.
-
-## Documentation rules
-
-- Describe current implementation first. Do not keep superseded plans in tracked docs.
-- Verify behavior against `src/**`, tests, default config, and solution metadata before documenting it.
-- Keep high-level documents linked from this page; add focused specs only when a stable implementation contract needs more detail.
-- Prefer implementation terms used in current boundaries: model provider for selectable LLM configuration/runtime adapters, session for conversation/work units, and backend only for explicit legacy wire/config names or third-party terminal/backend concepts.
-- Keep comparisons to other products and agents out of internal docs unless a configured provider/protocol name is required to explain CodeAlta behavior.
+These documents describe the current architecture only: no history, plans or decision logs. A detail that explains one piece of code is a comment in that code.

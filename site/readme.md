@@ -96,7 +96,7 @@ alta</code></pre>
             <p class="alta-kicker"><span>03</span> Windows</p>
             <h3 id="feature-title-windows">Every monitor.<br>One workspace.</h3>
             <p>Drag a tab out of the main window and it opens in a window of its own: a session on one monitor, its code or a review on another. Drag it back, or between windows, and it joins the pane under the pointer. Name and color a window, and it opens again where it was at the next start.</p>
-            <a href="{{site.basepath}}/docs/workspace/#windows-desktop">Spread out your work <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+            <a href="{{site.basepath}}/docs/workspace/#windows">Spread out your work <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-windows.webp" alt="Two CodeAlta Desktop windows side by side on Windows: the main window with a new session and Statistics, and Window 2 with the session of a release" width="3456" height="2168" loading="lazy"></div>
         </section>
@@ -114,7 +114,7 @@ alta</code></pre>
             <p class="alta-kicker"><span>05</span> Code &amp; git</p>
             <h3 id="feature-title-code">Stay close<br>to the code.</h3>
             <p>Search a project, edit files, run a terminal and inspect git diffs without leaving the workspace. Open any tool call to see what the agent did.</p>
-            <a href="{{site.basepath}}/docs/workspace/#code-editor">Explore the editor <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+            <a href="{{site.basepath}}/docs/workspace/code/#code-editor">Explore the editor <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-editor-search.webp" alt="The SharpYaml code editor with a search across files and matching source lines" width="2400" height="1500" loading="lazy"></div>
         </section>
@@ -159,7 +159,7 @@ alta</code></pre>
             <p class="alta-kicker"><span>10</span> Interactive canvases</p>
             <h3 id="feature-title-canvases">Beyond<br>the conversation.</h3>
             <p>Boards, checklists and custom tools become interactive tabs. Ask an agent to build a plugin, then use its canvas right beside the conversation.</p>
-            <a href="{{site.basepath}}/docs/plugins/developers/#canvases">Discover canvases <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+            <a href="{{site.basepath}}/docs/plugins/ui/#canvases">Discover canvases <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-canvas-board.webp" alt="An agent session beside an interactive Board canvas with To do, Doing and Done columns" width="2400" height="1500" loading="lazy"></div>
         </section>
@@ -195,7 +195,7 @@ alta</code></pre>
             <p class="alta-kicker"><span>14</span> Welcome home</p>
             <h3 id="feature-title-welcome">Pick up where<br>you left off.</h3>
             <p>Start from recent sessions, projects and useful shortcuts. Press <kbd>Ctrl+P</kbd> to <a href="{{site.basepath}}/docs/search/">find any earlier conversation</a>, plan or tool by its words, or by its meaning with a model that runs on your computer. The built-in documentation is always nearby, with an agent ready to answer your questions.</p>
-            <a href="{{site.basepath}}/docs/workspace/#welcome-page-desktop">Meet your workspace <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+            <a href="{{site.basepath}}/docs/workspace/#welcome-page">Meet your workspace <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-landing.webp" alt="The Welcome page with recent projects and sessions, Statistics and quick access to the documentation" width="2400" height="1500" loading="lazy"></div>
         </section>
@@ -212,7 +212,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>16</span> Your choice of AI</p>
             <h3 id="feature-title-models">Your AI.<br>Your choice.</h3>
-            <p>Use your Claude Code, Codex or GitHub Copilot subscriptions, even several accounts, or connect an API-based provider, and continue in CodeAlta the Claude Code sessions you started in VS Code or a terminal. Add any agent of the <a href="{{site.basepath}}/docs/model-providers/#agents-of-the-acp-registry">ACP registry</a>, such as Cursor, Gemini CLI or Qwen Code, in one click: it works with the tools and permissions of CodeAlta. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
+            <p>Use your Claude Code, Codex or GitHub Copilot subscriptions, even several accounts, or connect an API-based provider, and continue in CodeAlta the Claude Code sessions you started in VS Code or a terminal. Add any agent of the <a href="{{site.basepath}}/docs/model-providers/acp-agents/">ACP registry</a>, such as Cursor, Gemini CLI or Qwen Code, in one click: it works with the tools and permissions of CodeAlta. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
             <a href="{{site.basepath}}/docs/model-providers/">See model providers <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-model-providers.webp" alt="The Model Providers window listing Claude Code, Codex, GitHub Copilot and API-based providers" width="2400" height="1500" loading="lazy"></div>
@@ -230,7 +230,7 @@ alta</code></pre>
   </div>
   <div class="alta-highlight-grid">
     <article class="alta-highlight">
-      <div class="alta-highlight-copy"><span class="alta-kicker">Transparent by design</span><h3>See the work, not just the answer.</h3><p>Choose how much each session may do on its own: ask first, accept edits or run freely, and turn off the tools it should not use. Read tool inputs and outputs, review modified files and follow live commands.</p><a href="{{site.basepath}}/docs/workspace/#timeline-cards">Inside the timeline <i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
+      <div class="alta-highlight-copy"><span class="alta-kicker">Transparent by design</span><h3>See the work, not just the answer.</h3><p>Choose how much each session may do on its own: ask first, accept edits or run freely, and turn off the tools it should not use. Read tool inputs and outputs, review modified files and follow live commands.</p><a href="{{site.basepath}}/docs/workspace/prompt/#timeline">Inside the timeline <i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
       <img src="{{site.basepath}}/img/alta-desktop-modified-files.webp" alt="A source diff showing the exact lines an agent changed" width="2400" height="1500" loading="lazy">
     </article>
     <article class="alta-highlight">

@@ -8,7 +8,10 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class RpcChannelBudgetTests
 {
-    /// <summary>The channels the page may hold at once (doc/development-guide.md, "Plugin RPC carrier").</summary>
+    /// <summary>
+    /// The channels the page may hold at once. The calls of plugin canvases (<c>alta.rpc</c>) ride the single
+    /// <c>canvases.watch</c> channel instead of adding channels, so that the budget does not grow with plugins.
+    /// </summary>
     private const int PageBudget = 35;
 
     /// <summary>The channel methods the services offer today. A new one takes room from the budget: count it here.</summary>

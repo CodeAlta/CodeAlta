@@ -113,7 +113,9 @@ repository has no API: tell the owner to upload the new file himself (Settings >
   was renamed.
 - New pages are added to the menus (`site/menu.yml`, the `menu.yml` of their folder under `site/docs/`) and
   linked from the pages around them.
-- The repository readme (`readme.md`) and the internal docs (`doc/`) follow the same changes.
+- The repository readme (`readme.md`) lists the features at a glance; `doc/` changes only if the architecture
+  did (see "Documentation" in `AGENTS.md`).
+- Pages stay concise with short headings: look at the table of contents of the long ones in the built site.
 - `site/docs/**` and the `site/img/alta-desktop-*.webp` pictures are packed into the applications as their
   built-in user guide (`content/user-guide`, see `src/CodeAlta/CodeAlta.csproj` and `src/CodeAlta.Tui/CodeAlta.Tui.csproj`):
   the docs and pictures must be final **before the tag**, or the release ships the old ones.

@@ -1,0 +1,5 @@
+doc:
+  - {path: readme.md, title: "<i class='bi bi-cpu' aria-hidden='true'></i> Overview"}
+  - {path: setup.md, title: "Set up a provider"}
+  - {path: configuration.md, title: "Configuration file"}
+  - {path: acp-agents.md, title: "ACP agents"}

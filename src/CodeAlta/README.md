@@ -5,7 +5,7 @@ This project builds CodeAlta Desktop: the .NET tool package `CodeAlta`, command 
 This page is for people who build and change the app. To use it, see the
 [user documentation](https://codealta.github.io) and
 [Desktop and TUI](https://codealta.github.io/docs/desktop-and-tui/). How the app behaves in detail
-(window, workspace, composer, timeline, Settings pages, RPC services and their limits) is described
+(the host, the RPC between host and page, the page, windows, security boundaries) is described
 in [`doc/desktop.md`](../../doc/desktop.md).
 
 ## How it is built
@@ -100,7 +100,7 @@ Set `CODEALTA_DISABLE_PLUGINS=1` to start without plugins.
 `alta --help` also lists the options that start the app on explicit directories instead of
 `~/.alta` (`--data-root`, `--catalog-root`, `--allow-owned-host` and others). They are for tests and
 for running on a copy of a profile. See
-[Isolated-root launches](../../doc/desktop.md#isolated-root-launches).
+[One instance per profile](../../doc/desktop.md#one-instance-per-profile).
 
 ## Browser demo
 
@@ -123,8 +123,7 @@ disappear on refresh. `npm run build:demo` writes the same demo as static files 
 ## Frontend notes
 
 - **Spaces**: `frontend/src/spaces/` holds the groups of projects the window shows one at a time.
-  The window is given the catalog as the shown space has it, and each space has its own tabs. See
-  [Spaces](../../doc/desktop.md#spaces).
+  The window is given the catalog as the shown space has it, and each space has its own tabs.
 - **Tests**: `npm test` in `frontend/` runs the unit tests (`src/*.test.ts`, `src/*.test.tsx`). The
   `*.browser.test.ts` files among them mount real components in headless Edge and are skipped where
   Edge is not installed.

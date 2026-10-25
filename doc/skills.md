@@ -1,161 +1,75 @@
 # Skills
 
-CodeAlta skills are filesystem directories that contain a required `SKILL.md` file and optional helper files such as `scripts/`, `references/`, and `assets/`. Discovery reads metadata and files; activation never executes scripts automatically.
+A skill is a folder with a `SKILL.md` (YAML frontmatter, then Markdown instructions) and optional helper files
+(`scripts/`, `references/`, `assets/`). The prompt advertises skills by name and description; the body enters a session
+only when the user, the window, a plugin or the agent activates the skill. Activation never runs a script: helper files
+are offered for reading. CodeAlta reads the Agent Skills format, so skills written for other agents work unchanged.
+
+| Part | Where |
+| --- | --- |
+| Discovery, validation, shadowing, enablement, cache | `src/CodeAlta.Catalog/Skills/` (`SkillCatalog`, `SkillCatalogQuery`, `SkillFrontmatterReader`) |
+| Built-in skills | `src/CodeAlta.Catalog/BuiltinSkills/` (`codealta-plugin-runtime`, `document-conversion`) |
+| The prompt's skill list | `AgentInstructionTemplateProvider` (`src/CodeAlta.Orchestration/Runtime`) |
+| Activation | `SessionRuntimeService`, `alta skill` (`src/CodeAlta.LiveTool`) |
+| Preferred skills | `DesktopSkillUsage` (`src/CodeAlta/Desktop`), from the Statistics plugin |
 
 ## Roots and precedence
 
-CodeAlta discovers skills from these roots, highest precedence first:
+Highest first:
 
-1. `<project>/.alta/skills/`
-2. `<project>/.agents/skills/`, then `<project>/.github/skills/` (the layout of GitHub Copilot)
-3. `~/.alta/skills/`
-4. `~/.agents/skills/`, then `~/.copilot/skills/` (the layout of GitHub Copilot)
-5. built-in skills bundled with CodeAlta
+1. `<project>/.alta/skills/`, then `<project>/.agents/skills/` and `<project>/.github/skills/`
+2. `~/.alta/skills/`, then `~/.agents/skills/` and `~/.copilot/skills/`
+3. Skill roots of plugins (resource contributions), with the scope of their plugin
+4. Built-in skills
 
-The two folders of GitHub Copilot (`SkillSourceKind.ProjectCopilot`, `UserCopilot`; `IsCopilot()`) have the precedence of the common folder of their scope and come after it by their path. A skill there is read as Copilot writes it: any top-level field is accepted, including whatever Copilot adds later, where the other roots refuse an unknown field. In every root the four fields that skill tools write beside the Agent Skills format (`argument-hint`, `user-invocable`, `disable-model-invocation`, `context`; `npx skills add` fills `~/.agents/skills` with them) are accepted, and `disable-model-invocation: true` keeps the skill from the model (`SkillFrontmatter.DisableModelInvocation`): it stays valid, and the user still activates it by name. The other three are read and have no effect. In every root `allowed-tools` is one text or a list of texts, and `metadata` is a map whose non-text entries (a nested map, for example) are dropped with the `metadata-entries-ignored` warning instead of making the skill invalid. The Skills page marks these skills **Copilot** with the GitHub mark (`CopilotTag`), and their folders are edited like those of the other skills of a project or of the user.
+A skill with the name of a higher one is shadowed: it stays inspectable, and only the winner can be activated. Use
+`.alta/skills/` for skills that depend on CodeAlta; the `.agents` and GitHub Copilot folders are shared with other
+agents and are read as those agents write them (the Copilot folders accept any top-level field, the others refuse an
+unknown one). Skills that MCP servers publish are a separate origin, named by server and URI, that never shadows these
+(see [MCP](mcp.md)).
 
-Plugin-contributed skill roots are included through plugin resource contributions with runtime-assigned scope and precedence. Project/user skills with the same `name` shadow lower-precedence entries. Shadowed skills remain inspectable in the UI when requested, but only the winning valid skill is advertised for activation.
+## Validation
 
-**A second origin: the skills of MCP servers.** CodeAlta Desktop also offers the skills MCP servers publish (the MCP Skills extension). They are not part of `SkillCatalog`, which stays a catalog of folders: the MCP plugin lists them, the prompt shows them in an **MCP skills** part of their own, `alta mcp skill activate --server <server> <uri>` loads one after the user approves it, its files are read with `alta mcp skill read` and checked against the digests of the server, and the Skills page of Settings shows them in a **From the MCP server `<server>`** section for each server. A skill of a server is named by its server and its URI, so it never shadows a skill of these roots and `alta skill activate <name>` stays local; a session keeps both when they share a name. See "MCP skills" in `mcp.md`.
+- `name` is required, matches the folder, and is lowercase letters, digits and single hyphens.
+- `description` is required.
+- Frontmatter fields are checked against the allowed set. The fields other skill tools add (`argument-hint`,
+  `user-invocable`, `disable-model-invocation`, `context`) are accepted; `disable-model-invocation: true` hides the
+  skill from the model while the user can still activate it.
+- Resource paths are relative and stay inside the skill folder; walking respects `.gitignore` and skips VCS folders.
 
-Use `.alta/skills/` when a skill depends on CodeAlta behavior. The `.agents/skills/` roots are common `SKILL.md` roots that CodeAlta can read without making them CodeAlta-owned.
+## Enablement and spaces
 
-CodeAlta ships a built-in `codealta-plugin-runtime` skill with plugin authoring and troubleshooting guidance plus sample plugin folders. It is written for an agent that works on a plugin from a session: which `alta plugin` command creates, builds, reloads and inspects a plugin, how to look at the window with the UI tools, how to look the API up, and one section for each kind of contribution.
+Skills are enabled by default. `[skills] disabled = [...]` in the global `config.toml` disables names everywhere; a
+project's `config.toml` adds to it and cannot re-enable. `[skills.spaces]` in the global file assigns names to spaces;
+a skill outside the session's space is disabled whatever folder it comes from. `SkillCatalogQuery.ForSession` builds
+the one query a session uses for activation, instructions and `alta skill`, so what an agent sees is what it can
+activate.
 
-## `SKILL.md` format
+## The prompt
 
-Each skill directory must be named after the skill and contain YAML frontmatter:
+The instructions are rebuilt at each send and must stay byte-identical while nothing changes, or the provider's
+prompt cache is lost. So:
 
-```markdown
----
-name: dotnet-test-fix
-description: Diagnose and fix failing .NET tests with minimal churn.
----
+- **The catalog is cached.** `SkillCatalog` keeps each parsed `SKILL.md` until its length or write time changes, and
+  each root's walk until a folder, a `.gitignore` or the repository it read changes. A walk is not kept when something
+  it read changed in the last five seconds, since that change could be missing from it. Shadowing, enablement and
+  spaces are applied again on every call.
+- **The list is sorted and does not depend on the turn.** With many skills it is shortened
+  (`[search] prompt_catalog`): the whole list up to 12 skills, one line per skill above, counts per scope above 60,
+  with a hint to `alta search`. The TUI and a desktop without search keep the whole list.
+- **Built-in skills come first**, with their whole description: they say how CodeAlta itself works.
+- **Preferred skills** (desktop) are the skills used most recently, from Statistics: an exponential moving average of
+  uses over 28 days, full weight in the session's project, a quarter elsewhere in its space. The ranking is read once
+  per local day from uses before today, and a session keeps its first ranking for the life of the process, so the
+  prompt changes as seldom as possible.
 
-# Dotnet test fix
+## Activation
 
-Use this skill when a task is primarily about failing .NET tests.
-```
+`alta skill activate <name>` (or the window, or a plugin) resolves the winning enabled skill for the session's
+project and space, builds the payload (the `SKILL.md` body and a bounded list of its files), journals the activation,
+and injects it into the session with a visible activity. A resumed session replays its activations from the journal.
+After a compaction, active skills are restated in the composed instructions instead of their payloads being carried as
+history; a skill whose folder is gone keeps its history and is reported missing.
 
-Rules enforced by `SkillCatalog`:
-
-- the directory must contain `SKILL.md`;
-- `name` is required and must match the containing directory name;
-- names are lowercase alphanumeric text plus hyphens, with no leading/trailing hyphen or consecutive hyphens;
-- `description` is required;
-- frontmatter fields are validated against the allowed top-level fields;
-- resource paths must be relative and must not escape the skill root.
-
-## Discovery and validation
-
-`SkillCatalog` resolves root providers, walks skill roots with gitignore-aware file walking, parses frontmatter, validates descriptors, applies shadowing, applies global/project enablement, and returns descriptors with provenance and diagnostics.
-
-`SkillCatalogQuery.Scopes` limits a listing to the roots of some scopes; the others are not walked. Shadowing is applied among the roots read, so the skills of a project listed alone are those of a full listing (the roots of the user, CodeAlta and the plugins come after a project's and never shadow it), while a skill of the user that a project shadows is listed when the project's roots are not read. The search index lists the skills of the user, CodeAlta and the plugins once per check and then the roots of each project alone: with 500 skills of the user and 50 projects, 30 ms per check instead of 1.5 s (`SkillCatalogScopesTests`, M4 Pro, Debug).
-
-The host keeps one `SkillCatalog`, and that catalog keeps what it parsed of each `SKILL.md` per root: the descriptor from the file's content and its diagnostics, keyed by the root registration and the file path. It reads and parses a file again only when its length or last write time (UTC) changes. The walk of each root is kept too, with what it read: the folders it went through, the `.gitignore` of each of them and of every folder above the root, the info and global exclude files of the repository, and the repository the root is in (`RepositoryDiscovery` runs on each listing and must give the same one). A listing walks a root again only when one of them changed: a folder changes when an entry is added, removed or renamed in it, so an added, removed or renamed skill is seen at once. A walk is not kept when something it read changed less than five seconds before it, since a change made while it ran, or within the precision of the file times, could be missing from it; the next listing walks again. The cache entries of a root are replaced after each walk. With the walk kept, a listing of 500 skills takes about 2.5 ms instead of 30 ms, and the instructions of a session, built at each send, no longer walk the folders: `SessionRuntimeService` builds them with `AgentInstructionTemplateProvider.BuildCoordinatorInstructionsAsync`, which waits for the skills without holding a thread. Shadowing, enablement, spaces and the query filters are applied again on every call, and resource files are listed fresh on each activation. A file that could not be read is not cached.
-
-Resource listing excludes VCS directories and respects ignore rules. Activation payloads include the canonical `SKILL.md` body and a bounded list of related files. Related files are made available for inspection; they are not run.
-
-## Enablement config
-
-Skills are enabled by default. Disable a skill by name in the relevant `.alta/config.toml` file:
-
-```toml
-[skills]
-disabled = ["ilspy-decompile"]
-```
-
-Global `~/.alta/config.toml` disablement applies everywhere. Project `<project>/.alta/config.toml` disablement is additive for that project; it cannot re-enable a globally disabled skill. Names are normalized case-insensitively, and a disabled name affects every discovered skill with that normalized name across sources.
-
-### Spaces
-
-The global `config.toml` assigns skills to spaces by name:
-
-```toml
-[skills.spaces]
-terraform = ["business", "default"]
-```
-
-A skill that is not listed is in every space. `SkillCatalogQuery.Space` (a `SpaceFilter`) disables a skill the space of the session does not have, before the global and project enablement and whatever folder it comes from: a project skill with the name of a Business-only skill is out of Personal (`SkillDescriptor.IsOutsideSpace`). A null `Space` lists the skills of every space (Settings, the user in a terminal).
-
-`SkillCatalogQuery.ForSession` builds the one query of a session: the runtime activation, the instructions (`AgentInstructionTemplateProvider`, narrowed to model-visible skills) and `alta skill list|show` for a calling session. `alta skill activate` refuses a skill of another space with `skill.notInSpace`.
-
-## Runtime behavior
-
-For agent-runtime sessions, CodeAlta advertises compact skill metadata in instructions for enabled skills only. The full skill body is loaded only when the user, UI, plugin, or agent activates an enabled skill through the host-owned runtime path.
-
-How much of that metadata the prompt carries is `CodeAltaHostOptions.SkillPromptCatalog`, a mode per project and space (`[search] prompt_catalog`: `auto`, `compact` or `full`). Without it, and in the TUI, the list is whole (`full`). CodeAlta Desktop answers `auto` while search is on for the project and the space, and `full` when search is off or keeps them out, since the short forms send agents to `alta search`:
-
-- `auto` keeps the whole list up to `AgentInstructionTemplateProvider.SkillTitlesThreshold` (12) skills;
-- above it, and always in `compact`, each skill is its name and one line (the title of its first heading, or the start of its description), followed by `AgentInstructionTemplateProvider.SearchHint`;
-- above `SkillCountsThreshold` (60), only the number of skills of each scope remains, with the same hint.
-
-The list is sorted and does not depend on the turn, so the system prompt stays byte-identical while nothing is installed (`SkillPromptCatalogTests`).
-
-Two kinds of skills come first, with their whole description in every form, the count form included:
-
-- **The built-in skills of CodeAlta** (`SkillSourceKind.Builtin`), always: they say how CodeAlta itself works.
-- **The preferred skills**, marked `preferred="true"` and explained by `AgentInstructionTemplateProvider.PreferredHint`: the skills used most in the last days, at most `MaxPreferredSkills` (8), in the order `CodeAltaHostOptions.PreferredSkills` gives them. A name that is not a skill the session can use is left out. Without the delegate (the TUI) nothing is preferred.
-
-CodeAlta Desktop ranks them with `DesktopSkillUsage`, from the Statistics plugin (`StatisticsQueries.SkillUsageScoresAsync`): every use counts the same (an activation by an agent, an attachment to a prompt, a read of its `SKILL.md`), weighted by `0.5^(age / 7 days)` over the last 28 days, an exponential moving average. A use in the project of the session counts fully, one in another project of its space a quarter, one of another space nothing; a skill needs a score of 1 to be preferred. The prompt is built at each send and compared with the one the session runs with, so the ranking is made to change it as seldom as possible, and provider prompt caches survive:
-
-- it is read once per local day, from the uses **before** today: a restart in the same day gives the same ranking, and the uses of today do not move it;
-- a session keeps the first ranking it got for the life of the process, also across midnight; after a restart it gets the ranking of the day;
-- the same scores always give the same list (by score, then by name);
-- a ranking read while the history of Statistics is still read (the first start of a new version of the facts) is provisional: it is read again at most every ten minutes, for the sessions that start then. Statistics turned off, or a read that takes more than two seconds, prefers nothing.
-
-Activation:
-
-1. resolves the valid unshadowed skill for the current project/user scope;
-2. builds a canonical payload and related-file list;
-3. records activation in the session journal;
-4. injects skill context into the selected agent-runtime session;
-5. emits visible activity/session updates.
-
-Activated agent-runtime skills are replayed from the session journal after resume. Before compaction, activated payloads remain ordinary replayed context. After compaction, CodeAlta can rehydrate activated skills into composed instructions so compacted sessions retain skill guidance without duplicating current context. If a compacted skill payload references a missing on-disk skill, CodeAlta preserves history and reports the missing path.
-
-## Terminal UI
-
-Open the skills browser with `/skills`, `/skill`, the command palette entry, or `Ctrl+G Ctrl+K`.
-
-The browser can show combined, current-project, or user/global scopes. It displays source kind, validation state, model visibility, shadowing, enablement, provenance paths, diagnostics, and a refresh action. The compact `G` and `P` checkboxes control whether the global or selected-project config disables the skill; checked means enabled for that scope. Bulk actions can enable, disable, or invert the currently shown skills for Global, Project, or Both scopes.
-
-Available actions:
-
-- **Activate** loads an enabled, valid, unshadowed skill into the selected CodeAlta session through `SessionRuntimeService`.
-- **Open SKILL.md** opens the selected skill document in the editor.
-- **Open related** opens selected files under `scripts/`, `references/`, or `assets/` for inspection/editing.
-- **New skill** scaffolds a skill under `<project>/.alta/skills/<name>/` when a project is selected, otherwise under `~/.alta/skills/<name>/`.
-
-The scaffold creates `SKILL.md` plus empty `scripts/`, `references/`, and `assets/` directories, then opens `SKILL.md` in the editor.
-
-The Desktop **Settings → Skills** page lists the discovered skills with a switch per skill, a filter, **Enable all** / **Disable all** (every skill the filter matches, switched by the host) and **New skill**, and stays quick with thousands of skills; see the [desktop reference](desktop.md#skills-and-plugins). The details of a skill, and the `</>` button of its row, open its folder in the code editor: **Edit** for a skill of the user or of a project, **View files**, read-only, for a built-in skill and for one that a plugin brings. The page lists the folders the skills are read from, and opens `~/.alta/skills` or the `.alta/skills` of the project in the code editor as one folder.
-
-## Live-tool commands
-
-Managed sessions with the `alta` live tool use the singular `skill` command group:
-
-```text
-alta skill list [--project <id|slug|path>] [--detailed] [--query <text>] [--scope project|user|builtin|plugin] [--limit <n>]
-alta skill show <skill-name> [--project <id|slug|path>]
-alta skill activate <skill-name> [--session <session-id>]
-```
-
-`alta skill list` keeps the order of the catalog. `--query` keeps the skills whose name, title or description has every word of the text, in any case; `--scope` keeps the skills of one scope (`SkillScopeKind`). Without `--detailed` it writes one `alta.skill.refs` record with every name; with `--limit` cutting it, the record also says the `total`, `truncated: true` and `next`. `--detailed` writes one `alta.skill.item` per skill, 30 at most unless `--limit` says otherwise, so the records stay under the default caps of the alta tool (200 records, 64 KB), then `alta.skill.summary` with `total` (the skills that matched), `returned`, `truncated`, `limit`, `query`, `scope` and `next`: the same list with a limit that takes every match when words narrowed it, else `alta search --kind skill "<what you need>"` where the host keeps the search index (CodeAlta Desktop), else the same list with `--query`. A query that matches nothing gives a `hint`.
-
-`--session` defaults to the calling session; a caller that belongs to no session names one.
-
-`alta skills activate` and `alta skills_activate` remain aliases for existing prompt text; prefer `alta skill activate` in new guidance. Disabled skills are hidden from `list`/`show`, and activation uses the same enablement-enforced runtime path as the UI before recording the activation in the session journal.
-
-## Plugin skill roots
-
-Plugins can expose skill roots with resource contributions:
-
-```csharp
-public override IEnumerable<PluginResourceContribution> GetResources()
-{
-    yield return Resources.SkillRoot("skills");
-}
-```
-
-Plugin skill roots are trusted local resource roots. Project-scoped plugin roots are visible only for the matching project scope.
+`alta skill list|show|activate` is the agent's interface; `list` stays within the `alta` tool's output caps and points
+to `alta search --kind skill` where the desktop keeps a search index.

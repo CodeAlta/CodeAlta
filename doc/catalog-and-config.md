@@ -1,667 +1,215 @@
-# Catalog, configuration, and state
+# Catalog, configuration and state
 
-CodeAlta keeps user-owned durable state under a global root and project-local `.alta` directories. The default global root is `~/.alta`, resolved from the current user's profile directory by `CodeAltaOwnedServices` and `CodeAltaHost` unless a host overrides it.
+`CodeAlta.Catalog` owns the durable state of the user: configuration, projects, spaces, the session-view records of
+journals, the application database and the editable text files. It has no UI and no provider code. Paths come from
+`CatalogOptions`; nothing derives them elsewhere.
 
-## Global root layout
+## Global root and instance state root
 
-`CatalogOptions` defines the current global layout:
+Two roots, because two instances may run on one profile:
 
-| Path under `~/.alta` | Owner | Purpose |
-| --- | --- | --- |
-| `config.toml` | `CodeAltaConfigStore` | Global chat defaults, providers, and plugins; the automations of CodeAlta Desktop that are kept with the user. |
-| `mcp.json` | MCP plugin | Global MCP server connection definitions. |
-| `projects/` | `ProjectCatalog` | Markdown project descriptors keyed by project slug. |
-| `spaces/` | `SpaceCatalog` | The spaces that group the projects: one Markdown file for each, `<id>.md` (see "Spaces" below). |
-| `checkouts/` | `ProjectCatalog` helpers | Default checkout root used by catalog planning APIs. |
-| `machines/` | Catalog model | Machine-specific override profile root. |
-| `agents/` | Catalog model | File-backed agent-definition root used by host-owned coordinator setup. |
-| `cache/` | Process/runtime services | Machine-local cache root: refreshed model metadata, plugin build cache, `jira/acli/`, where the Jira plugin downloads the Atlassian CLI, `speech/` (`CatalogOptions.SpeechRoot`), where CodeAlta Desktop downloads the speech models, `search/models/` (`CatalogOptions.SearchCacheRoot`), where it downloads the models of search by meaning, and `runtime/` (`CatalogOptions.RuntimeRoot`), the native runtimes they share (`runtime/sherpa-onnx/<version>/<rid>`; see "Speech to prompt" and "Search" in `doc/desktop.md`). It holds nothing that cannot be rebuilt: the SQLite database moved to `data/` (see "The application database" below). |
-| `data/` | `ApplicationDatabase` | The SQLite database of the instance (`alta.sqlite3`) and its copies (`backups/`), and the search index of CodeAlta Desktop (`search.sqlite3`, `CatalogOptions.SearchDatabasePath`), which is derived data. Under the state root, so the developer instance has its own. |
-| `sessions/` | Agent session runtime and session catalog | Date-sharded session journals and optional protocol traces. |
-| `prompts/pull-requests/` | Catalog `PullRequestPromptCatalog` | The user's kinds of pull request (`<id>.pr.md`): what a session is sent when asked to create one. A project keeps its own under `<project>/.alta/prompts/pull-requests/`. |
-| `scratchpad/` | Agents | Where an agent writes down long instructions of the user (`<yyyy-mm-dd>-<short-name>-<hash>.md`: the agent chooses the name, the host gives the six characters of a hash of the session, so that two agents never write the same file), so that they outlive a compaction of the context. The file is named in the runtime context of the system prompt (`SystemPromptBuilder`), the default agent prompt says when to write there, and the compaction summary keeps the path of the file. |
-| `saved_prompts/` | Catalog `PromptDraftStore` | Unsent session and global/project new-session text drafts. |
-| `ui-state.yaml` | Catalog UI-state store | Open/selected sessions, project preferences, theme/navigator settings, frontend layouts and shared logical tab descriptors. |
-| `plugins/` | Plugin runtime | User-scoped source plugin packages, with the build files and the `.gitignore` CodeAlta generates beside them. |
-| `plugin-data/` | Plugin runtime | What plugins store with `Services.State`: one folder for each plugin, one JSON file for each item. |
-| `skills/` | Skill catalog | User-scoped CodeAlta skill roots. |
-| `worktrees/` | `GitWorktreeService` | The git worktrees CodeAlta creates for sessions, unless the user chose another place: one folder for each project, and in it one folder for each worktree (see `doc/desktop.md`). |
-| `color-schemes/` | Desktop `ColorSchemesService` | The user's color schemes of the desktop window, one JSON file each (see `doc/desktop.md`). |
-| `automations.json` | Desktop `AutomationStateStore` | What an instance remembers of the automations: whether they are paused, their runs, what the event triggers have seen and which automations of a project the user allowed (see `doc/desktop.md`). It is under the state root. |
-| `work_items.json` | Catalog `WorkItemLinkStore` | Which session proposed a task or a plan, what that session ran with (provider, model, reasoning effort), which one carries it out, and whether the user put its card away. It is under the state root; the tasks and the plans themselves are files of their project. |
-| `sessions/internal/` | Work-session catalog | Internal session linkage descriptors still read by the catalog. |
+- The **global root** (`CatalogOptions.GlobalRoot`, `~/.alta` by default) holds what the user configures and every
+  instance shares: settings, credentials, projects, spaces, prompts, skills, plugins, caches.
+- The **state root** (`CatalogOptions.StateRoot`) holds what one running instance alone writes: sessions, the
+  application database, view state, drafts, scratchpads. It is the global root for the normal instance and `~/.alta/dev/`
+  for the developer instance (`--dev`, `CodeAltaInstanceProfile` in `CodeAlta.Hosting`).
 
-CodeAlta Desktop also writes two files of its MCP server in the state root of the instance (see below):
-`mcp_url.txt`, the address of the server while it runs, and `mcp_token.txt`, the access token of a server
-that other computers can reach (see `doc/desktop.md`, MCP server).
+Why: two processes must never write the same journal or database, but a developer instance must see the user's real
+providers, prompts and plugins. Each instance holds the lock of its state root (`alta.lock`), so one instance of each
+kind runs at a time. A host with a separate state root only creates the coordinator
+`AGENTS.md` of the global root when it is missing, and on its first run seeds its view state from the normal instance's
+per-project provider preferences.
 
-### Instance state and the developer instance
+| Under the global root | Owner |
+| --- | --- |
+| `config.toml` | `CodeAltaConfigStore`: settings, providers, plugins, automations of the user. |
+| `mcp.json` | MCP plugin: server connections ([MCP](mcp.md)). |
+| `auth/` | Provider auth managers: subscription credentials, token caches. |
+| `projects/`, `spaces/` | `ProjectCatalog`, `SpaceCatalog`: one Markdown file per project or space. |
+| `prompts/`, `skills/`, `plugins/`, `plugin-data/` | Prompt resources, skills, source plugins, what plugins store with `Services.State`. |
+| `cache/` | Rebuildable data: model metadata, plugin builds, downloaded tools and models (`speech/`, `search/`, `runtime/`). |
+| `worktrees/`, `color-schemes/` | Session worktrees (by default), desktop color schemes. |
 
-`CatalogOptions.StateRoot` is the root of what one running instance alone writes: `sessions/` (journals and prompt-image copies), `scratchpad/`, `data/alta.sqlite3` (the application database and its `backups/`), `ui-state.yaml`, `saved_prompts/`, `automations.json`, `work_items.json` and the legacy `threads/internal/`. It defaults to the global root, so the layout above is unchanged for the normal instance, whose lock is `~/.alta/alta.lock`.
+| Under the state root | Owner |
+| --- | --- |
+| `sessions/yyyy/MM/dd/<id>.jsonl`, `<id>.attachments/` | Session journals and their files ([runtime](runtime.md#journals-are-the-source-of-truth)). |
+| `data/alta.sqlite3`, `data/backups/`, `data/search.sqlite3` | `ApplicationDatabase` and its copies; the desktop search index (derived). |
+| `saved_statistics_after_deleted_sessions/` | `StatisticsArchiveStore`: statistics of retired sessions (see below). |
+| `ui-state.yaml`, `saved_prompts/` | `SessionViewCatalog` view state, `PromptDraftStore` unsent drafts. |
+| `scratchpad/` | Files where agents write down long instructions; named in the runtime context, cleared at startup. |
+| `automations.json`, `work_items.json` | Desktop automation state; links of tasks and plans to sessions. |
+| `alta.lock`, `mcp_url.txt` | The instance lock, the address of the desktop MCP server while it runs. |
 
-The developer instance (`alta --dev`, `altatui --dev`; `CodeAltaInstanceProfile` in `CodeAlta.Hosting`) keeps the same global root and sets the state root to `~/.alta/dev/`. It therefore shares `config.toml`, `auth/`, `mcp.json`, `projects/`, `spaces/`, `prompts/`, `skills/`, `plugins/`, `plugin-data/`, `color-schemes/` and the rest of `cache/`, and writes its sessions, scratchpads (`dev/scratchpad/`), application database, view state, drafts, terminal logs (`dev/logs/`) and lock (`dev/alta.lock`) apart, which lets it run beside the normal instance. The desktop developer instance also uses its own WebView data root (`CodeAlta/desktop-dev` under the local application-data directory). A host with a separate state root does not refresh the coordinator `AGENTS.md` of the global root; it only creates it when missing. The first time it runs, its `ui-state.yaml` starts from the normal instance's per-project provider/model preferences and navigator settings (`SessionViewCatalog.SeedViewStateFromAsync`); open sessions, selection and layouts are not copied, and later changes on either side stay separate.
-
-Scratchpad cleanup preserves its root and never migrates existing normal/developer files or rewrites paths in old journals/checkpoints. A resumed developer session receives the isolated path in newly built runtime instructions; an older path quoted in its conversation remains historical text. Older developer binaries still use the normal scratchpad: normal startup clearing therefore requires a temporary, legacy-compatible exclusion on `dev/alta.lock`. Any existing or unprovable peer lock skips the pass, without stale-PID reclamation. The isolated developer pass does not acquire the normal lock. Host construction joins actual worker termination before allowing session execution, including cancellation; maintenance status remains replayable afterwards.
-
-Shared files keep their existing guarantees between the two instances: Codex credentials are refreshed under a cross-process file lock; `config.toml`, the project descriptors and the Copilot/xAI token files are whole-file writes without one, so the last writer wins. The space files and the `spaces` entry of a project file are saved over the bytes that were read, and an instance sees the changes of the other at its next read. Optional provider protocol traces stay under the global root's `sessions/traces/`, one file per session id.
-
-The runtime creates directories as needed. Provider auth managers also write under `~/.alta/auth/`, for example subscription credentials and direct-provider token caches. Protocol traces, session journals, auth files, and provider caches can contain prompts, tool arguments, model output, file paths, command output, or credentials; treat them as private user data.
-
-### Bounded directory completion prerequisite
-
-`DirectoryCompletionReader.Read(directoryPath, prefix, cancellationToken)` is a separate opt-in, read-only Catalog prerequisite for future absolute-folder completion, **not** an Open Project action or a catalog ownership check. It requires a caller-supplied canonical fully qualified directory below (not at) a local filesystem root and a literal name prefix; empty/relative/home/drive-root/UNC/device-namespace inputs are rejected, without CWD, home, drive, catalog or project scanning. It checks each ancestor for observed links/reparse components, then enumerates only direct children using a fixed `*` pattern. Every encountered entry counts, including files and nonmatches: at most 128 entries plus one over-limit sentinel. At most 16 paths are returned, each at most 1,024 UTF-16 units, with a 16,384-unit combined return bound; prefix is at most 128 units. Hidden, dot-prefixed, linked and overlong children are omitted and yield `Incomplete`; observed linked ancestors yield `ReadError`. `Complete` means the directory enumeration finished without omissions, not that a path can be opened or imported. Results are sorted **only within the observed subset** (ordinal-ignore-case, then ordinal); an incomplete subset is not a global first page or proof that no other name matches. `Missing`, `NotDirectory`, `Invalid`, `Denied` and `ReadError` are separate from `Incomplete` and expose no suggestions; cancellation throws. There are no filesystem mutations, file reads, recursive scans, RPC callers or changes to the TUI's existing unbounded completion route in this prerequisite. Attribute checks and directory enumeration are not atomic against external path swaps; mapped drives/Unix mounts can be remote despite local-looking syntax, and blocking filesystem operations/disposal have no strict wall-clock cancellation bound. This reader is **not** an untrusted-renderer filesystem grant or a sandbox.
-
-The subsequent **owned Desktop RPC only** `workspace.completeDirectory` exposes an internal generated request (`expectedHostEpoch`, `directoryPath`, `prefix`) and response (`status`, `hostEpoch`, `directoryPath`, `prefix`, `directories`, `entriesVisited`, `omittedUnsafeEntries`). The Desktop frontend calls it only on an explicit folder suggestion action. A canonical, fully qualified non-root directory (at most 1,024 UTF-16 units) and literal prefix (at most 128 units, including empty) must be supplied with the exact owned host epoch. Valid requests echo the exact directory and prefix, without normalization or implied ownership; a canonical trailing separator is echoed unchanged while returned children must have the exact directory as their direct parent (not merely a matching path prefix). Invalid wire inputs are not echoed. Catalog-only instances return `unconfigured` without filesystem access. Other statuses are `complete`, `incomplete`, `invalid_request`, `missing`, `not_directory`, `denied`, `read_error`, `stale_epoch`, `closed`, and `busy`; a canceled caller receives bridge cancellation rather than a misleading result status. No exception text or unvalidated suggestion is sent. The reader's 128+sentinel/16/1,024/16,384 bounds remain in effect, with a 64 KiB **serialized UTF-8 result frame** budget (including JSON escaping, response fields, and a maximally escaped 256-character ID, the largest permitted by NeoAstra, in the RPC envelope); suggestions omitted for this wire budget change a successful result to `incomplete`. Admission permits one outstanding completion read per service, immediately returns `busy` for another, and holds admission through settlement even when the caller cancels. Owned close rejects new calls and drains the outstanding read before host disposal. A blocking filesystem operation still has no strict time limit, so cancellation/close may wait for the underlying OS to return. No catalog enumeration, import, preview, activation, navigation, retry or TUI completion change is involved. The result is neither project ownership nor importability authority.
-
-The Desktop Open Project dialog now offers **Suggest folders** only on explicit click in an owned, permitted host; opening/typing/filtering/refresh do not start a completion read. A typed absolute directory ending in a separator is submitted as that exact directory with an empty literal prefix; otherwise the final component is the prefix and the preceding separator-terminated directory is submitted without normalization or home/CWD expansion. Obvious unsupported/oversized/root/relative forms are explained locally, and the host still validates canonical identity. Results must match the captured host epoch, directory, prefix, dialog, selected project/session and input edit revision, and pass child-path/budget checks before display or insertion; late, canceled, foreign or malformed replies cannot insert into another draft. A canceled waiter does not imply a stopped host read. Displayed entries are only a sorted observed subset, never proof of absence, ownership or importability. Picking one copies its exact path into the draft and clears any earlier folder preview/trust confirmation; only the separate Check folder and explicit trust/import actions can write or navigate. Catalog-only and demo views never request completion; retained uncertain imports continue to block folder actions across dialog reopen/refresh. No automatic retry is made for busy, canceled or failed reads.
-
-### Bounded project ownership prerequisite
-
-`ProjectCatalog.ReadBoundedOwnershipAsync(projectId, expectedProjectPath)` is an opt-in Catalog-only check for a host-known ID and normalized absolute path. It does not change `LoadAsync`, `GetByIdAsync`, or `GetByPathAsync`; alone it does not validate session metadata. It streams the catalog's flat `*.md` and legacy `<slug>/readme.md` sources, counts every root entry plus encountered legacy readmes (including unrelated entries), and caps enumeration at 128 entries plus one over-limit sentinel. It reads at most 32 KiB plus one byte per file and at most 512 KiB of actual source bytes in aggregate. An exact exhausted byte budget without observed EOF is incomplete, not evidence of absence. Only a full scan without errors, invalid metadata, conflicting IDs/paths, or exceeded limits returns `Match` or `Missing` with `Complete = true`; `Match` exposes the preferred flat descriptor's archived state (legacy when no flat source exists). Conflicting flat/legacy identities fail closed; linked/reparse paths and I/O failures return `ReadError`. Cancellation throws rather than certifying a result. No filename is inferred from the requested ID, and the scan does not write sources or fall back to the ordinary unbounded loader.
-
-The scan checks observed path attributes but is **not** an atomic cross-process snapshot: external catalog modifications or link swaps between enumeration, checks, and reads can invalidate an answer. Its limits and invalid/ambiguous results intentionally deny ownership rather than attempting to recover silently. This Catalog result alone does not establish session-metadata identity or native/full parity.
-
-For the read-only owned usage RPC, `SessionViewJournalStore.ReadBoundedHeaderAsync` validates only the exact date-sharded journal's first-line header (32 KiB actual read plus one over-limit sentinel, by requests of at most 4 KiB on an unbuffered stream: the request that reaches the first newline may read part of the next record, which is neither interpreted nor counted in `BytesRead`), refusing observed link/reparse paths, filename aliases, missing/invalid/oversize headers and I/O failures. It does **not** use `ReadHeaderAsync`'s unbounded line reader, session cache, journal history or a broad scan. `SessionRuntimeService.ReadOwnedUsageAsync` captures only an existing admitted attachment, checks the persisted exact session/provider/scope/working-directory identity and, for project scope, the complete unarchived bounded catalog result against the actor-owned path/ID; global scope requires both actor and persisted header to positively identify a global session. Before releasing the last admitted typed usage event it revalidates the original actor and attachment after asynchronous reads. Epoch validation and small, redacted read-only responses occur at the owned Desktop `sessionUsage.read` RPC; long counters are decimal strings. Absent usage, retiring/transitions, stale attachments, incomplete/ambiguous/archived catalog, missing/invalid metadata and read failures are distinct; zero is reported only when actually observed. The opt-in compact composer inspector reads on open or explicit refresh; no polling, provider query, cost aggregation, inferred currency or usage-history recovery exists. These checks are point-in-time and cannot prevent concurrent external changes or link swaps; they are not cross-process CAS/authorization guarantees or native/full usage parity.
-
-### Informational profile measurement
-
-`ProfileStorageScanner` captures `CatalogOptions.GlobalRoot` and reads filesystem metadata on a cancellable worker. Its disjoint categories count each discovered file path once, including hidden files, SQLite WAL/backups and unknown files; the whole `dev/` subtree is a separate category. It reads no file contents and exposes no deletion operation. Linked roots/ancestors and discovered reparse points are skipped. Inaccessible or changing entries produce partial coverage, with skipped-link/entry counts. The total is logical file length, not allocated disk space or a claim of reclaimable bytes; the scan is not an atomic filesystem snapshot. Configuration, credentials, plugin data, working copies, databases and saved Statistics remain informational even when they occupy most of the profile.
+Protocol traces stay under the global root (`sessions/traces/`). Journals, traces, auth files and caches hold prompts,
+tool output, paths and credentials: they are private user data.
 
 ## Project-local state
 
-Project-local CodeAlta state lives under `<project>/.alta/`:
-
-| Path | Purpose |
+| Under `<project>/.alta/` | Content |
 | --- | --- |
-| `<project>/.alta/config.toml` | Project-local config overrides and the automations of CodeAlta Desktop that are kept with the project. `[plugins.jira]` is still read there for a project whose `.alta/issues.toml` names no `site`, `url`, `project` or `projects` in `[jira]` (legacy, to be removed). |
-| `<project>/.alta/issues.toml` | The issues of the project, shared with the team: the views of the Issues tab (`[<service>.views.<view>]`) and `[jira]` (`site`, `project`, optionally `projects` for other Jira projects of the site), which turns the Jira plugin on for the project; `email` and `token_env` are not read from it. |
-| `<project>/.alta/local/issues.toml` | The same, the user's alone (the folder has a `.gitignore` of `*`): the user's views, the view the tab shows (`[<service>] current`), and `email`, `token_env` or `enabled = false` in `[jira]`, on top of the team's. |
-| `<project>/.alta/mcp.json` | Project-local MCP server connection definitions. |
-| `<project>/.alta/plugins/<package-id>/plugin.cs` | Project-scoped trusted source plugin packages. The generated `.gitignore` of the folder keeps the generated build files out of the repository. |
-| `<project>/.alta/plugin-data/<plugin key>/` | What a plugin stores for the project with `Services.State`. |
-| `<project>/.alta/skills/<skill-name>/SKILL.md` | Project-scoped skills. |
-| `<project>/.alta/plans/yyyy-mm-dd-<slug>.md` | The plans of the project: Markdown with a front matter (`title`, `status`, `created`, `summary`). Plans without a front matter are read from their first heading and their `- Status:` line. A plan that is done is kept unless `[work_items]` deletes it. |
-| `<project>/.alta/tasks/yyyy-mm-dd-<slug>-<xxxx>.md` | The follow-up tasks of the project: Markdown with a front matter (`title`, `kind`, `status`, `created`, `summary`). A completed or dismissed task is deleted unless `[work_items]` keeps it. |
-| `<repository>/.alta/worktrees/<name>/` | The git worktrees of the project, when the user chose to keep them inside the repository. The folder holds a `.gitignore` of one line (`*`), so git ignores it. |
+| `config.toml` | Project overrides, CLI profiles of its sessions (`[identity.cli.*]`), project automations, `[search] enabled`. |
+| `issues.toml`, `local/issues.toml` | Issue views and the Jira link of the team; the user's own on top (`local/` is git-ignored). |
+| `mcp.json`, `plugins/`, `plugin-data/`, `skills/`, `prompts/` | Project MCP servers, plugins, plugin data, skills, prompts. |
+| `plans/`, `tasks/` | Plans and follow-up tasks, Markdown with a front matter. |
+| `worktrees/` | Worktrees kept inside the repository when the user chose so (git-ignored). |
 
-The skill catalog also reads `<project>/.agents/skills/` and `~/.agents/skills/` as common `SKILL.md` roots. Use `.alta` roots when the content depends on CodeAlta-specific behavior.
+Skills are also read from `.agents/skills/` of the project and of the home folder.
 
-## Configuration model
+## Configuration
 
-The top-level TOML document has these active sections:
+`config.toml` of the user is the one settings file; a project's `.alta/config.toml` overlays what it may override
+(providers, plugins, skills disablement, which is additive: a project cannot re-enable a globally disabled skill).
+`CodeAltaConfigDocument` maps its tables, each read by a typed method of `CodeAltaConfigStore`:
 
-```toml
-[chat]
-default_provider = "my_provider"
+| Table | Holds |
+| --- | --- |
+| `[chat]`, `[providers.<key>]` | Default provider; provider definitions (`type`, `enabled`, `model`, credentials by environment variable name). |
+| `[plugins.<id>]` | Enablement, plus plugin-owned policy (`[plugins.mcp]`, `[plugins.mcp.servers.*]`) the store does not model. |
+| `[skills]`, `[tools]` | Disabled skills; tools every session does without. |
+| `[sessions]`, `[review]`, `[commits]`, `[work_items]` | Title mode and prompt suggestions; review before commit; co-author trailer; tasks and plans. |
+| `[worktrees]`, `[storage]`, `[speech]`, `[search]` | Where worktrees go; scratchpad and session retention; desktop speech and search. |
+| `[models]` | Model tiers and fallback (below). |
+| `[automations.<guid>]` | Desktop automations, read and written by the desktop, kept by every typed save. |
+| `spaces = [...]` on a resource, `[skills.spaces]`, `[prompts.spaces]` | The spaces of providers, MCP servers, plugins, skills and prompts. |
 
-[providers.my_provider]
-type = "openai-responses"
-enabled = true
-model = "model-id"
-api_key_env = "MY_PROVIDER_API_KEY"
+- Defaults are not written, and a table left empty is removed, so the file holds only what the user chose.
+- The bundled template (`src/CodeAlta.Catalog/DefaultConfig/config.toml`, every provider disabled) is written only when
+  the file is missing; an existing file is never reconciled with new defaults. A provider entry without `enabled` is
+  enabled; one with missing credentials is skipped at startup and stays in the file.
+- Session-specific choices (provider, model, effort, tier, mode) are not configuration: they live in the local state of
+  the journal, so a session keeps them when defaults change.
+- MCP connections are JSON (`mcp.json`) so they stay compatible with other clients; TOML only overlays policy.
 
-[plugins.statistics]
-enabled = true
+### Shared-file rules
 
-[skills]
-disabled = ["ilspy-decompile"]
+Several stores, both instances and the user's editor write the same files. The rules:
 
-[worktrees]
-location = "custom"
-folder = "D:/worktrees"
+- **One writer at a time.** Every save reads, changes and writes under `ConfigFileLock`, a named system mutex derived
+  from the path, shared across processes. Writers outside the store take the same lock
+  (`CodeAltaConfigStore.EditConfigFile`, `LockConfigFile`).
+- **Saves keep what they do not model.** Typed saves edit the table model of the existing file, so unknown keys,
+  plugin policy, key order, line endings and end-of-line comments stay. `ConfigTableSyntax` edits one value in the text
+  when comments and blank lines must stay too (space assignments, MCP policy, issue views).
+- **Readers take no lock**, so a write publishes with `StagedFileReplacement` (a rename with POSIX semantics):
+  a reader finds the old file or the new one, never none, which it would read as an empty configuration. `File.Replace`
+  is not used for these files because it moves the target away first.
+- **Editable documents** (`TextFileCodec`) save against the raw-byte revision they loaded: a stale save conflicts
+  instead of overwriting, encoding, BOM and line endings are preserved, and invalid bytes are refused rather than
+  replaced. This is cooperative: a writer outside the codec can still race the final check, so a revision is not an
+  authorization token.
+- Project and space files are edited over the bytes that were read (`ProjectCatalog.UpdateSpacesAsync` writes only the
+  `spaces` line); a file changed meanwhile is read again.
 
-[work_items]
-completed_tasks = "keep"
-completed_plans = "delete"
-start = "session"
+### Reads and the cache of the parsed files
 
-[sessions]
-title = "first_prompt"
-prompt_suggestions = false
-
-[review]
-before_commit = true
-
-[commits]
-co_author = false
-
-[models.tiers]
-standard = ["claude-code:opus@medium", "codex:gpt-6.1@medium"]
-
-[models.fallback]
-enabled = true
-```
-
-`CodeAltaConfigDocument` maps these sections to:
-
-- `chat`: chat-level defaults, currently the default provider key;
-- `providers`: configured model-provider documents keyed by provider key;
-- `skills`: skill enablement settings, currently normalized disabled skill names;
-- `plugins`: plugin enablement keyed by built-in id or source package id, plus plugin-owned policy such as `[plugins.mcp]`;
-- `worktrees`: where the git worktrees of sessions are created. `location` is `global` (under `~/.alta/worktrees`; the default, which is not written), `project` (inside the repository) or `custom` (under `folder`, an absolute path in which a leading `~` is the folder of the user). It is read from the file of the user only, with `WorktreeSettings.Read`; `folder` is kept when another location is chosen.
-
-- `sessions`: the choices for sessions (file of the user only). `title` is how a session nobody named is titled: `first_prompt`, `last_message` or `model` (the default, `AgentSessionTitles.DefaultMode`, which is not written). It is read with `CodeAltaConfigStore.LoadGlobalSessionTitleMode` when a session is attached and with each prompt of an attached session; a session can have a mode of its own, kept as `title_mode` in the local state of its journal. See [session titles](new-session-provider.md#session-titles). `prompt_suggestions` (default `true`, not written) has the model of a session the user writes in suggest the next prompt at the end of each turn; it is read with `CodeAltaConfigStore.LoadGlobalPromptSuggestions` when a run starts, so a change reaches a session at its next prompt; Settings → Sessions → Prompt suggestions sets it. See [prompt suggestions](new-session-provider.md#prompt-suggestions). The two settings share the table: saving one keeps the other, and the table is removed when both are defaults.
-
-- `review`: the reviews of the user (file of the user only). `before_commit` (default `false`, not written) has the user review the changes of every session before an agent commits them. It is read with `CodeAltaConfigStore.LoadGlobalReviewBeforeCommit` at each command a guard checks and at each prompt; a session can have a choice of its own, kept as `review_before_commit` in the local state of its journal, with `review_noted` (what its agent was last told). See [Reviews](review.md#review-before-commit).
-
-- `commits`: the commits agents make (file of the user only). `co_author` (default `true`, not written) has the Runtime Context of every session ask its agent to end the message of each commit with the trailer `Co-authored-by: CodeAlta <noreply@codealta.io>` (`SystemPromptBuilder.CoAuthorTrailer`; the address belongs to the GitHub account `codealta-agent`, which GitHub then shows as a co-author), beside the co-author lines the harness of a provider asks for. It is read with `CodeAltaConfigStore.LoadGlobalCommitCoAuthor` at each prompt, so a change reaches a session at its next prompt; Settings → Sessions → Commits sets it.
-
-- `work_items`: what is done with tasks and plans (`WorkItemSettings.Read`, file of the user only). `propose` (default `true`) lets agents propose follow-up tasks; `notify` (default `true`) shows the proposals as cards in the session; `completed_tasks` and `dismissed_tasks` are `delete` (default) or `keep` for the file of a task that is closed; `completed_plans` is `keep` (default) or `delete` for a plan once it is done; `start` is the way of starting that is offered first: `worktree` (default), `session` or `here`. A default is not written, and a table left empty is removed.
-
-- `speech`: the choices for speech to prompt of CodeAlta Desktop (`SpeechSettings.Read`, file of the user only). `enabled` defaults to `true`; `model` is the id of a preset model (`parakeet-tdt-0.6b-v3` by default, `SpeechSettings.DefaultModel`) or the address of a Hugging Face repository (`https://huggingface.co/<owner>/<repository>[/tree/<revision>[/<folder>]]`). The catalog checks only the shape of `model`: which ids are presets is known to the desktop (`SpeechModelCatalog`). `send` is what is done with the prompt when a dictation stops: `manual` (the default: it stays for the user to send) or `on_stop` (it is sent). `SaveGlobalSpeechSettings` omits the defaults and keeps unknown settings; a `model` that is neither shape or an unknown `send` is a validation error of the file, never replaced by the default. The microphone is not here: device ids belong to the WebView profile, so the page keeps the chosen device in its own storage.
-
-- `search`: the local search of CodeAlta Desktop (`SearchSettings.Read`, `LoadGlobalSearchSettings` and `SaveGlobalSearchSettings`, file of the user only). `enabled` (default `true`) is the index itself; `sessions` (default `true`) indexes the prompts and final answers of sessions; `semantic` (default `false`) is search by meaning, with `model` the id of an embedding preset (`embeddinggemma-2` by default; the catalog checks only its shape, the presets are the desktop's `EmbeddingModelCatalog`); `prompt_catalog` (`auto`, `full` or `compact`) is how the prompt lists skills; `excluded_projects` and `excluded_spaces` are the ids kept out of search; `meaning_offer` is what was answered to the offer of search by meaning (`never`, `turned_off` or `later:<yyyy-MM-dd>`); `parallelism` (default `2`, 1 to 64 in the file) is how many batches search by meaning embeds at once, run within one and half of the cores (`EffectiveParallelism`). A project keeps itself out with `[search] enabled = false` in its own `.alta/config.toml` (`IsProjectExcludedFromSearch`). Defaults are not written, and a table left empty is removed. See "Search" in `doc/desktop.md`.
-
-- `models`: the model tiers and the provider fallback (`ModelSettings.Read`, file of the user only); see [Model tiers and fallback](#model-tiers-and-fallback).
-
-- `storage`: global-only maintenance policy (`StorageSettings.Read`). `clear_scratchpad_on_startup` defaults to `true`. `[storage.session_retention]` has `enabled` (default `true`; `false` means Never), `amount` (a positive integer, default `3`) and `unit` (`days`, `weeks`, `months` or `years`, default `months`). Months and years use UTC calendar arithmetic, not fixed day approximations. Retention uses one captured UTC cutoff and retains equality. Invalid settings or an unrepresentable cutoff must skip cleanup and report a configuration error, never fall back to a shorter duration. `SaveGlobalStorageSettings` omits default fields/empty tables, keeps unknown TOML settings, and preserves a custom duration when retention is disabled. These settings authorize only guarded maintenance of instance-owned scratchpad/session artifacts, never configuration or arbitrary profile folders.
-
-`[automations.<guid>]` tables are the automations of CodeAlta Desktop, in the global file and in the file of a project. `CodeAltaConfigDocument` does not model them: the desktop reads and writes them apart (`AutomationConfig`, see `doc/desktop.md`), and the typed saves keep them like every other table they do not model. The check for the configuration shapes of older versions reads the keys of the file, not the text of its strings: a prompt may quote such a key.
-
-Legacy `[acp]` and `[acp.*]` blocks are no longer active configuration. `CodeAltaConfigStore` ignores them and keeps them when saving, like every other setting it does not model.
-
-**Typed saves keep what the document does not model.** `CodeAltaConfigDocument` models only part of the file: for a plugin it knows `enabled`, not the plugin-owned policy beside it. The typed save methods (`SaveGlobalProviderDefinitions`, `SaveGlobalProviderPreference`, `SaveGlobalDefaultProvider`, `SaveGlobalPluginEnabled`, `SaveProjectPluginEnabled`, `RemoveGlobalPluginEnabled`, `RemoveProjectPluginEnabled`, `SaveGlobalWorktreeSettings`, `SaveGlobalWorkItemSettings`) therefore apply their changes to the table model of the existing file instead of replacing the file: a modeled key takes its new value or is removed when normalization drops it, and every other key or table stays, including `[plugins.mcp]` policy, `[plugins.mcp.servers.*]`, unknown top-level settings and unknown keys inside a provider that is kept. A provider that the save removes goes with its whole table. The file keeps its key order, its line endings and end-of-line comments; full-line comments and blank lines are not kept by these saves (the raw editor and skill enablement edits keep the text as it is).
-
-**One writer at a time.** Every save of `CodeAltaConfigStore` reads, changes and writes the file under `ConfigFileLock`, a named system mutex derived from the full path of the file, shared by the stores of the process and by the user's other CodeAlta processes. A writer outside the store takes the same lock: `LockGlobalConfig()` for a check-then-save of the whole global file (the raw editor of the desktop), or the static `CodeAltaConfigStore.EditConfigFile(path, edit)` for any configuration file, which runs the edit on the current text under the lock and writes the result only when it changed and still loads. A writer that writes the file its own way holds `CodeAltaConfigStore.LockConfigFile(path)` while it reads, changes and writes it, on one thread: the automations of the desktop do, to keep their staged replacement, the link rules and the UTF-8 mark of the file. `ConfigTableSyntax.SetValue` sets a boolean or a list of strings in one table of the text (an empty list removes the line), with keys compared with their case, and leaves comments, blank lines and the other settings as they are. The MCP policy writer uses both ([MCP support](mcp.md#toml-policy-overlay)). Readers take no lock, so a write publishes the staged text with `StagedFileReplacement`, a rename with POSIX semantics on Windows: a reader of any instance finds the previous file or the new one, never none, which it would read as an empty configuration. `File.Replace` moves the file away before it moves the new one in on Windows, and is not used for these files; `TextFileCodec` keeps the attributes and the creation time that it kept.
-
-**Reads and the cache of the parsed files.** A configuration file is read on the paths that run with each prompt (the title mode of a session, the tools turned off, the model tiers, the space assignments and the disabled skills that the instructions of a session are built from), and parsing it costs about half a millisecond and a third of a megabyte for a usual `config.toml`. `CodeAltaConfigStore` therefore keeps what each file parses to, one `ParsedFileCache` per store instance for the typed documents (global and project files, by path) and one for `SpaceAssignments`, and parses a file again only when it changed:
-
-- Each read still checks the file: `File.Exists`, then its length, its last write time and, outside Windows, its permissions. A file whose last write is older than three seconds (`ParsedFileCache.RacyWindow`) when it is seen is trusted by that stamp alone; a more recent one is read again and its text compared at each read, since two writes within one step of the clock of the file system (two seconds on FAT) can leave the same length and time. A text read again as it was reuses what it parsed to, whatever its stamp. What a read finds is kept only when the stamp seen before the read is still the one after it.
-- A file that cannot be read, or does not parse, is never kept: every read throws again, with the same exception as before (`InvalidDataException` for a configuration that does not parse), and a file fixed afterwards is read again. A deleted file is read as missing at once.
-- `LoadGlobal()` and `LoadProject()` give each caller a copy of its own (`CodeAltaConfigDocumentCopy`, an exact deep copy: dictionaries keep their comparers and key order, nothing is normalized), which the caller may change. The other reads (`LoadGlobalSessionTitleMode`, `LoadGlobalModelSettings`, `LoadGlobalDisabledTools`, the disabled skill names, `GetEffectiveDefaultProvider`, `GetEffectiveProviderPreference`, the search and speech settings, `IsProjectExcludedFromSearch`) read the kept document without copying it and return values of their own. `LoadGlobalStorageSettings`, `LoadGlobalConfigContent` and the bounded skill reads read the file each time, as before.
-- Every save of the store reads its file again under its lock, never from what is kept, and forgets everything the store kept once it wrote (also when the write failed half way). Another store, another process or an editor is seen by the stamp of the file at the next read. `CodeAltaConfigDocumentCopyTests` fills every property of every document type: a property added to a document type is added to the copy as well.
-- What the stamp does not show: a writer that puts back the length and the last write time of the text it replaces (a copy that keeps the times, a clock set back onto the very time of the file), a network file system that answers with the times it read before (NFS attribute caching, for the writes of another computer), and on Windows (or with ACLs) a change of the access rights alone. Such a change is seen with the next change of the file.
-
-`ProjectCatalog.LoadAsync` (and `GetByIdAsync`, `GetBySlugAsync`, `GetByPathAsync` and the edits that start from it) works the same way for the project files: the folder is listed at each load, so a file added or removed is seen at once, and each file is parsed again only when its stamp says it changed, by the same rules. The order of the result, the choice between a flat file and a legacy `readme.md`, and the exceptions of a file that is not valid are those of a load that parses every file; the descriptors returned are copies the caller owns. A file whose `path` is not a full path is parsed again at each load, since its normalized form depends on the current folder of the process. Every write of the catalog (`SaveAsync`, `DeleteAsync`, renames, archive and spaces changes) forgets what it kept. `AgentInstructionTemplateProvider` keeps one store and one `SpaceCatalog` for its life and reads the spaces on the calling thread (`SpaceCatalog.Load`, the synchronous twin of `LoadAsync`), since it builds a prompt synchronously.
-
-Global config is loaded from `~/.alta/config.toml`. Project config is loaded from `<project>/.alta/config.toml` when a project scope is active. The provider-management UI edits the same global file and validates TOML before saving. During startup, `CodeAltaConfigStore` creates the bundled default template only when the global config file is missing; existing user config files are not reconciled with newly bundled defaults.
-
-**Startup configuration recovery.**
-
-`ConfigRecoveryService` owns the TUI failed-config preflight/recovery document at an explicitly captured absolute global root. It shares one `TextFileCodec` with its config owner for first-run creation, reload and recovery saves. Validation uses `CodeAltaConfigStore.ValidateGlobalConfigContent` only: no provider/plugin/session discovery or environment credential reads. `DeferredCodeAltaApp` invokes this service before its normal owned-service startup; the recovery dialog owns editor bindings, diagnostics, discard confirmation and continuation/exit callbacks, not file reads or writes.
-
-Recovery preserves the complete parser-accepted TOML text, comments, unknown fields, literal newlines and the loaded UTF-8/UTF-16/UTF-32 encoding/BOM. Only an actual successfully decoded snapshot or acknowledged save supplies a revision. Unreadable/undecodable content is not an empty editable baseline; a failed explicit reload revokes the previous baseline while the dialog retains unsaved text. Fix access/encoding externally and explicitly reload before saving. Invalid TOML, external changes/deletion and save failures do not continue startup or discard edits. Syntax validity is shown separately from storage failure; retry uses the original baseline. There is no overwrite action: Reload asks before discarding dirty edits, then users can reapply them. Reload alone never continues a recovery dialog; only successful Save and Continue does. Exit never saves, and pending edits are memory-only.
-
-`EnsureGlobalConfigExists` now uses the codec's conditional missing-file save and nonoverwriting publication rather than check-then-blind write. Recovery reloads and validates both its own newly created defaults and a competing creator before admission; read/default-create failures open recovery instead of escaping the terminal loop. The codec serializes cooperating operations on the same instance, not unrelated general config/provider/plugin persistence. External writers and path-link changes retain the final-check/commit race: this is not cross-process atomic CAS, a sandbox or power-loss durability. This bounded recovery route does not isolate the application's existing update checking, prestarted plugins, home resolution or broader startup ownership; tests use the storage-only preflight seam without constructing the default application.
-
-MCP server connection definitions are intentionally separate JSON files: global `~/.alta/mcp.json` and project `<project>/.alta/mcp.json`. CodeAlta loads one file per scope, global first and then project overlay; a project server key shadows a global server key. New files use the default `mcpServers` format, while supported existing `mcpServers`/`servers` flavors are detected and preserved. String values in stdio `env` entries and HTTP/SSE `headers` may reference process environment variables with `${NAME}` placeholders, keeping secrets out of JSON when desired. TOML under `[plugins.mcp]` is a policy overlay only: per-server enablement, per-tool `disabled_tools`/`allowed_tools`, prompt caps, timeouts, and direct-exposure controls. Runtime availability is finite diagnostic state rather than durable config: failed or timed-out MCP servers are reported as unavailable for the current request/test, and diagnostics/results are redacted before display. Dynamic MCP tool exposure is progressive: configured servers appear compactly in the prompt, and `alta mcp activate <id>*` enables tools from selected servers for the current session; see [MCP support](mcp.md).
-
-### Provider enablement
-
-The bundled template is `src/CodeAlta.Catalog/DefaultConfig/config.toml`; all built-in provider entries are explicitly disabled there. For user-authored provider entries, an omitted `enabled` value normalizes to `true`.
-
-Provider registrations are skipped at startup when required credentials or provider-specific authentication settings are missing. Skipped providers remain in config and can be corrected through the UI or TOML editor.
-
-### Project overrides
-
-Project-local config can override effective chat/provider behavior for that project. Project execution preferences live in `ui-state.yaml`; session-specific provider/model/reasoning selections live in session journal state, so an existing session view can keep its selected runtime after global defaults change.
-
-Skill disablement is additive rather than an override: a skill named in global `[skills].disabled` is disabled everywhere, and a skill named in project `[skills].disabled` is disabled only for that project. A project config cannot re-enable a globally disabled skill.
+Configuration is read on paths that run with every prompt (title mode, disabled tools, tiers, space assignments).
+`CodeAltaConfigStore` and `ProjectCatalog` therefore keep what each file parses to (`ParsedFileCache`, per store
+instance) and parse again only when the file's stamp (existence, length, last write time) changed. A file written in
+the last three seconds is compared by content at each read, since two writes within a clock step can leave the same
+stamp. A file that does not read or parse is never kept, so every read reports the error again. `LoadGlobal()` and
+`LoadProject()` return deep copies the caller owns; the narrow reads return values. Every save reads its file again
+under its lock and forgets what the store kept.
 
 ### Model tiers and fallback
 
-The `[models]` table of the global file (`CodeAltaModelSettingsDocument`, read with
-`CodeAltaConfigStore.LoadGlobalModelSettings` into `ModelSettings`, in `CodeAlta.Catalog.ModelTiers`) lists the
-models to use for three kinds of work, and says whether a session goes on with the next one when its provider fails:
+`[models.tiers]` lists, for `complex`, `standard` and `quick` work, ordered targets
+`<provider>:<model>@<effort>,<effort>`: the provider is a configured key, which names an account, and efforts are in
+order of preference. `[models.fallback]` (`enabled`, off by default; `on = ["quota", "unavailable"]`) says whether a
+failed run continues on the next target ([runtime](runtime.md#provider-fallback)).
 
 ```toml
 [models.tiers]
-complex  = ["claude-code:opus@high,xhigh", "codex:gpt-6.1@xhigh", "copilot:claude-opus-4.6@high"]
+complex  = ["claude-code:opus@high,xhigh", "codex:gpt-6.1@xhigh"]
 standard = ["claude-code:opus@medium", "codex:gpt-6.1@medium"]
-quick    = ["claude-code:haiku@low", "codex:gpt-6.1-mini@low"]
+quick    = ["claude-code:haiku@low"]
 
 [models.fallback]
-enabled = false                 # opt-in
-on = ["quota", "unavailable"]
+enabled = true
 ```
 
-- A tier (`complex`, `standard`, `quick`; `ModelTier`) is an ordered list of targets, the preferred first. A target
-  (`ModelTierTarget`) is written `<provider>:<model>` or `<provider>:<model>@<reasoning>,<reasoning>`: the provider
-  is the key of a configured provider, which names the account (two accounts of one vendor are two keys); the
-  reasoning efforts are in order of preference, and none leaves the choice to the provider. The provider key is
-  normalized to lower case. A tier steps through each target with each of its efforts in order
-  (`ModelTierResolver.Candidates`).
-- `ModelTierResolver.Resolve` gives the model a tier gives now: the first target whose provider is configured and
-  ready and lists the model (when it lists models), with the first of its efforts that the model supports.
-  `ModelTierSettings.FindTierOf` finds the tier of a model chosen by hand: the one where it comes first, standard
-  before complex before quick on a tie.
-- `[models.fallback]`: `enabled` is `false` unless the user sets it; `on` lists the failures that lead to the next
-  target, `quota` (an exhausted quota or allowance, a long rate limit) and `unavailable` (a provider that stays
-  unavailable after its retries), both when absent. What the fallback does is in "Provider fallback" in
-  [runtime](runtime.md#provider-fallback).
-
-Validation (`ModelSettings.Validate`) runs with the rest of the file, so an invalid table makes the file invalid.
-Each message names its setting: `models.tiers.<tier>[<n>]` for a target that is not `<provider>:<model>`, that
-names no provider or model, whose reasoning is not one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or
-`max`, or lists an effort twice, and for a model listed twice in one tier ("give one entry its reasoning efforts in
-order"); `models.fallback.on` for a failure that is neither `quota` nor `unavailable`. That a provider exists or
-lists the model is not checked: a target whose provider is missing, disabled or not ready is skipped when the tier
-is resolved. The runtime and the live tool read the table with `LoadModelSettings`, which gives no tier and no
-fallback when the file cannot be read or is invalid.
-
-`SaveGlobalModelSettings` writes the table, without the defaults: an empty tier, `enabled = false` and an `on` that
-has both failures are not written, and an empty table is removed (normalization keeps an invalid target, so that
-validation reports it).
-
-The `tier` a session runs on is not configuration: it is kept in the local state of its journal (see "Session and
-session-view storage" below).
-
-CodeAlta Desktop edits the table in Settings > Models, in the **Model tiers** section: an ordered list per tier,
-each row a provider, a model and its ordered reasoning efforts, and the fallback switch. The name of a row opens the
-picker of **Add a model** and changes its model in place (`replaceTierTarget` in `modelTiers.ts`): the row keeps its
-position and the efforts the new model offers, in order, or starts with the model's own effort when none remain; a
-model the tier already has is not offered. A row whose provider is not configured is fixed the same way. The model picker of the
-composer offers the three tiers first, with the model each gives now; choosing one records the tier of the session.
-A new desktop session starts on `standard` when the tiers are set.
-
-**Tiers and fallback per space.** The global `[models]` table is the usual setting: the tiers and the fallback of the
-default space and of every space without tiers of its own. The file of a space can set tiers of its own, in
-`new_sessions.tiers` (`SpaceModelTiers`, whose targets are the same `ModelTierTarget`, written the same way), and a
-fallback of its own, in `new_sessions.fallback` (a `ModelFallbackSettings`, written as `[models.fallback]`: `enabled`,
-always written, and `on` when it is not both failures; a failure it does not know is left out when read). The tiers
-replace the global ones for the sessions of the space, also for a tier they leave empty. The fallback of the space is
-read only with tiers of its own: a space with tiers and no `fallback` (every file of 1.9.0) takes the global fallback,
-and a `fallback` without tiers is ignored. `ModelTierScope` holds the tiers and the fallback a session uses:
-`ModelTierScope.Of(global, space, assignments)` takes the space's own tiers when they have a target (`FromSpace`), with
-its own fallback when it has one (`FallbackFromSpace`), else the global ones, and `IsProviderAvailable` refuses a
-provider the space has not got (its `spaces`, see
-[SpaceScope](#the-spaces-of-providers-mcp-servers-plugins-skills-and-prompts)). `ModelTierScope.LoadAsync` reads it for
-the space a session records (else the one of its project, else the default space). Every reader of the tiers uses
-it: the fallback (`RunFailureNotice.Scope`, whose `Fallback` decides), `alta session create --tier` and
-`alta model resolve --tier` (the space of the session created, else the one of the caller, else the one shown), the
-Runtime Context line (which names only the targets the space can use, and says the fallback of the space), and the
-composers (`globalConfig.modelTiers` with a `sessionId`, or with the `spaceId` of the space shown for a new session).
-The global reading of Settings > Models has no space and filters no provider.
-
-CodeAlta Desktop edits the tiers and the fallback of a space on its page, in **New sessions** > **Model tiers**:
-**Use global**, or **Customize**, which starts from a copy of the global tiers (`globalConfig.saveModelTiers` with
-`spaceId`, written by `SpaceCatalog.UpdateSettingsAsync`; `useGlobal` removes the tiers and the fallback). A save
-writes the fallback of the space only when it differs from the global one or the file has one already, so that a
-customized space follows the global fallback until its own is changed; a save without tiers removes both. The model
-picker of a space offers the enabled providers the space has, and a row whose provider is not in it says **Not in this
-space**. The global picker offers every provider, since the global tiers serve every space on the usual settings, and
-names the spaces of a provider assigned to some only (**Only in Business**).
-
-## Project catalog
-
-`ProjectCatalog` stores project descriptors under `~/.alta/projects`. Current saves use flat `<slug>.md` files; the loader still reads older `<slug>/readme.md` descriptor paths so existing user state can be opened.
-
-A project descriptor includes stable id, slug, display name, project path, archive/visibility state, and timestamps. At launch, the current directory is exposed as a selectable in-memory project when no persisted descriptor already exists for that path; it is not written to `~/.alta/projects` until a session is created for it. Opening a folder upserts a descriptor for that path, then the shell selects it in the sidebar. Filesystem roots are valid project paths: because they have no leaf folder name, the catalog stores a safe synthetic project `name` and uses the normalized root path (for example `D:\` or `/`) as the sidebar display name.
-
-A project file also names the spaces of the project besides the default one, in the front-matter entry `spaces` (`ProjectDescriptor.Spaces`), for example `spaces: [work, open-source]`. The entry is absent while the project is in no such space. An id that is not valid, the default one and a repeated one are dropped when the file is read (`SpaceDescriptor.NormalizeIds`), and an id that no space has is ignored by the readers.
-
-### Spaces
-
-`SpaceCatalog` stores the spaces under `~/.alta/spaces` (`CatalogOptions.SpacesRoot`): the named groups of projects that CodeAlta Desktop shows one at a time (see `doc/desktop.md`, "Spaces").
-
-```markdown
----
-id: open-source
-kind: space
-name: Open source
-icon: globe
-color: "#9d3f9d"
-order: 3
----
-
-Libraries I maintain and the projects I contribute to.
-```
-
-- The file name is the id: what the front matter says of `id` is not what other files refer to. An id is a catalog slug, worked out from the first name of the space and kept when the space is renamed.
-- `name` is 1 to 64 characters on one line; `icon` is the name of an icon (lower-case letters, digits and `-`); `color` is `#rgb` or `#rrggbb`; `order` is the place in the list, the lower first, then the name. The body is the description, at most 2000 characters. A value that is wrong in a file written by hand is ignored; a file that cannot be read as a space is left out, so that it never hides the others.
-- The default space (`default`) holds every project and has no file until it is given another name, icon, color or description (`default.md`). It is always first, and cannot be deleted, joined or left.
-- A catalog holds at most 32 spaces, the default one included.
-- `SeedAsync` gives a catalog that never had spaces its first ones, `work.md` and `personal.md`. It does nothing once the folder exists.
-
-A space is also a setup: its front matter can say what its new sessions start with, the identity its sessions work under and the tools they do without (`SpaceDescriptor.Settings`, a `SpaceSettings`). Each part is optional, and a file that sets none of them is written as above, byte for byte:
-
-```markdown
----
-id: business
-kind: space
-name: Business
-order: 1
-new_sessions:
-  agent_prompt: reviewer
-  tiers:
-    complex: ["claude-code:opus@high,xhigh", "codex:gpt-6.1@xhigh"]
-    standard: ["claude-code:opus@medium"]
-    quick: ["claude-code:haiku@low"]
-  fallback: { enabled: true, on: [quota] }
-identity:
-  git: { name: A. Mutel, email: alex@contoso.example, ssh_key: ~/.ssh/contoso, sign: ssh, signing_key: ~/.ssh/contoso.pub, signoff: true }
-  github: { config_dir: ~/.config/gh-contoso }
-  jira: { site: contoso.atlassian.net, email: alex@contoso.example, token_env: CONTOSO_JIRA_TOKEN }
-  cli:
-    azure:
-      env: { AZURE_CONFIG_DIR: ~/.azure-contoso }
-      check: az account show
-      login: az login --tenant contoso.onmicrosoft.com
-    aws:
-      env: { AWS_PROFILE: "${env:CONTOSO_AWS_PROFILE}" }
-tools:
-  disabled: [shell_command]
----
-Projects of the Contoso contract.
-```
-
-- `new_sessions.agent_prompt` is the id of an agent prompt; `new_sessions.tiers` lists, for `complex`, `standard` and `quick` work, at most 16 targets each, written `provider:model@effort1,effort2` (`ModelTierTarget`; the efforts are optional, each once); `new_sessions.fallback` is the fallback of the space beside its tiers (see "Tiers and fallback per space" above).
-- `identity.git` has `name`, `email`, `ssh_key` (the private key to fetch and push), `sign` (`off`, `ssh` or `gpg`, which needs `signing_key`), `signing_key` and `signoff`; `identity.github.config_dir` is the folder of a GitHub CLI profile; `identity.jira` has `site`, `email` and `token_env`, the **name** of the environment variable that holds the token. `identity.cli` maps the name of a profile of a command line tool (letters, digits, `-`, `_`, `.`, at most 64; at most 32 profiles) to its `env` (at least one and at most 32 variables, in their order), an optional `check` and an optional `login` command (`SpaceCliProfile`). A value is one line: `~` at its start or after the separator of a list of paths (`:`, `;` on Windows) is the folder of the user, and `${env:NAME}` the value of a variable of the environment of the application, the only `${...}` form. A variable whose name has a word of a secret (`TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `PASSPHRASE`, `APIKEY`, `PAT`, or `API_KEY`, `ACCESS_KEY`, `PRIVATE_KEY`, `CLIENT_KEY`, `ACCOUNT_KEY`, unless its last word is a place, `FILE`, `PATH`, `DIR` or `HOME`, such as `AZURE_FEDERATED_TOKEN_FILE`; `SpaceCliProfile.IsSecretName`) can only be one reference; the variables of the Git and GitHub cards (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `GIT_SSH_COMMAND`, `GIT_CONFIG_*`, `GH_CONFIG_DIR`) are refused; two profiles cannot give a variable two values. Only paths and names of variables are kept, never a secret.
-- `tools.disabled` lists names of tools (letters, digits, `_`, `-`, `.`, `:`), at most 64.
-- A value that is not valid in a file written by hand is left out when the file is read (`SpaceSettings.Sanitized`), and the space is read with the rest: a CLI variable that a profile before gives another value is left out, and a profile left without variable. What was wrong with the identity is kept in `SpaceDescriptor.IdentityProblem`, which the page of the space shows. `SpaceCatalog.UpdateSettingsAsync` changes the settings from what the file has now, refuses a value that is not valid with what is wrong (`SpaceChangeStatus.Invalid`), and keeps the name, the icon, the color and the description; a rename keeps the settings.
-- `new_sessions.agent_prompt` is the agent prompt of new sessions of the space, and `tools.disabled` adds to the tools its sessions do without (see `doc/runtime.md`, "Built-in local tools").
-- The global `config.toml` has the same list for every session, `[tools] disabled = ["shell_command"]` (`CodeAltaConfigStore.LoadGlobalDisabledTools`/`SaveGlobalDisabledTools`), read from the user's file only.
-- The identity is applied to the sessions of the space (see "The identity of a session" below); the other settings are read and validated, and what uses them comes with the work that applies them.
-
-### The space of a session
-
-A session belongs to one space for its whole life. The first line of its journal (`SessionViewJournalHeader`) records it as `space_id`, written when the session is created and copied by a fork and by the session that keeps what a rewind removed; moving a session to another project keeps it. It reaches `SessionViewDescriptor.SpaceId`, `AgentSessionMetadata.SpaceId` (read from the header, also without the session list), the `space_id` column of the session list in the application database, `SessionRuntimeOverview.SpaceId` and the session records of the desktop page.
-
-| Created by | Space |
-| --- | --- |
-| A session (`alta session create`) | The space of the calling session; it can name no other one (`space.notOwnSpace`) |
-| The window (a new session, a task or an issue started there, a question about the guide) | The space the window shows, which the page names; `workspace.createSession` answers `space_missing` for a space that no longer exists |
-| An automation | The space of its project when the project is in exactly one, else the default space |
-| A caller with no session (`alta session create` from the MCP server of the window or a terminal) | The space `--space` names, else the one the window shows |
-| CodeAlta TUI | None (see below) |
-
-A session that records no space (one created before sessions had a space, or by the TUI) is in the space of its project when the project is in exactly one, and in the default space otherwise. A `space_id` that names no space (a space deleted, maybe by the other instance) is read as the default space. `SpaceCatalog.ResolveSessionSpace` applies these rules and never throws for what a journal says. Journals are not rewritten.
-
-Where a session is **listed** (`SpaceCatalog.SessionSpaces`, and `sessionSpaces` in the page) is one space for a session that records one; a session that records none is listed in every space of its project, and in the default space when its project is in no other, and such a chat in the default space. `alta session list --space` and the Explorer follow it.
-
-`SessionViewJournalStore.MoveSessionToSpaceAsync` gives an idle chat or project session another space: like a move to another project, the first line of the journal is written again (with the local state after it) in one replacement of the file, and the history, the summary and the provider continuation stay. `SessionRuntimeService` moves the session with the sessions it started, refuses one at work, and retires its attachment; `OwnedSessionCommandService.MoveSessionToSpaceAsync` holds the catalog-mutation reservation while it runs. `MoveSpaceChatsAsync` gives the chats that record a space another one: deleting a space moves its chats to the default space this way.
-
-The Runtime Context of an agent names the space of its session, with what it is for on the same line (the description, joined and cut at 300 characters), as soon as the catalog has a space besides the default one:
-
-```text
-- Space: Business (business): Projects of the Contoso contract.
-```
-
-### The identity of a session
-
-A session of CodeAlta Desktop works under the identity of its space (`CodeAltaHostOptions.AppliesSpaceIdentities`; CodeAlta TUI leaves it off, and its sessions keep the user's usual settings). `SessionIdentityResolver` reads the space of the session (`SpaceCatalog.ResolveSessionSpaceAsync`) and the CLI profiles of its project when the session attaches (see "The CLI profiles of a project" below), and `SpaceIdentityEnvironment.Create` turns its identity into one `AgentProcessEnvironment`, kept by the attachment (`SessionRuntimeService.GetSessionIdentityAsync`): the session keeps it while it runs, whatever the window shows and whatever is changed in the space, and takes the new one when it attaches again. An identity that sets nothing, the default space's included, sets no variable.
-
-| Identity | Variables |
-| --- | --- |
-| `git.name`, `git.email` | `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_EMAIL` |
-| `git.ssh_key` | `GIT_SSH_COMMAND=ssh -i '<key>' -o IdentitiesOnly=yes`: the path quoted for the POSIX shell Git runs it in (the one it ships with on Windows), with `/` on Windows |
-| `git.sign`, `git.signing_key` | `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n`: `user.signingkey`, `gpg.format` (`ssh` or `openpgp`) and `commit.gpgsign` (`false` for `off`), numbered after the `GIT_CONFIG_*` settings the application already has, which the processes inherit |
-| `github.config_dir` | `GH_CONFIG_DIR` |
-| `cli.<name>.env` | Each variable, after the ones above; one whose `${env:NAME}` is not set is left out, so the tool keeps its own value |
-
-A path written `~` starts from the folder of the user. The variables are set over the environment of the application for `shell_command`, the Claude Code CLI (and so its Bash tool; they are part of the launch key, so another identity starts another CLI process, and `CLAUDE_CONFIG_DIR` of the provider stays its own), `alta job start`, the commands of the command triggers of automations (the space of the project of the automation), the `gh`, `glab` and `az` tools and the issue lookups of the Git plugin (`gh auth token`, `glab config get token`, `az account get-access-token`), the stdio MCP servers started for the session (one server process per identity, see `doc/mcp.md`), and the terminals of the window (the shown space, with the CLI profiles of the project the terminal is listed under; a terminal a session opens takes the session's). `git.signoff` sets no variable, since Git has no setting for it: the Runtime Context of the session says ``- Commit with `git commit --signoff`: Signed-off-by: <name> <email>``. The Jira part is read by the Jira plugin (see `doc/plugins.md`).
-
-#### The CLI profiles of a project
-
-A project can give its sessions other CLI profiles than the rest of its space, in its own `.alta/config.toml` (`[identity.cli.<name>]`, `CodeAltaIdentitySettingsDocument`, read with `CodeAltaConfigStore.LoadProjectCliProfiles` from the folder of the project; the global file does not read it):
-
-```toml
-[identity.cli.kubectl.env]
-KUBECONFIG = "~/.kube/contoso-prod-readonly"
-
-[identity.cli.aws]
-check = "aws sts get-caller-identity"
-
-[identity.cli.aws.env]
-AWS_PROFILE = "contoso-prod"
-```
-
-`SpaceIdentity.WithProjectCli` lays them over the profiles of the space: a profile of the project with the name of one of the space (without regard to case) replaces its variables of the same name, keeps the others, and replaces its `check` and `login` when it has them; another profile is added after the space's. A variable the project gives is taken out of every other profile, so that two profiles of the space that give it the same value never hide the project's; between two profiles of the project, the later wins. The project comes first, then the space, then the environment of the application. A profile of the project needs no variable when it only changes a command. What is not valid is left out (`SpaceCliProfile.Sanitized`), and a file that cannot be read gives none. `CodeAltaConfigDocument.Identity` is a `TomlTable`, read by `LoadProjectCliProfiles`: a value of another type (`VERBOSITY = 3`, `env = "x"`) is left out without making the rest of the file unreadable. A project file can set any variable for the processes of its sessions, as a space can: it is trusted as the rest of the project is (its `AGENTS.md`, its plugins). `SessionIdentity.ProjectProfiles` names the profiles the project gives or changes, for Session info. The window reads the issues and pull requests of a project (the issue picker, the Issues tab, `alta issue` from no session) with the shown space and the CLI profiles of that project (`IPluginIdentityService.GetWindowIdentityAsync`), as its terminals; the window-level reads that know no project use the profiles of the shown space alone.
-
-Limits: a profile is a separation, not a sandbox (an agent can still set another value in a command); a tool that keeps its credentials in the keychain of the system keeps one login per machine; a variable of the environment a tool reads first (`AWS_ACCESS_KEY_ID` before `AWS_PROFILE`) keeps its effect unless a profile sets it. A repository's own `.git/config` comes before `GIT_CONFIG_*`; an `env` block in the `settings.json` of a Claude Code profile can override the variables of the CLI; a `GITHUB_TOKEN` or `GH_TOKEN` of the environment comes before the GitHub profile; the HTTPS accounts of Git Credential Manager are not switched; the event feed of the automations (`GitRepositoryFeed`, the issues and pull requests an event trigger watches) reads with the usual GitHub profile.
-
-### The spaces of providers, MCP servers, plugins, skills and prompts
-
-Every resource gets one optional list, `spaces`, in the global `config.toml`, beside the definition it already has; one definition can be shared by several spaces. `SpaceScope.IsAvailable(spaces, sessionSpaceId)` is the rule: absent or empty is every space, `["business"]` is Business only (not the default space), `["business", "default"]` is Business and the default space.
-
-```toml
-[providers.claude-business]
-type = "claude-code"
-spaces = ["business"]
-
-[plugins.mcp.servers.atlassian]       # the policy entry of an MCP server
-spaces = ["business"]
-
-[plugins.jira]
-spaces = ["business"]
-
-[skills.spaces]
-terraform = ["business"]
-
-[prompts.spaces]
-reviewer = ["business", "default"]
-```
-
-`CodeAltaConfigStore.LoadGlobalSpaceAssignments` reads them all as a `SpaceAssignments` (keys compared without case; a value that is not a list of strings, or one string, is ignored). `SaveGlobalSpaceAssignment(kind, key, spaces)` writes one list and nothing else: the line is replaced in place, added after the last setting of its table, or removed for an empty list (every space), and comments, blank lines and the other settings stay as they are (`ConfigTableSyntax`, on the syntax tree of the file, keys compared without case). A missing table of an MCP server, a plugin, the skills or the prompts is added at the end of the file; a provider is assigned only when its table is in the file, so that a table with nothing but its spaces never reads as an incomplete provider. A table written inline or with dotted keys is refused (`InvalidDataException`) and left for the user to edit. `SpaceScope.With` and `SpaceScope.Without` work out the list when a space is turned on or off for a resource: a shared resource turned off in one space is listed for every other space that exists, the default space included, and a resource cannot be left in no space (`Without` returns `null`). A resource defined in a project follows its project. No `alta` command writes `spaces`.
-
-`SpaceFilter` is what the space of a session has: the assignments read once, with the space the session is in (`SpaceCatalog.ResolveSessionSpace`; `SessionRuntimeService.GetSpaceFilterAsync` and `GetSessionSpaceFilterAsync`). Each kind is filtered by it **before** its global and project enablement, by its key, name or id whatever file defines it, so a project cannot bring into a space what the space does not have. `ResourceNotInSpaceException` carries the refusal and its message for an agent. Where the assignments are read often (the buttons and regions of the window, every run of the plugins), `CachedSpaceAssignments` parses `config.toml` again only when the file changes. What each kind does with it is in `doc/skills.md`, `doc/mcp.md`, `doc/plugins.md` and `doc/live-tool.md`; the providers are filtered as follows.
-
-A session uses only the providers of its space (`SessionRuntimeService.IsProviderInSpace`, `DesktopDefaultProvider.InSpace`). The default provider of a new session is the configured one when it is in the space, else the first enabled provider of the space; `workspace.createSession` answers `provider_outside_space` for a provider of another space. The provider choices of a session list the providers of its space, and a switch to another one answers `provider_outside_space`; the fallback of a failed run skips them. A session whose provider was taken out of its space after it started sends nothing: the send fails with the code `provider_outside_space`, `sessionOperations.choices` says `providerOutsideSpace`, and the composer says why and opens the provider chooser. Renaming a provider in Settings keeps its spaces under the new key.
-
-A session whose provider no enabled provider has the key of (deleted in Settings, or turned off) is read the same way: `SessionRuntimeService.GetSessionSpaceProvidersAsync` gives `ProviderAvailable = false`, and `sessionOperations.choices` says `providerUnavailable`. When the configuration no longer defines the provider at all, `ReplacementProvider` (`replacementProvider` of the choices) is the configured default provider (`GetEffectiveDefaultProvider`, of the project then of the user) when the session can use it. The desktop composer then switches the session to it once when it is shown, with a toast, through the usual `providerChoices`/`selectProvider` guards; otherwise it says why nothing is sent, names the provider as unavailable in the chooser, and opens it, as for a provider outside the space. The models of a provider the catalog does not know (`modelCatalog.models` answers `not_found` with no provider) leave the choices as they are, so that the selection stays usable. A switch away from a deleted provider whose journal names its key as the protocol family (as CodeAlta 1.8 wrote it) takes the family from the provider state of the session, since no runtime is left to say it. A session that never ran has no provider state: a switch (`SessionViewJournalStore.SelectProviderAsync`) takes it, as a move does, as one with nothing to continue. Deleting a provider (`globalConfig.deleteProvider`) removes its targets from the global tiers and from the tiers of each space (`ModelTierSettings.ReplaceProvider`); a space left without tiers of its own takes the global ones and their fallback. Renaming one (`globalConfig.saveProvider` with another key) gives its targets the new key. The store already gives the default provider to the first enabled provider when the default is deleted or turned off. A work item started from the window (`SessionStarter`, in the space the window shows) and an automation run (`AutomationRunner`, in the space of its project) choose among the providers of their space the same way: a provider they name that the space does not have is refused before any session exists, and the default provider gives way to the first enabled provider of the space. `alta session create` does the same (see `doc/live-tool.md`).
-
-The projects of a space are the ones whose own file names it. `ProjectCatalog.UpdateSpacesAsync` changes that in place: only the `spaces` entry is written, added or removed, on one line, and every other byte of the project file stays. It runs under the project edit gate, with the renames and the archive changes of the same catalog instance, reads the edited text again with the YAML parser before saving, and saves over the revision it read; a file another process changed meanwhile is read again, twice at most. A project file whose front matter it cannot edit that way (the entry written twice, a link in the path, a descriptor without a file) is refused and left as it is. Deleting a space deletes its file first, then its id from each project file.
-
-Which space a window shows, and the tabs of each space, are not in the catalog: the page keeps them in the local storage of the window.
-
-## Session and session-view storage
-
-CodeAlta uses two related records for active work:
-
-- **Session-view descriptors** are catalog/runtime metadata for global, project, and internal session views. They carry title, project reference, provider/model/reasoning preferences, parent/created-by attribution, and last-active timestamps. Some persisted readers and file names still use `SessionView`/`SessionId` for legacy compatibility.
-- **Agent session journals** are CodeAlta-owned JSONL files under `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. They contain replayable normalized `AgentEvent` records plus raw snapshot events for `local.sessionSummary`, `local.sessionState`, `codealta.sessionHeader`, and `codealta.sessionState`.
-  A `codealta.sessionState` record is written compacted, so its size does not grow with the number of prompts already handled: queued prompts that are pending (`queued`, `submitting`) keep their whole text; the newest 20 handled ones (`submitted`, `failed`) keep their small fields (id, kind, state, run id, error, dates) and their text is replaced by the preview of at most 160 characters; older handled ones are dropped. `prompt_provenance` keeps the newest 100 entries, plus the entry of every pending queued prompt. The fields are the same as before, so older records still read and an older binary reads the new ones. Existing journals are not rewritten.
-  A queued prompt is marked `submitting`, with the id of the runtime that sends it (`submitting_runtime`), before its run starts, and `submitted` once it has. A CodeAlta that closes in between leaves it `submitting` with the mark of a runtime that no longer runs: the first drain of that session in another process (after a run ends, a prompt is queued, a job reports) queues it again with the note `last_error` "CodeAlta closed while this prompt was being sent: it is sent again." and counts it in `interrupted_sends`; a prompt whose send was already cut once fails instead, so that a prompt that ends CodeAlta is not sent at every start (`SessionRuntimeService.RecoverInterruptedSends`). Until that drain, the prompt is pending and holds the session's switches, as any pending prompt does.
-
-**Where a session works.** The working directory of a session is the folder it belongs to: the folder of its project, or the global root for a chat. It is written once, in the header of the journal, and it is what ties a session to its project. A session that works in a git worktree records that folder beside it, as `worktreeDirectory` in `local.sessionSummary` (`AgentSessionSummary.WorktreeDirectory`, `AgentSessionMetadata.WorktreePath`, `SessionViewDescriptor.WorktreeDirectory`): the tools of the agent run there. Journals written before worktrees have no such value and read as sessions that work in their folder. The value is cleared when the session continues after its worktree was removed. The SQLite projection keeps the whole summary, so the cache needs no column for it.
-
-**An archived session.** The local state of a session has `archived` and `archived_at` (the time of
-the archive; absent for one archived before the time was kept). Only an archive or a restore changes them
-(`SessionRuntimeService.SetSessionArchivedAsync`): a local state written from a descriptor keeps them as
-they were read, since the status `Archived` of a descriptor also says that its attachment ended. A session
-that the catalog could not delete is hidden this way too. The SQLite projection keeps `archived` and
-`local_archived_at_utc_ticks` (schema 4: a cache of an older build gets the column and keeps its rows), and
-`AgentSessionViewStateMetadata.ArchivedAt` carries the time to the lists. An archived session keeps its
-journal, its project and its space, so the statistics still count it. CodeAlta TUI leaves archived sessions
-out of its lists.
-
-**The tier of a session.** The local state of a session (`SessionViewLocalState`, the `codealta.sessionState` record) has `tier`: `complex`, `standard` or `quick` when the session runs on a tier of models, absent for a model chosen by hand. `SessionRuntimeService.SetSessionTierAsync` writes it (a session created with `--tier` or on the default `standard` tier, a tier chosen in the model picker of CodeAlta Desktop, a fallback) and `GetSessionTierAsync` reads it. It decides what the session falls back on, not the model it runs. A fork keeps it.
-
-`SessionViewJournalStore` still reads and writes the legacy header/state event names in the same journal used by the agent runtime. This avoids maintaining separate provider-bound state files for the same session while preserving existing user data.
-
-Sticky notes remain canonical `AgentNotesEvent` records in those journals. `FileSystemAgentSessionStore.ReadLatestNotesAsync` uses the existing parser under the shared per-file gate and retains only the last notes event (including clear and empty set), without loading the entire history. `AppendNotesAsync` opens only an existing catalog-resolved journal and orders persistence, metadata refresh and non-reentrant committed feedback under that gate. There is no notes database or authoritative notes cache. Runtime resolution validates active or recoverable global/project session identity before calling the store; caller-supplied IDs/paths are not renderer filesystem grants. Cancellation is honored before write admission; an admitted record completes without caller cancellation. Post-commit cache/observer failure is explicitly distinguished from write failure, not described as rollback. Existing trailing-record tolerance, partial-I/O/power-loss limits and restart semantics remain unchanged; general history paging and reload/loss reconciliation are separate work.
-
-Notes append strictly validates canonical content before mutation, with bounded memory. Records in the remembered notes prefix of the shared journal owner (see durable session notes in `runtime.md`) were already deserialized and are not read again. The append first extends that prefix as a notes read does, without the per-file gate, then validates what remains on the append handle itself, under the gate and with read-only sharing requested. It inserts a missing final newline separator only for valid content. A malformed or truncated tail, whether newline-terminated or not, is refused with no append, notification or byte removal; a tolerant read ignoring an incomplete final record does not make that journal safe to append. BOM-detected non-UTF-8 journals remain readable but notes append refuses to mix UTF-8 into them. There is no automatic journal repair/encoding conversion. Validation is linear in the records not yet scanned through that journal owner: the whole journal for the first notes operation after host start, and afterwards the records written since the last notes read or append. The gate is held only for records written while the append was scanning, not for a journal-size scan. Metadata refresh explicitly avoids reacquiring the already-owned journal gate; committed callbacks must not reenter storage or wait on UI work.
-
-For fast startup/sidebar loading, CodeAlta also keeps a projection of the sessions in the application database (below). The JSONL files under `~/.alta/sessions` remain authoritative for the sessions: when the session tables are missing, damaged, from an older layout or from the layout of a newer build they are made again from the journals, stale rows whose journals were deleted are pruned, and externally added or changed journals are reconciled after the initial cached load.
-
-### The application database
-
-**Durable Statistics exception:** `StatisticsArchiveStore` owns `<StateRoot>/saved_statistics_after_deleted_sessions/archives.sqlite3`, independently of the recoverable application database below. Catalog owns this file's I/O; Statistics owns its sanitized, versioned payloads and rebuildable application-table projection. Immutable generations and effective-generation/deletion metadata use SQLite rollback journaling with `synchronous=EXTRA`; reads verify integrity and payload digests. A sibling `<StateRoot>/saved_statistics_after_deleted_sessions.initialized` marker is created and flushed before initializing or acknowledging archive storage, including existing archives without a marker. Never route this irreplaceable store or marker through application-database restore/recreate logic, plugin-table removal, reset or cleanup. Corruption, an unsupported version, a missing file in an existing directory or loss of the initialized directory requires explicit repair/restore, not silent fallback, including across restarts. Include both directory and marker in profile backups; do not delete the marker to bypass repair. Normal and developer instances each use their own StateRoot archive; this mechanism detects directory loss while its marker survives, but cannot reconstruct lost facts.
-
-One SQLite file per instance, `<state root>/data/alta.sqlite3` (`~/.alta/data/alta.sqlite3`, and `~/.alta/dev/data/alta.sqlite3` for the developer instance), holds the list of sessions, the bookmarks, what the providers read of the conversations other programs started, and the tables the plugins keep (`doc/plugins.md`, "Plugin database"). `ApplicationDatabase` (`CodeAlta.Catalog`) owns it, one instance per host: `CodeAltaHost` opens it for its state root and shares it with the session catalog and the plugin runtime; the terminal application's early plugin start opens it through `PluginRuntimeManagerOptions.StateRoot` and the host reuses that one. **It is no longer a cache that may be deleted**: the tables of the plugins hold data that cannot be built again (the statistics of sessions that were deleted since). Nothing deletes the file. The Statistics plugin keeps its tables here under the prefix `statistics_` (`meta`, `journal`, `session`, `project`, `run`, and for each family of facts `<family>_q`, `_day`, `_month` and `_year`: `activity`, `usage`, `cost`, `tool`, `content`, `detail`, `histogram` and `extreme`); the 48 MB of the author's profile are described in `doc/statistics.md`.
-
-The bookmarks are an owner of the application itself, `bookmarks` (`BookmarkStore`, `CodeAlta.Catalog/Bookmarks`), with the table prefix `bookmarks` and one table at version 1, `bookmarks_item`: one row for each bookmark of a session or of a message of a session (its id, kind, session, the title and the project of the session when it was last seen, and for a message its role, excerpt, run id, content id, the journal offset it was last found at and its time; the label, when it was added and by which session). They cannot be built again from anything else, and they point to the sessions of one instance: this is why they are here and not in a file of the global root. `BookmarkService` keeps the rows in memory and reads them again when `Generation` says the file was replaced: after a restored copy the bookmarks are those of the copy, and after an empty file there are none, and the table is made again by the migration. At most 2 000 bookmarks are kept. See `doc/live-tool.md`, "Bookmark commands", for what names a bookmarked message and what happens when its session goes away.
-
-What the providers read of the files of conversations other programs started is the owner `external_conversation_headers` (`ExternalConversationHeaderStore`, `CodeAlta.Catalog`, behind `IAgentExternalConversationHeaderStore` of `CodeAlta.Agent`), with the table prefix `external_conversation_header` and one table at version 1, `external_conversation_header`: one row per provider and full path of a file (`provider`, `path`), with the `length` and `last_write_utc_ticks` the file had when it was read, the `format_version` of the provider, whether the provider lists it for an import (`importable`), and the header as the provider serialized it (`header_json`, opaque to the store). This is the place where an importer of the conversations of another client keeps what it read of that client's files, so that a start reads only the files that changed: Claude Code is the first (provider `claude-code`, see "Conversations started elsewhere" in `doc/providers.md`); an importer of Codex or Copilot CLI sessions takes a provider name of its own and its own format version. Each provider writes and removes only its own rows, in one write per listing. `CodeAltaHost` makes the store over the database of the instance and gives it to the providers through `ModelProviderRegistry.ExternalConversationHeaders`, which `ConfiguredModelProviderRegistryBuilder` hands to the options of the providers it builds. The rows are derived from the files: a table that is damaged, or that a newer build migrated, is dropped and made again empty, and a database that is locked, cannot be used now or is closed answers no rows and writes nothing, without an exception, so that the provider reads the files instead.
-
-| Rule | Content |
-| --- | --- |
-| Location | `CatalogOptions.ApplicationDatabasePath`. A first start finds `cache/cache.sqlite3` of the previous layout (`CatalogOptions.LegacySessionCacheDatabasePath`) and **moves** it, with its `-wal`, `-shm` and `-journal` files, so the session list is not read again from the journals; when the move fails, a new file starts. A missing file that has a valid copy is restored from it first (see Damage), and the file of the old location is then left where it is: the copy holds the tables of the plugins, and that file a list that can be built again. It never touches the state root of the other instance. |
-| Journal mode | Write-ahead log (`PRAGMA journal_mode = WAL`, `synchronous = NORMAL`): a reader never waits for a writer. Connections are opened for one operation and closed with it. Only the service makes the file, when it opens it (the log, the table of the versions): the connection of a read or of a write opens an existing file (`SqliteOpenMode.ReadWrite`). When the file went after the service saw it, SQLite reports error 14 and the operation runs once more: the service makes the file again as a new generation. A copy that meets it fails and keeps nothing. |
-| Writers | One at a time, through a first-in-first-out queue owned by the service; each write is one `BEGIN IMMEDIATE` transaction. A write that is still queued when it is canceled never runs. A write that starts another write, a migration or a drop of tables and awaits it would wait for the queue it holds itself: it is refused with `InvalidOperationException` (the service follows the flow of a write with an `AsyncLocal`); a read inside a write is fine, and so is work that a write starts and that writes after it. The guard follows the flow, not the `await`: work that a write starts without awaiting it is refused in the same way when it reaches the database before that write ended, and writes once it ended. A write that holds the queue longer than two seconds is logged with its owner. Waiting for a lock another process holds lasts five seconds (`ApplicationDatabaseOptions.BusyTimeout`), then the operation fails with SQLite error 5 or 6: the session list reports it as `AgentSessionCacheLockedException`, as before, but only a write can meet it (a reader is not blocked). |
-| Owners and versions | Every user of the file names itself (`session_cache`, `plugin:statistics`) and records the version of its tables in `app_meta`. `MigrateAsync` runs the steps once, in a write transaction, with the version recorded in the same transaction. A plugin migrates under its table prefix: the objects its steps create, change or drop must start with it, and an index or a trigger must also be on a table that starts with it (the name alone would let a plugin put a trigger on the table of another one), or the migration is rolled back. Dropping the tables of an owner also drops the views, and the indexes and triggers of its name on a table that is not its own. A recorded version higher than the one asked for (tables written by a newer build) is an error, not a downgrade: `ApplicationDatabaseNewerVersionException`, an `InvalidOperationException`, and nothing is changed. The tables of a plugin stay as the newer build left them. The session list, which can be made again, catches it: it drops its own tables and lists the journals again, so an older build still shows the sessions after a newer one ran on the same profile. |
-| Damage | SQLite errors 11 (malformed) and 26 (not a database) never delete the file. The session list first drops and makes again **its own tables** (`session_projection_cache*`) and lists the journals again. When the damage is not there, or the file cannot be opened at all, the file is moved aside as `alta.sqlite3.corrupt-<UTC timestamp>` (the last three are kept) and replaced by the newest valid copy, or by an empty file; the generation counter (`ApplicationDatabase.Generation`) increases, `LastRecovery` says what happened and an error is logged. The copy is checked and made ready beside the database first (`alta.sqlite3.restore`): the damaged file is moved only when there is something to put in its place, which is then one rename that overwrites nothing (a file that is there after all is the database, and the copy is dropped), and the move waits as long as a lock is waited for when a connection still has the file open: a number of tries 25 ms apart, `BusyTimeout` divided by that delay, whatever the clock of the options says. A file that is **missing** while a valid copy exists (it was deleted, or a replacement stopped half way) is restored from the newest valid copy in the same way, as a new generation, with `LastRecovery` set and nothing moved aside; what stays of the log of the missing file is removed first. Without a copy the file starts empty. A file that went while the service ran is a new generation from the moment it is missed, also when making it again fails at first. An empty database in the place of a missing one would be copied in its turn, and the copies that hold the data of the plugins would be gone after two days. The tables of the plugins come back with the copy, or start empty and migrate again: `PluginDatabase` keeps the last migration of its plugin and runs it again, before the next read or write of the plugin, when the generation changed since it ran (a plugin migrates when it is activated, not at every operation). A read the plugin starts inside one of its own writes cannot do that, since a migration is a write: when the file was replaced under that write, the read fails on the file that has no tables, the write is rolled back with it, and `WriteAsync` runs the migration and then the write once more. The session list is listed from the journals again either way. A damaged file that cannot be moved aside (another process holds it) is an `IOException` for the operation; the session list reports it, and any other file error of the database (a folder that cannot be made), as `AgentSessionCacheLockedException`, like a lock, with the message of the system: the database cannot be used now, and can be later. |
-| Copies | `data/backups/alta-<UTC timestamp>.sqlite3`, made with the online backup API of SQLite while the database is in use, checked with `PRAGMA quick_check`, and written as one file. A copy says that it is one: in its table of versions the row `database:copy` holds one more than in the file it is a copy of (`ApplicationDatabase.ReadCopyNumberAsync`, 0 for a file that never was a copy), so a file that took the place of another one is known as such by what is in it, also after a restart and when nothing told the service. The host starts the upkeep (`StartMaintenance`): a first check twenty seconds after start, then hourly, and a copy when the newest one is older than a day. The last two are kept. What is lost in the worst case is what was written since the last copy; the sessions are read again from their journals. |
-| Lifetime | Disposing the database (the host does it for the one it opened) closes the queue behind the writes that were admitted, so a shutdown waits for them. |
-
-File replacement is exclusive with the service's admitted connections, including online backups. Admission closes
-while recovery waits for those connections to be disposed, on every platform: Unix permits renaming an open file,
-but the old connection could then remove the replacement's WAL/SHM files when it closes. The wait is cancellable
-and bounded by the real-time `BusyTimeout`; a timeout reports SQLite error 5 without replacing the file. New
-operations resume after replacement or a failed wait. The reader-concurrency rules above apply to ordinary
-operations on a ready database; a read that must recover or initialize the file can also report that lock error.
-Initialization after a missing file follows the same rule,
-and recovery rechecks its observed generation under the initialization gate. Ordinary readers remain concurrent
-with each other and with the writer; they are not put through the write queue. This coordinates connections owned
-by this service, not external processes or another service on the same file.
-
-`MigrateAsync` first reads the recorded version without a write lock. When it is already current, even a new
-catalog can read while another connection writes. A needed migration checks the version again inside its
-write transaction; migration calls made inside an active write are still refused, including no-op migrations.
-
-The session list is `SessionJournalSqliteCache`, a client of this service like the plugins: the same tables (`session_projection_cache`, `session_projection_cache_detail`, `session_projection_cache_metadata`) and the same behavior for its callers. When the file was replaced under it (restored from an older copy, or deleted), or when it dropped and made its own tables again, it marks the projection incomplete, so that the sessions are listed from the journals again. The generation lives in memory, so it also keeps, beside its rows, which copy the file was when they were written (`session_projection_cache_copy`) and compares it with the copy number of the file each time it makes its schema: a copy the service restored in a process that ended before the list was used, or one somebody put in place by hand while the application was closed, is found at the next start and marks the list incomplete in the same way. A file that is not one of the copies of the service (a copy of `alta.sqlite3` made by hand at another time) carries no such number: put back by hand, it shows the list it held until the sessions are listed again. The mark is written, not left out: a session that is saved before the next list adds a row, and rows without a mark would read as a complete list. Its tables are dropped and made again under the gate that makes them, once for all the operations that met the same damage. A write that ran while the file was replaced finds none of its tables in the new file: the tables are made and the write runs once more; a read in the same case answers as an incomplete list. A reconciliation or a rebuild remembers the tables it started with and marks the list complete, under the same gate, only when they are still those tables in the same file: tables that were made again on the way lost rows it wrote or found up to date, so the list stays incomplete and the next listing reads the journals again.
-
-Each row keeps the CodeAlta header its journal starts with (`journal_header_json`, with `journal_header_read` saying that it was read; version 5 of the tables), written whenever the row is: the readers of the list (the workspace snapshot of the desktop, its bookmarks, search and sub-session reads) take the scope of a session and its creation instant from it, and open no journal. A listing makes one status read of each journal to check that the row is still its projection. A row whose journal changed (another process wrote it, or an atomic replacement left the row behind) is projected again with its header and view state, and written back once the listing ends, so that the next listing does not project it again; a write-back that cannot be made now is made by a later listing. The rows of a cache of version 4 stay when the columns are added: the first listing reads the first line of each of their journals once and writes the header it found.
-
-Each row also keeps how many queued prompts of the session are pending (`local_queued_prompt_count`, version 6 of the tables; `AgentSessionViewStateMetadata.QueuedPromptCount`, carried to the `alta` listing by `SessionViewDescriptor.CachedViewState`), so that `alta session list` and the commands that resolve sessions write `queuedPromptCount` without reading a journal. It is a projection of the journal and nothing else: the prompts of the last `codealta.sessionState` record whose state is `queued` or `submitting` (`SessionViewLocalState.CountPendingQueuedPrompts`), written with every state the journal store appends and computed again when a row is projected from its journal. It never comes from what the runtime holds in memory, so a new cache on the same database, as after a restart, gives the count the journal gives. The rows of a cache of version 5 stay when the column is added, with a count that is not known (`null`): their listing reads no journal for it, the `alta` listing reads the last state of such a journal as before, and that read, or any later read of the last state of the journal by `SessionViewJournalStore.ReadLatestStateAsync`, writes the count to the row, so that it is read at most once per row.
-
-The rows of the list keep short values only (version 8 of the tables): the scalar columns a listing shows, the last answer as a preview of at most 500 characters kept once (`summary`; `summary_json` leaves it out), the header and the lineage. A listing reads the columns it names (`ListColumns`), never `SELECT *`. What one session needs beyond them is in `session_projection_cache_detail`, keyed by the session and read for that session alone: the state of its provider (`state_json`: provider session, compaction, loaded skills), which a lookup of one session joins and a listing never reads (it takes the session of the provider from `provider_session_id`), and its last state record (`local_state_json`). The whole answer stays in the history of the journal (`alta session report` reads it there). A cache of version 7 or older is moved when it is opened, without a rebuild: the states go to the detail table, the last state record trimmed as below, the answer cut to its preview, and the old columns dropped.
-
-Each session also keeps its whole last state (`local_state_json` of the detail table): the `codealta.sessionState` record its journal ends with, trimmed as the journal keeps it (`SessionViewJournalStore.CompactForJournal`: pending queued prompts whole, the last 20 handled ones without their text, the provenance records of the pending ones and the last 20 others), also when it is read from an older journal that kept every handled prompt whole, or the JSON `null` for a journal without one. It stays in the database because a writer changes that record and appends it again: what the database gives must be what the journal holds. The database is kept in step with the session so that nothing reads the state back from a journal: `SessionViewJournalStore.ReadLatestStateAsync`, and through it the runtime (sends, queue drains, archive, title and permission modes, tiers, provider selection, branch, move), the `alta` commands (the model and the provenance of a session) and the terminal UI, take the state from the row when its stamp is the stamp of the journal, and open no journal. The rules:
-
-| Rule | Content |
-| --- | --- |
-| Written with the journal | `AppendStateAsync` appends the record to the journal first (it compares only the stamp and the header of the row, without reading its state), then writes the row and its detail in one write: the state, the stamp the journal has just after the record (taken under the gate of the journal), and the header the journal starts with. A reader never finds the row at that stamp with an older state. A row that was not the projection of the journal just before the append (another writer changed the journal, or a write of the list is still waiting) does not take the new stamp: it says no last state, and is projected again from its journal. A fork, a rewind and an import write the row of their session the same way after their journal is replaced. |
-| No read for an append | When the row is the projection of the journal and knows the header it starts with, `AppendStateAsync` does not read the journal to check its first line: the record is only appended. Otherwise the first line is checked, and the header written when it is missing, as before. |
-| Projected from the journal | A row projected from its journal (a rebuild of the list, a journal another process changed, a provider selection, a move) takes the state read with it, when the journal kept its stamp while it was read. An append of records that change neither the header nor the view state (the events of a run) keeps the state of the row when the row is the projection of the journal before the append, also in a new process: the journal is not read for it. |
-| Lineage | A state record that names neither a parent nor a creator takes those of the header the row keeps, as a read of the journal takes them from its first line. |
-| Read from the journal | Only for a session without a row, a row that is not the projection of its journal as it is (another process wrote it), a row of a cache of version 6 (no state yet), or a database that cannot be read now. When the row is the projection of the journal at the stamp of the read, the state read is written to it (`FillLocalStateAsync`, with the count of pending queued prompts of a row of version 5), so that the next read, also after a restart, takes it from the row. The rows of a cache of version 6 stay when the detail table is made. |
-| Authority | The journal stays the record of the session: the row is made again from it when the database is created, deleted, damaged or replaced. Nothing keeps the state in memory beside the row. |
-
-The rows of the list are kept in memory once read (`SessionJournalSqliteCache`): a listing reads again from the database only the rows of the sessions this instance wrote since, which each write names (`WriteAsync(sessionIds, …)`; a write that names none, such as a rebuild or a repair, drops the copy). Every write of the rows raises `session_projection_cache_rows_written` in the metadata table in its own transaction, and a listing reads it in the same snapshot as the rows: when another writer changed them, the copy is dropped and every row is read again. A lookup of one session reads its row from the database.
-
-The session index (`SessionJournalIndexStore`, owner and table prefix `session_journal_index`, version 1, behind `IAgentSessionJournalIndex`) keeps what normal operation needs of a journal without reading it:
-
-| Table | Content |
-| --- | --- |
-| `session_journal_index` | One row per session: the length and last-write time of the journal it covers, where the indexing ends (`end_offset`), the offsets of the summary, state and view-state records in force there, the number of turns and of history events, the last run, the latest notes record (`notes_json`, `notes_offset`). |
-| `session_journal_index_turn` | One row per turn: its run, its start and end offsets, times, status, the offset of its prompt and the counts of its messages, tool calls, steers and compactions, its place in the history. |
-| `session_journal_index_usage` | One row per usage record: its offset, run, time and operation. |
-
-The session store writes the index after each append (the journal first, then the index). Notes, turns, fork points, the message of a bookmark or a search hit, usage, and `alta session events`/`tail`/`info`/`report` read the index, then only the records of the turns they need. A journal another writer appended to is indexed from where the index ends; a missing, damaged or older index is made again from the journals, a session at a time, when it is first needed. The rows are derived: the journals stay authoritative.
-
-Optional protocol traces are written to `~/.alta/sessions/traces/<session-id>.trace` only when a provider has tracing enabled. Credential headers are redacted, but trace files can still contain sensitive prompts, outputs, tool arguments, and streamed protocol updates.
-
-## Prompt drafts and view state
-
-`CodeAlta.Catalog.PromptDraftStore` owns unsent text under `CatalogOptions.PromptDraftsRoot` (`<GlobalRoot>/saved_prompts`). Files remain plain text named `saved_prompt_{sanitizedScopeKey}.md`: session IDs are used unchanged as keys, global new-session drafts use `__draft__:global`, and project new-session drafts use `__draft__:project:{trimmedProjectId}`. Project drafts still live in the **global** root. Filename sanitization replaces the current OS's invalid filename characters with `-`; colon handling therefore remains OS-dependent, preserving existing filenames rather than migrating them.
-
-Legacy reads use the shared codec's strict BOM-aware Unicode decoding. Writes remain UTF-8 **without BOM** (including when replacing a BOM-bearing legacy file), retaining nonblank text, whitespace, Unicode and newlines literally. Null or whitespace-only text requests deletion. Missing and empty-file revisions differ. There is no new draft schema, and unsent image lists remain transient TUI state; this store does not persist images.
-
-The TUI owns debounce, selection, events, bindings and image lists. Its persistence coordinator tracks one ordered work chain for saves **and deletes**. Canceling a debounce never abandons a started write: subsequent edits/clears and disposal join it, and only acknowledged commits advance the baseline revision. Conflicts (including same-mtime external edits/deletions) and I/O failures retain pending text/deletion intent; a flush returns failures rather than marking it saved. Retries use the original acknowledged revision, never the conflicting external revision. Storage errors before an initial baseline is read fail closed. Pending text is in memory, not a recovery journal: preserve it before exiting after an error.
-
-The synchronous TUI projection/clear/delete seams join an awaitable flush on prompt selection synchronization, send-related clear actions and session deletion. Composer clear acknowledges deletion **before** changing text or images; failed pre-admission clear retains both the original composer and its pending text, not a tombstone. Send and queue paths complete that clear before admission, so a storage-failure retry cannot enqueue an already accepted prompt. New-session draft clear is deferred until provider/content checks and history loading succeed. Conflicts return no acknowledged snapshot, only the observed revision; successful deletion returns a missing snapshot. Deletion removes the final file entry, including a normal or dangling symbolic link, without deleting the linked target.
-
-Coordinator disposal stops new edits and joins pending work, throwing on failed flush. `ShellFrontendHost` still disposes the application's owned services if frontend disposal fails, preserving the original error and aggregating a second owned-cleanup failure instead of losing either. This is not a complete shutdown confirmation/recovery UX. Successful flush means the file operation completed, not guaranteed survival of power loss. The TUI composition injects the **same** `TextFileCodec` instance into drafts, file editors and ask reviews, serializing cooperating saves/deletes even when an editor opens a draft's path. External writers/path-link changes retain the documented final-check/commit race, not cross-process atomic compare-and-swap.
-
-### Additive UI-state persistence
-
-`SessionViewCatalog` owns `CatalogOptions.UiStatePath` (`~/.alta/ui-state.yaml`). Existing `open_session_ids`, `selection`, mirrored legacy `selected_session_id`, `updated_at`, `project_preferences` and `navigator` retain their meanings. Legacy `session_preferences` and `session_states` remain readable in memory for migration but are **omitted** on save, not copied back from retained extension data. Session journals remain authoritative and are not rewritten by UI-state saves.
-
-Two additive sections provide a persistence seam for multiple frontends:
-
-```yaml
-frontend_layouts:
-  tui: {navigator_width: 32}
-  desktop: {window: {width: 1200, height: 800}}
-logical_tabs:
-  - {id: session-1, kind: session, reference: session-1}
-  - {id: review-panel, kind: plugin, contribution: example.review, data: {mode: summary}}
-```
-
-`SessionViewViewState.FrontendLayouts` is a SharpYaml mapping keyed by frontend identity; values belonging to unknown future frontends may have any YAML-tree shape. `LogicalTabs` is an ordered YAML sequence of opaque descriptors, conventionally mappings with stable `id`, `kind`, `reference`/`contribution` and optional data. This slice does not validate renderer-specific descriptors, authorize paths, activate plugins or implement tab rendering/restoration. Frontends must preserve descriptors they cannot render rather than availability-filtering the sequence. Existing TUI session-ID pruning is unchanged and does not prune these descriptors. Theme/language and execution preferences remain shared through the existing known fields; frontend geometry belongs in its own layout entry.
-
-The serializer retains unknown root fields **and nested values** in selection, navigator, retained project preferences and arbitrary layout/tab contribution trees, using SharpYaml's structured model (no YAML text rewriting). Retention is held outside replaceable TUI selection/navigator DTOs. Known values, including deliberate nulls, win; removing a project preference removes its associated unknown fields too. Frontend-owned trees and the logical descriptor list are replaced only by the supplied complete trees/list, so callers must carry unrecognized entries through updates. Comments, whitespace, literal formatting and original encoding are not preserved; scalar values, tags, sequences and mapping data are retained semantically. Output is UTF-8 without BOM.
-
-Malformed documents, duplicate scalar mapping keys, complex mapping keys, merge keys, anchors/aliases, multiple documents, or wrong section shapes produce explicit errors rather than dropping data. There is no automatic backup/recovery rewrite. An unreadable/invalid existing file cannot be overwritten by a new empty state's missing-file baseline.
-
-`LoadViewStateAsync` returns the loaded **raw-byte** `Revision`, distinguishing a missing file from an empty one. `CreateViewStateSaveRequest` synchronously freezes mutable state to YAML; `SaveViewStateAsync(request)` requires the previously loaded or successfully acknowledged revision and returns `SessionViewStateSaveResult`. Only `AcknowledgedRevision` is a successful commit; a conflict's `CurrentRevision` is diagnostic, not a replacement baseline. The convenience state overload uses its original loaded revision, so callers performing repeated saves must carry the returned acknowledgment explicitly. Validation, I/O and cancellation failures throw and leave original bytes intact before commit.
-
-The actual TUI coordinator freezes each snapshot before yielding, orders cooperating writes in one owned chain, and advances its baseline only on acknowledgment. It retains pending state and the original baseline on conflicts/failure, including same-mtime external edits, deletions and creation after a missing load. Ordinary shell saves report conflicts as warnings and other save failures as errors in the existing workspace status channel; the app facade preserves the result. Explicit workspace settings and sidebar sort adapters also inspect the result, reporting failure instead of running their successful-save language/refresh actions. A successful retry after a reported failure acknowledges that pending changes were saved. There is no new conflict dialog: settings still close back to the workspace, and status messages can be replaced by later UI activity. Pending settings can remain effective in memory; failure does not roll them back or mark them durable.
-
-Pending state is memory-only and can be lost on exit; retries do not silently adopt an external revision. Final shutdown persistence suppresses UI feedback after projections have been disposed and retains the nonthrowing result/logging path, so a storage conflict/failure does not newly skip the subsequent editor, runtime, controller and draft cleanup. This is not a shutdown recovery transaction. Startup's navigator-only projection is not a write baseline; full catalog loading supplies the state used by normal saves.
-
-`SessionViewCatalog.TextFiles` is the same codec used by the TUI's draft store, editors and ask reviews, so an editor opening `ui-state.yaml` participates in the same staged-save gate. Noncooperating writers retain the codec's final-check/commit race; this is **not** cross-process atomic compare-and-swap or power-loss durability. Fixture TUI → simulated desktop → TUI round-trips establish persistence, not rendered desktop parity.
-
-`ShellStateStore` is a UI-session projection of currently open shell state; it is not a replacement for the durable catalog, session journals, or runtime-owned session state.
-
-### Prompt image attachment copies
-
-`CodeAlta.Catalog.PromptImageAttachmentStore` owns encoded image persistence and the neutral `PromptImageAttachment` / `PromptImageAttachmentReference` records. The TUI retains localized title/factory helpers, clipboard/DIB/Skia decoding, composer state, `PromptSubmission` snapshots, and conversion to `AgentInputItem.LocalImage`. No terminal toolkit dependency is introduced into Catalog.
-
-Images are copied into `<GlobalRoot>/sessions/<session CreatedAt UTC yyyy>/<MM>/<dd>/<sanitizedSessionId>.attachments/`; an unset creation date uses the current UTC date. Filenames remain `{currentUTC:yyyyMMddHHmmssfff}-{index:00}-{sanitizedTitle}-{first8ImageId}{extension}`, with titles capped at 48 characters and collision suffixes `-2`, `-3`, etc. Source image files are not moved or rewritten. Atomic `FileMode.CreateNew` creation never overwrites a preexisting entry; only native already-exists errors retry, bounded to 1000 candidates. Write/flush, permission and other I/O errors do not become collision retries.
-
-The entire batch's path/payload fields are validated before writes: nonempty bytes and titles, an image MIME type without parameters, 1–128 ASCII letter/digit/hyphen/underscore IDs, and 1–16 ASCII alphanumeric extension characters (optional leading dot). Session IDs must sanitize to 1–200 characters. Sanitization neutralizes both platforms' separators, invalid filename characters and control characters; unusable session components are rejected. This preserves normal legacy names without promising compatibility for malformed directly constructed payloads. Validation does not decode or sniff image contents.
-
-Queue and dispatch ownership are unchanged: submission/queue snapshots copy byte arrays before composer clear; saving happens on actual dispatch, **before** run augmentation and runtime submission. A failed/cancelled save attempts to remove only files that batch successfully created (including partial writes), never preexisting collision entries. Once save succeeds, its references remain valid across composer/queue clear, downstream augmentation cancellation or dispatch failure; retries may create another copy. Empty directories and files that cannot be removed due to filesystem errors may remain after rollback. This does not add image garbage collection, reference counting, recovery or restart durability for unsent images.
-
-The store accepts a **trusted backend root**, not a renderer file grant or RPC authorization. Its lexical validation and create-new behavior are not a filesystem sandbox: externally replaced directories/symlinks/files can race persistence or rollback, and cleanup cannot prove file identity after external replacement. Successful writes do not guarantee survival of power loss. Renderer authorization and broader ownership/recovery remain separate work.
-
-## Editable text files
-
-`CodeAlta.Catalog.TextFileCodec` owns text-file reads, attached-file lookup, and conditional saves/deletes. The TUI composition shares the session catalog's instance between UI state, prompt drafts, prompt management, live-tool prompt mutations, file-editor tabs and attached ask-file reviews. Editors, undo/selection state, file watchers, conflict dialogs, and ask comments remain TUI presentation; the store does not depend on terminal controls or LiveTool contracts.
-
-Loads return the complete text, encoding/BOM information, an advisory timestamp, and a SHA-256 identity of the raw bytes. The missing-file revision differs from an empty file. Saves require the previously observed revision, including for creation: stale edits, external deletion, and same-timestamp content changes return a conflict without overwriting the target. File-editor Overwrite confirms the revision observed in the conflict, so another intervening edit conflicts again. Conflicts retain dirty editor text; ask-file saves return failure without marking the review saved or allowing the save-and-submit action to proceed.
-
-UTF-8 with or without a BOM and BOM-bearing UTF-16/UTF-32 in either byte order are supported. Literal CRLF/LF/CR sequences, mixed line endings, Unicode, and final-newline presence are preserved; no newline conversion is applied. Invalid encoded bytes or invalid Unicode are rejected rather than decoded/encoded with replacement characters that could silently corrupt a saved document. BOM-less non-UTF-8 encodings are not inferred.
-
-Saves write a uniquely created temporary file in the destination directory, recheck content identity, and replace the target only after staging succeeds and cancellation is checked. Read-only targets are rejected, Unix mode bits are retained on replacement, and file symbolic links are followed rather than replaced with regular files. Failed/cancelled pre-commit saves leave the original intact and attempt to remove only their own staging file; cancellation after commit does not turn an acknowledged save into a cancellation. This is not a crash-recovery journal or a durability guarantee across power loss.
-
-New-file publication (`TryCreateAsync` and missing-revision saves) must not overwrite another creator's file.
-Windows uses a non-overwriting move. Unix atomically hard-links the completed sibling staging file to the new
-name, then removes the staging name: the managed non-overwriting move can check for absence and then rename,
-which races with another creator. An existing entry, including a directory or dangling link, refuses publication.
-Filesystems without hard-link support report a storage error; there is no unsafe rename or partial-copy fallback.
-Failure to remove staging after publication is reported as a cleanup failure, not as a collision. Existing-file
-revision checks retain the external-writer limitations below.
-
-Unix staging starts with user-only read/write mode. On Windows, staging for an existing file is created with a copy of the original's effective discretionary ACL (DACL), protected from additional directory inheritance, before any edited bytes are written. That DACL remains in place after the write handle closes for the revision check and replacement; directory readers do not gain additional DACL permissions through staging. Failure to read or apply the DACL aborts rather than falling back to directory permissions. Windows new-file saves have no original DACL and inherit directory permissions. This is DACL preservation, not a full security-descriptor/EFS copy or protection against privileged access; concurrent external security-metadata changes are not covered by content revisions.
-
-The instance-owned save gate serializes cooperating editors only. Other processes/instances or noncooperating writers can change a file or path link between the final check and replacement; there is no portable cross-process atomic compare-and-swap guarantee. Content identity also does not distinguish a delete/recreate sequence that restores identical bytes. Atomic replacement changes file identity, so hard-linked aliases do not receive the replacement contents. Do not treat timestamps, revisions, or paths as authorization tokens.
-
-Attached-file lookup retains the trusted TUI behavior: an absolute path is accepted; relative lookup tries the session working directory then project root, with the first supplied root/current directory as fallback. It is not a project containment or renderer authorization boundary. A future desktop adapter must validate project/session association and explicit external-file access before calling these APIs.
-
-## Prompt management storage
-
-`CodeAlta.Catalog.PromptResourceStore` owns trusted-backend agent/system prompt CRUD with explicit, non-overlapping built-in/global/project **prompt roots**, scoped resource identities, file-id validation and path provenance checks. It retains `agents/<id>.prompt.md` and `system/<id>.system-prompt.md`; project scope never falls back to global. Built-in writes/deletes are rejected below the UI, regardless of a caller's presentation flags. Discovery, shadowing and runtime composition stay in Orchestration's `AgentPromptCatalog`/`SystemPromptBuilder`; `PromptFileFormat` shares only neutral flat frontmatter/scalar and composition-mode parsing. Quoted scalar escapes emitted by management round-trip through discovery and runtime parsing.
-
-The actual TUI dialog loads editable metadata/body and raw-byte revision together, not descriptor text paired with a later revision. Absent append metadata remains absent so inheritance is not materialized into an override. Saves retain the loaded encoding/BOM, normalize managed frontmatter and trim the body as before; this is not a lossless frontmatter/comment editor. Replace-mode system prompts without name/description metadata remain plain Markdown; optional system metadata uses the same escaped frontmatter serializer. Create is non-overwriting within the selected scope. Save/delete use the loaded revision; conflicts retain dirty fields and offer an explicit retry against the observed conflicting revision (further changes conflict again). Failed create/save/delete does not notify success or reload selection; Refresh asks before discarding dirty fields.
-
-Live-tool `prompt create` uses `CreateAsync` with the Missing revision and shared structured serialization. `prompt edit` uses owner-bound `PromptResourceDocument` / `OpenDocumentAsync` / `SaveDocumentAsync`: strict Unicode load captures raw text, encoding/BOM and byte revision without requiring metadata to parse, then saves complete supplied text without normalization. Only file/directory absence becomes a Missing baseline; unreadable or undecodable files fail closed. A missing document can be created by raw edit, including empty text. `GetEditablePath` validates no-content path lookup without loading or creating a document. Validation/provenance/link policy stays in Catalog, while LiveTool translates outcomes to its existing JSONL command surface.
-
-For live-tool edits the revision is captured at command entry before potentially awaited stdin, not when the caller originally assembled replacement text. Changes detected during the invocation conflict; pre-command stale `--content` has no earlier revision contract. There is no automatic retry/adoption or cross-process atomic CAS: noncooperating writers can race path checks or the codec's final check/commit interval. The host registers its existing codec in the live-tool service collection; standalone catalog-only invocations may use an invocation-owned instance (no process-wide mutable gate). Cancellation before commit is failure; cancellation after commit does not change acknowledged success.
-
-Unlike the general-purpose codec, prompt management conservatively rejects existing symbolic-link/reparse-point components, including roots and final files, rather than following a link outside the selected resource. Trusted root/path APIs are not renderer grants or a sandbox. Path-link races and noncooperating writers remain subject to the codec's check/commit limits; there is no cross-process atomic CAS. Skill management and config recovery use their own Catalog workflows described separately; broader config/provider/plugin persistence and startup ownership are not migrated by prompt storage.
-
-## Plugin and skill state
-
-Source plugins are discovered from user and project roots and are enabled by default unless disabled in config or safe mode is active. CodeAlta owns generated plugin-root build files and plugin build manifests under its roots; plugin package directories should contain only package-owned source/content files. In CodeAlta Desktop a change of a source plugin's enablement is applied to the running application; see `doc/plugins.md`, Changing plugins while the application runs.
-
-Skills are plain directories containing `SKILL.md` plus optional helper files. Discovery validates metadata, applies precedence/shadowing and config enablement, and reads resources without executing scripts. Disabled skills remain visible in the management UI, but are not advertised to models and cannot be activated through UI, runtime, or live-tool paths.
-
-The opt-in neutral Catalog `RawSkillCandidateReader.Scan(explicitRoot)` is a **raw prerequisite only**, with no production caller or Desktop RPC/UI. It accepts one canonical fully qualified non-root local path (at most 1,024 UTF-16 units); it does not resolve root providers, discover repositories, invoke the Git/ignore walker, read `.git/config`/index, ancestor/global/nested ignore files or `SKILL.md` contents, or build descriptors. Hidden entries, including paths that ignore rules might exclude, are raw observations rather than effective skills. Streaming enumeration counts every encountered entry (including nonmatches) against 256 plus one sentinel; at most 64 directories are opened, 32 paths queued at a time, six descendant directory levels traversed, 16 candidate paths returned (at most 1,024 units each and 8,192 units in aggregate), 255 units copied per entry name, and 64 root components verified. Only the observed bounded subset is sorted; there is no globally first-page or absence claim after omissions. Known linked/reparse root ancestors refuse the scan; linked entries and fixed `.git`/`.hg`/`.svn`/`.jj`/`.sl` directories are skipped with explicit incomplete flags. `Complete` means **only raw traversal within these fixed exclusions** finished, never that ignore, precedence, shadowing, validation, enablement or activation is known. Statuses distinguish invalid/missing/file/denied/read error from bounded/incomplete traversal. Cancellations are checked between filesystem operations; blocking OS calls/disposal, external path swaps and network mounts remain non-atomic/unbounded in time. Existing TUI skill behavior is unchanged; a later inventory must independently bound all deferred root/ignore/metadata semantics before claiming effective visibility.
-
-`SkillMetadataParser.Parse(text)` is another **opt-in, in-memory prerequisite**: the caller supplies complete, already-read text; it never reads a path or resolves a skill directory. It accepts an optional initial BOM, `---` frontmatter envelope, one SharpYaml Core-schema mapping with scalar string keys/values (quoted, plain, folded or literal), and an optional one-level `metadata` string map. It recognizes `name`, `description`, `license`, `compatibility`, `allowed-tools`, and `metadata`; required name/description and their local length/Unicode rules agree with the legacy validator where this subset applies. Optional nulls mean absent. Unknown fields/invalid values are invalid; anchors, aliases, tags, directives, multiple YAML documents, duplicate/complex keys, sequences, and other nested maps are refused (unsupported where recognized). The result is only `Parsed`, `Invalid`, `Unsupported`, or `TooLarge`, at most one fixed diagnostic code, and **no partial fields on refusal**. Before SharpYaml constructs objects it limits the full string to 256 Ki UTF-16 units and 256 KiB on UTF-8 re-encoding, the envelope to 8,192 units, scanner tokens to 256 and parser nesting to four; event/field/scalar/aggregate-result budgets are 128/16/2,048/4,096. Re-encoded size does not attest original file bytes. No body or directory-name check occurs, no effective skill validity/visibility or activation is inferred, and the existing unrestricted `SkillCatalog.BuildDescriptorAsync`/TUI path is unchanged. Future integration must separately bind a bounded complete read to a canonical candidate and resolve root overlays, ignore files/rules, repository discovery, shadowing, enablement and trust before exposing an inventory; neither raw candidate nor parsed metadata alone establishes that authority.
-
-`SkillCandidateMetadataReader.ReadAsync(explicitRoot, explicitCandidate, optionalExpectedDirectoryName)` is a separate opt-in Catalog-only composition, with no production caller, traversal, ignore or root-provider read, RPC/UI or legacy text-reader change. It requires canonical fully qualified non-root paths (at most 1,024 UTF-16 units), a contained `SKILL.md` at most six directories below the supplied root, at most 64 checked ancestor components, and at most 255 UTF-16 units per component including supplied-root ancestors. Fixed VCS metadata and observed link/reparse ancestors or candidate are refused. An optional literal expected parent mismatch is `InvalidPath` **before I/O**, with zero bytes and no parser diagnostic; a matching parent with a different parsed `name` is `Invalid` with the `Field` diagnostic and complete byte count. It reads at most 256 KiB of **original file bytes plus one sentinel**, requires EOF within the limit before strict BOM-aware UTF-8/UTF-16/UTF-32 decoding and metadata parsing, and returns no partial fields on any refusal. The parser's separate decoded-string/UTF-8 **re-encoding** and YAML work budgets can still refuse content below the original byte limit; they do not establish original-byte provenance on their own. Cancellation is checked before/between calls but filesystem operations and disposal can block; mapped/remote mounts cannot be reliably excluded, and attribute checks, opening and reads can race external path swaps or edits. This is a point-in-time read, not an atomic snapshot, filesystem sandbox, CAS, complete provenance, effective inventory/visibility, trust or activation authority. Root overlays, Git/ignore inputs, shadowing, enablement and legacy discovery remain separate work.
-
-`SkillIgnoreSourceParser.Parse(bytes, baseDirectory, isComplete)` is an **in-memory syntactic prerequisite** for exactly one caller-supplied ignore source, with no filesystem access or matcher/walker invocation. The caller explicitly asserts completeness; a false assertion refuses even an empty byte buffer, while empty *asserted-complete* content yields zero parsed rules. The parser itself cannot prove EOF, source presence, absence, identity or original-file provenance. It refuses original buffers over 32 KiB before decoding (a future file reader must establish EOF using a byte cap plus sentinel), strictly decodes UTF-8 with/without BOM and BOM-bearing UTF-16/UTF-32 LE/BE, and rejects malformed encodings or NUL text. At most 256 physical lines of 1,024 UTF-16 units each, including blank/comment lines and a final empty line, reach XenoAtom's existing string Git-ignore parser; the slash-separated canonical relative base is limited to 1,024 units, six components and 255 units per component. Its output is an immutable bounded list of rule *syntax* snapshots preserving source order, scope, negation, anchoring, basename/directory and escaped-line semantics; fixed refusal codes contain neither partial rules nor arbitrary parser messages. It never matches paths or claims case mode, effective ignoredness, ancestor-pruned traversal, global/info/ancestor/nested input completeness, root/overlay resolution, shadowing, enablement, visibility, trust or activation. Legacy discovery continues to read repository/gitfile/config/global and nested ignores separately and without these limits; this parser does not make it bounded. No RPC/UI caller is wired.
-
-`SkillIgnoreSourceReader.ReadAsync(explicitBoundary, explicitSourceFile, relativeParseBase)` is an opt-in Catalog acquisition of **one** caller-selected file only, with no discovery, filename inference, enumeration, matcher/walker or legacy caller. Both supplied paths must be canonical fully-qualified, local-shaped, non-root and at most 1,024 UTF-16 units; the source file must be within the supplied boundary by at most six directories. It checks at most 64 ancestor directories (including those above the boundary), each path component at most 255 UTF-16 units, and refuses observed link/reparse/non-directory components before opening. Any contained filename is eligible, including `.git/info/exclude`: no `SKILL.md` requirement or fixed VCS exclusion applies to this reader. The separately supplied parser base follows the parser's canonical relative limits and is checked **before I/O**, but the caller's association of that base and the file is not authenticated. It reads at most 32 KiB original bytes **plus one sentinel** and must observe EOF before passing complete bytes to the strict parser; a sentinel refuses *before* decoding. A missing or unreadable source is unknown/refused, never a known empty rule set; an actually empty successfully read source parses to zero rules. On a complete parser refusal, `ParserStatus` retains its fixed cause and `BytesRead` the complete byte count; I/O/path refusals return zero bytes, a byte overflow reports cap plus sentinel, and all refusals return no rules. There is no arbitrary exception text or file content in results. Local-shaped paths cannot exclude mapped/network/remote mounts; attribute checks, opening, reads, external edits/swaps and disposal are not atomic or wall-clock bounded despite cancellation checks. An observed EOF is not immutable provenance, source applicability or absence of other files. Git configuration, global/info/ancestor/nested acquisition, case mode, parent pruning, root overlays, shadowing, enablement and effective visibility/trust/activation remain separate blockers. No RPC/UI integration exists.
-
-`CodeAlta.Catalog.Skills.SkillManagementService` owns management query assembly, scaffold creation, related-file shaping, and single/bulk/invert enablement through the existing `SkillCatalog` and `CodeAltaConfigStore`. Callers supply the global CodeAlta root, optional user-profile root, and each operation's project root explicitly. A null profile omits user-common skills; it does not infer home from the global root or the process environment. The production TUI factory supplies the production profile default, while the dialog captures project selection before worker dispatch. Activation, selection/scope mapping, file-editor dispatch, and feedback remain frontend responsibilities.
-
-Creation targets only `<project>/.alta/skills/<name>` or `<global-root>/skills/<name>`, retaining `SKILL.md`, `scripts/`, `references/`, `assets/`, the existing template and lowercase Unicode naming rules. Before mutations, it validates scope, required existing absolute roots, portable path/name constraints, and a nonempty description of at most 1024 characters (line breaks are folded; unsupported controls/invalid Unicode are rejected). Built-in/plugin targets are not exposed. Observed linked/reparse components and existing destinations - including files, empty directories and dangling links - are rejected. A unique adjacent staging directory is published using a non-overwriting directory move after the cancellation check. Cancellation/failure before publication removes owned staging, not the final or a colliding resource; empty parent directories may remain. Cancellation after publication does not roll back a completed skill. Cleanup itself can fail on filesystem errors. External path replacement races are not prevented: this is not a sandbox or a filesystem transaction framework.
-
-Skill enablement validates every requested scope/name and required project before writing either config. The config owner edits only `skills.disabled` TOML tokens, preserving comments (including array comments) and unknown fields for table, dotted-key and inline-table forms. Both applies global then project changes: a later I/O/config error can still leave the global change applied. There is no multi-file transaction, external-writer CAS, or general config recovery/conditional-save migration in this slice.
-
-Preservation applies to parser-accepted configuration. The current Tomlyn deserializer rejects a literal U+FFFD in a TOML comment as an invalid surrogate sequence even though U+FFFD is a valid Unicode scalar. Skill enablement reports this compatibility error and leaves the original bytes unchanged; it does not repair or silently replace the input. Regression coverage separately verifies valid U+FFFD/supplementary skill descriptions and Unicode/CRLF/provider-table retention in accepted TOML.
-
-Related-file discovery retains the catalog's Git rules and existing limits (256 catalog candidates, 128 conventional authoring resources). Isolated tests must bound Git ancestor discovery as well as skill roots: task-owned `.git/config` supplies both `core.ignorecase` and `core.excludesFile` to avoid the dependency's user Git fallback. This management extraction does not change other runtime/live-tool home discovery.
-
-`SkillManagementService.GetFileDocumentAsync` re-discovers the exact skill path under the captured context and returns a `TextFileDocument` with catalog-owned source kind/id and read-only policy. It never accepts a claimed descriptor or renderer read-only flag as path authority. Related requests must exactly match a conventional listed resource; rooted/traversal/alternate-separator/stream paths and observed linked/reparse components are rejected. Built-in content is read-only; plugin provenance alone does not imply bundled immutability, so plugin/user/project files retain normal editing. Linked skill paths are rejected again on workflow load/save, but root replacement races remain possible; these are trusted application APIs, not desktop grants or a sandbox.
-
-The TUI skill dialog routes this document through the existing workspace coordinator and `FileEditorTab`. Its saves (including stale overwrite callbacks) use the application's same `TextFileCodec` instance and document-aware overload, which refuses read-only saves before I/O and delegates writable saves to the existing raw-byte revision, encoding/BOM, and conditional-write implementation. Ordinary trusted raw codec operations remain outside workflow policy. The pinned sealed terminal CodeEditor lacks a read-only switch: a small `ITextDocument` adapter filters mutations, and mutating commands/Save are disabled while selection/copy/find remain available. This is presentation behavior, not the save guard.
-
-Path-keyed reuse only tightens policy: a protected tab cannot be downgraded by an ordinary reopen. Tightening preserves dirty text, undo/document identity, saved revision, conflict state, and watcher lifecycle; closing dirty protected tabs offers Cancel/Discard, not Save. A currently running save prevents tightening and produces explicit retry feedback rather than falsely claiming protection before that save completes. Protection is open-document lifetime state, not a new persisted UI-state schema or global path registry; closing/reopening via a raw trusted path is outside the skill route.
+- `ModelTierResolver.Resolve` gives the first target whose provider is enabled, ready and lists the model, with the
+  first effort the model supports. A missing or unready provider is skipped, never a validation error.
+- `ModelTierScope` is what a session uses: the tiers of its space when the space sets its own (`new_sessions.tiers`,
+  with its own `new_sessions.fallback`), else the global ones, filtered to providers of the space.
+- The tier of a session is part of its local state, not configuration.
+
+## Projects
+
+`ProjectCatalog` keeps one `<slug>.md` per project under `projects/` (legacy `<slug>/readme.md` is still read): a stable
+id, slug, name, path, archive state and the ids of its spaces besides the default one. The current directory at launch
+is offered as an in-memory project until a session is created for it. A filesystem root is a valid project.
+
+The working directory of a session ties it to its project; a session in a git worktree records the worktree beside it
+(`worktreeDirectory` of its summary).
+
+## Spaces
+
+A space is a named group of projects and a setup for their sessions. `SpaceCatalog` keeps one Markdown file per space
+under `spaces/`: the file name is the id (derived from the first name, kept on rename), the front matter has `name`,
+`icon`, `color`, `order` and optional settings, the body is the description. The default space (`default`) holds every
+project, comes first, cannot be deleted, and has a file only when it is customized. A file that cannot be read as a
+space is left out, never hiding the others; an invalid value written by hand is dropped with the rest kept.
+
+Space settings (`SpaceSettings`): `new_sessions` (agent prompt, tiers, fallback), `identity` (Git author and signing,
+SSH key, GitHub CLI profile, Jira, CLI profiles), and `tools.disabled`. Only paths and names of environment variables
+are stored, never a secret.
+
+- **The space of a session** is fixed at creation and recorded in the first line of its journal (`space_id`): the
+  calling session's space for an agent, the shown space for the window, the project's only space for an automation. A
+  session without one (older, or from the TUI) is in its project's space when the project has exactly one, else in the
+  default space. `SpaceCatalog.ResolveSessionSpace` applies these rules and never throws for what a journal says.
+  Why fixed: a session must never gain, mid-life, providers, tools or an identity its space did not give it.
+- **Resources per space.** Providers, MCP servers, plugins, skills and prompts carry an optional `spaces` list in
+  `config.toml`; absent means every space (`SpaceScope.IsAvailable`). `SpaceFilter` is what a session's space has,
+  applied before global and project enablement, so a project cannot bring into a space what the space does not have.
+  Only the window writes these lists.
+- **Identity.** In the desktop (`CodeAltaHostOptions.AppliesSpaceIdentities`), `SessionIdentityResolver` turns the
+  space identity, with the CLI profiles of the project, into one environment (`AgentProcessEnvironment`) kept by the
+  attachment and applied to every process the session starts (shell, Claude Code CLI, jobs, Git plugin tools, stdio MCP
+  servers, terminals). A profile separates accounts; it is not a sandbox.
+
+Which space a window shows, and its tabs, belong to the page's local storage, not the catalog.
+
+## The application database
+
+One SQLite file per instance, `<state root>/data/alta.sqlite3`, owned by `ApplicationDatabase` (one per host, shared
+with the session catalog and the plugin runtime). It holds the session projections, bookmarks, provider caches of
+external conversation headers, and the tables of plugins.
+
+It is **not a cache that may be deleted**: plugin tables hold data that cannot be rebuilt (statistics of deleted
+sessions), and bookmarks point to the sessions of one instance. Nothing deletes the file.
+
+- **Concurrency.** WAL mode, so readers never wait for the writer. Writes go one at a time through a FIFO queue, each a
+  `BEGIN IMMEDIATE` transaction; a write that awaits another write is refused, since it would wait for the queue it
+  holds.
+- **Owners and versions.** Each user (`session_cache`, `plugin:<id>`) records its schema version in `app_meta` and
+  migrates under its table prefix; objects outside the prefix are refused. A version from a newer build is an error,
+  not a downgrade; owners whose data is derived (the session list) drop and rebuild their tables instead.
+- **Damage.** Malformed or missing files are never deleted: derived tables are rebuilt first; otherwise the file is moved
+  aside and replaced by the newest valid copy, as a new `Generation`, and plugins migrate again. Replacement waits for
+  the service's connections to close on every platform, because an old connection would remove the new file's WAL/SHM.
+- **Copies.** `data/backups/`, made with the SQLite backup API about daily and checked; a copy records its copy number,
+  so a restored file is recognized after a restart.
+
+**Session projections.** The session list (`SessionJournalSqliteCache`) and the session index
+(`SessionJournalIndexStore`) let normal operation work without reading journals (see
+[runtime](runtime.md#journals-are-the-source-of-truth)). A row is the projection of its journal only at the journal's
+stamp: writers append to the journal first, then write the row with the stamp taken under the journal gate; a reader
+that finds another stamp reprojects. A listing reads named short columns; per-session detail (provider state, last
+state record) is a separate table read for one session. The journals stay authoritative: every table here is made again
+from them when missing, damaged, replaced or from another layout.
+
+**Statistics archive.** `StatisticsArchiveStore` keeps the statistics of retired sessions in its own file under the
+state root, with an initialized marker. It is irreplaceable, so it never goes through the recovery of the application
+database, and its loss requires explicit repair instead of a silent fresh start.
+
+## Other stores
+
+- `SessionViewCatalog` owns `ui-state.yaml`: open sessions, selection, project preferences, and frontend-owned trees
+  (`frontend_layouts`, `logical_tabs`) that every frontend preserves even when it cannot render them. Malformed YAML is
+  an error, never dropped data.
+- `PromptDraftStore` owns unsent text; `PromptImageAttachmentStore` copies prompt images beside the journal with
+  create-new semantics, never overwriting.
+- `PromptResourceStore` owns agent and system prompt files: built-in prompts cannot be written, project scope never
+  falls back to global, linked path components are refused.
+- `SkillManagementService` creates skills and edits skill enablement; skill discovery is in [skills](skills.md).

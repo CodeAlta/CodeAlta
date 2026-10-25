@@ -63,7 +63,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         AddHelpText(command,
             "The Markdown is the page as the application shows it: the templates of the site are replaced, and a picture is an image below the folder of the guide (`root`), followed by its caption.",
             "A long page comes in parts: when `truncated` is true, read on with `--offset <nextOffset>`.",
-            "Examples: `alta documentation read`; `alta documentation read sessions.md`; `alta documentation read workspace.md --offset 24000`.");
+            "Examples: `alta documentation read`; `alta documentation read sessions/readme.md`; `alta documentation read workspace/settings.md --offset 12000`.");
         return command;
     }
 
@@ -119,7 +119,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add((_, _) => ValueTask.FromResult(HandleDocumentationOpen(context, page, anchor)));
         AddHelpText(command,
             "It only shows the page to the user: to read a page yourself, use `alta documentation read`.",
-            "Examples: `alta documentation open`; `alta documentation open sessions.md`; `alta documentation open workspace.md --anchor code-editor`.");
+            "Examples: `alta documentation open`; `alta documentation open sessions/readme.md`; `alta documentation open workspace/code.md --anchor code-editor`.");
         return command;
     }
 

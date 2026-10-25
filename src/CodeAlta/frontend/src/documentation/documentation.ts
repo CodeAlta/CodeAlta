@@ -9,7 +9,7 @@ const anchorPattern = /^[\p{L}\p{N}_-]{1,200}$/u;
 /**
  * The address of a heading, from its text: lower case, a dash for each space, and nothing else but letters, digits,
  * dashes and underscores. It is how the site of the guide names its headings, so a link written for the site
- * (`workspace.md#code-editor`) finds its heading here.
+ * (`workspace/code.md#code-editor`) finds its heading here.
  */
 export function headingAnchor(text: string): string {
   return text.trim().toLowerCase().replace(/[^\p{L}\p{N}\-_ ]/gu, "").replace(/ /g, "-");

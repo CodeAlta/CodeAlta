@@ -13,7 +13,7 @@ dotnet tool install -g CodeAlta
 alta
 ```
 
-CodeAlta Desktop is the app we recommend. CodeAlta also has a terminal UI, which runs the same agents on the same `~/.alta` profile:
+CodeAlta Desktop is the app we recommend. CodeAlta TUI runs the same agents in a terminal, on the same `~/.alta` profile:
 
 ```sh
 dotnet tool install -g CodeAlta.Tui
@@ -25,21 +25,15 @@ altatui
 | **CodeAlta Desktop** | [`CodeAlta`](https://www.nuget.org/packages/CodeAlta/) | `alta` |
 | **CodeAlta TUI** | [`CodeAlta.Tui`](https://www.nuget.org/packages/CodeAlta.Tui/) | `altatui` |
 
-You can install both. [Desktop and TUI]({{site.basepath}}/docs/desktop-and-tui/) compares them.
+You can install both; [Desktop and TUI]({{site.basepath}}/docs/desktop-and-tui/) compares them. For the TUI, `dnx --yes CodeAlta.Tui` installs, updates and runs it in one command.
 
-For the TUI, `dnx` can install, update, and run in a single command:
+- The folder you launch from is opened as a project.
+- CodeAlta keeps its state under `~/.alta/`: configuration, logs, provider state, sessions, agent prompts, plugins and skills.
+- Only one CodeAlta runs on a profile at a time: close the desktop app before starting the TUI, and the other way around.
 
-```sh
-dnx --yes CodeAlta.Tui
-```
+### Add a project
 
-The folder you launch from is opened as a project. CodeAlta stores user state under `~/.alta/`, including configuration, logs, cached provider state, session journals, agent prompts under `~/.alta/prompts/agents`, plugins, and skills.
-
-Only one CodeAlta runs on a profile at a time. Close the desktop app before starting the TUI, and the other way around.
-
-### Add a project from the terminal
-
-`alta .` adds the current folder as a project of the desktop app, the way `code .` opens a folder in VS Code, and `alta <folder>` adds the folder named. It works whether CodeAlta is running or not: the window comes to the front and shows the project. A folder that is already a project is shown.
+`alta .` adds the current folder as a project of the desktop app, the way `code .` opens a folder in VS Code; `alta <folder>` adds the folder named. CodeAlta comes to the front with the project, whether it was running or not.
 
 ```sh
 alta .                                   # the current folder
@@ -48,71 +42,55 @@ alta . --space work                      # and put it in the space "work"
 alta ~/src/repo-a ~/src/repo-b ~/src/repo-c
 ```
 
-Several folders are added at once; the window shows the first one. `--space` takes the id, the start of the id or the name of a [space](spaces.md), and can be repeated. Every project is in the default space too. Plain `alta` without a folder only shows the window of a running CodeAlta.
+The window shows the first folder. `--space` takes the id, the start of the id or the name of a [space](spaces.md), and can be repeated; every project is in the default space too. Plain `alta` only shows the window of a running CodeAlta.
 
 ### Desktop requirements
 
-The desktop app uses the web view of the operating system:
+The desktop app uses the web view of the system:
 
-- **Windows**: WebView2, which is part of Windows 11 and of up-to-date Windows 10.
+- **Windows**: WebView2, part of Windows 11 and of an up-to-date Windows 10.
 - **macOS**: macOS 11 or later.
 - **Linux**: WebKitGTK 6.0 with GTK 4, in an X11 or Wayland session. On Ubuntu 24.04 or later: `sudo apt-get install libgtk-4-1 libwebkitgtk-6.0-4`.
 
-When the desktop app cannot start its window, it says why and what to do: in the terminal you started it from, in a message box on Windows, or in a notification. See [The desktop app does not start](troubleshooting.md#the-desktop-app-does-not-start).
+When the window cannot start, CodeAlta says why and what to do: see [The desktop app does not start](troubleshooting.md#the-desktop-app-does-not-start).
 
-On its first start, the desktop app adds CodeAlta to the Start Menu on Windows, to `~/Applications` on macOS, or to the applications menu on Linux. After that you can start it without a terminal. On macOS the app shows where it is and how to keep it in the Dock: **Reveal in Finder** opens the Applications folder of your home folder with CodeAlta selected, and you drag it to the Dock. The Dock entry stays the same across updates. In a terminal, `alta` gives the prompt back once the window is open; `alta --wait` keeps the terminal until the app closes.
+On its first start, the desktop app adds itself to the Start Menu on Windows, to `~/Applications` on macOS, or to the applications menu on Linux, so you can start it without a terminal.
 
-On Windows and macOS, after an update run by hand with `dotnet tool update -g CodeAlta`, start `alta` once from a terminal to refresh the Start Menu shortcut or the Dock entry. **Update and restart** in the app does it for you.
+- **macOS Dock**: **Reveal in Finder** opens the Applications folder of your home folder with CodeAlta selected: drag it to the Dock. The entry stays the same across updates.
+- **macOS permissions**: **System Settings > Privacy & Security** lists the app as **CodeAlta**. A permission given there usually stays across updates; started from a terminal, CodeAlta uses the permissions of that terminal. Remove the entries of older versions, listed as `alta`, with **−**.
+- **Terminal**: `alta` gives the prompt back once the window is open; `alta --wait` keeps the terminal until the app closes.
+- **Manual update**: after `dotnet tool update -g CodeAlta`, start `alta` once from a terminal to refresh the Start Menu shortcut or the Dock entry. **Update and restart** in the app does it for you.
 
-On macOS, **System Settings > Privacy & Security** lists the app as **CodeAlta**, with its icon, and **Show in Finder** opens `~/Applications/CodeAlta.app`. A permission given there usually stays across updates. Started from a terminal, CodeAlta uses the permissions of that terminal. Older versions were listed as `alta`, once per version: remove those entries with **−**.
-
-### Terminal font requirement
+### Terminal font
 
 > [!IMPORTANT]
-> The TUI uses [Nerd Fonts](https://www.nerdfonts.com/) icons. Install a current Nerd Font-patched font and select it in your terminal profile before using `altatui`. Without a font that includes the required Nerd Font glyphs, icons may appear as empty boxes, question marks, or misaligned symbols. The desktop app does not need it.
+> The TUI uses [Nerd Fonts](https://www.nerdfonts.com/) icons. Install a current Nerd Font (v3 or later) and select it in your terminal profile before using `altatui`, or icons show as boxes or wrong symbols. The desktop app does not need it.
 
-Use the latest Nerd Fonts release when possible. Nerd Fonts v3.0.0 changed many icon code points, so older v2-era patched fonts can still render CodeAlta incorrectly even when the font name includes `NF` or `Nerd Font`.
-
-Recommended setup:
-
-1. Download a recent font from the official [Nerd Fonts downloads](https://www.nerdfonts.com/font-downloads) page.
-2. Remove older copies of the same Nerd Font before installing the new one, especially if you have had the font installed for years. Duplicate old and new font files can cause the terminal or OS font cache to keep using the outdated glyph set.
-3. Choose the updated Nerd Font family in your terminal profile, such as `CaskaydiaCove Nerd Font`. If a similarly named family such as `CaskaydiaCove NF` still shows broken tree-view icons, check for stale older copies and reinstall the current font.
-4. Restart the terminal window and `altatui` after changing or reinstalling fonts.
-
-See [Troubleshooting: glyphs or tree icons look wrong]({{site.basepath}}/docs/troubleshooting/#glyphs-or-tree-icons-look-wrong) if icons still do not display correctly.
+Download a recent font from the [Nerd Fonts downloads](https://www.nerdfonts.com/font-downloads), remove older copies of the same font first, choose it in your terminal profile (such as `CaskaydiaCove Nerd Font`), and restart the terminal. See [Glyphs look wrong](troubleshooting.md#glyphs-look-wrong) if icons are still wrong.
 
 ## First launch
 
-On first launch, CodeAlta creates a starter `~/.alta/config.toml` with common provider entries disabled. If no provider is enabled yet, the app opens the provider setup automatically: **Settings > Providers** in the desktop app, with a short guide the first time, or the Model Providers dialog in the TUI.
+On first launch, CodeAlta writes a `~/.alta/config.toml` with common providers, all disabled, and opens the provider setup: **Settings > Providers** in the desktop app, with a short guide the first time, or the Model Providers dialog in the TUI.
 
 {{ alta_shot "alta-desktop-model-providers.webp" "alta-model-providers.png" "Model provider setup" "First launch takes you to provider setup so you can enable a provider, choose a model, and validate credentials before sending prompts." }}
 
-Use it to:
-
-1. Select a provider entry on the left.
+1. Select a provider on the left.
 2. Choose or confirm the model and reasoning effort.
-3. Add credentials through an API-key environment variable, direct API key, or provider sign-in.
-4. Test the provider to validate credentials and model discovery.
-5. Confirm the provider shows as enabled. Successful tests and subscription sign-ins enable it automatically.
-6. Save to write `~/.alta/config.toml` and refresh the runtime.
+3. Give its credentials: an API-key environment variable, an API key, or a sign-in.
+4. Test the provider. A successful test or sign-in enables it.
+5. Save: CodeAlta writes `~/.alta/config.toml` and applies it.
 
-You can reopen it any time with `Ctrl+G Ctrl+R` or, in CodeAlta Desktop, from **N active providers** in the **⋯** menu of the prompt.
+Reopen it any time with `Ctrl+G Ctrl+R` or, in CodeAlta Desktop, **N active providers** in the **⋯** menu of the prompt.
 
-## Configure one provider quickly
+## Set up a provider
 
-The most common first setup is a subscription-backed provider: **Claude Code** for Claude subscriptions, **Copilot** for GitHub Copilot subscriptions, or **Codex** for ChatGPT/Codex subscriptions. For Copilot and Codex, select the provider, keep or choose a model, start the browser or device-code sign-in, then save after sign-in completes. A successful sign-in enables that provider automatically; a successful provider test does the same for any provider type.
+The quickest start is a subscription you already have:
 
-For **Claude Code**, CodeAlta runs the Claude Code CLI with the account it is signed in to. In CodeAlta Desktop, select the provider and choose **Download** in its **Claude Code CLI** box to get the version CodeAlta is tested with, then run the command the box gives in a terminal and type `/login`. Enable the provider and **Test** it. See [Claude Code](model-providers.md#claude-code).
+- **Claude Code** for a Claude plan: choose **Download** in its **Claude Code CLI** box, run the command the box gives in a terminal and type `/login`, then enable and **Test** the provider. See [Claude Code](model-providers/setup.md#claude-code).
+- **Codex** for a ChatGPT plan, **Copilot** for GitHub Copilot: start the browser or device sign-in, then save. See [Codex](model-providers/setup.md#codex-chatgpt) and [Copilot](model-providers/setup.md#copilot).
+- **A coding agent** such as GitHub Copilot or Gemini CLI: **Add provider**, then **ACP registry…**, and **Add** the agent. See [Agents of the ACP registry](model-providers/acp-agents.md).
 
-A coding agent that speaks the Agent Client Protocol, such as GitHub Copilot or Gemini CLI, can be a provider too: in CodeAlta Desktop, choose **Add provider**, then **ACP registry…**, and **Add** the agent. See [Agents of the ACP registry](model-providers.md#agents-of-the-acp-registry).
-
-Codex and Copilot credentials are stored in CodeAlta-owned state through their sign-in flows. They are intentionally separate from OpenAI platform API keys.
-
-If you use an API-key provider instead, set the provider's environment variable and enable that provider in the app or in TOML. For OpenAI platform access:
-
-> [!TIP]
-> Environment variables keep API keys out of `~/.alta/config.toml` and project files. Set the variable in the same shell or profile that launches CodeAlta, then restart CodeAlta so the running process can see the new value.
+For an API-key provider, set its environment variable where CodeAlta starts, restart CodeAlta, and enable the provider. For OpenAI:
 
 ```sh
 # macOS/Linux
@@ -121,8 +99,6 @@ export CODEALTA_OPENAI_API_KEY="..."
 # PowerShell
 $env:CODEALTA_OPENAI_API_KEY = "..."
 ```
-
-In `~/.alta/config.toml`:
 
 ```toml
 [chat]
@@ -138,23 +114,18 @@ api_key_env = "CODEALTA_OPENAI_API_KEY"
 api_url = "https://api.openai.com/v1"
 ```
 
-The provider editor of both apps edits the same file and preserves advanced TOML values.
-
-Other API-key providers use the same pattern with their own environment variables, such as `CODEALTA_ALIBABA_API_KEY`, `CODEALTA_AZURE_OPENAI_API_KEY`, `CODEALTA_ANTHROPIC_API_KEY`, `CODEALTA_DEEPSEEK_API_KEY`, or `CODEALTA_ZAI_API_KEY`. For Azure OpenAI, choose `type = "azure-openai"`, set `api_url` to the resource endpoint, and use the deployment name as the model.
+Other providers follow the same pattern with their own variables, such as `CODEALTA_ANTHROPIC_API_KEY` or `CODEALTA_DEEPSEEK_API_KEY`. See [Set up a provider](model-providers/setup.md) for each one.
 
 ## Send a first prompt
 
 {{ alta_shot "alta-desktop-new-session.webp" "alta-home.png" "New session screen" "Selecting a project opens a new session for it. The prompt at the bottom starts the session in that project folder." }}
 
-1. Open a project with `Ctrl+O` or `/open`, or add a folder with the `+` button of the Projects sidebar. In CodeAlta Desktop, `+` opens the folder dialog of your operating system.
-2. If needed, choose the agent prompt, the model and the reasoning below the prompt: with the **Agent** chip in CodeAlta Desktop, with the selectors in CodeAlta TUI. The built-in **Default** agent prompt is a good starting point.
-3. Type a prompt in the prompt editor.
-4. Press `Enter` to send. Use `Shift+Enter` for a new line.
-5. Watch the timeline for reasoning/status messages, assistant messages, tool calls, tool results, statistics, and modified-file summaries.
+1. Open a project with `Ctrl+O` or `/open`, or add a folder with the `+` button of the Projects sidebar.
+2. If needed, choose the agent prompt, the model and the reasoning below the prompt: the **Agent** chip in CodeAlta Desktop, the selectors in CodeAlta TUI.
+3. Type a prompt, and press `Enter` to send it. `Shift+Enter` adds a new line.
+4. Watch the timeline: reasoning, messages, tool calls and their results, statistics and changed files.
 
-Agent prompts are selectable session profiles. Open the prompt manager with `Ctrl+G Ctrl+H` or `/prompt` to inspect Default, Plan mode, or your own global/project prompts. See [Agent Prompts]({{site.basepath}}/docs/prompts/) for the file layout, override rules, and custom workflow guidance.
-
-Use **Plan** when you want CodeAlta to research and write a reviewable `.alta/plans/` file before implementation. Use **Default** when the task is already scoped enough to inspect, edit, verify, and report directly.
+The built-in **Default** agent prompt inspects, edits, verifies and reports. **Plan** researches and writes a plan under `.alta/plans/` for your review before any change. See [Agent Prompts]({{site.basepath}}/docs/prompts/) for these modes and your own.
 
 Useful first prompts:
 
@@ -166,40 +137,38 @@ Summarize this repository and identify the main build/test commands.
 Inspect the failing test output below and propose the smallest safe fix.
 ```
 
-## Add files to a prompt
+## Mention files and issues
 
-Type `@` in the prompt editor to open the project file/folder picker. Accepted entries are inserted as Markdown links such as `[Program.cs](src/CodeAlta.Tui/Program.cs)` and are sent as structured attachments. Raw `@path`, quoted paths, and optional `:line` or `:start-end` suffixes are also recognized at send time.
+Type `@` in the prompt to search the files and folders of the project. An accepted entry is inserted as a Markdown link, such as `[Program.cs](src/CodeAlta.Tui/Program.cs)`, and sent as an attachment. A raw `@path`, a quoted path and a `:line` or `:start-end` suffix are recognized too.
 
-In GitHub, GitLab and Azure DevOps repositories, type `#` to search recent issues (work items on Azure DevOps). The picker accepts numbers or words, matches words case-insensitively, and inserts Markdown issue links such as `[#18](https://github.com/org/repo/issues/18)`. See the [Git plugin](plugins/git.md).
+In GitHub, GitLab and Azure DevOps repositories, type `#` to search recent issues (work items on Azure DevOps) by number or words. The picker inserts links such as `[#18](https://github.com/org/repo/issues/18)`. See the [Git plugin](plugins/git.md).
 
 {{ alta_shot "alta-desktop-file-selection.webp" "alta-file-selection.gif" "File picker opened from the prompt" "Type <code>@</code>, search for files or folders, and accept entries to add them to the prompt as structured attachments." }}
 
-## Attach files and images to a prompt
+## Attach files
 
-In the desktop app, the paperclip button of the prompt bar, before the model, opens a menu:
+In the desktop app, the paperclip button of the prompt bar opens a menu (in the `⋯` menu in a narrow window):
 
-- **Add files or photos** (`Ctrl+U`, `Cmd+U` on macOS, or `/attach_files`) opens the file dialog of your system: choose one file or several. You can also drop files from your file manager onto the prompt, or copy them and press `Ctrl+V` in the prompt editor.
-- **Add folder…** (`Ctrl+Alt+F` or `/attach_folder`) opens the folder dialog of your system in the folder the session works in. A folder of the project reaches the agent as a folder named with `@` does; any other folder, by its full path.
-- **Add issues…** (`Ctrl+Alt+I` or `/attach_issues`) opens the issue picker of the project: check issues with a click, their box or `Shift+Enter`, then press **Attach** (or `Enter`). Checked issues stay checked if you click outside the picker; **Cancel** (or `Esc`) drops them.
+- **Add files or photos** (`Ctrl+U`, `Cmd+U` on macOS, or `/attach_files`) opens the file dialog of the system. You can also drop files onto the prompt, or copy them and press `Ctrl+V` in it.
+- **Add folder…** (`Ctrl+Alt+F` or `/attach_folder`) opens the folder dialog in the session's folder. A folder of the project reaches the agent as with `@`; any other folder, by its full path.
+- **Add issues…** (`Ctrl+Alt+I` or `/attach_issues`) opens the issue picker: check issues with a click, their box or `Shift+Enter`, then **Attach** (or `Enter`). **Cancel** (or `Esc`) drops them.
 
-Each one appears above the prompt: an image as a thumbnail, a file with its icon and name, a folder or an issue with its name. Click a file or an image to preview, rename or remove it. When the prompt is sent, the links of the folders and the issues are added at the end of its text, one per line, as `@` and `#` put them in the text. In a narrow window, the menu is in the `⋯` menu of the prompt bar.
-
-When the prompt is sent, CodeAlta stores a copy of each file beside the session journal, so the conversation does not change if you later edit, move or delete the original. The model gets each file in a form it reads:
+Each attachment appears above the prompt; click a file or an image to preview, rename or remove it. When the prompt is sent, the links of folders and issues are added at the end of its text, and CodeAlta keeps a copy of each file with the session, so editing or deleting the original later changes nothing. The model gets each file in a form it reads:
 
 | File | What the model gets |
 | --- | --- |
-| Image (PNG, JPEG, WebP, GIF, BMP) | The image, in a format it reads (PNG, JPEG or WebP), scaled down to 2000 pixels on its longest side and to 3.75 MB at most. The selected model must support image input. |
-| PDF | The document itself for a model that reads PDFs (the Claude models of Anthropic and of Claude Code). Any other model gets its text, converted to Markdown when the prompt is sent to such a model; a PDF sent to a Claude model and later read by another one reaches that one by its path. |
+| Image (PNG, JPEG, WebP, GIF, BMP) | The image, scaled down to 2000 pixels on its longest side and 3.75 MB at most. The model must read images. |
+| PDF | The document itself for a model that reads PDFs (the Claude models of Anthropic and of Claude Code); its text, in Markdown, for the others. |
 | Word, Excel, PowerPoint, EPUB, RTF | Its text, converted to Markdown. |
 | Text: code, Markdown, CSV, JSON, logs… | Its content, up to 100,000 characters; the agent reads the rest from the stored copy. |
 | Any other file | Its path: the agent opens it with its tools. |
 
-A file is attached up to 20 MB, and a prompt has at most 64 attachments and 64 MB of files. Files work with any model; only images need a model that reads images.
+A file is attached up to 20 MB, and a prompt takes at most 64 attachments and 64 MB. Only images need a model that reads images.
 
-The conversion to Markdown uses [MarkItDotNet](https://github.com/elbruno/ElBruno.MarkItDotNet), run with `dotnet dnx` of the .NET SDK (version 10 or later): it is not part of CodeAlta, and the first conversion downloads it from nuget.org, which can take a few seconds. A document that cannot be converted (no SDK, no network, a protected or damaged file) reaches the model by its path, and the agent can try again with the built-in `document-conversion` skill, which it also uses for a document of the project that you name with `@`.
+The conversion to Markdown uses [MarkItDotNet](https://github.com/elbruno/ElBruno.MarkItDotNet), run with `dotnet dnx` of the .NET SDK 10 or later; the first conversion downloads it from nuget.org. A document that cannot be converted reaches the model by its path, and the agent can try again with the built-in `document-conversion` skill.
 
-- **Desktop**: the prompt in the timeline lists the files it was sent with, below its text.
-- **TUI**: pasting an image opens a preview/title dialog so you can confirm the image before it is attached. Other files are not attached in the TUI: name them with `@`.
+- **Desktop**: the prompt in the timeline lists the files it was sent with.
+- **TUI**: pasting an image opens a preview where you give it a title before it is attached. Other files are named with `@`.
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-image-prompt-copy-paste.png" alt="CodeAlta TUI image paste dialog showing an image copied into a prompt" loading="lazy">
@@ -207,11 +176,11 @@ The conversion to Markdown uses [MarkItDotNet](https://github.com/elbruno/ElBrun
 </figure>
 
 > [!IMPORTANT]
-> In the TUI, image preview requires a terminal with inline image protocol support. Use a terminal that supports Sixel, such as Windows Terminal, or the Kitty/iTerm2 image protocols. Without that support, pasted-image previews may not render correctly even when the selected model can accept images.
+> In the TUI, the image preview needs a terminal that shows images: Sixel, such as Windows Terminal, or the Kitty and iTerm2 protocols.
 
-## Let the agent look at an image
+## Images the agent reads
 
-The agent can open an image file on its own. Give it a path, or let it find the file, and it reads the image with its `view_image` tool:
+The agent can open an image on its own with its `view_image` tool. Give it a path, or let it find the file:
 
 ```text
 Look at docs/img/login-page.png and tell me why the button is misaligned.
@@ -219,14 +188,12 @@ Look at docs/img/login-page.png and tell me why the button is misaligned.
 Take a screenshot of the app with the test script, then check that the dialog is centered.
 ```
 
-PNG, JPEG, GIF, WebP and BMP files are supported. A large image is scaled down to 2000 pixels on its longest side before it is sent. Images returned by MCP tools, such as a browser screenshot, reach the model the same way. The selected model must support image input.
+PNG, JPEG, GIF, WebP and BMP files are read, scaled down to 2000 pixels on their longest side. Images returned by MCP tools, such as a browser screenshot, reach the model the same way. The model must read images.
 
-- **Desktop**: the timeline shows an **Image read** card with a preview of each image the agent looked at. Click the preview to open the image.
-- **TUI**: the tool call shows a line with the name, type and size of the image.
+- **Desktop**: the timeline shows an **Image read** card with a preview; click it to open the image. Right-click a thumbnail and choose **Copy image**, or use **Copy image** or `Ctrl+C` in its window, to copy it as PNG.
+- **TUI**: the tool call shows the name, type and size of the image.
 
-In the desktop app, an image of the timeline, sent with a prompt or read by the agent, can be copied to the clipboard: right-click its thumbnail and choose **Copy image**, or open it and use the **Copy image** button of its window or `Ctrl+C`. The image is copied as PNG.
-
-## Ask CodeAlta about CodeAlta
+## Ask about CodeAlta
 
 This guide ships with CodeAlta, and every agent can read it. Ask a session how to do something:
 
@@ -277,7 +244,7 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Abort the running turn | `F8` or `/abort` |
 | [Dictate a prompt](speech.md) (desktop) | `F9` |
 | Compact idle session | `Ctrl+F11` or `/compact` |
-| [Fork a session, or rewind it](sessions.md#fork-and-rewind) to an earlier turn (desktop) | `/fork`, `/rewind` |
+| [Fork a session, or rewind it](sessions/readme.md#fork-and-rewind) to an earlier turn (desktop) | `/fork`, `/rewind` |
 | Clear prompt queue | `F10` |
 | Previous/next user or assistant message | `F3` / `F4` |
 | Switch tabs | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+Shift+Tab` / `Ctrl+Tab` and `Ctrl+PageUp` / `Ctrl+PageDown` in the desktop app) |
@@ -291,4 +258,4 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Zoom in / out / reset (desktop) | `Ctrl+=` or `Ctrl+Plus` / `Ctrl+-` / `Ctrl+0`, or `/zoom_in` / `/zoom_out` / `/reset_zoom`, or the percentage in the title bar |
 | Copy the UI as an image (TUI) | `Ctrl+F12` |
 
-If these shortcuts do not work in Windows Terminal, see [Troubleshooting: Windows Terminal shortcuts do not reach CodeAlta]({{site.basepath}}/docs/troubleshooting/#windows-terminal-shortcuts-do-not-reach-codealta).
+If these shortcuts do not work in Windows Terminal, see [Windows Terminal shortcuts](troubleshooting.md#windows-terminal-shortcuts).

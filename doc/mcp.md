@@ -1,344 +1,116 @@
 # MCP support
 
-CodeAlta ships MCP support as a trusted built-in plugin (`CodeAlta.Plugin.Mcp`). The surface is configuration discovery, policy overlay, session-activated MCP agent tools, prompt guidance, `alta mcp ...` commands, explicit runtime calls through `alta mcp tool ...`, and the TUI MCP Servers dialog. Dynamic agent-tool registration exposes enabled/config-controlled MCP tools only for MCP servers activated in the current session.
+MCP support is the built-in plugin `mcp` (`src/CodeAlta.Plugin.Mcp`), on the public plugin contracts like any other
+(see [plugins](plugins.md)). It reads the configured servers, gives agents their tools progressively, runs the calls,
+and contributes `alta mcp`. The window's pages (`mcpServers`, `mcpApps` and `skills` RPC services in
+`src/CodeAlta/Desktop`) and the TUI dialog (`src/CodeAlta.Tui`) are presentations over its `McpManagementService` and
+`McpRuntimeService`; reusable MCP code stays in the plugin, never in a frontend.
 
-## Configuration files and overlay
+## Configuration: definitions and policy
 
-CodeAlta writes MCP server connection fields to one JSON file per scope:
+Server definitions (how to start or reach a server) and policy (whether and how CodeAlta uses it) are kept apart:
 
-| Scope | Path | Notes |
-| --- | --- | --- |
-| Global | `~/.alta/mcp.json` | For every project. |
-| Project | `<project>/.alta/mcp.json` | Read only when a project directory is active; comes before global. |
-
-It also reads the files other tools keep, where they are, and never writes them:
-
-| Scope | Path | Kept by | Origin |
-| --- | --- | --- | --- |
-| Project | `<project>/.mcp.json` | GitHub Copilot CLI, Visual Studio Code, Claude Code | `Common` |
-| Project | `<project>/.github/mcp.json` | GitHub Copilot CLI | `Copilot` |
-| Project | `<project>/.vscode/mcp.json` | Visual Studio Code | `Vscode` |
-| Global | `~/.copilot/mcp-config.json` | GitHub Copilot CLI, Visual Studio Code | `Copilot` |
-
-Effective servers are keyed by the raw server key, and the first definition of a key is the one in effect: a project comes before the user, and in each scope the file of CodeAlta comes before the files of other tools, in the order of the table. The other definitions of the key are reported as shadowed, with the file that comes first, instead of producing a duplicate connection or duplicate tools.
-
-`McpConfigSnapshot.Sources` are the two files CodeAlta writes, as before. `ExternalSources` are the files of other tools that exist (a missing one is not a source: CodeAlta does not create it). Every definition has a `SourceOrigin`, and `McpManagementServerSnapshot.IsReadOnly` is true for a server of another tool:
-
-- its enablement and its tool policy are in `config.toml`, as for any server, and it is tested, activated and authorized the same way;
-- its definition is never changed or removed. Saving it from a dialog writes a definition of the same key to the file of CodeAlta of the chosen scope, which then comes first; removing that one puts the other back in effect. `alta mcp server remove` refuses a key that only a file of another tool defines (`read_only_source`).
-
-A file of another tool is read with more tolerance than a file of CodeAlta, because it is not CodeAlta's to fix:
-
-- comments and trailing commas are accepted (Visual Studio Code writes JSON with comments);
-- the root can be the map of the servers itself, without `mcpServers` (GitHub Copilot CLI accepts it in a project);
-- the value of an environment variable can be a number, and `null` leaves the variable out;
-- a server that is not valid is left out and the others are read. A file that cannot be parsed is an invalid source (`InvalidConfig` row), and the other files stay in effect;
-- a server of a project starts in the folder of the project when it has no `cwd`, and a relative `cwd` is resolved from it, as in the tools the file is written for.
-
-Variables of such a file are brought to what CodeAlta resolves (`McpExternalVariables`):
-
-| Written | Becomes |
+| What | Files |
 | --- | --- |
-| `${env:NAME}` | `${NAME}`, resolved when the server starts |
-| `${NAME}`, `${NAME:-default}` | Kept in an `mcpServers` file; an unknown variable in a `servers` file, where Visual Studio Code would not resolve it |
-| `${workspaceFolder}`, `${workspaceFolderBasename}` | The folder of the project and its name |
-| `${userHome}`, `${pathSeparator}`, `${/}` | The home of the user and the separator of the platform |
-| `${input:id}` | The server is left out (`input_variable`): only Visual Studio Code can ask for the value |
-| Any other `${...}` | The server is left out (`unknown_variable`) |
-
-A server with an `envFile` is left out too (`environment_file`). A server that is left out is an `Unsupported` row of the management snapshot (`UnsupportedReason`, and a message that names the variable, never a value), an `alta.mcp.config.skipped_server` record of `alta mcp status` and `alta mcp config sources`, and a **Not supported** card of the desktop page.
-
-The `tools` list of a GitHub Copilot file is not used: the tools of a server are filtered by the TOML policy.
-
-The default write scope is project when a project directory is active and global otherwise. New files are created in CodeAlta's default `mcpServers` format:
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
-      "cwd": "C:/work/project",
-      "env": {
-        "MEMORY_TOKEN": "value"
-      }
-    },
-    "docs": {
-      "type": "http",
-      "url": "https://example.test/mcp",
-      "headers": {
-        "Authorization": "Bearer value"
-      }
-    }
-  }
-}
-```
-
-Existing files are parsed and written back using the detected root/flavor where supported:
-
-- CodeAlta/Claude/IntelliJ-style `mcpServers` files;
-- GitHub Copilot-style `mcpServers` files, detected by `tools` entries and preserved when writing;
-- Visual Studio Code-style `servers` files, including `stdio`, `http`, and `sse` transport type values.
-
-A single file containing both `mcpServers` and `servers` is invalid because its flavor is ambiguous. A server definition must choose exactly one transport: `command` for stdio or `url` for HTTP/SSE. The `type` of a stdio server is `stdio` or `local`, as GitHub Copilot CLI writes it. Stdio servers can include `args`, `cwd`, and `env`; HTTP/SSE servers can include `headers`. The `command`, `args`, `cwd` and `url` of a server, its `env` values and its `headers` values may reference process environment variables with `${NAME}` placeholders, for example `"Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"`, and `${NAME:-default}` gives a value for a variable that is not set. A missing variable produces a finite MCP diagnostic (`environment_variable_not_found`) instead of sending the literal placeholder. The tokens of an HTTP server are kept under its `url` as the file writes it, also when a variable is part of it.
-
-## TOML policy overlay
-
-Runtime policy lives in the normal CodeAlta TOML config files, loaded global first and then project-local when a project scope is active:
-
-| Scope | Path |
-| --- | --- |
-| Global | `~/.alta/config.toml` |
-| Project | `<project>/.alta/config.toml` |
-
-MCP policy is a policy overlay; it does not store server connection fields and should not rewrite JSON server definitions for enablement-only changes.
-
-```toml
-[plugins.mcp]
-enabled = true
-startup_timeout_ms = 30000
-tool_timeout_ms = 60000
-max_tool_output_chars = 120000
-discover_in_prompt = true
-prompt_max_servers = 10
-prompt_max_tools = 20
-direct_exposure = "auto"
-direct_tool_threshold = 40
-
-[plugins.mcp.servers.memory]
-enabled = true
-allowed_tools = ["read_graph"]
-disabled_tools = ["delete_graph"]
-disabled_skills = ["skill://acme/billing/refunds/SKILL.md"]
-startup_timeout_ms = 15000
-tool_timeout_ms = 30000
-direct_exposure = "allowlist"
-direct_tools = ["read_graph"]
-```
-
-Implemented policy behavior:
-
-- global policy is applied first and project policy overlays it;
-- `[plugins.mcp].enabled = false` disables MCP runtime exposure through direct tools and command paths;
-- `[plugins.mcp.servers.<server>].enabled = false` disables one server without deleting its JSON definition;
-- `allowed_tools` allow-lists a server's tools, and `disabled_tools` disables named raw MCP tools;
-- `disabled_skills` turns off skills of the server, by URI or by name (see "MCP skills");
-- the dialog's per-tool enablement table writes/removes `disabled_tools` entries only;
-- `McpPolicyWriter` (server and tool toggles in Settings, `alta mcp enable|disable`) changes `config.toml` through `CodeAltaConfigStore.EditConfigFile`, under the lock every save of the configuration stores takes, so a setting another page saves at the same time is kept. It edits the text with `ConfigTableSyntax`: only the `enabled` or `disabled_tools` line of `[plugins.mcp.servers.<server>]` changes (a missing table is added at the end of the file), and the comments and other settings stay as they are. Server keys keep their case, as the policy loader reads them. A server policy written as an inline table or with dotted keys is changed in the file's table model instead, which keeps the settings but not the comments;
-- `startup_timeout_ms`, per-server `startup_timeout_ms`, `tool_timeout_ms`, per-server `tool_timeout_ms`, and `max_tool_output_chars` bound runtime operations and output;
-- `discover_in_prompt`, `prompt_max_servers`, and `prompt_max_tools` bound MCP prompt guidance;
-- `direct_exposure`, `direct_tool_threshold`, and per-server `direct_exposure`/`direct_tools` decide which tools stay loaded for a provider that defers tools (see "Deferred tools" below). Their meaning changed with deferral: they no longer select tools to expose without an activation, they select the tools of the list CodeAlta keeps that are sent loaded instead of deferred. `all` keeps every tool of a server loaded, `none` defers all of them, `allowlist` and `auto` (the default) keep the tools of `direct_tools` (or of `allowed_tools` when a server has no `direct_tools`), and `direct_tool_threshold` (40) is now the most tools that stay loaded in all, in the order of the servers and the tools. `auto` no longer loads every tool while there are few: deferred tools cost nothing in the context, loaded ones do. The older `ListDirectToolsAsync` path, used by tests only, keeps the former meaning. After a server is activated, every enabled MCP tool that passes server/tool policy is exposed as a loaded `AgentToolDefinition` using the stable alias described below.
-
-### Deferred tools
-
-A provider that defers tools (`AgentToolDeferral.IsSupported`: the Claude API with Claude 4.5 or later, or a profile with `supports_tool_deferral = true`) is offered the tools of every enabled MCP server of the session's space that CodeAlta listed before (`McpToolListCache`, read by the fingerprint of the definition, at any age), not only those of activated servers. `McpRuntimeService.ListCachedTools` reads them without starting any server; `McpPlugin.OnBeforeAgentRunAsync` adds them when `PluginBeforeAgentRunContext.ProviderDefersTools` is set (the orchestration asks `PluginOrchestrationBridge.DefersToolsOf`, which the host answers from the provider's runtime descriptor and the model of the run). Those the policy keeps loaded are plain tools; the others are `AgentToolSpec.Deferred`, with `Group` set to their server. The tools of activated servers keep their place before them. A deferred tool is an ordinary MCP direct tool: its first call connects its server through the session's connections. A server CodeAlta never listed is not offered: `alta mcp tool search`, a test or an activation lists it once. A provider that does not defer tools is offered none of these, as before.
-
-### Spaces
-
-`[plugins.mcp.servers.<server>].spaces` (a list of space ids, or one string) assigns a server to spaces, with the rule of `CodeAlta.Catalog.SpaceScope`: absent or empty is every space, a list is only those spaces, and the default space only when `default` is listed. The plugin reads its policy without `CodeAlta.Catalog`, so `McpPolicyOptions.ServerSpaces` reads the same rule itself; a test in `CodeAlta.Tests` checks it against `SpaceAssignments.Parse`.
-
-- Only the **global** `config.toml` assigns spaces: `spaces` in a project `config.toml` is not read, so a repository cannot widen a space. Keys are compared without case, as the host compares them.
-- The space applies to the server in effect for a key, whatever file defines it: a project server with the key of a Business-only server is out of Personal too (its OAuth tokens are cached under the key and the URL).
-- The space comes before the enablement. `McpRuntimeRequest.SpaceId` is checked first in `GetServerStateAsync`, before the cache of connections: `server_not_in_space`. Tool search/describe/call, kept connections and direct tools go through it. Null applies no space (the user in a terminal).
-- The prompt list (`CreatePromptDiscoveryAsync`) leaves out the servers of other spaces, and forgets an activation that is no longer in the space. `OnBeforeAgentRunAsync` drops and forgets such activations.
-- `alta mcp activate` and `alta mcp server enable` refuse a server of another space to a session (`server_not_in_space`, nothing activated or written); `alta mcp list` lists the servers of its space. The space of the caller comes from `PluginAltaCommandContext.ResolveSourceSpaceIdAsync`.
-- No `alta mcp` command writes `spaces`: `McpPolicyWriter` sets `enabled` or `disabled_tools` only and keeps the rest of the table. Only the window writes `spaces` (`spaces.assignResource`).
-
-## `alta mcp` commands
-
-The MCP plugin contributes the `mcp` root to the in-process `alta` command registry. Commands resolve project scope from the selected workspace/project or invocation working directory and emit the normal finite JSONL transcript.
-
-Read-only/config inspection commands:
-
-```text
-alta mcp list
-alta mcp status
-alta mcp status --server <server>
-alta mcp config sources
-alta mcp config sources --include-missing
-alta mcp config sources --scope project
-```
-
-Mutation commands:
-
-```text
-alta mcp activate <server>|<server>/<tool> [...]
-alta mcp server add <server> --command <command> --arg <arg> --env KEY=VALUE --cwd <dir> --scope project
-alta mcp server add <server> --url https://example.test/mcp --header Authorization=Bearer... --scope global
-alta mcp server remove <server> --scope project
-alta mcp server enable <server> --scope project
-alta mcp server disable <server> --global
-```
-
-`activate` changes the activation state of the session and immediately enumerates tools from active servers so the UI can show whether activation took effect. An id is a server, activated as a whole, or `<server>/<tool>`, one tool of a server (a tool name of MCP has no `/`, a server key may): the activation state keeps servers and (server, tool) pairs, so a server of 50 tools does not bring 50 schemas for one of them. A tool the server does not give, or that the policy turns off, is refused with `tool_not_found` and nothing is activated. When an agent run calls it, the run also records the references `mcp:<server>` and `mcp:<server>/<tool>` with `AgentRunTools.KeepLoaded`: `AgentSession` journals them as a `local.toolLoad` raw event, keeps them in `AgentSessionState.LoadedTools` (rebuilt from the journal at resume, as loaded skills are), and the orchestration gives them to the plugins at each run (`PluginBeforeAgentRunContext.LoadedTools`, read by `SessionRuntimeService.GetLoadedToolsAsync`). The MCP plugin activates them again, so a resumed session, in another run of the application too, has the same tools. When an agent run calls it, the enumerated tools are also registered in that run (`AgentToolInvocation.RunTools`, see below): its result says `toolsAvailable: "now"` and the model calls them in its next step. Called from a terminal, or when a server gave no tool, the result says `"next_run"`. On every later agent run, the same activated servers are refreshed and registered as `mcp__<server>__<tool>` after normal MCP policy filters. `server add` and `server remove` mutate only the selected JSON MCP file of CodeAlta: adding a server that a file of another tool defines overrides it, and removing a key that only such a file defines is refused (`read_only_source`). `server enable` and `server disable` mutate TOML policy only and preserve JSON server definitions, whose file they are in. `list`, `status` and `config sources` say where a definition comes from (`sourceOrigin`: `codealta`, `common`, `copilot` or `vscode`; `readOnly`), `config sources` also lists the files of other tools that exist, and a shadowed definition has its reason (`project-overrides-global` or `same-scope-source-comes-first`) and `overriddenByPath`. Removing a global-only server from inside a project requires `--scope global` so a project context does not accidentally delete global user configuration.
-
-Runtime tool commands:
-
-```text
-alta mcp tool search
-alta mcp tool search --server <server> --query <text>
-alta mcp tool search --refresh
-alta mcp tool describe --server <server> --tool <raw-tool-name>
-alta mcp tool call --server <server> --tool <raw-tool-name> --arguments {"key":"value"}
-alta mcp auth status [--server <server>]
-alta mcp auth login <server>
-alta mcp auth logout <server>
-alta mcp skill list [--server <server>] [--query <text>] [--refresh]
-alta mcp skill show --server <server> <uri|name>
-alta mcp skill activate --server <server> <uri|name>
-alta mcp skill read --server <server> [--skill <uri|name>] <path|uri>
-```
-
-The `skill` commands exist where the host loads the skills of servers (CodeAlta Desktop); see "MCP skills" below. `tool search`, `describe`, and `call` lazily connect to enabled effective servers, list tools, apply policy filters, and return diagnostics plus tool/call records.
-
-**The tool-list cache.** Every listing of a server's tools (an activation, a test, `tool search`, a run) is kept in `~/.alta/cache/mcp/tools/<server>-<hash>.json` (`McpToolListCache`): the name, alias, title, description, arguments and input schema of each tool, under the fingerprint of the definition (command, arguments, folder, address and the names of the variables) and a variant, the SHA-256 of the whole start (the values of the variables and headers and the variables of the session). No value of a variable or header is kept. The search index of CodeAlta Desktop reads the lists by their fingerprint, so search finds the tools of a server without starting it. `tool search` answers from a list less than a day old whose variant is the one of the start it would make, without starting the server; `--refresh` asks every server again (`alta search reindex --kind mcp` does that). Tools are routed by raw MCP server key and raw MCP tool name. Returned records also include the same stable qualified alias used for direct agent-tool exposure, `mcp__<server>__<tool>`; alias parts are sanitized and receive a stable short hash suffix when sanitized names collide.
-
-## Runtime behavior
-
-`McpRuntimeService` owns finite MCP runtime state for direct MCP agent tools, the `alta mcp tool ...` commands, and the dialog's Test Server action. It supports:
-
-- stdio servers launched from JSON `command`, `args`, optional `cwd`, and optional `env`. A server started for a session also gets the variables of the identity of its space (`McpRuntimeRequest.Environment`, see "The identity of a session" in `catalog-and-config.md`), under its own `env`, which wins; the identity is part of the key of the connection (`CreateServerCacheKey`, and the per-session entry of `McpSessionConnections`), so two identities never share a server process. An HTTP/SSE server is not started by CodeAlta and is not keyed on it;
-- HTTP/SSE servers using absolute `http`/`https` URLs, SDK transport auto-detection, connection timeout, JSON `headers` with optional `${NAME}` environment-variable expansion, and CodeAlta-managed OAuth/Authv2 tokens when authorized;
-- bounded startup/tool discovery with effective global or per-server startup timeout;
-- bounded tool calls with effective global or per-server tool timeout;
-- disabled-server, missing-server, disabled-tool, missing-tool, invalid transport, invalid URL/header, timeout, unavailable, and authentication diagnostics.
-
-An image block of a tool result is kept for a direct agent tool: the tool returns it with the text of the result, and the session checks it, scales it down when needed, saves it beside the journal and gives it to the model (see "Images in tool results" in `runtime.md`). An image over 32 MB is left out. `alta mcp tool call` output names an image by its media type and size and never holds its bytes. Audio blocks and embedded resources are still summarized as text.
-
-Runtime diagnostics redact sensitive values before they reach command output or the dialog. Redaction covers configured URLs/headers, secret-like dictionary keys, arguments, exceptions, text output, and structured JSON output. An argument is hidden after a flag that names a secret (`--api-key`, `--token`), as the value of such a key (`--token=...`), with a `Bearer`/`Basic` prefix, or as a long value of letters and digits; a path (from `/`, a drive, a UNC share, `~`, `./` or `../`) is shown however long, unless one of its segments reads as a token. An argument shown as `[redacted]` in the editor and saved unchanged keeps its stored value. HTTP 401/403 diagnostics explicitly direct the user to use the dialog **Authorize/Login** action or `alta mcp auth login <server>` for browser OAuth, or to configure static headers (including `${NAME}` environment-variable references when preferred) when appropriate.
-
-## HTTP OAuth/Authv2 browser login
-
-Remote HTTP/SSE MCP servers that follow the MCP authorization flow can use browser login instead of long-lived bearer headers in MCP JSON. Add an optional per-server JSON auth block when client details are needed; for servers that support dynamic client registration, the URL plus `"auth": { "type": "oauth" }` is usually enough:
-
-```json
-{
-  "mcpServers": {
-    "docs": {
-      "url": "https://example.test/mcp",
-      "auth": {
-        "type": "oauth",
-        "clientId": "optional-client-id",
-        "scopes": ["read", "search"]
-      }
-    }
-  }
-}
-```
-
-CodeAlta stores access/refresh tokens in local user MCP plugin state under `~/.alta/auth/mcp/`, not in `.alta/mcp.json` or TOML policy. The token cache uses per-server files, creates parent directories for the current user, writes through a temporary file, and command/dialog output reports only status and expiry, never token values, authorization codes, or client secrets. Browser login uses a loopback callback with a per-login state value and an ephemeral port by default; set `redirectUri` only when an authorization server requires a pre-registered fixed callback. Non-interactive agent runs and ordinary `alta mcp tool ...` commands use cached/refreshable tokens only; they do not surprise-open a browser.
-
-The loopback callback waits `McpOAuthBrowserAuthorization.DefaultTimeout` (5 minutes) from the moment the address is reported; when it runs out the login ends with the `oauth_login_timeout` diagnostic (status `TimedOut`). The SDK runs the whole authorization inside the first request of the connection, the `server/discover` probe, which it bounds to 5 seconds by default: a browser login therefore passes `McpClientOptions` whose `InitializationTimeout` and `DiscoverProbeTimeout` are the startup timeout plus that wait, and the startup budget is extended by as much. Ordinary connections keep the SDK's defaults and the startup timeout. The address and its deadline reach callers as `McpOAuthBrowserPrompt` (`McpManagementService.LoginOAuthAsync` overload with a prompt callback); callers without one get the status text `Open MCP authorization in your browser within 5 minutes: <url>`, with the address last. `alta mcp auth login` writes the prompt as an `alta.mcp.auth.progress` record with `authorizationUrl`, `expiresAt` and `timeoutSeconds`.
-
-Use the MCP Servers dialog **Authorize/Login** action for a configured HTTP server to open the browser flow. The action opens a small modal login dialog on top of the MCP dialog, shows/copies the login URL when available, and supports **Cancel Login** (`Esc` or `Ctrl+G Ctrl+C`) for stuck or unwanted browser flows. Use **Logout** to delete cached tokens. The CLI fallback is `alta mcp auth login <server>`, `alta mcp auth status`, and `alta mcp auth logout <server>`.
-
-The desktop app has the same flow on the **MCP Servers** page of Settings. The form of a saved HTTP server ends with an **Authorization** block that says whether tokens are stored and until when, with **Authorize** (or **Authorize again**), and **Sign out** to remove the tokens. The `mcpServers` RPC service streams the login as events (`login`: a `prompt` with the address to open and `expiresAt`, which the page shows as a countdown, then `completed` with the number of listed tools or `failed` with a code and the plugin's redacted explanation); closing the channel, the page's **Cancel**, or closing the application cancels it. One login runs at a time, and only for the definition in effect: a definition that another one overrides is refused. The page receives the address and the token's presence and expiry, never a token.
-
-Tool-call results preserve `isError` from MCP. Text content becomes `contentText` and `content` blocks; structured content is included after redaction when it fits the output character budget. Image, audio, embedded-resource, resource-link, and unknown non-text content are summarized instead of embedding raw payloads. Output beyond `max_tool_output_chars` is truncated and marked with `truncated = true`.
-
-Servers that cannot connect or list tools are reported as unavailable for that runtime request and do not contribute enabled tools to activation-time status, activated-agent-tool enumeration, or search/describe/call results. Runtime state is explicit and finite; activated tools are eagerly enumerated when `alta mcp activate ...` runs for immediate status feedback, then refreshed again at agent-run time on the session's connections (see below). `tool-list-changed` notifications are follow-up work only if tool freshness requires them.
-
-The tools a session calls keep their server connected (`McpSessionConnections`). A server can hold state from one call to the next, such as a browser snapshot whose element ids the next call uses, and starting it for every call costs seconds. Each session has its own connections, used by one call or listing at a time, opened by its first use. The tool listing at the start of each run of a session goes through them too (`McpSessionConnections.ListToolsForServersAsync`): the server started to list the tools is the one the calls of the run use, and a server the session keeps connected answers the next run without being started again (before, each run started every activated server once more only to list its tools). A kept connection answers a listing as a new start would (`McpRuntimeService.ReviseKeptStateAsync`): the tool flags come from the policy of now, a connection whose server exited (`McpClient.Completion`) or that the policy turned off is closed and the server started again or refused with its usual diagnostic, and a server that could not be started is forgotten after the listing (`ForgetFailedServers`), so the next call or run tries again. The list of tools stays the one the server gave when it connected, which is also what its calls are resolved against; a changed definition or identity is another key, so it never reuses a process of the old one. The connections are closed when a call could not be completed (the server did not start, the call timed out or the connection broke: the next call connects again), after fifteen minutes without a call or a listing, and when the plugin stops. An activation called by a session lists its tools on the session's connections too, with the same request as the start of its runs: the identity of the session (`McpCommandFactoryOptions.SessionEnvironment`, the plugin's `SessionEnvironmentAsync`) and the project its runs start their servers for (`McpActivationState.GetProjectDirectory`, recorded by `OnBeforeAgentRunAsync`; the `alta` call itself is given the folder of the call and the project the window shows, not the session's), so the server started for the activation is the one its calls in the same run and the next runs use, and the tools it registers in the run call with the same identity. `alta mcp tool ...` commands, an activation without a session and a run without a session still use a connection of their own that ends with them; called by a session, the commands start the server with its identity too. Sessions never share a server process.
-
-**Reading the configuration.** The plugin reads the MCP files and the MCP policy of `config.toml` through one `McpConfigCache`, shared by its runtimes, its session connections, its commands and its prompt: every tool call, run start and prompt build used to read and parse the two files of CodeAlta, the four files of other tools and the two `config.toml`, and to probe whether the files of CodeAlta could be written (creating and deleting a file next to a missing one). The cache keeps a discovery and a policy under the stamp of each of their files (whether it exists, its size, the time it was last written, and for a file of CodeAlta whether its folder exists), taken before the files are read: another stamp reads them again at the next request. A file written less than three seconds ago (`McpConfigCache.SettleTime`) is read at each request until it is older, because a file system that keeps coarse times could give a second write of the same size the same stamp. The writes of the plugin (its `alta mcp server ...` commands and the management service of its presentation) also invalidate the cache. A file that cannot be read or parsed is never kept: the next request reads it again and fails as before. The runtime never probes writability (it never writes the files) and reads the files of CodeAlta whole, as before; the prompt reads the servers and the policy as a management snapshot did, without its OAuth token reads. OAuth token status is read with synchronous file I/O where a snapshot is built synchronously (`McpOAuthTokenCache.GetStatus`) and awaited in the commands, never by blocking on the asynchronous read.
-
-## TUI dialog and status indicator
-
-Open the MCP Servers dialog through any of these entry points:
-
-- `/mcp` in the shell prompt;
-- command palette entry **MCP Servers**;
-- `Ctrl+G Ctrl+Y` (not `Ctrl+G Ctrl+M`, because some terminals report Enter as `Ctrl+M`);
-- the clickable MCP status indicator when a cached MCP snapshot exists and MCP JSON/TOML configuration is present.
-
-The dialog and status indicator share `McpManagementService`. `Refresh` reads the fixed JSON config files, the files of other tools and TOML policy without connecting to servers. The server list includes effective servers, disabled servers, invalid/missing config rows, shadowed definitions, and the servers of other tools that are left out (`not supported`). A server of another tool names its file in the list and in **Details** (**Source Owner**, **Shadowed By**); **Remove** is not offered for it, and **Save** writes the edited definition to the file of CodeAlta and leaves the other file as it is. Dialog counts are cached snapshot counts; the status indicator uses cached exposed/total counts when a dialog test has run, otherwise it reports session activation state as `tools pending`, `active tools N`, or `tools not loaded`; `tools pending` should be transient and is replaced after activation-time or agent-run tool enumeration updates the bindable status state. Enabled configured servers with no cached test result start a background, cancellable tool discovery when selected so the **Tools (N)** tab is prefilled without blocking rendering, close, or application shutdown.
-
-For a selected configured server, the dialog shows compact enablement/actions above the tab strip. The first **Config** tab contains editable JSON server fields. The **Tools (N)** tab contains discovered tool policy controls. The following **Details** tab contains normalized/redacted connection fields, authorization status for HTTP servers, source scope/path/format, policy values, and diagnostics. Rendering and refresh use cached/discovered config snapshots and do not synchronously connect to servers; background prefill and the explicit **Test** action connect to the selected stdio or HTTP/SSE server with configured timeouts, update cached exposed/total tool counts, and surface success, failure, timeout, cancellation, and auth/unavailable diagnostics without blocking normal config refresh/rendering. The **Authorize/Login** action is explicit and may open a browser; automatic prefill and background agent-tool enumeration remain non-interactive. The top-level **Add**, **Save**, and **Remove** actions create/update/remove JSON server definitions in the selected project/global scope. Editable config fields show the unredacted JSON values because they are write-back fields. Editable arguments use semicolon-separated values; env/header fields use semicolon-separated `KEY=VALUE` pairs and support `${NAME}` environment-variable placeholders. The compact Enabled checkbox writes server `enabled` policy. The discovered tools table shows Enabled, raw MCP name/title, and policy status. Toggling a tool writes/removes that raw tool name in `disabled_tools`; it does not edit JSON server definitions.
-
-Use `alta mcp server add/remove/...` or **Open JSON Config** for advanced JSON shapes not exposed by the dialog form.
-
-## Plugin and prompt boundaries
-
-The MCP implementation is a built-in trusted plugin, enabled by default through the same built-in plugin infrastructure as the Git and statistics plugins. It contributes:
-
-- an `alta mcp` root command with mutating command policy;
-- compact dynamic developer prompt guidance that advertises active/inactive configured MCP servers and the `alta mcp activate <id>*` path;
-- direct `AgentToolDefinition` contributions for enabled/config-controlled MCP tools on session-activated servers;
-- shared discovery/runtime services consumed by direct tools and `alta`, plus management snapshots consumed by the TUI dialog, status indicator, and prompt guidance.
-
-Reusable MCP configuration, policy, runtime, and management code lives in `src/CodeAlta.Plugin.Mcp/`. TUI-specific composition, status indicator rendering, and the dialog live in `src/CodeAlta.Tui/`. Do not move reusable MCP runtime orchestration into frontend controls.
-
-## Progressive MCP agent-tool behavior
-
-Progressive dynamic `AgentToolDefinition` exposure is shipped behavior:
-
-- the MCP plugin prompt contribution reads configured MCP servers without connecting and emits a compact active/inactive server inventory, for example: `MCP servers: Active memory; Inactive docs`;
-- `alta mcp activate <server>|<server>/<tool> [...]` marks configured servers, or single tools of them, active for the current session (falling back to project scope when no session is available) and immediately lists tools for active servers to update activation status. An agent's activation is kept in the session's journal and restored at each run, a resumed session included; `alta search load <ref>…` activates the MCP tools of search hits through it;
-- a run that activates a server takes its tools at once. `AgentSession` gives every tool call the tools of its run (`AgentRunTools`); `alta mcp activate` adds the direct tools there, and the session offers them with the next model request of the same run, appended after the tools the run started with. No turn is ended and no follow-up run is started. Tools added this way last until the run ends;
-- before each agent run, the MCP plugin lists the tools of the activated servers on the session's connections: it starts a server only when the session does not keep it connected, and applies the policy of now;
-- every enabled tool on an activated server that passes global/server policy (`enabled`, `allowed_tools`, `disabled_tools`) is exposed as a direct agent tool; a server with only some tools activated gives only those. The prompt block lists the servers activated as a whole as active: loading single tools leaves its text as it is;
-- the deterministic `mcp__<server>__<tool>` alias is used as `AgentToolSpec.Name`, with the same sanitization and collision hashing used by runtime command output;
-- the MCP `inputSchema` is passed through as the tool input schema when it can be represented by CodeAlta's strict/OpenAI-compatible tool schema subset; schemas with dynamic object maps or required names outside local `properties` are exposed through an `arguments_json` compatibility string containing the raw MCP argument JSON object;
-- direct tool handlers delegate to `McpRuntimeService.CallToolAsync(serverKey, toolName, arguments, ...)`, unwrapping `arguments_json` when needed and preserving tool timeout, redaction, `isError`, structured content, and truncation behavior;
-- startup/list-tools diagnostics are reported through per-run MCP prompt guidance without leaking headers, environment values, arguments, or tool output secrets;
-- direct tools are enumerated on activation for immediate status feedback and refreshed at agent-run enumeration time. `tool-list-changed` notifications are an optional follow-up only if finite refresh is insufficient;
-- direct tool calls of a session share that session's connections, which stay open between calls (see above).
-
-## MCP Apps (views of tool calls)
-
-CodeAlta Desktop shows the views of MCP Apps, the `io.modelcontextprotocol/ui` extension (spec 2026-01-26): a tool names a `ui://` resource, an HTML document its server shows for its calls, and says who may call it.
-
-- **Capability.** A host that shows views creates the plugin with `McpPluginOptions.ShowsApps`. Every runtime it starts then sends `capabilities.extensions["io.modelcontextprotocol/ui"] = { "mimeTypes": ["text/html;profile=mcp-app"] }` in `initialize`: the session connections, the `alta mcp` commands and the management tests alike. CodeAlta Desktop sets it (`DesktopMcpAppViews.IsSupported`): since NeoAstra 1.9.0 no frame reaches the bridge of the window on Windows, macOS or Linux. The TUI never sets it. A list of tools made with the extension has a cache variant of its own.
-- **Tool metadata.** `McpRuntimeTool` and `McpCachedTool` keep `UiResourceUri` (`_meta.ui.resourceUri`, then the deprecated `_meta["ui/resourceUri"]`; only a `ui://` URI) and `Visibility` (`_meta.ui.visibility`).
-- **Audience.** A tool whose visibility lacks `model` is a tool of the view only. It is left out of every list the model gets: search, direct and session listings, cached and deferred tools. A model call of it is refused with `tool_app_only`. This holds for every host, the TUI included.
-- **Result.** For a tool with a view, `McpRuntimeToolCallResult.App` keeps the `structuredContent` and the `_meta` of the result as the server sent them. They are not redacted, since redaction by property name would change the view's data. Each is dropped above 1 MB. The direct tool returns them as `AgentToolResult.App` (`AgentToolAppResult`: server, tool, resource, structured content, meta). `AgentSession` writes it on the completed activity record of the call only, never on the tool message the model is sent nor on the output record. The model's text is redacted as before.
-- **Through `alta mcp tool call`.** The command calls on the session's connections when a session calls (as the direct tool does), and gives the view to `PluginAltaCommandContext.AttachApp`, which the host sets for an agent caller only. `AltaCommandDispatcher` keeps it as `AltaCommandResult.App` and the `alta` tool returns it as `AgentToolResult.App`, so the view is under the `alta` call. `AgentToolAppResult.Arguments` then holds the arguments the server got, which `ReadCall` gives the view instead of the `args` of the `alta` call.
-- **Requests of a view.** These are `McpPlugin.OpenAppViewAsync`, `CallAppToolAsync` and `ReadAppResourceAsync`, which run on the session's connection to the server (`McpSessionConnections.UseForViewAsync`) with the checks of a model call: space, `enabled`, `allowed_tools`, `disabled_tools`, timeouts.
-  - Reading a view accepts only a `ui://` resource whose content has the MIME type `text/html;profile=mcp-app`, within 2 MB. Its `_meta.ui` is read on the content, else on its entry in `resources/list`.
-  - A tool call of a view accepts only a tool whose visibility has `app`; otherwise it is refused with `tool_not_for_app`.
-  - A refusal leaves the connection open. A call or read that broke closes it, as for the model.
-- **Desktop.** The desktop side is the `mcpApps` RPC service (`McpAppsRpc.cs`) and the `mcpapp` scheme (`DesktopMcpApps.cs`).
-  - `open` reads the call's record at its journal offset and the view from its server. It then serves the HTML at `mcpapp://<hash of session and server>/view/<token>` with a `Content-Security-Policy` header built from `_meta.ui.csp`, the restrictive policy of the spec widened only by checked origins (`DesktopMcpAppPolicy`).
-  - `callTool`, `readResource` and `close` name the token, which binds the session, project, space and server.
-  - Every request is logged with its server, its tool and its time.
-  - The history row of such a call carries `HistoryToolSummary.App`, the server.
-- **Frontend.** `src/mcpApps/` hosts the view.
-  - `McpAppBridge` is the JSON-RPC over `postMessage` (`ui/initialize`, `tool-input`, `tool-result`, `tools/call`, `resources/read`, `ui/message`, `ui/open-link`, `ui/request-display-mode`, `size-changed`, `host-context-changed`, `ui/resource-teardown`).
-  - `McpAppFrame` is a frame with `sandbox="allow-scripts allow-same-origin allow-forms"` on the `mcpapp` origin. It accepts the messages of its own window only, and stops at a second document in the frame.
-  - `McpAppSlot` sits under the activity block that holds the call (`TimelineActivity`, `activityViews`), after its folded line or its open rows, so that a view is seen without unfolding the work and stays mounted when the block opens or closes; its heading opens the window of the call. It shows the view at once for a call that ended after its pane opened, and behind **Show view** otherwise. It keeps at most four live views per pane, and gives `fullscreen` a window that holds a new instance of the view.
-  - `ui/message` is sent as the composer of the session sends a prompt, queued while a run is busy. It is accepted only while the frame has the keyboard or had it less than 15 seconds ago (the user pressed in the view), at most one every two seconds and one at a time; a view that speaks on its own is refused.
-  - The result a view gets has the content blocks the server sent (`AgentToolAppResult.Content`, within the 1 MB budget), else the text of the model. `ui/update-model-context`, `tool-input-partial`, `pip` and the permissions (camera, microphone, geolocation, clipboard) are not offered.
-
-## MCP skills
-
-CodeAlta Desktop loads the skills MCP servers publish, the MCP Skills extension `io.modelcontextprotocol/skills` (stable spec, SEP-2640 v1). A skill is a directory of resources with a `SKILL.md`; a server lists them with `skills/list`, confirms one with `skills/get`, and may list a directory with `resources/directory/read` (setting `directoryRead`). The code is in `src/CodeAlta.Plugin.Mcp/Skills/` and `McpRuntimeService.Skills.cs`; no SDK package is added: the requests are raw JSON-RPC requests on the `McpClient` of `ModelContextProtocol.Core` 2.2.0, which negotiates `2026-07-28` and stamps the request `_meta` on them.
-
-- **Capability.** A host that loads skills creates the plugin with `McpPluginOptions.LoadsSkills`. Its runtimes then declare `extensions["io.modelcontextprotocol/skills"] = {}` beside MCP Apps, and list the skills of a server that declares the extension, whatever the negotiated version. CodeAlta Desktop sets it (`DesktopPlugins`); the TUI does not, and neither declares nor lists anything. The extension is part of the cache variant of a start.
-- **Checks of an entry** (`McpSkillValidator`). An entry is kept only when the last segment of its path is `frontmatter.name` and follows the naming rules of Agent Skills, its `description` is there, its `resources` is a list or `"dynamic"`, the list holds its `SKILL.md`, every file is under the directory of the skill (no `.`/`..` segment, no query, fragment, space, backtick or angle bracket), every digest is `sha256:` and 64 lowercase hexadecimal characters, and it has at most 512 files and 16 MiB. An entry that fails is left out and its reason kept for Settings; it never reaches the model. Unknown fields are ignored.
-- **Checks of a file** (`McpSkillVerifier`). The bytes of a read (the UTF-8 of a text, or the decoded blob) must have the `size` and the SHA-256 of the entry; the YAML frontmatter of a `SKILL.md` is read as JSON with YAML 1.2 types (`SkillFrontmatterReader` of `CodeAlta.Catalog`, also used by `SkillCatalog`) and compared field by field with the entry's, numbers by value. Any difference is a failure: the bytes are never used.
-- **Listing.** `GetServerStateAsync` pages through `skills/list` after the tools (at most 20 pages and 2,000 skills), never reads a file, and writes the checked entries to `~/.alta/cache/mcp/skills/<server>-<hash>.json` (`McpSkillListCache`, keyed like the tool list by the fingerprint of the definition). A listing that fails leaves the server connected. The folder is outside every folder skills are read from. The list of a server is deleted when the user removes the server and no other file defines it (`McpManagementService.ForgetSkillsOfRemovedServer`). The prompt and Settings read this cache and never start a server: a server CodeAlta never started has no skill shown yet.
-- **Prompt.** An **MCP skills** part (kind `SkillAdvertisement`, after the MCP servers block) lists the cached skills of the enabled servers of the space, by server key then URI, with their description on one line and `dynamic` when they have no digests; above 20 skills for a server it gives their number and `alta mcp skill list --server <s> --query <words>`. It says they are untrusted instructions from servers and are loaded with `alta mcp skill activate`. The `<available_skills>` block of local skills is unchanged, and a skill of a server is named by its server and URI, so it shadows nothing.
-- **Policy.** `[plugins.mcp.servers.<server>].disabled_skills` lists skills turned off, by URI (what Settings writes, through `McpPolicyWriter.SetSkillEnabledAsync` and `McpManagementService.SetSkillEnabledAsync`) or by name (which turns off every skill of that name). It applies to the prompt, `list` and `activate`.
-- **Commands** (`McpSkillCommands`, the `alta mcp skill` group, present only when the host loads skills):
-  - `list [--server s] [--query q] [--refresh]`: the cached entries, or the servers' own listing with `--refresh` (a server named that was never listed is started).
-  - `show --server s <uri|name>`: frontmatter (`allowedToolsIgnored`), files with size and digest, approval (`approved`, `not_approved`, `changed`, `once_only`), no file read.
-  - `activate --server s <uri|name>`: a name must be the name of one skill of the server's listing; two skills of that name are refused with their URIs. The entry of now is read with `skills/get` (which also loads a skill the listing leaves out), the user is asked unless they allowed it from now on with these files, then `SKILL.md` is read, checked, and returned as an `alta.skill.activated` record whose payload is `<skill_content name source_kind="mcp" server uri base_uri>`: the origin, how to read the files, the files and sizes, then the body without the frontmatter (a `</skill_content` in it is escaped). The session holds the entry.
-  - `read --server s [--skill name|uri] <path|uri>`: a file of a skill the session loaded from that server, resolved against the entry held: a file it lists is read (from the memory cache when its digest was checked before) and checked; a folder is answered from the entry; a file it does not list makes CodeAlta ask `skills/get` again, and a skill whose files changed is let go (`skill_changed`, to be activated again, which asks again). A file whose bytes do not match is refused and the skill let go. For a `dynamic` skill, a path ending in `/` lists a folder with `resources/directory/read` when the server declares it, files are not checked, and at most 16 MiB are read in all. A read never goes to another server than `--server`, and a URI is resolved only among the skills the session loaded from it.
-- **Approval.** Loading a skill is asked in every permission mode. `PluginAltaCommandContext.RequestPermissionAsync` reaches `SessionPermissionService.RequestForSessionAsync`, which reviews an `AgentSkillPermissionRequest` (kind `skill`) on the card of the session in a review of its own that follows no policy; no default handler, mode, mode change (`GrantWaitingOwnedAsync`) or TUI auto-approval answers it (`AlwaysAsks`). The card offers **Allow this skill** (`AllowAlways`, accepted only for a skill whose files can be checked), **Allow once** and **Deny**, and **Show the skill** reads its `SKILL.md` (`sessionPermissions.skillContent`). Only an agent of a session can ask; `activate` and `read` refuse a caller without a session (`session_required`), and an agent that cannot ask gets `approval_unavailable`. **Allow this skill** is kept in `~/.alta/plugin-data/mcp/skill-approvals.json` (`McpSkillApprovalStore`), keyed by server, fingerprint of its definition and URI, and bound to the SHA-256 of every `{uri, digest}` of the files: any change asks again. A `dynamic` skill is allowed once only. A skill nested in another needs its own approval. `allowed-tools` and every field that would widen permissions are ignored.
-- **The entry held.** It lives in `McpActivationState` per session for the life of the process: a restart lets it go, and a read then asks for a new activation. It is not ended at a compaction (the spec allows holding it longer); instead `AgentSession` keys an MCP skill by server and URI (`AgentLoadedSkillState.Key`), so it never replaces a local skill of the same name, and `AgentInstructionComposer` writes a `<skill_unloaded>` line with the command to load it again instead of putting its payload back.
-- **Cache of content.** Checked files are kept in memory per plugin (`McpSkillContentCache`), keyed by server, URI and digest, least recently used first out above 64 MB. Nothing of a skill is written to disk.
-- **Desktop.** The `skills` RPC service has `listMcp`, `setMcpEnabled`, `mcpContent` (read and check a `SKILL.md` for the user, without loading it) and `forgetMcpApproval`, over `McpPlugin.ListSkillsAsync`, `ReadSkillContentAsync` and `ForgetSkillApproval`. The Skills page of Settings shows a **From the MCP server `<server>`** section for each server.
-- **Statistics.** `alta mcp skill activate --server s <uri|name>` is a `skill` fact with the source `mcp:<server>` (see `statistics-facts.md`).
-- **Test server.** `MCP_TEST_SKILLS=1` gives `CodeAlta.Tests.TinyMcpServer` the extension (protocol not pinned): the spec's `pdf-processing` with its exact digests, a nested skill, two skills named `refunds`, a `dynamic` one, one named like a built-in skill, one the listing omits and an invalid entry, in three pages; `MCP_TEST_SKILLS_TAMPER=1` serves `templates/invoice.md` with other bytes. It logs `CLIENT_SKILLS yes|no`, `SKILLS_LIST`, `SKILLS_GET`, `DIR` and `READ`.
-
-Not done: `/name` and the composer's skill attachment for skills of servers, skills of servers in `alta search`, a general resource read for the model, and the `instructions` of a server in the prompt. A pre-standard `skill://` layout without the extension stays ordinary resources.
-
-## Deferred/future work
-
-The following remain outside direct MCP tool exposure until separately implemented and tested:
-
-- MCP resources other than the files of skills, prompts, elicitation, and user-interaction flows beyond the views of MCP Apps;
-- timeline display integration beyond the generic direct-tool display and the views of MCP Apps;
-- `tool-list-changed` notifications and automatic dynamic refresh beyond agent-run/plugin-tool enumeration;
-- richer Add/Edit server dialog workflows beyond the basic JSON fields currently exposed;
-- a process-wide MCP connection manager shared by sessions: connections are kept per session, for its direct tool calls only.
+| Definitions written by CodeAlta | `<project>/.alta/mcp.json`, then `~/.alta/mcp.json` |
+| Definitions of other tools, read only | `<project>/.mcp.json`, `.github/mcp.json`, `.vscode/mcp.json`; `~/.copilot/mcp-config.json` |
+| Policy | `[plugins.mcp]` of `~/.alta/config.toml`, overlaid by the project's `config.toml` |
+
+- **One definition per key.** A project comes before the user, and in a scope CodeAlta's file before the files of other
+  tools. Other definitions of the key are reported as shadowed, never connected twice.
+- **Other tools' files are theirs.** CodeAlta reads them leniently (comments, the bare `servers` root, VS Code
+  variables translated by `McpExternalVariables`) and never writes them: saving such a server writes a definition of
+  the same key to CodeAlta's file, which then comes first. A server whose value only VS Code can supply (`${input:…}`,
+  an `envFile`, an unknown variable) is listed as not supported rather than started with a wrong value.
+- **Policy never rewrites definitions.** Enabling a server or a tool changes only `config.toml`, through
+  `McpPolicyWriter`, which edits the one line it owns and keeps comments. Definitions stay shareable with other tools.
+- **Variables.** `${NAME}` and `${NAME:-default}` in command, arguments, folder, URL, environment and headers are
+  resolved when the server starts; a missing one is a diagnostic, never the literal placeholder sent to a server.
+- **Spaces.** `[plugins.mcp.servers.<key>] spaces` is read from the global file only, so a repository cannot widen a
+  space. The space is checked before enablement and before any cached connection (`server_not_in_space`), for tools,
+  activations, prompt and calls alike.
+
+`McpConfigCache` keeps the parsed files and policy under the stamp of each file (existence, size, write time), shared
+by runtimes, connections, commands and the prompt: every tool call and run start used to read and parse eight files.
+A file written in the last three seconds is read again at each request, because coarse file times could hide a
+second write of the same size; a file that cannot be read is never cached.
+
+## Tools for agents
+
+Exposure is progressive, so a session pays in context only for the servers it uses:
+
+1. The prompt lists the configured servers as active or inactive, without connecting to any.
+2. `alta mcp activate <server>|<server>/<tool>` activates a server, or one tool of it, for the session. The tools are
+   listed at once and registered into the running turn (`AgentRunTools`): the model calls them in its next step.
+   The activation is journaled (`AgentRunTools.KeepLoaded`, `local.toolLoad`) and restored at every run, also after a
+   restart.
+3. Each tool that passes policy (`enabled`, `allowed_tools`, `disabled_tools`) is an agent tool named
+   `mcp__<server>__<tool>`, sanitized with a stable hash suffix on collision. Its MCP `inputSchema` is passed through
+   when CodeAlta's strict tool schema can express it, else as an `arguments_json` string.
+
+**Deferred tools.** A provider that supports tool search (see [providers](providers.md)) is offered the tools of every
+enabled server of the space, not only activated ones: deferred, grouped by server, from the tool-list cache, without
+starting any server. `direct_exposure`, `direct_tools` and `direct_tool_threshold` decide which stay loaded. A deferred
+tool connects its server on first call. A server CodeAlta never listed is not offered.
+
+**The tool-list cache** (`McpToolListCache`, `~/.alta/cache/mcp/tools/`) keeps each listing under the fingerprint of
+the definition and a variant of its start. It keeps the names of variables and headers, never their values. Search
+and deferred tools read it without starting servers.
+
+## Runtime
+
+`McpRuntimeService` runs stdio servers (the command with its environment) and HTTP/SSE servers, with startup and tool
+timeouts, output bounds and finite diagnostics. Every request is bounded: no server can hang a turn or a command.
+
+- **Connections belong to a session** (`McpSessionConnections`). A server may keep state between calls (a browser
+  snapshot whose element ids the next call uses), and starting one costs seconds, so a session keeps its servers
+  connected across calls and runs, one call at a time, closed after 15 idle minutes, after a call that failed to
+  complete, and when the plugin stops. Sessions never share a server process: a stdio server gets the environment of
+  the identity of its session's space, and that identity is part of the connection key. Commands without a session
+  use a connection that ends with them.
+- **Redaction.** Diagnostics, command output and dialogs redact URLs, headers, secret-like keys and arguments,
+  exceptions and output. A 401 or 403 points to browser authorization or static headers.
+- **OAuth.** HTTP servers that follow MCP authorization sign in through the browser with a loopback callback. Tokens
+  live in `~/.alta/auth/mcp/`, never in `mcp.json` or policy, and no output shows a token. Agent runs and ordinary
+  commands only use cached or refreshable tokens: they never open a browser by surprise.
+- **Results.** Text and structured content are redacted and bounded (`max_tool_output_chars`). Images of a result
+  reach the model through the session (see [runtime](runtime.md)); other non-text content is summarized.
+
+## MCP Apps (CodeAlta Desktop)
+
+A tool may name a `ui://` resource: an HTML view its server shows for its calls. A host that shows views
+(`McpPluginOptions.ShowsApps`, the desktop only) declares the extension in `initialize`.
+
+- A tool whose visibility lacks `model` is for its view only: it is left out of every list the model gets and a model
+  call of it is refused, in every host.
+- The view's data (structured content and `_meta` of a result) is kept on the call's activity record for the view,
+  not redacted, and never sent to the model.
+- The desktop serves the view on the `mcpapp` scheme (`DesktopMcpApps.cs`) in a sandboxed frame, with a content
+  security policy built from the view's declaration and widened only by checked origins (`DesktopMcpAppPolicy`).
+  Requests of the view run on the session's connection with the checks of a model call, and a view may only call tools
+  whose visibility includes `app`.
+- A view may send a prompt only while the user is interacting with it (it had the keyboard in the last 15 seconds),
+  rate limited: a view never speaks on its own.
+
+## MCP skills (CodeAlta Desktop)
+
+Servers may publish skills (the `io.modelcontextprotocol/skills` extension, `Skills/`). They are a second origin
+beside the skill folders (see [skills](skills.md)): named by server and URI, never shadowing a local skill.
+
+- **Untrusted until checked.** An entry is kept only when it is well formed (`McpSkillValidator`: name, paths inside
+  the skill, `sha256` digests, bounded size); the bytes of every file read must match its size and digest, and the
+  frontmatter of `SKILL.md` must equal the entry (`McpSkillVerifier`). Anything else is refused, never shown to the
+  model.
+- **Listing never reads files**: entries are cached under `~/.alta/cache/mcp/skills/`, and the prompt and Settings read
+  that cache without starting a server. The prompt marks them as untrusted instructions from servers.
+- **Loading always asks the user**, in every permission mode: a server can change what it serves, and its skill is
+  instructions to the agent. **Allow this skill** is remembered bound to the digests of all its files
+  (`McpSkillApprovalStore`), so any change asks again; a skill without digests is allowed once only.
+- **Nothing of a skill is written to disk**: checked content is cached in memory (`McpSkillContentCache`). The loaded
+  entry lives per session for the life of the process; after a compaction the instructions say how to load it again
+  instead of carrying its text.
+
+## Not supported
+
+MCP resources other than skill files, prompts, elicitation, sampling, `tools/list_changed` from servers (tools are
+listed again at each run), a server's `instructions` in the prompt, and connections shared between sessions.

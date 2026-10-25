@@ -4,7 +4,7 @@ title: Git plugin
 
 # Git plugin
 
-The built-in Git plugin connects CodeAlta to the service that hosts your repository. It works with GitHub, GitLab, Azure DevOps and Bitbucket. It feeds the [Issues tab](../issues.md) of CodeAlta Desktop, adds issue lookup while you write prompts, and it gives agents the command-line tool of your provider when that tool is installed.
+The built-in Git plugin connects CodeAlta to the service that hosts your repository: GitHub, GitLab, Azure DevOps or Bitbucket. It feeds the [Issues tab](../issues.md) of CodeAlta Desktop, adds issue lookup in prompts, and gives agents your provider's command-line tool when it is installed.
 
 {.table}
 | Provider | Detected from the git remote | `#` lists | Agent tool |
@@ -14,14 +14,14 @@ The built-in Git plugin connects CodeAlta to the service that hosts your reposit
 | Azure DevOps | `dev.azure.com` and `<organization>.visualstudio.com` | Work items of the project | `az` |
 | Bitbucket | `bitbucket.org` | Issues | |
 
-CodeAlta reads the remotes of the project folder and prefers `origin`. HTTPS and SSH remotes are both recognized.
+CodeAlta reads the remotes of the project folder, prefers `origin`, and recognizes HTTPS and SSH remotes.
 
 > [!TIP]
-> Install the command-line tool of your provider and sign in once: [GitHub CLI](https://cli.github.com/) (`gh auth login`), [GitLab CLI](https://gitlab.com/gitlab-org/cli#installation) (`glab auth login`) or [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) (`az login`). CodeAlta then uses the same sign-in for issue lookup, and agents can work with issues, pull requests and pipelines through the official tool.
+> Install your provider's CLI and sign in once: [GitHub CLI](https://cli.github.com/) (`gh auth login`), [GitLab CLI](https://gitlab.com/gitlab-org/cli#installation) (`glab auth login`) or [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) (`az login`). Issue lookup then uses the same sign-in, and agents work with issues, pull requests and pipelines through the official tool.
 
 ## Issue picker
 
-Type `#` in the prompt editor to search the issues of the project's repository. The picker shows the most recently updated issues first. Type a number or some words to filter, and press Enter to insert a Markdown link to the selected issue:
+Type `#` in the prompt to search the issues of the project's repository, most recently updated first. Type a number or words to filter, and press Enter to insert a Markdown link:
 
 ```md
 [#18](https://github.com/org/repo/issues/18)
@@ -29,20 +29,20 @@ Type `#` in the prompt editor to search the issues of the project's repository. 
 [#18](https://dev.azure.com/organization/project/_workitems/edit/18)
 ```
 
-Closed issues are listed too. Use **Include closed** (`Ctrl+I`) to hide them. In CodeAlta Desktop the picker also lists the pull requests and merge requests of the repository, with their own icon.
+- Closed issues are listed too; **Include closed** (`Ctrl+I`) hides them.
+- In CodeAlta Desktop the picker also lists pull requests and merge requests, with their own icon.
+- On Azure DevOps it lists the work items of the project that owns the repository, of any type, matched by title.
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-github-issue-picker.gif" alt="CodeAlta issue prompt picker dialog" loading="lazy">
   <figcaption class="small text-secondary mt-2">The <code>#</code> issue picker in CodeAlta TUI, on a GitHub repository. The selected issue is inserted as a Markdown link.</figcaption>
 </figure>
 
-On Azure DevOps, the picker lists the work items of the project that owns the repository, whatever their type, and the search matches their titles.
+On Azure DevOps, the Issues tab can also show the work items of a team, a sprint, assigned to you, of a type, or by any field: see [Filters](../issues.md#filters). A personal access token needs **Work Items (Read)**, and **Project and Team (Read)** to list teams.
 
-In CodeAlta Desktop, the Issues tab of an Azure DevOps project can show only the work items of a team, of a sprint, assigned to you, of one type, or with a value of any field of your work items: see [Filters](../issues.md#filters). A personal access token needs **Work Items (Read)**, and **Project and Team (Read)** to list the teams.
+## Sign-in for issue lookup
 
-### Sign-in for issue lookup
-
-CodeAlta looks for credentials in this order and sends them only to the provider they belong to:
+CodeAlta looks for credentials in this order, and sends them only to their own provider:
 
 {.table}
 | Provider | Environment variable | Command-line tool |
@@ -52,27 +52,25 @@ CodeAlta looks for credentials in this order and sends them only to the provider
 | Azure DevOps | `AZURE_DEVOPS_EXT_PAT` | `az account get-access-token` |
 | Bitbucket | `BITBUCKET_ACCESS_TOKEN`, or `BITBUCKET_USERNAME` with `BITBUCKET_APP_PASSWORD` | |
 
-Without credentials, lookups are anonymous. This works for public GitHub and GitLab projects, with lower rate limits. Private projects and Azure DevOps need a sign-in.
+Without credentials, lookups are anonymous: public GitHub and GitLab projects work, with lower rate limits. Private projects and Azure DevOps need a sign-in.
 
-### The GitHub profile of a space
+### GitHub profile of a space
 
-When the [space](../spaces.md#identity) of a session has a GitHub profile in its **Identity**, the `gh` tool of that session runs with that profile, and the issue lookup uses its `gh auth token`. The window uses the profile of the space it shows. A `GITHUB_TOKEN` or `GH_TOKEN` of your environment still comes first.
+When the [space](../spaces.md#identity) of a session has a GitHub profile in its **Identity**, the session's `gh` tool runs with that profile, and issue lookup uses its token. The window uses the profile of the space it shows. A `GITHUB_TOKEN` or `GH_TOKEN` in your environment still comes first.
 
 ### Self-managed GitLab
 
-A GitLab instance is recognized when its host name starts with `gitlab.`, for example `gitlab.example.com`. For another host name, set `GITLAB_HOST` to that host, as you do for `glab`:
+A host name that starts with `gitlab.` (such as `gitlab.example.com`) is recognized. For another host, set `GITLAB_HOST`, as for `glab`:
 
 ```sh
 export GITLAB_HOST=code.example.com
 ```
 
-The `GITLAB_TOKEN` and `GITLAB_ACCESS_TOKEN` variables are used for `GITLAB_HOST`, or for `gitlab.com` when it is not set. For any other instance, sign in with `glab auth login --hostname <host>`.
+`GITLAB_TOKEN` and `GITLAB_ACCESS_TOKEN` apply to `GITLAB_HOST`, or to `gitlab.com` when it is not set. For other instances, sign in with `glab auth login --hostname <host>`.
 
 ## Agent tools
 
-When `gh`, `glab` or `az` is installed, the plugin gives agents a tool of the same name. Each tool accepts an `arguments` array and passes each item directly to the program, not through a shell command string.
-
-For example, an agent can call `gh` with arguments equivalent to:
+When `gh`, `glab` or `az` is installed, agents get a tool of the same name. It takes an `arguments` array passed straight to the program, never through a shell. For example, `gh` with:
 
 ```text
 issue view 18 --json title,state,url
@@ -84,21 +82,18 @@ or `glab` with:
 mr list --assignee=@me
 ```
 
-The `az` tool only runs the Azure DevOps commands of the Azure CLI: `az boards`, `az repos`, `az pipelines`, `az artifacts` and `az devops`. These commands come from the `azure-devops` extension (`az extension add --name azure-devops`). Other Azure commands are refused.
-
-The optional `workingDirectory` argument defaults to the selected project and must remain inside the selected project when one is active. The optional timeout defaults to 60 seconds and is capped at 300 seconds.
-
-The tools are available to every session. A [Claude Code](../model-providers.md#claude-code) session sees them as MCP tools, such as `mcp__codealta__gh`.
+- The `az` tool runs only the Azure DevOps commands: `az boards`, `az repos`, `az pipelines`, `az artifacts` and `az devops`, from the `azure-devops` extension (`az extension add --name azure-devops`).
+- `workingDirectory` defaults to the selected project and must stay inside it.
+- The timeout defaults to 60 seconds, at most 300.
+- Every session has the tools. A [Claude Code](../model-providers/setup.md#claude-code) session sees them as MCP tools, such as `mcp__codealta__gh`.
 
 ## Disable it
 
-Disable the Git plugin when you do not want the provider tools or the issue picker of CodeAlta TUI:
+Turn off the provider tools and the CodeAlta TUI issue picker with:
 
 ```toml
 [plugins.git]
 enabled = false
 ```
 
-In CodeAlta Desktop the `#` issue picker is part of the prompt editor and stays available.
-
-This plugin was named `github` in earlier versions. If your `config.toml` has a `[plugins.github]` table, rename it to `[plugins.git]`.
+In CodeAlta Desktop the `#` picker belongs to the prompt and stays available. A `[plugins.github]` table from earlier versions must be renamed `[plugins.git]`.

@@ -15,8 +15,8 @@ Paths/commands below are relative to this directory.
 - Tests: `src/CodeAlta.Tests/` (MSTest)
 - The in-process agent tool remains `alta`; do not rename neutral `CodeAlta.*` libraries or shared `.alta` state when changing frontend identities.
 - Website: `site/` (Lunet end-user documentation)
-- Development rules to keep in sync: `doc/development-guide.md` (strict rules first; detailed component contracts in `doc/development-contracts.md`)
-- Docs to keep in sync with behavior: `readme.md`, the public website under `site/`, and the internal docs under `doc/` (e.g., `doc/**/*.md`)
+- Architecture and its principles: `doc/architecture.md`; repository rules: `doc/development-guide.md`. Read them before a change that crosses areas.
+- Documentation: see [Documentation](#documentation) below.
 
 ## Build & Test
 
@@ -35,11 +35,11 @@ cd ../../../site
 lunet build
 ```
 
-Once the build is done, the two test suites do not depend on each other: run `dotnet test -c <Configuration> --no-build` and `npm test` at the same time, as two background jobs (`alta job start`) that each report when they end, so that a validation takes the time of the longer one. Never let `dotnet test` build while `npm test` runs: a build regenerates the RPC client that the frontend tests import. A test that fails only while both run is rerun alone before it is called a regression (see "Tests that hold on a loaded machine" in `doc/development-guide.md`).
+Once the build is done, the two test suites do not depend on each other: run `dotnet test -c <Configuration> --no-build` and `npm test` at the same time, as two background jobs (`alta job start`) that each report when they end, so that a validation takes the time of the longer one. Never let `dotnet test` build while `npm test` runs: a build regenerates the RPC client that the frontend tests import. A test that fails only while both run is rerun alone before it is called a regression (see "Tests" in `doc/development-guide.md`).
 
-All .NET tests, the frontend tests (`npm test`) and the Lunet website build must pass, and docs must be updated before submitting. `npm test` runs every `*.test.ts(x)` file under `src` and its feature folders, including the `*.browser.test.ts` files, which mount real components in headless Edge (found on Windows, macOS and Linux; `CODEALTA_TEST_BROWSER` names another Chromium) and are skipped where Edge is not installed. A frontend test that no longer matches the app is fixed or removed, never left failing.
+All .NET tests, the frontend tests (`npm test`) and the Lunet website build must pass before submitting. `npm test` runs every `*.test.ts(x)` file under `src` and its feature folders, including the `*.browser.test.ts` files, which mount real components in headless Edge (found on Windows, macOS and Linux; `CODEALTA_TEST_BROWSER` names another Chromium) and are skipped where Edge is not installed. A frontend test that no longer matches the app is fixed or removed, never left failing.
 
-Frontend test output is failure-focused, with totals and emitted diagnostics retained; use `npm run test:verbose` for every test name. Vite builds print warnings and errors, not the successful asset listing. The separate GitHub .NET summary is configured in `src/dotnet-releaser.toml` to omit passed/skipped details, not failures or totals; see `doc/development-guide.md`.
+Frontend test output is failure-focused, with totals and emitted diagnostics retained; use `npm run test:verbose` for every test name. Vite builds print warnings and errors, not the successful asset listing. The separate GitHub .NET summary is configured in `src/dotnet-releaser.toml` to omit passed/skipped details, not failures or totals (the final `--logger` argument there; a `.runsettings` logger is replaced by dotnet-releaser).
 
 Both frontend test scripts run at most two test files concurrently to bound headless Edge startup load. Browser fixtures use `browserTarget.ts` for guest-mode flags and `waitForBrowserPort`: a five-second wall-clock deadline that tolerates missing/partial port files and reports child exit, spawn errors and bounded stderr. Keep stderr piped, preserve owned-browser cleanup (`endBrowser`, not a command of one system such as `taskkill`), and do not replace startup failures with blind retries or skips.
 
@@ -131,6 +131,12 @@ Startup scratchpad cleanup is on by default and removes only the owning instance
 
 This is how CodeAlta is developed with CodeAlta: you run in the normal instance (desktop or terminal, any released or built `alta`/`altatui` that has this branch's MCP support), build the repository in a configuration that instance does not run from, start that `alta.exe --dev`, and drive that window through its MCP server (`codealta-dev`). The terminal UI is checked the same way with `altatui --dev` in a separate console.
 
+## Documentation
+
+- `site/docs` is the user guide, also what CodeAlta's agents read to answer users. Change it only when what a user sees or does changes, in the page of that feature: concise and task-oriented, headings of a few words (the page table of contents shows them), about a dozen `##` at most, pictures kept with their sections, links instead of repetition. A page that grows too long is split into sub-pages of substance (a folder with `readme.md` and `menu.yml`), never into fragments. Style: `doc/site-screenshots.md` for pictures; "CodeAlta Desktop" first, then "CodeAlta TUI"; no history or internal names.
+- `doc/` is the architecture: responsibilities, boundaries, main flows, invariants and why. Change it only when one of these changes, never for a feature, a fix or a setting. No history, plans, decision logs, test lists or per-option detail. A why that belongs to one piece of code is a comment in that code.
+- `readme.md` lists the features at a glance; plans and tasks stay under `.alta/`.
+
 ## Contribution Rules (Do/Don't)
 
 - Keep diffs focused; avoid drive-by refactors/formatting and unnecessary dependencies.
@@ -165,7 +171,7 @@ This is how CodeAlta is developed with CodeAlta: you run in the normal instance 
 
 - Commits: commit after each self-contained logical step; imperative subject, < 72 chars; one logical change per commit; reference issues when relevant; don't delete unrelated local files.
 - Commit subjects must start with a dotnet-releaser autolabel prefix: `Breaking Change`, `Add`, `Fix`/`Bugfix`, `Enhance`/`Refactor`, `Improve Perf`, `Add`/`Improve`/`Fix`/`Update` followed by `ci`/`doc`/`test`/`example`/`translation`/`accessibility`, or `Update Depend...`/`Bump <dependency>` for dependencies. Put any GitHub issue reference at the end in parentheses, e.g. `Fix parser error (#18)`.
-- Checklist: each self-contained step is committed; build+tests pass; docs updated if behavior changed; repository-wide development guidance updated in `doc/development-guide.md` when needed; public APIs have XML docs; changes covered by unit tests.
+- Checklist: each self-contained step is committed; build+tests pass; the user guide follows a user-visible change, `doc/` an architecture change ([Documentation](#documentation)); public APIs have XML docs; changes covered by unit tests.
 
 ## Local References
 
