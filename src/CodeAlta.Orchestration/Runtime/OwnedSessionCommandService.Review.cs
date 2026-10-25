@@ -18,7 +18,7 @@ public sealed partial class OwnedSessionCommandService
     public async Task<OwnedReviewBeforeCommit> GetReviewBeforeCommitAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        var setting = _runtime.ConfigStore.LoadGlobalReviewBeforeCommit();
+        var setting = _runtime.LoadReviewBeforeCommitSetting();
         try
         {
             var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
@@ -43,7 +43,7 @@ public sealed partial class OwnedSessionCommandService
     public async Task<OwnedReviewBeforeCommit> SetReviewBeforeCommitAsync(string sessionId, bool? reviewBeforeCommit, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        var setting = _runtime.ConfigStore.LoadGlobalReviewBeforeCommit();
+        var setting = _runtime.LoadReviewBeforeCommitSetting();
         lock (_gate)
         {
             if (_closed || _retained) return new("closed", null, setting, setting);
@@ -56,7 +56,7 @@ public sealed partial class OwnedSessionCommandService
             if (session is null || !string.Equals(session.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)) return new("unavailable", null, setting, setting);
             cancellationToken.ThrowIfCancellationRequested();
             await _runtime.SetReviewBeforeCommitAsync(session, reviewBeforeCommit).ConfigureAwait(false);
-            return new("ok", reviewBeforeCommit, reviewBeforeCommit ?? setting, setting);
+            return new("ok", reviewBeforeCommit, !_runtime.Headless && (reviewBeforeCommit ?? setting), setting);
         }
         catch (ObjectDisposedException) { return new("closed", null, setting, setting); }
     }

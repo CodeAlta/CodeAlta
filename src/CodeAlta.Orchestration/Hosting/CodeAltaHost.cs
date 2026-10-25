@@ -461,11 +461,13 @@ public sealed class CodeAltaHost : IAsyncDisposable
             });
             // The review of commands and file changes, and the automatic approval that is its opposite: one
             // policy when the host has a live one, the two fixed options otherwise.
-            var reviewOwnedPermissions = options.ReviewOwnedPermissionsPolicy
-                ?? (() => options.ReviewOwnedCommandPermissions);
-            Func<bool> autoApproveOwnedPermissions = options.ReviewOwnedPermissionsPolicy is { } live
-                ? () => !live()
-                : () => options.AutoApproveOwnedPermissions && !options.ReviewOwnedCommandPermissions;
+            // A host that trusts its sessions fully reviews nothing.
+            var reviewOwnedPermissions = options.FullTrust ? static () => false
+                : options.ReviewOwnedPermissionsPolicy ?? (() => options.ReviewOwnedCommandPermissions);
+            Func<bool> autoApproveOwnedPermissions = options.FullTrust ? static () => true
+                : options.ReviewOwnedPermissionsPolicy is { } live
+                    ? () => !live()
+                    : () => options.AutoApproveOwnedPermissions && !options.ReviewOwnedCommandPermissions;
             runtimeService = new SessionRuntimeService(
                 agentHub,
                 agentSessionCatalog,
@@ -480,7 +482,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 PluginEventObserver = eventObserver,
                 PluginEventCurrentProjectId = currentProject.Id,
                 PluginEventCurrentProjectPath = currentProject.ProjectPath,
-                SessionPermissionModes = options.SessionPermissionModes,
+                SessionPermissionModes = options.SessionPermissionModes || options.FullTrust,
+                FullTrust = options.FullTrust,
+                Headless = options.HeadlessInstructions,
                 InheritPermissionMode = options.InheritPermissionModePolicy,
                 ShowsPromptSuggestions = options.ShowsPromptSuggestions,
                 Identities = options.AppliesSpaceIdentities

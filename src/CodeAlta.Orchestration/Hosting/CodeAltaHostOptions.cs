@@ -52,6 +52,26 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public string? ScratchpadRoot { get; init; }
 
+    /// <summary>
+    /// Gets whether the sessions of the host are trusted fully, for a host without a user (a headless run): every permission
+    /// request is granted whatever the mode of the session, the loads of skills that otherwise always ask included, and
+    /// questions to the user are cancelled. Default false.
+    /// </summary>
+    /// <remarks>
+    /// It implies <see cref="SessionPermissionModes"/> and <see cref="AutoApproveOwnedPermissions"/>, and overrides
+    /// <see cref="ReviewOwnedCommandPermissions"/> and <see cref="ReviewOwnedPermissionsPolicy"/>: nothing is reviewed.
+    /// This grants commands and file changes the privileges of the process, not a sandbox.
+    /// </remarks>
+    public bool FullTrust { get; init; }
+
+    /// <summary>
+    /// Gets whether the sessions of the host run without a user (a headless run): the end of their system prompt says that
+    /// nobody can be asked and that the final answer is the result of the run
+    /// (<see cref="Runtime.SessionRuntimeService.HeadlessGuidance"/>), and none of them reviews its changes before commit.
+    /// Default false.
+    /// </summary>
+    public bool HeadlessInstructions { get; init; }
+
     /// <summary>Gets the instance-owned startup pass; null authorizes no deletion.</summary>
     public IStartupScratchpadCleanup? StartupScratchpadCleanup { get; init; }
 

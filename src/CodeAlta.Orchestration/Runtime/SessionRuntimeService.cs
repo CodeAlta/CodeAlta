@@ -149,6 +149,42 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     private readonly Func<bool> _autoApproveOwnedPermissions;
     private readonly bool _sessionPermissionModes;
+    private readonly bool _fullTrust;
+
+    /// <summary>
+    /// Gets or initializes whether the sessions of this runtime are trusted fully, for a host without a user (a headless
+    /// run): every permission request is granted, whatever the permission mode of the session, the loads of skills that
+    /// otherwise always ask the user included (<see cref="GetPermissionPolicy"/> answers
+    /// <see cref="SessionPermissionPolicy.Approve"/>). Default false.
+    /// </summary>
+    /// <remarks>This grants commands and file changes the privileges of the process, not a sandbox.</remarks>
+    public bool FullTrust
+    {
+        get => _fullTrust;
+        init
+        {
+            _fullTrust = value;
+            Permissions.FullTrust = value;
+        }
+    }
+
+    /// <summary>
+    /// Gets or initializes whether the sessions of this runtime run without a user (a headless run). Their instructions
+    /// then end with <see cref="HeadlessGuidance"/>, the same text for every session, and none of them reviews its
+    /// changes before commit, whatever the setting or its own choice. Default false.
+    /// </summary>
+    public bool Headless { get; init; }
+
+    /// <summary>
+    /// The paragraph that ends the system prompt of a session of a headless runtime (<see cref="Headless"/>). It never
+    /// changes, so that the prompt cache of the provider is kept.
+    /// </summary>
+    public const string HeadlessGuidance =
+        "## Headless run\n\n"
+        + "No user is available while this run goes on: nobody reads a question, approves a plan or reviews a change before it ends. "
+        + "Decide by yourself instead of asking: choose the narrowest safe interpretation of the request, go on, and say in your final answer what you assumed. "
+        + "The commands `alta ask`, `alta review`, `alta reminder` and the commands of the windows and of the user interface (`alta ui`, `alta window`) are not available here. "
+        + "Your final answer is the result of the run, read by a script or a program: make it complete and self-contained.";
 
     /// <summary>
     /// Gets or initializes whether the host shows the prompts the model suggests. False, the default: no session
@@ -195,6 +231,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <returns>The policy, read now: where sessions have a mode of their own, a send reads it again at each request.</returns>
     public SessionPermissionPolicy GetPermissionPolicy(string sessionId)
     {
+        if (_fullTrust) return SessionPermissionPolicy.Approve;
         var reviewByDefault = !_autoApproveOwnedPermissions();
         return _sessionPermissionModes && !string.IsNullOrWhiteSpace(sessionId) && _entries.TryGetValue(sessionId, out var entry)
             ? Runtime.SessionPermissionModes.Policy(entry.PermissionMode ?? ConfiguredPermissionMode(entry.ProviderKey), reviewByDefault)
@@ -2050,7 +2087,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ?? (title is not null && !IsCreationTitle(title, session.Kind, project) ? AgentSessionTitleSource.User : AgentSessionTitleSource.Auto);
         var shownTitle = title ?? session.Title;
         var requestedSessionId = NormalizeOptionalText(session.SessionId);
-        var systemMessage = AppendPromptPart(instructions.SystemMessage, options.AdditionalSystemMessage);
+        var systemMessage = AppendPromptPart(AppendPromptPart(instructions.SystemMessage, options.AdditionalSystemMessage), Headless ? HeadlessGuidance : null);
         var finalDeveloperInstructions = AppendPromptPart(developerInstructions, additionalDeveloperInstructions);
         IReadOnlyList<AgentInstructionTransformationInfo> instructionTransformations = [];
         var instructionsAlreadyComposed = false;
@@ -3472,8 +3509,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public bool GetEffectiveReviewBeforeCommit(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        return (_entries.TryGetValue(sessionId, out var entry) ? entry.OwnReviewBeforeCommit : null) ?? _configStore.LoadGlobalReviewBeforeCommit();
+        return EffectiveReviewBeforeCommit(_entries.TryGetValue(sessionId, out var entry) ? entry.OwnReviewBeforeCommit : null);
     }
+
+    /// <summary>
+    /// Reads the setting <c>[review] before_commit</c> as it applies to the sessions of this runtime: off in a headless
+    /// runtime (<see cref="Headless"/>), where nobody reviews.
+    /// </summary>
+    /// <returns>Whether sessions that follow the setting review their changes before commit.</returns>
+    internal bool LoadReviewBeforeCommitSetting() => !Headless && _configStore.LoadGlobalReviewBeforeCommit();
+
+    // What applies of a session's own choice: the choice, else the setting; never a review in a headless runtime.
+    private bool EffectiveReviewBeforeCommit(bool? own) => !Headless && (own ?? _configStore.LoadGlobalReviewBeforeCommit());
 
     /// <summary>
     /// Gets the own choice of an attached session about the review before commit; null when it follows the setting or
@@ -3505,7 +3552,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ?? session.ReviewBeforeCommit;
         }
 
-        return (own, own ?? _configStore.LoadGlobalReviewBeforeCommit());
+        return (own, EffectiveReviewBeforeCommit(own));
     }
 
     /// <summary>
@@ -3588,7 +3635,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // or nothing yet while the review applies. Null when there is nothing to tell.
     private bool? ReviewNoteFor(RuntimeSessionEntry entry)
     {
-        var effective = entry.OwnReviewBeforeCommit ?? _configStore.LoadGlobalReviewBeforeCommit();
+        var effective = EffectiveReviewBeforeCommit(entry.OwnReviewBeforeCommit);
         return entry.ReviewNoted is { } told ? told == effective ? null : effective : effective ? true : null;
     }
 

@@ -130,6 +130,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private async Task<AgentPermissionDecision> HandleOwnedDefaultAsync(AgentPermissionRequest request, CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
+        if (FullTrust) return new(AgentPermissionDecisionKind.AllowOnce);
         if (SessionPolicy is not { } policyOf || string.IsNullOrWhiteSpace(request.SessionId))
             return new(_autoApproveOwnedPermissions() && !AlwaysAsks(request) ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny);
         var policy = policyOf(request.SessionId);
@@ -167,6 +168,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(request);
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
+        if (FullTrust) return new(AgentPermissionDecisionKind.AllowOnce);
         if (SessionReviewTarget?.Invoke(sessionId) is not { } target) return new(AgentPermissionDecisionKind.Deny);
         request = request with { SessionId = sessionId, ProviderId = target.ProviderId };
         // A review of its own that asks whatever the mode of the session: it follows no policy.
@@ -187,6 +189,12 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     // A request no permission mode answers for the user: the load of a skill of an MCP server, whose instructions may ask
     // for commands. It waits for the user, or is denied where nobody can be asked.
     internal static bool AlwaysAsks(AgentPermissionRequest request) => request is AgentSkillPermissionRequest;
+
+    /// <summary>
+    /// Gets or sets whether every request the host answers by default is granted, the loads of skills that otherwise
+    /// always ask included: a host that runs without a user and trusts its sessions fully (a headless run). Default false.
+    /// </summary>
+    internal bool FullTrust { get; set; }
 
     // Whether the user may allow a request from now on: only the load of a skill whose files can be checked.
     private static bool OffersAllowAlways(SessionPermissionSnapshot snapshot) => snapshot.Skill is { Dynamic: false };
@@ -224,7 +232,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     // automatic approval of the host, read now, decides until the send ends.
     internal AgentPermissionRequestHandler CreateSendDefaultPermissionHandler(SessionPermissionPolicy? policy)
     {
-        if (policy is not null && SessionPolicy is not null) return OwnedDefaultPermissionHandler;
+        if (FullTrust || policy is not null && SessionPolicy is not null) return OwnedDefaultPermissionHandler;
         var autoApprove = policy is { } own ? own == SessionPermissionPolicy.Approve : _autoApproveOwnedPermissions();
         return (request, token) => Task.FromResult(new AgentPermissionDecision(
             token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? AgentPermissionDecisionKind.Cancel
