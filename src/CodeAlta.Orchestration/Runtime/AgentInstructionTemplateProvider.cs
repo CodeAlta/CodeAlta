@@ -35,6 +35,10 @@ public sealed class AgentInstructionTemplateProvider
     /// </summary>
     public string? ScratchpadRoot { get; init; }
 
+    // The patterns over tool names the runtime gives a session (SessionRuntimeService.SetDisabledToolPatterns), expanded
+    // over the built-in tools into the tools the session does without; none without a runtime.
+    internal Func<string?, IReadOnlyList<string>>? SessionToolPatterns { get; set; }
+
     /// <summary>
     /// Gets how the prompt lists the skills of a session of a project and a space: <c>full</c> (every skill with its
     /// description), <c>compact</c> (names and titles) or <c>auto</c> (full while there are few). Null, or a host whose
@@ -256,7 +260,7 @@ public sealed class AgentInstructionTemplateProvider
             DiscoveryScope = DiscoveryScope,
             AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project, spaceResources, skills),
             SpaceResources = spaceResources,
-            DisabledTools = HostDisabledTools(space),
+            DisabledTools = WithSessionPatterns(HostDisabledTools(space), session.SessionId),
             // The Runtime Context names the space only when there is another one than the default, where it tells something.
             Space = spaces.Count < 2 ? null : space,
             GitIdentity = AppliesSpaceIdentities ? space.Settings.Identity?.Git : null,
@@ -291,6 +295,7 @@ public sealed class AgentInstructionTemplateProvider
             UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         }, agentPromptId);
         disabled.UnionWith(prompt?.DisabledTools ?? []);
+        disabled.UnionWith(SessionPatternTools(session.SessionId));
         return disabled;
     }
 
@@ -301,6 +306,20 @@ public sealed class AgentInstructionTemplateProvider
         disabled.UnionWith(space.Settings.Tools?.Disabled ?? []);
         return disabled;
     }
+
+    private IReadOnlySet<string> WithSessionPatterns(IReadOnlySet<string> disabled, string? sessionId)
+    {
+        var fromPatterns = SessionPatternTools(sessionId);
+        if (fromPatterns.Count == 0) return disabled;
+        var union = new HashSet<string>(disabled, StringComparer.Ordinal);
+        union.UnionWith(fromPatterns);
+        return union;
+    }
+
+    private IReadOnlySet<string> SessionPatternTools(string? sessionId)
+        => SessionToolPatterns?.Invoke(sessionId) is { Count: > 0 } patterns
+            ? CodeAlta.Agent.AgentToolPatterns.Expand(CodeAlta.Agent.AgentToolPatterns.KnownToolNames, patterns)
+            : new HashSet<string>();
 
     // The spaces of the catalog; the default one alone while the catalog keeps no space.
     private IReadOnlyList<SpaceDescriptor> LoadSpaces()

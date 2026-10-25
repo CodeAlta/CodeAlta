@@ -6,10 +6,23 @@ namespace CodeAlta.Agent.Claude;
 /// What one CLI process of a session is started with. A change of any of these starts another process, which
 /// resumes the conversation. <paramref name="Environment"/> is the environment of the session (its Git identity),
 /// which the CLI and the commands of its tools inherit. <paramref name="WithoutShell"/> starts it without its shell
-/// tools: the session does without <c>shell_command</c>.
+/// tools: the session does without <c>shell_command</c>. <paramref name="WithoutWebTools"/> names the web tools of the
+/// CLI it is started without (<c>WebSearch</c>, <c>WebFetch</c>): the session does without
+/// <see cref="AgentToolPatterns.WebSearchToolName"/> or <see cref="AgentToolPatterns.WebFetchToolName"/>.
 /// </summary>
 internal sealed record ClaudeCodeLaunchKey(string? WorkingDirectory, string? Model, string? Effort,
-    AgentProcessEnvironment? Environment = null, bool WithoutShell = false);
+    AgentProcessEnvironment? Environment = null, bool WithoutShell = false, string? WithoutWebTools = null)
+{
+    /// <summary>Gets the web tools of the CLI a session does without, separated by commas, or null for none.</summary>
+    /// <param name="disabledTools">The tools the session does without.</param>
+    public static string? WebToolsOf(IReadOnlySet<string>? disabledTools)
+    {
+        if (disabledTools is null) return null;
+        var search = disabledTools.Contains(AgentToolPatterns.WebSearchToolName);
+        var fetch = disabledTools.Contains(AgentToolPatterns.WebFetchToolName);
+        return search && fetch ? "WebSearch,WebFetch" : search ? "WebSearch" : fetch ? "WebFetch" : null;
+    }
+}
 
 /// <summary>
 /// Builds the command line and the environment of a CLI process.
@@ -184,6 +197,7 @@ internal static class ClaudeCodeLauncher
             arguments.Add("--strict-mcp-config");
         }
 
+        if (key.WithoutWebTools is { Length: > 0 } webTools) disallowed.Add(webTools);
         if (disallowed.Count > 0)
         {
             arguments.Add($"--disallowedTools={string.Join(',', disallowed)}");

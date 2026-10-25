@@ -500,7 +500,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             ClaudeCodeLauncher.ToModelOption(request.ModelId),
             effort,
             request.Environment is { IsEmpty: false } environment ? environment : null,
-            request.DisabledTools?.Contains(ShellCommandTool) == true);
+            request.DisabledTools?.Contains(ShellCommandTool) == true,
+            ClaudeCodeLaunchKey.WebToolsOf(request.DisabledTools));
         var permissionMode = ClaudeCodeLauncher.PermissionMode(NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode), key.WithoutShell);
         lock (_gate)
         {

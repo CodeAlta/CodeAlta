@@ -187,6 +187,20 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [TestMethod]
+    public void Launcher_StartsTheCliWithoutItsWebTools_WhenTheSessionDoesWithoutTheWeb()
+    {
+        var options = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code" };
+        var disabled = AgentToolPatterns.Expand(AgentToolPatterns.KnownToolNames, [AgentToolPatterns.WebAlias]);
+
+        var key = new ClaudeCodeLaunchKey(null, null, null, WithoutWebTools: ClaudeCodeLaunchKey.WebToolsOf(disabled));
+        var launch = ClaudeCodeLauncher.Create("/bin/claude", options, key, null, null, withTools: true);
+
+        Assert.AreEqual("--disallowedTools=WebSearch,WebFetch", launch.Arguments.Single(static argument => argument.StartsWith("--disallowedTools", StringComparison.Ordinal)));
+        Assert.IsNull(ClaudeCodeLaunchKey.WebToolsOf(new HashSet<string> { "webget" }), "The built-in webget is no tool of the CLI.");
+        Assert.AreNotEqual(new ClaudeCodeLaunchKey(null, null, null), key);
+    }
+
+    [TestMethod]
     public void Launcher_RunsACliWithoutItsShell_InAModeThatAsksForEveryEdit()
     {
         var options = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", PermissionMode = "bypassPermissions" };

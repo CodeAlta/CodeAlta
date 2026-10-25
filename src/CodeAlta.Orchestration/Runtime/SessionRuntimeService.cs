@@ -139,6 +139,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         };
         Jobs = new SessionJobService(DeliverJobResultAsync);
         _sessionViewCatalog.JournalStore.StateAppended += OnSessionStateAppended;
+        instructionTemplateProvider.SessionToolPatterns = GetDisabledToolPatterns;
     }
 
     // A state written to a journal (a prompt queued or sent, a mode, an archive) is in the row of its session: the listing
@@ -1478,6 +1479,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             PermissionMode = NormalizeOptionalText(options.PermissionMode),
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
         };
+        ReserveSessionIdentity(session);
+        InheritToolPatterns(session.SessionId, session.ParentSessionId, createdBy?.SourceSessionId);
 
         var failureCapture = new RuntimeFailureCapture();
         try
@@ -1685,6 +1688,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             // A child reviews before commit when its parent does: its changes reach the user through it.
             ReviewBeforeCommit = NormalizeOptionalText(parentSessionId) is { } parent && GetEffectiveReviewBeforeCommit(parent) ? true : null,
         };
+        ReserveSessionIdentity(session);
+        InheritToolPatterns(session.SessionId, session.ParentSessionId, createdBy?.SourceSessionId);
 
         var failureCapture = new RuntimeFailureCapture();
         try
@@ -1814,7 +1819,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var settled = existing is not null && (existing.HasActiveRun || existing.QueueDrainInProgress || (ownedCommand && !HasOwnedCommandDefaults(existing)));
         var worktree = settled ? existing!.WorktreeDirectory : ExistingWorktree(session.WorktreeDirectory);
         bool Reusable(RuntimeSessionEntry entry) => entry.Matches(options, prompt) && string.Equals(entry.WorktreeDirectory, worktree, StringComparison.Ordinal)
-            && UsesCurrentProvider(entry);
+            && UsesCurrentProvider(entry) && AgentToolPatterns.SameAs(entry.DisabledToolPatterns, GetDisabledToolPatterns(session.SessionId));
         // A provider whose settings were saved is registered again: an idle attachment is attached again, to run with
         // them. One that runs, or that another caller configured, keeps the provider it started with, and so does one
         // whose provider is no longer registered.
@@ -1997,6 +2002,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }
         }
         var agentPromptUsage = ResolveAgentPromptUsage(instructions.PromptBundle, project?.ProjectPath);
+        // Read with the instructions, which expand the same patterns into the built-in tools the session does without.
+        var toolPatterns = GetDisabledToolPatterns(session.SessionId);
         var providerProviderId = new ModelProviderId(options.ProviderId.Value);
         var developerInstructions = instructions.DeveloperInstructions;
         // A session moved to another project is told so once, by the first attachment after the move.
@@ -2095,6 +2102,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             AgentPromptUsage = agentPromptUsage,
             Tools = tools,
             DisabledBuiltInTools = instructions.PromptBundle?.DisabledTools,
+            DisabledToolPatterns = toolPatterns,
             WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree, options.ProjectRoots),
             CommandGuard = CreateCommandGuard(session.SessionId),
             OnPermissionRequest = options.OnPermissionRequest,
@@ -2208,6 +2216,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             OwnReviewBeforeCommit = startNewSession ? session.ReviewBeforeCommit : savedLocalState?.ReviewBeforeCommit,
             ReviewNoted = startNewSession ? null : savedLocalState?.ReviewNoted,
             DisabledTools = instructions.PromptBundle?.DisabledTools ?? System.Collections.Frozen.FrozenSet<string>.Empty,
+            DisabledToolPatterns = toolPatterns,
             PublishedBy = ticket,
             ComposedAgentPromptId = composedAgentPromptId,
         };
@@ -5636,6 +5645,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         /// <summary>The built-in tools the attachment runs without.</summary>
         public IReadOnlySet<string> DisabledTools { get; init; } = System.Collections.Frozen.FrozenSet<string>.Empty;
+
+        // The patterns over tool names the attachment was given (SetDisabledToolPatterns).
+        public IReadOnlyList<string> DisabledToolPatterns { get; init; } = [];
 
         /// <summary>The transition that published this attachment: the request that joins it reuses it as it is.</summary>
         public Task? PublishedBy { get; init; }

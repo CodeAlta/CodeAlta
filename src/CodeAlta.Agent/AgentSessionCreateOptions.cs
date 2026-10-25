@@ -180,6 +180,13 @@ public class AgentSessionCreateOptions
     public IReadOnlySet<string>? DisabledBuiltInTools { get; init; }
 
     /// <summary>
+    /// Gets or initializes patterns over the names of every tool of the session, its own tools and those a run adds
+    /// included (<see cref="AgentToolPatterns"/>): a tool they name is never offered to the model. <see langword="null"/>
+    /// or empty for none.
+    /// </summary>
+    public IReadOnlyList<string>? DisabledToolPatterns { get; init; }
+
+    /// <summary>
     /// Gets or initializes where the file tools of the session may write: set for a session that does without
     /// <c>shell_command</c>, for the built-in tools and for those of a provider that runs its own. <see langword="null"/>
     /// where they write wherever the permission handler lets them.

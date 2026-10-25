@@ -1554,8 +1554,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
             options.Patch.Set("$.stream_options.reasoning_summary_delivery"u8, "sequential_cutoff");
         }
 
-        // The summary of a compaction stands alone and has nothing to search for.
-        if (codexOptions.WebSearch is not OpenAICodexWebSearchMode.Disabled && !request.IsStandalone)
+        // The summary of a compaction stands alone and has nothing to search for; a session without the web has no search.
+        if (codexOptions.WebSearch is not OpenAICodexWebSearchMode.Disabled && !request.IsStandalone
+            && request.DisabledTools?.Contains(AgentToolPatterns.WebSearchToolName) != true)
         {
             // Run by OpenAI during the response: it stays a top-level tool, Responses Lite included.
             var webSearch = ResponseTool.CreateWebSearchTool();

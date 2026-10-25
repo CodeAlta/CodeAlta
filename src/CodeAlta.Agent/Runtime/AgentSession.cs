@@ -702,8 +702,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
             var permissionRequestHandler = options.OnPermissionRequest ?? _options.OnPermissionRequest;
             var userInputRequestHandler = options.OnUserInputRequest ?? _options.OnUserInputRequest;
-            var allTools = AppendSendTools(BuildAvailableTools(permissionRequestHandler,
-                userInputRequestHandler, options.EnableUserInputTool), options.AdditionalTools);
+            var allTools = WithoutDisabledTools(AppendSendTools(BuildAvailableTools(permissionRequestHandler,
+                userInputRequestHandler, options.EnableUserInputTool), options.AdditionalTools));
             // A provider that runs tools itself answers its own permission prompts and questions through the run.
             var providerToolHost = _turnExecutor as IAgentProviderToolHost;
             providerToolHost?.AttachRun(new AgentProviderRunContext(SessionId, runId, permissionRequestHandler,
@@ -722,7 +722,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 {
                     // A tool registered again under a name of the run (a plugin that was built again) takes its place.
                     var names = addedTools.Select(static tool => AgentToolBridge.GetRegisteredToolName(tool.Spec.Name)).ToHashSet(StringComparer.Ordinal);
-                    allTools = [.. allTools.Where(tool => !names.Contains(AgentToolBridge.GetRegisteredToolName(tool.Spec.Name))), .. addedTools];
+                    allTools = [.. allTools.Where(tool => !names.Contains(AgentToolBridge.GetRegisteredToolName(tool.Spec.Name))), .. WithoutDisabledTools(addedTools)];
                     toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
                 }
 
@@ -1750,6 +1750,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             ? [.. builtIns, .. _options.Tools]
             : builtIns;
     }
+
+    // The tools the patterns of the session turn off are never offered, nor run when a model names them anyway.
+    private IReadOnlyList<AgentToolDefinition> WithoutDisabledTools(IReadOnlyList<AgentToolDefinition> tools)
+        => _options.DisabledToolPatterns is { Count: > 0 } patterns && tools.Any(tool => AgentToolPatterns.IsDisabled(tool.Spec.Name, patterns))
+            ? [.. tools.Where(tool => !AgentToolPatterns.IsDisabled(tool.Spec.Name, patterns))]
+            : tools;
 
     // Registration uses normalized/truncated names and suffixes duplicate session tools. Preserve that
     // legacy behavior, but never let an additional per-send tool silently acquire another alias.
