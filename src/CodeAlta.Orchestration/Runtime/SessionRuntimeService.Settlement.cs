@@ -25,6 +25,11 @@ public sealed partial class SessionRuntimeService
     // Whether the owner of the commands has work under way for a session, a fallback included; set by the owner.
     internal Func<string, bool>? OwnedWork { get; set; }
 
+    // Cancels the send the owner of the commands admitted for a session, if any: one that has not started its run does
+    // not start it, and one that has is aborted. The task completes when the send has ended; null when there is none.
+    // Set by the owner.
+    internal Func<string, Task?>? CancelOwnedSend { get; set; }
+
     // Tells what waits for sessions to settle that something changed: it looks at them again.
     internal void PulseSettlement() => _settlement.Pulse();
 
@@ -105,7 +110,8 @@ public sealed partial class SessionRuntimeService
     }
 
     /// <summary>
-    /// Aborts a session and every session it started (<see cref="GetSessionTree"/>): their runs are stopped and their jobs
+    /// Aborts a session and every session it started (<see cref="GetSessionTree"/>): their runs are stopped, the prompts the
+    /// owner of the commands admitted before the abort and that have not started their run are cancelled, their jobs are
     /// cancelled, and their queues hold what they receive afterwards (the failures of their children, the ends of their
     /// jobs) until a prompt is sent to them again, so that nothing starts after the abort. Each session of the tree that was
     /// at work, and the root, records the abort and its reason in its journal, once its run has stopped.
@@ -132,10 +138,12 @@ public sealed partial class SessionRuntimeService
                 atWork.Add((sessionId, _entries.TryGetValue(sessionId, out var entry) ? entry.ActiveRunId : null));
         }
 
-        // Every stop is started before any is waited for: a parent that waits for its child is stopped too.
+        // Every stop is started before any is waited for: a parent that waits for its child is stopped too. A prompt admitted
+        // before the abort whose run has not started yet is cancelled: it does not start after the abort.
         var stops = new List<Task>();
         foreach (var sessionId in tree)
         {
+            stops.Add(CancelOwnedSendAsync(sessionId, reason));
             stops.Add(AbortQuietlyAsync(sessionId));
             foreach (var job in Jobs.List(sessionId).Where(static job => job.State == CodeAlta.Orchestration.Jobs.SessionJobState.Running))
                 stops.Add(Jobs.CancelAsync(job.Id, byUser: false, CancellationToken.None));
@@ -160,6 +168,14 @@ public sealed partial class SessionRuntimeService
 
     // A prompt sent to a session lifts the hold of an abort: its queue drains again after that run.
     private void ReleaseAbortHold(string sessionId) => _abortHolds.TryRemove(sessionId, out _);
+
+    private async Task CancelOwnedSendAsync(string sessionId, string reason)
+    {
+        if (CancelOwnedSend?.Invoke(sessionId) is not { } cancelled) return;
+        await cancelled.ConfigureAwait(false);
+        // A send admitted before the abort may have reached the runtime before it was cancelled, and lifted the hold.
+        _abortHolds[sessionId] = reason;
+    }
 
     private async Task AbortQuietlyAsync(string sessionId)
     {

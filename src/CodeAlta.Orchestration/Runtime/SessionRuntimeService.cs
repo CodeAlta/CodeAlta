@@ -2397,6 +2397,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(sendOptions);
+        // A send cancelled before it got here (an abort of its tree after its admission) starts nothing, and lifts no hold.
+        cancellationToken.ThrowIfCancellationRequested();
 
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         // A prompt sent to a session an abort held lets its queue drain again after this run.

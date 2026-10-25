@@ -310,8 +310,9 @@ and of the sessions they started, and reports how each run ended from the journa
   delivery, retention claim (sends, parent notifications, host prompts in delivery), owned command, fallback or
   forwarded callback. It wakes on the signals of the runtime and ends after two consecutive idle probes on the
   actors; a slow re-check only bounds what a missed signal would cost.
-- **Abort.** `AbortTreeAsync` stops the runs and jobs of a tree and holds their queues until a prompt is sent to them
-  again, so that nothing starts after a timeout or a signal; each journal records the abort and its reason.
+- **Abort.** `AbortTreeAsync` stops the runs and jobs of a tree, cancels the sends of the owner admitted before it
+  (one that has not started its run never starts it), and holds their queues until a prompt is sent to them again, so
+  that nothing starts after a timeout or a signal; each journal records the abort and its reason.
 - **A host without a user.** `FullTrust` grants every request, `HeadlessInstructions` ends every system prompt with one
   fixed paragraph and turns review before commit off, and `ReadOnlyGlobalState` lets the process run beside Desktop:
   it writes nothing shared under the global root (a folder outside the catalog gets a transient project, and the

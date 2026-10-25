@@ -193,7 +193,28 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         Fallback = new SessionFallbackCoordinator(this, runtime);
         runtime.RunFailureFallback = Fallback.TryClaim;
         runtime.OwnedWork = HasWork;
+        runtime.CancelOwnedSend = CancelSend;
     }
+
+    // Cancels the send of a session for an abort of its tree (SessionRuntimeService.AbortTreeAsync), as an abort of the
+    // send does: a send that has not started its run does not start it, and the run of one that has is aborted. The task
+    // completes when the send has ended; null when the session has no send.
+    private Task? CancelSend(string sessionId)
+    {
+        SendOperation? operation;
+        lock (_gate)
+        {
+            if (_closed || !_active.TryGetValue(sessionId, out operation)) return null;
+            EnsureControl(operation);
+        }
+
+        StartControl(operation);
+        return operation.Receipt.Completion;
+    }
+
+    // Awaited by a send once it is prepared, just before it reaches the runtime, with the token that cancels it: what a
+    // test orders itself by. Null in the application.
+    internal Func<string, CancellationToken, Task>? SendStarting { get; set; }
 
     // Whether a command of this owner for a session is under way (a send, a queued prompt, a steer, a compaction, an
     // abort), or a fallback that continues its failed run: the settlement of the session waits for it.
@@ -989,6 +1010,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                             // Without an owned execution, the session's default decision, which follows its mode.
                             OnPermissionRequest = operation.PermissionExecution is null ? _runtime.Permissions.CreateSendDefaultPermissionHandler(policy) : null,
                         };
+                        if (SendStarting is { } starting) await starting(operation.SessionId, operation.Execution.Token).ConfigureAwait(false);
                         operation.SendInvocation.Launch(() => operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
                             operation.PermissionExecution, operation.Execution.Token, operation.AskExecution, operation.AskSubmission));
                         if (await operation.SendInvocation.Outcome.ConfigureAwait(false) is { } sendFailure) ExceptionDispatchInfo.Throw(sendFailure);

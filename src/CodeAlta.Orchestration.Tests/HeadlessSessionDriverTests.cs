@@ -187,6 +187,83 @@ public sealed class HeadlessSessionDriverTests
     }
 
     [TestMethod]
+    public async Task Run_ThatRunsOutOfTimeBeforeItsPromptStarts_StartsNoRun_AndIsAbortedWithTheReasonTimeout()
+    {
+        var (root, provider, host) = await CreateAsync();
+        await using var scope = root;
+        var aborted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var driver = new HeadlessSessionDriver(host, new HeadlessSessionDriverOptions
+        {
+            // A run left going after the abort would make the driver wait this long.
+            AbortGrace = TimeSpan.FromSeconds(5),
+            Observer = (item, _) => { if (IsAbortRecord(item.Event)) aborted.TrySetResult(); return ValueTask.CompletedTask; },
+        });
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        provider.Turns.Enqueue(ScriptedTurnProvider.WaitThenReply(new TaskCompletionSource().Task, "never"));
+        // The prompt is admitted, then held before its run starts until the timeout has aborted it.
+        host.Commands.SendStarting = (_, token) => HoldUntilAbortedAsync(aborted.Task, token);
+
+        var result = await driver.RunAsync(session, new HeadlessPrompt("work"), TimeSpan.FromMilliseconds(100)).WaitAsync(Hang);
+
+        Assert.AreEqual(HeadlessRunStatus.Timeout, result.Status, result.FailureMessage);
+        Assert.AreEqual("timeout", result.AbortReason);
+        Assert.AreEqual(0, provider.RequestsOf(session.SessionId).Length, "A prompt admitted before the abort does not start after it.");
+        await host.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        var outcome = await host.RuntimeService.ReadOutcomeAsync(session.Descriptor, result.RunId);
+        Assert.AreEqual(SessionOutcomeStatus.Cancelled, outcome.Status);
+        Assert.AreEqual("timeout", outcome.AbortReason, "The journal records the abort and its reason.");
+    }
+
+    [TestMethod]
+    public async Task Cancel_BeforeThePromptStarts_StartsNoRun_AndALaterPromptRuns()
+    {
+        var (root, provider, host) = await CreateAsync();
+        await using var scope = root;
+        var aborted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var driver = new HeadlessSessionDriver(host, new HeadlessSessionDriverOptions
+        {
+            AbortGrace = TimeSpan.FromSeconds(5),
+            Observer = (item, _) => { if (IsAbortRecord(item.Event)) aborted.TrySetResult(); return ValueTask.CompletedTask; },
+        });
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.Commands.SendStarting = (_, token) =>
+        {
+            held.TrySetResult();
+            return HoldUntilAbortedAsync(aborted.Task, token);
+        };
+        using var signalled = new CancellationTokenSource();
+
+        // As altacli does on a signal: the tree is aborted, then the token stops the wait of the run.
+        var run = driver.RunAsync(session, new HeadlessPrompt("work"), null, signalled.Token);
+        await held.Task.WaitAsync(Hang);
+        await driver.CancelAsync(session, "signal").WaitAsync(Hang);
+        await signalled.CancelAsync();
+        var result = await run.WaitAsync(Hang);
+
+        Assert.AreEqual(HeadlessRunStatus.Aborted, result.Status, result.FailureMessage);
+        Assert.IsNotNull(result.AbortReason);
+        Assert.AreEqual(0, provider.RequestsOf(session.SessionId).Length, "A prompt admitted before the abort does not start after it.");
+        var outcome = await host.RuntimeService.ReadOutcomeAsync(session.Descriptor, result.RunId);
+        Assert.AreEqual(SessionOutcomeStatus.Cancelled, outcome.Status);
+        Assert.IsNotNull(outcome.AbortReason, "The journal records the abort and its reason.");
+
+        host.Commands.SendStarting = null;
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Later answer."));
+        var later = await driver.RunAsync(session, new HeadlessPrompt("again")).WaitAsync(Hang);
+        Assert.AreEqual(HeadlessRunStatus.Completed, later.Status, later.FailureMessage);
+        Assert.AreEqual("Later answer.", later.FinalMessage, "The abort does not hold a prompt sent after it.");
+        Assert.IsNull(host.RuntimeService.GetAbortReason(session.SessionId));
+    }
+
+    private static bool IsAbortRecord(SessionRuntimeEvent runtimeEvent)
+        => runtimeEvent is SessionAgentEvent { Event: AgentSessionUpdateEvent update } && SessionOutcome.AbortReasonOf(update) is not null;
+
+    // Holds a send before it reaches the runtime until it is cancelled, or until the abort was recorded when nothing cancels it.
+    private static async Task HoldUntilAbortedAsync(Task aborted, CancellationToken cancellationToken)
+        => await Task.WhenAny(aborted, Task.Delay(Timeout.Infinite, cancellationToken));
+
+    [TestMethod]
     public async Task Open_ASessionIdOpensOrCreates_AResumeOfAnUnknownSessionIsNotFound_AndALeaseHeldElsewhereRefuses()
     {
         var root = new HeadlessTestRoot();

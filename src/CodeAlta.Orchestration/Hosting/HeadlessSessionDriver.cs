@@ -278,7 +278,9 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             ? await runtime.ReadOutcomeAsync(session.Descriptor, run, CancellationToken.None).ConfigureAwait(false)
             : await runtime.ReadOutcomeSinceAsync(session.Descriptor, startedAt, CancellationToken.None).ConfigureAwait(false);
         var usage = await ReadTreeUsageAsync(session.SessionId, outcome.Usage, startedAt).ConfigureAwait(false);
-        abortReason ??= outcome.AbortReason ?? runtime.GetAbortReason(session.SessionId);
+        // A send the driver admitted is cancelled by an abort of its tree (CancelAsync) before its run started, or by the host closing.
+        abortReason ??= outcome.AbortReason ?? runtime.GetAbortReason(session.SessionId)
+            ?? (sent is { Outcome: OwnedSessionCommandOutcome.Cancelled } ? "cancelled" : null);
         if (abortReason is not null)
         {
             return Result(abortReason == "timeout" ? HeadlessRunStatus.Timeout : HeadlessRunStatus.Aborted, runId, outcome, usage, abortReason,
