@@ -49,7 +49,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         bool enableOwnedAsks,
         bool enableOwnedUserInput,
         IStartupScratchpadCleanup? startupScratchpadCleanup,
-        SessionRetentionProtection retentionProtection)
+        SessionRetentionProtection retentionProtection,
+        bool followExternalSessions)
     {
         CatalogOptions = catalogOptions;
         StartupScratchpadCleanup = startupScratchpadCleanup;
@@ -92,6 +93,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
         };
         Commands.Fallback.ProviderStates = () => modelProviderInitializationService.CurrentStates;
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
+        ExternalSessions = followExternalSessions
+            ? new ExternalSessionFollower(catalogOptions, sessionViewCatalog.JournalStore.CreateSessionStore(), agentSessionCatalog, runtimeService)
+            : null;
         _earlyReadShutdown = new HostDisposalStage(() => WorkspaceReads.DisposeAsync().AsTask());
         _earlyCommandShutdown = new HostDisposalStage(() => Commands.DisposeAsync().AsTask());
         var disposal = CreateHostDisposal(
@@ -225,6 +229,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     /// <summary>Gets host-owned admission and drainage for up to eight actual cached workspace reads.</summary>
     public OwnedSessionWorkspace WorkspaceReads { get; }
+
+    /// <summary>
+    /// Gets what lists the sessions another process writes into the sessions folder of the host and follows those it holds
+    /// (<see cref="CodeAltaHostOptions.FollowExternalSessions"/>), started with the host; null for a host that does not.
+    /// </summary>
+    public ExternalSessionFollower? ExternalSessions { get; }
 
     /// <summary>
     /// Gets the project-file search service.
@@ -503,7 +513,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 projectFileSnapshotCache,
                 new InMemoryProjectFileUsageStore());
 
-            return new CodeAltaHost(
+            var host = new CodeAltaHost(
                 catalogOptions,
                 projectCatalog,
                 sessionViewCatalog,
@@ -525,7 +535,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 options.EnableOwnedAsks,
                 options.EnableOwnedUserInput,
                 startupScratchpadCleanup,
-                retentionProtection);
+                retentionProtection,
+                options.FollowExternalSessions);
+            // The markers written while no instance ran are read at once, beside the start of the frontend.
+            host.ExternalSessions?.Start();
+            return host;
         }
         catch (Exception creationFailure)
         {
@@ -721,6 +735,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     private async ValueTask DisposeCommandsAndRuntimeAsync()
     {
+        // Nothing is listed or followed any more while the sessions close.
+        if (ExternalSessions is { } follower) await follower.DisposeAsync().ConfigureAwait(false);
         BeginShutdownControls();
         await DisposeOwnedWorkAsync(
             () => _earlyCommandShutdown.Reported,

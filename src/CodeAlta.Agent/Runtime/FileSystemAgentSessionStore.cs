@@ -280,6 +280,37 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             ? Task.FromResult(new AgentSessionCacheReconciliationResult(false, 0, 0))
             : _projectionCache.ReconcileAsync(CreateCacheProjectionContext(), cancellationToken);
 
+    /// <summary>
+    /// Projects one journal into the listing cache from the file as it is now, as a reconciliation does for each journal: the
+    /// journal of a session another process wrote (named by a marker) or writes (followed while it runs). Only the records
+    /// the listing reads are read (the head and the tail of the file).
+    /// </summary>
+    /// <param name="sessionFile">The path of the journal.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// <see langword="true"/> when the journal was projected; <see langword="false"/> when the store keeps no cache, the file is
+    /// gone, or it is not (yet) the journal of a session.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionFile"/> is empty.</exception>
+    /// <exception cref="AgentSessionCacheLockedException">The cache database is locked.</exception>
+    public async Task<bool> ProjectJournalAsync(string sessionFile, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionFile);
+        if (_projectionCache is null || !File.Exists(sessionFile)) return false;
+        var projection = await ProjectSessionFileForCacheAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        if (projection is null) return false;
+        await _projectionCache.UpsertSessionAsync(projection, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>Gets the path of the journal of a session, as the store finds it.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The path; <see langword="null"/> when the session has no journal.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    public Task<string?> GetJournalPathAsync(string sessionId, CancellationToken cancellationToken = default)
+        => TryGetSessionFilePathAsync(sessionId, cancellationToken);
+
     private AgentSessionCacheProjectionContext CreateCacheProjectionContext()
         => new(_layout.SessionsRootPath, ProjectSessionFileForCacheAsync);
 
