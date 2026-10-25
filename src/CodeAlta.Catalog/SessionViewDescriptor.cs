@@ -153,6 +153,13 @@ public sealed class SessionViewDescriptor
     public string? PermissionMode { get; set; }
 
     /// <summary>
+    /// Gets or sets the sandbox chosen for the session (a profile name, or <c>off</c>), or <see langword="null"/> when
+    /// its scopes decide.
+    /// </summary>
+    [JsonPropertyName("sandbox")]
+    public string? Sandbox { get; set; }
+
+    /// <summary>
     /// Gets or sets how the session titles itself (<c>first_prompt</c>, <c>last_message</c> or <c>model</c>), or
     /// <see langword="null"/> when it follows the setting.
     /// </summary>

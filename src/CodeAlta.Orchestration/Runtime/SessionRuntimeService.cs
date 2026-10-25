@@ -1146,6 +1146,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         // Only the local state says it, and none is a choice too: the mode of the provider.
         session.PermissionMode = NormalizeOptionalText(localState.PermissionMode);
+        session.Sandbox = NormalizeOptionalText(localState.Sandbox);
         session.TitleMode = AgentSessionTitles.ParseMode(localState.TitleMode) is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null;
 
         if (!string.IsNullOrWhiteSpace(localState.AgentPromptId))
@@ -1178,6 +1179,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = localState.ModelId,
             ReasoningEffort = localState.ReasoningEffort,
             PermissionMode = localState.PermissionMode,
+            Sandbox = localState.Sandbox,
             TitleMode = localState.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null,
             AgentPromptId = localState.AgentPromptId,
             Archived = localState.Archived,
@@ -1560,6 +1562,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = options.Model,
             ReasoningEffort = options.ReasoningEffort,
             PermissionMode = NormalizeOptionalText(options.PermissionMode),
+            Sandbox = await CreatedSandboxAsync(options.Sandbox, createdBy, cancellationToken).ConfigureAwait(false),
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
         };
         ReserveSessionIdentity(session);
@@ -1767,6 +1770,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = options.Model,
             ReasoningEffort = options.ReasoningEffort,
             PermissionMode = NormalizeOptionalText(options.PermissionMode),
+            Sandbox = await CreatedSandboxAsync(options.Sandbox, createdBy, cancellationToken).ConfigureAwait(false),
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
             // A child reviews before commit when its parent does: its changes reach the user through it.
             ReviewBeforeCommit = NormalizeOptionalText(parentSessionId) is { } parent && GetEffectiveReviewBeforeCommit(parent) ? true : null,
@@ -2152,6 +2156,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // how the session titles itself, which is the setting unless the session has a mode of its own.
         var savedLocalState = startNewSession ? null : await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false);
         var permissionMode = NormalizeOptionalText(startNewSession ? session.PermissionMode : savedLocalState?.PermissionMode);
+        // So is the sandbox chosen for the session; its scopes are read again at each command.
+        var ownSandbox = NormalizeOptionalText(startNewSession ? session.Sandbox : savedLocalState?.Sandbox);
         var ownTitleMode = AgentSessionTitles.ParseMode(startNewSession ? session.TitleMode : savedLocalState?.TitleMode);
         var titleMode = ownTitleMode ?? _configStore.LoadGlobalSessionTitleMode();
         var sessionOptions = new AgentSessionResumeOptions
@@ -2243,6 +2249,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         session.ModelId = options.Model;
         session.ReasoningEffort = options.ReasoningEffort;
         session.PermissionMode = permissionMode;
+        session.Sandbox = ownSandbox;
         session.TitleMode = ownTitleMode is { } ownMode ? AgentSessionTitles.NameOf(ownMode) : null;
         session.TitleSource = titleSource;
         session.AgentPromptId = effectiveAgentPromptId ?? session.AgentPromptId;
@@ -2254,7 +2261,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             // The modes a session is created with are saved with it: the next attachment reads them from there.
             await UpdateSessionLocalStateAsync(session, actorCancellationToken, startNewSession ? permissionMode : null,
-                startNewSession ? session.TitleMode : null, createdReviewBeforeCommit: startNewSession ? session.ReviewBeforeCommit : null).ConfigureAwait(false);
+                startNewSession ? session.TitleMode : null, createdReviewBeforeCommit: startNewSession ? session.ReviewBeforeCommit : null,
+                createdSandbox: startNewSession ? ownSandbox : null).ConfigureAwait(false);
             return true;
         }, CancellationToken.None).ConfigureAwait(false);
         if (startNewSession)
@@ -2308,6 +2316,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProcessEnvironment = processEnvironment,
             ProviderRegistrationVersion = providerVersion,
             PermissionMode = permissionMode,
+            OwnSandbox = ownSandbox,
             OwnTitleMode = ownTitleMode,
             TitleMode = titleMode,
             OwnReviewBeforeCommit = startNewSession ? session.ReviewBeforeCommit : savedLocalState?.ReviewBeforeCommit,
@@ -5314,6 +5323,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = session.ModelId,
             ReasoningEffort = session.ReasoningEffort,
             PermissionMode = session.PermissionMode,
+            Sandbox = session.Sandbox,
             TitleMode = session.TitleMode,
             TitleSource = session.TitleSource,
             AgentPromptId = session.AgentPromptId,
@@ -5680,11 +5690,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // createdPermissionMode, createdTitleMode: the modes of a session that starts, when it has them. Any other
     // update leaves the saved modes as they are: only the owner of the session changes them.
     private async Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken, string? createdPermissionMode,
-        string? createdTitleMode = null, bool archive = false, bool? createdReviewBeforeCommit = null)
+        string? createdTitleMode = null, bool archive = false, bool? createdReviewBeforeCommit = null, string? createdSandbox = null)
     {
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) ?? new SessionViewLocalState();
         if (createdPermissionMode is not null) localState.PermissionMode = createdPermissionMode;
+        if (createdSandbox is not null) localState.Sandbox = createdSandbox;
         if (createdTitleMode is not null) localState.TitleMode = createdTitleMode;
         if (createdReviewBeforeCommit is not null) localState.ReviewBeforeCommit = createdReviewBeforeCommit;
         localState.ProviderKey = session.ResolvedProviderKey;
@@ -5825,6 +5836,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         private string? _permissionMode;
+
+        /// <summary>
+        /// The sandbox chosen for the session (a profile name, or <c>off</c>), or null when its scopes decide. Read from any
+        /// thread: the tools of the session read it at each call.
+        /// </summary>
+        public string? OwnSandbox
+        {
+            get => Volatile.Read(ref _ownSandbox);
+            set => Volatile.Write(ref _ownSandbox, value);
+        }
+
+        private string? _ownSandbox;
 
         /// <summary>How the session titles itself when it does not follow the setting. Read and written on the actor of the session.</summary>
         public AgentSessionTitleMode? OwnTitleMode { get; set; }

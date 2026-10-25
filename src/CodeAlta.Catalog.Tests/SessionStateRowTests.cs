@@ -31,6 +31,7 @@ public sealed class SessionStateRowTests
             ("tier", static state => state.Tier = "quick"),
             ("title", static state => state.TitleMode = "last_message"),
             ("permission", static state => state.PermissionMode = "plan"),
+            ("sandbox", static state => state.Sandbox = "strict"),
             ("queue", static state => state.QueuedPrompts.Add(Queued("later", "queued"))),
             ("submitting", static state => state.QueuedPrompts.Single(static prompt => prompt.QueueItemId == "later").State = "submitting"),
             ("drained", static state =>

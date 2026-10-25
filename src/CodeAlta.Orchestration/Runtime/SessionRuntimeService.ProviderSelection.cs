@@ -64,6 +64,10 @@ public sealed partial class SessionRuntimeService
                 // The original attachment stays intact through preparation and the atomic durable decision.
                 var family = await RuntimeFamilyOfKeyWrittenAsFamilyAsync(
                     await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionSummaryAsync(session.SessionId, token).ConfigureAwait(false), token).ConfigureAwait(false);
+                // A session does not leave its sandbox by changing provider, by hand or in a fallback: the work and the
+                // history of a sandboxed model come with it.
+                if (await KeptSandboxAsync(session, target.ProviderId.Value, carryOver?.ModelId, token).ConfigureAwait(false) is { } kept)
+                    carryOver = (carryOver ?? new Catalog.SessionViewProviderCarryOver(null, null, null)) with { Sandbox = kept };
                 // The journal tells what it holds that keeps the session where it is: a turn that did not end, or a
                 // prompt queued since the check above.
                 try { await _sessionViewCatalog.JournalStore.SelectProviderAsync(session, expected.ProviderKey, target, carryOver, family, token).ConfigureAwait(false); }

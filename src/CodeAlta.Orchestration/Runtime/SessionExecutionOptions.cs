@@ -44,6 +44,13 @@ public sealed class SessionExecutionOptions
     public string? PermissionMode { get; init; }
 
     /// <summary>
+    /// Gets or initializes the sandbox a session is created with: a profile name, or <c>off</c>. Null, the default,
+    /// gives it none of its own: its scopes decide, or the sandbox of the sandboxed session that creates it. A session
+    /// that exists keeps the choice saved with it.
+    /// </summary>
+    public string? Sandbox { get; init; }
+
+    /// <summary>
     /// Gets or initializes the selected agent prompt identifier.
     /// </summary>
     public string? AgentPromptId { get; init; }

@@ -174,6 +174,8 @@ public sealed partial class SessionViewJournalStore
             ModelId = sourceLocal?.ModelId,
             ReasoningEffort = sourceLocal?.ReasoningEffort,
             PermissionMode = sourceLocal?.PermissionMode,
+            // A fork keeps the sandbox of its source: it continues the same work, written by the same model.
+            Sandbox = sourceLocal?.Sandbox,
             TitleMode = sourceLocal?.TitleMode,
             // A fork keeps the choice of review; what its agent was told is in the conversation it continues.
             ReviewBeforeCommit = sourceLocal?.ReviewBeforeCommit,

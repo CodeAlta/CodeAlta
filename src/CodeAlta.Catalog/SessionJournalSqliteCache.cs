@@ -24,7 +24,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         session_id, journal_path, journal_last_write_utc_ticks, journal_length, created_at_utc_ticks, updated_at_utc_ticks,
         protocol_family, provider_id, provider_key, working_directory, title, summary, model_id, reasoning_effort, agent_prompt_id,
         parent_session_id, created_by_session_id, created_by_run_id, provider_session_id, summary_json, local_provider_key,
-        local_model_id, local_reasoning_effort, local_agent_prompt_id, local_permission_mode, local_title_mode, archived,
+        local_model_id, local_reasoning_effort, local_agent_prompt_id, local_permission_mode, local_title_mode, local_sandbox, archived,
         local_archived_at_utc_ticks, local_queued_prompt_count, message_count, local_parent_session_id, created_by_json,
         local_state_cached, space_id, journal_header_json, journal_header_read
         """;
@@ -722,6 +722,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         local_agent_prompt_id = $local_agent_prompt_id,
         local_permission_mode = $local_permission_mode,
         local_title_mode = $local_title_mode,
+        local_sandbox = $local_sandbox,
         archived = $archived,
         local_archived_at_utc_ticks = $local_archived_at_utc_ticks,
         local_queued_prompt_count = $local_queued_prompt_count,
@@ -739,6 +740,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_agent_prompt_id", NormalizeOptionalText(state.AgentPromptId));
         AddParameter(command, "$local_permission_mode", NormalizeOptionalText(state.PermissionMode));
         AddParameter(command, "$local_title_mode", FormatTitleMode(state.TitleMode));
+        AddParameter(command, "$local_sandbox", NormalizeOptionalText(state.Sandbox));
         AddParameter(command, "$archived", state.Archived ? 1 : 0);
         AddParameter(command, "$local_archived_at_utc_ticks", state.Archived ? state.ArchivedAt?.UtcTicks : null);
         AddParameter(command, "$local_queued_prompt_count", state.CountPendingQueuedPrompts());
@@ -1547,6 +1549,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     local_agent_prompt_id TEXT,
                     local_permission_mode TEXT,
                     local_title_mode TEXT,
+                    local_sandbox TEXT,
                     archived INTEGER NOT NULL DEFAULT 0,
                     local_archived_at_utc_ticks INTEGER,
                     local_queued_prompt_count INTEGER,
@@ -1589,6 +1592,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
         await AddPermissionModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddTitleModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
+        await AddSandboxColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddSpaceColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddArchivedAtColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddJournalHeaderColumnsAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -1640,6 +1644,22 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         }
 
         await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_title_mode TEXT;", cancellationToken).ConfigureAwait(false);
+    }
+
+    // A cache written before sessions could choose a sandbox has no column for it. Its rows stay, without a choice:
+    // the sessions of such a build made none, and a row is read again when its journal changes.
+    private static async Task AddSandboxColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_sandbox';";
+            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
+            {
+                return;
+            }
+        }
+
+        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_sandbox TEXT;", cancellationToken).ConfigureAwait(false);
     }
 
     // A cache written before sessions had a space has no column for it. Its rows are read again from the journals:
@@ -1956,6 +1976,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_agent_prompt_id,
                 local_permission_mode,
                 local_title_mode,
+                local_sandbox,
                 archived,
                 local_archived_at_utc_ticks,
                 local_queued_prompt_count,
@@ -1997,6 +2018,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 $local_agent_prompt_id,
                 $local_permission_mode,
                 $local_title_mode,
+                $local_sandbox,
                 $archived,
                 $local_archived_at_utc_ticks,
                 $local_queued_prompt_count,
@@ -2040,6 +2062,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_agent_prompt_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_agent_prompt_id ELSE session_projection_cache.local_agent_prompt_id END,
                 local_permission_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_permission_mode ELSE session_projection_cache.local_permission_mode END,
                 local_title_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_title_mode ELSE session_projection_cache.local_title_mode END,
+                local_sandbox = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_sandbox ELSE session_projection_cache.local_sandbox END,
                 archived = CASE WHEN excluded.local_state_cached = 1 THEN excluded.archived ELSE session_projection_cache.archived END,
                 local_archived_at_utc_ticks = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_archived_at_utc_ticks ELSE session_projection_cache.local_archived_at_utc_ticks END,
                 local_queued_prompt_count = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_queued_prompt_count ELSE session_projection_cache.local_queued_prompt_count END,
@@ -2089,6 +2112,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_agent_prompt_id", NormalizeOptionalText(localState?.AgentPromptId));
         AddParameter(command, "$local_permission_mode", NormalizeOptionalText(localState?.PermissionMode));
         AddParameter(command, "$local_title_mode", localState?.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null);
+        AddParameter(command, "$local_sandbox", NormalizeOptionalText(localState?.Sandbox));
         AddParameter(command, "$archived", localState?.Archived == true ? 1 : 0);
         AddParameter(command, "$local_archived_at_utc_ticks", localState?.Archived == true ? localState.ArchivedAt?.UtcTicks : null);
         AddParameter(command, "$local_queued_prompt_count", localState?.QueuedPromptCount);
@@ -2188,6 +2212,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 CreatedByJson: GetString(reader, "created_by_json"))
             {
                 PermissionMode = GetString(reader, "local_permission_mode"),
+                Sandbox = GetString(reader, "local_sandbox"),
                 TitleMode = AgentSessionTitles.ParseMode(GetString(reader, "local_title_mode")),
                 ArchivedAt = GetNullableInt64(reader, "local_archived_at_utc_ticks") is { } archivedAt ? FromUtcTicks(archivedAt) : null,
                 QueuedPromptCount = GetNullableInt32(reader, "local_queued_prompt_count"),
@@ -2233,6 +2258,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             CreatedByJson: SerializeCreatedBy(state.CreatedBy))
         {
             PermissionMode = NormalizeOptionalText(state.PermissionMode),
+            Sandbox = NormalizeOptionalText(state.Sandbox),
             TitleMode = AgentSessionTitles.ParseMode(state.TitleMode),
             ArchivedAt = state.Archived ? state.ArchivedAt : null,
             QueuedPromptCount = state.CountPendingQueuedPrompts(),

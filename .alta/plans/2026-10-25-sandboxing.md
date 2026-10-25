@@ -295,7 +295,9 @@ Their native sandboxes are not the boundary. Claude Code's covers only its shell
   A `[sandbox]` table in a project's `.alta/config.toml` is ignored with a warning. Tests.
 
   **Done** in the catalog (`CodeAltaSandboxSettings`, `LoadGlobalSandbox`/`SaveGlobalSandbox`, `ProjectSetsSandbox`; `sandbox` of providers and of `model_overrides`; `new_sessions.sandbox`; `sandbox` of project files). The warning is logged by the runtime (step 5), which reads the table.
-- [ ] 5. **The sandbox of a session.** `sandbox` goes into the local state of the journal and its SQLite projection, like `PermissionMode`. `SandboxResolver` applies the precedence at each turn, plus the rules for sessions that agents create, fork or switch, and for fallback. Tests.
+- [x] 5. **The sandbox of a session.** `sandbox` goes into the local state of the journal and its SQLite projection, like `PermissionMode`. `SandboxResolver` applies the precedence at each turn, plus the rules for sessions that agents create, fork or switch, and for fallback. Tests.
+
+  **Done** in `SessionRuntimeService.Sandbox.cs`: `GetSessionSandboxAsync` resolves at each call (no separate resolver type); `SetOwnedSandboxAsync` and `OwnedSessionCommandService.SetSandboxAsync` save the session's choice; a session created by a sandboxed one gets its profile; a fork keeps it; a provider switch or fallback pins the profile when the new provider would not sandbox the session. A profile that cannot be resolved keeps the session sandboxed with a problem. The ignored repository table is reported on `SessionSandbox.ProjectSetsSandbox`. Skipping fallback targets that cannot run sandboxed is in step 7, with the refusal of such providers.
 - [ ] 6. **The worker.** `--sandbox-worker` is dispatched first in `Program.Main` of `alta`, `altatui` and `altacli`. It speaks a framed protocol over stdio (`WorkerFrames`):
   - the file tools, with the handlers of `AgentBuiltInToolFactory` and `AgentWriteGuard` on;
   - commands, with streamed output, cancellation and timeout;

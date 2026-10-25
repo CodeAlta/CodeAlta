@@ -85,6 +85,9 @@ public sealed record AgentSessionViewStateMetadata(
     /// <summary>Gets the permission mode chosen for the session, or <see langword="null"/> for the one of its provider.</summary>
     public string? PermissionMode { get; init; }
 
+    /// <summary>Gets the sandbox chosen for the session (a profile name, or <c>off</c>), or <see langword="null"/> when its scopes decide.</summary>
+    public string? Sandbox { get; init; }
+
     /// <summary>Gets how the session titles itself, or <see langword="null"/> when it follows the setting.</summary>
     public AgentSessionTitleMode? TitleMode { get; init; }
 

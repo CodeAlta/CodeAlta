@@ -7,7 +7,8 @@ namespace CodeAlta.Catalog;
 /// <param name="ModelId">The model, or <see langword="null"/> for the provider's own.</param>
 /// <param name="ReasoningEffort">The reasoning effort, or <see langword="null"/> for the model's own.</param>
 /// <param name="PermissionMode">The permission mode, or <see langword="null"/> for the provider's configured one.</param>
-public sealed record SessionViewProviderCarryOver(string? ModelId, AgentReasoningEffort? ReasoningEffort, string? PermissionMode);
+/// <param name="Sandbox">A sandbox the session takes as its own choice, or <see langword="null"/> to keep its choice as it is.</param>
+public sealed record SessionViewProviderCarryOver(string? ModelId, AgentReasoningEffort? ReasoningEffort, string? PermissionMode, string? Sandbox = null);
 
 public sealed partial class SessionViewJournalStore
 {
@@ -82,6 +83,8 @@ public sealed partial class SessionViewJournalStore
         // The modes are those of a provider: the session starts on the new one with its configured mode, unless the
         // switch names the mode it keeps.
         local.PermissionMode = carryOver?.PermissionMode;
+        // The sandbox goes with the session, not with its provider; a switch may make it the session's own choice.
+        if (carryOver?.Sandbox is { } sandbox) local.Sandbox = sandbox;
         // The agent of the new provider is told of the review before commit again at its first prompt.
         local.ReviewNoted = null;
         var selected = SessionViewJournalHeader.FromDescriptor(session).ToDescriptor();

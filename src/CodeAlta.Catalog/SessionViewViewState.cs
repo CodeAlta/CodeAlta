@@ -287,6 +287,14 @@ public sealed class SessionViewLocalState
     public string? PermissionMode { get; set; }
 
     /// <summary>
+    /// Gets or sets the sandbox chosen for the session: the name of a sandbox profile, or <c>off</c>; null when its
+    /// model, provider, project, space or the setting of every session decides. A journal written before the sandbox
+    /// existed has none.
+    /// </summary>
+    [JsonPropertyName("sandbox")]
+    public string? Sandbox { get; set; }
+
+    /// <summary>
     /// Gets or sets how the session titles itself (<c>first_prompt</c>, <c>last_message</c> or <c>model</c>), or
     /// <see langword="null"/> when it follows the setting. A journal written before the choice existed has none.
     /// </summary>
