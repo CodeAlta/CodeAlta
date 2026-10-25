@@ -28,26 +28,31 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
     /// <summary>The ids of the spaces of the plugin; empty when it is in every space.</summary>
     internal IReadOnlyList<string> Spaces => spaces.GetAssignedSpaces();
 
+    /// <summary>How many projects the phone keeps to at most: each is a list asked of alta.</summary>
+    internal const int MaximumProjects = 16;
+
     /// <summary>A page of the sessions, the latest activity first.</summary>
     /// <param name="offset">The sessions to skip.</param>
     /// <param name="limit">The sessions of the page.</param>
-    /// <param name="projectId">The project the phone keeps to, or null for every project.</param>
+    /// <param name="projectIds">The projects the phone keeps to (the first <see cref="MaximumProjects"/>), or null or none for every project.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    internal async Task<JsonObject> ListAsync(int offset, int limit, string? projectId, CancellationToken cancellationToken)
+    internal async Task<JsonObject> ListAsync(int offset, int limit, IReadOnlyList<string>? projectIds, CancellationToken cancellationToken)
     {
         offset = Math.Max(0, offset);
         limit = Math.Clamp(limit, 1, MaximumPageSize);
         var assigned = Spaces;
+        var projects = (projectIds ?? []).Where(MobileApi.IsId).Distinct(StringComparer.Ordinal).Take(MaximumProjects).ToArray();
         var sessions = new List<JsonObject>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         string? error = null;
-        // alta lists the latest activity first: each space gives at most the sessions up to the end of the page, and one more
-        // that says whether there are more.
+        // alta lists the latest activity first: each space and each project gives at most the sessions up to the end of
+        // the page, and one more that says whether there are more.
         var wanted = (offset + limit + 1).ToString(CultureInfo.InvariantCulture);
         foreach (var space in assigned.Count == 0 ? [null] : assigned.Cast<string?>())
+        foreach (var project in projects.Length == 0 ? [null] : projects.Cast<string?>())
         {
             List<string> args = ["session", "list", "--limit", wanted];
-            if (projectId is not null) args.AddRange(["--project", projectId]);
+            if (project is not null) args.AddRange(["--project", project]);
             if (space is not null) args.AddRange(["--space", space]);
             var result = await MobileAlta.RunAsync(alta, args, null, cancellationToken).ConfigureAwait(false);
             error ??= result.Error;
@@ -61,7 +66,7 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         return new JsonObject
         {
             ["sessions"] = new JsonArray(page), ["next"] = offset + page.Length, ["hasMore"] = ordered.Count > offset + page.Length,
-            ["project"] = projectId, ["machine"] = Environment.MachineName, ["error"] = error,
+            ["projects"] = new JsonArray([.. projects.Select(static project => (JsonNode)project)]), ["machine"] = Environment.MachineName, ["error"] = error,
             // The spaces the phone sees; empty when it sees every space.
             ["spaces"] = new JsonArray([.. assigned.Select(space => (JsonNode)names.Space(space))]),
         };

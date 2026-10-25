@@ -76,10 +76,31 @@ public sealed class MobileSessionsTests
         var alta = new FakeAlta().Answer("session list", FakeAlta.Session("a", "p1", "work", "2026-10-24T10:00:00Z"), FakeAlta.Session("x", "p1", "work", "2026-10-24T09:00:00Z", state: "archived"));
         var sessions = new MobileSessions(alta, new FakeSpaces(), new MobileLive());
 
-        var page = await sessions.ListAsync(0, 6, "p1", default);
+        var page = await sessions.ListAsync(0, 6, ["p1"], default);
 
         CollectionAssert.AreEqual(new[] { "a" }, Ids(page), "An archived session is not listed.");
         CollectionAssert.AreEqual(new[] { "session", "list", "--limit", "7", "--project", "p1" }, alta.CallsOf("session list").Single());
+        Assert.AreEqual("p1", (string?)page["projects"]![0]);
+    }
+
+    [TestMethod]
+    public async Task List_KeepsToSeveralProjects_InEachSpace_LatestFirst()
+    {
+        var alta = new FakeAlta().Answer("session list", (args, _) => (args[5], args[^1]) switch
+        {
+            ("p1", "personal") => FakeAlta.Transcript(0, FakeAlta.Session("a", "p1", "personal", "2026-10-24T08:00:00Z")),
+            ("p2", "personal") => FakeAlta.Transcript(0, FakeAlta.Session("b", "p2", "personal", "2026-10-24T10:00:00Z")),
+            ("p2", "family") => FakeAlta.Transcript(0, FakeAlta.Session("c", "p2", "family", "2026-10-24T09:00:00Z")),
+            _ => FakeAlta.Transcript(0),
+        });
+        var sessions = new MobileSessions(alta, new FakeSpaces("personal", "family"), new MobileLive());
+
+        // An id twice is asked once, and what is no id is left out.
+        var page = await sessions.ListAsync(0, 6, ["p1", "p2", "p1", "--help"], default);
+
+        CollectionAssert.AreEqual(new[] { "b", "c", "a" }, Ids(page), "The sessions of both projects, the latest activity first.");
+        Assert.AreEqual(4, alta.CallsOf("session list").Length, "One list per space and project.");
+        CollectionAssert.AreEqual(new[] { "p1", "p2" }, page["projects"]!.AsArray().Select(static project => (string?)project).ToArray());
     }
 
     [TestMethod]

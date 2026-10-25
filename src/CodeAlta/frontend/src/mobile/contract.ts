@@ -59,7 +59,8 @@ export type SessionPage = Readonly<{
   sessions: readonly Session[];
   next: number;
   hasMore: boolean;
-  project: string | null;
+  /** The projects the page keeps to; empty for every project. */
+  projects: readonly string[];
   machine: string;
   /** The spaces the phone sees; empty when it sees every space. */
   spaces?: readonly Space[];

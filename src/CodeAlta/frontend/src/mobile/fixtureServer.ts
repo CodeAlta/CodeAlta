@@ -85,10 +85,10 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     }
     if (path === "/api/sessions" && request.method === "GET") {
       const offset = Number(url.searchParams.get("offset") ?? 0), limit = Math.min(50, Number(url.searchParams.get("limit") ?? 6));
-      const project = url.searchParams.get("project");
-      const all = state.sessions.filter(s => !project || s.projectId === project).sort((a, b) => Date.parse(b.lastActivity!) - Date.parse(a.lastActivity!));
+      const projects = url.searchParams.getAll("project");
+      const all = state.sessions.filter(s => projects.length === 0 || projects.includes(s.projectId ?? "")).sort((a, b) => Date.parse(b.lastActivity!) - Date.parse(a.lastActivity!));
       const page = all.slice(offset, offset + limit);
-      return send(response, 200, { sessions: page, next: offset + page.length, hasMore: offset + page.length < all.length, project, machine: "FIXTURE-PC", spaces: state.spaces, error: null });
+      return send(response, 200, { sessions: page, next: offset + page.length, hasMore: offset + page.length < all.length, projects, machine: "FIXTURE-PC", spaces: state.spaces, error: null });
     }
     if (path === "/api/sessions" && request.method === "POST") {
       const id = `new${++state.created}`;

@@ -40,7 +40,7 @@ export function createSessionStore() {
   const live = new Map<string, Readonly<{ live: Live; stamp: number }>>();
   let stamp = 0;
   let listed: string[] = [];
-  let next = 0, hasMore = false, filter = "";
+  let next = 0, hasMore = false, filter: readonly string[] = [];
   // Where the phone is: the computer, and the spaces it sees (none: every space).
   let machine = "", spaces: readonly Space[] = [];
   // Sessions out of the list that already made the list be read again: once is enough for each.
@@ -68,7 +68,7 @@ export function createSessionStore() {
   };
 
   return {
-    /** The project the list is filtered on; "" for every project. */
+    /** The projects the list is filtered on; empty for every project. */
     get filter() { return filter; },
     get hasMore() { return hasMore; },
     get next() { return next; },
@@ -109,7 +109,7 @@ export function createSessionStore() {
       live.set(update.id, { live: merged, stamp: ++stamp });
       if (listed.includes(update.id)) return "listed";
       if (requested.has(update.id)) return "none";
-      if (filter && merged.projectId !== filter) return "none";
+      if (filter.length > 0 && !filter.includes(merged.projectId ?? "")) return "none";
       if (!couldShow(merged)) return "none";
       requested.add(update.id);
       return "reload";
@@ -122,9 +122,9 @@ export function createSessionStore() {
     },
     /** Whether the list holds a session. */
     listed: (id: string) => listed.includes(id),
-    /** Filters the list on a project ("" for all): the list is empty until it is read again. */
-    setFilter(project: string) {
-      filter = project; listed = []; next = 0; hasMore = false; requested.clear();
+    /** Filters the list on projects (none for all): the list is empty until it is read again. */
+    setFilter(projects: readonly string[]) {
+      filter = [...new Set(projects.filter(Boolean))]; listed = []; next = 0; hasMore = false; requested.clear();
     },
     /** Hides a session while its archive is asked for. */
     hide(id: string) { gone.add(id); settling.add(id); },

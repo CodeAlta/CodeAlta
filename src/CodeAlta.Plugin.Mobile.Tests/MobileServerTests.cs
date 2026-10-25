@@ -89,6 +89,12 @@ public sealed class MobileServerTests
         var choices = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/choices"))!;
         Assert.AreEqual(("codex", "gpt"), ((string?)choices["current"]!["provider"], (string?)choices["current"]!["model"]));
 
+        // The list keeps to each project the query repeats.
+        fixture.Alta.Answer("session list", FakeAlta.Session("known", "p1", "personal", "2026-10-24T10:00:00Z"));
+        var listed = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions?offset=0&limit=6&project=p1&project=p2"))!;
+        CollectionAssert.AreEqual(new[] { "p1", "p2" }, listed["projects"]!.AsArray().Select(static project => (string?)project).ToArray());
+        Assert.IsTrue(fixture.Alta.CallsOf("session list").Any(static call => call.Contains("p2")), "a list asked for the second project");
+
         using var form = new StringContent("text=hello", Encoding.UTF8, "application/x-www-form-urlencoded");
         Assert.AreEqual(HttpStatusCode.BadRequest, (await fixture.Client.PostAsync("/api/sessions/known/prompt", form)).StatusCode, "A form of another site is no JSON.");
         Assert.AreEqual(HttpStatusCode.BadRequest, (await fixture.PostAsync("/api/sessions", new JsonObject { ["project"] = "p1" })).StatusCode, "An answer that is only an error.");

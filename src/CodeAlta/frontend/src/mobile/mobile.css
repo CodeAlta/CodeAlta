@@ -117,10 +117,6 @@ main { min-width: 0; max-width: 720px; margin: 0 auto; padding: .5rem calc(.75re
 .scope-where .ico svg { width: .875rem; height: .875rem; }
 .scope-machine { margin-left: -.375rem; color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
 .scope-space { white-space: nowrap; }
-.chip { display: inline-flex; align-items: center; gap: .25rem; max-width: 100%; min-height: 44px; margin: 0 0 0 auto; padding: 0 0 0 .75rem; border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--text); font-size: .8125rem; }
-.chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip button { flex: none; min-width: 44px; min-height: 44px; border: 0; background: transparent; color: var(--muted); font-size: 1.125rem; border-radius: 999px; cursor: pointer; }
 .more { display: block; width: 100%; min-height: 44px; margin-top: .5rem; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
 
 /* The footer: the computer, the state of the link and the time of its last news. Under the composer on a session's page. */
@@ -250,6 +246,9 @@ footer { display: flex; align-items: center; justify-content: center; gap: .4rem
 .sheet-panel button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-width: 0; min-height: 48px; padding: .5rem .75rem; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; text-align: start; cursor: pointer; }
 .sheet-panel button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .sheet-panel button.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-weight: 600; }
+/* The projects of the filter: several can be checked, each with its mark. */
+#sheet-list button[aria-pressed] { position: relative; padding-right: 2.25rem; }
+#sheet-list button[aria-pressed="true"]::after { content: "✓"; position: absolute; top: 50%; right: .75rem; transform: translateY(-50%); font-weight: 700; }
 .sheet-panel small { max-width: 100%; color: var(--muted); font-size: .75rem; font-weight: normal; overflow-wrap: anywhere; }
 
 /* Buttons and fields of the composers. */

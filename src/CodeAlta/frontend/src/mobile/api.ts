@@ -132,9 +132,9 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
       store.remove(tokenKey);
       return false;
     },
-    sessions: (offset: number, limit: number, project: string) => {
+    sessions: (offset: number, limit: number, projects: readonly string[]) => {
       const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
-      if (project) query.set("project", project);
+      for (const project of projects) query.append("project", project);
       return call<SessionPage>("GET", `/api/sessions?${query}`);
     },
     session: (id: string) => call<Session>("GET", session(id)),

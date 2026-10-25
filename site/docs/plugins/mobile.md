@@ -36,7 +36,7 @@ When something keeps a phone from connecting, the Mobile tab says what it is and
 
 ## On the phone
 
-- **The sessions**, latest activity first, six at a time, each with a dot and a line that show what it does: working, calling tools, thinking, writing. **Project** keeps the list to one project.
+- **The sessions**, latest activity first, six at a time, each with a dot and a line that show what it does: working, calling tools, thinking, writing. The filter button keeps the list to the projects you check, one or several; the checked ones come first, and **All projects** shows them all again.
 - **A session**: its timeline, with the messages, the thoughts, the tool calls (without their output) and the diagrams. A diagram opens in a tab of its own, where you can zoom.
 - **The prompt** sends to an idle session. While a turn runs, **Steer** sends into that turn, **Queue** keeps the prompt until the turn ends, and **Stop** stops the turn.
 - **The model chip**, beside the prompt buttons, shows the session's model and effort, such as `GPT-6.1 Sol · low`. Tap it to choose another model of the provider and its effort. **⋯** holds the agent prompt, the permissions (when the provider has modes), and **Queue rather than steer while it works**, which makes Queue the first button during a turn. A choice shows in blue until the next prompt takes it, and the session keeps it. A steered prompt changes none of these.

@@ -39,11 +39,11 @@ test("signIn keeps an accepted token and forgets a refused one", async () => {
 
 test("a 401 signs in again once with the kept token and repeats the call", async () => {
   const store = memoryStore({ [tokenKey]: "kept" });
-  const page = JSON.stringify({ sessions: [], next: 0, hasMore: false, project: null, machine: "PC", error: null });
+  const page = JSON.stringify({ sessions: [], next: 0, hasMore: false, projects: [], machine: "PC", error: null });
   const { fetch, calls } = server({ "/api/sessions": [[401], [200, page]], "/api/login": [[204]] });
   let signedOut = 0;
   const api = createApi({ fetch, store, onSignedOut: () => signedOut++ });
-  const read = await api.sessions(0, 6, "");
+  const read = await api.sessions(0, 6, []);
   assert.equal(read.machine, "PC");
   assert.deepEqual(calls.map(c => `${c.method} ${c.url}`), ["GET /api/sessions?offset=0&limit=6", "POST /api/login", "GET /api/sessions?offset=0&limit=6"]);
   assert.equal(signedOut, 0);
@@ -102,13 +102,13 @@ test("a new session needs an id, and its send error is an answer, not a failure"
   await assert.rejects(api.create({ project: "p", text: "hi" }), /No such project/);
 });
 
-test("the paths of a session are encoded, and the project filter is a query", async () => {
+test("the paths of a session are encoded, and the project filter is a query of each project", async () => {
   const { fetch, calls } = server({});
   const api = createApi({ fetch, store: memoryStore(), onSignedOut: () => { } });
   await api.prompt("a/b", "x", "steer").catch(() => { });
-  await api.sessions(6, 12, "p 1").catch(() => { });
+  await api.sessions(6, 12, ["p 1", "p2"]).catch(() => { });
   await api.events("a/b", 42).catch(() => { });
-  assert.deepEqual(calls.map(c => c.url), ["/api/sessions/a%2Fb/prompt", "/api/sessions?offset=6&limit=12&project=p+1", "/api/sessions/a%2Fb/events?since=42"]);
+  assert.deepEqual(calls.map(c => c.url), ["/api/sessions/a%2Fb/prompt", "/api/sessions?offset=6&limit=12&project=p+1&project=p2", "/api/sessions/a%2Fb/events?since=42"]);
   assert.deepEqual(calls[0].body, { text: "x", mode: "steer" });
 });
 

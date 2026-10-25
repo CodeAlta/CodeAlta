@@ -118,8 +118,9 @@ internal sealed partial class MobileServer : IAsyncDisposable
 
         var api = app.MapGroup("/api").AddEndpointFilter(async (invocation, next) =>
             Authorized(invocation.HttpContext) ? await next(invocation).ConfigureAwait(false) : Results.Unauthorized());
-        api.MapGet("/sessions", async (int? offset, int? limit, string? project, CancellationToken ct) =>
-            Json(await _options.Sessions.ListAsync(offset ?? 0, limit ?? MobileSessions.DefaultPageSize, MobileApi.IsId(project) ? project : null, ct).ConfigureAwait(false)));
+        // A project repeated for each one the phone keeps to: ?project=a&project=b.
+        api.MapGet("/sessions", async (int? offset, int? limit, string[]? project, CancellationToken ct) =>
+            Json(await _options.Sessions.ListAsync(offset ?? 0, limit ?? MobileSessions.DefaultPageSize, project, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}", async (string id, CancellationToken ct) => Json(await _options.Sessions.GetAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/events", async (string id, long? since, CancellationToken ct) =>
             Json(await _options.Sessions.EventsAsync(id, Math.Max(0, since ?? 0), ct).ConfigureAwait(false)));

@@ -310,6 +310,39 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await waitFor(`!(${shown("#sheet")})`, "the sheet closed");
     assert.equal(await evaluate("document.activeElement?.id"), "filter");
 
+    // Several projects can be checked: the list keeps to them once the sheet closes, and no chip takes room above it.
+    assert.equal(await evaluate("!!document.getElementById('chip')"), false, "no chip of the project");
+    const row = (project: string) => `document.querySelector('#sheet-list button[data-project="${project}"]')`;
+    await click("#filter");
+    await waitFor(shown("#sheet"), "the project sheet");
+    await evaluate(`${row("p2")}.click()`);
+    await evaluate(`${row("p1")}.click()`);
+    assert.deepEqual(await evaluate<string[]>("[...document.querySelectorAll('#sheet-list button[aria-pressed=\"true\"]')].map(b => b.dataset.project)"), ["p1", "p2"],
+      "both checked, the rows where they were");
+    assert.equal(await evaluate("document.querySelector('#sheet-list li:first-child button').getAttribute('aria-pressed')"), "false", "All projects is no longer checked");
+    const listReads = count("GET", "/api/sessions");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await waitUntil(() => count("GET", "/api/sessions") > listReads, "the list read again for the projects");
+    assert.match(server.requests.filter(r => r.path === "/api/sessions").at(-1)?.query ?? "", /^\?offset=0&limit=\d+&project=p2&project=p1$/);
+    await waitFor(`document.querySelector('.row[data-id="s1"]') && document.querySelector('.row[data-id="s2"]')`, "the sessions of both projects");
+    assert.match(await evaluate<string>("document.getElementById('filter').getAttribute('aria-label')"), /^Filter by project: site, parser$/);
+    // Unchecking one keeps to the other; the checked one comes first when the sheet opens again.
+    await click("#filter");
+    await waitFor(shown("#sheet"), "the project sheet");
+    await evaluate(`${row("p2")}.click()`);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await waitFor(`!document.querySelector('.row[data-id="s2"]') && document.querySelector('.row[data-id="s1"]')`, "the sessions of parser only");
+    await click("#filter");
+    await waitFor(shown("#sheet"), "the project sheet");
+    assert.deepEqual(await evaluate<string[]>("[...document.querySelectorAll('#sheet-list button[data-project]')].map(b => b.dataset.project)"), ["p1", "p2"],
+      "the checked project first");
+    // All projects unchecks them all, and closes the sheet.
+    await evaluate("document.querySelector('#sheet-list li:first-child button').click()");
+    await waitFor(`!(${shown("#sheet")}) && document.querySelector('.row[data-id="s2"]')`, "every project again");
+    assert.equal(await evaluate("document.querySelector('#filter .badge').hidden"), true);
+
     // A new session: the default tier of the settings; a prompt that did not go is back in the composer of its session.
     // The screen is the project, the prompt, and one line of chips beside Start.
     await click("#new");

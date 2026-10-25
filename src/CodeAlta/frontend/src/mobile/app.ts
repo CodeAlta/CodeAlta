@@ -220,7 +220,8 @@ export function startMobile(window: Window & typeof globalThis) {
       }
       renderList();
       showScope();
-      if (!sessions.list().length) note.textContent = listError || (filter ? "No sessions in this project." : "No sessions yet.");
+      if (!sessions.list().length) note.textContent = listError
+        || (filter.length > 1 ? "No sessions in these projects." : filter.length ? "No sessions in this project." : "No sessions yet.");
     } catch (error) {
       if (error instanceof SignedOutError) return;
       note.textContent = `CodeAlta is not reachable: ${failureText(error, host)}`;
@@ -245,8 +246,17 @@ export function startMobile(window: Window & typeof globalThis) {
     }
   });
 
-  // ---- The project filter: a sheet of the projects and "All projects"; the choice is kept ----
+  // ---- The project filter: a sheet of the projects, any of them checked, and "All projects"; the choice is kept ----
   const projectKey = "alta.project";
+  // The projects kept: a list, or the one project an earlier version kept.
+  function keptProjects(): string[] {
+    const raw = store.get(projectKey);
+    if (!raw) return [];
+    try {
+      const value: unknown = JSON.parse(raw);
+      return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string" && id.length > 0) : [raw];
+    } catch { return [raw]; }
+  }
   let projects: ProjectList | null = null;
   async function readProjects(): Promise<ProjectList> {
     if (!projects) {
@@ -255,18 +265,24 @@ export function startMobile(window: Window & typeof globalThis) {
     }
     return projects;
   }
-  const filterButton = $<HTMLButtonElement>("filter"), chip = $("chip");
-  const filterSheet = createSheet(document, $("sheet"));
+  const filterButton = $<HTMLButtonElement>("filter");
+  // The projects checked in the open sheet: the list keeps to them once the sheet closes.
+  let checking: string[] | null = null;
+  const filterSheet = createSheet(document, $("sheet"), () => {
+    const chosen = checking;
+    checking = null;
+    if (chosen && (chosen.length !== sessions.filter.length || chosen.some(id => !sessions.filter.includes(id)))) chooseProjects(chosen);
+  });
   function showFilter() {
-    const project = sessions.filter;
-    const name = project ? projects?.projects.find(p => p.id === project)?.name ?? project : "";
-    filterButton.querySelector<HTMLElement>(".badge")!.hidden = !project;
-    filterButton.setAttribute("aria-label", project ? `Filter by project: ${name}` : "Filter by project");
-    chip.hidden = !project;
-    chip.querySelector("span")!.textContent = name;
+    const chosen = sessions.filter;
+    const names = chosen.map(id => projects?.projects.find(p => p.id === id)?.name ?? id);
+    filterButton.querySelector<HTMLElement>(".badge")!.hidden = chosen.length === 0;
+    const label = chosen.length ? `Filter by project: ${names.join(", ")}` : "Filter by project";
+    filterButton.setAttribute("aria-label", label);
+    filterButton.title = label;
     showScope();
   }
-  // Where the phone is, at the top of the list: the computer and the spaces it sees (beside the project filter, when one is set).
+  // Where the phone is, at the top of the list: the computer and the spaces it sees.
   const spaceMark = (space: Space) => {
     const item = make("span", "scope-space");
     const dot = make("span", "space-dot");
@@ -284,10 +300,9 @@ export function startMobile(window: Window & typeof globalThis) {
     if (spaces.length) where.append(...spaces.map(spaceMark));
     else where.append(make("span", "scope-space", "All spaces"));
   }
-  function chooseProject(project: string) {
-    store.set(projectKey, project);
-    sessions.setFilter(project);
-    filterSheet.close();
+  function chooseProjects(chosen: readonly string[]) {
+    store.set(projectKey, JSON.stringify(chosen));
+    sessions.setFilter(chosen);
     list.replaceChildren();
     showFilter();
     void readList();
@@ -296,11 +311,18 @@ export function startMobile(window: Window & typeof globalThis) {
     let data: ProjectList;
     try { data = await readProjects(); }
     catch (error) { if (!(error instanceof SignedOutError)) showToast(`Projects not read: ${failureText(error, host)}`); return; }
-    const items = [{ id: "", name: "All projects", path: "" }, ...data.projects];
-    $("sheet-list").replaceChildren(...items.map(project => {
-      const item = make("li"), button = make("button", project.id === sessions.filter ? "on" : null, project.name);
+    checking = [...sessions.filter];
+    // "All projects", then the projects checked, then the others: those checked are at hand to uncheck.
+    const all = make("button", checking.length === 0 ? "on" : null, "All projects");
+    all.type = "button";
+    all.setAttribute("aria-pressed", String(checking.length === 0));
+    all.addEventListener("click", () => { checking = []; filterSheet.close(); });
+    const ordered = [...data.projects.filter(p => checking!.includes(p.id)), ...data.projects.filter(p => !checking!.includes(p.id))];
+    const rows = ordered.map(project => {
+      const item = make("li"), button = make("button", checking!.includes(project.id) ? "on" : null, project.name);
       button.type = "button";
-      if (project.id === sessions.filter) button.setAttribute("aria-current", "true");
+      button.dataset.project = project.id;
+      button.setAttribute("aria-pressed", String(checking!.includes(project.id)));
       // Its space when the phone sees several, then its folder.
       const space = showSpaces(sessions.spaces) && "space" in project ? project.space : null;
       if (project.path || space) {
@@ -309,13 +331,24 @@ export function startMobile(window: Window & typeof globalThis) {
         if (project.path) small.append(document.createTextNode(project.path));
         button.append(small);
       }
-      button.addEventListener("click", () => chooseProject(project.id));
+      // A tap checks the project or unchecks it; the rows stay where they are while the sheet is open.
+      button.addEventListener("click", () => {
+        if (!checking) return;
+        checking = checking.includes(project.id) ? checking.filter(id => id !== project.id) : [...checking, project.id];
+        const on = checking.includes(project.id);
+        button.classList.toggle("on", on);
+        button.setAttribute("aria-pressed", String(on));
+        all.classList.toggle("on", checking.length === 0);
+        all.setAttribute("aria-pressed", String(checking.length === 0));
+      });
       item.append(button);
       return item;
-    }));
+    });
+    const first = make("li");
+    first.append(all);
+    $("sheet-list").replaceChildren(first, ...rows);
     filterSheet.open();
   });
-  chip.querySelector("button")!.addEventListener("click", () => chooseProject(""));
 
   // ---- The page of a session: its timeline, folded as the desktop folds it, drawn block by block ----
   type Drawn = { element: HTMLLIElement; version: string; diagram: boolean };
@@ -1034,7 +1067,8 @@ export function startMobile(window: Window & typeof globalThis) {
         permissionModes: read.permissionModes ?? {}, error: read.error ?? null,
       };
       const keep = !fresh && projectList.projects.some(p => p.id === newProject.value) ? newProject.value : null;
-      const selected = keep ?? (fresh ? projectList.default : sessions.filter || projectList.default);
+      // A list kept to projects starts the session in the first one checked.
+      const selected = keep ?? (fresh ? projectList.default : sessions.filter[0] ?? projectList.default);
       newProject.replaceChildren(...projectList.projects.map(p => option(p.id, p.name, p.id === selected)));
       newAgent.replaceChildren(...options.prompts.map(p => option(p.id, p.name, p.id === options!.defaults?.prompt)));
       if (!newText.value) newText.value = drafts.get(newSessionDraft);
@@ -1217,7 +1251,7 @@ export function startMobile(window: Window & typeof globalThis) {
     onState: state => { if (signedOut) return; link.state = state; if (state === "live") link.at = new Date(); showLink(); },
     onReconnected: readAgain,
     check: async () => {
-      try { await api.sessions(0, 1, ""); return "ok"; }
+      try { await api.sessions(0, 1, []); return "ok"; }
       catch (error) { return error instanceof SignedOutError ? "signed-out" : error instanceof ApiError ? "ok" : "unreachable"; }
     },
     setTimer: (callback, ms) => window.setTimeout(callback, ms),
@@ -1264,15 +1298,14 @@ export function startMobile(window: Window & typeof globalThis) {
 
   async function start() {
     setUpInstall(window, store);
-    const kept = store.get(projectKey) ?? "";
-    sessions.setFilter(kept);
+    sessions.setFilter(keptProjects());
     showFilter();
     if (!await signInFromAddress()) return;
     route();
     await readList();
     if (signedOut) return;
     stream.start();
-    readProjects().then(showFilter, () => { /* the chip shows the id until the projects are read */ });
+    readProjects().then(showFilter, () => { /* the filter names the ids until the projects are read */ });
   }
   void start();
 }

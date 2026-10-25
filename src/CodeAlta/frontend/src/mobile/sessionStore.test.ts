@@ -11,7 +11,7 @@ const live = (id: string, state: Live["live"], at: string | null, extra: Partial
   ({ id, projectId: "p1", live: state, kind: "assistant", line: `line of ${id}`, at, activity: null, canSteer: false, ...extra });
 const session = (id: string, minutesAgo: number, state: Live["live"] = "idle", projectId = "p1"): Session =>
   ({ id, title: `Session ${id}`, projectId, project: projectId, summary: null, lastActivity: iso(minutesAgo), live: live(id, state, iso(minutesAgo), { projectId }) });
-const page = (sessions: Session[], hasMore = false, next = sessions.length): SessionPage => ({ sessions, next, hasMore, project: null, machine: "PC", error: null });
+const page = (sessions: Session[], hasMore = false, next = sessions.length): SessionPage => ({ sessions, next, hasMore, projects: [], machine: "PC", error: null });
 
 test("the first page replaces the list and a later one adds to it, without twice the same session", () => {
   const store = createSessionStore();
@@ -63,9 +63,10 @@ test("an update of a session out of the list reads the list once for it, not at 
 
 test("an update out of the list is ignored when the filter would not show it or when it is older than the list", () => {
   const store = createSessionStore();
-  store.setFilter("p1");
+  store.setFilter(["p1", "p3"]);
   store.applyPage(page([session("a", 5), session("b", 10)], true), store.beginRead(), false);
   assert.equal(store.applyLive(live("other", "running", iso(0), { projectId: "p2" })), "none", "another project");
+  assert.equal(store.applyLive(live("third", "running", iso(0), { projectId: "p3" })), "reload", "one of the projects of the filter");
   assert.equal(store.applyLive(live("unknown", "running", iso(0), { projectId: null })), "none", "a project the page cannot tell");
   // What the stream tells on each connection: every session seen since the plugin started, most of them long idle.
   assert.equal(store.applyLive(live("old", "idle", iso(600))), "none");
@@ -80,7 +81,8 @@ test("a new filter forgets which sessions already made the list be read", () => 
   const store = createSessionStore();
   store.applyPage(page([session("a", 5)], true), store.beginRead(), false);
   assert.equal(store.applyLive(live("x", "running", iso(0))), "reload");
-  store.setFilter("p1");
+  store.setFilter(["p1", "", "p1"]);
+  assert.deepEqual(store.filter, ["p1"], "once each, without the empty one");
   assert.equal(store.count, 0);
   store.applyPage(page([session("a", 5)], true), store.beginRead(), false);
   assert.equal(store.applyLive(live("x", "running", iso(0))), "reload");
