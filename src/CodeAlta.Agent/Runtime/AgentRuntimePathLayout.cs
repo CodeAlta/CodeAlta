@@ -32,6 +32,18 @@ public sealed class AgentRuntimePathLayout
     public string SessionTracesRootPath => Path.Combine(SessionsRootPath, "traces");
 
     /// <summary>
+    /// The folder of the session leases under the sessions root: files of the processes that run sessions, never
+    /// journals, never removed by retention.
+    /// </summary>
+    public const string SessionLeasesFolderName = "leases";
+
+    /// <summary>
+    /// The folder of the session markers under the sessions root: files that name the journals another process wrote,
+    /// never journals, never removed by retention.
+    /// </summary>
+    public const string SessionMarkersFolderName = "markers";
+
+    /// <summary>
     /// Gets the session journal path.
     /// </summary>
     /// <param name="sessionId">Local session identifier.</param>

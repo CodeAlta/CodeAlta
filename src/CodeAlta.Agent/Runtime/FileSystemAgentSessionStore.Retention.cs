@@ -73,7 +73,8 @@ public sealed partial class FileSystemAgentSessionStore
 
     // Every file of the sessions folder last written before the cutoff, whether it belongs to a session or not: a stat of
     // each, never a read. Links are not followed. A file belongs to a session by its name: its journal, a file of its
-    // attachments folder, its trace.
+    // attachments folder, its trace. The leases and the markers are not listed: their owners remove them, and outside
+    // Windows the name of a held lease can be removed, which would let a second process take the session.
     internal IReadOnlyList<SessionFolderFile> ListExpiredSessionFolderFiles(DateTimeOffset cutoff, CancellationToken cancellationToken)
     {
         var root = _layout.SessionsRootPath;
@@ -83,6 +84,7 @@ public sealed partial class FileSystemAgentSessionStore
         foreach (var info in new DirectoryInfo(root).EnumerateFiles("*", options))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (IsOwnedElsewhere(root, info.FullName)) continue;
             var lastWrite = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero);
             if (lastWrite >= cutoff) continue;
             var (owner, kind) = OwnerOf(root, info.FullName);
@@ -90,6 +92,13 @@ public sealed partial class FileSystemAgentSessionStore
         }
 
         return files;
+    }
+
+    private static bool IsOwnedElsewhere(string root, string path)
+    {
+        var parts = Path.GetRelativePath(root, path).Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+        return parts.Length > 1 && (string.Equals(parts[0], AgentRuntimePathLayout.SessionLeasesFolderName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(parts[0], AgentRuntimePathLayout.SessionMarkersFolderName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static (string? Owner, SessionFolderFileKind Kind) OwnerOf(string root, string path)

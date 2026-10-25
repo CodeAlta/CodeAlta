@@ -156,6 +156,12 @@ public sealed class CatalogOptions
     public string SessionsRoot => Path.Combine(StateRoot, "sessions");
 
     /// <summary>
+    /// Gets the folder of the session leases, under <see cref="SessionsRoot"/>: one <c>&lt;session-id&gt;.lease</c> for each
+    /// session a process runs (<see cref="SessionLeaseStore"/>).
+    /// </summary>
+    public string SessionLeasesRoot => Path.Combine(SessionsRoot, CodeAlta.Agent.Runtime.AgentRuntimePathLayout.SessionLeasesFolderName);
+
+    /// <summary>
     /// Gets the saved prompt drafts root path, under <see cref="StateRoot"/>.
     /// </summary>
     public string PromptDraftsRoot => Path.Combine(StateRoot, "saved_prompts");
