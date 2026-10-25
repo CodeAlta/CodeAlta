@@ -733,6 +733,26 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             : SessionIdentity.Usual;
     }
 
+    /// <summary>
+    /// Gets the environment the programs a session starts get (a background job, a command): the one its attachment was
+    /// given, for a session that is attached; otherwise the environment of its identity with the variables that name the
+    /// session and its saved model (<see cref="SessionProcessEnvironment"/>).
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The environment; the one of the usual identity, without variables of a session, for a session that is not known.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    public async Task<AgentProcessEnvironment> GetSessionProcessEnvironmentAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated) return entry.ProcessEnvironment;
+        var identity = await GetSessionIdentityAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var session = await ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return session is null
+            ? identity.Environment
+            : SessionProcessEnvironment.WithMarkers(identity.Environment, session.SessionId, session.ResolvedProviderKey, session.ModelId, session.ReasoningEffort);
+    }
+
     internal async Task<SessionViewDescriptor?> ResolveOwnedSessionAsync(string sessionId, CancellationToken cancellationToken)
         => await AdmitAsync(() => ResolveOwnedSessionBodyAsync(sessionId, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -2014,6 +2034,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // The identity of the space of the session as it is now: the session keeps it until it attaches again,
         // whatever the window shows and whatever is changed in the space meanwhile.
         var identity = await Identities.ResolveAsync(session.SpaceId, session.ProjectRef, cancellationToken).ConfigureAwait(false);
+        // What the programs of the session start with: the identity of its space, and the variables that name the session.
+        var processEnvironment = SessionProcessEnvironment.WithMarkers(identity.Environment, session.SessionId,
+            options.ProviderKey ?? session.ResolvedProviderKey, options.Model, options.ReasoningEffort);
 
         AgentSessionHandleId sessionHandleId;
         bool startNewSession;
@@ -2093,7 +2116,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             WorktreeDirectory = worktree,
             LeaveWorktree = worktree is null,
             ProjectRoots = options.ProjectRoots,
-            Environment = identity.Environment,
+            Environment = processEnvironment,
             SystemMessage = systemMessage,
             DeveloperInstructions = finalDeveloperInstructions,
             InstructionsAlreadyComposed = instructionsAlreadyComposed,
@@ -2209,6 +2232,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ForkedFrom = session.ForkedFrom,
             SpaceId = session.SpaceId,
             Identity = identity,
+            ProcessEnvironment = processEnvironment,
             ProviderRegistrationVersion = providerVersion,
             PermissionMode = permissionMode,
             OwnTitleMode = ownTitleMode,
@@ -5642,6 +5666,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         /// <summary>The identity the attachment runs under, read when it attached.</summary>
         public SessionIdentity Identity { get; init; } = SessionIdentity.Usual;
+
+        // What the programs of the attachment start with: the environment of the identity and the variables of the session.
+        public AgentProcessEnvironment ProcessEnvironment { get; init; } = AgentProcessEnvironment.Empty;
 
         /// <summary>The built-in tools the attachment runs without.</summary>
         public IReadOnlySet<string> DisabledTools { get; init; } = System.Collections.Frozen.FrozenSet<string>.Empty;

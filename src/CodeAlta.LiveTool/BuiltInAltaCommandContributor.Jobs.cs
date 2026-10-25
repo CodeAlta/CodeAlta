@@ -208,17 +208,18 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.missingCwd", "No folder to run in: add `--cwd`.", path);
         }
 
-        // A job runs as the commands of its session do: with the identity the session has (the Git author of its space).
-        var identity = context.Services.Get<SessionRuntimeService>() is { } runtime
-            ? await runtime.GetSessionIdentityAsync(sessionId, context.CancellationToken).ConfigureAwait(false)
-            : SessionIdentity.Usual;
+        // A job runs as the commands of its session do: with the identity the session has (the Git author of its space),
+        // and the variables that name the session and its model.
+        var environment = context.Services.Get<SessionRuntimeService>() is { } runtime
+            ? await runtime.GetSessionProcessEnvironmentAsync(sessionId, context.CancellationToken).ConfigureAwait(false)
+            : SessionIdentity.Usual.Environment;
         var started = jobs.Start(new SessionJobRequest
         {
             SessionId = sessionId,
             ProjectId = projectId,
             Command = commandLine,
             Folder = folder,
-            Environment = identity.Environment,
+            Environment = environment,
             Title = NormalizeOptionalText(options.Title),
             Notification = notification,
             Timeout = timeout,

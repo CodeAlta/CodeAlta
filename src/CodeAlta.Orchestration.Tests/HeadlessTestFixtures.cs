@@ -193,11 +193,13 @@ internal sealed class HeadlessTestRoot : IAsyncDisposable
     }
 
     /// <summary>The options of a send through the runtime, in a folder.</summary>
-    internal static SessionExecutionOptions Options(ScriptedTurnProvider provider, string folder, IReadOnlyList<AgentToolDefinition>? tools = null) => new()
+    internal static SessionExecutionOptions Options(ScriptedTurnProvider provider, string folder, IReadOnlyList<AgentToolDefinition>? tools = null,
+        AgentReasoningEffort? reasoningEffort = null) => new()
     {
         ProviderId = provider.ProviderId,
         ProviderKey = provider.ProviderId.Value,
         Model = provider.Model,
+        ReasoningEffort = reasoningEffort,
         WorkingDirectory = folder,
         ProjectRoots = [folder],
         Tools = tools,

@@ -419,7 +419,10 @@ public sealed class SessionForkRewindTests
         Assert.AreEqual(Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config/gh-contoso"), request.Environment.Get("GH_CONFIG_DIR"));
         StringAssert.Contains(request.DeveloperInstructions + request.SystemMessage, "- Commit with `git commit --signoff`: Signed-off-by: A. Mutel <alex@contoso.example>");
         var usualRequest = provider.Requests.Last(value => value.SessionId == usual.SessionId);
-        Assert.IsTrue(usualRequest.Environment is null or { IsEmpty: true }, "A session of a space without identity keeps the usual settings.");
+        // A session of a space without identity keeps the usual settings: its programs are only told which session they run for.
+        CollectionAssert.AreEquivalent(
+            new[] { SessionProcessEnvironment.AgentVariable, SessionProcessEnvironment.ModelVariable, SessionProcessEnvironment.SessionIdVariable },
+            usualRequest.Environment!.Variables.Select(static variable => variable.Key).ToArray());
         Assert.IsFalse((usualRequest.DeveloperInstructions + usualRequest.SystemMessage).Contains("--signoff", StringComparison.Ordinal));
 
         // A session that runs keeps the identity it attached with, whatever is changed in its space meanwhile.
@@ -483,7 +486,8 @@ public sealed class SessionForkRewindTests
         await SendAsync(host, session, options, "one");
 
         var request = provider.Requests.Last(value => value.SessionId == session.SessionId);
-        Assert.IsTrue(request.Environment is null or { IsEmpty: true });
+        Assert.IsNull(request.Environment!.Get("GIT_AUTHOR_EMAIL"), "Only the variables of the session are set, not those of the space.");
+        Assert.AreEqual(session.SessionId, request.Environment.Get(SessionProcessEnvironment.SessionIdVariable));
         Assert.IsFalse((request.DeveloperInstructions + request.SystemMessage).Contains("--signoff", StringComparison.Ordinal));
         Assert.AreSame(SessionIdentity.Usual, await host.RuntimeService.GetSessionIdentityAsync(session.SessionId));
     }

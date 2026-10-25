@@ -793,10 +793,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 terminals = new Terminals.DesktopTerminals(DesktopCommandLine.Version, Path.Combine(options.DataRoot, "terminal"))
                 {
                     // A terminal of the window has the identity of the space it shows, with the CLI profiles of the project it
-                    // is listed under; one a session opens, the session's.
-                    Identity = request => (request.Agent && request.SessionId is { } owner
-                        ? host.RuntimeService.GetSessionIdentityAsync(owner)
-                        : host.Identities.ResolveAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, request.ProjectId)).GetAwaiter().GetResult().Environment,
+                    // is listed under; one a session opens, the environment of the session's commands.
+                    Identity = request => request.Agent && request.SessionId is { } owner
+                        ? host.RuntimeService.GetSessionProcessEnvironmentAsync(owner).GetAwaiter().GetResult()
+                        : host.Identities.ResolveAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, request.ProjectId).GetAwaiter().GetResult().Environment,
                 };
                 shell.BusyTerminals = () => terminals.Busy;
                 // The definitions are shared with every instance; what ran is this instance's. The developer
