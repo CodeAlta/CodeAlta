@@ -312,11 +312,11 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
     <SettingsFileLocations files={files} disabled={busy} />
     {!listing ? <NonIdealState icon={loading ? <ActivitySpinner size={28} /> : <AppIcon name="model" size={36} />}
         title={t(loading ? "Loading configured providers." : "Provider configuration unavailable")} />
-      : <div className="provider-settings-layout">
+      : <div className="provider-settings-layout settings-split">
         <div className="provider-settings-column">
         {providers.length > 1 && <Switch className="provider-settings-order" checked={listPreferences.enabledFirst} label={t("Enabled providers first")}
           onChange={event => { const enabledFirst = event.currentTarget.checked; changeList(current => ({ ...current, enabledFirst })); }} />}
-        <CardList compact className="provider-settings-list" aria-label={t("Configured providers")}>
+        <CardList compact className="provider-settings-list settings-split-list" aria-label={t("Configured providers")}>
           {groups.map(group => <Fragment key={group.kind}>
           {/* A title only where there is more than one group: a list of enabled providers alone needs none. */}
           {groups.length > 1 && <div className="provider-settings-group" role="presentation">{group.kind === "favorites" && <AppIcon name="star" size={11} />}<span>{t(groupTitles[group.kind])}</span></div>}
@@ -343,7 +343,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
           {providers.length === 0 && selected !== newProvider && <Card><span className="bp6-text-muted">{t("No providers are configured yet.")}</span></Card>}
         </CardList>
         </div>
-        {form && <Section className="provider-settings-form" icon={shownLogo ? <Logo brand={shownLogo} size={20} fallback="model" /> : undefined} title={original ? original.effectiveName : t("New provider")}
+        {form && <Section className="provider-settings-form settings-split-detail" icon={shownLogo ? <Logo brand={shownLogo} size={20} fallback="model" /> : undefined} title={original ? original.effectiveName : t("New provider")}
           subtitle={original ? `${original.key} · ${original.type}` : t("Not saved yet")}
           rightElement={<Switch checked={form.enabled} disabled={busy} label={t("Enabled")} alignIndicator="end"
             onChange={event => edit({ enabled: event.currentTarget.checked, makeDefault: event.currentTarget.checked && form.makeDefault })} />}>
@@ -431,7 +431,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
               onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
           </SectionCard>
-          <SectionCard className="provider-settings-footer">
+          <SectionCard className="provider-settings-footer settings-split-footer">
             {problem && dirty && <span className="provider-settings-problem" role="alert">{t(problem)}</span>}
             {movedSessions > 0
               // Their transcripts stay in the old folder: the CLI started with the new one does not find them.

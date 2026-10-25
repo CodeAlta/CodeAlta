@@ -120,13 +120,13 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
       <MenuItem icon={<AppIcon name="prompt" size={15} />} text={t("System prompt")} onClick={() => create("System")} /></Menu>}>
       <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} endIcon={<AppIcon name="chevronDown" size={14} />}>{t("New prompt")}</Button></PopoverNext>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="assistant" title="Agent prompts unavailable" />
-      : <><SettingsFileLocations files={files} disabled={busy} /><div className="settings-editor-layout">
-        <CardList compact className="settings-editor-list" aria-label={t("Agent prompts")}>
+      : <><SettingsFileLocations files={files} disabled={busy} /><div className="settings-editor-layout settings-split">
+        <CardList compact className="settings-editor-list settings-split-list" aria-label={t("Agent prompts")}>
           {group("Agent", "Agent prompts")}{group("System", "System prompts")}
           {selected === added && <Card interactive selected><span className="settings-editor-name"><strong>{form?.id || t("New prompt")}</strong></span>
             <Tag minimal round intent="warning">{t("Unsaved changes")}</Tag></Card>}
         </CardList>
-        {form ? <Section className="settings-editor-form prompt-settings-form" title={selected === added ? t("New prompt") : entry?.name || form.id}
+        {form ? <Section className="settings-editor-form prompt-settings-form settings-split-detail" title={selected === added ? t("New prompt") : entry?.name || form.id}
           subtitle={`${t(form.kind === "System" ? "System prompt" : "Agent prompt")} · ${form.id || "…"}`}
           rightElement={reading ? <ActivitySpinner size={14} /> : readOnly ? copilotPromptScope(document?.scope ?? "") ? <CopilotTag /> : <Tag minimal round>{t("Built-in")}</Tag> : undefined}>
           {document?.file && selected !== added && <SectionCard className="settings-editor-file">
@@ -165,7 +165,7 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
             </>}
           </SectionCard>
           <SectionCard className="prompt-settings-editor"><CodeEditor language="markdown" wrap label={t("Prompt text")} value={form.body} readOnly={busy || readOnly} onChange={body => edit({ body })} /></SectionCard>
-          <SectionCard className="settings-editor-footer">
+          <SectionCard className="settings-editor-footer settings-split-footer">
             {problem && dirty && !readOnly && <span className="settings-editor-problem" role="alert">{t(problem)}</span>}
             {readOnly ? <Button intent="primary" icon={<AppIcon name="copy" size={15} />} disabled={busy} onClick={() => create(form.kind, form)}>{t("Customize a copy")}</Button> : <>
               <Button intent="primary" disabled={!dirty || !!problem || busy} onClick={() => void save()}>{t("Save")}</Button>

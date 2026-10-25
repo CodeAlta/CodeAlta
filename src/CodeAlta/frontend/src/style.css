@@ -1543,6 +1543,22 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .prompt-settings .settings-editor-list .settings-editor-name { flex: 1 1 10em; }
 .prompt-settings .settings-editor-list .settings-editor-tags { flex-wrap: wrap; gap: 6px; min-width: 0; }
 @media (max-width: 900px) { .settings-editor-layout { grid-template-columns: minmax(0, 1fr); } }
+/* A list beside the detail of its selected item (providers, MCP servers, agent prompts, pull requests): side by side, the page
+   fits the dialog under its heading, the list and the detail scroll each on their own, and the detail keeps its title and its
+   buttons in view. Stacked on a narrow window, the page scrolls as one. */
+@media (min-width: 901px) {
+  .settings-dialog-content > .configuration-page:has(> .settings-split) { height: 100%; min-height: 0; box-sizing: border-box; overflow: hidden; }
+  .settings-split { flex: 1 1 0; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+  .settings-split > * { max-height: 100%; min-height: 0; }
+  .settings-split-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+  /* A detail that asks for more height than the dialog has (the text of a prompt) scrolls instead of being cut. */
+  .settings-split > .settings-split-detail.bp6-section { min-height: 0; overflow-y: auto; }
+  .settings-split-detail > .bp6-section-header { position: sticky; top: 0; z-index: 2; background-color: inherit; }
+  .settings-split-detail > .settings-split-footer { position: sticky; bottom: 0; z-index: 2; background-color: inherit; }
+  /* The text of a prompt takes the room left under its fields, which scroll on their own: one scroll in the editor, not two. */
+  .prompt-settings-form > .settings-editor-fields.bp6-section-card { flex: 0 1 auto; min-height: 0; max-height: 35%; overflow-y: auto; }
+  .settings-split .prompt-settings-editor.bp6-section-card { flex: 1 1 0; min-height: 180px; }
+}
 
 /* Settings: About page. */
 .about-settings-card { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--panel)), var(--panel)); }

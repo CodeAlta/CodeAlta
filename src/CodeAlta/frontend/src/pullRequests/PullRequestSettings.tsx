@@ -101,8 +101,8 @@ export function PullRequestSettings({ api, epoch, project, onOpenFile, filesApi 
     onReload={() => setGeneration(value => value + 1)}
     actions={available ? <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={busy || items === null} onClick={() => startNew(null, "global", false)}>{t("New kind")}</Button> : undefined}>
     {!available ? <SettingsUnavailable loading={items === null} icon="pullRequest" title="Pull request instructions are unavailable in this window." />
-      : <><SettingsFileLocations files={files} disabled={busy} /><div className="provider-settings-layout pull-request-layout">
-        <CardList compact className="provider-settings-list" aria-label={t("Kinds of pull request")}>
+      : <><SettingsFileLocations files={files} disabled={busy} /><div className="provider-settings-layout pull-request-layout settings-split">
+        <CardList compact className="provider-settings-list settings-split-list" aria-label={t("Kinds of pull request")}>
           {(items ?? []).map(item => <Card key={keyOf(item)} interactive selected={selected === keyOf(item)} aria-current={selected === keyOf(item) ? "true" : undefined} onClick={() => choose(item)}>
             <span className="provider-settings-name"><strong>{item.name}</strong><small>{item.id}.pr.md</small></span>
             <span className="provider-settings-tags">{item.overridden && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
@@ -111,7 +111,7 @@ export function PullRequestSettings({ api, epoch, project, onOpenFile, filesApi 
           {form && selected === null && <Card interactive selected><span className="provider-settings-name"><strong>{form.name || t("New kind")}</strong>
             <small>{form.id || "…"}.pr.md</small></span><Tag minimal round intent="warning">{t("Unsaved changes")}</Tag></Card>}
         </CardList>
-        {form && <Section className="provider-settings-form" title={builtIn ? current!.name : form.original?.name ?? t("New kind")}
+        {form && <Section className="provider-settings-form settings-split-detail" title={builtIn ? current!.name : form.original?.name ?? t("New kind")}
           subtitle={builtIn ? t("Ships with CodeAlta") : form.original ? undefined : t("Not saved yet")}>
           {form.original?.file && <SectionCard className="settings-editor-file">
             <SettingsFileLocation path={form.original.file} platform={files.platform} disabled={busy}

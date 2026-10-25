@@ -104,8 +104,8 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
     notice={notice} loading={loading} busy={busy} onReload={() => { reload(); spaceScope?.refresh?.(); }}
     actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} onClick={() => choose(null)}>{t("Add server")}</Button>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="server" title="MCP servers unavailable" />
-      : <><SettingsFileLocations files={files} disabled={busy} /><div className="settings-editor-layout">
-        <CardList compact className="settings-editor-list" aria-label={t("MCP Servers")}>
+      : <><SettingsFileLocations files={files} disabled={busy} /><div className="settings-editor-layout settings-split">
+        <CardList compact className="settings-editor-list settings-split-list" aria-label={t("MCP Servers")}>
           {servers.map(server => { const id = mcpServerId(server); return <Card key={id} interactive selected={selected === id}
             aria-current={selected === id ? "true" : undefined} onClick={() => choose(server)}>
             <span className="settings-editor-logo">{namedBrand(server.key) ? <BrandIcon name={namedBrand(server.key)!} size={20} /> : <AppIcon name="server" size={18} />}</span>
@@ -127,7 +127,7 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
           </Card>)}
           {servers.length === 0 && !listing.unsupported?.length && selected !== added && <Card><span className="bp6-text-muted">{t("No MCP servers are defined yet.")}</span></Card>}
         </CardList>
-        {form && <Section className="settings-editor-form" title={original ? original.key : t("New server")}
+        {form && <Section className="settings-editor-form settings-split-detail" title={original ? original.key : t("New server")}
           rightElement={<Switch checked={form.enabled} disabled={busy} label={t("Enabled")} alignIndicator="end" onChange={event => edit({ enabled: event.currentTarget.checked })} />}>
           <SectionCard className="settings-editor-fields">
             <FormGroup label={t("Name")} labelFor="mcp-key">
@@ -158,7 +158,7 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
                   blocked={authorizationBlocked(original, dirty)} onChanged={reload} /></FormGroup>}
             </>}
           </SectionCard>
-          <SectionCard className="settings-editor-footer">
+          <SectionCard className="settings-editor-footer settings-split-footer">
             {problem && dirty && <span className="settings-editor-problem" role="alert">{t(problem)}</span>}
             <Button intent="primary" disabled={!dirty || !!problem || busy} onClick={() => void save()}>{t("Save")}</Button>
             <Button disabled={selected !== added && !dirty || busy} onClick={() => { if (selected !== added) { if (baseline) setForm(baseline); } else if (servers[0]) choose(servers[0]); else { setSelected(null); setForm(null); } }}>{t(selected === added ? "Cancel" : "Revert")}</Button>
