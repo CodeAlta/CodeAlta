@@ -230,8 +230,13 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
             {
                 return;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or AgentSessionCacheLockedException)
+            catch (ObjectDisposedException) when (token.IsCancellationRequested)
             {
+                return;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // A pass that fails is made again on the next sign or period: the follower never stops on one failure.
                 Log.Warn($"The sessions written by another process could not be read: {exception.Message}");
             }
 

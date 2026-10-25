@@ -285,9 +285,12 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         }
     }
 
-    /// <summary>Closes a session of the driver: its lease is released and its events are no longer observed. The session is kept.</summary>
+    /// <summary>
+    /// Closes a session of the driver: the driver no longer holds its lease (its attachment holds it until it goes) and its
+    /// events are no longer observed. The session is kept.
+    /// </summary>
     /// <param name="session">The session.</param>
-    /// <returns>A task that completes when the lease is released.</returns>
+    /// <returns>A completed task.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
     public ValueTask CloseAsync(HeadlessSession session)
     {

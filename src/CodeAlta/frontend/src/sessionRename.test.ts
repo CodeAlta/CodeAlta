@@ -57,6 +57,8 @@ test("invalid titles, stale host, wrong-session response and uncertainty never r
   assert.deepEqual(await stale(epoch, project, "s1", "New", capability), { kind: "error", code: "stale_epoch" });
   assert.equal(capability.canMutate(), false);
   assert.match(sessionRenameMessage("rename_unconfirmed"), /do not retry automatically/i);
+  // Another process runs the session: a definite refusal, not an uncertain rename.
+  assert.match(sessionRenameMessage("session_in_use"), /another process/i);
 });
 
 test("one in-flight rename only, including after a project switch", async () => {

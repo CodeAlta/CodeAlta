@@ -76,6 +76,7 @@ export function sessionRenameMessage(code: string): string {
     case "stale_epoch": return "The host changed. Reload before renaming.";
     case "closed": return "The host is closing; the rename was not admitted.";
     case "busy": return "Another rename is in progress.";
+    case "session_in_use": return "Another process runs this session. Rename it once that ends.";
     default: return "Rename may have completed. Refresh and inspect the title; do not retry automatically.";
   }
 }

@@ -61,6 +61,11 @@ internal sealed partial class WorkspaceService
             var renamed = await _renameSession!(request.SessionId, request.ProjectId, request.ProjectPath!, request.Title).ConfigureAwait(false);
             response = Reply(renamed ? "ok" : "session_missing");
         }
+        catch (CodeAlta.Orchestration.Runtime.SessionInUseException)
+        {
+            // Another process runs the session: refused before anything was written.
+            response = Reply("session_in_use");
+        }
         catch (Exception)
         {
             // The journal append may have committed. No retry or definite refusal after admission.
