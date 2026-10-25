@@ -45,6 +45,12 @@ Two processes must never write the same session files, so a profile has one runn
   `~/.alta`, and keeps its own sessions, database and lock under `~/.alta/dev/`, its own web view data and its
   own MCP port. It is how CodeAlta is developed with CodeAlta: the instance the user works in builds and drives
   another one (`AGENTS.md`, "Developer instance").
+- **The command line beside it.** `altacli` writes its sessions into the same sessions folder without the lock, and
+  each session has a lease ([runtime](runtime.md#sessions-shared-with-other-processes)). The pages tell the host the
+  session tabs they have (`spaces.openSessions`, every space for the main page), so a session open in a tab keeps its
+  lease and a closed, idle one is let go. A session another process holds is in the activity of the spaces with its
+  holder: the page marks it, makes its composer read-only, and reads its timeline again as its journal grows; a
+  `sessions` event of `spaces.watch` makes every page read the list again.
 - **Explicit roots** (tests, automation, demos) take everything from the folders they are given: no network
   update check, no desktop entry, no speech, a free MCP port.
 

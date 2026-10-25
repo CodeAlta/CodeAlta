@@ -299,7 +299,8 @@ or journal writer. The parent link gives:
 ## Headless runs
 
 `HeadlessSessionDriver` is the one loop the faces without a user share (a command line run, an ACP server): it opens
-a session (new, resumed, or named by the caller), checks that its provider and model can run, sends prompts through
+a session (new, resumed, or named by the caller) and holds its lease until it closes it (see "Sessions shared with other
+processes"), checks that its provider and model can run, sends prompts through
 the owned commands, owns the single reader of `SessionRuntimeEvent` and gives an observer the events of its sessions
 and of the sessions they started, and reports how each run ended from the journal (`SessionOutcome`).
 
@@ -315,6 +316,26 @@ and of the sessions they started, and reports how each run ended from the journa
   fixed paragraph and turns review before commit off, and `ReadOnlyGlobalState` lets the process run beside Desktop:
   it writes nothing shared under the global root (a folder outside the catalog gets a transient project, and the
   database is a private, throwaway one), only the journals of its sessions.
+
+## Sessions shared with other processes
+
+Desktop or TUI and the command line (`altacli`) write journals into one sessions folder at the same time, each with
+its own database. Two rules keep one writer per session across processes:
+
+- **Leases.** A host with `SessionLeaseOwner` holds the lease of a session (`SessionLeaseStore`, an OS-held handle,
+  released when the process ends) from the moment it attaches it (`SessionLeaseRegistry`: the attachment, the holds of
+  a frontend that shows it or of a headless driver that opened it, and the hold of a change being written). A session
+  another process holds is neither attached nor changed: `SessionInUseException`, or the status `session_in_use` of
+  the commands that report one; a fork, which writes a new session, is allowed. The lease goes when the attachment goes
+  for good (after its retirement) and no hold is left. A frontend says what it shows (`SetShownSessions`); from then
+  on a session it does not show is detached once it has had nothing to do for a while (no run, queue, job, background
+  task, pending agent prompt or remote control), so a closed tab lets another process continue the session.
+- **Following.** A host that owns the database of its state root (`FollowExternalSessions`: Desktop, TUI) runs
+  `ExternalSessionFollower`: it projects the sessions the command line names in markers, then deletes the markers;
+  it follows the sessions another process holds, projecting their journals again as they grow (head and tail only,
+  about once a second, only while held) and once more when released, and raises `Changed` for the frontends. The
+  folders are watched and listed again on a bounded period, since watchers drop events. This and the reconciliation
+  are the only projections of journals another process writes.
 
 ## Owned session commands
 

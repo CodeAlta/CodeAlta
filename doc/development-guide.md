@@ -4,7 +4,7 @@ Rules that hold across the repository. The reasons are in [architecture](archite
 
 ## Architecture rules
 
-1. **Never read session journals in normal operation.** A fact about sessions that a listing, a relation, a state, a resume or a search needs is written to the application database when the session is written (a column, or a table of its own). Journals are read only to rebuild the database, to page the history of the open session, by the statistics and search followers from their cursors, and to build what a provider needs from the last compaction. Each such path has a test that holds the journals locked.
+1. **Never read session journals in normal operation.** A fact about sessions that a listing, a relation, a state, a resume or a search needs is written to the application database when the session is written (a column, or a table of its own). Journals are read only to rebuild the database, to project the sessions another process writes (their head and tail), to page the history of the open session, by the statistics and search followers from their cursors, and to build what a provider needs from the last compaction. Each such path has a test that holds the journals locked.
 2. **One writer per session state**: the session actor. No process-wide lock around providers, tools, compaction or journals; no other actor framework.
 3. **No static mutable data**: instance-owned state, services, or frozen static data.
 4. **Layers**: nothing below a frontend references a frontend; orchestration logic never lives in a frontend; `CodeAlta.Hosting` is composition only; Desktop never references the TUI.

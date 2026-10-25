@@ -16,7 +16,9 @@ Two roots, because two instances may run on one profile:
 
 Why: two processes must never write the same journal or database, but a developer instance must see the user's real
 providers, prompts and plugins. Each instance holds the lock of its state root (`alta.lock`), so one instance of each
-kind runs at a time. A host with a separate state root only creates the coordinator
+kind runs at a time. The command line runs beside an instance on the same state root without that lock: it writes only
+the journals of its sessions (with a private database), names them in markers, and the lease of each session keeps one
+writer per session ([runtime](runtime.md#sessions-shared-with-other-processes)). A host with a separate state root only creates the coordinator
 `AGENTS.md` of the global root when it is missing, and on its first run seeds its view state from the normal instance's
 per-project provider preferences.
 
@@ -33,7 +35,7 @@ per-project provider preferences.
 | Under the state root | Owner |
 | --- | --- |
 | `sessions/yyyy/MM/dd/<id>.jsonl`, `<id>.attachments/` | Session journals and their files ([runtime](runtime.md#journals-are-the-source-of-truth)). |
-| `sessions/leases/<id>.lease` | `SessionLeaseStore`: the process that runs a session holds an open handle on its lease, so no other process runs it; the system releases it when the process ends. Never removed by retention. |
+| `sessions/leases/<id>.lease` | `SessionLeaseStore`: the process that runs or shows a session holds an open handle on its lease, so no other process runs or changes it; the system releases it when the process ends. Never removed by retention. |
 | `sessions/markers/<id>.json` | `SessionMarkerStore`: a process without the database (the command line) names each journal it writes there; the instance lists those sessions, then deletes the markers. Written by rename, never read as journals, never removed by retention. |
 | `data/alta.sqlite3`, `data/backups/`, `data/search.sqlite3` | `ApplicationDatabase` and its copies; the desktop search index (derived). |
 | `saved_statistics_after_deleted_sessions/` | `StatisticsArchiveStore`: statistics of retired sessions (see below). |
