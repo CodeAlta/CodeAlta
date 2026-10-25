@@ -49,6 +49,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// The supplying owner retains the catalog and its locator through runtime cleanup.</remarks>
     internal AgentPromptCatalog? PromptCatalog { get; init; }
 
+    /// <summary>
+    /// Gets the home folder whose resources of other tools the sessions read (the skills of <c>~/.agents/skills</c> and
+    /// <c>~/.copilot/skills</c>, the agents of <c>~/.copilot/agents</c>); <see langword="null"/> for a host that reads none
+    /// of them (<see cref="AgentInstructionTemplateProvider.ReadsUserHome"/>).
+    /// </summary>
+    public string? UserHomeRoot => _instructionTemplateProvider.UserHomeRoot;
+
     private Task<T> AdmitAsync<T>(Func<Task<T>> body, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -3846,7 +3853,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return SkillCatalogQuery.ForSession(
             _configStore,
             _catalogOptions.GlobalRoot,
-            _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserHomeRoot,
             project?.ProjectPath,
             projectRoots,
             space);
@@ -5400,7 +5407,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
             UserCodeAltaRoot = _catalogOptions.GlobalRoot,
-            UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = UserHomeRoot,
         }), space);
     }
 
@@ -5441,7 +5448,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
             UserCodeAltaRoot = _catalogOptions.GlobalRoot,
-            UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = UserHomeRoot,
         };
         return (PromptCatalog ?? new AgentPromptCatalog()).ListEffectivePrompts(query)
             .Select(static prompt => prompt.PromptName)
@@ -5475,7 +5482,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
             UserCodeAltaRoot = _catalogOptions.GlobalRoot,
-            UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = UserHomeRoot,
         };
         var descriptor = (PromptCatalog ?? new AgentPromptCatalog()).ResolvePrompt(query, promptName);
         if (descriptor is null)

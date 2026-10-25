@@ -148,6 +148,8 @@ internal sealed class CliHost : IAsyncDisposable
                 // A session another process runs (another altacli, CodeAlta Desktop or TUI) is refused as in use, exit code 5.
                 SessionLeaseOwner = SessionLeaseOwner.CliKind,
                 ListsSkills = request.ListsSkills,
+                // A separate profile reads none of the user's home: not the skills and agents other tools keep there.
+                ReadsUserHome = storage.Mode != CliStorageMode.Profile,
                 IsHeadless = true,
                 HasInteractiveUi = false,
                 OwnsLogging = false,

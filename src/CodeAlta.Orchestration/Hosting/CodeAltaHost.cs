@@ -453,6 +453,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 PreferredSkills = options.PreferredSkills,
                 ScratchpadRoot = options.ScratchpadRoot is { } scratchpad ? Path.GetFullPath(scratchpad) : null,
                 ListsSkills = options.ListsSkills,
+                ReadsUserHome = options.ReadsUserHome,
             };
             // The providers that list the conversations of other programs keep what they read of their files in the
             // database, so that a start reads only the files that changed.

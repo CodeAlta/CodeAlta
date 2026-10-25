@@ -5522,7 +5522,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var query = SkillCatalogQuery.ForSession(
             configStore,
             globalRoot,
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserHomeOf(context),
             project?.ProjectPath,
             otherProjectRoots: null,
             space);
@@ -5542,9 +5542,16 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ProjectRoot = projectRoot.ProjectRoot,
             ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot.ProjectRoot),
             UserCodeAltaRoot = context.Services.Get<CatalogOptions>()?.GlobalRoot ?? GetGlobalRootOrCwd(context),
-            UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = UserHomeOf(context),
         });
     }
+
+    // The home folder whose skills and agents of other tools the commands read: the one the sessions of the host read,
+    // the user's without a runtime; null for a host that reads none of them (a separate profile).
+    internal static string? UserHomeOf(AltaCommandContext context)
+        => context.Services.Get<SessionRuntimeService>() is { } runtime
+            ? runtime.UserHomeRoot
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     private static async Task<PromptProjectRootResult> ResolvePromptProjectRootAsync(AltaCommandContext context, string? projectRef)
     {
@@ -5635,7 +5642,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
             UserCodeAltaRoot = globalRoot,
-            UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = UserHomeOf(context),
         };
         var resources = SpaceFilter.Load(context.Services.Get<CodeAltaConfigStore>() ?? new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = globalRoot }), space?.Id);
         var prompts = new AgentPromptCatalog().ListEffectivePrompts(query);

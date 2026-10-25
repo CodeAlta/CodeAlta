@@ -57,7 +57,7 @@ public sealed class SystemPromptBuilder
         var projectRoot = NormalizeOptionalRoot(request.Project?.ProjectPath ?? FirstNonBlank(request.ProjectRoots));
         var roots = _contentLocator.GetRoots(new SystemPromptDiscoveryContext
         {
-            UserProfileRoot = request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot,
+            UserProfileRoot = UserHomeOf(request),
             UserCodeAltaRoot = request.UserCodeAltaRoot,
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = projectRoot is not null,
@@ -814,7 +814,7 @@ public sealed class SystemPromptBuilder
     {
         var prompts = new AgentPromptCatalog(_contentLocator).ListEffectivePrompts(new AgentPromptCatalogQuery
         {
-            UserProfileRoot = request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot,
+            UserProfileRoot = UserHomeOf(request),
             UserCodeAltaRoot = request.UserCodeAltaRoot,
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = projectRoot is not null,
@@ -968,11 +968,15 @@ public sealed class SystemPromptBuilder
         return builder.Length == 0 ? null : builder.ToString();
     }
 
+    // The home folder whose files of other tools the prompt reads; null for none.
+    private static string? UserHomeOf(SystemPromptBuildRequest request)
+        => request.ReadsUserHome ? request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot : null;
+
     // What the user wrote for GitHub Copilot in every project: `~/.copilot/copilot-instructions.md`.
     private static string? CopilotUserInstructions(SystemPromptBuildRequest request, AgentInstructionFileReader instructionFiles)
     {
         // The profile the host names: a request that names none is given no file of the real one.
-        if (NormalizeOptionalRoot(request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot) is not { } profile) return null;
+        if (NormalizeOptionalRoot(UserHomeOf(request)) is not { } profile) return null;
         var path = Path.Combine(profile, ".copilot", "copilot-instructions.md");
         return instructionFiles.GetLength(path) is not null ? path : null;
     }
@@ -1352,6 +1356,13 @@ public sealed class SystemPromptBuildRequest
 
     /// <summary>Gets the optional user profile root used to resolve <c>~/.alta</c>.</summary>
     public string? UserProfileRoot { get; init; }
+
+    /// <summary>
+    /// Gets whether the prompt reads what other tools keep in the home folder (<see cref="DiscoveryScope"/>, else
+    /// <see cref="UserProfileRoot"/>): the agents of <c>~/.copilot/agents</c> and <c>~/.copilot/copilot-instructions.md</c>.
+    /// True, the default; false for a separate profile, which reads none of them.
+    /// </summary>
+    public bool ReadsUserHome { get; init; } = true;
 
     /// <summary>Gets optional explicit home and lexical instruction ancestry limits; not a filesystem sandbox.</summary>
     public SessionDiscoveryScope? DiscoveryScope { get; init; }

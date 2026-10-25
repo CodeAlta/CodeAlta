@@ -73,7 +73,7 @@ A session is run by one program at a time: `altacli --resume` of a session that 
 | --- | --- |
 | *(none)* | The sessions of `~/.alta`, shared with the apps. |
 | `--isolated` | `~/.alta/cli`: apart from the apps, with your settings, providers and skills. Several `altacli` can run at once. |
-| `--profile FOLDER` or `CODEALTA_HOME` | A whole separate profile: its own settings, credentials, MCP servers (`mcp.json`) and sessions. The MCP servers that other tools configure in your home folder are not read. The folder must exist. |
+| `--profile FOLDER` or `CODEALTA_HOME` | A whole separate profile: its own settings, credentials, MCP servers (`mcp.json`) and sessions. The MCP servers, skills and agents that other tools keep in your home folder are not read. The folder must exist. |
 | `--ephemeral` | A temporary folder deleted at the end: nothing is kept. |
 | `--dev` | The sessions of the developer instance of CodeAlta (`alta --dev`), for those who develop CodeAlta. |
 

@@ -41,6 +41,19 @@ public sealed class AgentInstructionTemplateProvider
     /// </summary>
     public bool ListsSkills { get; init; } = true;
 
+    /// <summary>
+    /// Gets or initializes whether the sessions read what other tools keep in the home folder of the user: the skills of
+    /// <c>~/.agents/skills</c> and <c>~/.copilot/skills</c>, the agents of <c>~/.copilot/agents</c> and
+    /// <c>~/.copilot/copilot-instructions.md</c>. True, the default; false for a separate profile, which reads none of them.
+    /// </summary>
+    public bool ReadsUserHome { get; init; } = true;
+
+    /// <summary>
+    /// Gets the home folder whose resources of other tools the sessions read: the one of the discovery scope, else the one
+    /// of the user; <see langword="null"/> when the sessions read none (<see cref="ReadsUserHome"/>).
+    /// </summary>
+    public string? UserHomeRoot => ReadsUserHome ? DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : null;
+
     // The patterns over tool names the runtime gives a session (SessionRuntimeService.SetDisabledToolPatterns), expanded
     // over the built-in tools into the tools the session does without; none without a runtime.
     internal Func<string?, IReadOnlyList<string>>? SessionToolPatterns { get; set; }
@@ -259,7 +272,8 @@ public sealed class AgentInstructionTemplateProvider
             WorkingDirectory = session.WorkingDirectory,
             ProjectRoots = projectRoots,
             SelectedPromptName = selectedPromptName ?? session.AgentPromptId,
-            UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = UserHomeRoot,
+            ReadsUserHome = ReadsUserHome,
             UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
             InstanceStateRoot = _catalogOptions?.StateRoot,
             ScratchpadRoot = ScratchpadRoot,
@@ -298,7 +312,7 @@ public sealed class AgentInstructionTemplateProvider
             ProjectRoot = project?.ProjectPath,
             ProjectPromptResourcesTrusted = project is not null,
             UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
-            UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserProfileRoot = UserHomeRoot,
         }, agentPromptId);
         disabled.UnionWith(prompt?.DisabledTools ?? []);
         disabled.UnionWith(SessionPatternTools(session.SessionId));
@@ -397,7 +411,7 @@ public sealed class AgentInstructionTemplateProvider
         var query = SkillCatalogQuery.ForSession(
             _configStore,
             _catalogOptions.GlobalRoot,
-            DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            UserHomeRoot,
             project?.ProjectPath,
             otherProjectRoots: null,
             space);

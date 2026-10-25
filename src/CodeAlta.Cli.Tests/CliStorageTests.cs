@@ -176,6 +176,38 @@ public sealed class CliStorageTests
     }
 
     [TestMethod]
+    public async Task Profile_ReadsNoSkillsOrAgentsThatOtherToolsKeepInTheHome()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        var skill = Path.Combine(root.Home, ".agents", "skills", "zebra-skill");
+        Directory.CreateDirectory(skill);
+        File.WriteAllText(Path.Combine(skill, "SKILL.md"), "---\nname: zebra-skill\ndescription: Paints zebras in stripes.\n---\n\nPaint.\n");
+        var agents = Directory.CreateDirectory(Path.Combine(root.Home, ".copilot", "agents")).FullName;
+        File.WriteAllText(Path.Combine(agents, "giraffe-agent.agent.md"), "---\nname: giraffe-agent\ndescription: Herds giraffes.\n---\n\nHerd.\n");
+
+        var profile = Directory.CreateDirectory(Path.Combine(root.Root, "profile")).FullName;
+        var separate = await root.RunAsync(provider, ["run", Plain, "--profile", profile, "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, separate.ExitCode, separate.Stderr);
+        Assert.IsFalse(PromptOfLastRequest(provider).Contains("zebra-skill", StringComparison.Ordinal), "No skill of ~/.agents/skills.");
+        Assert.IsFalse(PromptOfLastRequest(provider).Contains("giraffe-agent", StringComparison.Ordinal), "No agent of ~/.copilot/agents.");
+        var skills = await root.RunAsync(provider, ["alta", Plain, "--profile", profile, "skill", "list"]);
+        Assert.AreEqual(0, skills.ExitCode, skills.Stdout + skills.Stderr);
+        Assert.IsFalse(skills.Stdout.Contains("zebra-skill", StringComparison.Ordinal), skills.Stdout);
+        var prompts = await root.RunAsync(provider, ["alta", Plain, "--profile", profile, "prompt", "list"]);
+        Assert.AreEqual(0, prompts.ExitCode, prompts.Stdout + prompts.Stderr);
+        Assert.IsFalse(prompts.Stdout.Contains("giraffe-agent", StringComparison.Ordinal), prompts.Stdout);
+
+        // The other modes read them, as CodeAlta Desktop does, and the alta commands list what the sessions see.
+        var visible = await root.RunAsync(provider, ["run", Plain, "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, visible.ExitCode, visible.Stderr);
+        StringAssert.Contains(PromptOfLastRequest(provider), "zebra-skill");
+        StringAssert.Contains(PromptOfLastRequest(provider), "giraffe-agent");
+        StringAssert.Contains((await root.RunAsync(provider, ["alta", Plain, "skill", "list"])).Stdout, "zebra-skill");
+        StringAssert.Contains((await root.RunAsync(provider, ["alta", Plain, "prompt", "list"])).Stdout, "giraffe-agent");
+    }
+
+    [TestMethod]
     public async Task Ephemeral_PersistsNothing()
     {
         using var root = new CliTestRoot();

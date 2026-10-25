@@ -369,8 +369,9 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
             (string? ProjectRoot, bool Trusted) key = (session.WorkingDirectory, !string.IsNullOrWhiteSpace(session.ProjectRef));
             if (!_names.TryGetValue(key, out var names))
             {
-                _userProfileRoot ??= Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                _userCodeAltaRoot ??= context.Services.Get<CatalogOptions>()?.GlobalRoot ?? Path.Combine(_userProfileRoot, ".alta");
+                _userProfileRoot ??= BuiltInAltaCommandContributor.UserHomeOf(context);
+                _userCodeAltaRoot ??= context.Services.Get<CatalogOptions>()?.GlobalRoot
+                    ?? Path.Combine(_userProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta");
                 var query = new AgentPromptCatalogQuery
                 {
                     ProjectRoot = key.ProjectRoot,

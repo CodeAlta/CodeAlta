@@ -46,6 +46,15 @@ public sealed class CodeAltaHostOptions
     public bool ListsSkills { get; init; } = true;
 
     /// <summary>
+    /// Gets whether the sessions read what other tools keep in the home folder of the user (the one of
+    /// <see cref="DiscoveryScope"/>, else the real one): the skills of <c>~/.agents/skills</c> and <c>~/.copilot/skills</c>,
+    /// the agents of <c>~/.copilot/agents</c> and <c>~/.copilot/copilot-instructions.md</c>, for their prompts and for the
+    /// <c>alta</c> commands. Default true; false for a separate profile (<c>altacli --profile</c>), which reads none of the
+    /// user's home. The skills and prompts of the global root are read either way.
+    /// </summary>
+    public bool ReadsUserHome { get; init; } = true;
+
+    /// <summary>
     /// Gets whether the host leaves the shared state of the global root as it is, for a process that runs beside CodeAlta
     /// Desktop or TUI on the same profile (a headless run). Default false.
     /// </summary>
