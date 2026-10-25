@@ -33,6 +33,24 @@ export function elsewhereRefreshView(sessionId: string, journalLength: string | 
     evictedTextItems: "0", evictedToolActivities: "0", unsupportedEvents: "0" };
 }
 
+const releasedRevision = ":released";
+
+/**
+ * The view that has the timeline of a session read again while another process holds it ({@link elsewhereRefreshView}),
+ * given the one of the previous rendering: `journalLength` is null once no other process holds the session. The timeline
+ * is read once more when the other process lets it go, since its last records can come with the release, after the last
+ * length the window was told. Null for a session no other process held while it was shown.
+ */
+export function elsewhereFollowView(sessionId: string, journalLength: string | null, previous: SessionDisplayView | null): SessionDisplayView | null {
+  const shown = previous?.sessionId === sessionId ? previous : null;
+  if (journalLength !== null) {
+    const view = elsewhereRefreshView(sessionId, journalLength);
+    return shown?.revision === view.revision ? shown : view;
+  }
+  if (!shown) return null;
+  return shown.revision.endsWith(releasedRevision) ? shown : { ...shown, revision: shown.revision + releasedRevision };
+}
+
 /** The read-only part of Storage that lists the tabs kept for every space. */
 export type TabStorage = Pick<Storage, "length" | "key" | "getItem">;
 

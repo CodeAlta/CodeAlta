@@ -214,7 +214,7 @@ import { storage } from "#neoastra";
 import { speech as speechApi } from "#neoastra";
 import { mcpApps as mcpAppsApi } from "#neoastra";
 import { createMcpAppsHost, McpAppsContext } from "./mcpApps/mcpAppHost";
-import type { SpaceSessionResourcesResponse } from "#neoastra";
+import type { SessionDisplayView, SpaceSessionResourcesResponse } from "#neoastra";
 import { globalConfig } from "#neoastra";
 import { windows as windowsApi, type WindowsCurrentResponse } from "#neoastra";
 import { createWindowsHub, readWindowPage, writeWindowPage, type WindowsRequest } from "./windows/windowsHub";
@@ -250,7 +250,7 @@ import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
-import { elsewhereKind, elsewhereLabel, elsewhereRefreshView, openSessionIds, type ElsewhereKind } from "./sessionLeases/sessionLeases";
+import { elsewhereFollowView, elsewhereKind, elsewhereLabel, openSessionIds, type ElsewhereKind } from "./sessionLeases/sessionLeases";
 import { SpaceActivityBar, SpaceIcon, SpaceSwitch } from "./spaces/SpaceViews";
 import { readSpacePageLink, type SpacePageTarget } from "./spaces/spaceSummary";
 import { SpaceDialog } from "./spaces/SpaceDialog";
@@ -5923,9 +5923,11 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   const ownedHost = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const ownedSession = ownedHost && !archivedScope;
   // A session another process holds is read again as its journal grows, as a session of this window is with its run.
+  // Once more when it is released: the last records of the other process come with the release.
   const elsewhereJournal = heldElsewhere ? heldElsewhere.journalLength ?? "" : null;
-  const elsewhereView = useMemo(() => elsewhereJournal === null ? null : elsewhereRefreshView(session.id, elsewhereJournal),
-    [session.id, elsewhereJournal]);
+  const [elsewhereShown, setElsewhereShown] = useState<SessionDisplayView | null>(null);
+  const elsewhereView = elsewhereFollowView(session.id, elsewhereJournal, elsewhereShown);
+  if (elsewhereView !== elsewhereShown) setElsewhereShown(elsewhereView);
   // The prompt of a run that waited for the conversation to be released elsewhere, and found turns added there meanwhile,
   // was never sent: it goes back to the composer when it is empty, as after a rewind; a draft that is there is kept, and
   // the prompt is offered beside it to copy. Once per run.
@@ -6067,7 +6069,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}
-          live={elsewhereView ?? (ownedSession ? live?.snapshot?.session ?? null : null)} running={running ?? undefined} /></McpAppsContext.Provider></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
+          live={(heldElsewhere ? elsewhereView : null) ?? (ownedSession ? live?.snapshot?.session ?? null : null) ?? elsewhereView} running={running ?? undefined} /></McpAppsContext.Provider></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />

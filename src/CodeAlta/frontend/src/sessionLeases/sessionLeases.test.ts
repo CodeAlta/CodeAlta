@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { sessionTabsKey, type SessionTab } from "../sessionTabs";
-import { createOpenSessionsPublisher, elsewhereKind, elsewhereLabel, elsewhereRefreshView, openSessionIds } from "./sessionLeases";
+import { createOpenSessionsPublisher, elsewhereFollowView, elsewhereKind, elsewhereLabel, elsewhereRefreshView, openSessionIds } from "./sessionLeases";
 
 const tab = (sessionId: string): SessionTab => ({ sessionId, projectId: null, path: null });
 const kept = (...ids: string[]) => JSON.stringify({ version: 1, open: ids.map(tab), active: null, closed: [] });
@@ -26,6 +26,29 @@ test("the timeline of a session held elsewhere is read again when its journal gr
   assert.equal(elsewhereRefreshView("s", "10").revision, elsewhereRefreshView("s", "10").revision);
   assert.notEqual(elsewhereRefreshView("s", "10").revision, elsewhereRefreshView("s", "20").revision);
   assert.equal(elsewhereRefreshView("s", null).sessionId, "s");
+});
+
+test("the timeline of a session held elsewhere is read once more when it is released, then not again", () => {
+  // A session no other process held while it was shown has no such view.
+  assert.equal(elsewhereFollowView("s", null, null), null);
+  const held = elsewhereFollowView("s", "10", null)!;
+  assert.equal(held.revision, elsewhereRefreshView("s", "10").revision);
+  // The same length keeps the view: nothing is read again.
+  assert.equal(elsewhereFollowView("s", "10", held), held);
+  const grown = elsewhereFollowView("s", "20", held)!;
+  assert.notEqual(grown.revision, held.revision);
+  // Released: one more revision, which stays as long as the session is not held again.
+  const released = elsewhereFollowView("s", null, grown)!;
+  assert.equal(released.sessionId, "s");
+  assert.notEqual(released.revision, grown.revision);
+  assert.equal(elsewhereFollowView("s", null, released), released);
+  // Held again, it follows the journal again, and is read once more at its next release.
+  const again = elsewhereFollowView("s", "20", released)!;
+  assert.notEqual(again.revision, released.revision);
+  assert.notEqual(elsewhereFollowView("s", null, again)!.revision, again.revision);
+  // The view of another session is not carried over.
+  assert.equal(elsewhereFollowView("t", null, released), null);
+  assert.equal(elsewhereFollowView("t", "20", grown)!.sessionId, "t");
 });
 
 test("the open sessions are the tabs of the shown space from memory and those kept for the other spaces", () => {
