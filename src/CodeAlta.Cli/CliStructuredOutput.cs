@@ -1,30 +1,55 @@
+using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace CodeAlta.Cli;
 
 /// <summary>
 /// The structured final answer of <c>--output-schema</c>: the prompt asks for one JSON value that matches a JSON Schema,
 /// and the final answer is read back (alone, or in a fenced <c>```json</c> block), checked against the schema, and given
-/// as the JSON value alone. The check covers the common subset of JSON Schema: <c>type</c> (one or a list),
-/// <c>properties</c>, <c>required</c>, <c>items</c>, <c>enum</c>, <c>const</c> and <c>additionalProperties: false</c>;
-/// other keywords are not checked.
+/// as the JSON value alone. The check covers a common subset of JSON Schema (<see cref="CheckedKeywords"/>); a schema
+/// that uses another keyword, other than an annotation such as <c>title</c> or <c>description</c>, is refused when it is
+/// read, since an answer could pass a constraint that is not checked.
 /// </summary>
 internal static class CliStructuredOutput
 {
     private const int MaximumErrors = 8;
 
-    /// <summary>Reads the schema of a file.</summary>
-    /// <returns>The schema, or a message when the file cannot be read or is not a JSON Schema.</returns>
+    /// <summary>The keywords the check covers, in the order the help lists them.</summary>
+    internal static readonly ImmutableArray<string> CheckedKeywords =
+    [
+        "type", "properties", "required", "additionalProperties", "items", "enum", "const", "minimum", "maximum", "exclusiveMinimum",
+        "exclusiveMaximum", "minLength", "maxLength", "pattern", "minItems", "maxItems",
+    ];
+
+    private static readonly FrozenSet<string> Checked = CheckedKeywords.ToFrozenSet(StringComparer.Ordinal);
+
+    // What only describes a value: it constrains nothing.
+    private static readonly FrozenSet<string> Annotations = new[]
+    {
+        "$schema", "$id", "$comment", "title", "description", "default", "examples", "deprecated", "readOnly", "writeOnly",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly TimeSpan PatternTimeout = TimeSpan.FromSeconds(1);
+
+    /// <summary>Reads the schema of a file and checks that it uses only what the check covers.</summary>
+    /// <returns>The schema, or a message when the file cannot be read, is not a JSON Schema, or uses what is not checked.</returns>
     public static (JsonElement Schema, string? Error) Load(string path)
     {
         try
         {
             using var document = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
             var root = document.RootElement;
-            return root.ValueKind is JsonValueKind.Object or JsonValueKind.True or JsonValueKind.False
+            if (root.ValueKind is not (JsonValueKind.Object or JsonValueKind.True or JsonValueKind.False))
+                return (default, $"The schema '{path}' is not a JSON Schema: a schema is an object.");
+            var problems = new List<string>();
+            Inspect(root, "$", problems);
+            return problems.Count == 0
                 ? (root.Clone(), null)
-                : (default, $"The schema '{path}' is not a JSON Schema: a schema is an object.");
+                : (default, $"The schema '{path}' uses what --output-schema does not check: {string.Join("; ", problems.Take(MaximumErrors))}. "
+                    + $"It checks {string.Join(", ", CheckedKeywords)}.");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -33,6 +58,57 @@ internal static class CliStructuredOutput
         catch (JsonException exception)
         {
             return (default, $"The schema '{path}' is not JSON: {exception.Message}");
+        }
+    }
+
+    // The keywords of a schema and of the schemas it holds that the check would pass over, or whose values it cannot use.
+    private static void Inspect(JsonElement schema, string path, List<string> problems)
+    {
+        if (schema.ValueKind != JsonValueKind.Object) return;
+        foreach (var property in schema.EnumerateObject())
+        {
+            var (name, value) = (property.Name, property.Value);
+            if (Annotations.Contains(name)) continue;
+            if (!Checked.Contains(name))
+            {
+                problems.Add($"{name} (at {path})");
+                continue;
+            }
+
+            switch (name)
+            {
+                case "minimum" or "maximum" or "exclusiveMinimum" or "exclusiveMaximum" when value.ValueKind != JsonValueKind.Number:
+                    problems.Add($"{name} that is not a number (at {path})");
+                    break;
+                case "minLength" or "maxLength" or "minItems" or "maxItems" when !value.TryGetInt64(out var count) || count < 0:
+                    problems.Add($"{name} that is not a count (at {path})");
+                    break;
+                case "pattern" when value.ValueKind != JsonValueKind.String || !IsPattern(value.GetString()!):
+                    problems.Add($"a pattern that is not a regular expression (at {path})");
+                    break;
+                case "items" when value.ValueKind == JsonValueKind.Array:
+                    problems.Add($"items as a list (at {path})");
+                    break;
+                case "items" or "additionalProperties":
+                    Inspect(value, path + "." + name, problems);
+                    break;
+                case "properties" when value.ValueKind == JsonValueKind.Object:
+                    foreach (var declared in value.EnumerateObject()) Inspect(declared.Value, path + ".properties." + declared.Name, problems);
+                    break;
+            }
+        }
+    }
+
+    private static bool IsPattern(string pattern)
+    {
+        try
+        {
+            _ = new Regex(pattern, RegexOptions.None, PatternTimeout);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
         }
     }
 
@@ -134,15 +210,58 @@ internal static class CliStructuredOutput
                 }
             }
         }
-        else if (value.ValueKind == JsonValueKind.Array && schema.TryGetProperty("items", out var items) && items.ValueKind is JsonValueKind.Object or JsonValueKind.False)
+        else if (value.ValueKind == JsonValueKind.Array)
         {
-            var index = 0;
-            foreach (var item in value.EnumerateArray())
+            var length = value.GetArrayLength();
+            if (Count(schema, "minItems") is { } minItems && length < minItems) errors.Add($"{path}: expected at least {minItems} items, got {length}.");
+            if (Count(schema, "maxItems") is { } maxItems && length > maxItems) errors.Add($"{path}: expected at most {maxItems} items, got {length}.");
+            if (schema.TryGetProperty("items", out var items) && items.ValueKind is JsonValueKind.Object or JsonValueKind.False)
             {
-                Validate(items, item, path + "[" + index.ToString(CultureInfo.InvariantCulture) + "]", errors);
-                index++;
+                var index = 0;
+                foreach (var item in value.EnumerateArray())
+                {
+                    Validate(items, item, path + "[" + index.ToString(CultureInfo.InvariantCulture) + "]", errors);
+                    index++;
+                }
             }
         }
+        else if (value.ValueKind == JsonValueKind.Number)
+        {
+            CheckBound(schema, "minimum", value, path, errors, static order => order >= 0, "at least");
+            CheckBound(schema, "maximum", value, path, errors, static order => order <= 0, "at most");
+            CheckBound(schema, "exclusiveMinimum", value, path, errors, static order => order > 0, "more than");
+            CheckBound(schema, "exclusiveMaximum", value, path, errors, static order => order < 0, "less than");
+        }
+        else if (value.ValueKind == JsonValueKind.String)
+        {
+            var text = value.GetString()!;
+            // The length of a string counts its characters (code points), as JSON Schema does.
+            var length = text.EnumerateRunes().Count();
+            if (Count(schema, "minLength") is { } minLength && length < minLength) errors.Add($"{path}: expected at least {minLength} characters, got {length}.");
+            if (Count(schema, "maxLength") is { } maxLength && length > maxLength) errors.Add($"{path}: expected at most {maxLength} characters, got {length}.");
+            if (schema.TryGetProperty("pattern", out var pattern) && pattern.ValueKind == JsonValueKind.String)
+            {
+                try
+                {
+                    if (!Regex.IsMatch(text, pattern.GetString()!, RegexOptions.None, PatternTimeout)) errors.Add($"{path}: the value does not match the pattern {pattern.GetRawText()}.");
+                }
+                catch (RegexMatchTimeoutException)
+                {
+                    errors.Add($"{path}: the pattern {pattern.GetRawText()} took too long to match.");
+                }
+            }
+        }
+    }
+
+    private static long? Count(JsonElement schema, string keyword)
+        => schema.TryGetProperty(keyword, out var count) && count.TryGetInt64(out var value) ? value : null;
+
+    // A bound of a number: the order of the value against the bound must satisfy the keyword.
+    private static void CheckBound(JsonElement schema, string keyword, JsonElement value, string path, List<string> errors, Func<int, bool> satisfies, string expected)
+    {
+        if (!schema.TryGetProperty(keyword, out var bound) || bound.ValueKind != JsonValueKind.Number) return;
+        var order = value.TryGetDecimal(out var number) && bound.TryGetDecimal(out var limit) ? number.CompareTo(limit) : value.GetDouble().CompareTo(bound.GetDouble());
+        if (!satisfies(order)) errors.Add($"{path}: expected a number {expected} {bound.GetRawText()}, got {value.GetRawText()}.");
     }
 
     private static bool MatchesType(JsonElement type, JsonElement value)
