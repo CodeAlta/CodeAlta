@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 using CodeAlta.Acp;
 using CodeAlta.Agent;
@@ -8,7 +9,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class AcpSessionUpdatesTests
 {
-    private static readonly Dictionary<string, AgentToolDefinition> NoTools = new(StringComparer.Ordinal);
+    private static readonly FrozenDictionary<string, AgentToolDefinition> NoTools = FrozenDictionary<string, AgentToolDefinition>.Empty;
 
     [TestMethod]
     public void Chunks_AreReadBackByTheClient()
