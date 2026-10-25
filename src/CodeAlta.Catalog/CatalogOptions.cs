@@ -35,6 +35,19 @@ public sealed class CatalogOptions
         && !string.Equals(Path.GetFullPath(_stateRoot), Path.GetFullPath(GlobalRoot),
             OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
+    private CodeAltaConfigOptions _config = CodeAltaConfigOptions.Default;
+
+    /// <summary>
+    /// Gets or sets how the stores built from these options read and write the configuration of the user: the file as
+    /// it is by default; overlays, a strict reading or no write for a process such as the command line.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">The value set is <see langword="null"/>.</exception>
+    public CodeAltaConfigOptions Config
+    {
+        get => _config;
+        set => _config = value ?? throw new ArgumentNullException(nameof(value));
+    }
+
     /// <summary>
     /// Gets the default checkout root path under the global catalog.
     /// </summary>

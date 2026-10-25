@@ -79,6 +79,13 @@ Skills are also read from `.agents/skills/` of the project and of the home folde
 - Session-specific choices (provider, model, effort, tier, mode) are not configuration: they live in the local state of
   the journal, so a session keeps them when defaults change.
 - MCP connections are JSON (`mcp.json`) so they stay compatible with other clients; TOML only overlays policy.
+- **Overlays.** `CatalogOptions.Config` (`CodeAltaConfigOptions`) tells every store built from those options how to read
+  the user's configuration: the file, or none (`IgnoreUserConfig`), then each `CodeAltaConfigOverlay` in order (the
+  `CODEALTA_CONFIG_CONTENT` variable, then the `-c key=value` of a command line), tables merged key by key and the later
+  layer winning on values and arrays; a strict reading that rejects settings no part of CodeAlta reads; and a read-only
+  store whose saves fail. Overlays are never written, errors name the layer at fault, and a project file still overlays
+  the result. Why options and not a mode of the process: a headless run reads the user's settings without changing
+  them while Desktop runs on the same file.
 
 ### Shared-file rules
 

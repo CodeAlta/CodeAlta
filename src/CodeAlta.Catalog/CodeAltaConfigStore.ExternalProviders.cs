@@ -32,7 +32,7 @@ public sealed partial class CodeAltaConfigStore
     public IReadOnlyList<CodeAltaExternalProvider> LoadGlobalExternalProviders()
     {
         var document = LoadGlobal();
-        if (document.UnsupportedProviders.Count == 0 || !File.Exists(_options.ConfigPath))
+        if (document.UnsupportedProviders.Count == 0 || (!ChangesGlobalContent && !File.Exists(_options.ConfigPath)))
         {
             return [];
         }
@@ -40,8 +40,10 @@ public sealed partial class CodeAltaConfigStore
         TomlTable root;
         try
         {
-            root = TomlSerializer.Deserialize<TomlTable>(SharedTextFile.ReadAllText(_options.ConfigPath),
-                TomlSerializerOptions.Default with { SourceName = _options.ConfigPath }) ?? new TomlTable();
+            var content = ChangesGlobalContent ? LoadGlobalConfigContent() : SharedTextFile.ReadAllText(_options.ConfigPath);
+            root = string.IsNullOrWhiteSpace(content)
+                ? new TomlTable()
+                : TomlSerializer.Deserialize<TomlTable>(content, TomlSerializerOptions.Default with { SourceName = _options.ConfigPath }) ?? new TomlTable();
         }
         catch (Exception ex) when (IsConfigLoadException(ex))
         {
@@ -77,11 +79,12 @@ public sealed partial class CodeAltaConfigStore
     /// <param name="values">The values of its section, as <see cref="CodeAltaExternalProvider.Values"/> holds them; <c>type</c> is ignored.</param>
     /// <exception cref="ArgumentException">The key or the type is empty, or the type is a built-in one.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="values"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">A built-in provider has the key.</exception>
+    /// <exception cref="InvalidOperationException">A built-in provider has the key, or the store is read-only.</exception>
     /// <exception cref="InvalidDataException">The configuration cannot be parsed, or a value cannot be written.</exception>
     /// <exception cref="IOException">The configuration cannot be read or written.</exception>
     public void SaveGlobalExternalProvider(string providerKey, string providerType, IReadOnlyDictionary<string, object?> values)
     {
+        ThrowIfReadOnly();
         var key = NormalizeProviderKey(providerKey) ?? throw new ArgumentException("The provider key is empty.", nameof(providerKey));
         ArgumentException.ThrowIfNullOrWhiteSpace(providerType);
         ArgumentNullException.ThrowIfNull(values);
@@ -140,8 +143,10 @@ public sealed partial class CodeAltaConfigStore
     /// <returns>Whether the section was removed; <see langword="false"/> when there is none, or it is the one of a built-in provider.</returns>
     /// <exception cref="InvalidDataException">The configuration cannot be parsed.</exception>
     /// <exception cref="IOException">The configuration cannot be read or written.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public bool RemoveGlobalExternalProvider(string providerKey)
     {
+        ThrowIfReadOnly();
         if (NormalizeProviderKey(providerKey) is not { } key)
         {
             return false;

@@ -75,18 +75,24 @@ public sealed partial class CodeAltaConfigStore
     };
 
     private readonly CatalogOptions _options;
+    private readonly CodeAltaConfigOptions _config;
     private readonly TextFileCodec _textFiles;
 
     // What the files this store reads parse to, parsed again only when a file changes. The documents are shared by the
     // reads of the store: they are never changed, and what is handed out is a copy, or a value read from them. The saves
-    // read their file again under its lock, and forget all of it once they wrote.
+    // read their file again under its lock, and forget all of it once they wrote. The user's file has a cache of its own,
+    // since it parses with the overlays merged over it; a project file at the same path would not.
     private readonly ParsedFileCache<CodeAltaConfigDocument> _documents = new();
+    private readonly ParsedFileCache<CodeAltaConfigDocument> _globalDocuments = new();
     private readonly ParsedFileCache<SpaceAssignments> _assignments = new();
+
+    // The user's configuration when no file is read: the overlays alone, which do not change.
+    private readonly Lazy<CodeAltaConfigDocument> _overlaysOnly;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CodeAltaConfigStore"/> class.
     /// </summary>
-    /// <param name="options">Catalog layout options.</param>
+    /// <param name="options">Catalog layout options, with how the configuration is read and written (<see cref="CatalogOptions.Config"/>).</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <see cref="CatalogOptions.GlobalRoot"/> is empty.</exception>
     public CodeAltaConfigStore(CatalogOptions options)
@@ -107,7 +113,10 @@ public sealed partial class CodeAltaConfigStore
         }
 
         _options = options;
+        _config = options.Config;
         _textFiles = textFiles;
+        // Not kept when it throws: every read reports the error again, as for a file.
+        _overlaysOnly = new Lazy<CodeAltaConfigDocument>(() => ParseGlobal(GlobalLayers(null)), LazyThreadSafetyMode.PublicationOnly);
     }
 
     /// <summary>
@@ -127,20 +136,20 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="IOException">The configuration cannot be read.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
     public CodeAltaConfigDocument LoadGlobal()
-        => LoadOwnedDocument(_options.ConfigPath);
+        => LoadOwnedGlobalDocument();
 
     /// <summary>Reads the global choices for speech to prompt. A missing file gives the defaults.</summary>
     /// <exception cref="InvalidDataException">The configuration or the model is invalid.</exception>
     /// <exception cref="IOException">The configuration cannot be read.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
     public Speech.SpeechSettings LoadGlobalSpeechSettings()
-        => Speech.SpeechSettings.Read(ReadSharedDocument(_options.ConfigPath).Speech);
+        => Speech.SpeechSettings.Read(ReadSharedGlobalDocument().Speech);
 
     /// <summary>Reads the global choices for search. A missing file gives the defaults.</summary>
     /// <returns>The choices.</returns>
     /// <exception cref="InvalidDataException">The configuration is invalid.</exception>
     public Search.SearchSettings LoadGlobalSearchSettings()
-        => Search.SearchSettings.Read(ReadSharedDocument(_options.ConfigPath).Search);
+        => Search.SearchSettings.Read(ReadSharedGlobalDocument().Search);
 
     /// <summary>Reads whether a project's own configuration keeps it out of search (<c>[search] enabled = false</c>).</summary>
     /// <param name="projectRoot">The folder of the project.</param>
@@ -206,16 +215,18 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="IOException">The configuration cannot be read.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
     public ModelTiers.ModelSettings LoadGlobalModelSettings()
-        => ModelTiers.ModelSettings.Read(ReadSharedDocument(_options.ConfigPath).Models);
+        => ModelTiers.ModelSettings.Read(ReadSharedGlobalDocument().Models);
 
     /// <summary>Saves the global model tiers and provider fallback. Defaults are not written.</summary>
     /// <exception cref="ArgumentNullException">The settings are null.</exception>
     /// <exception cref="InvalidDataException">The existing configuration is invalid.</exception>
     /// <exception cref="IOException">The configuration cannot be read or written.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalModelSettings(ModelTiers.ModelSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ThrowIfReadOnly();
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         document.Models = settings.ToDocument();
@@ -229,11 +240,9 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
     public Storage.StorageSettings LoadGlobalStorageSettings()
     {
-        string content;
-        try { content = SharedTextFile.ReadAllText(_options.ConfigPath); }
-        catch (FileNotFoundException) { return Storage.StorageSettings.Default; }
-        catch (DirectoryNotFoundException) { return Storage.StorageSettings.Default; }
-        try { return Storage.StorageSettings.Read(ParseDocument(content, _options.ConfigPath).Storage); }
+        var content = ReadGlobalFileText();
+        if (content is null && _config.Overlays.Count == 0) return Storage.StorageSettings.Default;
+        try { return Storage.StorageSettings.Read(ParseGlobal(GlobalLayers(content)).Storage); }
         catch (Exception ex) when (IsConfigLoadException(ex))
         {
             throw new InvalidDataException($"Failed to read storage settings from '{_options.ConfigPath}'.", ex);
@@ -251,9 +260,15 @@ public sealed partial class CodeAltaConfigStore
         => EnsureGlobalConfigExistsAsync().GetAwaiter().GetResult();
 
     /// <summary>Creates missing defaults through the shared conditional-save gate; never replaces a competing creator.</summary>
+    /// <remarks>Does nothing in a read-only store, or one that ignores the user's file (<see cref="CatalogOptions.Config"/>).</remarks>
     /// <inheritdoc cref="EnsureGlobalConfigExists"/>
     public async Task<bool> EnsureGlobalConfigExistsAsync()
     {
+        if (_config.ReadOnly || _config.IgnoreUserConfig)
+        {
+            return false;
+        }
+
         try
         {
             var result = await _textFiles.SaveAsync(new TextFileSaveRequest(
@@ -294,13 +309,25 @@ public sealed partial class CodeAltaConfigStore
     /// <summary>
     /// Loads the global user configuration TOML content.
     /// </summary>
-    /// <returns>The existing config content, or the bundled first-run template when the config file is missing.</returns>
+    /// <returns>
+    /// The existing config content, or the bundled first-run template when the config file is missing. With overlays or
+    /// an ignored file (<see cref="CatalogOptions.Config"/>), the content the store reads: the layers merged, as TOML.
+    /// </returns>
     /// <exception cref="IOException">Thrown when the config file or default template cannot be read.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the bundled first-run template is unavailable.</exception>
+    /// <exception cref="InvalidDataException">Thrown when the file or an overlay is not TOML, with overlays.</exception>
     public string LoadGlobalConfigContent()
-        => File.Exists(_options.ConfigPath)
+    {
+        if (ChangesGlobalContent)
+        {
+            var layers = GlobalLayers(ReadGlobalFileText());
+            return layers.Count == 0 ? string.Empty : ComposeText(layers, layers.Count);
+        }
+
+        return File.Exists(_options.ConfigPath)
             ? SharedTextFile.ReadAllText(_options.ConfigPath)
             : GetDefaultGlobalConfigContent();
+    }
 
     /// <summary>
     /// Validates and saves the global user configuration TOML content without reformatting it.
@@ -309,8 +336,10 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="InvalidDataException">Thrown when the supplied configuration cannot be loaded.</exception>
     /// <exception cref="IOException">Thrown when the config file cannot be written.</exception>
     /// <exception cref="UnauthorizedAccessException">Thrown when the config file cannot be written because access is denied.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalConfigContent(string? content)
     {
+        ThrowIfReadOnly();
         var validation = ValidateGlobalConfigContent(content, _options.ConfigPath);
         if (!validation.IsValid)
         {
@@ -447,7 +476,7 @@ public sealed partial class CodeAltaConfigStore
     /// </summary>
     /// <returns>The normalized disabled skill names.</returns>
     public IReadOnlySet<string> LoadGlobalDisabledSkillNames()
-        => ReadDisabledSkillNames(ReadSharedDocument(_options.ConfigPath));
+        => ReadDisabledSkillNames(ReadSharedGlobalDocument());
 
     /// <summary>
     /// Loads project-local disabled skill names.
@@ -465,9 +494,38 @@ public sealed partial class CodeAltaConfigStore
     /// <returns>Read outcome and names, without private diagnostics.</returns>
     /// <exception cref="ArgumentOutOfRangeException">The budget is outside the supported range.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-    public Task<SkillDisabledNamesReadResult> LoadGlobalDisabledSkillNamesBoundedAsync(
+    public async Task<SkillDisabledNamesReadResult> LoadGlobalDisabledSkillNamesBoundedAsync(
         int maxBytes, CancellationToken cancellationToken = default)
-        => LoadDisabledSkillNamesBoundedAsync(_options.ConfigPath, maxBytes, cancellationToken);
+    {
+        if (!ChangesGlobalContent)
+        {
+            return await LoadDisabledSkillNamesBoundedAsync(_options.ConfigPath, maxBytes, cancellationToken).ConfigureAwait(false);
+        }
+
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxBytes, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(maxBytes, SkillBoundedTextReader.MaximumBytes);
+        cancellationToken.ThrowIfCancellationRequested();
+        string? content = null;
+        if (!_config.IgnoreUserConfig)
+        {
+            var read = await SkillBoundedTextReader.ReadAsync(_options.ConfigPath, maxBytes, cancellationToken).ConfigureAwait(false);
+            if (read.Status is not (SkillBoundedReadStatus.Complete or SkillBoundedReadStatus.Missing))
+            {
+                return new SkillDisabledNamesReadResult(read.Status, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            }
+
+            content = read.Content;
+        }
+
+        try
+        {
+            return new SkillDisabledNamesReadResult(SkillBoundedReadStatus.Complete, LoadDisabledSkillNames(ParseGlobal(GlobalLayers(content))));
+        }
+        catch (Exception ex) when (IsConfigLoadException(ex))
+        {
+            return new SkillDisabledNamesReadResult(SkillBoundedReadStatus.Invalid, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
+    }
 
     /// <summary>Reads project-disabled skill names with a hard byte limit; does not create or update files.</summary>
     /// <remarks>A null project root omits project disablement. Other non-complete outcomes mean unknown enablement.</remarks>
@@ -532,7 +590,7 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="IOException">The configuration file cannot be read.</exception>
     public IReadOnlySet<string> LoadGlobalDisabledTools()
     {
-        var document = ReadSharedDocument(_options.ConfigPath);
+        var document = ReadSharedGlobalDocument();
         return new HashSet<string>((document.Tools?.Disabled ?? []).Where(SpaceTools.IsToolName).Select(static name => name.Trim()), StringComparer.Ordinal);
     }
 
@@ -542,9 +600,11 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="ArgumentException">A name is not the name of a tool, or there are too many.</exception>
     /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
     /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalDisabledTools(IEnumerable<string> tools)
     {
         ArgumentNullException.ThrowIfNull(tools);
+        ThrowIfReadOnly();
         var names = tools.Select(static name => name?.Trim() ?? string.Empty).Distinct(StringComparer.Ordinal).ToList();
         if (names.FirstOrDefault(static name => !SpaceTools.IsToolName(name)) is { } wrong) throw new ArgumentException($"'{wrong}' is not the name of a tool.", nameof(tools));
         if (names.Count > SpaceTools.MaximumTools) throw new ArgumentException($"At most {SpaceTools.MaximumTools} tools are turned off.", nameof(tools));
@@ -560,9 +620,11 @@ public sealed partial class CodeAltaConfigStore
     /// </summary>
     /// <remarks>Edits only skill enablement tokens, preserving TOML comments and unknown settings. This is not an external-writer compare-and-swap.</remarks>
     /// <param name="skillNames">The skill names to disable globally.</param>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalDisabledSkillNames(IEnumerable<string> skillNames)
     {
         ArgumentNullException.ThrowIfNull(skillNames);
+        ThrowIfReadOnly();
         try
         {
             SaveDisabledSkillNames(_options.ConfigPath, skillNames);
@@ -580,10 +642,12 @@ public sealed partial class CodeAltaConfigStore
     /// <param name="projectRoot">The project root directory.</param>
     /// <param name="skillNames">The skill names to disable for the project.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="projectRoot"/> is empty.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveProjectDisabledSkillNames(string projectRoot, IEnumerable<string> skillNames)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         ArgumentNullException.ThrowIfNull(skillNames);
+        ThrowIfReadOnly();
         var path = GetProjectConfigPath(projectRoot);
         try
         {
@@ -601,8 +665,10 @@ public sealed partial class CodeAltaConfigStore
     /// <param name="skillName">The skill name.</param>
     /// <param name="enabled">A value indicating whether the skill should be enabled globally.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="skillName"/> is empty or invalid.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalSkillEnabled(string skillName, bool enabled)
     {
+        ThrowIfReadOnly();
         var normalizedName = NormalizeSkillConfigNameForSave(skillName);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var disabled = new HashSet<string>(LoadDisabledSkillNames(LoadDocument(_options.ConfigPath)), StringComparer.OrdinalIgnoreCase);
@@ -617,9 +683,11 @@ public sealed partial class CodeAltaConfigStore
     /// <param name="skillName">The skill name.</param>
     /// <param name="enabled">A value indicating whether the skill should be enabled for the project.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="projectRoot"/> or <paramref name="skillName"/> is empty, or when the skill name is invalid.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveProjectSkillEnabled(string projectRoot, string skillName, bool enabled)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        ThrowIfReadOnly();
         var normalizedName = NormalizeSkillConfigNameForSave(skillName);
         using var writing = ConfigFileLock.Acquire(GetProjectConfigPath(projectRoot));
         var disabled = new HashSet<string>(LoadDisabledSkillNames(LoadDocument(GetProjectConfigPath(projectRoot))), StringComparer.OrdinalIgnoreCase);
@@ -638,6 +706,17 @@ public sealed partial class CodeAltaConfigStore
     {
         // Immutable: one value serves every read of the same text.
         var path = _options.ConfigPath;
+        if (ChangesGlobalContent)
+        {
+            return _config.IgnoreUserConfig || !File.Exists(path)
+                ? SpaceAssignments.Parse(LoadGlobalConfigContent())
+                : _assignments.Read(path, (source, content) =>
+                {
+                    var layers = GlobalLayers(content);
+                    return SpaceAssignments.Parse(layers.Count == 0 ? string.Empty : ComposeText(layers, layers.Count), source);
+                });
+        }
+
         return File.Exists(path)
             ? _assignments.Read(path, static (source, content) => SpaceAssignments.Parse(content, source))
             : SpaceAssignments.Empty;
@@ -658,11 +737,12 @@ public sealed partial class CodeAltaConfigStore
     /// <param name="spaces">The identifiers of its spaces; <see langword="null"/> or empty for every space.</param>
     /// <exception cref="ArgumentException"><paramref name="key"/> is empty, or a space is not the identifier of a space.</exception>
     /// <exception cref="InvalidDataException">The configuration cannot be parsed, or writes the resource in a form that is not edited here.</exception>
-    /// <exception cref="InvalidOperationException">The provider is not defined in the configuration file.</exception>
+    /// <exception cref="InvalidOperationException">The provider is not defined in the configuration file, or the store is read-only.</exception>
     /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
     public void SaveGlobalSpaceAssignment(SpaceResourceKind kind, string key, IEnumerable<string>? spaces)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ThrowIfReadOnly();
         var list = SpaceScope.Normalize(spaces ?? []);
         if (list.FirstOrDefault(static id => !SpaceDescriptor.IsValidId(id)) is { } invalid)
             throw new ArgumentException($"'{invalid}' is not the identifier of a space.", nameof(spaces));
@@ -726,8 +806,10 @@ public sealed partial class CodeAltaConfigStore
     /// <param name="pluginId">The built-in plugin id or source plugin package id.</param>
     /// <param name="enabled">A value indicating whether the plugin should be enabled.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="pluginId"/> is empty.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalPluginEnabled(string pluginId, bool enabled)
     {
+        ThrowIfReadOnly();
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         try
@@ -747,9 +829,11 @@ public sealed partial class CodeAltaConfigStore
     /// <param name="pluginId">The source plugin package id.</param>
     /// <param name="enabled">A value indicating whether the plugin should be enabled.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="projectRoot"/> or <paramref name="pluginId"/> is empty.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveProjectPluginEnabled(string projectRoot, string pluginId, bool enabled)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        ThrowIfReadOnly();
         var path = GetProjectConfigPath(projectRoot);
         using var writing = ConfigFileLock.Acquire(path);
         var document = LoadDocument(path);
@@ -771,8 +855,10 @@ public sealed partial class CodeAltaConfigStore
     /// <returns><see langword="true"/> when an override was removed; <see langword="false"/> when the file has none.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="pluginId"/> is empty.</exception>
     /// <exception cref="InvalidDataException">Thrown when the configuration file cannot be parsed.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public bool RemoveGlobalPluginEnabled(string pluginId)
     {
+        ThrowIfReadOnly();
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         try
@@ -794,9 +880,11 @@ public sealed partial class CodeAltaConfigStore
     /// <returns><see langword="true"/> when an override was removed; <see langword="false"/> when the file has none.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="projectRoot"/> or <paramref name="pluginId"/> is empty.</exception>
     /// <exception cref="InvalidDataException">Thrown when the configuration file cannot be parsed.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public bool RemoveProjectPluginEnabled(string projectRoot, string pluginId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+        ThrowIfReadOnly();
         var path = GetProjectConfigPath(projectRoot);
         using var writing = ConfigFileLock.Acquire(path);
         var document = LoadDocument(path);
@@ -820,7 +908,7 @@ public sealed partial class CodeAltaConfigStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
 
-        var global = ReadSharedDocument(_options.ConfigPath);
+        var global = ReadSharedGlobalDocument();
         var project = ReadSharedProjectDocument(projectRoot);
         return ResolveProviderPreference(global, project, providerKey);
     }
@@ -831,11 +919,14 @@ public sealed partial class CodeAltaConfigStore
     /// <param name="providerKey">The provider key.</param>
     /// <param name="model">The preferred model identifier.</param>
     /// <param name="reasoningEffort">The preferred reasoning effort.</param>
+    /// <exception cref="ArgumentException">The provider key is empty.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalProviderPreference(
         string providerKey,
         string? model,
         AgentReasoningEffort? reasoningEffort)
     {
+        ThrowIfReadOnly();
         var normalizedProviderKey = NormalizeProviderKey(providerKey)
             ?? throw new ArgumentException("Provider key is required.", nameof(providerKey));
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
@@ -875,7 +966,7 @@ public sealed partial class CodeAltaConfigStore
     /// <returns>The configured default provider key, or <see langword="null"/> when none is configured.</returns>
     public string? GetEffectiveDefaultProvider(string? projectRoot = null)
     {
-        var global = ReadSharedDocument(_options.ConfigPath);
+        var global = ReadSharedGlobalDocument();
         var project = ReadSharedProjectDocument(projectRoot);
         return NormalizeProviderKey(project.Chat?.DefaultProvider)
             ?? NormalizeProviderKey(global.Chat?.DefaultProvider);
@@ -885,8 +976,10 @@ public sealed partial class CodeAltaConfigStore
     /// Persists the global default provider key.
     /// </summary>
     /// <param name="providerKey">The provider key, or <see langword="null"/> to clear the setting.</param>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalDefaultProvider(string? providerKey)
     {
+        ThrowIfReadOnly();
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
@@ -900,8 +993,10 @@ public sealed partial class CodeAltaConfigStore
     /// </summary>
     /// <param name="location"><c>global</c>, <c>project</c> or <c>custom</c>; <c>global</c>, the default, is not written.</param>
     /// <param name="folder">The folder of the <c>custom</c> location; it is kept when another location is chosen.</param>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalWorktreeSettings(string? location, string? folder)
     {
+        ThrowIfReadOnly();
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
@@ -915,9 +1010,11 @@ public sealed partial class CodeAltaConfigStore
     /// </summary>
     /// <param name="settings">The choices.</param>
     /// <exception cref="ArgumentNullException"><paramref name="settings"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalWorkItemSettings(WorkItems.WorkItemSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ThrowIfReadOnly();
         var defaults = WorkItems.WorkItemSettings.Default;
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
@@ -943,7 +1040,7 @@ public sealed partial class CodeAltaConfigStore
     {
         try
         {
-            return CodeAlta.Agent.AgentSessionTitles.ParseMode(ReadSharedDocument(_options.ConfigPath).Sessions?.Title) ?? CodeAlta.Agent.AgentSessionTitles.DefaultMode;
+            return CodeAlta.Agent.AgentSessionTitles.ParseMode(ReadSharedGlobalDocument().Sessions?.Title) ?? CodeAlta.Agent.AgentSessionTitles.DefaultMode;
         }
         catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
         {
@@ -955,8 +1052,10 @@ public sealed partial class CodeAltaConfigStore
     /// Persists how a session nobody named is titled, in the user's configuration file. The default is not written.
     /// </summary>
     /// <param name="mode">The mode.</param>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalSessionTitleMode(CodeAlta.Agent.AgentSessionTitleMode mode)
     {
+        ThrowIfReadOnly();
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
@@ -975,7 +1074,7 @@ public sealed partial class CodeAltaConfigStore
     {
         try
         {
-            return ReadSharedDocument(_options.ConfigPath).Sessions?.PromptSuggestions != false;
+            return ReadSharedGlobalDocument().Sessions?.PromptSuggestions != false;
         }
         catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
         {
@@ -988,8 +1087,10 @@ public sealed partial class CodeAltaConfigStore
     /// The default (true) is not written.
     /// </summary>
     /// <param name="enabled">The choice.</param>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalPromptSuggestions(bool enabled)
     {
+        ThrowIfReadOnly();
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
@@ -1007,7 +1108,7 @@ public sealed partial class CodeAltaConfigStore
     {
         try
         {
-            return ReadSharedDocument(_options.ConfigPath).Review?.BeforeCommit == true;
+            return ReadSharedGlobalDocument().Review?.BeforeCommit == true;
         }
         catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
         {
@@ -1020,8 +1121,10 @@ public sealed partial class CodeAltaConfigStore
     /// (false) is not written.
     /// </summary>
     /// <param name="beforeCommit">The choice.</param>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalReviewBeforeCommit(bool beforeCommit)
     {
+        ThrowIfReadOnly();
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
@@ -1038,7 +1141,7 @@ public sealed partial class CodeAltaConfigStore
     {
         try
         {
-            return ReadSharedDocument(_options.ConfigPath).Commits?.CoAuthor != false;
+            return ReadSharedGlobalDocument().Commits?.CoAuthor != false;
         }
         catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
         {
@@ -1051,8 +1154,10 @@ public sealed partial class CodeAltaConfigStore
     /// default (true) is not written.
     /// </summary>
     /// <param name="coAuthor">The choice.</param>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalCommitCoAuthor(bool coAuthor)
     {
+        ThrowIfReadOnly();
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
@@ -1065,10 +1170,12 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="InvalidDataException">The duration or existing configuration is invalid.</exception>
     /// <exception cref="IOException">The configuration cannot be read or written.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalStorageSettings(Storage.StorageSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(settings.SessionRetention);
+        ThrowIfReadOnly();
         if (settings.SessionRetention.GetValidationError() is { } error) throw new InvalidDataException(error);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
@@ -1091,9 +1198,11 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="InvalidDataException">The model, the mode or the existing configuration is invalid.</exception>
     /// <exception cref="IOException">The configuration cannot be read or written.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalSearchSettings(Search.SearchSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ThrowIfReadOnly();
         if ((Search.SearchSettings.GetModelError(settings.Model) ?? Search.SearchSettings.GetPromptCatalogError(settings.PromptCatalog)
             ?? Search.SearchSettings.GetParallelismError(settings.Parallelism)) is { } error) throw new InvalidDataException(error);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
@@ -1114,9 +1223,11 @@ public sealed partial class CodeAltaConfigStore
     /// <exception cref="InvalidDataException">The model or the existing configuration is invalid.</exception>
     /// <exception cref="IOException">The configuration cannot be read or written.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalSpeechSettings(Speech.SpeechSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ThrowIfReadOnly();
         if ((Speech.SpeechSettings.GetModelError(settings.Model) ?? Speech.SpeechSettings.GetSendError(settings.Send)) is { } error) throw new InvalidDataException(error);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
@@ -1158,11 +1269,13 @@ public sealed partial class CodeAltaConfigStore
     /// </summary>
     /// <param name="definitions">The provider definitions to persist.</param>
     /// <exception cref="InvalidOperationException">
-    /// A definition is not valid, or has the key of a provider whose type this version does not know.
+    /// A definition is not valid, has the key of a provider whose type this version does not know, or the store is
+    /// read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).
     /// </exception>
     public void SaveGlobalProviderDefinitions(IEnumerable<CodeAltaProviderDocument> definitions)
     {
         ArgumentNullException.ThrowIfNull(definitions);
+        ThrowIfReadOnly();
 
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
@@ -1307,13 +1420,13 @@ public sealed partial class CodeAltaConfigStore
     // A document the caller owns: a copy of the one this store keeps for the file.
     private CodeAltaConfigDocument LoadOwnedDocument(string path)
         => File.Exists(path)
-            ? CodeAltaConfigDocumentCopy.Copy(_documents.Read(path, ParseLoadedContent))
+            ? CodeAltaConfigDocumentCopy.Copy(_documents.Read(path, ParseFile))
             : new CodeAltaConfigDocument();
 
     // The document of a file as it is now, shared by the reads of this store: what reads it never changes it and never
     // hands out a part of it that can be changed.
     private CodeAltaConfigDocument ReadSharedDocument(string path)
-        => File.Exists(path) ? _documents.Read(path, ParseLoadedContent) : new CodeAltaConfigDocument();
+        => File.Exists(path) ? _documents.Read(path, ParseFile) : new CodeAltaConfigDocument();
 
     private CodeAltaConfigDocument ReadSharedProjectDocument(string? projectRoot)
         => string.IsNullOrWhiteSpace(projectRoot) ? new CodeAltaConfigDocument() : ReadSharedDocument(GetProjectConfigPath(projectRoot));
@@ -1352,6 +1465,7 @@ public sealed partial class CodeAltaConfigStore
     private void Written()
     {
         _documents.Invalidate();
+        _globalDocuments.Invalidate();
         _assignments.Invalidate();
     }
 
