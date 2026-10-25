@@ -44,11 +44,12 @@ public sealed class DesktopSearchTests
         provider.Script(DesktopUiToolsTests.Say("The retry test waits for the port before it connects."));
         await DesktopUiToolsTests.SendAsync(host, session, "Why does the retry test fail on macOS?");
 
-        // The plugin signals the prompt and the end of the turn: both are found within moments, without a pass.
-        var message = await FirstHitAsync(commands, ["search", "retry", "port", "--kind", "message"]);
+        // The plugin signals the prompt and the end of the turn: both are found within moments, without a pass. The prompt
+        // is indexed first, so the search waits for the answer rather than taking the first hit.
+        var message = await FirstHitAsync(commands, ["search", "retry", "port", "--kind", "message"],
+            static hit => hit.TryGetProperty("role", out var role) && role.GetString() == "assistant");
         Assert.AreEqual("message", message.GetProperty("kind").GetString());
         StringAssert.StartsWith(message.GetProperty("ref").GetString(), $"msg:{session.SessionId}/");
-        Assert.AreEqual("assistant", message.GetProperty("role").GetString());
 
         // The plugin API reference is documentation too, indexed before the guide: its types name branches.
         var doc = await FirstHitAsync(commands, ["search", "merged", "branch", "--kind", "doc"],
