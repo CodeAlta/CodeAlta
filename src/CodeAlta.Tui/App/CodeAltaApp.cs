@@ -317,7 +317,13 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
                 return true;
             },
         });
+        // The sessions the command line writes are listed as it writes them.
+        _externalSessionRefresh = ownedServices?.ExternalSessions is { } externalSessions
+            ? new ExternalSessionRefresh(externalSessions, _shellController.RefreshSessionsAsync)
+            : null;
     }
+
+    private readonly ExternalSessionRefresh? _externalSessionRefresh;
 
     public async Task RunAsync(CancellationToken cancellationToken)
         => await _frontendHost.RunAsync(cancellationToken);
@@ -327,6 +333,7 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
 
     async ValueTask IShellFrontendHostLifecycle.DisposeFrontendAsync()
     {
+        _externalSessionRefresh?.Dispose();
         _ownedServices?.PluginHostBridge?.Ui?.Detach();
         await ShellFrontendHost.DisposeFrontendResourcesAsync(
             _projectionCoordinator.Dispose, _reminderUiCoordinator.Dispose,

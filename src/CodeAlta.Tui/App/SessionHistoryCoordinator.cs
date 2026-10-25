@@ -658,6 +658,16 @@ internal sealed class SessionHistoryCoordinator
 
             throw;
         }
+        catch (Exception exception) when (SessionRuntimeService.FindSessionInUse(exception) is not null)
+        {
+            // Another process runs the session (the command line): its journal is read as it is, without attaching it.
+            if (await _runtimeService.TryReadStoredHistoryAsync(session, cancellationToken).ConfigureAwait(false) is { } storedHistory)
+            {
+                return storedHistory.ToList();
+            }
+
+            throw;
+        }
     }
 
     private static bool ShouldDisplayCompletedHistoryContent(AgentContentCompletedEvent completed)

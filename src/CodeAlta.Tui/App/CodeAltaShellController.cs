@@ -76,6 +76,26 @@ internal sealed class CodeAltaShellController : ISessionRuntimeEventProjector, I
         global::CodeAlta.Tui.CodeAltaTaskMonitor.Observe(_initializationTask, "Shell initialization");
     }
 
+    /// <summary>
+    /// Reads the sessions again without a status line: a session another process writes (the command line) was listed,
+    /// changed or released.
+    /// </summary>
+    public async Task RefreshSessionsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+            await _sessionLoadCoordinator.ApplyRecoverableSessionsProgressivelyAsync(projects, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            CodeAltaApp.UiLogger.Warn($"The sessions were not read again: {exception.Message}");
+        }
+    }
+
     public async Task ReloadCatalogAsync(CancellationToken cancellationToken)
     {
         try

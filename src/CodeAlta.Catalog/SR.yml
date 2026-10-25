@@ -9452,6 +9452,18 @@
   fr: "une autre application"
   ja: "別のアプリケーション"
   zh: "另一个应用程序"
+"This session is in use by {0}: send it again once that ends.":
+  de: "Diese Sitzung wird von {0} verwendet: Sende es erneut, sobald das beendet ist."
+  es: "Esta sesión está en uso por {0}: envíalo de nuevo cuando termine."
+  fr: "Cette session est utilisée par {0} : renvoyez-le une fois que c’est terminé."
+  ja: "このセッションは {0} が使用中です。終了したらもう一度送信してください。"
+  zh: "此会话正被 {0} 使用：结束后请再次发送。"
+"another process":
+  de: "einem anderen Prozess"
+  es: "otro proceso"
+  fr: "un autre processus"
+  ja: "別のプロセス"
+  zh: "另一个进程"
 "User Answer":
   de: "Antwort des Benutzers"
   es: "Respuesta del usuario"

@@ -309,6 +309,28 @@ internal sealed class SessionPromptDispatchCoordinator
             tab.ActiveRunStartedAt = null;
             _commandContext.SetSessionStatus(tab, SR.T("Prompt cancelled."), false, StatusTone.Warning);
         }
+        catch (Exception ex) when (responseDispatch is null && SessionRuntimeService.FindSessionInUse(ex) is { } inUse)
+        {
+            // Another process runs the session (the command line, another instance): nothing was sent, the prompt stays.
+            if (renderedOptimisticPrompt)
+            {
+                tab.Timeline.RollbackOptimisticUserPrompt();
+            }
+
+            if (steer && !string.IsNullOrWhiteSpace(pendingSteerId))
+            {
+                _queueCoordinator.RemovePendingSteer(tab, pendingSteerId);
+            }
+
+            if (_commandContext.IsSessionInputEmpty())
+            {
+                _commandContext.RestoreSessionInput(prompt);
+            }
+
+            tab.ActiveRunStartedAt = null;
+            _commandContext.SetSessionStatus(tab, SR.T("This session is in use by {0}: send it again once that ends.", inUse.HolderKind ?? SR.T("another process")),
+                false, StatusTone.Warning);
+        }
         catch (Exception ex) when (responseDispatch is null)
         {
             if (renderedOptimisticPrompt)

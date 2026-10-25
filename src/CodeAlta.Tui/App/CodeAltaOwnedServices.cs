@@ -110,6 +110,9 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 
     public PluginHostBridge PluginHostBridge { get; }
 
+    /// <summary>Gets what lists the sessions another process writes and follows those it holds.</summary>
+    public ExternalSessionFollower? ExternalSessions => _host.ExternalSessions;
+
     /// <summary>
     /// Creates the terminal frontend's owned services, rolling back returned acquisitions on failure.
     /// </summary>
@@ -183,6 +186,10 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                         HasInteractiveUi = true,
                         // A Claude Code conversation open in VS Code or a terminal: a dialog asks what to do.
                         AskWhenConversationHeld = true,
+                        // The sessions it runs are leased, so that the command line does not run them meanwhile; the
+                        // sessions the command line writes are listed.
+                        SessionLeaseOwner = CodeAlta.Catalog.SessionLeaseOwner.TuiKind,
+                        FollowExternalSessions = true,
                         PluginSafeMode = pluginBootstrapOptions.PluginSafeMode,
                         RawArguments = rawArguments,
                         WaitForEnterAfterPluginLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,
