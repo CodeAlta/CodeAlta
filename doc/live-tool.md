@@ -31,7 +31,7 @@ flowchart TD
 | --- | --- |
 | `AltaSessionToolFactory` | The agent tool named `alta`: `args`, optional `stdin`, `cwd`, output caps and timeout. |
 | `AltaCommandDispatcher` | Runs one invocation: captures output, applies the caps, returns the transcript. |
-| `AltaCommandRegistry` | Creates a fresh `XenoAtom.CommandLine.CommandApp` per invocation from the contributors. |
+| `AltaCommandRegistry` | Creates a fresh `XenoAtom.CommandLine.CommandApp` per invocation from the contributors, with the built-in roots its `AltaCommandRegistryOptions` allow. |
 | `BuiltInAltaCommandContributor` | The built-in groups, one partial file per group (`.Spaces.cs`, `.Jobs.cs`, `.Windows.cs`...). |
 | `PluginAltaCommandContributor` | Adapts plugin command roots and enforces reserved roots. |
 | `AltaServiceCollection` | The host services the commands use; a group exists only when its service is registered. |
@@ -95,6 +95,12 @@ services the host registered. Nothing is shared between invocations.
 - **Built-in groups** are written in `BuiltInAltaCommandContributor`. A group that needs a host surface reads its
   service from the collection and adds nothing when the host has none: in the TUI the desktop groups are absent from
   the commands, their help and `alta tool list`.
+- **An allow-list of built-in roots** (`AltaCommandRegistryOptions.AllowedBuiltInRoots`) narrows a registry further,
+  for a host where a service may exist but the command must not: the command-line application
+  (`AltaCommandRegistryOptions.Cli`) has no user to answer `ask` or `review`, no window, and does not outlive its run
+  for `reminder` or `automation`. The registry applies it to the tree, its help, the policies of `alta tool list` and
+  `tool capability list`, and the examples of the root help. A new built-in root is absent there until it is listed;
+  plugin roots are not filtered. Without options (the desktop and the TUI) every root its service supports is offered.
 - **Plugins** return `PluginAltaCommandContribution` records from `PluginBase.GetAltaCommands()`: a root or path,
   policy flags, ordering, and a factory that creates a fresh unattached `CommandNode`. A root that collides with a
   reserved root or an earlier plugin root is skipped and diagnosed. Reserved roots (`version`, `ask`, `project`,

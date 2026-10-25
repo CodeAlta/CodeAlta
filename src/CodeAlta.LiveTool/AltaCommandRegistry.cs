@@ -20,7 +20,24 @@ public sealed class AltaCommandRegistry
     public AltaCommandRegistry(IEnumerable<IAltaCommandContributor>? contributors = null)
     {
         _contributors = (contributors ?? [new BuiltInAltaCommandContributor(), new PluginAltaCommandContributor()]).ToArray();
+        Options = AltaCommandRegistryOptions.Default;
     }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AltaCommandRegistry"/> class with the built-in and plugin
+    /// commands that <paramref name="options"/> allow.
+    /// </summary>
+    /// <param name="options">The options of the registry, such as <see cref="AltaCommandRegistryOptions.Cli"/>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    public AltaCommandRegistry(AltaCommandRegistryOptions options)
+        : this()
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        Options = options;
+    }
+
+    /// <summary>Gets the options of the registry.</summary>
+    public AltaCommandRegistryOptions Options { get; }
 
     /// <summary>Gets policies contributed by the registered command contributors.</summary>
     /// <param name="context">The invocation context used to build policies.</param>
@@ -29,9 +46,17 @@ public sealed class AltaCommandRegistry
         ArgumentNullException.ThrowIfNull(context);
         var contributionContext = new AltaCommandContributionContext { Invocation = context };
         return _contributors
-            .SelectMany(contributor => contributor.GetCommandPolicies(contributionContext))
+            .SelectMany(contributor => contributor is BuiltInAltaCommandContributor
+                ? contributor.GetCommandPolicies(contributionContext).Where(policy => Options.AllowsBuiltInRoot(RootOf(policy.Path)))
+                : contributor.GetCommandPolicies(contributionContext))
             .OrderBy(static policy => policy.Path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static string RootOf(string path)
+    {
+        var space = path.IndexOf(' ', StringComparison.Ordinal);
+        return space < 0 ? path : path[..space];
     }
 
     /// <summary>Creates a fresh <see cref="CommandApp"/> for one invocation.</summary>
@@ -61,14 +86,17 @@ public sealed class AltaCommandRegistry
             {
                 context.ClaimUnknownCommandWork();
             }
+            var builtIn = contributor is BuiltInAltaCommandContributor;
             foreach (var node in contributor.CreateCommandLineNodes(contributionContext))
             {
+                if (builtIn && node is Command { Name: var root } && !Options.AllowsBuiltInRoot(root)) continue;
                 if (node is Command command) ObserveCommandOriginals(command, context);
                 app.Add(node);
             }
         }
 
-        AddRootGuidance(app);
+        // An allow-list leaves out the guidance of the roots it removes; without one, the guidance is complete.
+        AddRootGuidance(app, Options.AllowedBuiltInRoots is null ? static _ => true : app.SubCommands.ContainsKey);
 
         return app;
     }
@@ -90,33 +118,43 @@ public sealed class AltaCommandRegistry
         foreach (var child in command.SubCommands.Values) ObserveCommandOriginals(child, context);
     }
 
-    private static void AddRootGuidance(CommandApp app)
+    // Each example is written when the tree has its root command.
+    private static readonly (string Root, string Line)[] RootGuidanceExamples =
+    [
+        ("project", "  `alta project current`; `alta project list`"),
+        ("space", "  `alta space list`; `alta space show <space>` for the spaces that group the projects"),
+        ("ask", "  `alta ask --stdin` to ask the user structured questions, then yield"),
+        ("notes", "  `alta notes get`; `alta notes set --stdin`; `alta notes clear`"),
+        ("session", "  `alta session current` to get the calling agent session id"),
+        ("session", "  `alta session list --project <project> --state all --limit 20`"),
+        ("session", "  `alta session result <session-id>`; `alta session metrics <session-id>`"),
+        ("session", "  `alta session report <session-id-1> <session-id-2> --include=result,metrics`"),
+        ("session", "  `alta session status <session-id>`"),
+        ("session", "  `alta session tail <session-id> --last 10 --include assistant`"),
+        ("session", "  `alta session create --project <project> --reasoning low`"),
+        ("session", "  `alta session create --project <project> --same-model-as <session-id>`"),
+        ("prompt", "  `alta prompt list`; `alta prompt create <prompt-id> --scope global --stdin`"),
+        ("session", "  `alta session send <session-id> --prompt-id <prompt-id> --stdin`"),
+        ("session", "  `alta session send <session-id> --stdin`"),
+        ("session", "  `alta session steer <session-id> --message \"...\"`"),
+        ("session", "  `alta session request <session-id> --reply-requested --stdin`"),
+        ("session", "  `alta session fork <session-id> --before <turn>`; see `alta session turns`"),
+        ("reminder", "  `alta reminder create --duration 60 --content \"...\"`; `alta reminder list`"),
+        ("job", "  `alta job start --command \"...\"` to run a long command in the background and be sent its result; `alta job list`; `alta job output <job-id>`"),
+        ("tool", "  `alta tool status`; `alta tool capability list`"),
+    ];
+
+    private static void AddRootGuidance(CommandApp app, Func<string, bool> hasRoot)
     {
         app.Add("");
         app.Add("Guidance: non-help commands return JSONL headed by `alta.result`; help is plain text.");
         app.Add("Use small limits for snapshots. Common examples:");
-        app.Add("  `alta project current`; `alta project list`");
-        app.Add("  `alta space list`; `alta space show <space>` for the spaces that group the projects");
-        app.Add("  `alta ask --stdin` to ask the user structured questions, then yield");
-        app.Add("  `alta notes get`; `alta notes set --stdin`; `alta notes clear`");
-        app.Add("  `alta session current` to get the calling agent session id");
-        app.Add("  `alta session list --project <project> --state all --limit 20`");
-        app.Add("  `alta session result <session-id>`; `alta session metrics <session-id>`");
-        app.Add("  `alta session report <session-id-1> <session-id-2> --include=result,metrics`");
-        app.Add("  `alta session status <session-id>`");
-        app.Add("  `alta session tail <session-id> --last 10 --include assistant`");
-        app.Add("  `alta session create --project <project> --reasoning low`");
-        app.Add("  `alta session create --project <project> --same-model-as <session-id>`");
-        app.Add("  `alta prompt list`; `alta prompt create <prompt-id> --scope global --stdin`");
-        app.Add("  `alta session send <session-id> --prompt-id <prompt-id> --stdin`");
-        app.Add("  `alta session send <session-id> --stdin`");
-        app.Add("  `alta session steer <session-id> --message \"...\"`");
-        app.Add("  `alta session request <session-id> --reply-requested --stdin`");
-        app.Add("  `alta session fork <session-id> --before <turn>`; see `alta session turns`");
-        app.Add("  `alta reminder create --duration 60 --content \"...\"`; `alta reminder list`");
-        app.Add("  `alta job start --command \"...\"` to run a long command in the background and be sent its result; `alta job list`; `alta job output <job-id>`");
-        app.Add("  `alta tool status`; `alta tool capability list`");
-        app.Add("Coordinate: delegate project-folder work to project sessions; use `session request`/`message` for peer-agent notes and `session steer` only for active runs.");
+        foreach (var (root, line) in RootGuidanceExamples)
+        {
+            if (hasRoot(root)) app.Add(line);
+        }
+
+        if (hasRoot("session")) app.Add("Coordinate: delegate project-folder work to project sessions; use `session request`/`message` for peer-agent notes and `session steer` only for active runs.");
         app.Add("Discover: `alta <command> --help` or `alta <command> <subcommand> --help`.");
     }
 
