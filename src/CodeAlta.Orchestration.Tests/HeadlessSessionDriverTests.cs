@@ -225,4 +225,34 @@ public sealed class HeadlessSessionDriverTests
         Assert.AreEqual(HeadlessOpenStatus.Opened, (await driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id })).Status, "Once released, the session is continued.");
         Assert.AreEqual(HeadlessOpenStatus.InvalidRequest, (await driver.OpenAsync(new HeadlessSessionRequest { SessionId = "nope" })).Status);
     }
+
+    [TestMethod]
+    public async Task ChangeSelection_ChangesWhatTheNextPromptsRunWith_AndRefusesWhatTheSessionCannotRun()
+    {
+        var (root, provider, host) = await CreateAsync();
+        await using var scope = root;
+        await using var driver = new HeadlessSessionDriver(host);
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        var prompts = (await host.Commands.GetSelectionChoicesAsync(session.SessionId))!.Prompts.Select(static prompt => prompt.Id).ToArray();
+        CollectionAssert.Contains(prompts, "plan");
+
+        var changed = await driver.ChangeSelectionAsync(session, new HeadlessSelectionChange { AgentPromptId = "plan", Reasoning = AgentReasoningEffort.Low });
+
+        Assert.AreEqual(HeadlessOpenStatus.Opened, changed.Status, changed.Message);
+        Assert.AreEqual("plan", changed.Session!.AgentPromptId);
+        Assert.AreEqual(AgentReasoningEffort.Low, changed.Session.ReasoningEffort);
+        Assert.AreEqual("scripted-model", changed.Session.ModelId, "What the change does not name stays.");
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Planned."));
+        var result = await driver.RunAsync(changed.Session, new HeadlessPrompt("plan it")).WaitAsync(Hang);
+        Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
+        Assert.AreEqual(AgentReasoningEffort.Low, provider.RequestsOf(session.SessionId).Last().ReasoningEffort);
+        var stored = await host.RuntimeService.TryGetResumableSessionAsync(session.SessionId);
+        Assert.AreEqual("plan", stored!.AgentPromptId, "The prompt ran with the agent prompt chosen.");
+
+        Assert.AreEqual(HeadlessOpenStatus.ProviderNotReady, (await driver.ChangeSelectionAsync(changed.Session, new() { ModelRef = "scripted:missing-model" })).Status);
+        Assert.AreEqual(HeadlessOpenStatus.ProviderNotReady, (await driver.ChangeSelectionAsync(changed.Session, new() { ModelRef = "missing:model" })).Status);
+        Assert.AreEqual(HeadlessOpenStatus.InvalidRequest, (await driver.ChangeSelectionAsync(changed.Session, new() { AgentPromptId = "no-such-prompt" })).Status);
+        Assert.AreEqual(HeadlessOpenStatus.InvalidRequest, (await driver.ChangeSelectionAsync(changed.Session, new() { ModelRef = "not a model" })).Status);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => driver.ChangeSelectionAsync(changed.Session with { SessionId = Guid.NewGuid().ToString() }, new()));
+    }
 }

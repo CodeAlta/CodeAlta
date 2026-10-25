@@ -100,6 +100,19 @@ public sealed record HeadlessSessionOpenResult(HeadlessOpenStatus Status, Headle
     public bool Succeeded => Session is not null;
 }
 
+/// <summary>What <see cref="HeadlessSessionDriver.ChangeSelectionAsync"/> changes; what is null stays as it is.</summary>
+public sealed record HeadlessSelectionChange
+{
+    /// <summary>Gets the model as a reference <c>provider:model</c> or <c>provider:model@reasoning</c>; null keeps the model.</summary>
+    public string? ModelRef { get; init; }
+
+    /// <summary>Gets the reasoning effort, over the one of <see cref="ModelRef"/>; null keeps the effort, or takes the model's.</summary>
+    public AgentReasoningEffort? Reasoning { get; init; }
+
+    /// <summary>Gets the agent prompt (<c>default</c>, <c>plan</c>...); null keeps it.</summary>
+    public string? AgentPromptId { get; init; }
+}
+
 /// <summary>A prompt of a headless run.</summary>
 /// <param name="Text">The text of the prompt.</param>
 public sealed record HeadlessPrompt(string Text)

@@ -113,9 +113,7 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             var project = existing is not null ? null : await ResolveProjectAsync(folder!, cancellationToken).ConfigureAwait(false);
             var model = await ResolveModelAsync(request, existing, project, cancellationToken).ConfigureAwait(false);
             if (model.Failure is { } failure) return failure;
-            var bypass = _host.Commands.GetNewSessionPermissionModes(model.Provider!.ProviderId.Value).Modes.Contains(SessionPermissionModes.Bypass, StringComparer.Ordinal)
-                ? SessionPermissionModes.Bypass
-                : null;
+            var bypass = BypassModeOf(model.Provider!.ProviderId.Value);
             // The tools the session does without are known before it attaches: a new session is created with them.
             runtime.SetDisabledToolPatterns(sessionId, request.DisabledToolPatterns.Count > 0 ? request.DisabledToolPatterns : null);
             SessionViewDescriptor descriptor;
@@ -158,6 +156,70 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         {
             if (!opened) lease.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Changes what the next prompts of an open session run with: the model (on another provider too), the reasoning
+    /// effort or the agent prompt. What the change does not name stays as it is; a model named without an effort keeps
+    /// the effort of the session when the model has it, else takes the one the model starts with. A model named by hand
+    /// takes the session off its tier. A run in progress goes on with what it started with.
+    /// </summary>
+    /// <param name="session">The session, opened by this driver.</param>
+    /// <param name="change">What changes.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The session with its new selection (<see cref="HeadlessOpenStatus.Opened"/>), to send the next prompts with, or why
+    /// the change was refused: <see cref="HeadlessOpenStatus.InvalidRequest"/> or <see cref="HeadlessOpenStatus.ProviderNotReady"/>.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> or <paramref name="change"/> is null.</exception>
+    /// <exception cref="ArgumentException">The session is not open in this driver.</exception>
+    /// <exception cref="ObjectDisposedException">The driver is disposed.</exception>
+    /// <exception cref="OperationCanceledException">The change was canceled.</exception>
+    public async Task<HeadlessSessionOpenResult> ChangeSelectionAsync(HeadlessSession session, HeadlessSelectionChange change, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(change);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        if (!_open.ContainsKey(session.SessionId)) throw new ArgumentException($"Session '{session.SessionId}' is not open in this driver.", nameof(session));
+        var runtime = _host.RuntimeService;
+        var descriptor = await runtime.TryGetResumableSessionAsync(session.SessionId, cancellationToken).ConfigureAwait(false) ?? session.Descriptor;
+        var (providerKey, modelId, effort, tier) = (session.ProviderKey, session.ModelId, change.Reasoning, session.Tier);
+        if (change.ModelRef is { } reference)
+        {
+            var model = await ResolveModelAsync(new HeadlessSessionRequest { ModelRef = reference, Reasoning = change.Reasoning }, descriptor, null, cancellationToken)
+                .ConfigureAwait(false);
+            if (model.Failure is { } failure) return failure;
+            (providerKey, modelId, effort, tier) = (model.Provider!.ProviderId.Value, model.ModelId, model.Effort, null);
+        }
+        else if (effort is null)
+        {
+            effort = session.ReasoningEffort;
+        }
+
+        var bypass = BypassModeOf(providerKey);
+        if (!string.Equals(descriptor.ResolvedProviderKey, providerKey, StringComparison.OrdinalIgnoreCase)
+            && await SwitchProviderAsync(session.SessionId, providerKey, modelId, effort, bypass).ConfigureAwait(false) is { } switchFailure)
+            return switchFailure;
+        if (session.Tier is not null && tier is null) await runtime.SetSessionTierAsync(session.SessionId, null, cancellationToken).ConfigureAwait(false);
+        var prompt = change.AgentPromptId ?? session.AgentPromptId;
+        var check = await _host.Commands.CheckSelectionAsync(session.SessionId, modelId, effort, prompt, bypass, cancellationToken).ConfigureAwait(false);
+        if (check is not { Status: OwnedSelectionCheck.Ok, Selection: { } selection })
+        {
+            return check.Status switch
+            {
+                OwnedSelectionCheck.InvalidModel => NotReady($"Model '{modelId}' is not offered by provider '{providerKey}'."),
+                OwnedSelectionCheck.InvalidPrompt => Invalid($"The agent prompt '{prompt}' is not available to session '{session.SessionId}'."),
+                OwnedSelectionCheck.InvalidEffort => Invalid($"Model '{modelId}' does not take the reasoning effort '{effort?.ToString().ToLowerInvariant()}'."),
+                OwnedSelectionCheck.Unavailable => NotReady($"Session '{session.SessionId}' cannot be prepared now."),
+                _ => Invalid($"The session cannot run with this selection ({check.Status})."),
+            };
+        }
+
+        return new(HeadlessOpenStatus.Opened, new HeadlessSession(session.SessionId, descriptor, selection.ProviderKey, selection.ModelId ?? modelId,
+            selection.ReasoningEffort, selection.AgentPromptId, tier, Created: false)
+        {
+            Selection = selection,
+        });
     }
 
     /// <summary>
@@ -323,6 +385,12 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     private static HeadlessSessionOpenResult Invalid(string message) => new(HeadlessOpenStatus.InvalidRequest, null, message);
 
     private static HeadlessSessionOpenResult NotReady(string message) => new(HeadlessOpenStatus.ProviderNotReady, null, message);
+
+    // The mode that bypasses permissions, for a provider that offers it.
+    private string? BypassModeOf(string providerKey)
+        => _host.Commands.GetNewSessionPermissionModes(providerKey).Modes.Contains(SessionPermissionModes.Bypass, StringComparer.Ordinal)
+            ? SessionPermissionModes.Bypass
+            : null;
 
     // The project of a folder: the one the catalog lists, else a transient one; none for the global root (a chat).
     private async Task<ProjectDescriptor?> ResolveProjectAsync(string folder, CancellationToken cancellationToken)
