@@ -1180,6 +1180,8 @@ dialog::backdrop { background: var(--scrim); }
 .provider-settings-heading p { margin: 0; color: var(--muted); }
 .provider-settings-actions { display: flex; align-items: center; gap: 8px; }
 .provider-settings-layout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+/* The providers take a share of the page, as the skills do: their names, tags and spaces are read without wrapping. */
+@media (min-width: 901px) { .provider-settings .provider-settings-layout { grid-template-columns: minmax(280px, 2fr) minmax(0, 3fr); } }
 /* A provider is its logo, its name and its tags on a first row, and its spaces on a row of their own under the name:
    the name is always read whole, whatever the number of tags and of spaces. */
 .provider-settings-column { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -1224,7 +1226,7 @@ dialog::backdrop { background: var(--scrim); }
 .provider-settings-name strong, .provider-settings-name small { overflow-wrap: anywhere; }
 .provider-settings-name small { color: var(--muted); }
 .provider-settings-tags { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-.provider-settings-fields.bp6-section-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 4px 20px; }
+.provider-settings-fields.bp6-section-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 20px; }
 .provider-settings-fields .bp6-form-group { margin: 0 0 10px; }
 .provider-model-field { display: flex; gap: 6px; min-width: 0; }
 .provider-model-field > .bp6-input-group { flex: 1; min-width: 0; }
