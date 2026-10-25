@@ -147,13 +147,17 @@ public sealed partial class SessionRuntimeService
             }
         }
 
-        // The record of an abort belongs to the run it stops, when the session has one.
-        var atWork = new List<(string SessionId, AgentRunId? RunId)>();
+        // The record of an abort belongs to the run it stops, when the session has one. The last run seen to start is kept
+        // too: a run that started before the abort, whose first events had not reached the actor yet, is found once stopped.
+        var atWork = new List<(string SessionId, AgentRunId? RunId, AgentRunId? LastRunId)>();
         foreach (var sessionId in tree)
         {
             if (string.Equals(sessionId, rootSessionId, StringComparison.OrdinalIgnoreCase)
                 || (await ProbeSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)).Busy)
-                atWork.Add((sessionId, _entries.TryGetValue(sessionId, out var entry) ? entry.ActiveRunId : null));
+            {
+                var entry = _entries.TryGetValue(sessionId, out var found) ? found : null;
+                atWork.Add((sessionId, entry?.ActiveRunId, entry?.LastRunId));
+            }
         }
 
         // Every stop is started before any is waited for: a parent that waits for its child is stopped too. A prompt admitted
@@ -168,10 +172,10 @@ public sealed partial class SessionRuntimeService
         }
 
         await Task.WhenAll(stops).WaitAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var (sessionId, runId) in atWork)
+        foreach (var (sessionId, runId, lastRunId) in atWork)
         {
             await WhenRunEndedAsync(sessionId, cancellationToken).ConfigureAwait(false);
-            await RecordAbortAsync(sessionId, reason, runId).ConfigureAwait(false);
+            await RecordAbortAsync(sessionId, reason, runId ?? RunStartedSince(sessionId, lastRunId)).ConfigureAwait(false);
         }
 
         PulseSettlement();
@@ -277,6 +281,10 @@ public sealed partial class SessionRuntimeService
             // A session that is being removed, or a runtime that closes, keeps no record.
         }
     }
+
+    // The run a session started since the abort found it, its start not yet seen then: the actor has seen it by the end of the run.
+    private AgentRunId? RunStartedSince(string sessionId, AgentRunId? lastRunIdAtAbort)
+        => _entries.TryGetValue(sessionId, out var entry) && entry.LastRunId is { } last && last != lastRunIdAtAbort ? last : null;
 
     private async Task<(bool Busy, Task? Wake)> ProbeTreeAsync(string rootSessionId, CancellationToken cancellationToken)
     {

@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Actors;
 
 namespace CodeAlta.Orchestration.Tests;
 
@@ -239,6 +241,64 @@ public sealed class HeadlessSessionDriverTests
         var outcome = await host.RuntimeService.ReadOutcomeAsync(session.Descriptor, result.RunId);
         Assert.AreEqual(SessionOutcomeStatus.Cancelled, outcome.Status);
         Assert.AreEqual("timeout", outcome.AbortReason, "The journal records the abort and its reason.");
+    }
+
+    [TestMethod]
+    public async Task Abort_OfARunWhoseStartTheRuntimeHasNotSeenYet_IsRecordedInThatRun()
+    {
+        var (root, provider, host) = await CreateAsync();
+        await using var scope = root;
+        await using var driver = new HeadlessSessionDriver(host);
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        provider.Turns.Enqueue(async (_, cancellationToken) =>
+        {
+            started.TrySetResult();
+            try { await Task.Delay(Timeout.Infinite, cancellationToken); }
+            finally { stopped.TrySetResult(); }
+            return ScriptedTurnProvider.Answer("never");
+        });
+        // The actor of the session is held from the claim of the run on: the runtime sees no event of the run, as under
+        // load, until the abort has stopped it.
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hold = Task.CompletedTask;
+        host.RuntimeService.RunClaimed = sessionId =>
+        {
+            hold = HoldActorAsync(host.RuntimeService, sessionId, held, release.Task);
+            return held.Task;
+        };
+
+        var run = driver.RunAsync(session, new HeadlessPrompt("work"));
+        await started.Task.WaitAsync(Hang);
+        var cancel = driver.CancelAsync(session, "signal");
+        await stopped.Task.WaitAsync(Hang);
+        release.SetResult();
+        await hold.WaitAsync(Hang);
+        await cancel.WaitAsync(Hang);
+        var result = await run.WaitAsync(Hang);
+
+        Assert.AreEqual(HeadlessRunStatus.Aborted, result.Status, result.FailureMessage);
+        Assert.AreEqual("signal", result.AbortReason);
+        var ofTheRun = await host.RuntimeService.ReadOutcomeAsync(session.Descriptor, result.RunId);
+        Assert.AreEqual("signal", ofTheRun.AbortReason, "The outcome of the run reads the record of its abort.");
+        var last = await host.RuntimeService.ReadOutcomeAsync(session.Descriptor, null);
+        Assert.AreEqual(SessionOutcomeStatus.Cancelled, last.Status);
+        Assert.AreEqual("signal", last.AbortReason, "The record belongs to the run it stopped: the last run of the session has it.");
+    }
+
+    // Holds the actor of a session until the release: the events of its runs wait in its mailbox.
+    private static async Task HoldActorAsync(SessionRuntimeService runtime, string sessionId, TaskCompletionSource held, Task release)
+    {
+        var actor = (SessionActor)typeof(SessionRuntimeService).GetMethod("GetActorForWork", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(runtime, [sessionId])!;
+        await actor.QueryAsync(async _ =>
+        {
+            held.TrySetResult();
+            await release.ConfigureAwait(false);
+            return true;
+        });
     }
 
     [TestMethod]

@@ -2412,6 +2412,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // itself by. Null in the application.
     internal Func<string, CancellationToken, Task>? SendStarting { get; set; }
 
+    // Awaited by a send once its run is claimed, just before the run starts: what a test orders itself by. Null in the application.
+    internal Func<string, Task>? RunClaimed { get; set; }
+
     private async Task<AgentRunId> SendOwnedBodyAsync(
         SessionViewDescriptor session, SessionExecutionOptions options, AgentSendOptions sendOptions, long admittedAbortSequence,
         CancellationToken cancellationToken, CancellationToken coordinationCancellationToken,
@@ -2496,6 +2499,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 PublishSessionCatalogEvent(session);
             }
 
+            if (RunClaimed is { } claimed) await claimed(session.SessionId).ConfigureAwait(false);
             var runStartedAt = DateTimeOffset.UtcNow;
             execution = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, candidate.Attachment.Cancellation.Token);
             AgentRunId runId;
@@ -5905,6 +5909,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public AgentRunId? ActiveRunId { get; private set; }
 
+        // The last run this attachment saw start, kept after it ended.
+        public AgentRunId? LastRunId { get; private set; }
+
         public DateTimeOffset LastTerminalEventAt { get; private set; } = DateTimeOffset.MinValue;
 
         public bool QueueDrainInProgress { get; private set; }
@@ -5993,6 +6000,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 // What was suggested answered the turn before the run that starts.
                 if (ActiveRunId is null) PromptSuggestion = null;
                 ActiveRunId = runId;
+                LastRunId = runId;
             }
 
             if (@event is AgentErrorEvent) LastRunFailed = true;
@@ -6159,6 +6167,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }
 
             ActiveRunId = runId;
+            LastRunId = runId;
             return true;
         }
 
