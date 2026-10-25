@@ -37,4 +37,23 @@ public sealed partial class McpRuntimeServiceTests
         Assert.ThrowsExactly<ArgumentException>(() => plugin.AddSessionServers("one", project.Path, [new McpSessionServer { Name = "none" }]));
         Assert.ThrowsExactly<ArgumentException>(() => plugin.AddSessionServers("one", project.Path, [new McpSessionServer { Name = "relative", Url = "mcp" }]));
     }
+
+    [TestMethod]
+    public async Task SessionServers_AddedAtTheSameTime_HaveKeysOfTheirOwn()
+    {
+        using var project = TempDirectory.Create();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
+        // Each addition waits for the other once it knows the keys taken: two that do not exclude each other choose the same.
+        using var bothTaken = new Barrier(2);
+        plugin.SessionServerKeysTaken = () => bothTaken.SignalAndWait(TimeSpan.FromSeconds(1));
+
+        var one = Task.Run(() => plugin.AddSessionServers("one", project.Path, [new McpSessionServer { Name = "docs", Url = "http://127.0.0.1:1/mcp" }]));
+        var two = Task.Run(() => plugin.AddSessionServers("two", project.Path, [new McpSessionServer { Name = "docs", Url = "http://127.0.0.1:2/mcp" }]));
+        var keys = await Task.WhenAll(one, two);
+
+        Assert.AreNotEqual(keys[0].Single(), keys[1].Single());
+        var servers = plugin.ConfigCache.Discover(project.Path, _home.Path).EffectiveServers.ToDictionary(static server => server.Definition.Key, static server => server.Definition);
+        Assert.AreEqual("http://127.0.0.1:1/mcp", servers[keys[0].Single()].Url);
+        Assert.AreEqual("http://127.0.0.1:2/mcp", servers[keys[1].Single()].Url);
+    }
 }

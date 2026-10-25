@@ -31,6 +31,10 @@ public sealed partial class McpPlugin
 {
     // The session each server given in memory belongs to, by key.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _sessionServerOwners = new(StringComparer.Ordinal);
+    private readonly Lock _sessionServersGate = new();
+
+    /// <summary>Gets or sets what is called once <see cref="AddSessionServers"/> knows the keys that are taken, for a test.</summary>
+    internal Action? SessionServerKeysTaken { get; set; }
 
     /// <summary>
     /// Adds MCP servers for one session, in memory: no configuration file is written. They are activated for that session,
@@ -62,40 +66,47 @@ public sealed partial class McpPlugin
             if (hasUrl && !Uri.TryCreate(server.Url, UriKind.Absolute, out _)) throw new ArgumentException($"The address of the MCP server '{server.Name}' is not absolute.", nameof(servers));
         }
 
-        // The keys of the configured servers, and of the servers of the other sessions; those of this session are replaced.
-        var taken = _configCache.Discover(projectDirectory, _home).EffectiveServers
-            .Where(static server => server.Definition.SourcePath != McpConfigDiscovery.SessionServersPath)
-            .Select(static server => server.Definition.Key)
-            .Concat(_sessionServerOwners.Where(owner => !string.Equals(owner.Value, sessionId, StringComparison.OrdinalIgnoreCase)).Select(static owner => owner.Key))
-            .ToHashSet(StringComparer.Ordinal);
-        var suffix = "-" + new string([.. sessionId.Where(char.IsAsciiLetterOrDigit).Take(8)]);
-        var definitions = new List<McpServerDefinition>(servers.Count);
-        foreach (var server in servers)
+        string[] keys;
+        // The keys are chosen and published at once: two sessions added at the same time never take the same one.
+        lock (_sessionServersGate)
         {
-            var name = KeyOf(server.Name);
-            var key = taken.Contains(name) ? name + suffix : name;
-            for (var index = 2; taken.Contains(key) || definitions.Any(definition => definition.Key == key); index++) key = $"{name}{suffix}-{index}";
-            definitions.Add(new McpServerDefinition
+            // The keys of the configured servers, and of the servers of the other sessions; those of this session are replaced.
+            var taken = _configCache.Discover(projectDirectory, _home).EffectiveServers
+                .Where(static server => server.Definition.SourcePath != McpConfigDiscovery.SessionServersPath)
+                .Select(static server => server.Definition.Key)
+                .Concat(_sessionServerOwners.Where(owner => !string.Equals(owner.Value, sessionId, StringComparison.OrdinalIgnoreCase)).Select(static owner => owner.Key))
+                .ToHashSet(StringComparer.Ordinal);
+            SessionServerKeysTaken?.Invoke();
+            var suffix = "-" + new string([.. sessionId.Where(char.IsAsciiLetterOrDigit).Take(8)]);
+            var definitions = new List<McpServerDefinition>(servers.Count);
+            foreach (var server in servers)
             {
-                Key = key,
-                Transport = string.IsNullOrWhiteSpace(server.Url) ? McpTransportKind.Stdio : McpTransportKind.Http,
-                SourceScope = McpConfigScope.Project,
-                SourcePath = McpConfigDiscovery.SessionServersPath,
-                SourceFlavor = McpConfigFlavor.CodeAlta,
-                SourceOrigin = McpConfigOrigin.Common,
-                Command = string.IsNullOrWhiteSpace(server.Command) ? null : server.Command,
-                Args = [.. server.Args],
-                // A stdio server starts in the folder of its session.
-                Cwd = string.IsNullOrWhiteSpace(server.Command) || string.IsNullOrWhiteSpace(projectDirectory) ? null : Path.GetFullPath(projectDirectory),
-                Env = new Dictionary<string, string>(server.Env, StringComparer.Ordinal),
-                Url = string.IsNullOrWhiteSpace(server.Url) ? null : server.Url,
-                Headers = new Dictionary<string, string>(server.Headers, StringComparer.Ordinal),
-            });
+                var name = KeyOf(server.Name);
+                var key = taken.Contains(name) ? name + suffix : name;
+                for (var index = 2; taken.Contains(key) || definitions.Any(definition => definition.Key == key); index++) key = $"{name}{suffix}-{index}";
+                definitions.Add(new McpServerDefinition
+                {
+                    Key = key,
+                    Transport = string.IsNullOrWhiteSpace(server.Url) ? McpTransportKind.Stdio : McpTransportKind.Http,
+                    SourceScope = McpConfigScope.Project,
+                    SourcePath = McpConfigDiscovery.SessionServersPath,
+                    SourceFlavor = McpConfigFlavor.CodeAlta,
+                    SourceOrigin = McpConfigOrigin.Common,
+                    Command = string.IsNullOrWhiteSpace(server.Command) ? null : server.Command,
+                    Args = [.. server.Args],
+                    // A stdio server starts in the folder of its session.
+                    Cwd = string.IsNullOrWhiteSpace(server.Command) || string.IsNullOrWhiteSpace(projectDirectory) ? null : Path.GetFullPath(projectDirectory),
+                    Env = new Dictionary<string, string>(server.Env, StringComparer.Ordinal),
+                    Url = string.IsNullOrWhiteSpace(server.Url) ? null : server.Url,
+                    Headers = new Dictionary<string, string>(server.Headers, StringComparer.Ordinal),
+                });
+            }
+
+            keys = [.. definitions.Select(static definition => definition.Key)];
+            foreach (var key in keys) _sessionServerOwners[key] = sessionId;
+            _configCache.AddSessionServers(definitions);
         }
 
-        var keys = definitions.Select(static definition => definition.Key).ToArray();
-        foreach (var key in keys) _sessionServerOwners[key] = sessionId;
-        _configCache.AddSessionServers(definitions);
         var scope = McpActivationState.ResolveScopeKey(sessionId, null);
         if (!string.IsNullOrWhiteSpace(projectDirectory)) _activationState.SetProjectDirectory(scope, Path.GetFullPath(projectDirectory));
         _activationState.ActivateServers(scope, keys);
