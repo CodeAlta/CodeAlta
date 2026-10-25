@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Text;
 using System.Text.Json;
 using CodeAlta.Acp;
 using CodeAlta.Agent;
@@ -29,8 +30,9 @@ internal interface IAcpEventSink
 /// session it belongs to, a session the root started included:
 /// </para>
 /// <list type="bullet">
-/// <item><c>agent_message_chunk</c> and <c>agent_thought_chunk</c> for the deltas of the answer and of the reasoning, or
-/// for the whole text when the provider streamed none;</item>
+/// <item><c>agent_message_chunk</c> and <c>agent_thought_chunk</c> for the deltas of the answer and of the reasoning, for
+/// the whole text when the provider streamed none, and for what the stream of events dropped once the text is complete
+/// (with an error <c>events_dropped</c> when a part in the middle was lost);</item>
 /// <item><c>tool_call</c> when a tool call starts (kind, title, locations, raw input, and in <c>_meta.codealta</c> the name
 /// of the CodeAlta tool and the run), <c>tool_call_update</c> when it ends (status) and when its output is known (a bounded
 /// text, a diff);</item>
@@ -53,10 +55,11 @@ internal sealed class AcpEventProjector
     // The sessions seen, and the tool calls announced, by session and call.
     private readonly HashSet<string> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<(string Session, string Call)> _tools = [];
-    // The texts streamed since the last completed one, by session and channel (answer or thought), and the contents they
-    // were streamed for: a completed text whose deltas were streamed is not sent again, one that had none is sent whole.
-    private readonly HashSet<(string Session, bool Thought)> _streamed = [];
-    private readonly HashSet<(string Session, string Content)> _streamedContents = [];
+    // The texts streamed and not completed yet, by session and content, with their run, and the content each channel (answer
+    // or thought) of a session streamed last: a completed text is compared with what was streamed of it, and only what the
+    // client misses is sent (all of it when nothing was streamed). They are forgotten when the run of the session ends.
+    private readonly Dictionary<(string Session, string Content), StreamedText> _streamed = [];
+    private readonly Dictionary<(string Session, bool Thought), string> _lastStreamed = [];
 
     /// <summary>Creates a projection to a sink.</summary>
     /// <param name="sink">What takes the updates and the notifications.</param>
@@ -154,19 +157,21 @@ internal sealed class AcpEventProjector
         switch (agentEvent)
         {
             case AgentContentDeltaEvent { Kind: AgentContentKind.Assistant, Delta.Length: > 0 } delta:
-                Streamed(sessionId, thought: false, delta.ContentId);
+                Streamed(sessionId, thought: false, delta);
                 await UpdateAsync(sessionId, AcpSessionUpdates.AgentMessageChunk(delta.Delta), cancellationToken).ConfigureAwait(false);
                 break;
             case AgentContentDeltaEvent { Kind: AgentContentKind.Reasoning or AgentContentKind.ReasoningSummary, Delta.Length: > 0 } delta:
-                Streamed(sessionId, thought: true, delta.ContentId);
+                Streamed(sessionId, thought: true, delta);
                 await UpdateAsync(sessionId, AcpSessionUpdates.AgentThoughtChunk(delta.Delta), cancellationToken).ConfigureAwait(false);
                 break;
-            case AgentContentCompletedEvent { Kind: AgentContentKind.Assistant, Content.Length: > 0 } answer when !WasStreamed(sessionId, thought: false, answer.ContentId):
-                await UpdateAsync(sessionId, AcpSessionUpdates.AgentMessageChunk(answer.Content), cancellationToken).ConfigureAwait(false);
+            case AgentContentCompletedEvent { Kind: AgentContentKind.Assistant } answer:
+                await CompleteAsync(sessionId, thought: false, answer, cancellationToken).ConfigureAwait(false);
                 break;
-            case AgentContentCompletedEvent { Kind: AgentContentKind.Reasoning or AgentContentKind.ReasoningSummary, Content.Length: > 0 } thought
-                when !WasStreamed(sessionId, thought: true, thought.ContentId):
-                await UpdateAsync(sessionId, AcpSessionUpdates.AgentThoughtChunk(thought.Content), cancellationToken).ConfigureAwait(false);
+            case AgentContentCompletedEvent { Kind: AgentContentKind.Reasoning or AgentContentKind.ReasoningSummary } thought:
+                await CompleteAsync(sessionId, thought: true, thought, cancellationToken).ConfigureAwait(false);
+                break;
+            case AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle }:
+                ForgetStreamed(sessionId);
                 break;
             case AgentActivityEvent activity when IsToolActivity(activity.Kind) && !string.IsNullOrEmpty(activity.ActivityId):
                 await ProjectToolActivityAsync(sessionId, activity, cancellationToken).ConfigureAwait(false);
@@ -196,6 +201,8 @@ internal sealed class AcpEventProjector
                 await ProjectSessionUpdateAsync(sessionId, update, cancellationToken).ConfigureAwait(false);
                 break;
             case AgentErrorEvent error:
+                // The error of a run ends it, without completing what it streamed.
+                ForgetStreamed(sessionId);
                 await ExtensionAsync(ErrorMethod, sessionId, writer =>
                 {
                     writer.WriteString("kind", FailureKindName(error.Failure?.Kind ?? AgentFailureKind.Other));
@@ -290,17 +297,70 @@ internal sealed class AcpEventProjector
         }
     }
 
-    private void Streamed(string sessionId, bool thought, string contentId)
+    private void Streamed(string sessionId, bool thought, AgentContentDeltaEvent delta)
     {
-        _streamed.Add((sessionId, thought));
-        // Bounded: the contents of a provider that names its completed texts otherwise are never matched.
-        if (_streamedContents.Count >= 1024) _streamedContents.Clear();
-        _streamedContents.Add((sessionId, contentId));
+        if (!_streamed.TryGetValue((sessionId, delta.ContentId), out var text) || text.Run != delta.RunId)
+        {
+            // Bounded: the contents of a provider that never completes them are dropped at last.
+            if (_streamed.Count >= 1024)
+            {
+                _streamed.Clear();
+                _lastStreamed.Clear();
+            }
+
+            _streamed[(sessionId, delta.ContentId)] = text = new StreamedText(delta.RunId);
+        }
+
+        text.Text.Append(delta.Delta);
+        _lastStreamed[(sessionId, thought)] = delta.ContentId;
     }
 
-    // Whether the deltas of a completed text were sent: its own, or those streamed since the last completed text.
-    private bool WasStreamed(string sessionId, bool thought, string contentId)
-        => _streamedContents.Remove((sessionId, contentId)) | _streamed.Remove((sessionId, thought));
+    // Sends what the client misses of a completed text: all of it when nothing was streamed; the end the stream dropped;
+    // or, when it dropped a part in the middle, the text after what the client has right, with an error that says so.
+    private async ValueTask CompleteAsync(string sessionId, bool thought, AgentContentCompletedEvent completed, CancellationToken cancellationToken)
+    {
+        var text = completed.Content;
+        var streamed = TakeStreamed(sessionId, thought, completed);
+        var common = streamed is null ? 0 : CommonPrefixLength(streamed, text);
+        if (common < text.Length)
+        {
+            var rest = text[common..];
+            await UpdateAsync(sessionId, thought ? AcpSessionUpdates.AgentThoughtChunk(rest) : AcpSessionUpdates.AgentMessageChunk(rest), cancellationToken).ConfigureAwait(false);
+        }
+
+        if (streamed is not null && common < streamed.Length && common < text.Length)
+        {
+            await ExtensionAsync(ErrorMethod, sessionId, writer =>
+            {
+                writer.WriteString("kind", "events_dropped");
+                writer.WriteString("message", $"Updates of the {(thought ? "reasoning" : "answer")} were lost: the text streamed is incomplete. The text after the last part it has right was sent again.");
+            }, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // What was streamed of a completed text: its own deltas, or else the deltas the channel streamed last in the same run (a
+    // provider that names its completed texts otherwise); null when nothing was streamed of it.
+    private string? TakeStreamed(string sessionId, bool thought, AgentContentCompletedEvent completed)
+    {
+        if (_streamed.Remove((sessionId, completed.ContentId), out var own))
+        {
+            if (_lastStreamed.TryGetValue((sessionId, thought), out var last) && last == completed.ContentId) _lastStreamed.Remove((sessionId, thought));
+            return own.Run == completed.RunId ? own.Text.ToString() : null;
+        }
+
+        return _lastStreamed.Remove((sessionId, thought), out var lastId) && _streamed.Remove((sessionId, lastId), out var other) && other.Run == completed.RunId
+            ? other.Text.ToString()
+            : null;
+    }
+
+    private void ForgetStreamed(string sessionId)
+    {
+        foreach (var key in _streamed.Keys.Where(key => string.Equals(key.Session, sessionId, StringComparison.OrdinalIgnoreCase)).ToArray()) _streamed.Remove(key);
+        _lastStreamed.Remove((sessionId, false));
+        _lastStreamed.Remove((sessionId, true));
+    }
+
+    private static int CommonPrefixLength(string left, string right) => left.AsSpan().CommonPrefixLength(right);
 
     private static bool IsToolActivity(AgentActivityKind kind)
         => kind is AgentActivityKind.ToolCall or AgentActivityKind.CommandExecution or AgentActivityKind.FileChange or AgentActivityKind.McpToolCall
@@ -385,21 +445,23 @@ internal sealed class AcpEventProjector
         return paths.Count == 0 ? null : paths;
     }
 
-    // The output of a tool as a client shows it: the change of a file a replacement made, the unified diff of the call, and
-    // the bounded text of its result.
+    // The output of a tool as a client shows it: the change of a file, the unified diff of the call, and the bounded text of
+    // its result. An ACP diff carries whole contents, which only a write_file that created its file knows (the content it
+    // wrote, from nothing); the change of another call is its unified diff.
     private static List<ToolCallContent> ToolOutputContent(AgentContentCompletedEvent output)
     {
         var content = new List<ToolCallContent>();
         var details = output.Details ?? default;
-        if (AcpJson.GetString(details, "toolName") == "replace_in_file"
-            && AcpJson.TryGetObject(details, "arguments", out var arguments)
-            && AcpJson.GetString(arguments, "old_string") is { } oldText && AcpJson.GetString(arguments, "new_string") is { } newText
+        var diff = AcpJson.GetString(details, "diff");
+        if (AcpJson.GetString(details, "toolName") == "write_file"
+            && diff is not null && diff.ReplaceLineEndings("\n").Split('\n').Contains("new file mode 100644")
+            && AcpJson.TryGetObject(details, "arguments", out var arguments) && AcpJson.GetString(arguments, "content") is { } newText
             && AcpJson.TryGetArray(details, "modifiedFiles", out var modified) && modified.GetArrayLength() == 1
             && modified[0].GetString() is { } path && Path.IsPathFullyQualified(path))
         {
-            content.Add(ToolCallContent.FromDiff(path, oldText, newText));
+            content.Add(ToolCallContent.FromDiff(path, null, newText));
         }
-        else if (AcpJson.GetString(details, "diff") is { Length: > 0 } diff)
+        else if (diff is { Length: > 0 })
         {
             content.Add(ToolCallContent.FromText(Bound("```diff\n" + diff.TrimEnd() + "\n```")));
         }
@@ -444,5 +506,13 @@ internal sealed class AcpEventProjector
     {
         if (value is null) writer.WriteNull(name);
         else writer.WriteString(name, value);
+    }
+
+    // The text streamed of a content, and the run that streamed it.
+    private sealed class StreamedText(AgentRunId? run)
+    {
+        public AgentRunId? Run { get; } = run;
+
+        public StringBuilder Text { get; } = new();
     }
 }

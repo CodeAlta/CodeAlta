@@ -119,6 +119,104 @@ public sealed class AcpEventProjectorTests
         Assert.AreEqual("execute", AcpEventProjector.KindOf("anything", AgentActivityKind.CommandExecution).Value.GetString());
     }
 
+    [TestMethod]
+    public async Task CompletedText_RepairsWhatTheStreamDropped()
+    {
+        var sink = new CaptureSink();
+        var projector = new AcpEventProjector(sink);
+        var run = new AgentRunId("run-1");
+
+        // The last deltas were dropped: the rest of the text is sent once it is complete.
+        await projector.ProjectAsync(Of(Delta(run, AgentContentKind.Assistant, "a1", "Hello")), default);
+        await projector.ProjectAsync(Of(Completed(run, AgentContentKind.Assistant, "a1", "Hello, world.")), default);
+        // A delta in the middle was dropped: the text after the common part is sent, and the client is told.
+        await projector.ProjectAsync(Of(Delta(run, AgentContentKind.Reasoning, "t1", "Think ")), default);
+        await projector.ProjectAsync(Of(Delta(run, AgentContentKind.Reasoning, "t1", "hard.")), default);
+        await projector.ProjectAsync(Of(Completed(run, AgentContentKind.Reasoning, "t1", "Think about it hard.")), default);
+        // Nothing was dropped: nothing more is sent.
+        await projector.ProjectAsync(Of(Delta(run, AgentContentKind.Assistant, "a2", "Done.")), default);
+        await projector.ProjectAsync(Of(Completed(run, AgentContentKind.Assistant, "a2", "Done.")), default);
+
+        CollectionAssert.AreEqual(new[] { "Hello", ", world.", "Done." }, Chunks(sink, "agent_message_chunk"));
+        CollectionAssert.AreEqual(new[] { "Think ", "hard.", "about it hard." }, Chunks(sink, "agent_thought_chunk"));
+        var dropped = sink.Extensions.Single();
+        Assert.AreEqual(CodeAltaAcpExtensions.ErrorMethod, dropped.Method);
+        Assert.AreEqual("events_dropped", dropped.Parameters.GetProperty("kind").GetString());
+        Assert.AreEqual(Root, dropped.Parameters.GetProperty("sessionId").GetString());
+    }
+
+    [TestMethod]
+    public async Task TextStreamedInARunThatFailed_DoesNotHideTheAnswerOfTheNextRun()
+    {
+        var sink = new CaptureSink();
+        var projector = new AcpEventProjector(sink);
+        var failed = new AgentRunId("run-1");
+        var next = new AgentRunId("run-2");
+
+        await projector.ProjectAsync(Of(Delta(failed, AgentContentKind.Assistant, "a1", "Partial")), default);
+        await projector.ProjectAsync(Of(new AgentErrorEvent(Provider, Root, DateTimeOffset.UtcNow, "Connection lost.", runId: failed)), default);
+        // The next run streams nothing: its answer is sent whole.
+        await projector.ProjectAsync(Of(Completed(next, AgentContentKind.Assistant, "a2", "Whole answer.")), default);
+        // A run without an id ends with its idle event.
+        await projector.ProjectAsync(Of(Delta(null, AgentContentKind.Reasoning, "t1", "Half")), default);
+        await projector.ProjectAsync(Of(new AgentSessionUpdateEvent(Provider, Root, DateTimeOffset.UtcNow, null, AgentSessionUpdateKind.Idle, null)), default);
+        await projector.ProjectAsync(Of(Completed(null, AgentContentKind.Reasoning, "t2", "A whole thought.")), default);
+
+        CollectionAssert.AreEqual(new[] { "Partial", "Whole answer." }, Chunks(sink, "agent_message_chunk"));
+        CollectionAssert.AreEqual(new[] { "Half", "A whole thought." }, Chunks(sink, "agent_thought_chunk"));
+    }
+
+    [TestMethod]
+    public async Task FileChanges_AreDiffsOnlyWithTheWholeContents()
+    {
+        var sink = new CaptureSink();
+        var projector = new AcpEventProjector(sink);
+        var path = Path.Combine(Path.GetTempPath(), "codealta-acp", "a.txt");
+        var pathJson = JsonSerializer.Serialize(path);
+
+        // A replacement knows fragments only: the client is given the unified diff of the call.
+        var replace = await ToolOutputAsync(projector, sink, "call-1", "replace_in_file",
+            $$"""{"toolName":"replace_in_file","arguments":{"path":{{pathJson}},"old_string":"two","new_string":"2"},"modifiedFiles":[{{pathJson}}],"diff":"--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+2\n three\n"}""");
+        Assert.IsFalse(replace.Any(static item => item.GetProperty("type").GetString() == "diff"), replace.Count.ToString());
+        StringAssert.Contains(replace[0].GetProperty("content").GetProperty("text").GetString(), "-two\n+2");
+
+        // A new file is known whole: a diff from nothing.
+        var created = await ToolOutputAsync(projector, sink, "call-2", "write_file",
+            $$"""{"toolName":"write_file","arguments":{"path":{{pathJson}},"content":"one\ntwo\n"},"modifiedFiles":[{{pathJson}}],"diff":"diff --git a/a.txt b/a.txt\nnew file mode 100644\n--- /dev/null\n+++ b/a.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n"}""");
+        var diff = created.Single(static item => item.GetProperty("type").GetString() == "diff");
+        Assert.AreEqual(path, diff.GetProperty("path").GetString());
+        Assert.IsTrue(!diff.TryGetProperty("oldText", out var oldText) || oldText.ValueKind == JsonValueKind.Null);
+        Assert.AreEqual("one\ntwo\n", diff.GetProperty("newText").GetString());
+
+        // A file written over: what it was is not known, the unified diff is given.
+        var rewritten = await ToolOutputAsync(projector, sink, "call-3", "write_file",
+            $$"""{"toolName":"write_file","arguments":{"path":{{pathJson}},"content":"three\n"},"modifiedFiles":[{{pathJson}}],"diff":"--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1 @@\n-one\n-two\n+three\n"}""");
+        Assert.IsFalse(rewritten.Any(static item => item.GetProperty("type").GetString() == "diff"));
+        StringAssert.Contains(rewritten[0].GetProperty("content").GetProperty("text").GetString(), "+three");
+    }
+
+    // The content of the update a tool output became.
+    private static async Task<List<JsonElement>> ToolOutputAsync(AcpEventProjector projector, CaptureSink sink, string callId, string tool, string details)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var json = JsonDocument.Parse(details).RootElement.Clone();
+        await projector.ProjectAsync(Of(new AgentActivityEvent(Provider, Root, now, null, AgentActivityKind.ToolCall, AgentActivityPhase.Started, callId, null, tool, null, json)), default);
+        await projector.ProjectAsync(Of(new AgentContentCompletedEvent(Provider, Root, now, null, AgentContentKind.ToolOutput, callId + "-output", callId, "Done.", json)), default);
+        var update = sink.Updates[^1].Update.Value;
+        Assert.AreEqual("tool_call_update", update.GetProperty("sessionUpdate").GetString());
+        return [.. update.GetProperty("content").EnumerateArray()];
+    }
+
+    private static AgentContentDeltaEvent Delta(AgentRunId? run, AgentContentKind kind, string contentId, string text)
+        => new(Provider, Root, DateTimeOffset.UtcNow, run, kind, contentId, null, text);
+
+    private static AgentContentCompletedEvent Completed(AgentRunId? run, AgentContentKind kind, string contentId, string text)
+        => new(Provider, Root, DateTimeOffset.UtcNow, run, kind, contentId, null, text);
+
+    private static string[] Chunks(CaptureSink sink, string kind)
+        => [.. sink.Updates.Select(static item => item.Update.Value).Where(update => update.GetProperty("sessionUpdate").GetString() == kind)
+            .Select(static update => update.GetProperty("content").GetProperty("text").GetString()!)];
+
     private static HeadlessSessionEvent Of(AgentEvent agentEvent) => new(Root, new SessionAgentEvent(agentEvent.SessionId, agentEvent));
 
     private sealed class CaptureSink : IAcpEventSink
