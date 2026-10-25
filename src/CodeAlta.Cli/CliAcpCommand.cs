@@ -35,6 +35,7 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
                 StartMcp = !options.NoMcp,
                 ListsSkills = !options.NoSkills,
                 Offline = options.Offline,
+                ChecksRequired = true,
             }, environment, processToken).ConfigureAwait(false);
             environment.HostCreated?.Invoke(host.Host);
             CliAcpAgent? agent = null;
@@ -58,6 +59,12 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
             }
 
             return CliExitCodes.Completed;
+        }
+        catch (CliStartupException exception)
+        {
+            // A required plugin or MCP server did not start: the client sees the process end before it answers.
+            output.Error("altacli: " + exception.Message);
+            return CliExitCodes.InvalidUsage;
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !processToken.IsCancellationRequested)
         {

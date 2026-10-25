@@ -34,7 +34,17 @@ internal sealed record CliHostRequest
     public bool ListsSkills { get; init; } = true;
 
     public bool Offline { get; init; }
+
+    /// <summary>
+    /// Gets whether the host checks, once started, that the plugins and the MCP servers the configuration marks required
+    /// started (<c>run</c> and <c>acp</c>); a failure is a <see cref="CliStartupException"/>.
+    /// </summary>
+    public bool ChecksRequired { get; init; }
 }
+
+/// <summary>A host that cannot run as it was set up: a required plugin or MCP server did not start. Exit code 2.</summary>
+/// <param name="message">What did not start, and why.</param>
+internal sealed class CliStartupException(string message) : Exception(message);
 
 /// <summary>
 /// The host of a run of <c>altacli</c>, the composition every face shares (<c>run</c>, <c>alta</c>, <c>models</c>,
@@ -116,7 +126,7 @@ internal sealed class CliHost : IAsyncDisposable
                 PluginEnvironment = environment.PluginEnvironment,
                 StartPlugins = request.StartPlugins,
                 PluginFrontend = PluginFrontends.Cli,
-                PluginBuiltIns = BuiltInPlugins(request, plugin => Volatile.Write(ref mcp, plugin)),
+                PluginBuiltIns = BuiltInPlugins(request, catalog, plugin => Volatile.Write(ref mcp, plugin)),
                 RawArguments = [],
                 ConfigureModelProviders = environment.ConfigureModelProviders ?? (registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), storage.GlobalRoot, modelsDev, pluginProviderTypes)),
@@ -130,6 +140,11 @@ internal sealed class CliHost : IAsyncDisposable
             host.Commands.SessionTools = CreateSessionTools(alta);
             // The MCP plugin that runs: one that was created but did not start is not used.
             var started = Volatile.Read(ref mcp) is { } created && host.PluginRuntime.ActivePlugins.Any(plugin => ReferenceEquals(plugin.Instance, created)) ? created : null;
+            if (request.ChecksRequired && await CheckRequiredAsync(host, started, request, catalog, cancellationToken).ConfigureAwait(false) is { } missing)
+            {
+                throw new CliStartupException(missing);
+            }
+
             return new CliHost(storage, host, alta, database, modelsDev, toolEndpoints) { Mcp = started };
         }
         catch
@@ -144,9 +159,11 @@ internal sealed class CliHost : IAsyncDisposable
 
     /// <summary>The built-in plugins of the command-line application: Git, Jira, MCP (unless <c>--no-mcp</c>) and ACP.</summary>
     /// <param name="request">What the host is composed with.</param>
+    /// <param name="catalog">The roots and the configuration of the host, which the MCP plugin reads its policy through.</param>
     /// <param name="mcpCreated">Told the MCP plugin once it is created; null for nothing.</param>
-    internal static IReadOnlyList<BuiltInPluginDefinition> BuiltInPlugins(CliHostRequest request, Action<McpPlugin>? mcpCreated = null)
+    internal static IReadOnlyList<BuiltInPluginDefinition> BuiltInPlugins(CliHostRequest request, CatalogOptions catalog, Action<McpPlugin>? mcpCreated = null)
     {
+        ArgumentNullException.ThrowIfNull(catalog);
         var plugins = new List<BuiltInPluginDefinition>
         {
             new()
@@ -166,15 +183,14 @@ internal sealed class CliHost : IAsyncDisposable
         };
         if (request.StartMcp)
         {
-            var loadsSkills = request.ListsSkills;
+            var options = McpOptions(request, catalog);
             plugins.Add(new()
             {
                 Id = "mcp", DisplayName = "MCP",
                 Description = "Connects CodeAlta to configured Model Context Protocol servers.",
-                // No window shows the views of MCP Apps; the skills of the servers are loaded like the others, without asking.
                 PluginType = typeof(McpPlugin), Factory = () =>
                 {
-                    var plugin = new McpPlugin(new McpPluginOptions { ShowsApps = false, LoadsSkills = loadsSkills });
+                    var plugin = new McpPlugin(options);
                     mcpCreated?.Invoke(plugin);
                     return plugin;
                 },
@@ -191,6 +207,100 @@ internal sealed class CliHost : IAsyncDisposable
         });
         return plugins;
     }
+
+    // The MCP plugin of a run. No window shows the views of MCP Apps; the skills of the servers are loaded like the others,
+    // without asking. The policy ([plugins.mcp]) is the one of the configuration the run reads, -c and CODEALTA_CONFIG_CONTENT
+    // included, and the alta mcp commands do not write the configuration files. The servers are those of the home of the
+    // profile (~/.alta/mcp.json); a separate profile (--profile) reads those of the user's home.
+    internal static McpPluginOptions McpOptions(CliHostRequest request, CatalogOptions catalog)
+    {
+        var store = new CodeAltaConfigStore(catalog);
+        var overlaid = request.Config.IgnoreUserConfig || request.Config.Overlays.Count > 0;
+        var globalRoot = Path.TrimEndingDirectorySeparator(request.Storage.GlobalRoot);
+        return new McpPluginOptions
+        {
+            ShowsApps = false,
+            LoadsSkills = request.ListsSkills,
+            // Without overlays and without a file, there is no policy (the store would give the template of a new file).
+            GlobalConfigContent = () => overlaid || File.Exists(catalog.ConfigPath) ? store.LoadGlobalConfigContent() : null,
+            ReadOnlyConfiguration = true,
+            UserHomeDirectory = request.Storage.Mode != CliStorageMode.Profile && Path.GetFileName(globalRoot) == ".alta" ? Path.GetDirectoryName(globalRoot) : null,
+        };
+    }
+
+    // [plugins.<id>] required = true and [plugins.mcp.servers.<key>] required = true: the run does not go on with fewer of
+    // them than it was set up with. --no-plugins and --no-mcp turn the check off with what they turn off.
+    private static async Task<string?> CheckRequiredAsync(CodeAltaHost host, McpPlugin? mcp, CliHostRequest request, CatalogOptions catalog,
+        CancellationToken cancellationToken)
+    {
+        if (!request.StartPlugins) return null;
+        var problems = new List<string>();
+        IReadOnlyList<string> requiredPlugins;
+        try
+        {
+            requiredPlugins = RequiredPlugins(catalog, request.ProjectFolder);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or Tomlyn.TomlException)
+        {
+            return "The required plugins cannot be read from the configuration: " + exception.GetBaseException().Message;
+        }
+
+        foreach (var id in requiredPlugins)
+        {
+            if (id == "mcp" && !request.StartMcp) continue;
+            if (host.PluginRuntime.ActivePlugins.Any(plugin => string.Equals(PluginIdOf(plugin), id, StringComparison.OrdinalIgnoreCase))) continue;
+            var diagnostic = host.PluginRuntime.Diagnostics.LastOrDefault(candidate => candidate.Severity >= PluginDiagnosticSeverity.Error
+                && (string.Equals(candidate.PackageId, id, StringComparison.OrdinalIgnoreCase) || string.Equals(candidate.RuntimeKey, "builtin:" + id, StringComparison.OrdinalIgnoreCase)));
+            problems.Add($"The required plugin '{id}' did not start: {diagnostic?.Message ?? "it is not installed, it is turned off, or it is not made for the command line."}");
+        }
+
+        if (request.StartMcp)
+        {
+            if (mcp is not null)
+            {
+                foreach (var failure in await mcp.CheckRequiredServersAsync(request.ProjectFolder, cancellationToken).ConfigureAwait(false))
+                {
+                    problems.Add($"The required MCP server '{failure.Server}' did not start ({failure.Code}): {failure.Message}");
+                }
+            }
+            else
+            {
+                // The plugin did not start (turned off, or it failed): its policy is read all the same, by an instance of its own.
+                await using var reader = new McpPlugin(McpOptions(request, catalog));
+                IReadOnlyList<string> required;
+                try
+                {
+                    required = reader.GetRequiredServers(request.ProjectFolder);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Tomlyn.TomlException)
+                {
+                    required = [];
+                }
+
+                foreach (var key in required) problems.Add($"The required MCP server '{key}' did not start: the MCP plugin is not running.");
+            }
+        }
+
+        return problems.Count == 0 ? null : string.Join(Environment.NewLine, problems);
+    }
+
+    // The plugins a configuration marks required: [plugins.<id>] required = true in the configuration of the run (the user's
+    // file and what is laid over it) or in the project's .alta/config.toml.
+    internal static IReadOnlyList<string> RequiredPlugins(CatalogOptions catalog, string projectFolder)
+    {
+        var store = new CodeAltaConfigStore(catalog);
+        return [.. new[] { store.LoadGlobal(), store.LoadProject(projectFolder) }
+            .SelectMany(static document => document.Plugins ?? [])
+            .Where(static entry => entry.Value?.Required == true)
+            .Select(static entry => entry.Key.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    // The id of a plugin as the configuration names it: the package of a source plugin, the id of a built-in one.
+    private static string PluginIdOf(ActivePluginInstance plugin)
+        => plugin.SourcePackage?.PackageId
+            ?? (plugin.Descriptor.RuntimeKey.StartsWith("builtin:", StringComparison.Ordinal) ? plugin.Descriptor.RuntimeKey["builtin:".Length..] : plugin.Descriptor.RuntimeKey);
 
     // The alta commands over the services of the host, as the desktop composes them, minus those of a user (ask, review), of a
     // window (views, windows, terminals, canvases), of a host that outlives the run (reminders, automations) and of search.

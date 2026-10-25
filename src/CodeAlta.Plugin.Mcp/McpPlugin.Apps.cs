@@ -22,7 +22,32 @@ public sealed record McpPluginOptions
     /// with <c>alta mcp skill activate</c> once the user approves them. A host that cannot ask the user leaves it off.
     /// </summary>
     public bool LoadsSkills { get; init; }
+
+    /// <summary>
+    /// Gets what reads the user's <c>config.toml</c> as the host reads it, with the settings the host lays over it (such as
+    /// the <c>-c</c> options of <c>altacli</c>), or <see langword="null"/> to read the file. The MCP policy of the user,
+    /// <c>[plugins.mcp]</c>, is read from what it returns; null or blank text is a configuration without one.
+    /// </summary>
+    public Func<string?>? GlobalConfigContent { get; init; }
+
+    /// <summary>
+    /// Gets whether the <c>alta mcp</c> commands leave the configuration files as they are: those that add, remove, turn on
+    /// or turn off a server (<c>mcp.json</c>, <c>config.toml</c>) fail instead, for a host that never writes them.
+    /// </summary>
+    public bool ReadOnlyConfiguration { get; init; }
+
+    /// <summary>
+    /// Gets the home folder whose <c>.alta/mcp.json</c>, <c>.alta/config.toml</c>, tokens and the configurations of other
+    /// tools the plugin reads, or <see langword="null"/> for the home of the current user.
+    /// </summary>
+    public string? UserHomeDirectory { get; init; }
 }
+
+/// <summary>A server the policy marks required that could not start (<see cref="McpPlugin.CheckRequiredServersAsync"/>).</summary>
+/// <param name="Server">The key of the server.</param>
+/// <param name="Code">Why: <c>server_not_found</c>, <c>server_disabled</c>, <c>server_startup_timeout</c>, <c>server_unavailable</c>...</param>
+/// <param name="Message">What failed, for a person.</param>
+public sealed record McpRequiredServerFailure(string Server, string Code, string Message);
 
 /// <summary>Who asks for the view of a tool call: the session it belongs to, which gives the server its connection.</summary>
 /// <param name="SessionId">The session of the call.</param>

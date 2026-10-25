@@ -1729,7 +1729,8 @@ public sealed partial class CodeAltaConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         NormalizeDocument(document);
         document.Plugins ??= new Dictionary<string, CodeAltaPluginSettingsDocument>(StringComparer.OrdinalIgnoreCase);
-        document.Plugins[pluginId.Trim()] = new CodeAltaPluginSettingsDocument { Enabled = enabled };
+        document.Plugins.TryGetValue(pluginId.Trim(), out var existing);
+        document.Plugins[pluginId.Trim()] = new CodeAltaPluginSettingsDocument { Enabled = enabled, Required = existing?.Required };
         SaveDocument(path, document);
     }
 

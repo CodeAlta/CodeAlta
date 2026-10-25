@@ -25,7 +25,7 @@ internal sealed class McpConfigCache
     private readonly Dictionary<string, Entry<McpConfigSnapshot>> _configs = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Entry<McpPolicyOptions>> _policies = new(StringComparer.Ordinal);
     private readonly McpConfigDiscovery _discovery = new();
-    private readonly McpPolicyLoader _policyLoader = new();
+    private readonly McpPolicyLoader _policyLoader;
     private readonly TimeProvider _time;
     // The servers given in memory for sessions, with every discovery.
     private IReadOnlyList<McpServerDefinition> _sessionServers = [];
@@ -38,11 +38,21 @@ internal sealed class McpConfigCache
     {
     }
 
-    internal McpConfigCache(TimeProvider time)
+    // The policy of the user's configuration as the host reads it (McpPluginOptions.GlobalConfigContent); null reads the file.
+    public McpConfigCache(Func<string?>? globalConfigContent)
+        : this(TimeProvider.System, globalConfigContent)
+    {
+    }
+
+    internal McpConfigCache(TimeProvider time, Func<string?>? globalConfigContent = null)
     {
         ArgumentNullException.ThrowIfNull(time);
         _time = time;
+        _policyLoader = new McpPolicyLoader(globalConfigContent);
     }
+
+    /// <summary>Gets the loader of the policy, which reads the user's configuration as the host does: what reads the policy without the cache uses it too.</summary>
+    internal McpPolicyLoader PolicyLoader => _policyLoader;
 
     /// <summary>How many times the MCP configuration files were read.</summary>
     internal int ConfigReads => Volatile.Read(ref _configReads);

@@ -89,7 +89,8 @@ Skills are also read from `.agents/skills/` of the project and of the home folde
   layer winning on values and arrays; a strict reading that rejects settings no part of CodeAlta reads; and a read-only
   store whose saves fail. Overlays are never written, errors name the layer at fault, and a project file still overlays
   the result. Why options and not a mode of the process: a headless run reads the user's settings without changing
-  them while Desktop runs on the same file.
+  them while Desktop runs on the same file. A plugin that reads its own table of the file (MCP and `[plugins.mcp]`)
+  is given the text the store composes (`McpPluginOptions.GlobalConfigContent`), so that the overlays reach it too.
 
 ### Shared-file rules
 

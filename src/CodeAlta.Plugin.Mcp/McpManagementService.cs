@@ -1374,7 +1374,7 @@ public sealed class McpManagementService
     {
         try
         {
-            return (_policyLoader.Load(globalPolicyPath, projectPolicyPath), null);
+            return ((_configCache?.PolicyLoader ?? _policyLoader).Load(globalPolicyPath, projectPolicyPath), null);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or Tomlyn.TomlException)
         {

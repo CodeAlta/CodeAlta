@@ -80,6 +80,16 @@ internal sealed record McpServerPolicyOptions
 
 internal sealed class McpPolicyLoader
 {
+    // The user's configuration as the host reads it (McpPluginOptions.GlobalConfigContent), or null to read its file.
+    private readonly Func<string?>? _globalContent;
+
+    public McpPolicyLoader()
+        : this(globalContent: null)
+    {
+    }
+
+    public McpPolicyLoader(Func<string?>? globalContent) => _globalContent = globalContent;
+
     public McpPolicyOptions Load(string? globalConfigPath, string? projectConfigPath)
         => LoadCore(globalConfigPath, projectConfigPath, bounded: false);
 
@@ -87,10 +97,12 @@ internal sealed class McpPolicyLoader
     internal McpPolicyOptions LoadBoundedForInventory(string? globalConfigPath, string? projectConfigPath)
         => LoadCore(globalConfigPath, projectConfigPath, bounded: true);
 
-    private static McpPolicyOptions LoadCore(string? globalConfigPath, string? projectConfigPath, bool bounded)
+    private McpPolicyOptions LoadCore(string? globalConfigPath, string? projectConfigPath, bool bounded)
     {
         var policy = new McpPolicyOptions();
-        policy = ApplyFile(policy, globalConfigPath, bounded, global: true);
+        policy = _globalContent is { } globalContent
+            ? Apply(policy, globalContent(), global: true)
+            : ApplyFile(policy, globalConfigPath, bounded, global: true);
         policy = ApplyFile(policy, projectConfigPath, bounded, global: false);
         return policy;
     }
@@ -102,7 +114,17 @@ internal sealed class McpPolicyLoader
             return policy;
         }
 
-        var model = TomlSerializer.Deserialize<TomlTable>(bounded ? McpBoundedTextReader.Read(path) : File.ReadAllText(path)) ?? new TomlTable();
+        return Apply(policy, bounded ? McpBoundedTextReader.Read(path) : File.ReadAllText(path), global);
+    }
+
+    private static McpPolicyOptions Apply(McpPolicyOptions policy, string? text, bool global)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return policy;
+        }
+
+        var model = TomlSerializer.Deserialize<TomlTable>(text) ?? new TomlTable();
         if (!TryGetTable(model, "plugins", out var plugins) || !TryGetTable(plugins, "mcp", out var mcp))
         {
             return policy;

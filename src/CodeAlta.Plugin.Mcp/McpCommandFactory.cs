@@ -26,6 +26,9 @@ internal sealed record McpCommandFactoryOptions
 
     // What the skill commands keep, for a host that loads the skills of the servers; null for another host.
     public McpSkillServices? Skills { get; init; }
+
+    // Whether the commands that write mcp.json or config.toml fail instead (McpPluginOptions.ReadOnlyConfiguration).
+    public bool ReadOnlyConfiguration { get; init; }
 }
 
 internal static class McpCommandFactory
@@ -818,6 +821,11 @@ internal static class McpCommandFactory
     // A write of the configuration or the policy: what the plugin read before is read again at its next request.
     private static async Task<T> WriteAsync<T>(McpCommandFactoryOptions options, Func<Task<T>> write)
     {
+        if (options.ReadOnlyConfiguration)
+        {
+            throw new UnauthorizedAccessException("The MCP configuration is read-only in this process: mcp.json and config.toml are not written.");
+        }
+
         try
         {
             return await write().ConfigureAwait(false);
@@ -929,7 +937,7 @@ internal static class McpCommandFactory
     internal static McpPolicyOptions LoadPolicy(PluginAltaCommandContext context, McpCommandFactoryOptions options)
     {
         var projectDirectory = ResolveProjectDirectory(context, options);
-        return new McpPolicyLoader().Load(McpPolicyWriter.GetGlobalPolicyPath(options.UserHomeDirectory),
+        return (options.ConfigCache?.PolicyLoader ?? new McpPolicyLoader()).Load(McpPolicyWriter.GetGlobalPolicyPath(options.UserHomeDirectory),
             projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory));
     }
 

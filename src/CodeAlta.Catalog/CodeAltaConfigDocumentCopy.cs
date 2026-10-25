@@ -28,7 +28,7 @@ internal static class CodeAltaConfigDocumentCopy
             // Records: immutable, only the list is new.
             UnsupportedProviders = [.. document.UnsupportedProviders],
             Skills = document.Skills is { } skills ? new CodeAltaSkillSettingsDocument { Disabled = Copy(skills.Disabled) } : null,
-            Plugins = Copy(document.Plugins, static plugin => new CodeAltaPluginSettingsDocument { Enabled = plugin.Enabled }),
+            Plugins = Copy(document.Plugins, static plugin => new CodeAltaPluginSettingsDocument { Enabled = plugin.Enabled, Required = plugin.Required }),
             Worktrees = document.Worktrees is { } worktrees
                 ? new CodeAltaWorktreeSettingsDocument { Location = worktrees.Location, Folder = worktrees.Folder }
                 : null,

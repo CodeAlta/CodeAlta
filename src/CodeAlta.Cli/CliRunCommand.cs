@@ -48,9 +48,17 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
                 StartMcp = !options.NoMcp,
                 ListsSkills = !options.NoSkills,
                 Offline = options.Offline,
+                ChecksRequired = true,
             }, environment, processToken).ConfigureAwait(false);
             environment.HostCreated?.Invoke(host.Host);
             return await RunAsync(host, request, new HeadlessPrompt(prompt) { Attachments = attachments }, timeout, schema, options, jsonl).ConfigureAwait(false);
+        }
+        catch (CliStartupException exception)
+        {
+            // A required plugin or MCP server did not start: the run does not go on with a weaker harness.
+            output.Error("altacli: " + exception.Message);
+            jsonl?.WriteResult(new CliRunReport("invalid_usage", CliExitCodes.InvalidUsage) { FailureKind = "required_unavailable", FailureMessage = exception.Message });
+            return CliExitCodes.InvalidUsage;
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !processToken.IsCancellationRequested)
         {

@@ -16,7 +16,7 @@ public sealed partial class McpPlugin : PluginBase
 
     private readonly McpActivationState _activationState = new();
     // What every tool call, prompt build and run start reads: the configuration and the policy, read again when a file changed.
-    private readonly McpConfigCache _configCache = new();
+    private readonly McpConfigCache _configCache;
     private readonly McpSessionConnections _connections;
     private readonly McpManagementService _managementService;
     private readonly McpPluginPresentation? _presentation;
@@ -53,9 +53,12 @@ public sealed partial class McpPlugin : PluginBase
     internal McpPlugin(Func<McpManagementService, McpActivationState, McpPluginPresentation>? createPresentation, string? userHomeDirectory, McpPluginOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        userHomeDirectory ??= options.UserHomeDirectory;
         _userHomeDirectory = userHomeDirectory;
+        _configCache = new McpConfigCache(options.GlobalConfigContent);
         ShowsApps = options.ShowsApps;
         LoadsSkills = options.LoadsSkills;
+        ReadOnlyConfiguration = options.ReadOnlyConfiguration;
         _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills);
         // What the presentation saves through it is read again at once by the runtime and the prompt.
         _managementService = new McpManagementService(userHomeDirectory, _configCache, options.ShowsApps, options.LoadsSkills);
@@ -72,6 +75,9 @@ public sealed partial class McpPlugin : PluginBase
 
     /// <summary>Gets whether the host loads the skills of MCP servers: the servers are told, and their skills are listed and offered.</summary>
     public bool LoadsSkills { get; }
+
+    /// <summary>Gets whether the <c>alta mcp</c> commands leave <c>mcp.json</c> and <c>config.toml</c> as they are (<see cref="McpPluginOptions.ReadOnlyConfiguration"/>).</summary>
+    public bool ReadOnlyConfiguration { get; }
 
     // The configuration the plugin reads, kept between its requests.
     internal McpConfigCache ConfigCache => _configCache;
@@ -145,6 +151,7 @@ public sealed partial class McpPlugin : PluginBase
                         ? null
                         : _activationState.GetProjectDirectory(McpActivationState.ResolveScopeKey(context.SourceSessionId, null)),
                     Skills = _skills,
+                    ReadOnlyConfiguration = ReadOnlyConfiguration,
                 },
                 _activationState),
         };

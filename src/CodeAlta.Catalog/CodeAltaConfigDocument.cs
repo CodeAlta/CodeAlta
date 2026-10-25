@@ -326,6 +326,13 @@ public sealed class CodeAltaPluginSettingsDocument
     /// </summary>
     [JsonPropertyName("enabled")]
     public bool? Enabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a run of <c>altacli</c> fails at its start (exit code 2) when the plugin does
+    /// not start, instead of running without it. The applications ignore it.
+    /// </summary>
+    [JsonPropertyName("required")]
+    public bool? Required { get; set; }
 }
 
 /// <summary>

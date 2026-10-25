@@ -230,6 +230,7 @@ tool_timeout_ms = 30000
 | `startup_timeout_ms`, `tool_timeout_ms` | Per-server timeouts. |
 | `direct_exposure`, `direct_tools` | Per-server tool loading for models that load tools on demand. |
 | `spaces` | The [spaces](../spaces.md#what-a-space-has) whose sessions can use the server; absent for all. Global `config.toml` only. Other spaces get `server_not_in_space`. |
+| `required` | `true`: [`altacli run` and `altacli acp`](../command-line.md#configuration) start the server first and stop with exit code 2 when it does not start. The apps ignore it. |
 
 Once a session calls a server's tools, the server stays connected for the session, so a tool can rely on an earlier call (a browser snapshot, an opened document). An unused connection closes after fifteen minutes and reopens at the next call.
 
