@@ -366,6 +366,27 @@ public sealed class CliRunTests
     }
 
     [TestMethod]
+    public async Task OutputLastMessage_ThatCannotBeWritten_ExitsWithOne_AndReportsIt()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        provider.Turns.Enqueue(FakeProvider.Reply("Lost."));
+        // A file stands where the folder of the destination should be.
+        var blocker = Path.Combine(root.Root, "blocker");
+        File.WriteAllText(blocker, "a file");
+
+        var run = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "--output-last-message", Path.Combine(blocker, "last.md"), "write"]);
+
+        Assert.AreEqual(CliExitCodes.Failed, run.ExitCode, run.Stderr);
+        var result = Result(run);
+        Assert.AreEqual("failed", result.GetProperty("status").GetString());
+        Assert.AreEqual(1, result.GetProperty("exitCode").GetInt32());
+        Assert.AreEqual("output_write", result.GetProperty("failure").GetProperty("kind").GetString());
+        StringAssert.Contains(result.GetProperty("failure").GetProperty("message").GetString(), "last.md");
+        Assert.AreEqual("Lost.", result.GetProperty("finalMessage").GetString(), "The answer is still in the result.");
+    }
+
+    [TestMethod]
     public async Task OutputSchema_GivesTheJsonAlone_WhenTheAnswerMatches()
     {
         using var root = new CliTestRoot();

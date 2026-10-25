@@ -210,7 +210,10 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                output.Error($"altacli: the final answer was not written to '{lastMessagePath}': {exception.Message}");
+                // What the caller reads is missing: a run that completed fails, one that did not keeps its own failure.
+                var message = $"The final answer was not written to '{lastMessagePath}': {exception.Message}";
+                if (report.Status == "completed") report = report with { Status = "failed", ExitCode = CliExitCodes.Failed, FailureKind = "output_write", FailureMessage = message };
+                else output.Error("altacli: " + message);
             }
         }
 

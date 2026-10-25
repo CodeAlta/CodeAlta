@@ -41,7 +41,7 @@ Nobody is there to answer, so every tool runs without asking, and the agents are
 
 ## Output and exit codes
 
-By default, standard output holds the final answer only, so `altacli run "..." > answer.md` works; what the agent does goes to standard error (`-q` to hide it). `--output-last-message FILE` also writes the answer to a file. `--output-schema FILE` asks for an answer that is a JSON value matching a JSON Schema, and checks it.
+By default, standard output holds the final answer only, so `altacli run "..." > answer.md` works; what the agent does goes to standard error (`-q` to hide it). `--output-last-message FILE` also writes the answer to a file; a run whose answer cannot be written there fails (exit code 1). `--output-schema FILE` asks for an answer that is a JSON value matching a JSON Schema, and checks it.
 
 `--format jsonl` writes what happens as it happens, one JSON line each, in the format of [ACP](https://agentclientprotocol.com): the notifications an ACP agent sends to its editor.
 
@@ -55,7 +55,7 @@ By default, standard output holds the final answer only, so `altacli run "..." >
 | Exit code | The run |
 | --- | --- |
 | 0 | completed |
-| 1 | failed: an error of the provider or of a tool |
+| 1 | failed: an error of the provider or of a tool, or an answer that could not be written to `--output-last-message` |
 | 2 | could not start: an option, the configuration, a session that does not exist, a required plugin or MCP server that did not start |
 | 3 | was stopped (Ctrl+C, a signal) |
 | 4 | ran out of time (`--timeout`) |
