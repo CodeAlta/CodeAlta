@@ -22,10 +22,8 @@ internal sealed class SessionFactsState
     /// an activation when it ends without failing, and names the MCP tool of every MCP call, those made through <c>alta</c> included.
     /// Version 7 takes the sender of a prompt from the provenance the host recorded it with, and counts the prompts by that provenance.
     /// Version 8 counts an <c>alta mcp skill activate</c> as a use of a skill of its MCP server (<c>mcp:&lt;server&gt;</c>).
-    /// Version 9 keeps the key of the folder of a session (<see cref="SessionFolders"/>), so that a session whose project the
-    /// catalog does not have counts under the project of its folder.
     /// </summary>
-    public const int CurrentVersion = 9;
+    public const int CurrentVersion = 8;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;
@@ -60,7 +58,10 @@ internal sealed class SessionFactsState
     /// <summary>Gets or sets the space the session belongs to, as its header records it.</summary>
     public string? SpaceId { get; set; }
 
-    /// <summary>Gets or sets the key of the folder the session works in (<see cref="SessionFolders.Key"/>).</summary>
+    /// <summary>
+    /// Gets or sets the key of the folder the session works in (<see cref="SessionFolders.Key"/>); null in a state saved before it
+    /// was kept, whose session row gets it from the header of its journal instead.
+    /// </summary>
     public string? FolderKey { get; set; }
 
     /// <summary>Gets or sets the kind of session.</summary>

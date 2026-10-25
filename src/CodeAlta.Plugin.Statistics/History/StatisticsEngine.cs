@@ -4,6 +4,7 @@ using System.Globalization;
 using CodeAlta.Agent;
 using CodeAlta.Plugin.Statistics.Query;
 using CodeAlta.Plugin.Statistics.Facts;
+using CodeAlta.Plugin.Statistics.Journal;
 using CodeAlta.Plugin.Statistics.Store;
 using XenoAtom.Logging;
 
@@ -66,6 +67,7 @@ internal sealed partial class StatisticsEngine : IStatisticsService, IAsyncDispo
     private const string ReasonKey = "history.reason";
     private const string CompleteFromKey = "history.complete_from_day";
     private const int ProjectNameRefreshSeconds = 30;
+    private const int FolderBackfillBatch = 64;
 
     private readonly StatisticsStore _store;
     private readonly ISessionJournalCatalog _journals;
@@ -96,6 +98,10 @@ internal sealed partial class StatisticsEngine : IStatisticsService, IAsyncDispo
     private int? _completeFromDay;
     private string? _reason;
     private string? _error;
+
+    // The last session the backfill of the keys of the folders looked at; null when no session waits for one. Only the step reads and writes it.
+    private string? _folderBackfillAfter;
+    private bool _folderKeysWritten;
     private Queue<TodoItem>? _todo;
     private int _sessionsTotal;
     private int _sessionsDone;
@@ -203,6 +209,7 @@ internal sealed partial class StatisticsEngine : IStatisticsService, IAsyncDispo
                 _stopped = meta.GetValueOrDefault(StoppedKey) == "1";
                 // A catch-up writes 0 for "complete from everything": it is no day.
                 _completeFromDay = meta.TryGetValue(CompleteFromKey, out var complete) && int.TryParse(complete, NumberStyles.None, CultureInfo.InvariantCulture, out var from) && from > 0 ? from : null;
+                _folderBackfillAfter = meta.GetValueOrDefault(StatisticsStore.FolderBackfillKey);
                 // A pause made while a stopped history caught up comes first: the reading it paused ends back in the stop.
                 _phase = _choice is null ? HistoryPhase.NeedsChoice : _paused ? HistoryPhase.Paused : _stopped ? HistoryPhase.Stopped : meta.GetValueOrDefault(DoneKey) == "1" ? HistoryPhase.Done : HistoryPhase.Reading;
                 // A start that failed before is over.
@@ -584,6 +591,9 @@ internal sealed partial class StatisticsEngine : IStatisticsService, IAsyncDispo
                 ResetProgress();
             }
 
+            // The sessions read from now on get the key of their folder as they are read.
+            _folderBackfillAfter = null;
+
             _flow.Clear();
             _failed.Clear();
             // The table of the names is emptied with the others: they are asked again for the sessions that are read next.
@@ -662,8 +672,15 @@ internal sealed partial class StatisticsEngine : IStatisticsService, IAsyncDispo
 
             // A stopped history is complete from its floor, as one that is done: what changed without a signal (a session of another
             // application, the last second before the application closed, a run that never ended) is caught up the same way.
-            case HistoryPhase.Done or HistoryPhase.Stopped when _time.GetUtcNow() - _lastRescan >= _options.RescanInterval:
-                return await RescanAsync(cancellationToken).ConfigureAwait(false);
+            // Once the history has nothing to read, the keys of the folders are filled in, a batch of sessions per step; a pause
+            // stops it as it stops the history.
+            case HistoryPhase.Done or HistoryPhase.Stopped:
+                if (_time.GetUtcNow() - _lastRescan >= _options.RescanInterval && await RescanAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    return true;
+                }
+
+                return await BackfillFolderKeysAsync(cancellationToken).ConfigureAwait(false);
             default:
                 return false;
         }
@@ -853,6 +870,77 @@ internal sealed partial class StatisticsEngine : IStatisticsService, IAsyncDispo
         StopReadingClock();
         await PersistHistoryAsync(cancellationToken).ConfigureAwait(false);
         Publish();
+    }
+
+    // The sessions read before the store kept the key of their folder get it from their header, the first line of their journal: one
+    // bounded read per session, once, a batch per step, with no facts read again. A journal that is gone, or that does not start with a
+    // header, leaves the session without a key: it counts under the project it records. Returns false when no session waits.
+    private async Task<bool> BackfillFolderKeysAsync(CancellationToken cancellationToken)
+    {
+        if (_folderBackfillAfter is not { } after)
+        {
+            return false;
+        }
+
+        var sessionIds = await _store.ListSessionsWithoutFolderAsync(after, FolderBackfillBatch, cancellationToken).ConfigureAwait(false);
+        var journals = new List<(string SessionId, Stream Stream)>(sessionIds.Count);
+        (string SessionId, string FolderKey)[] keys;
+        try
+        {
+            foreach (var sessionId in sessionIds)
+            {
+                try
+                {
+                    if (await _journals.OpenAsync(sessionId, 0, cancellationToken).ConfigureAwait(false) is { } stream)
+                    {
+                        journals.Add((sessionId, stream));
+                    }
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+
+            keys = await RunOnReaderThreadAsync(() =>
+            {
+                var found = new List<(string, string)>(journals.Count);
+                foreach (var (sessionId, stream) in journals)
+                {
+                    try
+                    {
+                        if (JournalHeaders.ReadFolderKey(stream) is { } key)
+                        {
+                            found.Add((sessionId, key));
+                        }
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                    }
+                }
+
+                return found.ToArray();
+            }).ConfigureAwait(false);
+        }
+        finally
+        {
+            foreach (var (_, stream) in journals)
+            {
+                await stream.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+
+        var next = sessionIds.Count < FolderBackfillBatch ? null : sessionIds[^1];
+        await _store.SetFolderKeysAsync(keys, next, cancellationToken).ConfigureAwait(false);
+        _folderBackfillAfter = next;
+        _folderKeysWritten |= keys.Length > 0;
+        if (next is null && _folderKeysWritten)
+        {
+            // A session may now count under another project: the pages ask again for what they show.
+            _folderKeysWritten = false;
+            DataChanged?.Invoke(new StatisticsDataChange(Interlocked.Increment(ref _revision), 10101, 99991231, []));
+        }
+
+        return true;
     }
 
     private async Task<bool> RescanAsync(CancellationToken cancellationToken)

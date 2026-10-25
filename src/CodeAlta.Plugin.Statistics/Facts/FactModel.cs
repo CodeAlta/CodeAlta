@@ -678,7 +678,8 @@ internal sealed class SessionRow
 
     /// <summary>
     /// Gets or sets the key of the folder the session works in (<see cref="SessionFolders.Key"/>): a session whose project the
-    /// catalog does not have counts under the project of the catalog in that folder. Null for a session read before it was kept.
+    /// catalog does not have counts under the project of the catalog in that folder. Null when the reading resumed from a state
+    /// saved before it was kept: the store then keeps the key the row has (see <c>StatisticsEngine.BackfillFolderKeysAsync</c>).
     /// </summary>
     public string? FolderKey { get; set; }
 

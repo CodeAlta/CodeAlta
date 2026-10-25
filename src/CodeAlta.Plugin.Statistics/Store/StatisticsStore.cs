@@ -35,6 +35,13 @@ internal sealed partial class StatisticsStore
     /// <summary>The key of the time zone of the roll-ups in the <c>meta</c> table.</summary>
     public const string RollupTimeZoneKey = "rollup.timezone";
 
+    /// <summary>
+    /// The key, in the <c>meta</c> table, of the sessions that still wait for the key of their folder from their header: the last
+    /// session that got it, in the order of their identifiers (empty to start). Absent when none waits, as in a store created with
+    /// the column.
+    /// </summary>
+    public const string FolderBackfillKey = "folders.backfill_after";
+
     private const string DataUpdatedKey = "data.updated_ms";
     private readonly IPluginDatabase _database;
 
@@ -116,11 +123,14 @@ internal sealed partial class StatisticsStore
             if (from < 5)
             {
                 // The key of the folder of a session (SessionFolders): a session whose project the catalog does not have counts
-                // under the project of its folder. Sessions read before have none until the facts of version 9 read them again.
+                // under the project of its folder. The sessions read before get it from the header of their journal, once, in the
+                // background (StatisticsEngine.BackfillFolderKeysAsync): their facts are not read again.
                 using var sql = new SqlSession(connection);
                 if (sql.ScalarLong($"SELECT COUNT(*) FROM pragma_table_info('{Table("session")}') WHERE name = 'folder_key'") == 0)
                     sql.Execute($"ALTER TABLE {Table("session")} ADD COLUMN folder_key TEXT");
                 sql.Execute($"CREATE INDEX IF NOT EXISTS {Table("session")}_by_folder ON {Table("session")} (folder_key)");
+                if (from >= 1)
+                    SetMeta(sql, new Dictionary<string, string?> { [FolderBackfillKey] = string.Empty });
             }
 
             return ValueTask.CompletedTask;
@@ -163,6 +173,34 @@ internal sealed partial class StatisticsStore
         ArgumentNullException.ThrowIfNull(values);
         return WriteAsync(sql => SetMeta(sql, values), cancellationToken);
     }
+
+    /// <summary>Lists the sessions that have no key of their folder, after a session in the order of their identifiers.</summary>
+    /// <param name="after">The last session listed before; empty for the first.</param>
+    /// <param name="limit">The most sessions listed.</param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The sessions, in the order of their identifiers.</returns>
+    internal ValueTask<IReadOnlyList<string>> ListSessionsWithoutFolderAsync(string after, int limit, CancellationToken cancellationToken = default)
+        => ReadAsync<IReadOnlyList<string>>(
+            sql => sql.Query($"SELECT session_id FROM {Table("session")} WHERE folder_key IS NULL AND session_id > @p0 ORDER BY session_id LIMIT @p1", static reader => reader.GetString(0), after, (long)limit),
+            cancellationToken);
+
+    /// <summary>Gives sessions the keys of their folders, where they have none yet, and saves how far the backfill went, in one transaction.</summary>
+    /// <param name="keys">The sessions and the keys of their folders.</param>
+    /// <param name="after">The last session the backfill looked at; null when it is over.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    /// <returns>A task representing the write.</returns>
+    internal ValueTask SetFolderKeysAsync(IReadOnlyList<(string SessionId, string FolderKey)> keys, string? after, CancellationToken cancellationToken = default)
+        => WriteAsync(
+            sql =>
+            {
+                foreach (var (sessionId, folderKey) in keys)
+                {
+                    sql.Execute($"UPDATE {Table("session")} SET folder_key = @p1 WHERE session_id = @p0 AND folder_key IS NULL", sessionId, folderKey);
+                }
+
+                SetMeta(sql, new Dictionary<string, string?> { [FolderBackfillKey] = after });
+            },
+            cancellationToken);
 
     /// <summary>Reads the last committed data update in the caller's snapshot; older databases retain their journal catch-up time.</summary>
     internal DateTimeOffset? ReadDataUpdatedAt(SqlSession sql)
@@ -502,7 +540,7 @@ internal sealed partial class StatisticsStore
             + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, 0, @p12, @p13) "
             + "ON CONFLICT (session_id) DO UPDATE SET project_ref = excluded.project_ref, session_kind = excluded.session_kind, parent_session_id = excluded.parent_session_id, created_by_kind = excluded.created_by_kind, "
             + "created_by_session_id = excluded.created_by_session_id, automation_id = excluded.automation_id, title = excluded.title, provider = excluded.provider, permission_mode = excluded.permission_mode, "
-            + "first_ms = excluded.first_ms, last_ms = excluded.last_ms, deleted = 0, space_id = excluded.space_id, folder_key = excluded.folder_key",
+            + "first_ms = excluded.first_ms, last_ms = excluded.last_ms, deleted = 0, space_id = excluded.space_id, folder_key = COALESCE(excluded.folder_key, folder_key)",
             row.SessionId,
             row.ProjectRef,
             row.SessionKind,

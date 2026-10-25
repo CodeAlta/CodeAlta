@@ -54,7 +54,7 @@ Definitions the reducer guarantees:
   inherited ones only carry the choices in force. Turns made outside CodeAlta (runs whose id starts with `external:`)
   count nothing. So the totals of a session and its forks are what was spent: nothing twice, nothing lost.
 
-`SessionFactsState.CurrentVersion` (9) versions the definitions. A new version rereads every session that still has
+`SessionFactsState.CurrentVersion` (8) versions the definitions. A new version rereads every session that still has
 its journal, one at a time, keeping the old numbers until each session's new rows are saved.
 
 ## Reading journals
@@ -89,6 +89,11 @@ start.
   the charts fill toward the past. It is gentle: one thread below normal priority, one session at a time, the flow
   served between sessions and chunks. Every five minutes it compares the store of journals with its cursors (sessions
   of another application, deleted journals).
+- **The key of the folder of a session** (`SessionFolders`) is kept with the session: a session read now gets it from
+  its header as it is read. A session read before the store kept it gets it once, after the history has nothing left to
+  read, from the first line of its journal only (`StatisticsEngine.BackfillFolderKeysAsync`): a small batch per step,
+  stopped by a pause, never a new reading of its facts. A journal that is gone, or whose first line is no header,
+  leaves the session without a key.
 - **The flow** catches a session up one second after its first signal, coalescing a streaming session to once a
   second. `OnAgentEventAsync` only enqueues the session id: a slow handler would hold the event pipeline of its
   session, and callbacks beyond the plugin's budget are dropped. The plugin opts out of streaming deltas, which the
