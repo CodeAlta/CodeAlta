@@ -2503,23 +2503,21 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static SessionResult BuildSessionResult(AltaSessionInfo info, IReadOnlyList<AgentEvent> history, SessionMetricsScope scope)
     {
-        var scoped = SelectMetricScope(history, scope);
+        var outcome = BuildOutcome(info, history, scope);
         var metrics = BuildSessionMetrics(info, history, scope);
-        var finalAssistant = scoped.OfType<AgentContentCompletedEvent>().LastOrDefault(static content => content.Kind == AgentContentKind.Assistant);
-        var finalError = scoped.OfType<AgentErrorEvent>().LastOrDefault();
-        var status = DetermineResultStatus(info, finalAssistant, finalError);
-        var finalAnswer = status == SessionResultStatus.Completed && finalAssistant is not null
-            ? finalAssistant.Content
-            : null;
         var result = new SessionResult(
             scope,
-            status,
-            finalAnswer,
-            finalAssistant?.Timestamp,
-            status is SessionResultStatus.Failed or SessionResultStatus.Cancelled ? CreateFinalError(finalError!) : null,
+            outcome.Status,
+            outcome.Status == SessionOutcomeStatus.Completed ? outcome.FinalMessage : null,
+            outcome.FinalMessageAt,
+            CreateFinalError(outcome),
             metrics);
         return result;
     }
+
+    // The outcome as the runtime reads it (SessionOutcome), of the whole session or of its last turn.
+    private static SessionOutcome BuildOutcome(AltaSessionInfo info, IReadOnlyList<AgentEvent> history, SessionMetricsScope scope)
+        => SessionOutcome.From(SelectMetricScope(history, scope), info.IsRunning || string.Equals(info.State, "running", StringComparison.OrdinalIgnoreCase));
 
     // lastTurn: for the last-turn scope, of which SelectMetricScope keeps the run of the last assistant message: the
     // stored history may then start at the first record of that run. The fallback to the provider history is the same.
@@ -2575,73 +2573,44 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static SessionMetrics BuildSessionMetrics(AltaSessionInfo info, IReadOnlyList<AgentEvent> history, SessionMetricsScope scope)
     {
-        var scoped = SelectMetricScope(history, scope);
-        var firstEvent = scoped.FirstOrDefault();
-        var lastEvent = scoped.LastOrDefault();
-        var firstUser = scoped.OfType<AgentContentCompletedEvent>().FirstOrDefault(static content => content.Kind == AgentContentKind.User);
-        var finalAssistant = scoped.OfType<AgentContentCompletedEvent>().LastOrDefault(static content => content.Kind == AgentContentKind.Assistant);
-        var startedAt = firstUser?.Timestamp ?? firstEvent?.Timestamp;
-        var completedAt = finalAssistant?.Timestamp ?? lastEvent?.Timestamp;
-        var finalError = scoped.OfType<AgentErrorEvent>().LastOrDefault();
-        var status = DetermineResultStatus(info, finalAssistant, finalError);
-        var duration = startedAt is not null && completedAt is not null && completedAt >= startedAt
-            ? completedAt.Value - startedAt.Value
-            : (TimeSpan?)null;
-        var toolCallCount = scoped.OfType<AgentActivityEvent>()
-            .Count(static activity => IsToolLikeActivity(activity.Kind) && activity.Phase == AgentActivityPhase.Requested);
-        var usageUpdates = scoped.OfType<AgentSessionUpdateEvent>()
-            .Where(static update => update.Usage is not null)
-            .ToArray();
-        var finalUsage = usageUpdates.LastOrDefault()?.Usage;
-        var providerTotals = BuildProviderOperationTotals(usageUpdates);
-        var finalAnswer = finalAssistant?.Content ?? string.Empty;
+        var outcome = BuildOutcome(info, history, scope);
+        var finalAnswer = outcome.FinalMessage ?? string.Empty;
 
         return new SessionMetrics(
             scope,
-            scoped.Count,
-            scoped.Select(static agentEvent => agentEvent.RunId?.Value).Where(static runId => !string.IsNullOrWhiteSpace(runId)).Distinct(StringComparer.Ordinal).Count(),
-            startedAt,
-            completedAt,
-            duration,
-            finalAssistant?.Timestamp,
-            CountCompletedContent(scoped, AgentContentKind.User),
-            CountCompletedContent(scoped, AgentContentKind.Assistant),
-            toolCallCount,
+            outcome.EventCount,
+            outcome.RunCount,
+            outcome.StartedAt,
+            outcome.CompletedAt,
+            outcome.Duration,
+            outcome.FinalMessageAt,
+            outcome.UserMessageCount,
+            outcome.AssistantMessageCount,
+            outcome.ToolCallCount,
             finalAnswer.Length,
             CountWords(finalAnswer),
             TokenEstimator.Estimate(finalAnswer),
-            finalUsage,
-            providerTotals,
-            StatusWire(status),
-            status is SessionResultStatus.Failed or SessionResultStatus.Cancelled ? CreateFinalError(finalError!) : null,
+            outcome.FinalUsage,
+            outcome.Usage,
+            StatusWire(outcome.Status),
+            CreateFinalError(outcome),
             ToModelSelectionPayload(CreateModelSelection(info.Session, info.Preference), info.Session.AgentPromptId));
     }
 
-    private static SessionResultStatus DetermineResultStatus(AltaSessionInfo info, AgentContentCompletedEvent? finalAssistant, AgentErrorEvent? finalError)
+    // The error that ended a failed or cancelled run; for a run aborted without one (its tree was, after it answered),
+    // what the abort recorded.
+    private static FinalErrorPayload? CreateFinalError(SessionOutcome outcome)
     {
-        if (info.IsRunning || string.Equals(info.State, "running", StringComparison.OrdinalIgnoreCase))
+        if (outcome.Status is not (SessionOutcomeStatus.Failed or SessionOutcomeStatus.Cancelled)) return null;
+        if (outcome.FinalError is not { } error)
         {
-            return SessionResultStatus.Running;
+            return outcome.AbortReason is { } reason
+                ? new FinalErrorPayload("cancelled", $"The run was aborted: {reason}.", outcome.CompletedAt ?? DateTimeOffset.UtcNow, null, null, null, null, null)
+                : null;
         }
 
-        if (finalError is not null && (finalAssistant is null || finalError.Timestamp >= finalAssistant.Timestamp))
-        {
-            return IsCancellationError(finalError) ? SessionResultStatus.Cancelled : SessionResultStatus.Failed;
-        }
-
-        return finalAssistant is not null ? SessionResultStatus.Completed : SessionResultStatus.Unknown;
-    }
-
-    private static bool IsCancellationError(AgentErrorEvent error)
-        => error.Exception is OperationCanceledException ||
-           error.Exception is TaskCanceledException ||
-           string.Equals(error.ExceptionInfo?.Type, typeof(OperationCanceledException).FullName, StringComparison.Ordinal) ||
-           string.Equals(error.ExceptionInfo?.Type, typeof(TaskCanceledException).FullName, StringComparison.Ordinal) ||
-           error.Message.Contains("cancel", StringComparison.OrdinalIgnoreCase);
-
-    private static FinalErrorPayload CreateFinalError(AgentErrorEvent error)
-        => new(
-            IsCancellationError(error) ? "cancelled" : "failed",
+        return new(
+            SessionOutcome.IsCancellation(error) ? "cancelled" : "failed",
             error.Message,
             error.Timestamp,
             error.RunId?.Value,
@@ -2649,6 +2618,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             error.Failure?.Kind.ToString(),
             CreateErrorDetails(error),
             CreateErrorCauses(error));
+    }
 
     // What the provider said about the failure beyond its message (code, HTTP status, request id, payload) and the
     // exceptions it wrapped, so that a session can be diagnosed from its report.
@@ -2675,86 +2645,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return causes.Count == 0 ? null : causes;
     }
 
-    private static string StatusWire(SessionResultStatus status)
+    private static string StatusWire(SessionOutcomeStatus status)
         => status switch
         {
-            SessionResultStatus.Completed => "completed",
-            SessionResultStatus.Failed => "failed",
-            SessionResultStatus.Cancelled => "cancelled",
-            SessionResultStatus.Running => "running",
+            SessionOutcomeStatus.Completed => "completed",
+            SessionOutcomeStatus.Failed => "failed",
+            SessionOutcomeStatus.Cancelled => "cancelled",
+            SessionOutcomeStatus.Running => "running",
             _ => "unknown",
         };
 
     private static IReadOnlyList<AgentEvent> SelectMetricScope(IReadOnlyList<AgentEvent> history, SessionMetricsScope scope)
-    {
-        if (scope == SessionMetricsScope.Session || history.Count == 0)
-        {
-            return history;
-        }
-
-        var lastRunId = history.OfType<AgentContentCompletedEvent>()
-            .Where(static content => content.Kind == AgentContentKind.Assistant && content.RunId is not null)
-            .Select(static content => content.RunId!.Value.Value)
-            .LastOrDefault();
-        if (string.IsNullOrWhiteSpace(lastRunId))
-        {
-            lastRunId = history.Where(static agentEvent => agentEvent.RunId is not null)
-                .Select(static agentEvent => agentEvent.RunId!.Value.Value)
-                .LastOrDefault();
-        }
-
-        return string.IsNullOrWhiteSpace(lastRunId)
-            ? history
-            : history.Where(agentEvent => string.Equals(agentEvent.RunId?.Value, lastRunId, StringComparison.Ordinal)).ToArray();
-    }
-
-    private static int CountCompletedContent(IReadOnlyList<AgentEvent> events, AgentContentKind kind)
-        => events.OfType<AgentContentCompletedEvent>().Count(content => content.Kind == kind);
-
-    private static ProviderOperationTotals BuildProviderOperationTotals(IReadOnlyList<AgentSessionUpdateEvent> usageUpdates)
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        long inputTokens = 0;
-        long outputTokens = 0;
-        long cachedInputTokens = 0;
-        long reasoningTokens = 0;
-        long cacheWriteTokens = 0;
-        double? cost = null;
-        string? costUnit = null;
-        var operationCount = 0;
-
-        foreach (var usage in usageUpdates)
-        {
-            if (usage.Usage?.LastOperation is not { } operation)
-            {
-                continue;
-            }
-
-            var signature = string.Join('\u001f', usage.RunId?.Value, operation.Model, operation.InputTokens, operation.OutputTokens, operation.CachedInputTokens, operation.CacheReadTokens, operation.CacheWriteTokens, operation.ReasoningTokens, operation.ParentToolCallId, operation.Initiator);
-            if (!seen.Add(signature))
-            {
-                continue;
-            }
-
-            operationCount++;
-            // The input of an operation holds what the cache read and wrote: the cached and written counts are parts
-            // of the input, not counts to add to it.
-            var input = AgentInputTokenUsage.From(operation);
-            inputTokens += input?.Total ?? 0;
-            outputTokens += operation.OutputTokens ?? 0;
-            cachedInputTokens += input?.CacheRead ?? 0;
-            reasoningTokens += operation.ReasoningTokens ?? 0;
-            cacheWriteTokens += input?.CacheWrite ?? 0;
-            // Costs add up in one unit: the unit of the first operation that reports one.
-            if (operation.Cost is { } operationCost && (cost is null || string.Equals(costUnit, operation.CostUnit, StringComparison.Ordinal)))
-            {
-                cost = (cost ?? 0) + operationCost;
-                costUnit = operation.CostUnit;
-            }
-        }
-
-        return new ProviderOperationTotals(operationCount, inputTokens, outputTokens, cachedInputTokens, reasoningTokens, cacheWriteTokens, cost, costUnit);
-    }
+        => scope == SessionMetricsScope.Session ? history : SessionOutcome.SelectLastTurn(history);
 
     private static int CountWords(string text)
     {
@@ -2777,9 +2679,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         return count;
     }
-
-    private static bool IsToolLikeActivity(AgentActivityKind kind)
-        => kind is AgentActivityKind.ToolCall or AgentActivityKind.CommandExecution or AgentActivityKind.FileChange or AgentActivityKind.McpToolCall or AgentActivityKind.DynamicToolCall or AgentActivityKind.CollabAgentToolCall;
 
     private static async ValueTask<int> HandleSessionCreateAsync(AltaCommandContext context, SessionCreateOptions options)
     {
@@ -6553,7 +6452,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             usage.UpdatedAt,
         };
 
-    private static object ToProviderOperationTotalsPayload(ProviderOperationTotals totals)
+    private static object ToProviderOperationTotalsPayload(SessionUsageTotals totals)
         => new
         {
             totals.OperationCount,
@@ -7348,16 +7247,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Session,
     }
 
-    private sealed record ProviderOperationTotals(
-        int OperationCount,
-        long InputTokens,
-        long OutputTokens,
-        long CachedInputTokens,
-        long ReasoningTokens,
-        long CacheWriteTokens = 0,
-        double? Cost = null,
-        string? CostUnit = null);
-
     private sealed record ProviderCapability(
         string ProviderKey,
         string ProviderId,
@@ -7385,14 +7274,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         int FinalAnswerWords,
         long FinalAnswerEstimatedTokens,
         AgentSessionUsage? FinalUsage,
-        ProviderOperationTotals ProviderOperations,
+        SessionUsageTotals ProviderOperations,
          string Status,
          FinalErrorPayload? FinalError,
         object ModelSelection);
 
     private sealed record SessionResult(
         SessionMetricsScope Scope,
-        SessionResultStatus Status,
+        SessionOutcomeStatus Status,
         string? FinalAnswer,
         DateTimeOffset? FinalAssistantAt,
         FinalErrorPayload? FinalError,
@@ -7421,15 +7310,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         string? failureKind,
         IReadOnlyDictionary<string, string>? details,
         IReadOnlyList<string>? causes);
-
-    private enum SessionResultStatus
-    {
-        Unknown,
-        Running,
-        Completed,
-        Failed,
-        Cancelled,
-    }
 
     private sealed class PromptOptions
     {

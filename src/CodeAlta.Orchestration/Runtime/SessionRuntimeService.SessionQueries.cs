@@ -176,6 +176,97 @@ public sealed partial class SessionRuntimeService
     }
 
     /// <summary>
+    /// Reads how the runs of a session ended from its journal (<see cref="SessionOutcome"/>): from the first record of a
+    /// run to the end, which a run, the queued prompts and the answers of children it started make; or the run of its last
+    /// answer.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="fromRun">The run to read from; null for the run of the last answer, as <c>alta session result</c> reads it.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The outcome; <see cref="SessionOutcomeStatus.Unknown"/> with nothing in it when the journal cannot be read.</returns>
+    /// <remarks>Only the turns from that run on are read when the session index has them; the whole journal otherwise.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public async Task<SessionOutcome> ReadOutcomeAsync(SessionViewDescriptor session, AgentRunId? fromRun, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        IReadOnlyList<AgentEvent> events;
+        if (fromRun is { } run)
+        {
+            events = await AdmitAsync(() => TryReadStoredHistoryFromRunOwnedBodyAsync(session, run, cancellationToken), cancellationToken)
+                .WaitAsync(cancellationToken).ConfigureAwait(false) ?? [];
+        }
+        else
+        {
+            events = SessionOutcome.SelectLastTurn(await TryReadStoredLastTurnHistoryAsync(session, null, cancellationToken).ConfigureAwait(false) ?? []);
+        }
+
+        var running = _entries.TryGetValue(session.SessionId, out var entry) && !entry.IsTerminated && (entry.HasActiveRun || entry.QueueDrainInProgress);
+        return SessionOutcome.From(events, running);
+    }
+
+    // The records from the first one of a run to the end of the journal; the whole history from that run when the turns
+    // of the index do not name it.
+    private async Task<IReadOnlyList<AgentEvent>?> TryReadStoredHistoryFromRunOwnedBodyAsync(SessionViewDescriptor session, AgentRunId runId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(session.SessionId)) return null;
+        var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+        for (var attempt = 0; attempt < LastTurnReadAttempts; attempt++)
+        {
+            try
+            {
+                var turns = await store.ReadTurnsAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+                var turn = turns.Turns.FirstOrDefault(candidate => string.Equals(candidate.RunId, runId.Value, StringComparison.Ordinal));
+                if (turn is null) break;
+                return await ReadFromOffsetAsync(store, session.SessionId, turns.Revision, turn.StartOffset, cancellationToken).ConfigureAwait(false);
+            }
+            catch (AgentSessionHistoryException error) when (error.Code == "history_changed")
+            {
+                // The session wrote meanwhile: its turns are read again.
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                break;
+            }
+        }
+
+        var history = await TryReadStoredHistoryOwnedBodyAsync(session, null, cancellationToken).ConfigureAwait(false);
+        return history is null ? null : SessionOutcome.SelectFromRun(history, runId);
+    }
+
+    // The events of the records from an offset to the end of the journal, read a page at a time from the end.
+    private static async Task<IReadOnlyList<AgentEvent>> ReadFromOffsetAsync(FileSystemAgentSessionStore store, string sessionId,
+        AgentHistoryRevision revision, long start, CancellationToken cancellationToken)
+    {
+        var pages = new List<AgentSessionHistoryPage>();
+        AgentSessionHistoryCursor? cursor = null;
+        var readFrom = revision.Length;
+        while (readFrom > start)
+        {
+            var page = await store.ReadTimelinePageAsync(sessionId, cursor, cancellationToken).ConfigureAwait(false);
+            if (page.Revision is not { } read || read.Length != revision.Length || read.LastWriteUtcTicks != revision.LastWriteUtcTicks)
+            {
+                throw new AgentSessionHistoryException("history_changed");
+            }
+
+            pages.Add(page);
+            cursor = page.Next;
+            readFrom = cursor?.Offset ?? 0;
+        }
+
+        var events = new List<AgentEvent>();
+        for (var index = pages.Count - 1; index >= 0; index--)
+        {
+            foreach (var entry in pages[index].Entries)
+            {
+                if (entry.Offset >= start) events.Add(entry.Event);
+            }
+        }
+
+        return events;
+    }
+
+    /// <summary>
     /// Reads a window of the persisted history of a session, numbered as in the whole history (the first event is 1), by
     /// reading only the turns it spans: the events after <paramref name="since"/> that <paramref name="include"/> keeps,
     /// the first <paramref name="limit"/> of them, or the last ones for <paramref name="fromTail"/>.
