@@ -53,6 +53,15 @@ public sealed partial class SessionRuntimeService
 
         var members = await ListMovedSessionsAsync(sessionId, projectId, workspacePath, projects).ConfigureAwait(false);
         if (members.Count == 0) return OwnedSessionMoveResult.Refused("session_missing");
+        // A session another process runs keeps its folder: none of the sessions moves.
+        var leases = new List<IDisposable>();
+        using var releaseLeases = new LeaseList(leases);
+        foreach (var member in members)
+        {
+            if (!TryHoldForWrite(member, out var lease)) return OwnedSessionMoveResult.Refused("session_in_use");
+            leases.Add(lease);
+        }
+
         foreach (var member in members)
         {
             if (ownerBusy(member)) return OwnedSessionMoveResult.Refused("busy");
@@ -190,7 +199,7 @@ public sealed partial class SessionRuntimeService
             {
                 // Its next summary would write the old folder back: the next send attaches the session again.
                 retirement = _forwarding.RetireAsync(entry.Attachment);
-                _entries.TryRemove(sessionId, out _);
+                if (_entries.TryRemove(sessionId, out _)) ReleaseEntryLeaseAfter(sessionId, retirement);
                 _transitions[sessionId] = retirement;
             }
 

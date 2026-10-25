@@ -73,6 +73,8 @@ public sealed partial class SessionRuntimeService
     {
         var session = await TryResolveSessionForParentDeliveryAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
         if (session is null) return "missing_session";
+        // A session another process runs gets nothing written in its journal from here.
+        using var lease = HoldForWrite(sessionId);
         return await WithRetentionWorkAsync(async () =>
         {
         var running = await HasActiveRunOwnedBodyAsync(session, CancellationToken.None).ConfigureAwait(false);

@@ -33,6 +33,8 @@ public sealed partial class SessionRuntimeService
         Catalog.SessionViewProviderCarryOver? carryOver)
         => AdmitAsync(async () =>
         {
+            if (!TryHoldForWrite(expected.SessionId, out var lease)) return "session_in_use";
+            using var held = lease;
             var actor = GetActorForWork(expected.SessionId);
             Task? retirement = null;
             var result = await actor.QueryAsync(async token =>
@@ -69,7 +71,7 @@ public sealed partial class SessionRuntimeService
                 if (entry is not null)
                 {
                     retirement = _forwarding.RetireAsync(entry.Attachment);
-                    _entries.TryRemove(expected.SessionId, out _);
+                    if (_entries.TryRemove(expected.SessionId, out _)) ReleaseEntryLeaseAfter(expected.SessionId, retirement);
                     _transitions[expected.SessionId] = retirement;
                 }
                 return "ok";

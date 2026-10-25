@@ -3383,6 +3383,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return PromptDenied(context);
         }
 
+        // A session another process runs (the command line, another instance) takes no prompt from here.
+        if (runtime.GetSessionLeaseHolderElsewhere(info.Session.SessionId) is { } holder)
+        {
+            return Unsupported(context, "session.inUse",
+                new SessionInUseException(info.Session.SessionId, holder.OwnerKind, holder.ProcessId).Message + " It can take a prompt here once that process ends.");
+        }
+
         var inputText = kind is PromptDispatchKind.Message or PromptDispatchKind.Request
             ? BuildPeerAgentMessage(context, info.Session, options, promptResult.Prompt!)
             : promptResult.Prompt!;

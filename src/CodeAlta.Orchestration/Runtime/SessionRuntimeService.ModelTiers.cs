@@ -167,6 +167,7 @@ public sealed partial class SessionRuntimeService
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         return await AdmitAsync(async () =>
         {
+            using var lease = HoldForWrite(sessionId);
             while (true)
             {
                 ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);

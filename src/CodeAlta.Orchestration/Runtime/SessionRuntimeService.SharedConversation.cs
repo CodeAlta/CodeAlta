@@ -86,7 +86,7 @@ public sealed partial class SessionRuntimeService
                 if (await ReleaseRefusalAsync(sessionId, token).ConfigureAwait(false) is { } refusal) return refusal;
                 if (!_entries.TryGetValue(sessionId, out var entry)) return ReleaseReleased;
                 retirement = _forwarding.RetireAsync(entry.Attachment);
-                _entries.TryRemove(sessionId, out _);
+                if (_entries.TryRemove(sessionId, out _)) ReleaseEntryLeaseAfter(sessionId, retirement);
                 _transitions[sessionId] = retirement;
                 return ReleaseReleased;
             }, CancellationToken.None).ConfigureAwait(false);

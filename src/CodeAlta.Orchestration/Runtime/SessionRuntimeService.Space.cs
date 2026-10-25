@@ -34,6 +34,7 @@ public sealed partial class SessionRuntimeService
         if (members.Count == 0) return OwnedSessionSpaceMoveResult.Refused("session_missing");
         foreach (var member in members)
         {
+            if (RefuseIfHeldElsewhere(member) is { } inUse) return OwnedSessionSpaceMoveResult.Refused(inUse);
             if (ownerBusy(member)) return OwnedSessionSpaceMoveResult.Refused("busy");
             var refusal = await GetActorForWork(member).QueryAsync(token => new ValueTask<string?>(MoveRefusalAsync(member, token)), CancellationToken.None)
                 .ConfigureAwait(false);
@@ -109,6 +110,9 @@ public sealed partial class SessionRuntimeService
 
     private async Task<string> MoveOneSessionToSpaceGuardedAsync(string sessionId, string spaceId, Func<string, bool> ownerBusy, List<string> moved, List<string> warnings)
     {
+        // A session another process runs keeps its space.
+        if (!TryHoldForWrite(sessionId, out var lease)) return "session_in_use";
+        using var held = lease;
         try
         {
             return await MoveOneSessionToSpaceAsync(sessionId, spaceId, ownerBusy, moved, warnings).ConfigureAwait(false);
@@ -147,7 +151,7 @@ public sealed partial class SessionRuntimeService
                 // The attachment has the instructions, the tools and the resources of the old space: the next send
                 // attaches the session again, in its new space.
                 retirement = _forwarding.RetireAsync(entry.Attachment);
-                _entries.TryRemove(sessionId, out _);
+                if (_entries.TryRemove(sessionId, out _)) ReleaseEntryLeaseAfter(sessionId, retirement);
                 _transitions[sessionId] = retirement;
             }
 

@@ -58,6 +58,8 @@ public sealed partial class SessionRuntimeService
     // The catch-up of a work already admitted (a send).
     private async Task<string> CatchUpExternalTurnsCoreAsync(string sessionId)
     {
+        // A session another process runs is written by that process alone.
+        if (RefuseIfHeldElsewhere(sessionId) is not null) return CatchUpBusy;
         var joined = false;
         while (true)
         {
@@ -216,7 +218,7 @@ public sealed partial class SessionRuntimeService
                     if (appending && appends && entry is not null)
                     {
                         retirement = _forwarding.RetireAsync(entry.Attachment);
-                        _entries.TryRemove(sessionId, out _);
+                        if (_entries.TryRemove(sessionId, out _)) ReleaseEntryLeaseAfter(sessionId, retirement);
                         _transitions[sessionId] = retirement;
                     }
                 }

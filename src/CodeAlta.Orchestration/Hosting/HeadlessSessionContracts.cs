@@ -167,12 +167,6 @@ public sealed record HeadlessSessionDriverOptions
     public Func<HeadlessSessionEvent, CancellationToken, ValueTask>? Observer { get; init; }
 
     /// <summary>
-    /// Gets what takes the lease of a session before the driver opens it, so that two processes never run one session;
-    /// it returns null when another process holds it. Null takes none.
-    /// </summary>
-    public Func<string, CancellationToken, ValueTask<IAsyncDisposable?>>? AcquireSessionLease { get; init; }
-
-    /// <summary>
     /// Gets how long a run that was aborted (its time ran out, it was cancelled) is waited for to settle before its result
     /// is reported anyway. The default is 30 seconds.
     /// </summary>

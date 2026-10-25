@@ -88,6 +88,25 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public bool HeadlessInstructions { get; init; }
 
+    /// <summary>
+    /// Gets the kind of holder this host names in the leases it takes on the sessions it runs or shows
+    /// (<see cref="Catalog.SessionLeaseOwner.DesktopKind"/>, <see cref="Catalog.SessionLeaseOwner.TuiKind"/>,
+    /// <see cref="Catalog.SessionLeaseOwner.CliKind"/>), so that two processes on one sessions folder never run one session;
+    /// null, the default, takes none.
+    /// </summary>
+    /// <remarks>
+    /// With leases, a session another process holds is neither attached nor changed: the runtime refuses with
+    /// <see cref="Runtime.SessionInUseException"/> or the status <c>session_in_use</c>.
+    /// </remarks>
+    public string? SessionLeaseOwner { get; init; }
+
+    /// <summary>
+    /// Gets whether the host lists the sessions another process writes into its sessions folder (the command line names each
+    /// in a marker), and follows, read-only, the sessions another process holds while their journals grow. Default false; a
+    /// host that owns the application database of its state root (CodeAlta Desktop and TUI) turns it on.
+    /// </summary>
+    public bool FollowExternalSessions { get; init; }
+
     /// <summary>Gets the instance-owned startup pass; null authorizes no deletion.</summary>
     public IStartupScratchpadCleanup? StartupScratchpadCleanup { get; init; }
 

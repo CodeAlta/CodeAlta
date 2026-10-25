@@ -194,10 +194,12 @@ internal sealed class HeadlessTestRoot : IAsyncDisposable
     /// </summary>
     internal async Task<CodeAltaHost> CreateHostAsync(ScriptedTurnProvider provider, bool readOnlyGlobalState = false, bool separateStateRoot = false,
         string? scratchpadRoot = null, string? currentProject = null, bool fullTrust = false, bool headlessInstructions = false,
-        CodeAltaConfigOptions? config = null, bool listsSkills = true)
+        CodeAltaConfigOptions? config = null, bool listsSkills = true, string? sessionLeaseOwner = null, bool followExternalSessions = false)
     {
         var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
         {
+            SessionLeaseOwner = sessionLeaseOwner,
+            FollowExternalSessions = followExternalSessions,
             GlobalRoot = GlobalRoot,
             StateRoot = separateStateRoot ? StateRoot : null,
             CurrentProjectPath = currentProject ?? ProjectRoot,

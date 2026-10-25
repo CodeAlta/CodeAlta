@@ -491,6 +491,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(@event);
         using var retentionWork = ClaimRetentionWork(sessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         cancellationToken.ThrowIfCancellationRequested();
+        using var lease = HoldForWrite(sessionId);
         if (!string.Equals(sessionId, @event.SessionId, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("The event session id must match the target session.", nameof(@event));
@@ -600,6 +601,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         var session = await ResolveNotesSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        using var lease = HoldForWrite(session.SessionId);
         var notes = new AgentNotesEvent(session.ProviderId, session.SessionId, DateTimeOffset.UtcNow, null, kind, markdown);
         var publication = new LiveEventPublication(this);
         await publication.CompleteAsync(mark => _sessionViewCatalog.JournalStore.CreateSessionStore().AppendNotesAsync(notes, async () =>
@@ -808,6 +810,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var session = TryCreateRecoverableSession(metadata, projects);
             if (session is null || session.Kind != (projectId is null ? SessionViewKind.GlobalSession : SessionViewKind.ProjectSession)
                 || session.ProjectRef != projectId || session.WorkingDirectory != workspacePath) return false;
+            using var lease = HoldForWrite(sessionId);
             if (!await RenameInActorAsync(store, sessionId, title, token).ConfigureAwait(false)) return false;
             await _agentSessionCatalog.NotifySessionUpdatedAsync(sessionId, token).ConfigureAwait(false);
             return true;
@@ -893,6 +896,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     if (_transitions.TryGetValue(sessionId, out var pending)) return ((Task?)pending, (SessionTitleState?)null);
                     var session = await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false);
                     if (session is null) return (null, null);
+                    using var lease = HoldForWrite(sessionId);
                     var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
                     if (_entries.TryGetValue(sessionId, out var entry) && (entry.IsTerminated || entry.Attachment.IsRetiring)) entry = null;
                     if (changeMode)
@@ -1203,6 +1207,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(session);
 
         var deleted = false;
+        using var lease = HoldForWrite(session.SessionId);
         if (!string.IsNullOrWhiteSpace(session.SessionId))
         {
             deleted = await _agentSessionCatalog.DeleteSessionAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
@@ -1230,6 +1235,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(session);
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
+        using var lease = HoldForWrite(session.SessionId);
         if (!string.IsNullOrWhiteSpace(session.SessionId))
         {
             await _agentSessionCatalog.NotifySessionUpdatedAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
@@ -2177,24 +2183,34 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         // Read before the runtime is created: a provider registered again in between is only attached again once more.
         var providerVersion = _agentHub.GetProviderRegistrationVersion(sessionOptions.ProviderKey);
-        if (startNewSession)
+        // The lease before the journal: a session another process runs is not attached, and nothing is written for it.
+        ClaimEntryLease(session.SessionId);
+        try
         {
-            var handle = await _agentHub.StartSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
-            sessionHandleId = handle.HandleId;
-        }
-        else
-        {
-            AgentSessionHandle handle;
-            try
+            if (startNewSession)
             {
-                handle = await _agentHub.ResumeSessionAsync(session.SessionId, sessionOptions, cancellationToken).ConfigureAwait(false);
+                var handle = await _agentHub.StartSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
+                sessionHandleId = handle.HandleId;
             }
-            catch (KeyNotFoundException)
+            else
             {
-                handle = await _agentHub.StartSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
-            }
+                AgentSessionHandle handle;
+                try
+                {
+                    handle = await _agentHub.ResumeSessionAsync(session.SessionId, sessionOptions, cancellationToken).ConfigureAwait(false);
+                }
+                catch (KeyNotFoundException)
+                {
+                    handle = await _agentHub.StartSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
+                }
 
-            sessionHandleId = handle.HandleId;
+                sessionHandleId = handle.HandleId;
+            }
+        }
+        catch
+        {
+            ReleaseEntryLeaseWithoutEntry(session.SessionId);
+            throw;
         }
 
         var attachment = _forwarding.RegisterAttachment(
@@ -2305,6 +2321,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 throw new InvalidOperationException("The coordinator transition no longer owns publication.");
             if (previousEntry is not null && !string.Equals(previousEntry.PendingAgentPromptId, selectedPrompt, StringComparison.Ordinal))
                 entry.PendingAgentPromptId = previousEntry.PendingAgentPromptId;
+            // An attachment is published with its lease, even when a removal released it meanwhile.
+            ClaimEntryLease(session.SessionId);
             _entries[session.SessionId] = entry;
             return ValueTask.FromResult(true);
         }, CancellationToken.None).ConfigureAwait(false);
@@ -2318,6 +2336,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             attachment.CompleteSetup();
             try { await _forwarding.RetireAsync(attachment).ConfigureAwait(false); }
             catch (Exception cleanupFailure) { throw new AggregateException(failure, cleanupFailure); }
+            finally { ReleaseEntryLeaseWithoutEntry(session.SessionId); }
             throw;
         }
     }
@@ -2601,6 +2620,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         permissionMode = NormalizeOptionalText(permissionMode);
         return AdmitAsync(async () =>
         {
+            using var lease = HoldForWrite(session.SessionId);
             while (true)
             {
                 ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
@@ -2701,6 +2721,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
 
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
+        using var lease = HoldForWrite(session.SessionId);
         var actor = GetActorForWork(session.SessionId);
         return await actor.QueryAsync(
                 async actorCancellationToken =>
@@ -3576,6 +3597,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return AdmitAsync(async () =>
         {
             ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
+            using var lease = HoldForWrite(session.SessionId);
             await GetActorForWork(session.SessionId).QueryAsync(async actorCancellationToken =>
             {
                 if (_entries.TryGetValue(session.SessionId, out var entry)) entry.OwnReviewBeforeCommit = reviewBeforeCommit;
@@ -3943,18 +3965,21 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public async Task<bool> DetachRuntimeSessionAsync(string sessionId, CancellationToken cancellationToken = default)
         => await AdmitAsync(() => DetachOwnedBodyAsync(sessionId), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
 
-    private async Task<bool> DetachOwnedBodyAsync(string sessionId)
+    // onlyIfIdle: a session nobody shows is detached only while it still has nothing to do, without waiting for anything.
+    private async Task<bool> DetachOwnedBodyAsync(string sessionId, bool onlyIfIdle = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         var actor = GetActorForWork(sessionId);
         while (true)
         {
-            var preparation = await actor.QueryAsync(_ =>
+            var preparation = await actor.QueryAsync(async token =>
             {
                 if (_transitions.TryGetValue(sessionId, out var current))
-                    return ValueTask.FromResult((Claimed: false, Work: (Task?)current));
+                    return (Claimed: false, Work: onlyIfIdle ? null : (Task?)current);
                 if (!_entries.TryGetValue(sessionId, out var entry))
-                    return ValueTask.FromResult((Claimed: false, Work: (Task?)null));
+                    return (Claimed: false, Work: (Task?)null);
+                if (onlyIfIdle && !await IsStillIdleOnActorAsync(entry, token).ConfigureAwait(false))
+                    return (Claimed: false, Work: (Task?)null);
                 var retirement = _forwarding.RetireAsync(entry.Attachment);
                 var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 Task? ticket = null;
@@ -3966,8 +3991,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     {
                         await actor.QueryAsync(token =>
                         {
-                            if (_entries.TryGetValue(sessionId, out var active) && ReferenceEquals(active, entry))
-                                _entries.TryRemove(sessionId, out var removedEntry);
+                            if (_entries.TryGetValue(sessionId, out var active) && ReferenceEquals(active, entry)
+                                && _entries.TryRemove(sessionId, out var removedEntry))
+                                ReleaseEntryLease(sessionId);
                             if (_transitions.TryGetValue(sessionId, out var currentTicket) && ReferenceEquals(currentTicket, ticket))
                                 _transitions.TryRemove(sessionId, out var removedTransition);
                             return ValueTask.FromResult(true);
@@ -3977,7 +4003,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 _transitions[sessionId] = work;
                 ticket = work;
                 launch.TrySetResult();
-                return ValueTask.FromResult((Claimed: true, Work: (Task?)work));
+                return (Claimed: true, Work: (Task?)work);
             }, CancellationToken.None).ConfigureAwait(false);
             if (preparation.Work is null) return false;
             await preparation.Work.ConfigureAwait(false);
@@ -4177,6 +4203,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             {
                 await _sessionActors.DisposeAsync().ConfigureAwait(false);
                 _entries.Clear();
+                // Nothing writes for the sessions any more: another process may take them.
+                DisposeLeases();
             }, _events.Complete)));
         }
     }

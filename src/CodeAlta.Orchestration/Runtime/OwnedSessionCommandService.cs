@@ -1003,6 +1003,12 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Cancelled);
         }
+        catch (Exception ex) when (SessionRuntimeService.FindSessionInUse(ex) is not null)
+        {
+            // Another process runs the session: nothing was sent.
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
+            result = new(OwnedSessionCommandOutcome.Failed, Code: SessionRuntimeService.SessionInUseCode);
+        }
         catch (Exception ex)
         {
             RecordFailure(ex, cleanup: false, operation.ReleaseDecision);

@@ -230,6 +230,18 @@ public sealed class AltaCommandRegistry
                 commandExitCode,
                 "The alta command was cancelled.");
         }
+        catch (Exception ex) when (CodeAlta.Orchestration.Runtime.SessionRuntimeService.FindSessionInUse(ex) is { } inUse)
+        {
+            // Another process (the command line, another instance) runs the session: nothing was changed.
+            retentionLifetime.ObserveFailure(ex);
+            commandExitCode = AltaExitCodes.Unsupported;
+            AltaJsonlWriter.WriteError(
+                context.Stderr,
+                context.CorrelationId,
+                "session.inUse",
+                commandExitCode,
+                inUse.Message);
+        }
         catch (Exception ex)
         {
             retentionLifetime.ObserveFailure(ex);

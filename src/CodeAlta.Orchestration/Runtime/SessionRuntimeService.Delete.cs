@@ -121,6 +121,8 @@ public sealed partial class SessionRuntimeService
     private async Task<bool> ClaimIdleForDeletionAsync(string sessionId, Func<string, bool> isBusy, List<IDisposable> claims)
     {
         if (isBusy(sessionId)) return false;
+        if (!TryHoldForWrite(sessionId, out var lease)) return false;
+        claims.Add(lease);
         var jobClaim = Jobs.TryReserveDeletion(sessionId);
         if (jobClaim is null) return false;
         claims.Add(jobClaim);
@@ -170,6 +172,9 @@ public sealed partial class SessionRuntimeService
     private async Task<string> DeleteOwnedCatalogSessionBodyAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle,
         IReadOnlySet<string>? projectSessions = null)
     {
+        // A session another process runs is not deleted under it.
+        if (!TryHoldForWrite(sessionId, out var lease)) return "session_in_use";
+        using var held = lease;
         var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
         async Task<string> ValidateAsync(CancellationToken token)
         {
@@ -216,8 +221,9 @@ public sealed partial class SessionRuntimeService
                 {
                     await actor.QueryAsync(token =>
                     {
-                        if (_entries.TryGetValue(sessionId, out var active) && ReferenceEquals(active, entry))
-                            _entries.TryRemove(sessionId, out var removedEntry);
+                        if (_entries.TryGetValue(sessionId, out var active) && ReferenceEquals(active, entry)
+                            && _entries.TryRemove(sessionId, out var removedEntry))
+                            ReleaseEntryLease(sessionId);
                         if (_transitions.TryGetValue(sessionId, out var current) && ReferenceEquals(current, ticket))
                             _transitions.TryRemove(sessionId, out var removedTransition);
                         return ValueTask.FromResult(true);

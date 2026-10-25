@@ -27,8 +27,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     private readonly CodeAltaHost _host;
     private readonly HeadlessSessionDriverOptions _options;
     private readonly HeadlessPromptAttachmentService _attachments = new();
-    // The sessions the driver opened, with the lease each holds.
-    private readonly ConcurrentDictionary<string, IAsyncDisposable?> _open = new(StringComparer.OrdinalIgnoreCase);
+    // The sessions the driver opened, with the hold of their leases (SessionRuntimeService.HoldSession).
+    private readonly ConcurrentDictionary<string, IDisposable> _open = new(StringComparer.OrdinalIgnoreCase);
     // The session the driver opened that each observed session belongs to. Forgotten when the open sessions change.
     private readonly ConcurrentDictionary<string, string> _rootOf = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _closing = new();
@@ -53,8 +53,9 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
 
     /// <summary>
     /// Opens a session: the one to resume, the one named by the caller when it exists, or a new one in a folder. It checks
-    /// that the provider and the model can be used, gives the session full trust and the tools it does without, and takes
-    /// its lease when the driver has one.
+    /// that the provider and the model can be used, gives the session full trust and the tools it does without, and holds
+    /// its lease until it is closed when the host takes leases (<see cref="CodeAltaHostOptions.SessionLeaseOwner"/>): a
+    /// session another process holds is <see cref="HeadlessOpenStatus.SessionInUse"/>.
     /// </summary>
     /// <param name="request">What to open.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -95,11 +96,15 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
 
         var sessionId = existing?.SessionId ?? existingId ?? Guid.CreateVersion7().ToString();
         if (_open.ContainsKey(sessionId)) return new(HeadlessOpenStatus.SessionInUse, null, $"Session '{sessionId}' is already open.");
-        IAsyncDisposable? lease = null;
-        if (_options.AcquireSessionLease is { } acquire)
+        // The lease is held from the opening on, so that no other process takes the session between the opening and its run.
+        IDisposable lease;
+        try
         {
-            lease = await acquire(sessionId, cancellationToken).ConfigureAwait(false);
-            if (lease is null) return new(HeadlessOpenStatus.SessionInUse, null, $"Session '{sessionId}' is in use by another process.");
+            lease = runtime.HoldSession(sessionId);
+        }
+        catch (SessionInUseException inUse)
+        {
+            return new(HeadlessOpenStatus.SessionInUse, null, inUse.Message);
         }
 
         var opened = false;
@@ -151,7 +156,7 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         }
         finally
         {
-            if (!opened && lease is not null) await lease.DisposeAsync().ConfigureAwait(false);
+            if (!opened) lease.Dispose();
         }
     }
 
@@ -218,6 +223,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
                 abortReason == "timeout" ? $"The run did not end within {timeout}." : $"The run was aborted: {abortReason}.");
         }
 
+        if (sent is { Outcome: not OwnedSessionCommandOutcome.Completed, Code: SessionRuntimeService.SessionInUseCode } && runId is null)
+            return Result(HeadlessRunStatus.SessionInUse, null, outcome, usage, null, $"Session '{session.SessionId}' is in use by another process.");
         if (sent is { Outcome: not OwnedSessionCommandOutcome.Completed } && runId is null && outcome.FinalError is null)
             return Result(HeadlessRunStatus.Failed, null, outcome, usage, null, $"The prompt could not be sent ({sent.Code ?? sent.Outcome.ToString().ToLowerInvariant()}).");
 
@@ -282,14 +289,16 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     /// <param name="session">The session.</param>
     /// <returns>A task that completes when the lease is released.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
-    public async ValueTask CloseAsync(HeadlessSession session)
+    public ValueTask CloseAsync(HeadlessSession session)
     {
         ArgumentNullException.ThrowIfNull(session);
         if (_open.TryRemove(session.SessionId, out var lease))
         {
             _rootOf.Clear();
-            if (lease is not null) await lease.DisposeAsync().ConfigureAwait(false);
+            lease.Dispose();
         }
+
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>Stops the reader of the events and releases the leases of the open sessions. The host and its sessions are left as they are.</summary>
@@ -302,7 +311,7 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         catch (OperationCanceledException) { }
         foreach (var sessionId in _open.Keys.ToArray())
         {
-            if (_open.TryRemove(sessionId, out var lease) && lease is not null) await lease.DisposeAsync().ConfigureAwait(false);
+            if (_open.TryRemove(sessionId, out var lease)) lease.Dispose();
         }
 
         _closing.Dispose();

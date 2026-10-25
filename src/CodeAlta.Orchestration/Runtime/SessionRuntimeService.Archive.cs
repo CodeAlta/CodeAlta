@@ -87,7 +87,7 @@ public sealed partial class SessionRuntimeService
             // The sessions below one that is archived alone report to it: none of them may be at work either.
             foreach (var member in family)
             {
-                if (ownerBusy(member)) return SessionArchiveResult.Refused("session_in_use", member);
+                if (ownerBusy(member) || RefuseIfHeldElsewhere(member) is not null) return SessionArchiveResult.Refused("session_in_use", member);
                 var refusal = await GetActorForWork(member).QueryAsync(token => new ValueTask<string?>(ArchiveRefusalAsync(member, token)), CancellationToken.None)
                     .ConfigureAwait(false);
                 if (refusal is not null) return SessionArchiveResult.Refused(refusal, member);
@@ -132,6 +132,8 @@ public sealed partial class SessionRuntimeService
     private async Task<string> SetOneSessionArchivedAsync(string sessionId, bool archived, Func<string, bool> ownerBusy, List<string> changed)
     {
         if (archived && ownerBusy(sessionId)) return "session_in_use";
+        if (!TryHoldForWrite(sessionId, out var lease)) return "session_in_use";
+        using var held = lease;
         var actor = GetActorForWork(sessionId);
         Task? retirement = null;
         SessionViewDescriptor? written = null;
@@ -153,7 +155,7 @@ public sealed partial class SessionRuntimeService
                 // An archived session keeps no provider at work: it is attached again if it is used again. An
                 // attachment another front end made (the terminal UI) is its own to end.
                 retirement = _forwarding.RetireAsync(entry.Attachment);
-                _entries.TryRemove(sessionId, out _);
+                if (_entries.TryRemove(sessionId, out _)) ReleaseEntryLeaseAfter(sessionId, retirement);
                 _transitions[sessionId] = retirement;
             }
 

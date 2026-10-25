@@ -285,8 +285,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <exception cref="ArgumentOutOfRangeException">Owned receipt capacity is not positive, before host acquisition.</exception>
     /// <exception cref="ArgumentException">An explicit builtin skill root is blank or not fully qualified.</exception>
     /// <exception cref="ArgumentException">
-    /// The scratchpad root is not an absolute path, a host with read-only global state is given a startup scratchpad cleanup, or
-    /// the configuration options are null.
+    /// The scratchpad root is not an absolute path, a host with read-only global state is given a startup scratchpad cleanup,
+    /// the configuration options are null, or the session lease owner is not a short name without control characters.
     /// </exception>
     public static async Task<CodeAltaHost> CreateAsync(
         CodeAltaHostOptions options,
@@ -495,6 +495,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 ScratchpadRoot = instructionTemplateProvider.ScratchpadRoot,
+                Leases = options.SessionLeaseOwner is { } leaseOwner
+                    ? new SessionLeaseRegistry(new SessionLeaseStore(catalogOptions), new SessionLeaseOwner(leaseOwner, Guid.NewGuid().ToString("D")))
+                    : null,
             };
             var projectFileSearchService = new ProjectFileSearchService(
                 projectFileSnapshotCache,

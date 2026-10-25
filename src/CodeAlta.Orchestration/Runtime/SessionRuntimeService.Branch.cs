@@ -181,6 +181,9 @@ public sealed partial class SessionRuntimeService
     {
         var sessionId = request.SessionId;
         using var lineage = ClaimRetentionWork(sessionId, request.CreatedBy?.SourceSessionId);
+        // Another process that runs the session would write after the rewound journal.
+        if (!TryHoldForWrite(sessionId, out var lease)) return new("session_in_use");
+        using var held = lease;
         async Task<(string Status, SessionViewDescriptor? Session)> ValidateAsync(CancellationToken token)
         {
             var session = await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false);
@@ -219,8 +222,9 @@ public sealed partial class SessionRuntimeService
                 {
                     await actor.QueryAsync(token =>
                     {
-                        if (_entries.TryGetValue(sessionId, out var current) && ReferenceEquals(current, entry))
-                            _entries.TryRemove(sessionId, out var removedEntry);
+                        if (_entries.TryGetValue(sessionId, out var current) && ReferenceEquals(current, entry)
+                            && _entries.TryRemove(sessionId, out var removedEntry))
+                            ReleaseEntryLease(sessionId);
                         if (_transitions.TryGetValue(sessionId, out var currentTicket) && ReferenceEquals(currentTicket, ticket))
                             _transitions.TryRemove(sessionId, out var removedTransition);
                         return ValueTask.FromResult(true);

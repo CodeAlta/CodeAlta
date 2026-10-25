@@ -69,6 +69,9 @@ public sealed partial class SessionRuntimeService
         if (jobClaim is null) return "jobs_or_delivery";
         using var runtimeClaim = TryClaimRuntimeRetirement(candidate.SessionId);
         if (runtimeClaim is null) return "runtime_admission_or_lineage";
+        // A session another process runs or shows is not old, whatever its journal says.
+        if (!TryHoldForWrite(candidate.SessionId, out var lease)) return "session_in_use";
+        using var held = lease;
         var actor = GetActorForWork(candidate.SessionId);
         // Holding this original query serializes direct hub/runtime admissions, not merely UI/owned sends.
         // Never detach an idle-looking provider: any attachment (remote/background work included) protects it.

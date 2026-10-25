@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 
@@ -188,18 +189,18 @@ public sealed class HeadlessSessionDriverTests
     [TestMethod]
     public async Task Open_ASessionIdOpensOrCreates_AResumeOfAnUnknownSessionIsNotFound_AndALeaseHeldElsewhereRefuses()
     {
-        var (root, _, host) = await CreateAsync();
+        var root = new HeadlessTestRoot();
         await using var scope = root;
-        var held = new ConcurrentDictionary<string, bool>();
-        await using var driver = new HeadlessSessionDriver(host, new HeadlessSessionDriverOptions
-        {
-            AcquireSessionLease = (id, _) => ValueTask.FromResult<IAsyncDisposable?>(held.ContainsKey(id) ? null : new Lease()),
-        });
+        var host = await root.CreateHostAsync(new ScriptedTurnProvider(), readOnlyGlobalState: true, fullTrust: true, headlessInstructions: true,
+            sessionLeaseOwner: SessionLeaseOwner.CliKind);
+        await using var driver = new HeadlessSessionDriver(host);
         var id = Guid.NewGuid().ToString();
+        var leases = new SessionLeaseStore(host.CatalogOptions);
 
         var created = await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, SessionId = id, ModelRef = "scripted:scripted-model" });
         Assert.AreEqual(HeadlessOpenStatus.Created, created.Status, created.Message);
         Assert.AreEqual(id, created.Session!.SessionId);
+        Assert.AreEqual(SessionLeaseOwner.CliKind, leases.TryReadHolder(id)?.OwnerKind, "An open session holds its lease.");
         Assert.AreEqual(HeadlessOpenStatus.SessionInUse, (await driver.OpenAsync(new HeadlessSessionRequest { SessionId = id })).Status, "A session is open once.");
         await driver.CloseAsync(created.Session);
 
@@ -207,15 +208,21 @@ public sealed class HeadlessSessionDriverTests
         Assert.AreEqual(HeadlessOpenStatus.Opened, reopened.Status, reopened.Message);
         StringAssert.StartsWith(reopened.Session!.ModelRef, "scripted:scripted-model");
         await driver.CloseAsync(reopened.Session);
+        // The attachment the opening made still holds the lease: it goes with the host.
+        await host.RuntimeService.DetachRuntimeSessionAsync(id);
+        Assert.IsNull(leases.TryReadHolder(id), "A closed session without an attachment releases its lease.");
 
         Assert.AreEqual(HeadlessOpenStatus.NotFound, (await driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = Guid.NewGuid().ToString() })).Status);
-        held[id] = true;
-        Assert.AreEqual(HeadlessOpenStatus.SessionInUse, (await driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id })).Status);
-        Assert.AreEqual(HeadlessOpenStatus.InvalidRequest, (await driver.OpenAsync(new HeadlessSessionRequest { SessionId = "nope" })).Status);
-    }
+        // Another process holds it (a second lease of this process stands for one).
+        using (var elsewhere = leases.TryAcquire(id, new SessionLeaseOwner(SessionLeaseOwner.DesktopKind, "other")))
+        {
+            Assert.IsNotNull(elsewhere);
+            var refused = await driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id });
+            Assert.AreEqual(HeadlessOpenStatus.SessionInUse, refused.Status);
+            StringAssert.Contains(refused.Message, SessionLeaseOwner.DesktopKind);
+        }
 
-    private sealed class Lease : IAsyncDisposable
-    {
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        Assert.AreEqual(HeadlessOpenStatus.Opened, (await driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id })).Status, "Once released, the session is continued.");
+        Assert.AreEqual(HeadlessOpenStatus.InvalidRequest, (await driver.OpenAsync(new HeadlessSessionRequest { SessionId = "nope" })).Status);
     }
 }

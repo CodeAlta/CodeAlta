@@ -78,6 +78,7 @@ public sealed partial class OwnedSessionCommandService
             return new("ok", chosen);
         }
         catch (ObjectDisposedException) { return new("closed", null); }
+        catch (SessionInUseException) { return new("session_in_use", null); }
         catch (InvalidOperationException) { return new("unavailable", null); }
     }
 }
