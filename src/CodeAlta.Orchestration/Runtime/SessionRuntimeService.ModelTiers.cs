@@ -15,6 +15,7 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="Error">The error that ended the run.</param>
 /// <param name="HasQueuedPrompts">Whether prompts wait in the queue of the session.</param>
 /// <param name="Scope">The tiers of the space of the session, and the providers available there.</param>
+/// <param name="Sandboxed">Whether the session runs in a sandbox: it falls back only on a provider whose tools a sandbox holds.</param>
 internal sealed record RunFailureNotice(
     string SessionId,
     string? ParentSessionId,
@@ -26,7 +27,8 @@ internal sealed record RunFailureNotice(
     ModelTier? Tier,
     CodeAlta.Agent.AgentErrorEvent Error,
     bool HasQueuedPrompts,
-    ModelTierScope Scope);
+    ModelTierScope Scope,
+    bool Sandboxed = false);
 
 public sealed partial class SessionRuntimeService
 {
@@ -77,6 +79,7 @@ public sealed partial class SessionRuntimeService
         {
             var local = await ReadLatestLocalStateAsync(sessionId, entry.CreatedAt, CancellationToken.None).ConfigureAwait(false);
             var scope = await LoadModelTierScopeAsync(entry.SpaceId, entry.ProjectId, CancellationToken.None).ConfigureAwait(false);
+            var sandboxed = (await GetSessionSandboxAsync(sessionId, CancellationToken.None).ConfigureAwait(false)).IsSandboxed;
             return fallback(new RunFailureNotice(
                 sessionId,
                 entry.ParentSessionId,
@@ -88,7 +91,8 @@ public sealed partial class SessionRuntimeService
                 ModelTiers.Parse(local?.Tier),
                 error,
                 local?.HasPendingQueuedPrompts() ?? false,
-                scope));
+                scope,
+                sandboxed));
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {

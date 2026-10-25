@@ -184,14 +184,18 @@ public sealed partial class SessionRuntimeService
     // SessionLeaseUnavailableException.
     private void ClaimEntryLease(string sessionId) => Leases?.ClaimEntry(sessionId);
 
-    // Called where an attachment goes away for good (not where it is replaced).
-    private void ReleaseEntryLease(string sessionId) => Leases?.ReleaseEntry(sessionId);
+    // Called where an attachment goes away for good (not where it is replaced). The sandbox worker of the session goes
+    // with it, unless a background command still runs there.
+    private void ReleaseEntryLease(string sessionId)
+    {
+        Leases?.ReleaseEntry(sessionId);
+        StopUnusedSandboxWorker(sessionId);
+    }
 
     // An attachment removed while it retires: the lease goes once the retirement ended, since the attachment may still write
     // until then, unless another attachment of the session was published meanwhile.
     private void ReleaseEntryLeaseAfter(string sessionId, Task retirement)
     {
-        if (Leases is null) return;
         _ = retirement.ContinueWith(_ => ReleaseEntryLeaseWithoutEntry(sessionId), CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }

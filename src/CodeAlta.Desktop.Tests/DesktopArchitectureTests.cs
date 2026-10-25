@@ -27,7 +27,9 @@ public sealed class DesktopArchitectureTests
                 Assert.IsTrue(reference.Name is "XenoAtom.Logging" or "XenoAtom.CommandLine", $"Desktop references no terminal presentation library: {reference.Name}.");
             if (reference.Name.StartsWith("CodeAlta", StringComparison.Ordinal))
                 Assert.IsTrue(reference.Name is "CodeAlta.Catalog" or "CodeAlta.Agent" or "CodeAlta.Hosting" or "CodeAlta.Orchestration" or "CodeAlta.LiveTool" or "CodeAlta.Plugins" or "CodeAlta.Plugins.Abstractions" or "CodeAlta.Plugin.Mcp" or "CodeAlta.Plugin.Git" or "CodeAlta.Plugin.Jira" or "CodeAlta.Plugin.Statistics"
-                    or "CodeAlta.Plugin.Mobile" or "CodeAlta.Plugin.Acp" or "CodeAlta.Acp" or "CodeAlta.NativeEngines" or "CodeAlta.Search", reference.Name);
+                    or "CodeAlta.Plugin.Mobile" or "CodeAlta.Plugin.Acp" or "CodeAlta.Acp" or "CodeAlta.NativeEngines" or "CodeAlta.Search"
+                    // The desktop executable is also the sandbox worker of its sessions (--sandbox-worker).
+                    or "CodeAlta.Sandbox", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }

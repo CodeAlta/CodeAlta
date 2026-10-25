@@ -2197,6 +2197,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             DisabledToolPatterns = toolPatterns,
             WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree, options.ProjectRoots),
             CommandGuard = CreateCommandGuard(session.SessionId),
+            // Where its built-in tools run: in the worker of its sandbox while it is sandboxed, read at each call.
+            BuiltInToolRouter = CreateSandboxToolRouter(session.SessionId, options.ProviderKey ?? session.ResolvedProviderKey, options.ProjectRoots),
             OnPermissionRequest = options.OnPermissionRequest,
             OnUserInputRequest = options.OnUserInputRequest,
             OnConversationHeld = AskWhenConversationHeld ? ConversationHolds.Handler : null,
@@ -4253,7 +4255,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _sessionViewCatalog.JournalStore.StateAppended -= OnSessionStateAppended;
         // The commands of the jobs are ended first: none tells its end to a session that is closing.
         var jobs = Jobs.DisposeAsync().AsTask();
-        return new ValueTask(Task.WhenAll(jobs, _forwarding.CloseAsync(
+        // Then the sandboxes, with what their workers run.
+        var sandboxes = Task.Run(async () => { await jobs.ConfigureAwait(false); await DisposeSandboxWorkersAsync().ConfigureAwait(false); });
+        return new ValueTask(Task.WhenAll(jobs, sandboxes, _forwarding.CloseAsync(
             () => Task.WhenAll(Permissions.DisposeAsync().AsTask(), ConversationHolds.DisposeAsync().AsTask()),
             async () =>
             {

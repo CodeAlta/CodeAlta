@@ -52,6 +52,9 @@ public sealed record SessionJobRequest
     /// <summary>Gets the variables of the session the command runs with, such as its Git identity; null for none.</summary>
     public CodeAlta.Agent.AgentProcessEnvironment? Environment { get; init; }
 
+    /// <summary>Gets what starts the command, such as the worker of the sandbox of the session; null for the starter of the service.</summary>
+    public ShellCommandStarter? Starter { get; init; }
+
     /// <summary>Gets what the job is for, in a few words; null to show the command.</summary>
     public string? Title { get; init; }
 

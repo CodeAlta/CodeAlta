@@ -210,9 +210,19 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         // A job runs as the commands of its session do: with the identity the session has (the Git author of its space),
         // and the variables that name the session and its model.
-        var environment = context.Services.Get<SessionRuntimeService>() is { } runtime
+        var runtime = context.Services.Get<SessionRuntimeService>();
+        var environment = runtime is not null
             ? await runtime.GetSessionProcessEnvironmentAsync(sessionId, context.CancellationToken).ConfigureAwait(false)
             : SessionIdentity.Usual.Environment;
+        // The job of a sandboxed session runs in its sandbox, as its commands do, or not at all.
+        ShellCommandStarter? starter = null;
+        if (runtime is not null)
+        {
+            var (sandboxed, refusal) = await runtime.GetJobStarterAsync(sessionId, context.CancellationToken).ConfigureAwait(false);
+            if (refusal is not null) return PermissionDenied(context, "job.sandboxUnavailable", refusal);
+            starter = sandboxed;
+        }
+
         var started = jobs.Start(new SessionJobRequest
         {
             SessionId = sessionId,
@@ -223,6 +233,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             Title = NormalizeOptionalText(options.Title),
             Notification = notification,
             Timeout = timeout,
+            Starter = starter,
         });
         if (started.Job is not { } job)
         {

@@ -287,6 +287,35 @@ public sealed class SessionFallbackTests
     }
 
     [TestMethod]
+    public async Task SandboxedSession_GoesOnOnlyWithAProviderWhoseToolsItsSandboxHolds()
+    {
+        // B has no type CodeAlta drives: it would run its own tools, outside the sandbox.
+        await using var f = await Fixture.CreateAsync(Tiers + "\n\n[sandbox]\nall_sessions = \"workspace\"\n");
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+
+        var card = await f.WaitForCardAsync(AgentSessionUpdateKind.Warning);
+        StringAssert.Contains(card.Message, "no other model of the standard tier can take over");
+        Assert.AreEqual(0, f.B.SendCount);
+    }
+
+    [TestMethod]
+    public async Task SandboxedSession_FallsBackToAProviderThatCodeAltaDrives()
+    {
+        await using var f = await Fixture.CreateAsync(Tiers + "\n\n[sandbox]\nall_sessions = \"workspace\"\n", bType: "openai-chat");
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        var continuation = await f.NextSendAsync(f.B);
+
+        StringAssert.Contains(continuation.Text, "[CodeAlta fallback]");
+        Assert.AreEqual("prov-b", (await f.ChildStateAsync()).ProviderKey);
+    }
+
+    [TestMethod]
     public async Task Switch_KeepsOrNarrowsThePermissionMode_NeverWidensIt()
     {
         await using var f = await Fixture.CreateAsync(Tiers, childPermissionMode: SessionPermissionModes.AcceptEdits,
@@ -399,10 +428,10 @@ public sealed class SessionFallbackTests
         internal SessionViewDescriptor Child { get; private set; } = null!;
 
         internal static async Task<Fixture> CreateAsync(string config, string? childPermissionMode = null, IReadOnlyList<string>? bModes = null,
-            Func<SpaceCatalog, Task<string>>? childSpace = null, string? providerSpaces = null, IReadOnlyList<SessionViewQueuedPrompt>? childQueue = null)
+            Func<SpaceCatalog, Task<string>>? childSpace = null, string? providerSpaces = null, IReadOnlyList<SessionViewQueuedPrompt>? childQueue = null, string? bType = null)
         {
             var f = new Fixture();
-            f.B = new ScriptedProvider("prov-b", "model-b", bModes ?? [SessionPermissionModes.Ask, SessionPermissionModes.AcceptEdits, SessionPermissionModes.Bypass]);
+            f.B = new ScriptedProvider("prov-b", "model-b", bModes ?? [SessionPermissionModes.Ask, SessionPermissionModes.AcceptEdits, SessionPermissionModes.Bypass], bType);
             await f.SetupAsync(providerSpaces is null ? config : config + "\n" + providerSpaces, childPermissionMode, childSpace, childQueue);
             return f;
         }
@@ -575,10 +604,10 @@ public sealed class SessionFallbackTests
         private readonly Channel<SendRecord> _sends = Channel.CreateUnbounded<SendRecord>();
         private int _sendCount;
 
-        internal ScriptedProvider(string id, string model, IReadOnlyList<string> permissionModes)
+        internal ScriptedProvider(string id, string model, IReadOnlyList<string> permissionModes, string? type = null)
         {
             Model = model;
-            Descriptor = new(new ModelProviderId(id), id.ToUpperInvariant()) { DefaultModelId = model, PermissionModes = permissionModes };
+            Descriptor = new(new ModelProviderId(id), id.ToUpperInvariant(), type) { DefaultModelId = model, PermissionModes = permissionModes };
         }
 
         internal string Model { get; }

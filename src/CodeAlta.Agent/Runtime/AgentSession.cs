@@ -706,6 +706,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 userInputRequestHandler, options.EnableUserInputTool), options.AdditionalTools));
             // A provider that runs tools itself answers its own permission prompts and questions through the run.
             var providerToolHost = _turnExecutor as IAgentProviderToolHost;
+            // A session whose tools must run elsewhere (in a sandbox) does not start a run whose tools would run here.
+            if (_options.BuiltInToolRouter is { } router
+                && await router.RefuseRunAsync(providerToolHost is not null, linkedCts.Token).ConfigureAwait(false) is { } refusal)
+                throw new InvalidOperationException(refusal);
             providerToolHost?.AttachRun(new AgentProviderRunContext(SessionId, runId, permissionRequestHandler,
                 options.EnableUserInputTool ? userInputRequestHandler : null, options.IsProviderInitiated,
                 options.OnConversationHeld ?? _options.OnConversationHeld));
@@ -1730,22 +1734,23 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private IReadOnlyList<AgentToolDefinition> BuildAvailableTools(AgentPermissionRequestHandler permissionRequestHandler,
         AgentUserInputRequestHandler? userInputRequestHandler, bool enableUserInputTool)
     {
-        var builtIns = AgentBuiltInToolFactory.CreateDefaultTools(
-            new AgentBuiltInToolOptions
-            {
-                ProviderId = ProviderId,
-                SessionId = SessionId,
-                WorkingDirectory = _summary.ExecutionDirectory,
-                Environment = _options.Environment,
-                OnPermissionRequest = permissionRequestHandler,
-                OnUserInputRequest = userInputRequestHandler,
-                EnableUserInputTool = enableUserInputTool,
-                Provider = Provider,
-                HttpClient = BuiltInToolHttpClient,
-                DisabledTools = _options.DisabledBuiltInTools,
-                WriteGuard = _options.WriteGuard,
-                CommandGuard = _options.CommandGuard,
-            });
+        var toolOptions = new AgentBuiltInToolOptions
+        {
+            ProviderId = ProviderId,
+            SessionId = SessionId,
+            WorkingDirectory = _summary.ExecutionDirectory,
+            Environment = _options.Environment,
+            OnPermissionRequest = permissionRequestHandler,
+            OnUserInputRequest = userInputRequestHandler,
+            EnableUserInputTool = enableUserInputTool,
+            Provider = Provider,
+            HttpClient = BuiltInToolHttpClient,
+            DisabledTools = _options.DisabledBuiltInTools,
+            WriteGuard = _options.WriteGuard,
+            CommandGuard = _options.CommandGuard,
+        };
+        var builtIns = AgentBuiltInToolFactory.CreateDefaultTools(toolOptions);
+        if (_options.BuiltInToolRouter is { } router) builtIns = router.Route(toolOptions, builtIns);
         return _options.Tools is { Count: > 0 }
             ? [.. builtIns, .. _options.Tools]
             : builtIns;

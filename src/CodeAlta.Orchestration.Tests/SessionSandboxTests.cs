@@ -97,6 +97,167 @@ public sealed class SessionSandboxTests
         Assert.AreEqual("workspace", sandbox.Choice.Profile);
     }
 
+    [TestMethod]
+    public async Task TheToolsOfASandboxedSession_RunInItsWorker_WhichFollowsTheProfileOfTheMoment()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        await f.CreateSessionAsync("s");
+        var tools = f.RoutedTools("s");
+
+        var plain = await tools.CallAsync("write_file", new { path = "plain.txt", content = "here" });
+        Assert.IsTrue(plain.Success, plain.Error);
+        Assert.AreEqual(0, backend.Starts.Count, "a session that is not sandboxed runs its tools here");
+
+        f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
+        var written = await tools.CallAsync("write_file", new { path = "boxed.txt", content = "in the box" });
+        Assert.IsTrue(written.Success, written.Error);
+        Assert.AreEqual("in the box", File.ReadAllText(Path.Combine(f.Project.ProjectPath, "boxed.txt")));
+        var read = await tools.CallAsync("read_file", new { path = "boxed.txt" });
+        Assert.IsTrue(read.Success, read.Error);
+        Assert.AreEqual(1, backend.Starts.Count, "one worker per session, kept between calls");
+        var policy = backend.Starts[0];
+        Assert.AreEqual("strict", policy.ProfileName);
+        Assert.AreEqual(Path.GetFullPath(f.Project.ProjectPath), policy.WorkingDirectory);
+
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        Assert.IsTrue((await tools.CallAsync("read_file", new { path = "boxed.txt" })).Success);
+        Assert.AreEqual(2, backend.Starts.Count, "another profile is another container");
+        Assert.AreEqual("workspace", backend.Starts[1].ProfileName);
+
+        await f.Runtime.SandboxWorkers.StopIfUnusedAsync("s");
+        Assert.IsTrue((await tools.CallAsync("read_file", new { path = "boxed.txt" })).Success);
+        Assert.AreEqual(3, backend.Starts.Count, "a session that went away left no worker: the next call starts one");
+
+        f.WriteConfig("[sandbox]\nall_sessions = \"missing\"\n");
+        var refused = await tools.CallAsync("read_file", new { path = "boxed.txt" });
+        Assert.IsFalse(refused.Success, "a profile that cannot be used runs nothing, here or there");
+        Assert.Contains("'missing'", refused.Error!);
+    }
+
+    [TestMethod]
+    public async Task ASandboxThatCannotRun_RefusesTheRunAndTheTools_AndSaysWhy()
+    {
+        var backend = new InProcessBackend { Available = false };
+        await using var f = await Fixture.CreateAsync(backend);
+        await f.CreateSessionAsync("s");
+        var router = f.Runtime.CreateSandboxToolRouter("s", "codex", [f.Project.ProjectPath]);
+        Assert.IsNull(await router.RefuseRunAsync(providerRunsItsOwnTools: true, CancellationToken.None), "nothing is refused to a session that is not sandboxed");
+
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        Assert.Contains("not available on this computer", (await router.RefuseRunAsync(false, CancellationToken.None))!);
+        backend.Available = true;
+        Assert.IsNull(await router.RefuseRunAsync(false, CancellationToken.None));
+        Assert.Contains("runs its own tools", (await router.RefuseRunAsync(true, CancellationToken.None))!);
+
+        backend.Fails = true;
+        var result = await f.RoutedTools("s").CallAsync("shell_command", new { command = "echo no" });
+        Assert.IsFalse(result.Success);
+        Assert.Contains("did not run", result.Error!);
+        Assert.Contains("refused by the test", result.Error!);
+
+        var (starter, refusal) = await f.Runtime.GetJobStarterAsync("s");
+        Assert.IsNull(starter);
+        Assert.Contains("not attached", refusal!, "a background command waits for a session that runs");
+    }
+
+    [TestMethod]
+    public async Task WebGetOfASandboxWithoutNetwork_IsRefused_BeforeAnyRequest()
+    {
+        await using var f = await Fixture.CreateAsync(new InProcessBackend());
+        await f.CreateSessionAsync("s");
+        f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
+
+        var result = await f.RoutedTools("s").CallAsync("webget", new { url = "http://127.0.0.1:9/" });
+
+        Assert.IsFalse(result.Success);
+        Assert.Contains("has no network", result.Error!);
+    }
+
+    // The tools of a session as its agent gets them, through the router of the runtime.
+    private sealed class RoutedToolSet(IReadOnlyList<AgentToolDefinition> tools, string sessionId)
+    {
+        public async Task<AgentToolResult> CallAsync(string tool, object arguments)
+            => await tools.Single(candidate => candidate.Spec.Name == tool).Handler(
+                new AgentToolInvocation(new ModelProviderId("codex"), sessionId, Guid.NewGuid().ToString("N"), tool, System.Text.Json.JsonSerializer.SerializeToElement(arguments)),
+                CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(60));
+    }
+
+    // A sandbox that runs the worker in this process, on two pipes, and records the policies it is given.
+    private sealed class InProcessBackend : ISandboxBackend
+    {
+        public List<SandboxPolicy> Starts { get; } = [];
+
+        public bool Available { get; set; } = true;
+
+        public bool Fails { get; set; }
+
+        public SandboxAvailability GetAvailability() => Available
+            ? new SandboxAvailability(true, "test", null, null, new HashSet<SandboxNetwork> { SandboxNetwork.Off, SandboxNetwork.Hosts, SandboxNetwork.On })
+            : SandboxAvailability.Unavailable("test", "the test has none.", null);
+
+        public Task<ISandboxProcess> StartAsync(SandboxPolicy policy, string commandLine, string? proxyEndpoint, CancellationToken cancellationToken)
+        {
+            if (Fails) throw new SandboxUnavailableException("refused by the test.");
+            lock (Starts) Starts.Add(policy);
+            return Task.FromResult<ISandboxProcess>(new Process());
+        }
+
+        private sealed class Process : ISandboxProcess
+        {
+            private readonly System.IO.Pipes.AnonymousPipeServerStream _toWorker = new(System.IO.Pipes.PipeDirection.Out);
+            private readonly System.IO.Pipes.AnonymousPipeServerStream _fromWorker = new(System.IO.Pipes.PipeDirection.Out);
+            private readonly System.IO.Pipes.AnonymousPipeClientStream _workerInput;
+            private readonly System.IO.Pipes.AnonymousPipeClientStream _hostInput;
+            private readonly CancellationTokenSource _kill = new();
+            private readonly Task _worker;
+
+            public Process()
+            {
+                _workerInput = new(System.IO.Pipes.PipeDirection.In, _toWorker.ClientSafePipeHandle);
+                _hostInput = new(System.IO.Pipes.PipeDirection.In, _fromWorker.ClientSafePipeHandle);
+                _worker = Task.Run(() => CodeAlta.Sandbox.Worker.SandboxWorker.RunAsync(_workerInput, _fromWorker, _kill.Token));
+            }
+
+            public int Id => Environment.ProcessId;
+
+            public Stream StandardInput => _toWorker;
+
+            public Stream StandardOutput => _hostInput;
+
+            public Stream StandardError { get; } = new MemoryStream();
+
+            public async Task<int> WaitForExitAsync(CancellationToken cancellationToken)
+            {
+                try
+                {
+                    await _worker.WaitAsync(cancellationToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                }
+
+                return 0;
+            }
+
+            public void Kill()
+            {
+                _kill.Cancel();
+                _toWorker.Dispose();
+            }
+
+            public async ValueTask DisposeAsync()
+            {
+                Kill();
+                await WaitForExitAsync(CancellationToken.None);
+                _fromWorker.Dispose();
+                _workerInput.Dispose();
+                _hostInput.Dispose();
+                _kill.Dispose();
+            }
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _temp;
@@ -123,7 +284,7 @@ public sealed class SessionSandboxTests
 
         public CatalogOptions Options { get; }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(ISandboxBackend? backend = null)
         {
             var temp = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-sandbox-" + Guid.NewGuid().ToString("N"))).FullName;
             var hub = new AgentHub(new ModelProviderRegistry(), temp);
@@ -132,8 +293,26 @@ public sealed class SessionSandboxTests
             var projects = new ProjectCatalog(options);
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(temp, "project")).FullName);
             var runtime = new SessionRuntimeService(hub, new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore()), projects,
-                sessionViewCatalog, new AgentInstructionTemplateProvider(catalogOptions: options), options);
+                sessionViewCatalog, new AgentInstructionTemplateProvider(catalogOptions: options), options)
+            {
+                SandboxBackend = backend,
+                SandboxDataRoot = Path.Combine(temp, "sandbox"),
+                ScratchpadRoot = Path.Combine(temp, "scratchpad"),
+            };
             return new Fixture(temp, hub, runtime, sessionViewCatalog.JournalStore, projects, project, options);
+        }
+
+        public RoutedToolSet RoutedTools(string sessionId)
+        {
+            var options = new CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolOptions
+            {
+                ProviderId = new ModelProviderId("codex"),
+                SessionId = sessionId,
+                WorkingDirectory = Project.ProjectPath,
+                OnPermissionRequest = (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            };
+            var router = Runtime.CreateSandboxToolRouter(sessionId, "codex", [Project.ProjectPath]);
+            return new RoutedToolSet(router.Route(options, CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolFactory.CreateDefaultTools(options)), sessionId);
         }
 
         public SessionRuntimeService CreateRuntime()

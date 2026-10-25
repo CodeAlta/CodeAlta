@@ -48,6 +48,68 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_RoutesItsBuiltInTools_AndStartsNoRunTheRouterRefuses()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-routed-tools");
+        var state = CreateState(summary.SessionId);
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(state);
+        var router = new RecordingRouter();
+        var turns = 0;
+        await using var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor((_, _, _) =>
+            {
+                Interlocked.Increment(ref turns);
+                return Task.FromResult(new AgentTurnResponse { AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]) });
+            }), new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                BuiltInToolRouter = router,
+            });
+
+        await session.SendAsync(new() { Input = AgentInput.Text("Work") });
+        Assert.AreEqual(1, turns);
+        Assert.AreEqual(summary.ExecutionDirectory, router.WorkingDirectory, "the router gets the options the tools are built with");
+        Assert.IsTrue(router.Routed.Contains("read_file") && router.Routed.Contains("shell_command"));
+        Assert.IsFalse(router.LastProviderRunsItsOwnTools);
+
+        router.Refusal = "This session is sandboxed, and its sandbox cannot run.";
+        var refused = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => session.SendAsync(new() { Input = AgentInput.Text("Again") }));
+        Assert.AreEqual(router.Refusal, refused.Message);
+        Assert.AreEqual(1, turns, "no turn of the model starts when its tools could not run where they must");
+    }
+
+    private sealed class RecordingRouter : IAgentBuiltInToolRouter
+    {
+        public string? Refusal { get; set; }
+
+        public string? WorkingDirectory { get; private set; }
+
+        public HashSet<string> Routed { get; } = [];
+
+        public bool LastProviderRunsItsOwnTools { get; private set; }
+
+        public IReadOnlyList<AgentToolDefinition> Route(AgentBuiltInToolOptions options, IReadOnlyList<AgentToolDefinition> tools)
+        {
+            WorkingDirectory = options.WorkingDirectory;
+            foreach (var tool in tools) Routed.Add(tool.Spec.Name);
+            return tools;
+        }
+
+        public ValueTask<string?> RefuseRunAsync(bool providerRunsItsOwnTools, CancellationToken cancellationToken)
+        {
+            LastProviderRunsItsOwnTools = providerRunsItsOwnTools;
+            return ValueTask.FromResult(Refusal);
+        }
+    }
+
+    [TestMethod]
     public async Task AgentSession_JournalsTheActivitiesOfTheProvider_WhereTheyCameInTheAnswer()
     {
         using var temp = TestTempDirectory.Create();

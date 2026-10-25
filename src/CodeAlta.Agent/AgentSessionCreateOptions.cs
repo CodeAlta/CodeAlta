@@ -200,6 +200,12 @@ public class AgentSessionCreateOptions
     public CodeAlta.Agent.Runtime.Tools.AgentCommandGuard? CommandGuard { get; init; }
 
     /// <summary>
+    /// Gets or initializes where the built-in tools of the session run, and whether a run may start: set for a
+    /// session whose tools may run in a sandbox. <see langword="null"/> where they run in this process.
+    /// </summary>
+    public CodeAlta.Agent.Runtime.Tools.IAgentBuiltInToolRouter? BuiltInToolRouter { get; init; }
+
+    /// <summary>
     /// Gets or initializes MCP server configurations available to this session.
     /// </summary>
     public IReadOnlyDictionary<string, AgentMcpServerConfig>? McpServers { get; init; }

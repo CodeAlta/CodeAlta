@@ -306,13 +306,17 @@ Their native sandboxes are not the boundary. Claude Code's covers only its shell
   Tests run the protocol with a plain-process backend. The container tests are skipped where the sandbox is not available, as the browser tests are without Edge.
 
   **Done** (`src/CodeAlta.Sandbox/Worker`): `SandboxWorker` runs the handlers of `AgentBuiltInToolFactory` unchanged and relays their permission requests, the command guard and their progress; `SandboxWorkerClient` is CodeAlta's side, with cancellation and background commands; messages longer than a frame go in parts. The protocol tests run the worker in the test process on pipes; `CliSandboxWorkerTests` runs `altacli --sandbox-worker` in a real container (ready in about a second here).
-- [ ] 7. **Routing.**
+- [x] 7. **Routing.**
   - `AgentSession.BuildAvailableTools` gives a sandboxed session the tools backed by its worker, and `SessionJobService` starts its jobs in the worker.
   - The worker starts on the first tool call, stops when the session detaches or idles, and starts again when the profile changes.
   - Without a worker, the tool fails with the reason.
 
   Tests.
-- [ ] 8. **`SandboxNetworkProxy`**, as described above. The `webget` of a sandboxed session follows the same host list. Tests for the patterns and for each refused kind of address.
+
+  **Done.** `IAgentBuiltInToolRouter` (Agent) is given to each attached session; `SessionRuntimeService.SandboxTools.cs` routes the tools of `SandboxWorker.Tools` to the worker when the session is sandboxed at the moment of the call, and runs `webget` here with `SandboxHttp`. `SessionSandboxWorkers` keeps one worker per session, keyed by its policy, stops it when the session's attachment goes (unless a background command holds it) or after 10 idle minutes. `RefuseRunAsync` refuses the run of a sandboxed session whose sandbox cannot run, and of a provider that runs its own tools (`IAgentProviderToolHost`); the fallback skips targets that are not CodeAlta-driven (`SandboxedProviders`). `alta job` starts in the worker (`GetJobStarterAsync`).
+- [x] 8. **`SandboxNetworkProxy`**, as described above. The `webget` of a sandboxed session follows the same host list. Tests for the patterns and for each refused kind of address.
+
+  **Done** (`src/CodeAlta.Sandbox/Network`): CONNECT and plain HTTP, a 403 that names the host, `RecentRefusals` for the note of step 10; CodeAlta's MCP ports are never reached.
 - [ ] 9. **Gates for sandboxed callers** in `BuiltInAltaCommandContributor`, the plugin bridge and the MCP plugin, as in the table above, with a test for each refusal. Add the sandbox-safe flag to `PluginToolActivationPolicy`.
 - [ ] 10. **The agent's side.**
   - The sandbox paragraph of the runtime context, and the host-context note when it changes.
