@@ -378,8 +378,12 @@ public sealed partial class StatisticsQueries
         query.SessionIds = ids;
         var rootRow = SessionEntries(sql, query, [id], "recent", 1, out _).FirstOrDefault()
             ?? sql.Query(
-                $"SELECT session_id, title, project_ref, provider, parent_session_id, COALESCE(last_ms, 0), deleted FROM {P}session WHERE session_id = @p0",
-                reader => new SessionEntry(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.IsDBNull(2) ? null : query.ProjectName(reader.GetString(2)), reader.IsDBNull(3) ? null : reader.GetString(3), null, reader.IsDBNull(4) ? null : reader.GetString(4), 0, 0, 0, 0, [], 0, null, reader.GetInt64(6) != 0),
+                $"SELECT session_id, title, project_ref, provider, parent_session_id, COALESCE(last_ms, 0), deleted, folder_key FROM {P}session WHERE session_id = @p0",
+                reader =>
+                {
+                    var project = query.SessionProjects.Resolve(reader.IsDBNull(2) ? null : reader.GetString(2), reader.IsDBNull(7) ? null : reader.GetString(7));
+                    return new SessionEntry(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), project, project is null ? null : query.ProjectName(project), reader.IsDBNull(3) ? null : reader.GetString(3), null, reader.IsDBNull(4) ? null : reader.GetString(4), 0, 0, 0, 0, [], 0, null, reader.GetInt64(6) != 0);
+                },
                 id).First();
         var children = withChildren && ids.Count > 1
             ? SessionEntries(sql, query, [.. ids.Where(other => other != id)], "recent", MaxLimit, out _)

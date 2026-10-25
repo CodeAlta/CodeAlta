@@ -8,7 +8,11 @@ namespace CodeAlta.Plugin.Statistics.Query;
 /// <param name="Slug">The short name.</param>
 /// <param name="Name">The name to show.</param>
 /// <param name="SpaceIds">The spaces the project belongs to today, the default space apart, which holds every project.</param>
-internal sealed record ProjectInfo(string Id, string Slug, string Name, IReadOnlyList<string> SpaceIds);
+internal sealed record ProjectInfo(string Id, string Slug, string Name, IReadOnlyList<string> SpaceIds)
+{
+    /// <summary>Gets the folder of the project: a session whose project the catalog does not have counts under the project of its folder.</summary>
+    public string? Path { get; init; }
+}
 
 /// <summary>A space: a named group of projects.</summary>
 /// <param name="Id">The identifier of the space.</param>
@@ -166,7 +170,7 @@ internal sealed class AltaProjectDirectory(IPluginAltaService alta, TimeProvider
             spaces.AddRange(list.EnumerateArray().Select(static item => item.GetString()).OfType<string>());
         }
 
-        return new ProjectInfo(id, Text(element, "slug") ?? id, Text(element, "displayName") ?? Text(element, "name") ?? id, spaces);
+        return new ProjectInfo(id, Text(element, "slug") ?? id, Text(element, "displayName") ?? Text(element, "name") ?? id, spaces) { Path = Text(element, "projectPath") };
     }
 
     private static SpaceInfo? ParseSpace(JsonElement element)

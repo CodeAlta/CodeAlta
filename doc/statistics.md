@@ -33,8 +33,8 @@ from three choices:
   are a cache, written in the same transaction as the facts, rebuilt from the facts alone when the time zone or the
   roll-up version changes. A journey costs a rebuild, never a reread.
 - **Names, never content.** The store keeps counts, the names of providers, models, tools, skills and MCP servers,
-  the program of a shell command, the first two words of an `alta` command, file extensions, and a cleaned session
-  title. No prompt, answer, tool argument, result or path is copied. A name taken out of a command is kept only when
+  the program of a shell command, the first two words of an `alta` command, file extensions, a cleaned session
+  title, and a hash of the folder of a session. No prompt, answer, tool argument, result or path is copied. A name taken out of a command is kept only when
   it is written as a name, because the rest of a command may hold a secret (`PGPASSWORD=… psql` counts `psql`; a quoted
   value, a token-like word or an ambiguous shell construct counts nothing).
 
@@ -54,7 +54,7 @@ Definitions the reducer guarantees:
   inherited ones only carry the choices in force. Turns made outside CodeAlta (runs whose id starts with `external:`)
   count nothing. So the totals of a session and its forks are what was spent: nothing twice, nothing lost.
 
-`SessionFactsState.CurrentVersion` (8) versions the definitions. A new version rereads every session that still has
+`SessionFactsState.CurrentVersion` (9) versions the definitions. A new version rereads every session that still has
 its journal, one at a time, keeping the old numbers until each session's new rows are saved.
 
 ## Reading journals
@@ -108,6 +108,10 @@ start.
 `StatisticsRequest` (period in local days, frequency, comparison, filters, limit):
 
 - Counts and sums read the roll-ups; a question that needs the session, the project or the hour reads quarter hours.
+- **A session counts under the project CodeAlta lists it under** (`ProjectCatalog.ResolveSessionProject`): the project
+  its header records when the catalog has it, otherwise the project of the catalog in its folder (a session `altacli`
+  wrote where no project was), never another project of the catalog. The rule is applied with each question from the
+  catalog of now (`SessionProjects`), so adding a project moves the numbers of its sessions without reading a journal.
 - **A session filter is always applied.** It resolves to the session and, with `withChildren`, its sub-agents; other
   filters only narrow it, and an unknown session gives the numbers of nothing (`session-not-found`), never the numbers
   of everything.
@@ -153,5 +157,6 @@ project and session menu lines, and a landing card (see [plugins](plugins.md)).
 
 - Only what journals record is counted: a session deleted before it was read cannot be counted.
 - The spaces of a project are the ones it has today; a chat counts in the space its header records.
+- Saved statistics of a deleted session keep no folder: they count under the project its header records.
 - Sessions at once count a run from its first to its last record, including time spent waiting for the user.
 - The developer instance has its own statistics, as it has its own sessions and database.

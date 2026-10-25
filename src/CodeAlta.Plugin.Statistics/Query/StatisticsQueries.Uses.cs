@@ -56,19 +56,27 @@ public sealed partial class StatisticsQueries
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(window, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(halfLife, TimeSpan.Zero);
+        return ReadSkillUsageScoresAsync(end, window, halfLife, cancellationToken);
+    }
+
+    private async ValueTask<IReadOnlyList<SkillUsageScore>> ReadSkillUsageScoresAsync(DateTimeOffset end, TimeSpan window, TimeSpan halfLife, CancellationToken cancellationToken)
+    {
         var upper = QuarterHour.Of(end).Index;
         var lower = QuarterHour.Of(end - window).Index;
         var endMs = end.ToUnixTimeMilliseconds();
         var halfLifeMs = halfLife.TotalMilliseconds;
-        return _store.ReadAsync<IReadOnlyList<SkillUsageScore>>(sql =>
+        var projects = _directory is not null ? await _directory.ListProjectsAsync(cancellationToken).ConfigureAwait(false) : [];
+        return await _store.ReadAsync<IReadOnlyList<SkillUsageScore>>(sql =>
         {
+            var sessionProjects = SessionProjects.Read(sql, P, projects);
             var table = FactTables.Details.TableName(P, RollupLevel.Quarter);
             var rows = sql.Query(
-                $"SELECT COALESCE(s.project_ref, ''), COALESCE(s.space_id, ''), f.name, f.q, SUM(f.n) FROM {table} f"
+                $"SELECT s.project_ref, s.folder_key, COALESCE(s.space_id, ''), f.name, f.q, SUM(f.n) FROM {table} f"
                 + $" LEFT JOIN {P}session s ON s.session_id = f.session_id"
                 + $" WHERE f.q >= @p0 AND f.q < @p1 AND {ListsWhere(SkillLists)} AND f.name <> ''"
-                + " GROUP BY 1, 2, 3, 4",
-                static reader => (Project: reader.GetString(0), Space: reader.GetString(1), Name: reader.GetString(2), Quarter: reader.GetInt32(3), Uses: reader.GetInt64(4)),
+                + " GROUP BY 1, 2, 3, 4, 5",
+                reader => (Project: sessionProjects.Resolve(reader.IsDBNull(0) ? null : reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1)) ?? string.Empty,
+                    Space: reader.GetString(2), Name: reader.GetString(3), Quarter: reader.GetInt32(4), Uses: reader.GetInt64(5)),
                 lower,
                 upper);
             var scores = new SortedDictionary<(string, string, string), (double Score, long Uses)>();
@@ -87,7 +95,7 @@ public sealed partial class StatisticsQueries
                 pair.Key.Item3,
                 Math.Round(pair.Value.Score, 6),
                 pair.Value.Uses))];
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private SkillsResult BuildSkills(SqlSession sql, ResolvedQuery query)

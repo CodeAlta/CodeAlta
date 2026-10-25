@@ -969,6 +969,20 @@ public sealed class SessionFactsReducerTests
     }
 
     [TestMethod]
+    public void Session_KeepsTheKeyOfItsFolder_NeverTheFolder()
+    {
+        var b = new JournalBuilder("33333333-3333-3333-3333-333333333333", "codex");
+        b.Header(T0).Idle(T0.AddSeconds(1), "r1");
+
+        var batch = Reduce(b);
+
+        Assert.AreEqual(SessionFolders.Key(@"C:\placeholder"), batch.Session!.FolderKey);
+        Assert.IsFalse(batch.Session.FolderKey!.Contains("placeholder", StringComparison.OrdinalIgnoreCase));
+        Assert.AreNotEqual(SessionFolders.Key(@"C:\Placeholder"), batch.Session.FolderKey, "Folders are compared as the catalog compares them: exactly.");
+        Assert.IsNull(SessionFolders.Key(null));
+    }
+
+    [TestMethod]
     public void Session_IdentityComesFromTheHeaderAndTheState()
     {
         var b = new JournalBuilder("33333333-3333-3333-3333-333333333333", "codex");

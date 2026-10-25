@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Plugin.Statistics.Facts;
 
 namespace CodeAlta.Plugin.Statistics.Journal;
 
@@ -1490,6 +1491,15 @@ internal sealed class JournalPayloadParser
                         }
 
                         record.SpaceId = ReadString(ref reader);
+                    }
+                    else if (reader.ValueTextEquals("working_directory"u8))
+                    {
+                        if (!reader.Read())
+                        {
+                            return record;
+                        }
+
+                        record.FolderKey = SessionFolders.Key(ReadString(ref reader));
                     }
                     else if (reader.ValueTextEquals("parent_session_id"u8))
                     {

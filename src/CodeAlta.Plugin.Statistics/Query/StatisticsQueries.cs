@@ -109,6 +109,9 @@ public sealed partial class StatisticsQueries
         }
 
         var refs = ResolveProjectRefs(filter, projects, spaces, notes, out var includesChats, out var chatSpace);
+        var sessionProjects = projects.Count == 0
+            ? SessionProjects.None
+            : await _store.ReadAsync(sql => SessionProjects.Read(sql, P, projects), cancellationToken).ConfigureAwait(false);
         var saved = await _store.ReadAsync(sql => sql.Query($"SELECT facts_version,full_source,recorded_metrics FROM {P}archive WHERE effective=1",
             reader => (Version: (int)reader.GetInt64(0), Verified: reader.GetInt64(1) != 0, Metrics: reader.GetString(2).Split('\n', StringSplitOptions.RemoveEmptyEntries))), cancellationToken).ConfigureAwait(false);
         var unavailable = StatisticsStore.CurrentMetrics().Where(metric => saved.Any(archive => !archive.Metrics.Contains(metric, StringComparer.Ordinal))).ToArray();
@@ -133,6 +136,7 @@ public sealed partial class StatisticsQueries
             ComparePlan = comparePlan,
             WeekStart = weekStart,
             ProjectRefs = refs,
+            SessionProjects = sessionProjects,
             IncludesChats = includesChats,
             ChatSpaceId = chatSpace?.Id,
             OtherSpaceIds = chatSpace is { IsDefault: true } ? [.. spaces.Where(static space => !space.IsDefault).Select(static space => space.Id)] : [],
@@ -302,6 +306,14 @@ public sealed partial class StatisticsQueries
         /// <summary>Gets the references of the projects the query is limited to; null for no project filter.</summary>
         public IReadOnlyList<string>? ProjectRefs { get; init; }
 
+        /// <summary>Gets the project each session counts under: the one it records, or the project of the catalog that adopted it.</summary>
+        public SessionProjects SessionProjects { get; init; } = SessionProjects.None;
+
+        /// <summary>Gets the SQL expression of the project a session counts under.</summary>
+        /// <param name="column">The column that holds the project reference of a session, as <c>s.project_ref</c>; its table also has <c>folder_key</c>.</param>
+        /// <param name="argument">Gives the name of a parameter for a value.</param>
+        public string ProjectOf(string column, Func<string, string> argument) => SessionProjects.Expression(column, argument);
+
         /// <summary>Gets a value indicating whether the sessions of no project (the chats) are in the limit of <see cref="ProjectRefs"/>: those of the space of the limit (<see cref="ChatSpaceId"/>).</summary>
         public bool IncludesChats { get; init; }
 
@@ -315,7 +327,7 @@ public sealed partial class StatisticsQueries
         public IReadOnlyList<string> OtherSpaceIds { get; init; } = [];
 
         /// <summary>Gets the condition of the limit to projects, to add to a WHERE clause: empty for no limit, starting with <c> AND </c> otherwise.</summary>
-        /// <param name="column">The column that holds the project reference of a session, as <c>s.project_ref</c>; its table also has <c>space_id</c>.</param>
+        /// <param name="column">The column that holds the project reference of a session, as <c>s.project_ref</c>; its table also has <c>space_id</c> and <c>folder_key</c>.</param>
         /// <param name="argument">Gives the name of a parameter for a value.</param>
         public string ProjectClause(string column, Func<string, string> argument)
         {
@@ -328,7 +340,7 @@ public sealed partial class StatisticsQueries
             var parts = new List<string>(2);
             if (refs.Count > 0)
             {
-                parts.Add($"{column} IN ({string.Join(", ", refs.Select(argument))})");
+                parts.Add($"{ProjectOf(column, argument)} IN ({string.Join(", ", refs.Select(argument))})");
             }
 
             if (IncludesChats)
@@ -421,7 +433,7 @@ public sealed partial class StatisticsQueries
         var level = ChooseLevel(query, plan, needsQuarter);
         var periodColumn = level == RollupLevel.Quarter ? "f.q" : "f.p";
         var tableName = family.TableName(P, level);
-        var groupExpressions = groups.Select(group => GroupExpression(family, group)).ToArray();
+        var groupExpressions = groups.Select(group => GroupExpression(query, family, group, Arg)).ToArray();
 
         var select = new StringBuilder("SELECT ").Append(periodColumn);
         foreach (var expression in groupExpressions)
@@ -457,7 +469,7 @@ public sealed partial class StatisticsQueries
         {
             foreach (var (group, keys) in restrict)
             {
-                var expression = GroupExpression(family, group);
+                var expression = GroupExpression(query, family, group, Arg);
                 if (keys.Count == 0)
                 {
                     select.Append(" AND 0");
@@ -569,12 +581,12 @@ public sealed partial class StatisticsQueries
         }
     }
 
-    private string GroupExpression(FactTable family, string group)
+    private string GroupExpression(ResolvedQuery query, FactTable family, string group, Func<object?, string> argument)
     {
         switch (group)
         {
             case "project":
-                return "COALESCE(s.project_ref, '')";
+                return $"COALESCE({query.ProjectOf("s.project_ref", value => argument(value))}, '')";
             case "space":
                 return "COALESCE(s.space_id, '')";
             case "delegated":

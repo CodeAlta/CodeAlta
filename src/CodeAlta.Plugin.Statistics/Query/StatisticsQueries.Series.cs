@@ -206,7 +206,7 @@ public sealed partial class StatisticsQueries
                 return "@p" + (args.Count - 1).ToString(CultureInfo.InvariantCulture);
             }
 
-            var builder = new System.Text.StringBuilder($"SELECT f.q, f.session_id, {(byDelegation ? "CASE WHEN s.parent_session_id IS NULL THEN 'direct' ELSE 'sub-agent' END" : "COALESCE(s.project_ref, '')")} FROM {P}activity_q f LEFT JOIN {P}session s ON s.session_id = f.session_id WHERE f.q >= ");
+            var builder = new System.Text.StringBuilder($"SELECT f.q, f.session_id, {(byDelegation ? "CASE WHEN s.parent_session_id IS NULL THEN 'direct' ELSE 'sub-agent' END" : $"COALESCE({query.ProjectOf("s.project_ref", value => Arg(value))}, '')")} FROM {P}activity_q f LEFT JOIN {P}session s ON s.session_id = f.session_id WHERE f.q >= ");
             var (from, to) = Days.QuarterRangeOfDays(LocalDays.ToDay(plan.Range.From), LocalDays.ToDay(plan.Range.To));
             builder.Append(Arg((long)from)).Append(" AND f.q < ").Append(Arg((long)to)).Append(" AND (f.active_ms > 0 OR f.runs_started > 0)");
             AppendFilters(builder, query, FactTables.Activity, Arg, applyOrigin: false);
@@ -238,7 +238,7 @@ public sealed partial class StatisticsQueries
         }
 
         var (lower, upper) = Days.QuarterRangeOfDays(LocalDays.ToDay(plan.Range.From), LocalDays.ToDay(plan.Range.To));
-        var startBuilder = new System.Text.StringBuilder($"SELECT s.first_ms, {(byDelegation ? "CASE WHEN s.parent_session_id IS NULL THEN 'direct' ELSE 'sub-agent' END" : "COALESCE(s.project_ref, '')")} FROM {P}session s WHERE s.first_ms >= ")
+        var startBuilder = new System.Text.StringBuilder($"SELECT s.first_ms, {(byDelegation ? "CASE WHEN s.parent_session_id IS NULL THEN 'direct' ELSE 'sub-agent' END" : $"COALESCE({query.ProjectOf("s.project_ref", value => StartArg(value))}, '')")} FROM {P}session s WHERE s.first_ms >= ")
             .Append(StartArg(lower * QuarterHour.Milliseconds)).Append(" AND s.first_ms < ").Append(StartArg(upper * QuarterHour.Milliseconds));
         var filter = query.Filter;
         if (filter.Provider is { Length: > 0 } provider)

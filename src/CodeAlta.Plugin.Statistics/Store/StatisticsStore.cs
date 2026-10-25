@@ -24,7 +24,7 @@ namespace CodeAlta.Plugin.Statistics.Store;
 internal sealed partial class StatisticsStore
 {
     /// <summary>The version of the tables, kept by the host for the plugin.</summary>
-    public const int SchemaVersion = 4;
+    public const int SchemaVersion = 5;
 
     /// <summary>The version of the roll-ups: when it changes, they are added up again from the facts.</summary>
     public const int RollupVersion = 1;
@@ -111,6 +111,16 @@ internal sealed partial class StatisticsStore
                 using var sql = new SqlSession(connection);
                 if (sql.ScalarLong($"SELECT COUNT(*) FROM pragma_table_info('{Table("session")}') WHERE name = 'space_id'") == 0)
                     sql.Execute($"ALTER TABLE {Table("session")} ADD COLUMN space_id TEXT");
+            }
+
+            if (from < 5)
+            {
+                // The key of the folder of a session (SessionFolders): a session whose project the catalog does not have counts
+                // under the project of its folder. Sessions read before have none until the facts of version 9 read them again.
+                using var sql = new SqlSession(connection);
+                if (sql.ScalarLong($"SELECT COUNT(*) FROM pragma_table_info('{Table("session")}') WHERE name = 'folder_key'") == 0)
+                    sql.Execute($"ALTER TABLE {Table("session")} ADD COLUMN folder_key TEXT");
+                sql.Execute($"CREATE INDEX IF NOT EXISTS {Table("session")}_by_folder ON {Table("session")} (folder_key)");
             }
 
             return ValueTask.CompletedTask;
@@ -488,11 +498,11 @@ internal sealed partial class StatisticsStore
         }
 
         sql.Execute(
-            $"INSERT INTO {Table("session")} (session_id, project_ref, session_kind, parent_session_id, created_by_kind, created_by_session_id, automation_id, title, provider, permission_mode, first_ms, last_ms, deleted, space_id) "
-            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, 0, @p12) "
+            $"INSERT INTO {Table("session")} (session_id, project_ref, session_kind, parent_session_id, created_by_kind, created_by_session_id, automation_id, title, provider, permission_mode, first_ms, last_ms, deleted, space_id, folder_key) "
+            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, 0, @p12, @p13) "
             + "ON CONFLICT (session_id) DO UPDATE SET project_ref = excluded.project_ref, session_kind = excluded.session_kind, parent_session_id = excluded.parent_session_id, created_by_kind = excluded.created_by_kind, "
             + "created_by_session_id = excluded.created_by_session_id, automation_id = excluded.automation_id, title = excluded.title, provider = excluded.provider, permission_mode = excluded.permission_mode, "
-            + "first_ms = excluded.first_ms, last_ms = excluded.last_ms, deleted = 0, space_id = excluded.space_id",
+            + "first_ms = excluded.first_ms, last_ms = excluded.last_ms, deleted = 0, space_id = excluded.space_id, folder_key = excluded.folder_key",
             row.SessionId,
             row.ProjectRef,
             row.SessionKind,
@@ -505,7 +515,8 @@ internal sealed partial class StatisticsStore
             row.PermissionMode,
             row.FirstRecord?.ToUnixTimeMilliseconds(),
             row.LastRecord?.ToUnixTimeMilliseconds(),
-            row.SpaceId);
+            row.SpaceId,
+            row.FolderKey);
     }
 
     private void WriteJournal(SqlSession sql, ApplyRequest request, long? updatedMilliseconds = null)

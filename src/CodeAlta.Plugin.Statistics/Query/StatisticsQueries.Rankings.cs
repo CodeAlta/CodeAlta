@@ -185,8 +185,8 @@ public sealed partial class StatisticsQueries
         foreach (var chunk in entities.Keys.Chunk(400))
         {
             var rows = sql.Query(
-                $"SELECT session_id, title, project_ref FROM {P}session WHERE session_id IN ({string.Join(", ", chunk.Select(static (_, index) => "@p" + index))})",
-                static reader => (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2)),
+                $"SELECT session_id, title, project_ref, folder_key FROM {P}session WHERE session_id IN ({string.Join(", ", chunk.Select(static (_, index) => "@p" + index))})",
+                reader => (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), query.SessionProjects.Resolve(reader.IsDBNull(2) ? null : reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3))),
                 [.. chunk.Cast<object?>()]);
             foreach (var (id, title, project) in rows)
             {
@@ -534,8 +534,8 @@ public sealed partial class StatisticsQueries
             foreach (var chunk in map.Keys.Chunk(400))
             {
                 foreach (var (id, title, project, provider, parent, last, deleted) in sql.Query(
-                             $"SELECT session_id, title, project_ref, provider, parent_session_id, COALESCE(last_ms, 0), deleted FROM {P}session WHERE session_id IN ({string.Join(", ", chunk.Select(static (_, index) => "@p" + index))})",
-                             static reader => (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetInt64(5), reader.GetInt64(6) != 0),
+                             $"SELECT session_id, title, project_ref, provider, parent_session_id, COALESCE(last_ms, 0), deleted, folder_key FROM {P}session WHERE session_id IN ({string.Join(", ", chunk.Select(static (_, index) => "@p" + index))})",
+                             reader => (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), query.SessionProjects.Resolve(reader.IsDBNull(2) ? null : reader.GetString(2), reader.IsDBNull(7) ? null : reader.GetString(7)), reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetInt64(5), reader.GetInt64(6) != 0),
                              [.. chunk.Cast<object?>()]))
                 {
                     info[id] = (title, project, provider, parent, last, deleted);

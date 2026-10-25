@@ -93,6 +93,9 @@ internal sealed class HeaderRecord : JournalRecord
     /// <summary>Gets or sets the space the session belongs to; null for a session created before sessions had a space.</summary>
     public string? SpaceId { get; set; }
 
+    /// <summary>Gets or sets the key of the folder the session works in (<see cref="Facts.SessionFolders.Key"/>); the folder itself is not kept.</summary>
+    public string? FolderKey { get; set; }
+
     /// <summary>Gets or sets the parent session of a sub-agent session.</summary>
     public string? ParentSessionId { get; set; }
 

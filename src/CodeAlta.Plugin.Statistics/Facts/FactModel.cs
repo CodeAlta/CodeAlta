@@ -676,6 +676,12 @@ internal sealed class SessionRow
     /// <summary>Gets or sets the space the session belongs to; null for a session created before sessions had a space.</summary>
     public string? SpaceId { get; set; }
 
+    /// <summary>
+    /// Gets or sets the key of the folder the session works in (<see cref="SessionFolders.Key"/>): a session whose project the
+    /// catalog does not have counts under the project of the catalog in that folder. Null for a session read before it was kept.
+    /// </summary>
+    public string? FolderKey { get; set; }
+
     /// <summary>Gets or sets the kind of session.</summary>
     public string? SessionKind { get; set; }
 

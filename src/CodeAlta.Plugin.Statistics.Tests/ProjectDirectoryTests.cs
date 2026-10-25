@@ -47,7 +47,10 @@ public sealed class ProjectDirectoryTests
         var clock = new ManualClock();
         var alta = new ScriptedAlta { Ready = true };
         var directory = new AltaProjectDirectory(alta, clock);
-        Assert.AreEqual(2, (await directory.ListProjectsAsync()).Count);
+        var projects = await directory.ListProjectsAsync();
+        Assert.AreEqual(2, projects.Count);
+        Assert.AreEqual(@"C:\code\alpha", projects[0].Path, "The folder of a project adopts the sessions of an unknown project there.");
+        Assert.IsNull(projects[1].Path);
         var calls = alta.Calls;
 
         clock.Advance(TimeSpan.FromSeconds(20));
@@ -99,7 +102,7 @@ public sealed class ProjectDirectoryTests
 
             var text = string.Join(' ', args);
             var transcript = text.StartsWith("project list", StringComparison.Ordinal)
-                ? "{\"type\":\"alta.project.item\",\"projectId\":\"project-0\",\"slug\":\"alpha\",\"displayName\":\"Alpha\",\"spaces\":[\"work\"]}\n{\"type\":\"alta.project.item\",\"projectId\":\"project-1\",\"slug\":\"beta\",\"displayName\":\"Beta\",\"spaces\":[]}\n"
+                ? "{\"type\":\"alta.project.item\",\"projectId\":\"project-0\",\"slug\":\"alpha\",\"displayName\":\"Alpha\",\"projectPath\":\"C:\\\\code\\\\alpha\",\"spaces\":[\"work\"]}\n{\"type\":\"alta.project.item\",\"projectId\":\"project-1\",\"slug\":\"beta\",\"displayName\":\"Beta\",\"spaces\":[]}\n"
                 : text.StartsWith("provider list", StringComparison.Ordinal)
                     ? "{\"type\":\"alta.provider.item\",\"providerKey\":\"claude-code\",\"displayName\":\"Claude Code\"}\n{\"type\":\"alta.provider.item\",\"providerKey\":\"codex\",\"displayName\":\"Codex\"}\n{\"type\":\"alta.provider.item\",\"providerKey\":\"bare\"}\n"
                     : "{\"type\":\"alta.space.item\",\"id\":\"default\",\"name\":\"Default\",\"default\":true}\n{\"type\":\"alta.space.item\",\"id\":\"work\",\"name\":\"Work\",\"default\":false}\n";
