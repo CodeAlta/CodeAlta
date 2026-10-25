@@ -50,9 +50,10 @@ flowchart LR
 | `CodeAlta.Plugin.*` | Built-in plugins. |
 | `CodeAlta.Search` | Local search index (words and meaning). |
 | `CodeAlta.NativeEngines` | Pinned native downloads and worker processes (speech, embeddings). |
+| `CodeAlta.Sandbox` | The optional OS sandbox of sessions: profiles, the policy of a session, the mxc backend. See [sandbox](sandbox.md). |
 | `CodeAlta.Acp` | Agent Client Protocol types, the client (ACP agents as providers) and the agent server (`altacli acp`). |
 
-Dependencies point down: frontends → Orchestration/LiveTool/Hosting → Agent, Catalog, Plugins. Nothing below a frontend references a frontend; `CodeAlta.Search` and `CodeAlta.NativeEngines` know neither the host nor a window. `ArchitectureGuardrailTests` checks the main boundaries.
+Dependencies point down: frontends → Orchestration/LiveTool/Hosting → Agent, Catalog, Plugins. Nothing below a frontend references a frontend; `CodeAlta.Search`, `CodeAlta.NativeEngines` and `CodeAlta.Sandbox` know neither the host nor a window. `ArchitectureGuardrailTests` checks the main boundaries.
 
 ## A turn
 

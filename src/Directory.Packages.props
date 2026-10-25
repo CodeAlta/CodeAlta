@@ -27,6 +27,9 @@
     <!-- Search by meaning: the managed binding must not be newer than the ONNX Runtime sherpa-onnx ships (1.28.2). -->
     <PackageVersion Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.28.0" />
     <PackageVersion Include="Microsoft.ML.Tokenizers" Version="2.0.1" />
+    <!-- The sandbox of sessions. 1.0.1 may fall back to changing folder permissions where the native container is
+         missing: CodeAlta.Sandbox refuses any request its probe does not serve natively. -->
+    <PackageVersion Include="Microsoft.Mxc.Sdk" Version="1.0.1" />
     <PackageVersion Include="SharpYaml" Version="3.16.0" />
     <PackageVersion Include="SkiaSharp" Version="3.119.4" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4" />

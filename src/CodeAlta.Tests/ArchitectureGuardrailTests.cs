@@ -122,6 +122,9 @@ public sealed class ArchitectureGuardrailTests
             .Select(static match => match.Groups[1].Value).Order(StringComparer.Ordinal)];
         CollectionAssert.AreEqual(new[] { "CodeAlta.Agent", "CodeAlta.Catalog" }, References(Path.Combine(sourceRoot, "CodeAlta.Search", "CodeAlta.Search.csproj")));
         Assert.IsEmpty(References(Path.Combine(sourceRoot, "CodeAlta.NativeEngines", "CodeAlta.NativeEngines.csproj")));
+        // The sandbox knows the agent contracts and the worker frames: its settings come from the runtime, which
+        // reads them in the catalog, so that a sandbox never depends on the files it keeps out of reach.
+        CollectionAssert.AreEqual(new[] { "CodeAlta.Agent", "CodeAlta.NativeEngines" }, References(Path.Combine(sourceRoot, "CodeAlta.Sandbox", "CodeAlta.Sandbox.csproj")));
     }
 
     [TestMethod]

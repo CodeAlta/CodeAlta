@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MSTest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeAlta.Sandbox\CodeAlta.Sandbox.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Resolves the temporary directory of the test process, which macOS places below a symbolic link. -->
+    <Compile Include="..\CodeAlta.Tests\LinkFreeTempDirectory.cs" Link="LinkFreeTempDirectory.cs" />
+  </ItemGroup>
+
+</Project>

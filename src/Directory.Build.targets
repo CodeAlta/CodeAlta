@@ -1,0 +1,12 @@
+<Project>
+  <!-- mxc ships its WSL Container backend and a retired helper beside its library; CodeAlta uses neither, and each
+       would add megabytes to the packages of every platform. -->
+  <Target Name="CodeAltaDropUnusedMxcAssets" AfterTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+        Condition="'%(RuntimeTargetsCopyLocalItems.NuGetPackageId)' == 'Microsoft.Mxc.Sdk' and ('%(Filename)%(Extension)' == 'plm.exe' or '%(Filename)%(Extension)' == 'wslcsdk.dll' or '%(Filename)%(Extension)' == 'wxc-wslc-daemon.exe')" />
+      <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
+        Condition="'%(NativeCopyLocalItems.NuGetPackageId)' == 'Microsoft.Mxc.Sdk' and ('%(Filename)%(Extension)' == 'plm.exe' or '%(Filename)%(Extension)' == 'wslcsdk.dll' or '%(Filename)%(Extension)' == 'wxc-wslc-daemon.exe')" />
+    </ItemGroup>
+  </Target>
+</Project>
