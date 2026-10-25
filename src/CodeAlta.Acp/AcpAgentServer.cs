@@ -11,7 +11,8 @@ namespace CodeAlta.Acp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each request runs in a task of its own and is always answered: with the result of the agent, with the error of an
+/// Each request runs in a task of its own (<c>session/prompt</c> and <c>session/cancel</c> start on the reading loop, in
+/// their order, see <see cref="IAcpAgent.PromptAsync"/>) and is always answered: with the result of the agent, with the error of an
 /// <see cref="AcpJsonRpcException"/> it throws, with <see cref="AcpErrorCodes.InternalError"/> for another exception,
 /// with <see cref="AcpErrorCodes.MethodNotFound"/> for a method the server does not know, and with
 /// <see cref="AcpErrorCodes.RequestCancelled"/> when the client cancelled it with <c>$/cancel_request</c> and the agent
@@ -128,9 +129,11 @@ public sealed class AcpAgentServer : IAsyncDisposable
             return;
         }
 
+        // A session/cancel cancels the prompt the client sent before it: both start on this loop, in their order, so that
+        // the agent has taken a prompt (up to its first await) before it handles a cancel read after it.
         if (message.RequestId is not { } id)
         {
-            Track(Task.Run(() => HandleNotificationAsync(message)));
+            Track(message.Method == "session/cancel" ? HandleNotificationAsync(message) : Task.Run(() => HandleNotificationAsync(message)));
             return;
         }
 
@@ -143,7 +146,7 @@ public sealed class AcpAgentServer : IAsyncDisposable
             return;
         }
 
-        Track(Task.Run(() => HandleRequestAsync(message, id, key, cancellation)));
+        Track(message.Method == "session/prompt" ? HandleRequestAsync(message, id, key, cancellation) : Task.Run(() => HandleRequestAsync(message, id, key, cancellation)));
     }
 
     private void Track(Task task)

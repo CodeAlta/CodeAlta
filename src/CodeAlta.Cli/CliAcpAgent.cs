@@ -80,6 +80,9 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
     private readonly AcpEventProjector _projector;
     // The sessions of the client, by id.
     private readonly ConcurrentDictionary<string, AcpSession> _sessions = new(StringComparer.OrdinalIgnoreCase);
+    // The folders whose required plugins and MCP servers were found running: the folder of the command, checked as the host
+    // started, and those of the sessions opened since.
+    private readonly ConcurrentDictionary<string, byte> _checkedFolders = new(FolderComparer);
     private int _disposed;
 
     public CliAcpAgent(IAcpClientConnection client, CliHost host, CliAcpDefaults defaults, TimeSpan? abortGrace)
@@ -90,6 +93,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         _client = client;
         _host = host;
         _defaults = defaults;
+        _checkedFolders.TryAdd(FolderKey(host.ProjectFolder), 0);
         _abortGrace = abortGrace ?? new HeadlessSessionDriverOptions().AbortGrace;
         _projector = new AcpEventProjector(this, (sessionId, cancellationToken) =>
             new ValueTask<SessionViewDescriptor?>(host.Host.RuntimeService.TryGetResumableSessionAsync(sessionId, cancellationToken)));
@@ -102,6 +106,9 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
 
     /// <summary>Gets the sessions the client has open.</summary>
     public int OpenSessionCount => _sessions.Count;
+
+    /// <summary>Gets what a prompt awaits before its content is read, for a test (<see cref="CliEnvironment.AcpPromptReading"/>); null for nothing.</summary>
+    public Func<Task>? PromptReading { get; init; }
 
     /// <inheritdoc />
     public override Task<InitializeResponse> InitializeAsync(InitializeRequest request, CancellationToken cancellationToken)
@@ -152,6 +159,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         ArgumentNullException.ThrowIfNull(request);
         var cwd = RequireFolder(request.Cwd);
         var servers = ReadMcpServers(request.McpServers);
+        await RequireResourcesAsync(cwd, null, cancellationToken).ConfigureAwait(false);
         var opened = await _driver.OpenAsync(new HeadlessSessionRequest
         {
             ProjectFolder = cwd,
@@ -207,6 +215,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
             cancellationToken).ConfigureAwait(false);
         // CodeAlta Desktop does not know the fork: it is marked as a new session is.
         var state = await RegisterAsync(opened, created: true, cancellationToken).ConfigureAwait(false);
+        await RequireResourcesAsync(state, cancellationToken).ConfigureAwait(false);
         await AttachMcpServersAsync(state, servers, state.Session.Descriptor.WorkingDirectory).ConfigureAwait(false);
         var (modes, options) = await DescribeAsync(state.Session, cancellationToken).ConfigureAwait(false);
         return new ForkSessionResponse { SessionId = state.Session.SessionId, Modes = modes, ConfigOptions = options };
@@ -313,31 +322,45 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
     {
         ArgumentNullException.ThrowIfNull(request);
         var state = Find(request.SessionId.Value);
-        if (Interlocked.CompareExchange(ref state.Running, 1, 0) != 0)
+        // Taken before the first await: the server starts a session/cancel read after this prompt only once it is (AcpAgentServer).
+        using var turn = new PromptTurn(cancellationToken);
+        if (Interlocked.CompareExchange(ref state.Turn, turn, null) is not null)
         {
             throw Error(AcpErrorCodes.InvalidRequest, $"A prompt already runs in session '{state.Id}': wait for its response, or cancel it with session/cancel.",
                 "session_busy", state.Id);
         }
 
-        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Volatile.Write(ref state.PromptEnded, ended.Task);
         try
         {
-            state.CancelRequested = false;
+            // The rest runs off the loop that reads the messages.
+            await Task.Yield();
             var session = state.Session;
-            var (prompt, error) = await CliAcpPromptContent.ReadAsync(request.Prompt, session.Descriptor, _host.Host.CatalogOptions, cancellationToken).ConfigureAwait(false);
+            HeadlessPrompt? prompt;
+            string? error;
+            try
+            {
+                if (PromptReading is { } reading) await reading().ConfigureAwait(false);
+                (prompt, error) = await CliAcpPromptContent.ReadAsync(request.Prompt, session.Descriptor, _host.Host.CatalogOptions, turn.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (turn.CancelRequested)
+            {
+                return Respond(Cancelled(session));
+            }
+
             if (prompt is null) throw Error(AcpErrorCodes.InvalidParams, error!, "invalid_request", state.Id);
+            // A prompt cancelled while its content was read never reaches the provider.
+            if (turn.CancelRequested) return Respond(Cancelled(session));
             HeadlessRunResult result;
             try
             {
-                result = await _driver.RunAsync(session, prompt, timeout: null, cancellationToken).ConfigureAwait(false);
+                result = await _driver.RunAsync(session, prompt, timeout: null, turn.Token).ConfigureAwait(false);
             }
             catch (ArgumentException) when (!_sessions.ContainsKey(state.Id))
             {
                 throw Error(AcpErrorCodes.ResourceNotFound, $"Session '{state.Id}' was closed.", "session_not_found", state.Id);
             }
 
-            if (state.CancelRequested && result.Status is HeadlessRunStatus.Completed or HeadlessRunStatus.Failed)
+            if (turn.CancelRequested && result.Status is HeadlessRunStatus.Completed or HeadlessRunStatus.Failed)
             {
                 // The cancel may land as the run ends: a turn the client cancelled is reported as cancelled all the same.
                 result = result with { Status = HeadlessRunStatus.Aborted, AbortReason = "cancelled" };
@@ -349,18 +372,19 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         }
         finally
         {
-            Volatile.Write(ref state.Running, 0);
-            ended.TrySetResult();
+            // The session takes the next prompt; the turn ends (Ended) as it is disposed, right after.
+            Interlocked.CompareExchange(ref state.Turn, null, turn);
         }
     }
 
     /// <inheritdoc />
-    public override async Task CancelAsync(CancelNotification notification, CancellationToken cancellationToken)
+    public override Task CancelAsync(CancelNotification notification, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(notification);
-        if (!_sessions.TryGetValue(notification.SessionId.Value, out var state) || Volatile.Read(ref state.Running) == 0) return;
-        state.CancelRequested = true;
-        await AbortAsync(state).ConfigureAwait(false);
+        // The prompt in flight, from the moment it was taken: its content stops being read, it does not reach the provider,
+        // or its run is aborted. A cancel with no prompt in flight cancels nothing, not even the next prompt.
+        if (_sessions.TryGetValue(notification.SessionId.Value, out var state) && Volatile.Read(ref state.Turn) is { } turn) turn.Cancel();
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
@@ -419,8 +443,35 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         var opened = await _driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id, DisabledToolPatterns = _defaults.DisabledToolPatterns },
             cancellationToken).ConfigureAwait(false);
         var state = await RegisterAsync(opened, created: false, cancellationToken).ConfigureAwait(false);
+        await RequireResourcesAsync(state, cancellationToken).ConfigureAwait(false);
         await AttachMcpServersAsync(state, servers, state.Session.Descriptor.WorkingDirectory).ConfigureAwait(false);
         return state;
+    }
+
+    // Refuses a session whose folder requires a plugin or an MCP server that does not run, as the command refuses to start
+    // for its own folder; a folder found right is not checked again.
+    private async Task RequireResourcesAsync(string? folder, string? sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return;
+        var key = FolderKey(folder);
+        if (_checkedFolders.ContainsKey(key)) return;
+        if (await _host.CheckRequiredAsync(key, cancellationToken).ConfigureAwait(false) is { } missing)
+            throw Error(AcpErrorCodes.InternalError, missing, "required_unavailable", sessionId);
+        _checkedFolders.TryAdd(key, 0);
+    }
+
+    // The same for a session that is open already (load, resume, fork): it is closed when it is refused.
+    private async Task RequireResourcesAsync(AcpSession state, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RequireResourcesAsync(state.Session.Descriptor.WorkingDirectory, state.Id, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            if (_sessions.TryRemove(state.Id, out _)) await CloseAsync(state).ConfigureAwait(false);
+            throw;
+        }
     }
 
     // The MCP servers of a request, as the MCP plugin takes them; refused when this run starts no MCP server.
@@ -626,21 +677,22 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         }
     }
 
+    // The result of a prompt cancelled before it ran.
+    private static HeadlessRunResult Cancelled(HeadlessSession session)
+        => new(HeadlessRunStatus.Aborted, session.SessionId, null, null, "cancelled", null, "The prompt was cancelled before it ran.", SessionUsageTotals.None, TimeSpan.Zero);
+
     private AcpSession Find(string sessionId)
         => _sessions.TryGetValue(sessionId, out var state) ? state
             : throw Error(AcpErrorCodes.ResourceNotFound, $"Session '{sessionId}' is not open: create it with session/new, or open it with session/load.", "session_not_found", sessionId);
 
     private async Task CloseAsync(AcpSession state)
     {
-        if (Volatile.Read(ref state.Running) != 0)
+        if (Volatile.Read(ref state.Turn) is { } turn)
         {
-            state.CancelRequested = true;
+            turn.Cancel();
             await AbortAsync(state).ConfigureAwait(false);
-            if (Volatile.Read(ref state.PromptEnded) is { } ended)
-            {
-                try { await ended.WaitAsync(_abortGrace + TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
-                catch (TimeoutException) { }
-            }
+            try { await turn.Ended.WaitAsync(_abortGrace + TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
+            catch (TimeoutException) { }
         }
 
         await _driver.CloseAsync(state.Session).ConfigureAwait(false);
@@ -698,8 +750,11 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
             : throw Error(AcpErrorCodes.ResourceNotFound, $"'{sessionId}' is not a session of CodeAlta: a session is named by a GUID.", "session_not_found", null);
 
     private static bool SameFolder(string? path, string folder)
-        => !string.IsNullOrWhiteSpace(path) && string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)), folder,
-            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        => !string.IsNullOrWhiteSpace(path) && FolderComparer.Equals(FolderKey(path), folder);
+
+    private static StringComparer FolderComparer => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    private static string FolderKey(string folder) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
 
     private static string WriteCursor(int offset) => Convert.ToBase64String(Encoding.UTF8.GetBytes("offset:" + offset.ToString(CultureInfo.InvariantCulture)));
 
@@ -740,11 +795,8 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
     {
         private HeadlessSession _session = session;
 
-        // 1 while a prompt runs.
-        public int Running;
-
-        // Ends when the prompt in progress has answered.
-        public Task? PromptEnded;
+        // The prompt in progress, from the moment it is taken to its response; null between the prompts.
+        public PromptTurn? Turn;
 
         public string Id { get; } = session.SessionId;
 
@@ -757,7 +809,41 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         public CliSessionMarkers? Markers { get; } = markers;
 
         public SemaphoreSlim Selection { get; } = new(1, 1);
+    }
 
-        public volatile bool CancelRequested;
+    // A prompt of a session, and the cancel of its client: the reading of its content and its run stop at the token.
+    private sealed class PromptTurn(CancellationToken requestToken) : IDisposable
+    {
+        private readonly CancellationTokenSource _cancel = CancellationTokenSource.CreateLinkedTokenSource(requestToken);
+        private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _cancelRequested;
+
+        public CancellationToken Token => _cancel.Token;
+
+        // Whether the client cancelled it with session/cancel (or closed its session), not with $/cancel_request.
+        public bool CancelRequested => Volatile.Read(ref _cancelRequested) != 0;
+
+        // Ends when the prompt has answered.
+        public Task Ended => _ended.Task;
+
+        public void Cancel()
+        {
+            Volatile.Write(ref _cancelRequested, 1);
+            try
+            {
+                // The callbacks of the token run off the caller (the loop that reads the messages).
+                _ = _cancel.CancelAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The prompt has just answered.
+            }
+        }
+
+        public void Dispose()
+        {
+            _ended.TrySetResult();
+            _cancel.Dispose();
+        }
     }
 }

@@ -50,6 +50,9 @@ internal sealed record CliEnvironment
     /// <summary>Gets what is told the host of a run once it is created, for a test that drives it; null for nothing.</summary>
     public Action<CodeAlta.Orchestration.Hosting.CodeAltaHost>? HostCreated { get; init; }
 
+    /// <summary>Gets what <c>altacli acp</c> awaits before it reads the content of a prompt, for a test that holds a prompt there; null for nothing.</summary>
+    public Func<Task>? AcpPromptReading { get; init; }
+
     /// <summary>Gets the profile of the user: <c>~/.alta</c>.</summary>
     public string DefaultProfile => Path.Combine(UserProfile, ".alta");
 

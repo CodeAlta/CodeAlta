@@ -182,6 +182,42 @@ public sealed class CliAcpTests
     }
 
     [TestMethod]
+    public async Task Cancel_WhileThePromptIsRead_EndsItWithCancelled_AndTheProviderNeverRuns()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        var reading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var environment = root.Environment(provider) with
+        {
+            AcpPromptReading = async () =>
+            {
+                reading.TrySetResult();
+                await gate.Task;
+            },
+        };
+        await using var acp = await AcpHarness.StartAsync(root, environment);
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+
+        var prompt = acp.PromptAsync(sessionId, "work");
+        await reading.Task.WaitAsync(Timeout);
+        await acp.Client.CancelSessionAsync(sessionId);
+        // Answered after the cancel was handled: the server reads the messages in order.
+        await acp.Client.SessionListAsync(new ListSessionsRequest()).WaitAsync(Timeout);
+        gate.SetResult();
+        var response = await prompt;
+
+        Assert.AreEqual("cancelled", response.StopReason.Value.GetString());
+        Assert.AreEqual(0, provider.Requests.Count, "A prompt cancelled before it ran never reaches the provider.");
+
+        // A cancel with no prompt in flight cancels nothing, not even the next prompt.
+        await acp.Client.CancelSessionAsync(sessionId);
+        await acp.Client.SessionListAsync(new ListSessionsRequest()).WaitAsync(Timeout);
+        provider.Turns.Enqueue(FakeProvider.Reply("Back."));
+        Assert.AreEqual("end_turn", (await acp.PromptAsync(sessionId, "again")).StopReason.Value.GetString());
+    }
+
+    [TestMethod]
     public async Task SetModeAndConfigOptions_ChangeWhatTheNextPromptsRunWith()
     {
         using var root = new CliTestRoot();
@@ -358,6 +394,37 @@ public sealed class CliAcpTests
         var refused = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
             off.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot, McpServers = [server] }).WaitAsync(Timeout));
         Assert.AreEqual("mcp_off", refused.ErrorData!.Value.GetProperty("kind").GetString());
+    }
+
+    [TestMethod]
+    public async Task Sessions_OfAFolderThatRequiresAServerThatDoesNotStart_AreRefused()
+    {
+        using var root = new CliTestRoot();
+        var other = Path.Combine(root.Root, "other");
+        Directory.CreateDirectory(other);
+        var provider = new FakeProvider();
+        string existing;
+        await using (var first = await AcpHarness.StartAsync(root, provider))
+        {
+            existing = (await first.Client.SessionNewAsync(new NewSessionRequest { Cwd = other }).WaitAsync(Timeout)).SessionId.Value;
+            await first.PromptAsync(existing, "hello");
+        }
+
+        // The project of the other folder requires a server no configuration defines; the folder of the command requires nothing.
+        Directory.CreateDirectory(Path.Combine(other, ".alta"));
+        File.WriteAllText(Path.Combine(other, ".alta", "config.toml"), "[plugins.mcp.servers.ghost]\nrequired = true\n");
+        await using var acp = await AcpHarness.StartAsync(root, root.Environment(provider) with { PluginEnvironment = null }, plugins: true);
+
+        await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout);
+        var created = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() => acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = other }).WaitAsync(Timeout));
+        Assert.AreEqual("required_unavailable", created.ErrorData!.Value.GetProperty("kind").GetString());
+        StringAssert.Contains(created.Message, "'ghost'");
+        var loaded = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
+            acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = existing, Cwd = other }).WaitAsync(Timeout));
+        Assert.AreEqual("required_unavailable", loaded.ErrorData!.Value.GetProperty("kind").GetString());
+        var resumed = await Assert.ThrowsExactlyAsync<AcpJsonRpcException>(() =>
+            acp.Client.SessionResumeAsync(new ResumeSessionRequest { SessionId = existing, Cwd = other }).WaitAsync(Timeout));
+        Assert.AreEqual("required_unavailable", resumed.ErrorData!.Value.GetProperty("kind").GetString(), "The refused load left the session closed.");
     }
 
     [TestMethod]

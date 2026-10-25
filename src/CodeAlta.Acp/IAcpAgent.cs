@@ -85,6 +85,10 @@ public interface IAcpAgent
     /// Answers <c>session/prompt</c>: runs a turn. The <c>session/update</c> notifications of the turn are awaited
     /// before the method returns, so that the client has them all before the response.
     /// </summary>
+    /// <remarks>
+    /// The server calls it on the loop that reads the messages, as it calls <see cref="CancelAsync"/>: what it does before
+    /// its first await (taking the turn) comes before a <c>session/cancel</c> the client sent after the prompt, and must not block.
+    /// </remarks>
     /// <param name="request">The request.</param>
     /// <param name="cancellationToken">A token cancelled when the request is cancelled or the connection ends.</param>
     /// <returns>The response, with <see cref="StopReason.Cancelled"/> for a turn that <c>session/cancel</c> stopped.</returns>
@@ -94,6 +98,7 @@ public interface IAcpAgent
     /// Handles the notification <c>session/cancel</c>: stops the turn of the session, whose <c>session/prompt</c> then
     /// answers with <see cref="StopReason.Cancelled"/>.
     /// </summary>
+    /// <remarks>Called on the loop that reads the messages, after the prompts read before it were taken: it must not block before its first await.</remarks>
     /// <param name="notification">The notification.</param>
     /// <param name="cancellationToken">A token cancelled when the connection ends.</param>
     /// <returns>A task that ends when the notification is handled.</returns>

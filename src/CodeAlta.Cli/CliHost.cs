@@ -82,6 +82,31 @@ internal sealed class CliHost : IAsyncDisposable
     /// <summary>Gets the MCP plugin that runs, which takes the servers of a session (<c>altacli acp</c>); null when MCP is off.</summary>
     public McpPlugin? Mcp { get; private init; }
 
+    /// <summary>Gets the folder the host was started for, whose required plugins and MCP servers it checked as it started.</summary>
+    public string ProjectFolder => Request.ProjectFolder;
+
+    // What the host was composed with, for the checks of the folders of later sessions.
+    private CliHostRequest Request { get; init; } = null!;
+
+    private CatalogOptions Catalog { get; init; } = null!;
+
+    /// <summary>
+    /// Checks that the plugins and the MCP servers the configuration of a folder marks required run, as the start of the host
+    /// checked those of its own folder (<see cref="CliHostRequest.ChecksRequired"/>): <c>altacli acp</c> opens sessions in
+    /// other folders, whose project configuration may require others.
+    /// </summary>
+    /// <param name="projectFolder">The folder of a session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What does not run, and why; null when everything required runs, or when the host checks nothing.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    public Task<string?> CheckRequiredAsync(string projectFolder, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectFolder);
+        return Request.ChecksRequired
+            ? CheckRequiredAsync(Host, Mcp, Request with { ProjectFolder = projectFolder }, Catalog, cancellationToken)
+            : Task.FromResult<string?>(null);
+    }
+
     /// <summary>Creates the host of a run.</summary>
     /// <exception cref="Exception">The host could not be created; what was acquired is released first.</exception>
     public static async Task<CliHost> CreateAsync(CliHostRequest request, CliEnvironment environment, CancellationToken cancellationToken)
@@ -145,7 +170,7 @@ internal sealed class CliHost : IAsyncDisposable
                 throw new CliStartupException(missing);
             }
 
-            return new CliHost(storage, host, alta, database, modelsDev, toolEndpoints) { Mcp = started };
+            return new CliHost(storage, host, alta, database, modelsDev, toolEndpoints) { Mcp = started, Request = request, Catalog = catalog };
         }
         catch
         {

@@ -41,7 +41,10 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
             CliAcpAgent? agent = null;
             try
             {
-                await using var server = new AcpAgentServer(input, streams.Stdout, client => agent = new CliAcpAgent(client, host, defaults!, environment.AbortGrace));
+                await using var server = new AcpAgentServer(input, streams.Stdout, client => agent = new CliAcpAgent(client, host, defaults!, environment.AbortGrace)
+                {
+                    PromptReading = environment.AcpPromptReading,
+                });
                 // A signal (or the token of a caller in a test) ends the connection as the end of standard input does; a second signal ends the process.
                 Action stop = () => _ = Task.Run(async () => await server.DisposeAsync().ConfigureAwait(false));
                 using var signals = environment.HandleSignals ? new CliSignals(stop, () =>

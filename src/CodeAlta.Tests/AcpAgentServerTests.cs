@@ -122,6 +122,38 @@ public sealed class AcpAgentServerTests
     }
 
     [TestMethod]
+    public async Task SessionCancel_SentRightAfterThePrompt_ReachesTheAgentAfterItTookThePrompt()
+    {
+        await using var raw = new RawHarness();
+        using var cancelHandled = new ManualResetEventSlim();
+        raw.Agent.CancelHandled = cancelHandled;
+        raw.Agent.OnPrompt = async (request, connection, cancellationToken) =>
+        {
+            // A cancel handled before the prompt is taken finds no turn: the server must not let it run first.
+            cancelHandled.Wait(TimeSpan.FromSeconds(1));
+            using var turn = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            raw.Agent.Turns[request.SessionId.Value] = turn;
+            await Task.Yield();
+            try
+            {
+                await Task.Delay(System.Threading.Timeout.Infinite, turn.Token);
+                return new PromptResponse { StopReason = StopReason.EndTurn };
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return new PromptResponse { StopReason = StopReason.Cancelled };
+            }
+        };
+
+        await raw.WriteAsync("""{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"session-1","prompt":[{"type":"text","text":"Wait"}]}}""" + "\n"
+            + """{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"session-1"}}""");
+
+        var response = await raw.ReadAsync();
+        Assert.AreEqual(1, response.GetProperty("id").GetInt32());
+        Assert.AreEqual("cancelled", response.GetProperty("result").GetProperty("stopReason").GetString());
+    }
+
+    [TestMethod]
     public async Task CancelRequest_CancelsThePendingRequestOfTheAgent()
     {
         await using var harness = await Harness.StartAsync();
@@ -387,6 +419,8 @@ public sealed class AcpAgentServerTests
 
         public Exception? NewSessionError { get; set; }
 
+        public ManualResetEventSlim? CancelHandled { get; set; }
+
         public string? LastCwd { get; private set; }
 
         public IReadOnlyList<AcpContentPart>? LastPrompt { get; private set; }
@@ -443,6 +477,7 @@ public sealed class AcpAgentServerTests
                 turn.Cancel();
             }
 
+            CancelHandled?.Set();
             return Task.CompletedTask;
         }
     }

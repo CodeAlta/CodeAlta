@@ -49,7 +49,7 @@ By default, standard output holds the final answer only, so `altacli run "..." >
 | --- | --- |
 | `_codealta/session` | First line: the session, its folder, provider, model and storage. |
 | `session/update` | Messages, thinking, tool calls and their results, plans and token use, as in ACP. The lines of a delegated agent carry its own `sessionId`. |
-| `_codealta/session_started`, `_codealta/compaction`, `_codealta/retry`, `_codealta/fallback`, `_codealta/error` | What ACP has no update for: a delegated agent starts, a compaction, a retry, a [fallback](model-tiers.md) to another model, an error. |
+| `_codealta/session_started`, `_codealta/compaction`, `_codealta/retry`, `_codealta/fallback`, `_codealta/error` | What ACP has no update for: a delegated agent starts, a compaction, a retry, a [fallback](model-tiers.md) to another model, an error (`events_dropped` when updates were lost: the whole answer is in the result). |
 | `_codealta/result` | Last line: the status, exit code, final answer, tokens, cost when the provider gives one, and duration. |
 
 | Exit code | The run |
@@ -98,7 +98,7 @@ api_key_env = "ANTHROPIC_API_KEY"'
 altacli run --ephemeral "Fix the failing test"
 ```
 
-A run that must not go on with less than it was set up with marks what it needs as required: `required = true` in `[plugins.<id>]` for a plugin, in `[plugins.mcp.servers.<key>]` for an [MCP server](plugins/mcp.md). `altacli run` and `altacli acp` then start the required MCP servers before the session, and stop with exit code 2, naming what did not start and why. `--no-plugins` and `--no-mcp` turn the check off with what they turn off.
+A run that must not go on with less than it was set up with marks what it needs as required: `required = true` in `[plugins.<id>]` for a plugin, in `[plugins.mcp.servers.<key>]` for an [MCP server](plugins/mcp.md). `altacli run` and `altacli acp` then start the required MCP servers before the session, and stop with exit code 2, naming what did not start and why. `altacli acp` checks the folder of each session it opens too, and refuses one whose project requires what does not start (error `required_unavailable`). `--no-plugins` and `--no-mcp` turn the check off with what they turn off.
 
 The commands an agent runs get `CODEALTA_SESSION_ID`, `CODEALTA_MODEL` and `AI_AGENT=codealta` in their environment, in the apps too.
 
