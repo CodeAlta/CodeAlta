@@ -46,8 +46,8 @@ public sealed partial class McpPlugin
         // One runtime for each server, closed once it answered: the sessions start their own when they activate it.
         var checks = required.Select(async key =>
         {
-            await using var runtime = _connections.CreateRuntime(_userHomeDirectory);
-            var result = await runtime.TestServerAsync(new McpRuntimeRequest { ProjectDirectory = projectPath, UserHomeDirectory = _userHomeDirectory }, key, cancellationToken)
+            await using var runtime = _connections.CreateRuntime(_home);
+            var result = await runtime.TestServerAsync(new McpRuntimeRequest { ProjectDirectory = projectPath, Home = _home }, key, cancellationToken)
                 .ConfigureAwait(false);
             return result.Diagnostics.FirstOrDefault() is { } diagnostic ? new McpRequiredServerFailure(key, diagnostic.Code, diagnostic.Message) : null;
         });

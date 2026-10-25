@@ -22,7 +22,7 @@ public sealed partial class McpPlugin : PluginBase
     private readonly McpPluginPresentation? _presentation;
     // The approvals and the files read of the skills of the servers, for a host that loads them.
     private readonly McpSkillServices? _skills;
-    private readonly string? _userHomeDirectory;
+    private readonly McpHome _home;
 
     /// <summary>Initializes an MCP backend without terminal presentation.</summary>
     public McpPlugin()
@@ -53,16 +53,16 @@ public sealed partial class McpPlugin : PluginBase
     internal McpPlugin(Func<McpManagementService, McpActivationState, McpPluginPresentation>? createPresentation, string? userHomeDirectory, McpPluginOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        userHomeDirectory ??= options.UserHomeDirectory;
-        _userHomeDirectory = userHomeDirectory;
+        var home = new McpHome(userHomeDirectory ?? options.UserHomeDirectory, options.CodeAltaRoot);
+        _home = home;
         _configCache = new McpConfigCache(options.GlobalConfigContent);
         ShowsApps = options.ShowsApps;
         LoadsSkills = options.LoadsSkills;
         ReadOnlyConfiguration = options.ReadOnlyConfiguration;
         _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills);
         // What the presentation saves through it is read again at once by the runtime and the prompt.
-        _managementService = new McpManagementService(userHomeDirectory, _configCache, options.ShowsApps, options.LoadsSkills);
-        _skills = options.LoadsSkills ? new McpSkillServices(new McpSkillApprovalStore(McpSkillApprovalStore.PathOf(userHomeDirectory)), new McpSkillContentCache()) : null;
+        _managementService = new McpManagementService(home, _configCache, options.ShowsApps, options.LoadsSkills);
+        _skills = options.LoadsSkills ? new McpSkillServices(new McpSkillApprovalStore(McpSkillApprovalStore.PathOf(home)), new McpSkillContentCache()) : null;
         if (createPresentation is not null)
         {
             _presentation = createPresentation(_managementService, _activationState)
@@ -143,7 +143,7 @@ public sealed partial class McpPlugin : PluginBase
                 context,
                 new McpCommandFactoryOptions
                 {
-                    UserHomeDirectory = _userHomeDirectory,
+                    Home = _home,
                     Connections = _connections,
                     ConfigCache = _configCache,
                     SessionEnvironment = SessionEnvironmentAsync,
@@ -325,7 +325,7 @@ public sealed partial class McpPlugin : PluginBase
         var environment = await SessionEnvironmentAsync(context.SessionId, cancellationToken).ConfigureAwait(false);
         var listed = await ListToolsAsync(
             context.SessionId,
-            new McpRuntimeRequest { ProjectDirectory = projectPath, UserHomeDirectory = _userHomeDirectory, SpaceId = context.SpaceId, Environment = environment },
+            new McpRuntimeRequest { ProjectDirectory = projectPath, Home = _home, SpaceId = context.SpaceId, Environment = environment },
             usedServers,
             cancellationToken).ConfigureAwait(false);
         // A server activated as a whole gives all its tools; another only the tools the session loaded.
@@ -335,7 +335,7 @@ public sealed partial class McpPlugin : PluginBase
             direct.Tools
                 .GroupBy(static tool => tool.Server, StringComparer.Ordinal)
                 .ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.Ordinal));
-        var activeTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections, context.SpaceId, SessionEnvironmentAsync)).ToArray();
+        var activeTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _home, _connections, context.SpaceId, SessionEnvironmentAsync)).ToArray();
         var cached = await CreateCachedToolsAsync(context, projectPath, activeTools).ConfigureAwait(false);
         if (direct.Tools.Count == 0 && direct.Diagnostics.Count == 0)
         {
@@ -366,7 +366,7 @@ public sealed partial class McpPlugin : PluginBase
             }
         }
 
-        await using var runtime = _connections.CreateRuntime(_userHomeDirectory);
+        await using var runtime = _connections.CreateRuntime(_home);
         return await runtime.ListToolsForServersAsync(request, servers, cancellationToken).ConfigureAwait(false);
     }
 
@@ -381,7 +381,7 @@ public sealed partial class McpPlugin : PluginBase
         }
 
         McpCachedToolsResult cached;
-        await using (var runtime = _connections.CreateRuntime(_userHomeDirectory))
+        await using (var runtime = _connections.CreateRuntime(_home))
         {
             try
             {
@@ -394,7 +394,7 @@ public sealed partial class McpPlugin : PluginBase
         }
 
         var active = activeTools.Select(static tool => tool.Spec.Name).ToHashSet(StringComparer.Ordinal);
-        AgentToolDefinition Create(McpRuntimeTool tool) => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections, context.SpaceId, SessionEnvironmentAsync);
+        AgentToolDefinition Create(McpRuntimeTool tool) => CreateAgentTool(tool, projectPath, _home, _connections, context.SpaceId, SessionEnvironmentAsync);
         AgentToolDefinition Defer(McpRuntimeTool tool)
         {
             var definition = Create(tool);
@@ -433,7 +433,7 @@ public sealed partial class McpPlugin : PluginBase
         var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
         // The servers and the policy as a refresh of the management snapshot reads them, from the files read last unless one
         // changed: a policy that cannot be read is the default one here, as in the snapshot.
-        var config = _configCache.Discover(projectPath, _userHomeDirectory);
+        var config = _configCache.Discover(projectPath, _home);
         McpPolicyOptions snapshotPolicy;
         try
         {
@@ -489,7 +489,7 @@ public sealed partial class McpPlugin : PluginBase
     }
 
     private McpPolicyOptions LoadPolicy(string? projectPath)
-        => _configCache.LoadPolicy(McpPolicyWriter.GetGlobalPolicyPath(_userHomeDirectory),
+        => _configCache.LoadPolicy(McpPolicyWriter.GetGlobalPolicyPath(_home),
             string.IsNullOrWhiteSpace(projectPath) ? null : McpPolicyWriter.GetProjectPolicyPath(projectPath));
 
     internal static string ResolveActivationScopeKey(PluginOperationContext context, string? projectPath)
@@ -520,7 +520,7 @@ public sealed partial class McpPlugin : PluginBase
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
-    internal static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath, string? userHomeDirectory, McpSessionConnections? connections,
+    internal static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath, McpHome home, McpSessionConnections? connections,
         string? spaceId = null, Func<string?, CancellationToken, ValueTask<AgentProcessEnvironment>>? environment = null)
     {
         var description = CreateToolDescription(tool);
@@ -534,7 +534,7 @@ public sealed partial class McpPlugin : PluginBase
                 tool.Server,
                 tool.Name,
                 projectPath,
-                userHomeDirectory,
+                home,
                 useArgumentsJsonWrapper,
                 connections,
                 invocation,
@@ -758,7 +758,7 @@ public sealed partial class McpPlugin : PluginBase
         string server,
         string tool,
         string? projectPath,
-        string? userHomeDirectory,
+        McpHome home,
         bool useArgumentsJsonWrapper,
         McpSessionConnections? connections,
         AgentToolInvocation invocation,
@@ -774,7 +774,7 @@ public sealed partial class McpPlugin : PluginBase
         var diagnostics = new List<McpRuntimeDiagnostic>();
         var request = new McpRuntimeRequest
         {
-            ProjectDirectory = projectPath, UserHomeDirectory = userHomeDirectory, SpaceId = spaceId,
+            ProjectDirectory = projectPath, Home = home, SpaceId = spaceId,
             Environment = environment is null ? null : await environment(invocation.SessionId, cancellationToken).ConfigureAwait(false),
         };
         McpRuntimeToolCallResult? result;
@@ -794,7 +794,7 @@ public sealed partial class McpPlugin : PluginBase
         }
         else
         {
-            await using var runtime = connections?.CreateRuntime(userHomeDirectory) ?? new McpRuntimeService(userHomeDirectory);
+            await using var runtime = connections?.CreateRuntime(home) ?? new McpRuntimeService(home);
             result = await runtime.CallToolAsync(request, server, tool, arguments, diagnostics, cancellationToken).ConfigureAwait(false);
         }
 

@@ -123,6 +123,15 @@ public sealed record McpManagementRequest
     /// <summary>Gets the user home directory override, primarily for tests.</summary>
     public string? UserHomeDirectory { get; init; }
 
+    // The CodeAlta root in place of <home>/.alta (McpHome.CodeAltaRoot), which a plugin with one gives its requests.
+    internal string? CodeAltaRoot { get; init; }
+
+    internal McpHome Home
+    {
+        get => new(UserHomeDirectory, CodeAltaRoot);
+        init => (UserHomeDirectory, CodeAltaRoot) = (value.UserHomeDirectory, value.CodeAltaRoot);
+    }
+
     /// <summary>
     /// Gets a value indicating whether a refresh probes each configuration source for writability, which
     /// can create and delete a temporary file next to a missing source. Hosts that only need the server
@@ -596,7 +605,7 @@ public sealed class McpManagementService
     private readonly McpConfigWriter _configWriter = new();
     private readonly McpPolicyLoader _policyLoader = new();
     private readonly McpPolicyWriter _policyWriter = new();
-    private readonly string? _userHomeDirectory;
+    private readonly McpHome _home;
     private readonly McpConfigCache? _configCache;
     private readonly bool _advertiseApps;
     private readonly bool _loadsSkills;
@@ -615,7 +624,7 @@ public sealed class McpManagementService
     /// <param name="options">What the host does with MCP servers beyond their tools.</param>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     public McpManagementService(McpPluginOptions options)
-        : this(userHomeDirectory: null, configCache: null, (options ?? throw new ArgumentNullException(nameof(options))).ShowsApps, options.LoadsSkills)
+        : this(home: default, configCache: null, (options ?? throw new ArgumentNullException(nameof(options))).ShowsApps, options.LoadsSkills)
     {
     }
 
@@ -623,30 +632,34 @@ public sealed class McpManagementService
     internal McpManagementService(string userHomeDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userHomeDirectory);
-        _userHomeDirectory = userHomeDirectory;
+        _home = userHomeDirectory;
         _lastRequest = new McpManagementRequest { UserHomeDirectory = userHomeDirectory };
     }
 
-    // The service of a plugin: what it writes is read again at once through the plugin's cache. A null home is the user's.
-    internal McpManagementService(string? userHomeDirectory, McpConfigCache? configCache)
-        : this(userHomeDirectory, configCache, advertiseApps: false)
+    // The service of a plugin: what it writes is read again at once through the plugin's cache. A default home is the user's.
+    internal McpManagementService(McpHome home, McpConfigCache? configCache)
+        : this(home, configCache, advertiseApps: false)
     {
     }
 
     // A test of a server tells it what the sessions' connections tell it: that the host shows views (MCP Apps), or not.
-    internal McpManagementService(string? userHomeDirectory, McpConfigCache? configCache, bool advertiseApps)
-        : this(userHomeDirectory, configCache, advertiseApps, loadsSkills: false)
+    internal McpManagementService(McpHome home, McpConfigCache? configCache, bool advertiseApps)
+        : this(home, configCache, advertiseApps, loadsSkills: false)
     {
     }
 
     // ... and that it loads skills (MCP Skills): a test then lists the skills of the server too.
-    internal McpManagementService(string? userHomeDirectory, McpConfigCache? configCache, bool advertiseApps, bool loadsSkills)
+    internal McpManagementService(McpHome home, McpConfigCache? configCache, bool advertiseApps, bool loadsSkills)
     {
-        if (userHomeDirectory is not null)
+        if (home.UserHomeDirectory is not null)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(userHomeDirectory);
-            _userHomeDirectory = userHomeDirectory;
-            _lastRequest = new McpManagementRequest { UserHomeDirectory = userHomeDirectory };
+            ArgumentException.ThrowIfNullOrWhiteSpace(home.UserHomeDirectory, nameof(home));
+        }
+
+        if (!home.IsDefault)
+        {
+            _home = home;
+            _lastRequest = new McpManagementRequest { Home = home };
         }
 
         _configCache = configCache;
@@ -679,16 +692,16 @@ public sealed class McpManagementService
         var configSnapshot = _discovery.Discover(new McpConfigPathOptions
         {
             ProjectDirectory = projectDirectory,
-            UserHomeDirectory = request.UserHomeDirectory,
+            Home = request.Home,
             ProbeWritability = request.ProbeWritability,
             SessionServers = _configCache?.SessionServers ?? [],
         });
-        var globalPolicyPath = McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
+        var globalPolicyPath = McpPolicyWriter.GetGlobalPolicyPath(request.Home);
         var projectPolicyPath = projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory);
         var (policy, policyDiagnostic) = LoadPolicy(globalPolicyPath, projectPolicyPath);
         var sources = configSnapshot.Sources.Select(MapSource).ToArray();
         var externalSources = configSnapshot.ExternalSources.Select(MapSource).ToArray();
-        var servers = BuildServers(configSnapshot, policy, [.. sources, .. externalSources], request.UserHomeDirectory);
+        var servers = BuildServers(configSnapshot, policy, [.. sources, .. externalSources], request.Home);
         var snapshot = new McpManagementSnapshot
         {
             ProjectDirectory = projectDirectory,
@@ -741,7 +754,7 @@ public sealed class McpManagementService
         request = WithDefaultHome(request);
         var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
         var targetScope = ResolveWriteScope(scope, projectDirectory, nameof(scope));
-        var targetPath = GetJsonConfigPath(targetScope, projectDirectory, request.UserHomeDirectory);
+        var targetPath = GetJsonConfigPath(targetScope, projectDirectory, request.Home);
         var normalized = ToServerDefinition(definition, targetScope, targetPath);
         McpConfigMutationResult result;
         try
@@ -752,7 +765,7 @@ public sealed class McpManagementService
                 (!string.Equals(originalKey.Trim(), normalized.Key, StringComparison.Ordinal) || originalScope != targetScope))
             {
                 var sourceScope = originalScope ?? targetScope;
-                var sourcePath = GetJsonConfigPath(sourceScope, projectDirectory, request.UserHomeDirectory);
+                var sourcePath = GetJsonConfigPath(sourceScope, projectDirectory, request.Home);
                 await _configWriter.RemoveServerAsync(sourcePath, MapScope(sourceScope), originalKey.Trim(), cancellationToken).ConfigureAwait(false);
             }
         }
@@ -774,11 +787,11 @@ public sealed class McpManagementService
     }
 
     // The skills CodeAlta listed of a server the user removed are forgotten, once no other file defines it.
-    internal static void ForgetSkillsOfRemovedServer(string? userHomeDirectory, string? projectDirectory, string serverKey)
+    internal static void ForgetSkillsOfRemovedServer(McpHome home, string? projectDirectory, string serverKey)
     {
-        var config = new McpConfigDiscovery().Discover(new McpConfigPathOptions { ProjectDirectory = projectDirectory, UserHomeDirectory = userHomeDirectory, ProbeWritability = false });
+        var config = new McpConfigDiscovery().Discover(new McpConfigPathOptions { ProjectDirectory = projectDirectory, Home = home, ProbeWritability = false });
         if (config.EffectiveServers.Any(server => string.Equals(server.Definition.Key, serverKey, StringComparison.Ordinal))) return;
-        new McpSkillListCache(McpSkillListCache.FolderOf(userHomeDirectory)).Delete(serverKey);
+        new McpSkillListCache(McpSkillListCache.FolderOf(home)).Delete(serverKey);
     }
 
     /// <summary>
@@ -803,7 +816,7 @@ public sealed class McpManagementService
         request = WithDefaultHome(request);
         var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
         var targetScope = ResolveWriteScope(scope, projectDirectory, nameof(scope));
-        var targetPath = GetJsonConfigPath(targetScope, projectDirectory, request.UserHomeDirectory);
+        var targetPath = GetJsonConfigPath(targetScope, projectDirectory, request.Home);
         McpConfigMutationResult result;
         try
         {
@@ -814,7 +827,7 @@ public sealed class McpManagementService
             _configCache?.Invalidate();
         }
 
-        ForgetSkillsOfRemovedServer(request.UserHomeDirectory, projectDirectory, serverKey.Trim());
+        ForgetSkillsOfRemovedServer(request.Home, projectDirectory, serverKey.Trim());
         RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
         return new McpManagementConfigMutationResult
         {
@@ -861,7 +874,7 @@ public sealed class McpManagementService
 
         var path = targetScope == McpManagementScope.Project
             ? McpPolicyWriter.GetProjectPolicyPath(projectDirectory!)
-            : McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
+            : McpPolicyWriter.GetGlobalPolicyPath(request.Home);
         McpPolicyMutationResult result;
         try
         {
@@ -917,7 +930,7 @@ public sealed class McpManagementService
 
         var path = targetScope == McpManagementScope.Project
             ? McpPolicyWriter.GetProjectPolicyPath(projectDirectory!)
-            : McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
+            : McpPolicyWriter.GetGlobalPolicyPath(request.Home);
         McpPolicyMutationResult result;
         try
         {
@@ -976,7 +989,7 @@ public sealed class McpManagementService
 
         var path = targetScope == McpManagementScope.Project
             ? McpPolicyWriter.GetProjectPolicyPath(projectDirectory!)
-            : McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
+            : McpPolicyWriter.GetGlobalPolicyPath(request.Home);
         var previousTools = GetCachedTools(serverKey.Trim());
         var previousStatus = GetCachedTestStatus(serverKey.Trim());
         var previousTestedAt = GetCachedTestedAt(serverKey.Trim());
@@ -1036,12 +1049,12 @@ public sealed class McpManagementService
         McpManagementServerTestResult result;
         try
         {
-            await using var runtime = new McpRuntimeService(_userHomeDirectory, configCache: null, _advertiseApps, _loadsSkills);
+            await using var runtime = new McpRuntimeService(_home, configCache: null, _advertiseApps, _loadsSkills);
             var runtimeResult = await runtime.TestServerAsync(
                 new McpRuntimeRequest
                 {
                     ProjectDirectory = projectDirectory,
-                    UserHomeDirectory = normalizedRequest.UserHomeDirectory,
+                    Home = normalizedRequest.Home,
                 },
                 serverKey.Trim(),
                 cancellationToken).ConfigureAwait(false);
@@ -1084,7 +1097,7 @@ public sealed class McpManagementService
             return new McpOAuthTokenStatus { Server = serverKey.Trim(), HasToken = false };
         }
 
-        return GetOAuthStatus(effective.Definition, request.UserHomeDirectory);
+        return GetOAuthStatus(effective.Definition, request.Home);
     }
 
     /// <summary>
@@ -1146,12 +1159,12 @@ public sealed class McpManagementService
             };
         }
 
-        await using var runtime = new McpRuntimeService(_userHomeDirectory, configCache: null, _advertiseApps, _loadsSkills);
+        await using var runtime = new McpRuntimeService(_home, configCache: null, _advertiseApps, _loadsSkills);
         var runtimeResult = await runtime.TestServerAsync(
             new McpRuntimeRequest
             {
                 ProjectDirectory = projectDirectory,
-                UserHomeDirectory = request.UserHomeDirectory,
+                Home = request.Home,
                 ForceOAuth = true,
                 AllowOAuthBrowserLogin = true,
                 OpenOAuthBrowser = true,
@@ -1184,7 +1197,7 @@ public sealed class McpManagementService
             return false;
         }
 
-        var cache = new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(request.UserHomeDirectory, effective.Definition.Key, effective.Definition.Url));
+        var cache = new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(request.Home, effective.Definition.Key, effective.Definition.Url));
         var existed = cache.Exists;
         cache.Delete();
         RefreshSnapshot(request);
@@ -1192,8 +1205,8 @@ public sealed class McpManagementService
     }
 
     private McpManagementRequest WithDefaultHome(McpManagementRequest request)
-        => request.UserHomeDirectory is null && _userHomeDirectory is not null
-            ? request with { UserHomeDirectory = _userHomeDirectory }
+        => request.Home.IsDefault && !_home.IsDefault
+            ? request with { Home = _home }
             : request;
 
     private static string? NormalizeProjectDirectory(string? projectDirectory)
@@ -1205,7 +1218,7 @@ public sealed class McpManagementService
         var snapshot = _discovery.Discover(new McpConfigPathOptions
         {
             ProjectDirectory = projectDirectory,
-            UserHomeDirectory = request.UserHomeDirectory,
+            Home = request.Home,
             SessionServers = _configCache?.SessionServers ?? [],
         });
         return snapshot.EffectiveServers.FirstOrDefault(server => string.Equals(server.Definition.Key, serverKey, StringComparison.Ordinal));
@@ -1386,7 +1399,7 @@ public sealed class McpManagementService
         McpConfigSnapshot configSnapshot,
         McpPolicyOptions policy,
         IReadOnlyList<McpManagementConfigSourceSnapshot> sources,
-        string? userHomeDirectory)
+        McpHome home)
     {
         var rows = new List<McpManagementServerSnapshot>();
         foreach (var source in sources.Where(static source => !source.Exists || !source.IsValid))
@@ -1409,12 +1422,12 @@ public sealed class McpManagementService
 
         foreach (var server in configSnapshot.EffectiveServers)
         {
-            rows.Add(MapServer(server, policy, McpManagementServerState.Configured, userHomeDirectory));
+            rows.Add(MapServer(server, policy, McpManagementServerState.Configured, home));
         }
 
         foreach (var shadowed in configSnapshot.ShadowedServers)
         {
-            rows.Add(MapShadowedServer(shadowed, policy, userHomeDirectory));
+            rows.Add(MapShadowedServer(shadowed, policy, home));
         }
 
         foreach (var skipped in configSnapshot.ExternalSources.SelectMany(static source => source.SkippedServers))
@@ -1452,13 +1465,13 @@ public sealed class McpManagementService
             .ToArray();
     }
 
-    private static McpManagementServerSnapshot MapServer(McpEffectiveServer effective, McpPolicyOptions policy, McpManagementServerState defaultState, string? userHomeDirectory)
+    private static McpManagementServerSnapshot MapServer(McpEffectiveServer effective, McpPolicyOptions policy, McpManagementServerState defaultState, McpHome home)
     {
         var definition = effective.Definition;
         policy.Servers.TryGetValue(definition.Key, out var serverPolicy);
         var policyEnabled = serverPolicy?.Enabled ?? policy.Enabled;
         var state = policyEnabled ? defaultState : McpManagementServerState.Disabled;
-        var oauthStatus = GetOAuthStatus(definition, userHomeDirectory);
+        var oauthStatus = GetOAuthStatus(definition, home);
         return new McpManagementServerSnapshot
         {
             Key = definition.Key,
@@ -1499,14 +1512,14 @@ public sealed class McpManagementService
         };
     }
 
-    private static McpManagementServerSnapshot MapShadowedServer(McpShadowedServer shadowed, McpPolicyOptions policy, string? userHomeDirectory)
+    private static McpManagementServerSnapshot MapShadowedServer(McpShadowedServer shadowed, McpPolicyOptions policy, McpHome home)
     {
         var definition = shadowed.Definition;
         var winner = shadowed.OverriddenBy;
         // The wording of a global definition under a project one is the one this had before other files were read.
         var byProject = definition.SourceScope == McpConfigScope.Global && winner.SourceScope == McpConfigScope.Project;
         policy.Servers.TryGetValue(definition.Key, out var serverPolicy);
-        var oauthStatus = GetOAuthStatus(definition, userHomeDirectory);
+        var oauthStatus = GetOAuthStatus(definition, home);
         return new McpManagementServerSnapshot
         {
             Key = definition.Key,
@@ -1576,14 +1589,14 @@ public sealed class McpManagementService
             _ => McpConfigOrigin.CodeAlta,
         };
 
-    private static McpOAuthTokenStatus GetOAuthStatus(McpServerDefinition definition, string? userHomeDirectory)
+    private static McpOAuthTokenStatus GetOAuthStatus(McpServerDefinition definition, McpHome home)
     {
         if (definition.Transport != McpTransportKind.Http)
         {
             return new McpOAuthTokenStatus { Server = definition.Key, HasToken = false };
         }
 
-        var cache = new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(userHomeDirectory, definition.Key, definition.Url));
+        var cache = new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(home, definition.Key, definition.Url));
         try
         {
             // A snapshot is built synchronously: the file is read so, without blocking on an asynchronous read.
@@ -1676,10 +1689,10 @@ public sealed class McpManagementService
         return targetScope;
     }
 
-    private static string GetJsonConfigPath(McpManagementScope scope, string? projectDirectory, string? userHomeDirectory)
+    private static string GetJsonConfigPath(McpManagementScope scope, string? projectDirectory, McpHome home)
         => scope == McpManagementScope.Project
             ? McpConfigDiscovery.GetProjectConfigPath(projectDirectory ?? throw new ArgumentException("Project JSON config scope requires a project directory.", nameof(projectDirectory)))
-            : McpConfigDiscovery.GetGlobalConfigPath(userHomeDirectory);
+            : McpConfigDiscovery.GetGlobalConfigPath(home);
 
     private static McpServerDefinition ToServerDefinition(McpManagementServerEdit edit, McpManagementScope scope, string path)
     {

@@ -66,7 +66,7 @@ internal sealed partial class McpRuntimeService
         var list = new McpCachedSkillList(definition.Key, McpToolListCache.Fingerprint(definition), DateTimeOffset.UtcNow, directoryRead, skills, diagnostics) { Variant = variant };
         try
         {
-            new McpSkillListCache(McpSkillListCache.FolderOf(context.Request.UserHomeDirectory)).Write(list);
+            new McpSkillListCache(McpSkillListCache.FolderOf(context.Request.Home)).Write(list);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The cache is written at the next connection. */ }
 
@@ -81,7 +81,7 @@ internal sealed partial class McpRuntimeService
     {
         ArgumentNullException.ThrowIfNull(request);
         var context = LoadContext(request);
-        var cache = new McpSkillListCache(McpSkillListCache.FolderOf(context.Request.UserHomeDirectory));
+        var cache = new McpSkillListCache(McpSkillListCache.FolderOf(context.Request.Home));
         var lists = new List<McpCachedSkillList>();
         if (!context.Policy.Enabled) return lists;
         foreach (var effective in context.Config.EffectiveServers.OrderBy(static server => server.Definition.Key, StringComparer.Ordinal))

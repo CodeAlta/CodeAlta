@@ -21,7 +21,7 @@ public sealed partial class McpPlugin
         var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
         IReadOnlyList<McpCachedSkillList> lists;
         McpPolicyOptions policy;
-        await using (var runtime = _connections.CreateRuntime(_userHomeDirectory))
+        await using (var runtime = _connections.CreateRuntime(_home))
         {
             try
             {

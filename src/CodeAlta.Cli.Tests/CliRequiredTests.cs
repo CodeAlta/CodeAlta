@@ -74,6 +74,40 @@ public sealed class CliRequiredTests
         Assert.AreEqual(mcpJson, File.ReadAllText(Path.Combine(root.Profile, "mcp.json")));
     }
 
+    [TestMethod]
+    public async Task Profile_UsesTheMcpServersOfTheProfile_AndNoneOfTheHome()
+    {
+        using var root = new CliTestRoot();
+        // The servers of ~/.alta and those of another tool in the home: a separate profile reads none of them.
+        Directory.CreateDirectory(root.Profile);
+        File.WriteAllText(Path.Combine(root.Profile, "mcp.json"), """{ "mcpServers": { "home-server": { "command": "codealta-no-such-command" } } }""");
+        Directory.CreateDirectory(Path.Combine(root.Home, ".copilot"));
+        File.WriteAllText(Path.Combine(root.Home, ".copilot", "mcp-config.json"), """{ "mcpServers": { "copilot-server": { "command": "codealta-no-such-command" } } }""");
+        var profile = Directory.CreateDirectory(Path.Combine(root.Root, "bench-profile")).FullName;
+        var tinyServer = Path.Combine(AppContext.BaseDirectory, "CodeAlta.Tests.TinyMcpServer.dll");
+        File.WriteAllText(Path.Combine(profile, "mcp.json"), JsonSerializer.Serialize(new { mcpServers = new { tiny = new { command = "dotnet", args = new[] { tinyServer } } } }));
+
+        var visible = await root.RunAsync(new FakeProvider(), ["alta", "mcp", "list"]);
+        Assert.AreEqual(0, visible.ExitCode, visible.Stderr);
+        StringAssert.Contains(visible.Stdout, "home-server");
+        StringAssert.Contains(visible.Stdout, "copilot-server", "The visible mode reads the configurations of other tools of the home.");
+
+        var separate = await root.RunAsync(new FakeProvider(), ["alta", "--profile", profile, "mcp", "list"]);
+        Assert.AreEqual(0, separate.ExitCode, separate.Stderr);
+        StringAssert.Contains(separate.Stdout, "\"tiny\"");
+        Assert.IsFalse(separate.Stdout.Contains("home-server", StringComparison.Ordinal), separate.Stdout);
+        Assert.IsFalse(separate.Stdout.Contains("copilot-server", StringComparison.Ordinal), separate.Stdout);
+        Assert.IsFalse(separate.Stdout.Contains(JsonSerializer.Serialize(root.Home)[1..^1], StringComparison.OrdinalIgnoreCase), "No file of the home is a source: " + separate.Stdout);
+
+        // The server of the profile starts (dotnet is found on the PATH of the process), and what it caches is the profile's.
+        var provider = new FakeProvider();
+        var run = await root.RunWithEnvironmentAsync(root.Environment(provider) with { PluginEnvironment = null },
+            ["run", "--profile", profile, "-c", "plugins.mcp.servers.tiny.required=true", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+        Assert.IsTrue(CliTestRoot.Files(profile).Any(static file => file.StartsWith("cache/mcp/tools/", StringComparison.Ordinal)), string.Join(", ", CliTestRoot.Files(profile)));
+        Assert.IsFalse(Directory.Exists(Path.Combine(root.Profile, "cache")), "Nothing is cached in ~/.alta.");
+    }
+
     private static JsonElement Result(CliRun run)
     {
         var last = JsonDocument.Parse(run.Lines[^1]).RootElement;

@@ -63,7 +63,7 @@ internal sealed class McpSessionConnections : IAsyncDisposable
     internal bool LoadsSkills { get; }
 
     /// <summary>Creates a runtime as the ones of the sessions: same configuration cache, same capabilities.</summary>
-    internal McpRuntimeService CreateRuntime(string? userHomeDirectory) => new(userHomeDirectory, ConfigCache, AdvertiseApps, LoadsSkills);
+    internal McpRuntimeService CreateRuntime(McpHome home) => new(home, ConfigCache, AdvertiseApps, LoadsSkills);
 
     /// <summary>The number of sessions that hold connections.</summary>
     internal int Count { get { lock (_gate) return _entries.Count; } }
@@ -90,7 +90,7 @@ internal sealed class McpSessionConnections : IAsyncDisposable
                 // The server did not start, the call timed out or the connection broke: what is cached
                 // is no longer trusted. The next call connects again.
                 await entry.Runtime.DisposeAsync().ConfigureAwait(false);
-                entry.Runtime = CreateRuntime(request.UserHomeDirectory);
+                entry.Runtime = CreateRuntime(request.Home);
             }
 
             return result;
@@ -122,7 +122,7 @@ internal sealed class McpSessionConnections : IAsyncDisposable
             if (result is null && diagnostics.Any(static diagnostic => diagnostic.Code is "tool_timeout" or "tool_call_failed" or "resource_timeout" or "resource_read_failed"))
             {
                 await entry.Runtime.DisposeAsync().ConfigureAwait(false);
-                entry.Runtime = CreateRuntime(request.UserHomeDirectory);
+                entry.Runtime = CreateRuntime(request.Home);
             }
             else
             {
@@ -166,7 +166,7 @@ internal sealed class McpSessionConnections : IAsyncDisposable
     private async Task<T> UseAsync<T>(string sessionId, McpRuntimeRequest request, Func<Entry, Task<T>> use, CancellationToken cancellationToken)
     {
         // A session attached again with another identity has other servers: the ones of its last identity close when idle.
-        var key = string.Join('\n', sessionId, request.ProjectDirectory, request.UserHomeDirectory, McpRuntimeService.EnvironmentKey(request.Environment));
+        var key = string.Join('\n', sessionId, request.ProjectDirectory, request.Home.Key, McpRuntimeService.EnvironmentKey(request.Environment));
         while (true)
         {
             Entry entry;
@@ -175,7 +175,7 @@ internal sealed class McpSessionConnections : IAsyncDisposable
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 if (!_entries.TryGetValue(key, out entry!))
                 {
-                    _entries[key] = entry = new Entry(CreateRuntime(request.UserHomeDirectory));
+                    _entries[key] = entry = new Entry(CreateRuntime(request.Home));
                     _sweeper ??= _time.CreateTimer(static state => _ = ((McpSessionConnections)state!).CloseIdleAsync(), this,
                         TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
                 }

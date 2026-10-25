@@ -204,7 +204,11 @@ internal sealed class CliTestRoot : IDisposable
     internal string[] LastPlugins { get; private set; } = [];
 
     /// <summary>Runs <c>altacli</c> in this process, with a standard input when one is given (as a pipe).</summary>
-    internal async Task<CliRun> RunAsync(FakeProvider? provider, string[] args, string? stdin = null, CancellationToken cancellationToken = default)
+    internal Task<CliRun> RunAsync(FakeProvider? provider, string[] args, string? stdin = null, CancellationToken cancellationToken = default)
+        => RunWithEnvironmentAsync(Environment(provider), args, stdin, cancellationToken);
+
+    /// <summary>Runs <c>altacli</c> in this process with an environment of its own, such as one whose plugins have the variables of the process.</summary>
+    internal async Task<CliRun> RunWithEnvironmentAsync(CliEnvironment environment, string[] args, string? stdin = null, CancellationToken cancellationToken = default)
     {
         using var stdout = new MemoryStream();
         var stderr = new StringWriter();
@@ -215,7 +219,7 @@ internal sealed class CliTestRoot : IDisposable
             Stdout = stdout,
             Stderr = TextWriter.Synchronized(stderr),
         };
-        var code = await CliApplication.RunAsync(args, streams, Environment(provider), cancellationToken).WaitAsync(TimeSpan.FromSeconds(60));
+        var code = await CliApplication.RunAsync(args, streams, environment, cancellationToken).WaitAsync(TimeSpan.FromSeconds(60));
         return new CliRun(code, Encoding.UTF8.GetString(stdout.ToArray()), stderr.ToString());
     }
 

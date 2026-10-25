@@ -13,10 +13,12 @@ internal sealed class McpConfigDiscovery
     public McpConfigSnapshot Discover(McpConfigPathOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var home = GetUserHome(options.UserHomeDirectory);
+        var home = options.Home;
         var projectDirectory = string.IsNullOrWhiteSpace(options.ProjectDirectory) ? null : Path.GetFullPath(options.ProjectDirectory);
         var boundedRead = options.BoundedRead ?? !options.ProbeWritability;
-        var context = new McpExternalContext(projectDirectory, home);
+        // Without a home of other tools (a separate profile), ${userHome} in a project file of another tool stays the home
+        // of the user the servers run as.
+        var context = new McpExternalContext(projectDirectory, home.OtherToolsHome ?? GetUserHome(null));
         var sources = new List<McpConfigSource>(2);
         var external = new List<McpConfigSource>(4);
         foreach (var file in GetSourceFiles(projectDirectory, home))
@@ -56,12 +58,12 @@ internal sealed class McpConfigDiscovery
     }
 
     // Every file a discovery reads, in the order it reads them: the two files of CodeAlta (global, then the project's), then
-    // those of other tools. A cache of discoveries watches the same files.
-    internal static IReadOnlyList<McpConfigSourceFile> GetSourceFiles(string? projectDirectory, string home)
+    // those of other tools, the global ones only from a home of other tools. A cache of discoveries watches the same files.
+    internal static IReadOnlyList<McpConfigSourceFile> GetSourceFiles(string? projectDirectory, McpHome home)
     {
         var files = new List<McpConfigSourceFile>(6)
         {
-            new(McpConfigScope.Global, McpConfigOrigin.CodeAlta, Path.Combine(home, ".alta", "mcp.json")),
+            new(McpConfigScope.Global, McpConfigOrigin.CodeAlta, Path.Combine(home.Root, "mcp.json")),
         };
         if (projectDirectory is not null)
         {
@@ -71,12 +73,16 @@ internal sealed class McpConfigDiscovery
             files.Add(new(McpConfigScope.Project, McpConfigOrigin.Vscode, Path.Combine(projectDirectory, ".vscode", "mcp.json")));
         }
 
-        files.Add(new(McpConfigScope.Global, McpConfigOrigin.Copilot, Path.Combine(home, ".copilot", "mcp-config.json")));
+        if (home.OtherToolsHome is { } otherToolsHome)
+        {
+            files.Add(new(McpConfigScope.Global, McpConfigOrigin.Copilot, Path.Combine(otherToolsHome, ".copilot", "mcp-config.json")));
+        }
+
         return files;
     }
 
-    public static string GetGlobalConfigPath(string? userHomeDirectory = null)
-        => Path.Combine(GetUserHome(userHomeDirectory), ".alta", "mcp.json");
+    public static string GetGlobalConfigPath(McpHome home = default)
+        => Path.Combine(home.Root, "mcp.json");
 
     internal static string GetUserHome(string? userHomeDirectory)
     {

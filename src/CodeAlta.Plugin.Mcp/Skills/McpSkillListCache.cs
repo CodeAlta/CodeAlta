@@ -43,8 +43,8 @@ internal sealed class McpSkillListCache
     public string Folder { get; }
 
     /// <summary>Gets the folder of the lists of a profile: <c>~/.alta/cache/mcp/skills</c>.</summary>
-    public static string FolderOf(string? userHomeDirectory)
-        => Path.Combine(userHomeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta", "cache", "mcp", "skills");
+    public static string FolderOf(McpHome home)
+        => Path.Combine(home.Root, "cache", "mcp", "skills");
 
     /// <summary>Reads the list of a server when it was listed with this fingerprint; null when there is none or it is stale.</summary>
     public McpCachedSkillList? Read(string server, string fingerprint)

@@ -63,7 +63,7 @@ public sealed partial class McpPlugin
         }
 
         // The keys of the configured servers, and of the servers of the other sessions; those of this session are replaced.
-        var taken = _configCache.Discover(projectDirectory, _userHomeDirectory).EffectiveServers
+        var taken = _configCache.Discover(projectDirectory, _home).EffectiveServers
             .Where(static server => server.Definition.SourcePath != McpConfigDiscovery.SessionServersPath)
             .Select(static server => server.Definition.Key)
             .Concat(_sessionServerOwners.Where(owner => !string.Equals(owner.Value, sessionId, StringComparison.OrdinalIgnoreCase)).Select(static owner => owner.Key))

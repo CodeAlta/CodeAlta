@@ -21,6 +21,15 @@ internal sealed record McpRuntimeRequest
 
     public string? UserHomeDirectory { get; init; }
 
+    // The CodeAlta root in place of <home>/.alta (McpHome.CodeAltaRoot).
+    public string? CodeAltaRoot { get; init; }
+
+    public McpHome Home
+    {
+        get => new(UserHomeDirectory, CodeAltaRoot);
+        init => (UserHomeDirectory, CodeAltaRoot) = (value.UserHomeDirectory, value.CodeAltaRoot);
+    }
+
     // The space of the session the request is for; null applies none (the user, outside any session). A server the
     // space does not have is refused whatever defines it and whatever its policy says.
     public string? SpaceId { get; init; }
@@ -164,31 +173,31 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
     private readonly McpConfigDiscovery _discovery = new();
     private readonly McpPolicyLoader _policyLoader = new();
     private readonly Dictionary<string, ServerRuntimeState> _servers = new(StringComparer.Ordinal);
-    private readonly string? _userHomeDirectory;
+    private readonly McpHome _home;
     private readonly McpConfigCache? _configCache;
 
-    // Requests without their own home directory read global configuration, policy and OAuth tokens under this one.
-    public McpRuntimeService(string? userHomeDirectory = null)
-        : this(userHomeDirectory, configCache: null)
+    // Requests without their own home read global configuration, policy and OAuth tokens under this one.
+    public McpRuntimeService(McpHome home = default)
+        : this(home, configCache: null)
     {
     }
 
     // With the cache of a plugin, the configuration and the policy are read again only when one of their files changed.
-    public McpRuntimeService(string? userHomeDirectory, McpConfigCache? configCache)
-        : this(userHomeDirectory, configCache, advertiseApps: false)
+    public McpRuntimeService(McpHome home, McpConfigCache? configCache)
+        : this(home, configCache, advertiseApps: false)
     {
     }
 
     // A host that shows the views of MCP Apps tells the servers it starts, which may then list other tools.
-    public McpRuntimeService(string? userHomeDirectory, McpConfigCache? configCache, bool advertiseApps)
-        : this(userHomeDirectory, configCache, advertiseApps, loadsSkills: false)
+    public McpRuntimeService(McpHome home, McpConfigCache? configCache, bool advertiseApps)
+        : this(home, configCache, advertiseApps, loadsSkills: false)
     {
     }
 
     // A host that loads the skills of MCP servers tells the servers it starts, and lists their skills when they publish some.
-    public McpRuntimeService(string? userHomeDirectory, McpConfigCache? configCache, bool advertiseApps, bool loadsSkills)
+    public McpRuntimeService(McpHome home, McpConfigCache? configCache, bool advertiseApps, bool loadsSkills)
     {
-        _userHomeDirectory = userHomeDirectory;
+        _home = home;
         _configCache = configCache;
         AdvertiseApps = advertiseApps;
         LoadsSkills = loadsSkills;
@@ -717,23 +726,23 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
 
     private RuntimeContext LoadContext(McpRuntimeRequest request)
     {
-        if (request.UserHomeDirectory is null && _userHomeDirectory is not null)
+        if (request.Home.IsDefault && !_home.IsDefault)
         {
-            request = request with { UserHomeDirectory = _userHomeDirectory };
+            request = request with { Home = _home };
         }
 
         var projectDirectory = string.IsNullOrWhiteSpace(request.ProjectDirectory) ? null : Path.GetFullPath(request.ProjectDirectory);
         // The runtime never writes the files: it reads them whole, and does not probe whether they can be written.
         var config = _configCache is { } cache
-            ? cache.Discover(projectDirectory, request.UserHomeDirectory)
+            ? cache.Discover(projectDirectory, request.Home)
             : _discovery.Discover(new McpConfigPathOptions
             {
                 ProjectDirectory = projectDirectory,
-                UserHomeDirectory = request.UserHomeDirectory,
+                Home = request.Home,
                 ProbeWritability = false,
                 BoundedRead = false,
             });
-        var globalPolicyPath = McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
+        var globalPolicyPath = McpPolicyWriter.GetGlobalPolicyPath(request.Home);
         var projectPolicyPath = projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory);
         var policy = _configCache is { } policies
             ? policies.LoadPolicy(globalPolicyPath, projectPolicyPath)
@@ -753,7 +762,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
         var context = LoadContext(request);
-        var cache = new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory));
+        var cache = new McpToolListCache(McpToolListCache.FolderOf(context.Request.Home));
         var loaded = new List<McpRuntimeTool>();
         var deferred = new List<McpRuntimeTool>();
         if (!context.Policy.Enabled) return new McpCachedToolsResult(loaded, deferred);
@@ -801,7 +810,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         if (!TryExpandConnectionFields(effective.Definition, out var definition, out _)) return null;
         var serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
         var variant = VariantOf(definition, serverAliasPart, context.Request.Environment);
-        var list = new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory)).Read(key, McpToolListCache.Fingerprint(effective.Definition));
+        var list = new McpToolListCache(McpToolListCache.FolderOf(context.Request.Home)).Read(key, McpToolListCache.Fingerprint(effective.Definition));
         if (list is null || list.Variant != variant || DateTimeOffset.UtcNow - list.ListedAt > CachedToolsLifetime || list.Tools.Any(static tool => tool.InputSchema is null)) return null;
         return [.. list.Tools.Select(tool =>
         {
@@ -910,7 +919,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
     {
         try
         {
-            new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory)).Write(definition, tools, variant);
+            new McpToolListCache(McpToolListCache.FolderOf(context.Request.Home)).Write(definition, tools, variant);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The cache is written at the next listing. */ }
     }
@@ -1197,7 +1206,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         }
 
         var configured = definition.OAuth is { Enabled: true } ? definition.OAuth : null;
-        var tokenPath = McpOAuthTokenCache.GetTokenPath(request.UserHomeDirectory, definition.Key, tokenUrl);
+        var tokenPath = McpOAuthTokenCache.GetTokenPath(request.Home, definition.Key, tokenUrl);
         if (!request.ForceOAuth && configured is null && !File.Exists(tokenPath))
         {
             return null;

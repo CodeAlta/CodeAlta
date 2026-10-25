@@ -72,7 +72,11 @@ public sealed class McpToolListCache
     /// <summary>Gets the folder of the lists of a profile: <c>~/.alta/cache/mcp/tools</c>.</summary>
     /// <param name="userHomeDirectory">The folder of the user, or null for the profile of the process.</param>
     public static string FolderOf(string? userHomeDirectory)
-        => Path.Combine(userHomeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta", "cache", "mcp", "tools");
+        => FolderOf(new McpHome(userHomeDirectory, null));
+
+    // The folder of the lists under the CodeAlta root of a home: cache/mcp/tools.
+    internal static string FolderOf(McpHome home)
+        => Path.Combine(home.Root, "cache", "mcp", "tools");
 
     /// <summary>
     /// Gets the fingerprint of the definition of a server: its command, its arguments, its folder, its address and the

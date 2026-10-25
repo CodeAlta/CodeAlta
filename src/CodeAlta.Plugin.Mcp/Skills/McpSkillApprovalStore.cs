@@ -40,8 +40,8 @@ internal sealed class McpSkillApprovalStore
     public string Path { get; }
 
     /// <summary>Gets the file of the approvals of a profile.</summary>
-    public static string PathOf(string? userHomeDirectory)
-        => System.IO.Path.Combine(userHomeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta", "plugin-data", "mcp", "skill-approvals.json");
+    public static string PathOf(McpHome home)
+        => System.IO.Path.Combine(home.Root, "plugin-data", "mcp", "skill-approvals.json");
 
     /// <summary>Whether the user allowed this skill of this server, with these files, from now on.</summary>
     public bool IsApproved(string server, string fingerprint, string uri, string? manifestHash)

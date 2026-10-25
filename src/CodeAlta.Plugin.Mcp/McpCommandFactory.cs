@@ -12,6 +12,15 @@ internal sealed record McpCommandFactoryOptions
 {
     public string? UserHomeDirectory { get; init; }
 
+    // The CodeAlta root in place of <home>/.alta (McpHome.CodeAltaRoot).
+    public string? CodeAltaRoot { get; init; }
+
+    public McpHome Home
+    {
+        get => new(UserHomeDirectory, CodeAltaRoot);
+        init => (UserHomeDirectory, CodeAltaRoot) = (value.UserHomeDirectory, value.CodeAltaRoot);
+    }
+
     // The plugin's connections, which the tools an activation registers in a run call through.
     public McpSessionConnections? Connections { get; init; }
 
@@ -162,7 +171,7 @@ internal static class McpCommandFactory
             var requested = direct.Tools.Where(tool => serverKeys.Contains(tool.Server, StringComparer.Ordinal) || toolKeys.Contains((tool.Server, tool.Name))).ToArray();
             // They are called as the tools of the session's runs are: on its server, with its identity.
             var registered = context.RunTools?.Add(
-                requested.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.UserHomeDirectory, options.Connections, request.SpaceId, options.SessionEnvironment)).ToArray()) ?? [];
+                requested.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.Home, options.Connections, request.SpaceId, options.SessionEnvironment)).ToArray()) ?? [];
             context.RunTools?.KeepLoaded([.. serverKeys.Select(McpToolReference.OfServer), .. toolKeys.Select(static key => McpToolReference.OfTool(key.Server, key.Tool))]);
             var availableNow = context.RunTools is { } runTools && requested.Length > 0 && requested.All(tool => runTools.Contains(tool.Alias));
 
@@ -203,7 +212,7 @@ internal static class McpCommandFactory
             var policy = spaceId is null ? null : LoadPolicy(context, options);
             foreach (var server in snapshot.EffectiveServers.Where(server => policy?.IsServerInSpace(server.Definition.Key, spaceId) != false))
             {
-                WriteRecord(context.Stdout, await CreateServerRecordAsync("alta.mcp.server", context, server, options.UserHomeDirectory).ConfigureAwait(false));
+                WriteRecord(context.Stdout, await CreateServerRecordAsync("alta.mcp.server", context, server, options.Home).ConfigureAwait(false));
             }
 
             return 0;
@@ -244,7 +253,7 @@ internal static class McpCommandFactory
             var snapshot = Discover(context, options);
             foreach (var effective in snapshot.EffectiveServers.Where(item => string.IsNullOrWhiteSpace(server) || string.Equals(item.Definition.Key, server, StringComparison.Ordinal)))
             {
-                WriteRecord(context.Stdout, await CreateOAuthStatusRecordAsync(context, effective.Definition, options.UserHomeDirectory).ConfigureAwait(false));
+                WriteRecord(context.Stdout, await CreateOAuthStatusRecordAsync(context, effective.Definition, options.Home).ConfigureAwait(false));
             }
 
             return 0;
@@ -341,7 +350,7 @@ internal static class McpCommandFactory
                 return ValueTask.FromResult(WriteError(context, "unsupported_transport", $"MCP server '{serverKey}' does not use HTTP/SSE transport; OAuth tokens are only available for remote HTTP MCP servers."));
             }
 
-            var cache = new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(options.UserHomeDirectory, definition.Key, definition.Url));
+            var cache = new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(options.Home, definition.Key, definition.Url));
             var existed = cache.Exists;
             cache.Delete();
             WriteRecord(context.Stdout, new
@@ -529,7 +538,7 @@ internal static class McpCommandFactory
 
             foreach (var server in effective)
             {
-                WriteRecord(context.Stdout, await CreateServerRecordAsync("alta.mcp.status.server", context, server, options.UserHomeDirectory).ConfigureAwait(false));
+                WriteRecord(context.Stdout, await CreateServerRecordAsync("alta.mcp.status.server", context, server, options.Home).ConfigureAwait(false));
             }
 
             return 0;
@@ -730,7 +739,7 @@ internal static class McpCommandFactory
             try
             {
                 var result = await WriteAsync(options, () => new McpConfigWriter().RemoveServerAsync(target.Path, target.Scope, key, context.CancellationToken)).ConfigureAwait(false);
-                McpManagementService.ForgetSkillsOfRemovedServer(options.UserHomeDirectory, ResolveProjectDirectory(context, options), key);
+                McpManagementService.ForgetSkillsOfRemovedServer(options.Home, ResolveProjectDirectory(context, options), key);
                 WriteRecord(context.Stdout, new
                 {
                     type = "alta.mcp.server.remove",
@@ -838,14 +847,14 @@ internal static class McpCommandFactory
 
     // A runtime of its own, with the capabilities of the sessions' connections: a server answers it as it answers them.
     internal static McpRuntimeService CreateRuntime(McpCommandFactoryOptions options)
-        => options.Connections?.CreateRuntime(options.UserHomeDirectory) ?? new McpRuntimeService(options.UserHomeDirectory, options.ConfigCache);
+        => options.Connections?.CreateRuntime(options.Home) ?? new McpRuntimeService(options.Home, options.ConfigCache);
 
     internal static McpConfigSnapshot Discover(PluginAltaCommandContext context, McpCommandFactoryOptions options)
     {
         var projectPath = ResolveProjectDirectory(context, options);
         return new McpConfigDiscovery().Discover(new McpConfigPathOptions
         {
-            UserHomeDirectory = options.UserHomeDirectory,
+            Home = options.Home,
             ProjectDirectory = projectPath,
             SessionServers = options.ConfigCache?.SessionServers ?? [],
         });
@@ -867,7 +876,7 @@ internal static class McpCommandFactory
     internal static async ValueTask<McpRuntimeRequest> CreateRuntimeRequestAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options)
         => new()
         {
-            UserHomeDirectory = options.UserHomeDirectory,
+            Home = options.Home,
             ProjectDirectory = ResolveProjectDirectory(context, options),
             SpaceId = await SourceSpaceAsync(context).ConfigureAwait(false),
             Environment = options.SessionEnvironment is { } environment && !string.IsNullOrWhiteSpace(context.SourceSessionId)
@@ -937,7 +946,7 @@ internal static class McpCommandFactory
     internal static McpPolicyOptions LoadPolicy(PluginAltaCommandContext context, McpCommandFactoryOptions options)
     {
         var projectDirectory = ResolveProjectDirectory(context, options);
-        return (options.ConfigCache?.PolicyLoader ?? new McpPolicyLoader()).Load(McpPolicyWriter.GetGlobalPolicyPath(options.UserHomeDirectory),
+        return (options.ConfigCache?.PolicyLoader ?? new McpPolicyLoader()).Load(McpPolicyWriter.GetGlobalPolicyPath(options.Home),
             projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory));
     }
 
@@ -975,7 +984,7 @@ internal static class McpCommandFactory
 
         var path = scope.Scope == McpConfigScope.Project
             ? McpConfigDiscovery.GetProjectConfigPath(projectDirectory!)
-            : McpConfigDiscovery.GetGlobalConfigPath(options.UserHomeDirectory);
+            : McpConfigDiscovery.GetGlobalConfigPath(options.Home);
         return new McpWriteTarget(scope.Scope, path, null);
     }
 
@@ -1033,7 +1042,7 @@ internal static class McpCommandFactory
 
         var path = scope == McpConfigScope.Project
             ? McpPolicyWriter.GetProjectPolicyPath(projectDirectory!)
-            : McpPolicyWriter.GetGlobalPolicyPath(options.UserHomeDirectory);
+            : McpPolicyWriter.GetGlobalPolicyPath(options.Home);
         return new McpWriteTarget(scope, path, null);
     }
 
@@ -1044,11 +1053,11 @@ internal static class McpCommandFactory
     private static bool ShouldEmitEffective(McpEffectiveServer effective, string scope)
         => scope == "all" || string.Equals(scope, FormatScope(effective.Definition.SourceScope), StringComparison.OrdinalIgnoreCase);
 
-    private static async ValueTask<object> CreateServerRecordAsync(string type, PluginAltaCommandContext context, McpEffectiveServer server, string? userHomeDirectory)
+    private static async ValueTask<object> CreateServerRecordAsync(string type, PluginAltaCommandContext context, McpEffectiveServer server, McpHome home)
     {
         var definition = server.Definition;
         var tokenStatus = definition.Transport == McpTransportKind.Http
-            ? await new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(userHomeDirectory, definition.Key, definition.Url)).GetStatusAsync(definition.Key, CancellationToken.None).ConfigureAwait(false)
+            ? await new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(home, definition.Key, definition.Url)).GetStatusAsync(definition.Key, CancellationToken.None).ConfigureAwait(false)
             : null;
         return new
         {
@@ -1077,10 +1086,10 @@ internal static class McpCommandFactory
         };
     }
 
-    private static async ValueTask<object> CreateOAuthStatusRecordAsync(PluginAltaCommandContext context, McpServerDefinition definition, string? userHomeDirectory)
+    private static async ValueTask<object> CreateOAuthStatusRecordAsync(PluginAltaCommandContext context, McpServerDefinition definition, McpHome home)
     {
         var status = definition.Transport == McpTransportKind.Http
-            ? await new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(userHomeDirectory, definition.Key, definition.Url)).GetStatusAsync(definition.Key, CancellationToken.None).ConfigureAwait(false)
+            ? await new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(home, definition.Key, definition.Url)).GetStatusAsync(definition.Key, CancellationToken.None).ConfigureAwait(false)
             : new McpOAuthTokenStatus { Server = definition.Key, HasToken = false };
         return new
         {

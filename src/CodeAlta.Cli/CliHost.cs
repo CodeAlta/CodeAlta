@@ -210,13 +210,15 @@ internal sealed class CliHost : IAsyncDisposable
 
     // The MCP plugin of a run. No window shows the views of MCP Apps; the skills of the servers are loaded like the others,
     // without asking. The policy ([plugins.mcp]) is the one of the configuration the run reads, -c and CODEALTA_CONFIG_CONTENT
-    // included, and the alta mcp commands do not write the configuration files. The servers are those of the home of the
-    // profile (~/.alta/mcp.json); a separate profile (--profile) reads those of the user's home.
+    // included, and the alta mcp commands do not write the configuration files. The servers, their OAuth tokens and their
+    // caches are those of the global root (mcp.json, auth/mcp, cache/mcp). The visible and isolated modes read the MCP
+    // configurations of other tools in the user's home too, as CodeAlta Desktop does; a separate profile (--profile) reads
+    // none of the user's home.
     internal static McpPluginOptions McpOptions(CliHostRequest request, CatalogOptions catalog)
     {
         var store = new CodeAltaConfigStore(catalog);
         var overlaid = request.Config.IgnoreUserConfig || request.Config.Overlays.Count > 0;
-        var globalRoot = Path.TrimEndingDirectorySeparator(request.Storage.GlobalRoot);
+        var globalRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.Storage.GlobalRoot));
         return new McpPluginOptions
         {
             ShowsApps = false,
@@ -224,7 +226,9 @@ internal sealed class CliHost : IAsyncDisposable
             // Without overlays and without a file, there is no policy (the store would give the template of a new file).
             GlobalConfigContent = () => overlaid || File.Exists(catalog.ConfigPath) ? store.LoadGlobalConfigContent() : null,
             ReadOnlyConfiguration = true,
-            UserHomeDirectory = request.Storage.Mode != CliStorageMode.Profile && Path.GetFileName(globalRoot) == ".alta" ? Path.GetDirectoryName(globalRoot) : null,
+            CodeAltaRoot = globalRoot,
+            // The global root of the other modes is <home>/.alta.
+            UserHomeDirectory = request.Storage.Mode == CliStorageMode.Profile ? null : Path.GetDirectoryName(globalRoot),
         };
     }
 

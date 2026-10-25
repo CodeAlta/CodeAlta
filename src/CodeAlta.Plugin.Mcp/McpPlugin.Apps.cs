@@ -41,6 +41,14 @@ public sealed record McpPluginOptions
     /// tools the plugin reads, or <see langword="null"/> for the home of the current user.
     /// </summary>
     public string? UserHomeDirectory { get; init; }
+
+    /// <summary>
+    /// Gets the CodeAlta folder of a separate profile, in place of <c>&lt;home&gt;/.alta</c>: its <c>mcp.json</c>,
+    /// <c>config.toml</c>, the OAuth tokens and the caches of the servers are the ones the plugin reads and writes, or
+    /// <see langword="null"/> for the one of the home. With it, the configurations of other tools of a home are read only
+    /// when <see cref="UserHomeDirectory"/> names that home: those of the current user are not read.
+    /// </summary>
+    public string? CodeAltaRoot { get; init; }
 }
 
 /// <summary>A server the policy marks required that could not start (<see cref="McpPlugin.CheckRequiredServersAsync"/>).</summary>
@@ -174,7 +182,7 @@ public sealed partial class McpPlugin
         {
             // The project the session's runs gave: the connection the model's calls use is the one the view talks to.
             ProjectDirectory = _activationState.GetProjectDirectory(McpActivationState.ResolveScopeKey(request.SessionId, null)) ?? request.ProjectDirectory,
-            UserHomeDirectory = _userHomeDirectory,
+            Home = _home,
             SpaceId = request.SpaceId,
             Environment = await SessionEnvironmentAsync(request.SessionId, cancellationToken).ConfigureAwait(false),
         };

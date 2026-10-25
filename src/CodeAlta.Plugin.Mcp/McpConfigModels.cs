@@ -170,6 +170,15 @@ internal sealed record McpConfigPathOptions
 
     public string? UserHomeDirectory { get; init; }
 
+    // The CodeAlta root in place of <home>/.alta (McpHome.CodeAltaRoot).
+    public string? CodeAltaRoot { get; init; }
+
+    public McpHome Home
+    {
+        get => new(UserHomeDirectory, CodeAltaRoot);
+        init => (UserHomeDirectory, CodeAltaRoot) = (value.UserHomeDirectory, value.CodeAltaRoot);
+    }
+
     public string? ProjectDirectory { get; init; }
 
     // The servers a host was given in memory for its sessions (McpPlugin.AddSessionServers): a source of the project that no

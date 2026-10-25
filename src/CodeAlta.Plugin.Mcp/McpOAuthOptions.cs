@@ -56,20 +56,12 @@ internal sealed partial class McpOAuthTokenCache : ITokenCache
 
     public bool Exists => File.Exists(_path);
 
-    public static string GetTokenPath(string? userHomeDirectory, string serverKey, string? serverUrl)
+    public static string GetTokenPath(McpHome home, string serverKey, string? serverUrl)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
-        var home = string.IsNullOrWhiteSpace(userHomeDirectory)
-            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
-            : userHomeDirectory;
-        if (string.IsNullOrWhiteSpace(home))
-        {
-            home = Environment.GetEnvironmentVariable("USERPROFILE") ?? Environment.GetEnvironmentVariable("HOME") ?? Environment.CurrentDirectory;
-        }
-
         var suffixSource = string.Concat(serverKey, "\n", serverUrl ?? string.Empty);
         var suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(suffixSource)), 0, 4).ToLowerInvariant();
-        return System.IO.Path.Combine(home, ".alta", "auth", "mcp", SanitizeFilePart(serverKey) + "-" + suffix + ".json");
+        return System.IO.Path.Combine(home.Root, "auth", "mcp", SanitizeFilePart(serverKey) + "-" + suffix + ".json");
     }
 
     public async ValueTask StoreTokensAsync(TokenContainer token, CancellationToken cancellationToken)

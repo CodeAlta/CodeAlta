@@ -71,15 +71,15 @@ public sealed partial class McpPlugin
         cancellationToken.ThrowIfCancellationRequested();
         if (_skills is null) return [];
         var projectDirectory = string.IsNullOrWhiteSpace(request.ProjectDirectory) ? null : request.ProjectDirectory;
-        var runtimeRequest = new McpRuntimeRequest { ProjectDirectory = projectDirectory, UserHomeDirectory = _userHomeDirectory, SpaceId = request.SpaceId };
+        var runtimeRequest = new McpRuntimeRequest { ProjectDirectory = projectDirectory, Home = _home, SpaceId = request.SpaceId };
         IReadOnlyList<McpCachedSkillList> lists;
-        await using (var runtime = _connections.CreateRuntime(_userHomeDirectory))
+        await using (var runtime = _connections.CreateRuntime(_home))
         {
             lists = runtime.ListCachedSkills(runtimeRequest);
         }
 
         var policy = LoadPolicy(projectDirectory);
-        var definitions = _configCache.Discover(projectDirectory, _userHomeDirectory).EffectiveServers.ToDictionary(static server => server.Definition.Key, static server => server.Definition, StringComparer.Ordinal);
+        var definitions = _configCache.Discover(projectDirectory, _home).EffectiveServers.ToDictionary(static server => server.Definition.Key, static server => server.Definition, StringComparer.Ordinal);
         return [.. lists.Select(list =>
         {
             var fingerprint = definitions.TryGetValue(list.Server, out var definition) ? McpToolListCache.Fingerprint(definition) : list.Fingerprint;
@@ -115,7 +115,7 @@ public sealed partial class McpPlugin
             // The project the session's runs gave: the connection its activation used.
             ProjectDirectory = (request.SessionId is { Length: > 0 } session ? _activationState.GetProjectDirectory(McpActivationState.ResolveScopeKey(session, null)) : null)
                 ?? request.ProjectDirectory,
-            UserHomeDirectory = _userHomeDirectory,
+            Home = _home,
             SpaceId = request.SpaceId,
             Environment = await SessionEnvironmentAsync(request.SessionId, cancellationToken).ConfigureAwait(false),
         };
@@ -147,7 +147,7 @@ public sealed partial class McpPlugin
             }
             else
             {
-                await using var runtime = _connections.CreateRuntime(_userHomeDirectory);
+                await using var runtime = _connections.CreateRuntime(_home);
                 content = await ReadAsync(runtime, diagnostics).ConfigureAwait(false);
             }
         }

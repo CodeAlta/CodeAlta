@@ -64,10 +64,9 @@ internal sealed class McpConfigCache
     /// Discovers the MCP servers as the runtime reads them: the files of CodeAlta are read whole, and nothing probes
     /// whether they can be written (the sources say they cannot).
     /// </summary>
-    public McpConfigSnapshot Discover(string? projectDirectory, string? userHomeDirectory)
+    public McpConfigSnapshot Discover(string? projectDirectory, McpHome home)
     {
         var project = string.IsNullOrWhiteSpace(projectDirectory) ? null : Path.GetFullPath(projectDirectory);
-        var home = McpConfigDiscovery.GetUserHome(userHomeDirectory);
         var files = McpConfigDiscovery.GetSourceFiles(project, home);
         var stamps = new FileStamp[files.Count];
         var now = _time.GetUtcNow().UtcDateTime;
@@ -77,13 +76,13 @@ internal sealed class McpConfigCache
             stamps[index] = StampOf(files[index].Path, files[index].Origin == McpConfigOrigin.CodeAlta, now, ref settled);
         }
 
-        return Get(_configs, string.Concat(project, "\n", home), stamps, settled, () =>
+        return Get(_configs, string.Concat(project, "\n", home.Key), stamps, settled, () =>
         {
             Interlocked.Increment(ref _configReads);
             return _discovery.Discover(new McpConfigPathOptions
             {
                 ProjectDirectory = project,
-                UserHomeDirectory = home,
+                Home = home,
                 ProbeWritability = false,
                 BoundedRead = false,
                 SessionServers = SessionServers,

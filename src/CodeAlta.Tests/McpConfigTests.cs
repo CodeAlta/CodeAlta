@@ -66,6 +66,44 @@ public sealed class McpConfigTests
     }
 
     [TestMethod]
+    public async Task CodeAltaRoot_TakesThePlaceOfTheHome_AndWithoutAHomeNoOtherToolIsRead()
+    {
+        using var profile = TempDirectory.Create();
+        using var project = TempDirectory.Create();
+        File.WriteAllText(Path.Combine(profile.Path, "mcp.json"), """{ "mcpServers": { "bench": { "command": "node" } } }""");
+        Directory.CreateDirectory(Path.Combine(_home.Path, ".alta"));
+        File.WriteAllText(Path.Combine(_home.Path, ".alta", "mcp.json"), """{ "mcpServers": { "home-server": { "command": "node" } } }""");
+        Directory.CreateDirectory(Path.Combine(_home.Path, ".copilot"));
+        File.WriteAllText(Path.Combine(_home.Path, ".copilot", "mcp-config.json"), """{ "mcpServers": { "copilot-server": { "command": "node" } } }""");
+
+        // A separate profile (altacli --profile): every file of the plugin is under its root, and no home is read.
+        var separate = new McpHome(null, profile.Path);
+        var files = McpConfigDiscovery.GetSourceFiles(project.Path, separate).Select(static file => file.Path).ToArray();
+        Assert.IsTrue(files.All(file => file.StartsWith(profile.Path, StringComparison.Ordinal) || file.StartsWith(project.Path, StringComparison.Ordinal)), string.Join(", ", files));
+        Assert.AreEqual(Path.Combine(profile.Path, "mcp.json"), McpConfigDiscovery.GetGlobalConfigPath(separate));
+        Assert.AreEqual(Path.Combine(profile.Path, "config.toml"), McpPolicyWriter.GetGlobalPolicyPath(separate));
+        StringAssert.StartsWith(McpOAuthTokenCache.GetTokenPath(separate, "docs", "https://example.test/mcp"), Path.Combine(profile.Path, "auth", "mcp"));
+        Assert.AreEqual(Path.Combine(profile.Path, "cache", "mcp", "tools"), McpToolListCache.FolderOf(separate));
+        Assert.AreEqual(Path.Combine(profile.Path, "cache", "mcp", "skills"), McpSkillListCache.FolderOf(separate));
+        Assert.AreEqual(Path.Combine(profile.Path, "plugin-data", "mcp", "skill-approvals.json"), McpSkillApprovalStore.PathOf(separate));
+
+        await using var plugin = new McpPlugin(new McpPluginOptions { CodeAltaRoot = profile.Path });
+        var keys = plugin.ManagementService.RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path, ProbeWritability = false })
+            .Servers.Select(static server => server.Key).ToArray();
+        CollectionAssert.Contains(keys, "bench");
+        CollectionAssert.DoesNotContain(keys, "home-server");
+        CollectionAssert.DoesNotContain(keys, "copilot-server");
+
+        // With a home beside the root, the other tools of that home are read; the files of CodeAlta stay those of the root.
+        await using var withHome = new McpPlugin(new McpPluginOptions { CodeAltaRoot = profile.Path, UserHomeDirectory = _home.Path });
+        keys = withHome.ManagementService.RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Path, ProbeWritability = false })
+            .Servers.Select(static server => server.Key).ToArray();
+        CollectionAssert.Contains(keys, "bench");
+        CollectionAssert.Contains(keys, "copilot-server");
+        CollectionAssert.DoesNotContain(keys, "home-server");
+    }
+
+    [TestMethod]
     public void Discovery_ReportsInvalidMixedTransportWithoutThrowing()
     {
         using var home = TempDirectory.Create();

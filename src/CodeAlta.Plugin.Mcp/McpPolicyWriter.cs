@@ -145,11 +145,8 @@ internal sealed class McpPolicyWriter
         return (changed, created, list);
     }
 
-    public static string GetGlobalPolicyPath(string? userHomeDirectory = null)
-    {
-        var mcpPath = McpConfigDiscovery.GetGlobalConfigPath(userHomeDirectory);
-        return Path.Combine(Path.GetDirectoryName(mcpPath)!, "config.toml");
-    }
+    public static string GetGlobalPolicyPath(McpHome home = default)
+        => Path.Combine(home.Root, "config.toml");
 
     public static string GetProjectPolicyPath(string projectDirectory)
     {
