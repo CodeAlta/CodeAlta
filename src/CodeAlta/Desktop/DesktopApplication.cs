@@ -509,6 +509,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 EnableOwnedUserInput = options.EnableOwnedUserInput,
                 // A Claude Code conversation open in VS Code or a terminal: the window asks what to do.
                 AskWhenConversationHeld = true,
+                // The sessions this window runs or has a tab of are leased: the command line cannot run them meanwhile. The
+                // sessions it writes into the sessions folder are listed, and followed while it runs them.
+                SessionLeaseOwner = CodeAlta.Catalog.SessionLeaseOwner.DesktopKind,
+                FollowExternalSessions = true,
                 // Source plugins are the same build as in the terminal application; the start-up screen
                 // names the ones being built.
                 StartPlugins = pluginAlta is not null, OwnsLogging = false, IsHeadless = false, HasInteractiveUi = true,
@@ -771,6 +775,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 spaceView.ShownChanged += windows.SetShownSpace;
                 // The sessions of the tabs of the secondary windows are protected before their pages claim them.
                 retention.ProtectionRpc.HostHeld = windows.SecondarySessions;
+                // A session open in a tab holds its lease; one no tab shows lets it go once it is idle.
+                spaceView.OpenSessionsChanged += host.RuntimeService.SetShownSessions;
+                // A session another process wrote, runs or released: the windows read the sessions again.
+                if (host.ExternalSessions is { } externalSessions) externalSessions.Changed += (_, _) => spaceView.NotifySessionsChanged();
                 canvases?.Attach(host.PluginRuntime, () => spaceView.ShownSpaceId);
                 // The project the catalog lists for a folder; null for none.
                 async Task<string?> ProjectIdOfAsync(string projectPath, CancellationToken token)
@@ -984,6 +992,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         return [.. host.Commands.Asks.ListWaitingSessions(), .. reviews, .. held];
                     }, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
                         Fallbacks = () => host.Commands.LastFallbacks,
+                        HeldElsewhere = () => host.ExternalSessions?.Held ?? [],
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
                         SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay)).ReadAsync,
                     });

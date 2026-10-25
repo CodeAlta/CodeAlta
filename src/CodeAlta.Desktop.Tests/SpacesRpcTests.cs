@@ -2,6 +2,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Desktop.Windows;
 using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Desktop.Tests;
@@ -309,6 +310,66 @@ public sealed class SpacesRpcTests
         // A space to copy that does not exist creates nothing.
         Assert.AreEqual("not_found", (await fixture.Service.CreateAsync(new(Epoch, "Other", null, null, null, null, "missing"), default)).Status);
         Assert.IsFalse((await fixture.Service.ListAsync(new(Epoch), default)).Spaces.Any(static space => space.Id == "other"));
+    }
+
+    [TestMethod]
+    public async Task ASessionAnotherProcessHolds_IsGivenWithItsHolder_AfterTheSessionsOfThisHost()
+    {
+        using var fixture = new Fixture();
+        IReadOnlyList<ExternalSessionHold> held =
+        [
+            new("cli", SessionLeaseOwner.CliKind, 42, 1234),
+            new("running", SessionLeaseOwner.DesktopKind, 7, 10),
+            new("unnamed", null, null, null),
+        ];
+        var service = new SpacesService(new SpaceCatalog(fixture.Projects), fixture.View, () => fixture.Runs, () => ValueTask.FromResult(fixture.Waiting), Epoch)
+        {
+            HeldElsewhere = () => held,
+        };
+        fixture.Runs = [new("running", "p1", "Running", true, 0, false)];
+
+        var reply = await service.ActivityAsync(new(Epoch), default);
+
+        CollectionAssert.AreEqual(new[] { "running", "cli", "unnamed" }, reply.Sessions.Select(static session => session.SessionId).ToArray(),
+            "A session this host runs is its own, whatever an old lease says.");
+        Assert.IsNull(reply.Sessions[0].Elsewhere);
+        Assert.AreEqual((SessionLeaseOwner.CliKind, "1234", false), (reply.Sessions[1].Elsewhere, reply.Sessions[1].JournalLength, reply.Sessions[1].Running));
+        Assert.AreEqual(("other", (string?)null), (reply.Sessions[2].Elsewhere, reply.Sessions[2].JournalLength));
+        StringAssert.Contains(JsonSerializer.Serialize(reply, DesktopJsonContext.Default.SpacesActivityResponse), "\"elsewhere\":\"altacli\"");
+    }
+
+    [TestMethod]
+    public async Task TheTabsOfThePages_AreTheOpenSessions_UntilAPageGoesAway_AndTheSessionsEventReachesEveryPage()
+    {
+        using var fixture = new Fixture();
+        var told = new List<string[]>();
+        fixture.View.OpenSessionsChanged += ids => told.Add([.. ids.Order(StringComparer.Ordinal)]);
+        var main = SpacesService.PageKey(DesktopWindows.MainLabel, "document-1");
+        var secondary = SpacesService.PageKey("window-2", "document-2");
+
+        Assert.AreEqual("ok", (await fixture.Service.OpenSessionsAsync(new(Epoch, ["a", "b"]), main, default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.OpenSessionsAsync(new(Epoch, ["b", "c"]), secondary, default)).Status);
+        CollectionAssert.AreEqual(new[] { "a", "b", "c" }, told[^1]);
+        Assert.AreEqual("invalid", (await fixture.Service.OpenSessionsAsync(new(Epoch, [" a"]), main, default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Service.OpenSessionsAsync(new("other", ["a"]), main, default)).Status);
+        Assert.AreEqual(2, told.Count, "A refused publication changes nothing.");
+
+        // The page of the secondary window watches, then goes away: its tabs are no longer open.
+        using (var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+        {
+            await using var events = fixture.Service.WatchAsync(new(Epoch), "window-2", stop.Token, secondary).GetAsyncEnumerator(stop.Token);
+            var next = events.MoveNextAsync();
+            for (var turn = 0; turn < 200 && !next.IsCompleted; turn++)
+            {
+                fixture.View.NotifySessionsChanged();
+                await Task.Delay(10, stop.Token);
+            }
+
+            Assert.IsTrue(await next);
+            Assert.AreEqual(("sessions", (string?)null), (events.Current.Kind, events.Current.SpaceId));
+        }
+
+        CollectionAssert.AreEqual(new[] { "a", "b" }, told[^1]);
     }
 
     [TestMethod]

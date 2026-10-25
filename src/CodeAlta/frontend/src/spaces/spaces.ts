@@ -355,7 +355,11 @@ export function readSessionActivity(value: SpaceSessionActivity | null | undefin
     fallback: value.fallback && text(value.fallback.at, 64) && typeof value.fallback.message === "string"
       ? { at: value.fallback.at, message: value.fallback.message.slice(0, 512) } : null,
     // When a prompt took it out of the archive to run in it, a short while ago.
-    restoredForRunAt: text(value.restoredForRunAt, 64) ? value.restoredForRunAt : null };
+    restoredForRunAt: text(value.restoredForRunAt, 64) ? value.restoredForRunAt : null,
+    // The kind of the process that holds it when another one does: it is read-only here meanwhile.
+    elsewhere: text(value.elsewhere, 64) ? value.elsewhere : null,
+    // The length of its journal then, in decimal: its timeline is read again when it grows.
+    journalLength: typeof value.journalLength === "string" && /^\d{1,19}$/.test(value.journalLength) ? value.journalLength : null };
 }
 
 /** A session that waits for the user, as the session above it shows it. */
@@ -488,6 +492,7 @@ export function sameSessions(left: readonly SpaceSessionActivity[], right: reado
     return session.sessionId === other.sessionId && session.projectId === other.projectId && session.spaceId === other.spaceId && session.title === other.title && session.running === other.running
       && session.backgroundTasks === other.backgroundTasks && session.failed === other.failed && session.waiting === other.waiting
       && session.fallback?.at === other.fallback?.at && session.restoredForRunAt === other.restoredForRunAt
+      && session.elsewhere === other.elsewhere && session.journalLength === other.journalLength
       && session.ancestors.length === other.ancestors.length && session.ancestors.every((id, at) => id === other.ancestors[at]);
   });
 }

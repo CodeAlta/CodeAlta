@@ -29,6 +29,7 @@ import { mobileSettingsMessages } from "./mobile/settings/messages";
 import { promptInheritanceMessages } from "./promptInheritance/messages";
 import { reviewMessages } from "./review/messages";
 import { conversationHeldMessages } from "./conversationHeld/messages";
+import { sessionLeasesMessages } from "./sessionLeases/messages";
 import { claudeCodeImportMessages } from "./claudeCodeImport/messages";
 import { claudeCodeOpenMessages } from "./claudeCodeOpen/messages";
 import { mcpAppMessages } from "./mcpApps/messages";
@@ -2770,6 +2771,7 @@ export const messages = dictionary({
   ...promptInheritanceMessages,
   ...reviewMessages,
   ...conversationHeldMessages,
+  ...sessionLeasesMessages,
   ...claudeCodeImportMessages,
   ...claudeCodeOpenMessages,
   ...mcpAppMessages,

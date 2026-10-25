@@ -248,7 +248,9 @@ import { reasoningShown } from "./promptSurface/promptSurface";
 import { WorktreeManager } from "./worktrees/WorktreeManager";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
-import { createSpacesHub } from "./spaces/spacesHub";
+import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
+import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
+import { elsewhereKind, elsewhereLabel, elsewhereRefreshView, openSessionIds, type ElsewhereKind } from "./sessionLeases/sessionLeases";
 import { SpaceActivityBar, SpaceIcon, SpaceSwitch } from "./spaces/SpaceViews";
 import { readSpacePageLink, type SpacePageTarget } from "./spaces/spaceSummary";
 import { SpaceDialog } from "./spaces/SpaceDialog";
@@ -1273,6 +1275,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const active = fileTabs.active ? fileTabRef(fileTabs.active) : tabs.active ? sessionTabRef(tabs.active.sessionId) : null;
     windowsHub.report(refs, active, secondary ? writeWindowPage(windowPage) : null);
   }, [tabs, fileTabs, tabsReady, snapshot, windowsHub]);
+  // The host holds the sessions this window has a tab of, so that the command line does not run one open here: the main
+  // window says those of every space, a secondary window its own.
+  useEffect(() => {
+    if (!tabsReady || !snapshot) return;
+    let storage: Storage | null = null;
+    if (!secondary) { try { storage = localStorage; } catch { storage = null; } }
+    spacesHub.openSessions(openSessionIds(tabs.open, storage, secondary ? null : spaceStorageKey(sessionTabsKey, spaceId)));
+  }, [tabs, tabsReady, snapshot, spaceId, spacesHub, spacesState.available]);
 
   // A scope that becomes the selected one with a session is opened. At the start what was remembered is kept as it is; with
   // nothing remembered the selected scope is the one open, as it was before the Explorer remembered anything.
@@ -1478,7 +1488,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (fresh?.projects.some(project => project.id === id)) { selectProject(id); focusPromptSoon(); }
   }
   // What reaches the window from elsewhere: a command asks for a space, or changed the spaces or the projects.
-  const spaceRequest = useRef<(kind: "show" | "changed", id: string | null) => void>(() => { });
+  // A change of the spaces, or of a session another process writes (listed, grown, released): the list is read again.
+  const spaceRequest = useRef<(kind: SpacesRequestKind, id: string | null) => void>(() => { });
   spaceRequest.current = (kind, id) => { if (kind === "show" && id) showSpace(id); else readSessionList.current(); };
   useEffect(() => { spacesHub.onRequest((kind, id) => spaceRequest.current(kind, id)); }, [spacesHub]);
   // The sessions that need the user in a space that is not shown: listed at the foot of the Explorer, and said
@@ -1501,6 +1512,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The sessions that wait for the user (a question, a command to allow, a form): marked in the Explorer and on their
   // tab. One of the space that is shown is also said once, when it starts to wait while another session is on screen.
   const waitingSessions = useMemo(() => new Set(spacesState.sessions.filter(session => session.waiting).map(session => session.sessionId)), [spacesState.sessions]);
+  // The sessions another process holds (the command line, another instance): marked, and read-only here meanwhile.
+  const elsewhereSessions = useMemo(() => new Map(spacesState.sessions.flatMap(session => {
+    const kind = elsewhereKind(session.elsewhere);
+    return kind ? [[session.sessionId, { kind, journalLength: session.journalLength }] as const] : [];
+  })), [spacesState.sessions]);
   // The sessions under each session that wait for the user: shown above its composer.
   const waitingBelow = useMemo(() => waitingSubSessions(spacesState.sessions), [spacesState.sessions]);
   const workingBelow = useMemo(() => subSessionsAtWork(spacesState.sessions), [spacesState.sessions]);
@@ -3497,6 +3513,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     return <>
       <SessionDraftStatus indicators={draftIndicators} sessionId={session.id} selectedId={sessionId} />
       <SessionWaitingBadge waiting={waitingSessions.has(session.id)} below={waitingBelow.get(session.id)?.length ?? 0} />
+      <ElsewhereBadge kind={elsewhereSessions.get(session.id)?.kind ?? null} />
       {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
       {carriedBy(work, session.id).length > 0 && <span className="session-work-mark" role="img" aria-label={t("Carries out a work item")}
@@ -5201,6 +5218,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
               <SessionWorkspace sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} subSessions={workingBelow.get(row.id)}
+                heldElsewhere={elsewhereSessions.get(row.id) ?? null}
                 archive={owned && !row.archived ? { asks: archivableDescendants(catalog.current?.sessions ?? [], row.id).length > 0,
                   run: () => { protectNavigation([row.id], () => beginSessionArchive(row, "composer")); },
                   question: sessionArchiving?.from === "composer" ? sessionArchiveQuestion(row, "top-end") : null } : null} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
@@ -5231,6 +5249,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 selections={nextSendSelections} timelineCommand={timelineCommand} /></ProjectReferenceContext.Provider></SessionRetentionGate>;
             }}
             capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()} waiting={waitingSessions} waitingBelow={waitingBelow}
+            elsewhere={elsewhereSessions}
             onSessionTabClick={focusPromptSoon}
             select={tab => selectSessionTab(tab, "preview")} close={tab => {
               if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
@@ -5745,8 +5764,13 @@ function promptBackComposer(sessionId: string): PromptBackComposer {
 // The run of a session whose prompt was last given back to its composer: a prompt is given back once, whatever reads the window again.
 const unsentPromptKey = (sessionId: string) => `codealta.desktop.unsentPrompt.${sessionId}`;
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
   canAdmit: () => boolean;
+  /**
+   * The process that holds the session when another one does (the command line, another instance), with the length of
+   * its journal: the prompt is read-only and says why, and the timeline is read again as the journal grows.
+   */
+  heldElsewhere?: Readonly<{ kind: ElsewhereKind; journalLength: string | null }> | null;
   /** The spaces, and what reads the space of a session and what it can use there; null where the host keeps no spaces. */
   sessionSpaces?: Readonly<{ spaces: readonly Space[]; read: (sessionId: string) => Promise<SpaceSessionResourcesResponse | null> }> | null;
   /** The number of times the session was rewound: what was read of its journal before a rewind is not what it holds now. */
@@ -5898,6 +5922,10 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   const archivedScope = archivedProjectScope(snapshot, selectedProjectId);
   const ownedHost = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const ownedSession = ownedHost && !archivedScope;
+  // A session another process holds is read again as its journal grows, as a session of this window is with its run.
+  const elsewhereJournal = heldElsewhere ? heldElsewhere.journalLength ?? "" : null;
+  const elsewhereView = useMemo(() => elsewhereJournal === null ? null : elsewhereRefreshView(session.id, elsewhereJournal),
+    [session.id, elsewhereJournal]);
   // The prompt of a run that waited for the conversation to be released elsewhere, and found turns added there meanwhile,
   // was never sent: it goes back to the composer when it is empty, as after a rewind; a draft that is there is kept, and
   // the prompt is offered beside it to copy. Once per run.
@@ -6039,7 +6067,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}
-          live={ownedSession ? live?.snapshot?.session ?? null : null} running={running ?? undefined} /></McpAppsContext.Provider></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
+          live={elsewhereView ?? (ownedSession ? live?.snapshot?.session ?? null : null)} running={running ?? undefined} /></McpAppsContext.Provider></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
@@ -6073,7 +6101,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
         <SessionWidthGrips sessionId={session.id} />
         <div className="ask-form-slot" ref={setAskFormSlot} hidden={askMode === "none"} />
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session} chrome={sessionChrome}
-          epoch={ownedHost ? status!.hostEpoch! : null}
+          epoch={ownedHost && !heldElsewhere ? status!.hostEpoch! : null}
           owned={status?.hostEpoch && mutation ? <OwnedSessionPanel canAdmit={canAdmit} observing={observing} active={active} onRunActivity={(value, background) => {
             setRunning(value);
             const calls = backgroundCalls(background ?? []);
@@ -6089,7 +6117,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
               onOpenCatalog={onOpenCatalog} onOpenDocumentation={onOpenDocumentation} timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
               activeReminderCount={activeReminderCount} autoSend={autoSend} archive={ownedSession ? archive : null} reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
           readOnly={<ReadOnlyComposer active={active} sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
-              reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.") : undefined} />}
+              reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.")
+                : heldElsewhere ? t(elsewhereLabel(heldElsewhere.kind)) : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
             steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />

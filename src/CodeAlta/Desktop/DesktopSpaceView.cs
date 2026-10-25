@@ -19,6 +19,15 @@ internal sealed class DesktopSpaceView : IAltaSpaceView
     private readonly Lock _gate = new();
     private readonly DesktopPageWatchers<SpacesEvent> _watchers = new();
     private readonly Dictionary<string, string> _shown = new(StringComparer.Ordinal);
+    // The session tabs of each page, by its window and document: the main page says those of every space.
+    private readonly Dictionary<string, string[]> _open = new(StringComparer.Ordinal);
+    private readonly Lock _openOrder = new();
+
+    /// <summary>
+    /// Raised with every session the windows have a tab of, when that changes: the host holds their leases, so that another
+    /// process does not run a session open here. Raised outside the lock of the view, in order.
+    /// </summary>
+    internal event Action<IReadOnlyCollection<string>>? OpenSessionsChanged;
 
     /// <summary>The label of the view of the window the user used last; null for the main one.</summary>
     internal Func<string>? FocusedLabel { get; set; }
@@ -66,6 +75,33 @@ internal sealed class DesktopSpaceView : IAltaSpaceView
 
     /// <inheritdoc />
     public void NotifyChanged() => _watchers.Publish(new("changed", null), null);
+
+    /// <summary>
+    /// Asks every window to read the sessions again: a session another process writes was listed, changed or released.
+    /// </summary>
+    internal void NotifySessionsChanged() => _watchers.Publish(new("sessions", null), null);
+
+    /// <summary>Records the session tabs of a page; an empty list when it has none, or when it went away.</summary>
+    /// <param name="page">The page: the label of the view of its window and its document.</param>
+    /// <param name="sessionIds">The sessions it has a tab of.</param>
+    internal void SetOpenSessions(string page, IReadOnlyCollection<string> sessionIds)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(page);
+        ArgumentNullException.ThrowIfNull(sessionIds);
+        // One publication at a time, so that the last one told is the last one recorded.
+        lock (_openOrder)
+        {
+            string[] union;
+            lock (_gate)
+            {
+                if (sessionIds.Count == 0) _open.Remove(page);
+                else _open[page] = [.. sessionIds];
+                union = [.. _open.Values.SelectMany(static ids => ids).Distinct(StringComparer.OrdinalIgnoreCase)];
+            }
+
+            OpenSessionsChanged?.Invoke(union);
+        }
+    }
 
     /// <summary>Registers a page for the requests; disposing the result ends it.</summary>
     /// <param name="label">The label of the view of the window of the page; null for the main one.</param>

@@ -442,6 +442,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(SpaceAssignRequest))]
 [JsonSerializable(typeof(SpaceReorderRequest))]
 [JsonSerializable(typeof(SpaceShownRequest))]
+[JsonSerializable(typeof(SpaceOpenSessionsRequest))]
 [JsonSerializable(typeof(SpaceChangeResponse))]
 [JsonSerializable(typeof(SpaceAssignmentsResponse))]
 [JsonSerializable(typeof(SpaceResourceAssignRequest))]

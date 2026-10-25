@@ -10,7 +10,7 @@ import { dropChange, movedOrder, SpaceSettings } from "./SpaceSettings";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
 import { archivedInView, defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameSpaces, scopeSnapshot,
   sessionHome, sessionSpaces, spaceActivities, spaceBrand, spaceCalls, spaceChatCounts, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey, spaceView, spaceViewKey, subSessionsAtWork, viewLists } from "./spaces";
-import { activityMilliseconds, createSpacesHub, type SpacesApi, type SpacesHub } from "./spacesHub";
+import { activityMilliseconds, createSpacesHub, reconnectMilliseconds, type SpacesApi, type SpacesHub } from "./spacesHub";
 import { SpaceScopeChip, spaceNames, toggledSpaces } from "./SpaceChips";
 import { inSpace, noAssignments, readAssignments, resourceSpaces, spacesWith, spacesWithout } from "./spaces";
 
@@ -21,7 +21,8 @@ const session = (id: string, scopeKind: string | null, projectId: string | null,
   updatedAt: "2026-01-01T00:00:00Z", fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind, projectId, lineageIssue: null, createdAt: "2026-01-01T00:00:00Z",
   messageCount: 1, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null });
 const doing = (sessionId: string, projectId: string | null, changes: Partial<SpaceSessionActivity> = {}): SpaceSessionActivity =>
-  ({ sessionId, projectId, title: `Title of ${sessionId}`, running: false, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, fallback: null, restoredForRunAt: null, ...changes });
+  ({ sessionId, projectId, title: `Title of ${sessionId}`, running: false, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, fallback: null, restoredForRunAt: null,
+    elsewhere: null, journalLength: null, ...changes });
 
 test("the spaces are read as the host lists them, the default one first, and what is not a space is left out", () => {
   const spaces = readSpaces([item("work", ["a", "b"], { icon: "briefcase", color: "#2D72D2", description: "Paid work" }), item("default", ["a", "b", "c"]),
@@ -323,6 +324,78 @@ test("the hub lists the spaces once, follows what the host says, and says what e
   disconnect();
   assert.deepEqual(hub.getSnapshot().spaces, [defaultSpace]);
   assert.equal((await hub.create("Later", null, null, null)).status, "unavailable");
+});
+
+test("the hub tells the host the tabs of the page, again after a lost watch, and reads the sessions again when another process changes one", async () => {
+  const calls: string[] = [];
+  let sessions = [doing("s1", "a")];
+  // Each watch ends when the test says so, as a watch the host lost.
+  const watches: { push: (event: { kind: string; spaceId: string | null } | null) => void }[] = [];
+  const ok = async () => ({ status: "ok", message: null, space: null, movedSessions: 0 });
+  const api: SpacesApi = {
+    list: async () => ({ status: "ok", spaces: [item("default", ["a"])] }),
+    activity: async () => { calls.push("activity"); return { status: "ok", sessions, truncated: false }; },
+    watch: async () => {
+      calls.push("watch");
+      const queue: ({ kind: string; spaceId: string | null } | null)[] = [];
+      let wake: (() => void) | null = null;
+      watches.push({ push: event => { queue.push(event); wake?.(); } });
+      return (async function* () {
+        while (true) {
+          while (queue.length === 0) await new Promise<void>(resolve => { wake = resolve; });
+          const event = queue.shift()!;
+          if (event === null) return;
+          yield event;
+        }
+      })();
+    },
+    openSessions: async request => { calls.push(`open ${request.sessionIds?.join(",")}`); return ok(); },
+    create: ok, update: ok, delete: ok, assign: ok, reorder: ok, shown: ok, setAgentPrompt: ok, setDisabledTools: ok, assignResource: ok,
+    assignments: async () => ({ status: "ok", providers: [], mcpServers: [], plugins: [], skills: [], prompts: [] }),
+    sessionResources: async () => ({ status: "ok", spaceId: "default", mcpServers: [], skills: [], prompts: [], plugins: [] }),
+  };
+  const timers: { run: () => void; milliseconds: number }[] = [];
+  const hub = createSpacesHub(api, { set: (run, milliseconds) => { const timer = { run, milliseconds }; timers.push(timer); return timer; }, clear: timer => { timers.splice(timers.indexOf(timer as never), 1); } });
+  const settle = async () => { for (let turn = 0; turn < 20; turn++) await Promise.resolve(); };
+  const requests: string[] = [];
+  hub.onRequest(kind => requests.push(kind));
+  // Said before the host is known: told once connected.
+  hub.openSessions(["s1", "s2"]);
+  const disconnect = hub.connect("epoch");
+  await hub.whenLoaded(5000);
+  await settle();
+  assert.deepEqual(calls.filter(call => call.startsWith("open")), ["open s1,s2"]);
+  // The same tabs are not told again; other tabs are.
+  hub.openSessions(["s1", "s2"]);
+  hub.openSessions(["s2"]);
+  await settle();
+  assert.deepEqual(calls.filter(call => call.startsWith("open")), ["open s1,s2", "open s2"]);
+
+  // A session another process runs: the sessions and what they do are read again.
+  sessions = [doing("s3", null, { elsewhere: "altacli", journalLength: "120" })];
+  calls.length = 0;
+  watches[0].push({ kind: "sessions", spaceId: null });
+  await settle();
+  assert.deepEqual(requests, ["sessions"]);
+  assert.ok(calls.includes("activity"));
+  const held = hub.getSnapshot().sessions.find(session => session.sessionId === "s3");
+  assert.deepEqual([held?.elsewhere, held?.journalLength], ["altacli", "120"]);
+
+  // The watch is lost: the host forgot the tabs of the page, which are told again once it watches again.
+  calls.length = 0;
+  watches[0].push(null);
+  await settle();
+  timers.find(timer => timer.milliseconds === reconnectMilliseconds)!.run();
+  await settle();
+  assert.deepEqual(calls.filter(call => call === "watch" || call.startsWith("open")), ["watch", "open s2"]);
+  disconnect();
+});
+
+test("what the host says of a session another process holds is read as it is, and anything else is left out", () => {
+  const read = readSessionActivity({ ...doing("s1", null), elsewhere: "altacli", journalLength: "4096" });
+  assert.deepEqual([read?.elsewhere, read?.journalLength], ["altacli", "4096"]);
+  const odd = readSessionActivity({ ...doing("s1", null), elsewhere: "x".repeat(65), journalLength: "-1" });
+  assert.deepEqual([odd?.elsewhere, odd?.journalLength], [null, null]);
 });
 
 test("a host that keeps no spaces leaves the window with the default one, and nobody waits for more", async () => {

@@ -1308,6 +1308,9 @@ dialog.session-info-dialog:has(> .app-window) .session-info-fields dd small { di
 /* A session whose sub-sessions wait: the same mark, lighter, since it is not the one asking. */
 .waiting-badge[data-below] { color: inherit; background: color-mix(in srgb, var(--yellow) 35%, transparent); box-shadow: inset 0 0 0 1px var(--yellow); }
 .reminder-badge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; margin-inline-start: 4px; color: var(--accent); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* A session another process holds (the command line, another instance): a quiet mark, read-only here meanwhile. */
+.elsewhere-badge { flex: 0 0 auto; display: inline-flex; align-items: center; margin-inline-start: 4px; color: var(--muted); }
+.flexlayout__tab_button_leading .elsewhere-badge { margin-inline: 0 2px; }
 /* Sub-agents have a color of their own, the one of the row of a session started by another: the count of the
    sessions a session started, the card of a message between agents, and the session such a message names. */
 :root { --agent-accent: #58c2a8; }

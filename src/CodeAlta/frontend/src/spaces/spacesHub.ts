@@ -1,11 +1,14 @@
 // The page's link to the spaces of the catalog: what they are now, what their sessions do, and the calls that change them.
 import type { spaces as spacesService, SpaceChangeResponse, SpaceSessionActivity, SpaceSessionResourcesResponse } from "#neoastra";
 import { createOrderedCalls } from "../orderedCalls";
+import { createOpenSessionsPublisher } from "../sessionLeases/sessionLeases";
 import { defaultSpace, noAssignments, readAssignments, readSessionActivity, readSpaces, sameSessions, sameSpaces, spaceActivities, type ResourceAssignments,
   type Space, type SpaceActivity, type SpaceResourceKind } from "./spaces";
 
 export type SpacesApi = Pick<typeof spacesService, "list" | "create" | "update" | "delete" | "assign" | "reorder" | "shown" | "activity" | "watch"
-  | "assignments" | "assignResource" | "setAgentPrompt" | "sessionResources" | "setDisabledTools">;
+  | "assignments" | "assignResource" | "setAgentPrompt" | "sessionResources" | "setDisabledTools"> & Partial<Pick<typeof spacesService, "openSessions">>;
+/** A request that reaches the page from elsewhere: show a space, read the spaces again, or read the sessions again. */
+export type SpacesRequestKind = "show" | "changed" | "sessions";
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
 /** What the page shows of the spaces. `loaded` is false until the host answered once. */
@@ -54,7 +57,13 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
   const inOrder = createOrderedCalls();
   let listing = 0;
   let latest: Promise<void> = Promise.resolve();
-  let request: (kind: "show" | "changed", spaceId: string | null) => void = () => { };
+  let request: (kind: SpacesRequestKind, spaceId: string | null) => void = () => { };
+  // The session tabs of the page, told to the host one set at a time, and told again to a host the page connects to.
+  let openTabs: readonly string[] | null = null;
+  const openSessions = createOpenSessionsPublisher(async (host, sessionIds) => {
+    if (!api.openSessions || epoch !== host) return false;
+    return (await api.openSessions({ expectedEpoch: host, sessionIds: [...sessionIds] }, { timeoutMilliseconds: 10_000 })).status === "ok";
+  });
   const listeners = new Set<() => void>();
   const waiters = new Set<() => void>();
   const notify = () => { for (const listener of [...listeners]) listener(); };
@@ -154,7 +163,16 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
       });
     },
     /** What the page does with a request that reaches it from elsewhere: show a space, or take a change into account. */
-    onRequest(handler: (kind: "show" | "changed", spaceId: string | null) => void) { request = handler; },
+    onRequest(handler: (kind: SpacesRequestKind, spaceId: string | null) => void) { request = handler; },
+    /**
+     * Tells the host the sessions the page has a tab of (the main page: in every space): it holds them while they are
+     * open, so that another process does not run them. A set already told is not told again.
+     */
+    openSessions(sessionIds: readonly string[]) {
+      openTabs = sessionIds;
+      const host = epoch;
+      if (host && state.available) void openSessions.publish(host, sessionIds);
+    },
     /** Listens to one host until the returned function is called. */
     connect(hostEpoch: string) {
       const abort = new AbortController();
@@ -162,12 +180,19 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
       let clock: unknown = null;
       epoch = hostEpoch;
       const tick = () => { clock = timers.set(() => { if (visible()) void readActivity(); tick(); }, activityMilliseconds); };
+      let watched = false;
       async function watch() {
         try {
-          for await (const event of await api.watch({ expectedEpoch: hostEpoch }, { signal: abort.signal })) {
+          const events = await api.watch({ expectedEpoch: hostEpoch }, { signal: abort.signal });
+          // The end of the last watch made the host forget the tabs of the page: they are told again.
+          if (watched && openTabs) { openSessions.forget(); void openSessions.publish(hostEpoch, openTabs); }
+          watched = true;
+          for await (const event of events) {
             if (abort.signal.aborted) return;
             if (event.kind === "show" && typeof event.spaceId === "string") { await list(); request("show", event.spaceId); }
             else if (event.kind === "changed") { await list(); request("changed", null); }
+            // A session another process writes was listed, changed or released: what the sessions do is read again too.
+            else if (event.kind === "sessions") { void readActivity(); request("sessions", null); }
           }
         } catch { /* Told again below. */ }
         if (!abort.signal.aborted) timer = timers.set(() => void watch(), reconnectMilliseconds);
@@ -177,6 +202,7 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
         if (abort.signal.aborted || !state.available) return;
         void watch();
         void readActivity();
+        if (openTabs) void openSessions.publish(hostEpoch, openTabs);
         tick();
       });
       return () => {

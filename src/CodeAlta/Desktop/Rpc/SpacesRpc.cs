@@ -321,9 +321,35 @@ internal sealed class SpacesService
         return Task.FromResult(new SpaceChangeResponse("ok", null, null));
     }
 
+    /// <summary>The most session tabs one page says it has.</summary>
+    internal const int MaximumOpenSessions = 4096;
+
+    /// <summary>
+    /// The page says which sessions it has a tab of (the main page: in every space): the host holds their leases while they
+    /// are open, so that the command line cannot run a session open here, and lets the others go once they are idle.
+    /// </summary>
+    [NeoRpcMethod("openSessions")]
+    public Task<SpaceChangeResponse> OpenSessionsAsync(SpaceOpenSessionsRequest request, NeoRpcContext context, CancellationToken cancellationToken)
+        => OpenSessionsAsync(request, PageKey(context.ViewLabel, context.DocumentSessionId), cancellationToken);
+
+    // page: the window and the document of the page, so that the end of a page that was reloaded leaves the tabs of the new one.
+    internal Task<SpaceChangeResponse> OpenSessionsAsync(SpaceOpenSessionsRequest request, string page, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return Task.FromResult(new SpaceChangeResponse(refused, null, null));
+        if (request.SessionIds is not { Count: <= MaximumOpenSessions } ids || ids.Any(static id => string.IsNullOrWhiteSpace(id) || id.Length > 256 || id != id.Trim()))
+            return Task.FromResult(new SpaceChangeResponse("invalid", null, null));
+        _view!.SetOpenSessions(page, ids);
+        return Task.FromResult(new SpaceChangeResponse("ok", null, null));
+    }
+
+    internal static string PageKey(string label, string? documentSessionId)
+        => string.IsNullOrEmpty(documentSessionId) ? label : $"{label}\n{documentSessionId}";
+
     /// <summary>
     /// What the sessions are doing right now, in every space: the ones that run, that work in the background,
-    /// whose last run failed, or that wait for the user. The page works out from it what each space is doing.
+    /// whose last run failed, or that wait for the user, and the ones another process holds. The page works out from it
+    /// what each space is doing.
     /// </summary>
     [NeoRpcMethod("activity")]
     public async Task<SpacesActivityResponse> ActivityAsync(SpacesRequest request, CancellationToken cancellationToken)
@@ -349,7 +375,7 @@ internal sealed class SpacesService
         var parents = runs.Where(static session => session.ParentSessionId is not null)
             .GroupBy(static session => session.SessionId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(static group => group.Key, static group => group.First().ParentSessionId!, StringComparer.OrdinalIgnoreCase);
-        return new("ok", [.. sessions.Take(MaximumActivitySessions).Select(session => new SpaceSessionActivity(session.SessionId, session.ProjectId,
+        var own = sessions.Select(session => new SpaceSessionActivity(session.SessionId, session.ProjectId,
             Cut(session.Title, 256), session.Running, Math.Min(session.BackgroundTasks, 99), session.Failed, waiting.Contains(session.SessionId),
             Ancestors(session.SessionId, parents),
             SpaceDescriptor.IsValidId(session.SpaceId) ? session.SpaceId : null)
@@ -358,9 +384,22 @@ internal sealed class SpacesService
                     ? new SpaceSessionFallback(fallback.At.ToString("O", System.Globalization.CultureInfo.InvariantCulture), Cut(fallback.Message, 512))
                     : null,
                 RestoredForRunAt = Restored(session) ? session.RestoredForRunAt!.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture) : null,
-            })],
-            sessions.Length > MaximumActivitySessions);
+            });
+        // The sessions another process runs or shows: read-only here while it holds them.
+        var ownIds = sessions.Select(static session => session.SessionId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var elsewhere = (HeldElsewhere?.Invoke() ?? []).Where(hold => !ownIds.Contains(hold.SessionId))
+            .OrderBy(static hold => hold.SessionId, StringComparer.Ordinal)
+            .Select(hold => new SpaceSessionActivity(hold.SessionId, null, string.Empty, false, 0, false, false, [])
+            {
+                Elsewhere = hold.HolderKind is { Length: > 0 and <= 64 } kind ? kind : "other",
+                JournalLength = hold.JournalLength?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            }).ToArray();
+        var all = own.Concat(elsewhere).ToArray();
+        return new("ok", [.. all.Take(MaximumActivitySessions)], all.Length > MaximumActivitySessions);
     }
+
+    /// <summary>Gets the sessions another process holds now; none when null.</summary>
+    internal Func<IReadOnlyList<ExternalSessionHold>>? HeldElsewhere { get; init; }
 
     /// <summary>How long a fallback of a session is listed with its activity.</summary>
     internal static readonly TimeSpan RecentFallback = TimeSpan.FromMinutes(10);
@@ -384,18 +423,28 @@ internal sealed class SpacesService
     public NeoRpcChannel<SpacesEvent> Watch(SpacesRequest request, NeoRpcContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return new(WatchAsync(request, context.ViewLabel, cancellationToken), DesktopJsonContext.Default.SpacesEvent);
+        return new(WatchAsync(request, context.ViewLabel, cancellationToken, PageKey(context.ViewLabel, context.DocumentSessionId)), DesktopJsonContext.Default.SpacesEvent);
     }
 
     internal IAsyncEnumerable<SpacesEvent> WatchAsync(SpacesRequest request, CancellationToken cancellationToken) => WatchAsync(request, null, cancellationToken);
 
-    internal async IAsyncEnumerable<SpacesEvent> WatchAsync(SpacesRequest request, string? label, [EnumeratorCancellation] CancellationToken cancellationToken)
+    // page: the key of the page whose open sessions its end forgets (OpenSessionsAsync); null for none.
+    internal async IAsyncEnumerable<SpacesEvent> WatchAsync(SpacesRequest request, string? label, [EnumeratorCancellation] CancellationToken cancellationToken,
+        string? page = null)
     {
         if (_view is null || !string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) yield break;
         // A page that does not read keeps the newest requests.
         var requests = Channel.CreateBounded<SpacesEvent>(new BoundedChannelOptions(8) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
         using var registration = _view.Watch(label, value => requests.Writer.TryWrite(value));
-        await foreach (var value in requests.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
+        try
+        {
+            await foreach (var value in requests.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
+        }
+        finally
+        {
+            // A page that went away has no tab open any more; a page that comes back says its tabs again.
+            if (page is not null) _view.SetOpenSessions(page, []);
+        }
     }
 
     private async Task<SpaceChangeResponse> ChangeAsync(string? expectedEpoch, Func<Task<SpaceChange>> change)
@@ -607,8 +656,16 @@ internal sealed record SpaceShownRequest(string ExpectedEpoch, string? Id);
 /// <param name="MovedSessions">For a deletion, how many chats of the space went to the default space.</param>
 internal sealed record SpaceChangeResponse(string Status, string? Message, SpaceItem? Space, int MovedSessions = 0);
 
+/// <summary>The sessions a page has a tab of.</summary>
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="SessionIds">The sessions; the main page names those of every space.</param>
+internal sealed record SpaceOpenSessionsRequest(string ExpectedEpoch, IReadOnlyList<string>? SessionIds);
+
 /// <summary>A request that reaches the page from elsewhere.</summary>
-/// <param name="Kind"><c>show</c>: show the space named; <c>changed</c>: read the spaces again.</param>
+/// <param name="Kind">
+/// <c>show</c>: show the space named; <c>changed</c>: read the spaces again; <c>sessions</c>: read the sessions and their
+/// activity again (a session another process writes was listed, changed or released).
+/// </param>
 /// <param name="SpaceId">The space to show.</param>
 internal sealed record SpacesEvent(string Kind, string? SpaceId);
 
@@ -642,6 +699,18 @@ internal sealed record SpaceSessionActivity(string SessionId, string? ProjectId,
     /// short while ago; <see langword="null"/> otherwise.
     /// </summary>
     public string? RestoredForRunAt { get; init; }
+
+    /// <summary>
+    /// Gets the kind of the process that holds the session, when another one does (<c>altacli</c>, <c>desktop</c>, <c>tui</c>,
+    /// or <c>other</c>): it runs or shows the session, which is read-only here until it releases it; null otherwise.
+    /// </summary>
+    public string? Elsewhere { get; init; }
+
+    /// <summary>
+    /// Gets the length of the journal of a session another process holds, as last projected, in decimal: it grows as that
+    /// session runs, and its timeline is read again when it does; null otherwise.
+    /// </summary>
+    public string? JournalLength { get; init; }
 }
 
 /// <summary>A fallback of a session: it went on with the next model of its tier after a failure of its provider.</summary>

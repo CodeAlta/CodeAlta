@@ -45,7 +45,7 @@ test("the sessions an archive takes with it are those below the session that are
 
 test("a session a prompt took out of the archive is said once, and none restored before the window opened", () => {
   const doing = (sessionId: string, restoredForRunAt: string | null = null): SpaceSessionActivity => ({ sessionId, projectId: "p", title: `Title of ${sessionId}`,
-    running: true, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, fallback: null, restoredForRunAt });
+    running: true, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, fallback: null, restoredForRunAt, elsewhere: null, journalLength: null });
   const opened = newRestoredNotices(null, [doing("a", "2026-10-15T08:00:00Z")]);
   assert.equal(opened.notices.length, 0);
   const next = newRestoredNotices(opened.said, [doing("a", "2026-10-15T08:00:00Z"), doing("b", "2026-10-15T08:05:00Z"), doing("c")]);

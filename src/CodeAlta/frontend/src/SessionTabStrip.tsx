@@ -8,6 +8,8 @@ import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
 import { isPreviewTab, resolveSessionTab, type DraftTab, type SessionTab } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { SessionWaitingBadge } from "./WaitingBadge";
+import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
+import type { ElsewhereKind } from "./sessionLeases/sessionLeases";
 import { createSessionTabModel, draftNodeId, draftTabAction, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, shownDraftNodeId, tabMiddleClickAction,
   type SessionTabView as Tabs } from "./sessionTabLayout";
 import { ProviderIcon } from "./ProviderIcon";
@@ -99,7 +101,7 @@ const noFiles = emptyFileTabs();
 
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
-export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, waitingBelow, capture, children, renderSession, newSessionLabel,
+export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, waitingBelow, elsewhere, capture, children, renderSession, newSessionLabel,
   files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout,
   keep, draftLabel, selectDraft, closeDraft, keepDraft, closePrompt, closeTabs, background, windowEntries, dragOut, externalDrag, arrival, onArrived }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
@@ -121,6 +123,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   waiting?: ReadonlySet<string>;
   /** How many sessions under each session wait for the user. */
   waitingBelow?: ReadonlyMap<string, readonly unknown[]>;
+  /** The sessions another process holds, with its kind: their tab says so. */
+  elsewhere?: ReadonlyMap<string, Readonly<{ kind: ElsewhereKind }>>;
   capture: () => () => boolean; children: ReactNode;
   renderSession?: (tab: SessionTab, visible: boolean) => ReactNode;
   newSessionLabel?: string;
@@ -472,6 +476,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         values.content = <span data-session-node={node.getId()} data-transient={isPreviewTab(state, tab) ? "true" : undefined}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null} /></span>;
         // A session that waits for the user says so before anything else: its run goes nowhere until it is answered.
         if (tab?.sessionId && waiting?.has(tab.sessionId)) values.leading = <SessionWaitingBadge waiting />;
+        // One another process holds says so: it is read-only here meanwhile.
+        else if (tab?.sessionId && elsewhere?.has(tab.sessionId)) values.leading = <ElsewhereBadge kind={elsewhere.get(tab.sessionId)!.kind} />;
         // So does one whose sub-sessions wait: its work waits for theirs.
         else if (tab?.sessionId && waitingBelow?.get(tab.sessionId)?.length) values.leading = <SessionWaitingBadge waiting={false} below={waitingBelow.get(tab.sessionId)!.length} />;
         else if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
