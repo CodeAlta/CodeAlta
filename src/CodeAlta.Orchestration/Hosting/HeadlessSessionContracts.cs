@@ -167,7 +167,15 @@ public sealed record HeadlessRunResult(
 /// <summary>An event of a session a headless driver runs, or of a session it started.</summary>
 /// <param name="RootSessionId">The session the driver opened.</param>
 /// <param name="Event">The event, of that session or of one it started.</param>
-public sealed record HeadlessSessionEvent(string RootSessionId, SessionRuntimeEvent Event);
+public sealed record HeadlessSessionEvent(string RootSessionId, SessionRuntimeEvent Event)
+{
+    /// <summary>
+    /// Gets how many runtime events, of any session, the bounded runtime stream dropped between the previous event given to
+    /// the observer and this one. Zero when none was: when it is not, what the observer saw of a stream of deltas may have
+    /// gaps, which a face repairs from the completed content.
+    /// </summary>
+    public long DroppedBefore { get; init; }
+}
 
 /// <summary>The options of a headless driver.</summary>
 public sealed record HeadlessSessionDriverOptions

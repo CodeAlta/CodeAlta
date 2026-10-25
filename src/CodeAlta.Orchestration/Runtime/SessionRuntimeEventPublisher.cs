@@ -42,7 +42,28 @@ internal sealed class SessionRuntimeEventPublisher(int capacity = BoundedRuntime
         }
     }
 
+    // Publishes an event to the reader alone, after every event published before it, waiting for room in a full stream: what
+    // must not be dropped (the marker of a flush). False when the stream is closed.
+    internal ValueTask<bool> PublishToReaderAsync(SessionRuntimeEvent runtimeEvent, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            if (_closed) return ValueTask.FromResult(false);
+        }
+
+        // Outside the gate: the publications never wait for it. A completion meanwhile ends the wait with false.
+        return _events.PublishAsync(runtimeEvent, cancellationToken);
+    }
+
     internal async IAsyncEnumerable<SessionRuntimeEvent> ReadAllAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var stamped in ReadStampedAsync(cancellationToken).ConfigureAwait(false))
+            yield return stamped.Event;
+    }
+
+    // The events with the number of events the stream had dropped when each was accepted.
+    internal async IAsyncEnumerable<BoundedRuntimeEventStream<SessionRuntimeEvent>.StampedEvent> ReadStampedAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -56,8 +77,8 @@ internal sealed class SessionRuntimeEventPublisher(int capacity = BoundedRuntime
         {
             // Retain the channel's buffered cancellation semantics; a per-item token check here
             // could consume and then discard an original event instead of delivering it.
-            await foreach (var runtimeEvent in _events.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-                yield return runtimeEvent;
+            await foreach (var stamped in _events.ReadStampedAsync(cancellationToken).ConfigureAwait(false))
+                yield return stamped;
         }
         finally
         {

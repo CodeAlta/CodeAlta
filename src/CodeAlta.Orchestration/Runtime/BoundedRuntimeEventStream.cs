@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
 namespace CodeAlta.Orchestration.Runtime;
@@ -11,7 +12,9 @@ public sealed class BoundedRuntimeEventStream<TEvent>
     /// <summary>The default event stream capacity.</summary>
     public const int DefaultCapacity = 1024;
 
-    private readonly Channel<TEvent> _channel;
+    // Each event with the number of events dropped before it was accepted: a reader tells from two of them whether events
+    // were lost between them.
+    private readonly Channel<StampedEvent> _channel;
     private long _droppedCount;
 
     /// <summary>
@@ -26,7 +29,7 @@ public sealed class BoundedRuntimeEventStream<TEvent>
             throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Event stream capacity must be at least one.");
         }
 
-        _channel = Channel.CreateBounded<TEvent>(new BoundedChannelOptions(capacity)
+        _channel = Channel.CreateBounded<StampedEvent>(new BoundedChannelOptions(capacity)
         {
             SingleReader = false,
             SingleWriter = false,
@@ -44,7 +47,7 @@ public sealed class BoundedRuntimeEventStream<TEvent>
     /// <returns><see langword="true"/> when the event was accepted; otherwise, <see langword="false"/> when the stream is complete.</returns>
     public bool TryPublish(TEvent runtimeEvent)
     {
-        if (_channel.Writer.TryWrite(runtimeEvent))
+        if (_channel.Writer.TryWrite(new StampedEvent(runtimeEvent, DroppedCount)))
         {
             return true;
         }
@@ -53,16 +56,41 @@ public sealed class BoundedRuntimeEventStream<TEvent>
         return false;
     }
 
+    // Publishes an event that must not be dropped (the marker of a flush): waits for room, after every event accepted before
+    // it. Never for runtime progress, which TryPublish never blocks. False when the stream is complete.
+    internal async ValueTask<bool> PublishAsync(TEvent runtimeEvent, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _channel.Writer.WriteAsync(new StampedEvent(runtimeEvent, DroppedCount), cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (ChannelClosedException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Streams events until the stream is completed or cancellation is requested.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>An async event sequence.</returns>
-    public IAsyncEnumerable<TEvent> ReadAllAsync(CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<TEvent> ReadAllAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var stamped in _channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            yield return stamped.Event;
+    }
+
+    // Streams the events with the number of events dropped before each was accepted.
+    internal IAsyncEnumerable<StampedEvent> ReadStampedAsync(CancellationToken cancellationToken = default)
         => _channel.Reader.ReadAllAsync(cancellationToken);
 
     /// <summary>
     /// Completes the stream.
     /// </summary>
     public void Complete() => _channel.Writer.TryComplete();
+
+    // An event, and how many events the stream had dropped when it was accepted.
+    internal readonly record struct StampedEvent(TEvent Event, long DroppedBefore);
 }

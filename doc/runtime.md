@@ -315,6 +315,11 @@ and of the sessions they started, and reports how each run ended from the journa
   journal records the abort and its reason. Each abort takes a number that a send captures when it is admitted and
   checks on the session actor when it claims its run: a send admitted before an abort of its session or of an ancestor
   (a detached `alta session send` to a child included) never starts its run after it.
+- **Flush.** What a face writes after a run (a result, the response of a prompt) comes after every update of the run:
+  `FlushEventsAsync` publishes a marker that waits for room in a full stream instead of being dropped, and ends once
+  the observer has returned from every event before it. The stream stays bounded and lossy; each event tells the
+  observer how many were dropped before it (`HeadlessSessionEvent.DroppedBefore`), so a face repairs from completed
+  content.
 - **A host without a user.** `FullTrust` grants every request, `HeadlessInstructions` ends every system prompt with one
   fixed paragraph and turns review before commit off, and `ReadOnlyGlobalState` lets the process run beside Desktop:
   it writes nothing shared under the global root (a folder outside the catalog gets a transient project, and the

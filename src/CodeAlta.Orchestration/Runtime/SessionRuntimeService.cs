@@ -463,6 +463,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // false when the stream is closed or full.
     internal bool TryPublishToReader(SessionRuntimeEvent marker) => _events.TryPublishToReader(marker);
 
+    // The same, waiting for room in a full stream so that the marker is never dropped: false when the stream is closed.
+    internal ValueTask<bool> PublishToReaderAsync(SessionRuntimeEvent marker, CancellationToken cancellationToken)
+        => _events.PublishToReaderAsync(marker, cancellationToken);
+
+    // StreamEventsAsync, each event with the number of events the stream had dropped when it was accepted.
+    internal IAsyncEnumerable<BoundedRuntimeEventStream<SessionRuntimeEvent>.StampedEvent> StreamStampedEventsAsync(CancellationToken cancellationToken = default)
+        => _events.ReadStampedAsync(cancellationToken);
+
     /// <summary>
     /// Appends a CodeAlta-authored session event to the session journal and publishes it to runtime subscribers.
     /// </summary>

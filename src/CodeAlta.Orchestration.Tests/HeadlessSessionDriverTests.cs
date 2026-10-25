@@ -133,6 +133,61 @@ public sealed class HeadlessSessionDriverTests
     }
 
     [TestMethod]
+    public async Task FlushEvents_OfAFullStream_WaitsForTheObserver_AndTellsTheDroppedEvents()
+    {
+        var (root, _, host) = await CreateAsync();
+        await using var scope = root;
+        var events = new ConcurrentQueue<HeadlessSessionEvent>();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var driver = new HeadlessSessionDriver(host, new HeadlessSessionDriverOptions
+        {
+            Observer = async (item, cancellationToken) =>
+            {
+                // From the first filler on, a slow observer: it takes nothing until the gate opens.
+                if (item.Event is Filler) entered.TrySetResult();
+                if (entered.Task.IsCompleted) await gate.Task.WaitAsync(cancellationToken);
+                events.Enqueue(item);
+            },
+        });
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        var runtime = host.RuntimeService;
+        Assert.IsTrue(runtime.TryPublishToReader(new Filler(session.SessionId, -1)));
+        await entered.Task.WaitAsync(Hang);
+
+        // The observer holds the reader: the stream fills up, and drops the newest events.
+        var accepted = new List<int>();
+        var rejected = 0;
+        for (var index = 0; index < BoundedRuntimeEventStream<SessionRuntimeEvent>.DefaultCapacity + 8; index++)
+        {
+            if (runtime.TryPublishToReader(new Filler(session.SessionId, index))) accepted.Add(index);
+            else rejected++;
+        }
+
+        Assert.IsGreaterThan(0, rejected, "The stream is full.");
+        var flush = driver.FlushEventsAsync();
+        await Task.Delay(50);
+        Assert.IsFalse(flush.IsCompleted, "The marker of the flush waits for room instead of being dropped.");
+        gate.SetResult();
+        await flush.WaitAsync(Hang);
+
+        var observed = events.Select(static item => item.Event).OfType<Filler>().Where(static filler => filler.Index >= 0).Select(static filler => filler.Index).ToArray();
+        CollectionAssert.AreEqual(accepted, observed, "Every event accepted before the flush reached the observer before it ended.");
+        Assert.IsGreaterThanOrEqualTo(rejected, driver.DroppedEventCount, "The flush counts the events dropped before it.");
+
+        // The next event observed tells the drops the observer did not see.
+        Assert.IsTrue(runtime.TryPublishToReader(new Filler(session.SessionId, int.MaxValue)));
+        using var deadline = new CancellationTokenSource(Hang);
+        while (!events.Any(static item => item.Event is Filler { Index: int.MaxValue })) await Task.Delay(10, deadline.Token);
+        Assert.IsGreaterThanOrEqualTo(rejected, events.Sum(static item => item.DroppedBefore));
+        Assert.AreEqual(0, events.Where(static item => item.Event is Filler { Index: >= 0 and < int.MaxValue }).Sum(static item => item.DroppedBefore),
+            "Nothing was dropped between the events accepted before the stream was full.");
+    }
+
+    // An event of a session, published to the reader alone.
+    private sealed record Filler(string SessionId, int Index) : SessionRuntimeEvent(SessionId, DateTimeOffset.UtcNow);
+
+    [TestMethod]
     public async Task Run_ThatFails_IsFailed_AndASignInFailureIsProviderNotReady()
     {
         var (root, provider, host) = await CreateAsync();

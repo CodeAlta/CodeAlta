@@ -35,6 +35,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     // The flushes waiting for the reader to reach their marker.
     private readonly ConcurrentDictionary<FlushMarker, TaskCompletionSource> _flushes = new();
     private readonly Task _reader;
+    // The events the runtime stream dropped while the reader read it (DroppedEventCount).
+    private long _droppedEventCount;
     private int _disposed;
 
     /// <summary>Creates a driver of the sessions of a host.</summary>
@@ -48,7 +50,9 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         _host = host;
         _options = options ?? new HeadlessSessionDriverOptions();
         ArgumentOutOfRangeException.ThrowIfLessThan(_options.AbortGrace, TimeSpan.Zero);
-        _reader = _options.Observer is { } observer ? Task.Run(() => ReadEventsAsync(observer, _closing.Token)) : Task.CompletedTask;
+        // What the stream dropped before the driver is not the driver's to report.
+        var droppedAtStart = host.RuntimeService.DroppedRuntimeEventCount;
+        _reader = _options.Observer is { } observer ? Task.Run(() => ReadEventsAsync(observer, droppedAtStart, _closing.Token)) : Task.CompletedTask;
     }
 
     /// <summary>
@@ -326,11 +330,16 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     }
 
     /// <summary>
-    /// Waits until the observer was given every event the runtime published before the call: a face calls it once a run has
-    /// settled, so that what it writes after it (a result, the response of a prompt) comes after every update of the run.
+    /// Waits until the observer was given every event the runtime published before the call, and has returned from the last
+    /// of them: a face calls it once a run has settled, so that what it writes after it (a result, the response of a prompt)
+    /// comes after every update of the run. The marker of the flush is never dropped: in a full stream it waits for room.
+    /// Events the stream dropped before it are counted in <see cref="DroppedEventCount"/> once the flush ends.
     /// </summary>
-    /// <param name="cancellationToken">Stops waiting: the runtime drops the newest events of a full stream, the marker of the flush included.</param>
-    /// <returns>A task that completes when the observer was given the events, at once without an observer or once the driver is disposed.</returns>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>
+    /// A task that completes when the observer was given the events: at once without an observer, or once the reader of the
+    /// events ended (the driver is disposed, the runtime closed).
+    /// </returns>
     /// <exception cref="OperationCanceledException">The wait was canceled.</exception>
     public async Task FlushEventsAsync(CancellationToken cancellationToken = default)
     {
@@ -341,14 +350,37 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         try
         {
             // A reader that ended gives nothing more to the observer.
-            if (_reader.IsCompleted || !_host.RuntimeService.TryPublishToReader(marker)) return;
-            await reached.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (_reader.IsCompleted) return;
+            CancellationTokenSource stop;
+            try { stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _closing.Token); }
+            catch (ObjectDisposedException) { return; }
+            using (stop)
+            {
+                try
+                {
+                    // Not published when the runtime closed: its reader drains what it accepted, then ends.
+                    await _host.RuntimeService.PublishToReaderAsync(marker, stop.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // The driver closes: its reader ends.
+                }
+            }
+
+            // The reader completes the flush when it reaches the marker, or when it ends.
+            await Task.WhenAny(reached.Task, _reader).WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _flushes.TryRemove(marker, out _);
         }
     }
+
+    /// <summary>
+    /// Gets how many runtime events, of any session, the bounded runtime stream dropped while the driver read it, as far as
+    /// its reader got: after <see cref="FlushEventsAsync"/>, every event dropped before the flush is counted.
+    /// </summary>
+    public long DroppedEventCount => Interlocked.Read(ref _droppedEventCount);
 
     /// <summary>
     /// Closes a session of the driver: the driver no longer holds its lease (its attachment holds it until it goes) and its
@@ -548,12 +580,23 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             root.CostUnit ?? children.CostUnit);
     }
 
-    private async Task ReadEventsAsync(Func<HeadlessSessionEvent, CancellationToken, ValueTask> observer, CancellationToken cancellationToken)
+    private async Task ReadEventsAsync(Func<HeadlessSessionEvent, CancellationToken, ValueTask> observer, long droppedAtStart, CancellationToken cancellationToken)
     {
+        // The drop count of the last event read, and what was dropped since the last event given to the observer: the
+        // drops before an event of another session or before a marker are told with the next event observed.
+        var stamp = droppedAtStart;
+        long unreported = 0;
         try
         {
-            await foreach (var runtimeEvent in _host.RuntimeService.StreamEventsAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var (runtimeEvent, droppedBefore) in _host.RuntimeService.StreamStampedEventsAsync(cancellationToken).ConfigureAwait(false))
             {
+                if (droppedBefore > stamp)
+                {
+                    unreported += droppedBefore - stamp;
+                    Interlocked.Add(ref _droppedEventCount, droppedBefore - stamp);
+                    stamp = droppedBefore;
+                }
+
                 if (runtimeEvent is FlushMarker marker)
                 {
                     if (_flushes.TryGetValue(marker, out var reached)) reached.TrySetResult();
@@ -561,9 +604,11 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
                 }
 
                 if (RootOf(runtimeEvent.SessionId) is not { } root) continue;
+                var gap = unreported;
+                unreported = 0;
                 try
                 {
-                    await observer(new HeadlessSessionEvent(root, runtimeEvent), cancellationToken).ConfigureAwait(false);
+                    await observer(new HeadlessSessionEvent(root, runtimeEvent) { DroppedBefore = gap }, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
