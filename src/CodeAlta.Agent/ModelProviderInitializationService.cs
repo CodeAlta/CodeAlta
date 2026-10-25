@@ -179,6 +179,45 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         return TryGetState(key)?.Models ?? [];
     }
 
+    /// <summary>
+    /// Sets an option of a model of a provider (<see cref="AgentModelInfo.Options"/>), which the provider sends with the
+    /// turns of the model from now on, and publishes the model with its options as they are now.
+    /// </summary>
+    /// <param name="providerId">The provider.</param>
+    /// <param name="modelId">A model of the provider.</param>
+    /// <param name="optionId">An option of the model.</param>
+    /// <param name="value">One of the values of the option.</param>
+    /// <param name="cancellationToken">Cancels the change.</param>
+    /// <returns>The model as it is now; null when the provider offers no option or does not list the model.</returns>
+    /// <exception cref="ArgumentException">A name is blank, or the option or the value is not one the model offers.</exception>
+    /// <exception cref="KeyNotFoundException">The provider is not registered.</exception>
+    public async Task<AgentModelInfo?> SetModelOptionAsync(ModelProviderId providerId, string modelId, string optionId, string value,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(optionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        var descriptor = GetProviderDescriptor(providerId);
+        var runtime = await _registry.GetOrCreateRuntimeAsync(descriptor.ProviderId, cancellationToken).ConfigureAwait(false);
+        if (runtime is not IModelProviderModelOptions options ||
+            await options.SetModelOptionAsync(modelId, optionId, value, cancellationToken).ConfigureAwait(false) is not { } model)
+        {
+            return null;
+        }
+
+        if (TryGetState(ModelProviderId.NormalizeValue(descriptor.ProviderId.Value)) is { } state &&
+            state.Models.Any(listed => string.Equals(listed.Id, model.Id, StringComparison.Ordinal)))
+        {
+            PublishState(state with
+            {
+                Models = [.. state.Models.Select(listed => string.Equals(listed.Id, model.Id, StringComparison.Ordinal) ? model : listed)],
+                ObservedAt = DateTimeOffset.UtcNow,
+            });
+        }
+
+        return model;
+    }
+
     private Task StartRefreshAsync(ModelProviderDescriptor descriptor, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(descriptor);

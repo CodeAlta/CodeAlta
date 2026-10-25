@@ -104,7 +104,10 @@ internal static class AgentModelMetadataEnricher
             Provider: model.Provider,
             DefaultReasoningEffort: model.DefaultReasoningEffort,
             SupportedReasoningEfforts: efforts,
-            Capabilities: capabilities ?? model.Capabilities);
+            Capabilities: capabilities ?? model.Capabilities)
+        {
+            Options = model.Options,
+        };
     }
 
     // The effort levels of models.dev ({"type":"effort","values":["none","low","medium","high","xhigh","max"]}), as a

@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState, type ComponentProps, type DragEvent, type ReactNode, type SyntheticEvent } from "react";
-import { Button, ButtonGroup, FormGroup, Menu, MenuItem, PopoverNext, Slider } from "@blueprintjs/core";
+import { Button, ButtonGroup, FormGroup, HTMLSelect, Menu, MenuItem, PopoverNext, Slider, Switch } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { modelBrand } from "./brands";
 import { ModelIcon, ProviderIcon } from "./ProviderIcon";
@@ -82,9 +82,11 @@ export type ComposerSelectionSummary = Readonly<{ agent: string; provider: strin
 // Both draft and owned composers present their selection as one chip, the Agent chip, that opens this form.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
 // open while a control owns an admitted change (a provider switch) that must not be orphaned.
-export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, permission, review, summary, locked = false, openRequest = 0, notice = null }: {
+export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, modelOptions, permission, review, summary, locked = false, openRequest = 0, notice = null }: {
   sessionId: string; onOpenCatalog?: (page: "prompts" | "models") => void;
   agent: ReactNode; provider: ReactNode; model: ReactNode; reasoning: ReactNode;
+  /** The other options of the model (its context, a fast mode), where its provider offers some. */
+  modelOptions?: ReactNode;
   /** The permission mode of the session, where the host offers modes. */
   permission?: ReactNode;
   /** Whether the user reviews the changes of the session before an agent commits them. */
@@ -106,6 +108,7 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       intent={notice ? "danger" : "none"} helperText={notice ? <span className="composer-selection-notice" role="alert">{notice}</span> : undefined}>{provider}</FormGroup>
     <FormGroup label={<span className="composer-selection-label"><ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />{t("Model")}</span>} labelFor={`composer-model-${sessionId}`}>{model}</FormGroup>
     <FormGroup label={t("Reasoning")}>{reasoning}</FormGroup>
+    {modelOptions}
     {permission && <FormGroup label={<span className="composer-selection-label"><AppIcon name="shield" size={14} />{t("Permissions")}</span>}
       labelFor={`composer-permission-${sessionId}`}>{permission}</FormGroup>}
     {review && <FormGroup label={<span className="composer-selection-label"><AppIcon name="eye" size={14} />{t("Review before commit")}</span>}
@@ -146,6 +149,35 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
         <span className="composer-selection-review-name">{t("Review before commit")}</span></span>}
     </Button>
   </PopoverNext>;
+}
+
+/** An option of a model other than its effort, as the host offers it: its values, the one it has, whether it is on or off. */
+export type ComposerModelOption = Readonly<{ id: string; name: string; description?: string | null; value: string;
+  values: ReadonlyArray<Readonly<{ value: string; name: string }>>; toggle?: boolean | null }>;
+
+/**
+ * The options of the selected model other than its effort, such as its context or a fast mode: a switch for one that
+ * is on or off, a list for the others. They are the model's, in every session of its provider.
+ */
+export function ModelOptionFields({ sessionId, options, disabled = false, onChange }: {
+  sessionId: string; options: ReadonlyArray<ComposerModelOption>; disabled?: boolean; onChange: (optionId: string, value: string) => void;
+}) {
+  const { t } = useShellLanguage();
+  return <>{options.map(option => {
+    const id = `composer-option-${sessionId}-${option.id}`;
+    const title = option.description ?? t("{option} of this model, in every session of its provider", { option: option.name });
+    if (option.toggle) {
+      const on = option.value.toLowerCase() === "true";
+      return <FormGroup key={option.id} className="composer-model-option">
+        <Switch id={id} checked={on} disabled={disabled} label={option.name} title={title} onChange={() => onChange(option.id, on ? "false" : "true")} />
+      </FormGroup>;
+    }
+    return <FormGroup key={option.id} label={option.name} labelFor={id} className="composer-model-option">
+      <HTMLSelect fill id={id} value={option.value} disabled={disabled} title={title} onChange={event => onChange(option.id, event.target.value)}>
+        {option.values.map(value => <option key={value.value} value={value.value}>{value.name}</option>)}
+      </HTMLSelect>
+    </FormGroup>;
+  })}</>;
 }
 
 /**

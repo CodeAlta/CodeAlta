@@ -35,6 +35,13 @@ public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<Agen
     /// none runs without one, whatever the session asked.
     /// </summary>
     public bool EffortsComplete { get; init; }
+
+    /// <summary>
+    /// Gets the other choices of the model, such as its context or a fast mode, with their values now: set for the model
+    /// in every session of its provider (<see cref="OwnedSessionCommandService.SetModelOptionAsync"/>). Empty when the
+    /// model or its provider has none.
+    /// </summary>
+    public IReadOnlyList<AgentModelOption> Options { get; init; } = [];
 }
 
 /// <summary>Session-scoped next-send choices; does not confer authority to mutate a running turn.</summary>
@@ -171,7 +178,7 @@ public sealed partial class OwnedSessionCommandService
         return new(new(provider, session.AgentPromptId ?? "default", modelId, effort) { PermissionMode = session.PermissionMode }, prompts,
             models.Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])
                 { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort,
-                  EffortsComplete = AgentReasoningEffortCapability.IsListComplete(m) }).ToArray())
+                  EffortsComplete = AgentReasoningEffortCapability.IsListComplete(m), Options = m.Options?.Take(16).ToArray() ?? [] }).ToArray())
         {
             PermissionModes = modes,
             // What a session without a mode runs in: the mode of its provider, else the one that names the policy of the host.
@@ -227,6 +234,51 @@ public sealed partial class OwnedSessionCommandService
         // What a send of the window checks again when it runs.
         return IsValidSelection(choices, selection) ? new(OwnedSelectionCheck.Ok, selection, choices) : new(OwnedSelectionCheck.InvalidEffort, null, choices);
     }
+
+    /// <summary>
+    /// Sets an option of a model of the provider of a session, such as its context or a fast mode: the provider sends
+    /// it with every turn of the model from now on, in all its sessions. The session itself is not changed.
+    /// </summary>
+    /// <param name="sessionId">The session whose provider has the model.</param>
+    /// <param name="modelId">A model of the provider.</param>
+    /// <param name="optionId">An option of the model.</param>
+    /// <param name="value">One of the values of the option.</param>
+    /// <param name="cancellationToken">Cancels the change.</param>
+    /// <returns>
+    /// <see cref="OwnedSelectionCheck.Ok"/>; <see cref="OwnedSelectionCheck.Unavailable"/> for an unknown session or a
+    /// provider that is not registered; <see cref="OwnedSelectionCheck.InvalidModel"/> for a provider that offers no
+    /// option or does not list the model; <see cref="InvalidOption"/> for an option or a value the model does not have.
+    /// </returns>
+    /// <exception cref="ArgumentException">A name is blank.</exception>
+    /// <exception cref="IOException">The provider could not keep the choice.</exception>
+    /// <exception cref="OperationCanceledException">The change is canceled.</exception>
+    public async Task<string> SetModelOptionAsync(string sessionId, string modelId, string optionId, string value, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(optionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        lock (_gate) { if (_closed || _retained) return OwnedSelectionCheck.Unavailable; }
+        var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (session is null || ModelOptions is null) return OwnedSelectionCheck.Unavailable;
+        try
+        {
+            return await ModelOptions(new ModelProviderId(session.ResolvedProviderKey), modelId, optionId, value, cancellationToken).ConfigureAwait(false) is null
+                ? OwnedSelectionCheck.InvalidModel
+                : OwnedSelectionCheck.Ok;
+        }
+        catch (ArgumentException)
+        {
+            return InvalidOption;
+        }
+        catch (KeyNotFoundException)
+        {
+            return OwnedSelectionCheck.Unavailable;
+        }
+    }
+
+    /// <summary>The outcome of <see cref="SetModelOptionAsync"/> for an option or a value the model does not have.</summary>
+    public const string InvalidOption = "invalid_option";
 
     // Modes a session is not given by itself. The plan mode of Claude Code ends with an approval CodeAlta does not
     // ask for: it stays a mode of the provider's configuration.

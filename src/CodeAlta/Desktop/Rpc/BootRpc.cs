@@ -198,6 +198,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(ApplicationLogsClearRequest))]
 [JsonSerializable(typeof(ApplicationLogsClearResponse))]
 [JsonSerializable(typeof(SessionChoicesRequest))]
+[JsonSerializable(typeof(SessionModelOptionRequest))]
 [JsonSerializable(typeof(SessionChoicesResponse))]
 [JsonSerializable(typeof(SessionProviderChoices))]
 [JsonSerializable(typeof(SessionProviderRequest))]

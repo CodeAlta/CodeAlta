@@ -53,6 +53,12 @@ internal sealed class AcpRuntimeOptions
 
     /// <summary>Gets what the runtime learned of the agent: shared by its sessions and its probe.</summary>
     public AcpAgentProfile Profile { get; } = new();
+
+    /// <summary>
+    /// Gets or sets where the models of the provider are kept, with the values chosen for their options: shared by every
+    /// runtime of the provider, set by the runtime that runs these options.
+    /// </summary>
+    public AcpModelCacheStore? ModelStore { get; set; }
 }
 
 /// <summary>What a runtime learned of its agent: its capabilities and its models, from its last start.</summary>

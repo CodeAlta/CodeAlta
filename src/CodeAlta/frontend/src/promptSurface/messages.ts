@@ -25,6 +25,12 @@ export const promptSurfaceMessages = {
   "{model} has no reasoning effort": ["{model} no tiene esfuerzo de razonamiento", "{model} n'a pas d'effort de raisonnement", "{model} hat keinen Denkaufwand",
     "{model} には推論の強さがありません", "{model} 没有推理强度"],
   "Not used": ["No se usa", "Non utilisé", "Nicht verwendet", "使用されません", "未使用"],
+  // The other options of a model (its context, a fast mode).
+  "{option} of this model, in every session of its provider": ["{option} de este modelo, en todas las sesiones de su proveedor",
+    "{option} de ce modèle, dans toutes les sessions de son fournisseur", "{option} dieses Modells, in allen Sitzungen seines Anbieters",
+    "このモデルの{option}（このプロバイダーのすべてのセッション）", "此模型的{option}，适用于其提供方的所有会话"],
+  "The option was not changed ({status}).": ["La opción no se cambió ({status}).", "L'option n'a pas été changée ({status}).",
+    "Die Option wurde nicht geändert ({status}).", "オプションは変更されませんでした（{status}）。", "选项未更改（{status}）。"],
   // The sub-agents at work.
   "Sub-agents at work": ["Subagentes en curso", "Sous-agents au travail", "Arbeitende Sub-Agenten", "作業中のサブエージェント", "工作中的子代理"],
   "{count} sub-agent(s) at work": ["{count} subagente(s) en curso", "{count} sous-agent(s) au travail", "{count} Sub-Agent(en) bei der Arbeit", "作業中のサブエージェント {count} 件", "{count} 个子代理工作中"],

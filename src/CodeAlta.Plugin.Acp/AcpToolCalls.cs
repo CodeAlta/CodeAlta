@@ -289,8 +289,8 @@ internal static class AcpConfigOptions
 
     /// <summary>
     /// Lists the models the <c>model</c> option offers. The options are the whole state of the session for its current
-    /// model: that one has the reasoning efforts of the <c>thought_level</c> option, none when there is no such option;
-    /// what the others have is not known from them.
+    /// model: that one has the reasoning efforts of the <c>thought_level</c> option, none when there is no such option,
+    /// and the other options of the session; what the others have is not known from them.
     /// </summary>
     public static IReadOnlyList<AcpListedModel> ReadModels(JsonElement options)
     {
@@ -301,25 +301,95 @@ internal static class AcpConfigOptions
 
         var current = AcpJson.GetString(model, "currentValue");
         return [.. Values(model).Select(value => string.Equals(value.Value, current, StringComparison.Ordinal)
-            ? AcpListedModel.From(value) with { Efforts = ReadEfforts(options), DefaultEffort = CurrentEffort(options) }
+            ? AcpListedModel.From(value) with { Efforts = ReadEfforts(options), DefaultEffort = CurrentEffort(options), Options = ReadModelOptions(options) }
             : AcpListedModel.From(value))];
+    }
+
+    /// <summary>
+    /// Returns the option of the reasoning effort: the <c>thought_level</c> option whose values are efforts. A model may
+    /// have another one, such as Cursor's <c>thinking</c> on or off beside its <c>effort</c>, or instead of it: that one is
+    /// an option of the model (<see cref="ReadModelOptions"/>).
+    /// </summary>
+    public static JsonElement? EffortOption(JsonElement options)
+    {
+        if (options.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var option in options.EnumerateArray())
+        {
+            if (IsThoughtLevel(option) && Values(option).Any(static value => ToEffort(value.Value) is not null and not AgentReasoningEffort.None))
+            {
+                return option;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Lists the options of the current model, as CodeAlta offers them: those of <c>model_config</c> (its context, a fast
+    /// mode) and a <c>thought_level</c> option that is not the effort, such as a toggle of thinking. An option of another
+    /// category is a setting of the session, not of its model.
+    /// </summary>
+    public static IReadOnlyList<AgentModelOption> ReadModelOptions(JsonElement options)
+    {
+        if (options.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var effort = EffortOption(options) is { } effortOption ? AcpJson.GetString(effortOption, "id") : null;
+        var listed = new List<AgentModelOption>();
+        foreach (var option in options.EnumerateArray())
+        {
+            var id = AcpJson.GetString(option, "id");
+            var category = AcpJson.GetString(option, "category");
+            if (string.IsNullOrWhiteSpace(id) || category is not ("model_config" or "thought_level") ||
+                string.Equals(id, effort, StringComparison.Ordinal) ||
+                AcpJson.GetString(option, "type") is { } type && !string.Equals(type, "select", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var values = Values(option).Select(static value => new AgentModelOptionValue(value.Value, value.Name)).ToArray();
+            var current = AcpJson.GetString(option, "currentValue");
+            if (values.Length < 2 || current is null || !values.Any(value => string.Equals(value.Value, current, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            listed.Add(new AgentModelOption(id, AcpJson.GetString(option, "name") is { Length: > 0 } name ? name : id, values, current)
+            {
+                Description = AcpJson.GetString(option, "description"),
+            });
+        }
+
+        return listed;
     }
 
     /// <summary>Lists the reasoning efforts the <c>thought_level</c> option offers now, as CodeAlta names them.</summary>
     public static IReadOnlyList<AgentReasoningEffort> ReadEfforts(JsonElement options)
-        => Find(options, "thought_level") is { } option
+        => EffortOption(options) is { } option
             ? [.. Values(option).Select(static value => ToEffort(value.Value)).OfType<AgentReasoningEffort>().Distinct()]
             : [];
 
     /// <summary>Returns the reasoning effort the <c>thought_level</c> option is set to, or <see langword="null"/>.</summary>
     public static AgentReasoningEffort? CurrentEffort(JsonElement options)
-        => Find(options, "thought_level") is { } option ? ToEffort(AcpJson.GetString(option, "currentValue")) : null;
+        => EffortOption(options) is { } option ? ToEffort(AcpJson.GetString(option, "currentValue")) : null;
 
     /// <summary>Returns the value of the <c>thought_level</c> option that stands for an effort, or <see langword="null"/>.</summary>
     public static string? EffortValue(JsonElement options, AgentReasoningEffort effort)
-        => Find(options, "thought_level") is { } option
+        => EffortOption(options) is { } option
             ? Values(option).Select(static value => value.Value).FirstOrDefault(value => ToEffort(value) == effort)
             : null;
+
+    // The category of the effort, or its id for an agent that gives no category.
+    private static bool IsThoughtLevel(JsonElement option)
+        => AcpJson.GetString(option, "category") is { } category
+            ? string.Equals(category, "thought_level", StringComparison.Ordinal)
+            : string.Equals(AcpJson.GetString(option, "id"), "thought_level", StringComparison.Ordinal);
 
     /// <summary>Creates the request that sets a select option of a session to a value.</summary>
     public static SetSessionConfigOptionRequest CreateSetRequest(string sessionId, string configId, string value)

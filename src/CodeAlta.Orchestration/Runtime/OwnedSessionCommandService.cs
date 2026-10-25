@@ -450,6 +450,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     internal Func<ModelProviderId, ModelProviderDescriptor?>? SelectionProvider { get; init; }
     internal Func<ModelProviderId, IReadOnlyList<AgentModelInfo>>? ObservedImageModels { get; init; }
 
+    /// <summary>Sets an option of a model of a provider (<see cref="ModelProviderInitializationService.SetModelOptionAsync"/>).</summary>
+    internal Func<ModelProviderId, string, string, string, CancellationToken, Task<AgentModelInfo?>>? ModelOptions { get; init; }
+
     /// <summary>Converts the documents attached to a prompt to Markdown for the models that cannot read them.</summary>
     internal AttachedDocumentConverter Documents { get; set; } = new();
 

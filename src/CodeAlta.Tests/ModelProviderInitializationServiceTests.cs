@@ -527,6 +527,58 @@ public sealed class ModelProviderInitializationServiceTests
         Assert.AreEqual(0, service.CurrentStates.Count);
     }
 
+    [TestMethod]
+    public async Task SetModelOptionAsync_PublishesTheModelAsItIsNow_ForAProviderThatOffersOptions()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var withOptions = new ModelProviderDescriptor(new ModelProviderId("options"), "Options", "test");
+        var plain = new ModelProviderDescriptor(new ModelProviderId("plain"), "Plain", "test");
+        var context = new AgentModelOption("context", "Context", [new("300k"), new("1m")], "300k");
+        var runtime = new OptionsRuntime(withOptions, [new AgentModelInfo("first") { Options = [context] }, new AgentModelInfo("second")]);
+        registry.RegisterOrReplace(withOptions, () => runtime);
+        registry.RegisterOrReplace(plain, () => new TestRuntime(plain, [new AgentModelInfo("plain-model")]));
+        var service = new ModelProviderInitializationService(registry);
+        await service.InitializeAllAsync(CancellationToken.None);
+
+        var model = await service.SetModelOptionAsync(withOptions.ProviderId, "first", "context", "1m");
+
+        Assert.AreEqual("1m", model!.Options!.Single().Value);
+        var models = await service.GetModelsAsync(withOptions.ProviderId);
+        CollectionAssert.AreEqual(new[] { "first", "second" }, models.Select(static listed => listed.Id).ToArray(), "the model keeps its place");
+        Assert.AreEqual("1m", models[0].Options!.Single().Value);
+        Assert.IsNull(await service.SetModelOptionAsync(plain.ProviderId, "plain-model", "context", "1m"), "a provider that offers no option");
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => service.SetModelOptionAsync(withOptions.ProviderId, "first", "context", "2m"));
+        await Assert.ThrowsExactlyAsync<KeyNotFoundException>(() => service.SetModelOptionAsync(new ModelProviderId("unknown"), "first", "context", "1m"));
+    }
+
+    private sealed class OptionsRuntime(ModelProviderDescriptor descriptor, IReadOnlyList<AgentModelInfo> models) : IModelProviderRuntime, IModelProviderModelOptions
+    {
+        private IReadOnlyList<AgentModelInfo> _models = models;
+
+        public ModelProviderDescriptor Descriptor { get; } = descriptor;
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId, Availability = ModelProviderAvailability.Ready, Models = _models });
+
+        public Task<AgentModelInfo?> SetModelOptionAsync(string modelId, string optionId, string value, CancellationToken cancellationToken = default)
+        {
+            if (_models.FirstOrDefault(model => model.Id == modelId) is not { } model) return Task.FromResult<AgentModelInfo?>(null);
+            var option = model.Options?.FirstOrDefault(option => option.Id == optionId) ?? throw new ArgumentException("No such option.", nameof(optionId));
+            if (!option.Values.Any(offered => offered.Value == value)) throw new ArgumentException("No such value.", nameof(value));
+            var changed = model with { Options = [.. model.Options!.Select(listed => listed.Id == optionId ? listed with { Value = value } : listed)] };
+            _models = [.. _models.Select(listed => listed.Id == modelId ? changed : listed)];
+            return Task.FromResult<AgentModelInfo?>(changed);
+        }
+
+        public IModelProviderTurnExecutor CreateTurnExecutor() => throw new NotSupportedException();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private static AgentModelInfo[] CreateUnsortedModels()
         =>
         [

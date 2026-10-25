@@ -563,6 +563,145 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task Probe_OfCursorThatListsItsModelsByName_ReadsTheEffortsAndTheOptionsOfEach()
+    {
+        // As Cursor answers a client that says parameterizedModelPicker: the models by their names, and their parameters
+        // as options. The thinking of a model comes before its effort, in the same category.
+        var agent = new AcpFakeAgent { Models = ["default", "claude-opus-5-5", "composer-2.5", "claude-haiku-4-5"], CurrentModel = "default" };
+        agent.EffortsByModel["default"] = [];
+        agent.EffortsByModel["composer-2.5"] = [];
+        agent.EffortsByModel["claude-haiku-4-5"] = [];
+        agent.ParametersByModel["claude-opus-5-5"] = new() { ["thinking"] = ["true", "false"], ["context"] = ["300k", "1m"], ["fast"] = ["false", "true"] };
+        agent.ParametersByModel["composer-2.5"] = new() { ["fast"] = ["true", "false"] };
+        agent.ParametersByModel["claude-haiku-4-5"] = new() { ["thinking"] = ["true", "false"] };
+        var settings = new AcpAgentSettings("dotnet", ["acp"], new Dictionary<string, string>(), "cursor", "2026.10.22");
+        await using var fixture = new Fixture(agent, settings, AcpAgentQuirks.For(settings));
+
+        var probe = await fixture.Runtime.ProbeAsync();
+
+        Assert.AreEqual(true, agent.ClientCapabilities?["_meta"]?["parameterizedModelPicker"]?.GetValue<bool>(), "CodeAlta asks Cursor for its models by name");
+        var opus = probe.Models.Single(static model => model.Id == "claude-opus-5-5");
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High }, opus.SupportedReasoningEfforts!.ToArray(),
+            "the effort is the option of the category whose values are efforts, not the thinking before it");
+        CollectionAssert.AreEqual(new[] { "thinking", "context", "fast" }, opus.Options!.Select(static option => option.Id).ToArray());
+        var context = opus.Options!.Single(static option => option.Id == "context");
+        Assert.AreEqual("300k", context.Value);
+        Assert.IsFalse(context.IsToggle);
+        Assert.IsTrue(opus.Options!.Single(static option => option.Id == "fast").IsToggle);
+        Assert.AreEqual(300_000L, opus.Capabilities!["contextWindow"], "the context the model runs with");
+        CollectionAssert.AreEqual(new[] { "fast" }, probe.Models.Single(static model => model.Id == "composer-2.5").Options!.Select(static option => option.Id).ToArray());
+        Assert.IsNull(probe.Models.Single(static model => model.Id == "default").Options, "a model without options offers none");
+        // A model whose only control of its reasoning is a toggle has no effort, and the toggle as an option.
+        var haiku = probe.Models.Single(static model => model.Id == "claude-haiku-4-5");
+        Assert.AreEqual(0, haiku.SupportedReasoningEfforts!.Count);
+        CollectionAssert.AreEqual(new[] { "thinking" }, haiku.Options!.Select(static option => option.Id).ToArray());
+    }
+
+    [TestMethod]
+    public void ModelOptions_AreTheModelConfigOptions_AndAThoughtLevelThatIsNotTheEffort()
+    {
+        var options = JsonDocument.Parse("""
+            [
+              { "id": "mode", "category": "mode", "type": "select", "currentValue": "agent", "options": [{ "value": "agent" }, { "value": "plan" }] },
+              { "id": "model", "category": "model", "type": "select", "currentValue": "m", "options": [{ "value": "m" }, { "value": "n" }] },
+              { "id": "thinking", "category": "thought_level", "type": "select", "currentValue": "true", "options": [{ "value": "true" }, { "value": "false" }] },
+              { "id": "effort", "category": "thought_level", "type": "select", "currentValue": "high", "options": [{ "value": "low" }, { "value": "high" }] },
+              { "id": "context", "name": "Context", "category": "model_config", "type": "select", "currentValue": "1m", "options": [{ "value": "300k" }, { "value": "1m" }] },
+              { "id": "approvals", "category": "_vendor", "type": "select", "currentValue": "ask", "options": [{ "value": "ask" }, { "value": "auto" }] },
+              { "id": "speed", "category": "model_config", "type": "boolean", "currentValue": true }
+            ]
+            """).RootElement;
+
+        Assert.AreEqual("effort", AcpJson.GetString(AcpConfigOptions.EffortOption(options)!.Value, "id"), "the thought level whose values are efforts");
+        var read = AcpConfigOptions.ReadModelOptions(options);
+        // A setting of another category belongs to the session, and a boolean option is not offered by this client.
+        CollectionAssert.AreEqual(new[] { "thinking", "context" }, read.Select(static option => option.Id).ToArray());
+        Assert.AreEqual("Context", read[1].Name);
+        Assert.AreEqual("thinking", read[0].Name, "an option without a name is named by its id");
+    }
+
+    [TestMethod]
+    public async Task ModelOption_ChosenInCodeAlta_IsSentBeforeEachTurnOfTheModel_AndKept()
+    {
+        var agent = new AcpFakeAgent();
+        agent.ParametersByModel["smart"] = new() { ["context"] = ["300k", "1m"], ["fast"] = ["false", "true"] };
+        await using var fixture = new Fixture(agent) { ModelId = "smart" };
+        await fixture.Runtime.ProbeAsync();
+
+        var model = await fixture.Runtime.SetModelOptionAsync("smart", "context", "1m");
+
+        Assert.AreEqual("1m", model!.Options!.Single(static option => option.Id == "context").Value);
+        Assert.AreEqual(1_000_000L, model.Capabilities!["contextWindow"]);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => fixture.Runtime.SetModelOptionAsync("smart", "context", "2m"));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => fixture.Runtime.SetModelOptionAsync("smart", "speed", "1m"));
+        Assert.IsNull(await fixture.Runtime.SetModelOptionAsync("unknown", "context", "1m"));
+
+        while (agent.ConfigChanges.TryDequeue(out _))
+        {
+        }
+
+        await fixture.RunAsync([User("hello")]);
+
+        CollectionAssert.AreEqual(new[] { "model=smart", "context=1m" }, agent.ConfigChanges.ToArray(),
+            "the model, then the option chosen for it; the one left as the agent has it is not sent");
+
+        // Another runtime of the provider, after a restart, has the choice.
+        await using var endpoints = new LoopbackHarnessToolEndpoints();
+        var again = new AcpModelProviderRuntime(fixture.Runtime.Descriptor, new AcpRuntimeOptions
+        {
+            ProviderKey = fixture.Runtime.Descriptor.ProviderId.Value,
+            AgentName = "Fake Agent",
+            Agent = new AcpAgentSettings("dotnet", [], new Dictionary<string, string>(), null, null),
+            ToolEndpoints = endpoints,
+            ProbeDirectory = Path.Combine(fixture.WorkingDirectory, ".probe"),
+            ConnectionFactory = agent.CreateFactory(),
+        }, new AcpModelCacheStore(Path.Combine(fixture.WorkingDirectory, ".models")));
+        await using (again)
+        {
+            var models = await again.ListModelsAsync(again.RuntimeDescriptor);
+            Assert.AreEqual("1m", models.Single(static listed => listed.Id == "smart").Options!.Single(static option => option.Id == "context").Value);
+
+            // An option set in another runtime of the provider (another CodeAlta of the profile) reaches the session
+            // that runs: the next turn sends it.
+            await again.SetModelOptionAsync("smart", "context", "300k");
+        }
+
+        while (agent.ConfigChanges.TryDequeue(out _))
+        {
+        }
+
+        await fixture.RunAsync([User("hello"), User("again")]);
+        CollectionAssert.Contains(agent.ConfigChanges.ToArray(), "context=300k", string.Join(", ", agent.ConfigChanges));
+    }
+
+    [TestMethod]
+    public async Task ModelOption_OfAModelTheAgentDoesNotList_IsNotGivenToTheModelTheSessionRuns()
+    {
+        var agent = new AcpFakeAgent();
+        agent.ParametersByModel["fast"] = new() { ["context"] = ["300k", "1m"] };
+        await using var fixture = new Fixture(agent) { ModelId = "gone" };
+        new AcpModelCacheStore(Path.Combine(fixture.WorkingDirectory, ".models"))
+            .Choose(fixture.Runtime.Descriptor.ProviderId.Value, "gone", "context", "1m", static () => new AcpModelCache());
+
+        await fixture.RunAsync([User("hello")]);
+
+        CollectionAssert.DoesNotContain(agent.ConfigChanges.ToArray(), "context=1m", string.Join(", ", agent.ConfigChanges));
+    }
+
+    [TestMethod]
+    public async Task SessionOfCursorNamedByAVariant_RunsTheModelOfItsName()
+    {
+        // A session of an earlier version of CodeAlta names the variant Cursor listed then.
+        var agent = new AcpFakeAgent { Models = ["default", "claude-opus-5-5"], Efforts = [] };
+        var settings = new AcpAgentSettings("dotnet", ["acp"], new Dictionary<string, string>(), "cursor", "2026.10.22");
+        await using var fixture = new Fixture(agent, settings, AcpAgentQuirks.For(settings)) { ModelId = "claude-opus-5-5[context=300k,effort=medium,fast=false]" };
+
+        await fixture.RunAsync([User("hello")]);
+
+        CollectionAssert.Contains(agent.ConfigChanges.ToArray(), "model=claude-opus-5-5");
+    }
+
+    [TestMethod]
     public void AgentQuirks_AreChosenByTheRegistryAgent_ElseByTheCommand()
     {
         static AcpAgentSettings Agent(string command, string? id, params string[] arguments) => new(command, arguments, new Dictionary<string, string>(), id, null);
@@ -596,15 +735,23 @@ public sealed class AcpTurnExecutorTests
         {
             Efforts = [AgentReasoningEffort.Low, AgentReasoningEffort.XHigh],
             DefaultEffort = AgentReasoningEffort.Low,
+            Options = [new AgentModelOption("context", "Context", [new("300k", "300K"), new("1m", "1M")], "300k") { Description = "The size of the context" }],
         };
-        var json = JsonSerializer.Serialize(AcpModelCache.From([listed, new AcpListedModel("unknown", null, null, default)], "fast"), AcpPluginJsonContext.Default.AcpModelCache);
+        var choices = new Dictionary<string, IReadOnlyDictionary<string, string>> { ["fast"] = new Dictionary<string, string> { ["context"] = "1m" } };
+        var json = JsonSerializer.Serialize(AcpModelCache.From([listed, new AcpListedModel("unknown", null, null, default)], "fast", choices), AcpPluginJsonContext.Default.AcpModelCache);
 
-        var read = JsonSerializer.Deserialize(json, AcpPluginJsonContext.Default.AcpModelCache)!.ToModels();
+        var cache = JsonSerializer.Deserialize(json, AcpPluginJsonContext.Default.AcpModelCache)!;
+        var read = cache.ToModels();
 
         CollectionAssert.AreEqual(new[] { AgentReasoningEffort.Low, AgentReasoningEffort.XHigh }, read[0].Efforts!.ToArray());
         Assert.AreEqual(AgentReasoningEffort.Low, read[0].DefaultEffort);
         Assert.AreEqual("1x", AcpJson.GetString(read[0].Meta, "copilotUsage"));
+        var option = read[0].Options!.Single();
+        Assert.AreEqual(("context", "Context", "300k", "The size of the context"), (option.Id, option.Name, option.Value, option.Description));
+        CollectionAssert.AreEqual(new[] { "300k", "1m" }, option.Values.Select(static value => value.Value).ToArray());
+        Assert.AreEqual("1m", cache.Choices!["fast"]["context"]);
         Assert.IsNull(read[1].Efforts);
+        Assert.IsNull(read[1].Options);
     }
 
     [TestMethod]

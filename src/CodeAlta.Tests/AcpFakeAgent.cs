@@ -46,6 +46,24 @@ internal sealed class AcpFakeAgent
 
     internal List<string> EffortsOf(string model) => EffortsByModel.TryGetValue(model, out var efforts) ? efforts : Efforts;
 
+    /// <summary>
+    /// Gets the other options of each model, as Cursor gives them: by option id, its values, the first the default. A
+    /// <c>thinking</c> option is a <c>thought_level</c> listed before the effort, the others are <c>model_config</c>.
+    /// The agent keeps the value of each option of each model, as Cursor does.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, List<string>>> ParametersByModel { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Gets the options set by the client, in order: <c>configId=value</c>.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<string> ConfigChanges { get; } = new();
+
+    /// <summary>Gets the client capabilities of the last <c>initialize</c>.</summary>
+    public JsonObject? ClientCapabilities { get; internal set; }
+
+    internal Dictionary<string, Dictionary<string, string>> ParameterValues { get; } = new(StringComparer.Ordinal);
+
+    internal string ParameterValue(string model, string id)
+        => ParameterValues.TryGetValue(model, out var values) && values.TryGetValue(id, out var value) ? value : ParametersByModel[model][id][0];
+
     /// <summary>Gets or sets what a prompt does; by default it answers "ok".</summary>
     public Func<AcpFakePrompt, Task<string>> OnPrompt { get; set; } = static async prompt =>
     {
@@ -183,7 +201,7 @@ internal sealed class AcpFakeConnection
         {
             JsonNode? result = method switch
             {
-                "initialize" => Initialize(),
+                "initialize" => Initialize(parameters),
                 "session/new" => NewSession(parameters),
                 "session/load" => await LoadSessionAsync(parameters),
                 "session/resume" => ResumeSession(parameters),
@@ -206,8 +224,9 @@ internal sealed class AcpFakeConnection
         }
     }
 
-    private JsonObject Initialize()
+    private JsonObject Initialize(JsonObject parameters)
     {
+        _agent.ClientCapabilities = parameters["clientCapabilities"]?.DeepClone().AsObject();
         var session = new JsonObject();
         if (_agent.CloseSession) session["close"] = new JsonObject();
         if (_agent.ResumeSession) session["resume"] = new JsonObject();
@@ -268,11 +287,30 @@ internal sealed class AcpFakeConnection
         var configId = parameters["configId"]!.GetValue<string>();
         var value = parameters["value"]!.GetValue<string>();
         var current = _sessions[sessionId];
+        _agent.ConfigChanges.Enqueue($"{configId}={value}");
         var model = configId == "model" ? value : current["model"]!.GetValue<string>();
         var effort = configId == "reasoning" ? value : current["effort"]?.GetValue<string>();
         if (!_agent.Models.Contains(model))
         {
             throw new FakeRpcException(-32602, $"Invalid model value: {model}");
+        }
+
+        if (configId is not "model" and not "reasoning")
+        {
+            if (!_agent.ParametersByModel.TryGetValue(model, out var modelParameters) || !modelParameters.TryGetValue(configId, out var values) || !values.Contains(value))
+            {
+                throw new FakeRpcException(-32602, $"Invalid value for {configId}: {value}");
+            }
+
+            lock (_agent.ParameterValues)
+            {
+                if (!_agent.ParameterValues.TryGetValue(model, out var kept))
+                {
+                    _agent.ParameterValues[model] = kept = new Dictionary<string, string>(StringComparer.Ordinal);
+                }
+
+                kept[configId] = value;
+            }
         }
 
         // The efforts change with the model: one it does not have becomes its own default.
@@ -293,6 +331,12 @@ internal sealed class AcpFakeConnection
                 ["options"] = new JsonArray([.. _agent.Models.Select(static name => (JsonNode)new JsonObject { ["value"] = name, ["name"] = name.ToUpperInvariant() })]),
             },
         };
+        var parameters = _agent.ParametersByModel.TryGetValue(model, out var listed) ? listed : [];
+        if (parameters.ContainsKey("thinking"))
+        {
+            list.Add(Parameter("thinking", "thought_level"));
+        }
+
         if (effort is not null)
         {
             list.Add(new JsonObject
@@ -302,7 +346,27 @@ internal sealed class AcpFakeConnection
             });
         }
 
+        foreach (var id in parameters.Keys.Where(static id => id != "thinking"))
+        {
+            list.Add(Parameter(id, "model_config"));
+        }
+
         return new JsonObject { ["list"] = list, ["model"] = model, ["effort"] = effort };
+
+        JsonObject Parameter(string id, string category)
+        {
+            string current;
+            lock (_agent.ParameterValues)
+            {
+                current = _agent.ParameterValue(model, id);
+            }
+
+            return new JsonObject
+            {
+                ["id"] = id, ["name"] = char.ToUpperInvariant(id[0]) + id[1..], ["category"] = category, ["type"] = "select", ["currentValue"] = current,
+                ["options"] = new JsonArray([.. parameters[id].Select(static value => (JsonNode)new JsonObject { ["value"] = value, ["name"] = value.ToUpperInvariant() })]),
+            };
+        }
     }
 
     private async Task<JsonObject> PromptAsync(JsonObject parameters)

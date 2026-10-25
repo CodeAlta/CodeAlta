@@ -8,7 +8,7 @@ using XenoAtom.Logging;
 namespace CodeAlta.Plugin.Acp;
 
 /// <summary>A model provider that runs CodeAlta sessions through an ACP agent.</summary>
-internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IModelProviderModelCatalog
+internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IModelProviderModelCatalog, IModelProviderModelOptions
 {
     /// <summary>The protocol family recorded in the journals of the sessions of this provider.</summary>
     public const string ProtocolFamily = "acp";
@@ -38,6 +38,7 @@ internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IMod
             // The agent keeps the context of a session and compacts it itself.
             Compaction = AgentCompactionSettings.Default with { Enabled = false },
         };
+        _options.ModelStore = modelCache;
         _turnExecutor = new AcpTurnExecutor(options);
     }
 
@@ -102,7 +103,37 @@ internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IMod
     }
 
     private IReadOnlyList<AgentModelInfo> Present(IReadOnlyList<AcpListedModel> models)
-        => AcpModels.Present(models, _options.Quirks, _options.ModelCatalog);
+        => AcpModels.Present(models, _options.Quirks, _options.ModelCatalog, _modelCache.Choices(Descriptor.ProviderId.Value));
+
+    /// <summary>
+    /// Records the value of an option of a model, which each turn of the model sends to the agent before its prompt,
+    /// and keeps it with the models of the provider.
+    /// </summary>
+    /// <exception cref="ArgumentException">The model has no such option, or the option no such value.</exception>
+    /// <exception cref="IOException">The choice could not be kept.</exception>
+    public Task<AgentModelInfo?> SetModelOptionAsync(string modelId, string optionId, string value, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(optionId);
+        ArgumentNullException.ThrowIfNull(value);
+        cancellationToken.ThrowIfCancellationRequested();
+        var models = _options.Profile.Models is { Count: > 0 } known ? known : _modelCache.Read(Descriptor.ProviderId.Value)?.ToModels() ?? [];
+        if (models.FirstOrDefault(model => string.Equals(model.Id, modelId, StringComparison.Ordinal)) is not { } listed)
+        {
+            return Task.FromResult<AgentModelInfo?>(null);
+        }
+
+        var option = listed.Options?.FirstOrDefault(option => string.Equals(option.Id, optionId, StringComparison.Ordinal))
+            ?? throw new ArgumentException($"The model {modelId} has no option {optionId}.", nameof(optionId));
+        if (!option.Values.Any(offered => string.Equals(offered.Value, value, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException($"The option {optionId} of the model {modelId} has no value {value}.", nameof(value));
+        }
+
+        var key = Descriptor.ProviderId.Value;
+        _modelCache.Choose(key, modelId, optionId, value, () => AcpModelCache.From(models, _options.Profile.CurrentModel));
+        return Task.FromResult<AgentModelInfo?>(AcpModels.Present(listed, _options.Quirks, _options.ModelCatalog, _modelCache.ChoicesOf(key, modelId)));
+    }
 
     public IModelProviderTurnExecutor CreateTurnExecutor() => _turnExecutor;
 
@@ -140,9 +171,13 @@ internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IMod
         await _probeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var inspection = await AcpAgentInspector.InspectAsync(_options, cancellationToken).ConfigureAwait(false);
+            // What was learned before: the probe learns first the models it knows nothing of, and the others keep what
+            // they had when its budget runs out (choosing each of Cursor's models takes most of a second).
+            var known = _options.Profile.Models ?? _modelCache.Read(Descriptor.ProviderId.Value)?.ToModels();
+            var inspection = await AcpAgentInspector.InspectAsync(_options, known, cancellationToken).ConfigureAwait(false);
             if (inspection.Models.Count > 0)
             {
+                inspection = inspection with { Models = AcpListedModel.Merge(inspection.Models, known) };
                 _options.Profile.SetModels(inspection.Models, inspection.CurrentModel);
                 _modelCache.Write(Descriptor.ProviderId.Value, AcpModelCache.From(inspection.Models, inspection.CurrentModel));
             }
@@ -172,7 +207,11 @@ internal static class AcpAgentInspector
     public const string SignedOutCategory = "acp-signed-out";
     public const string UnavailableCategory = "acp-unavailable";
 
-    public static async Task<AcpInspection> InspectAsync(AcpRuntimeOptions options, CancellationToken cancellationToken)
+    public static Task<AcpInspection> InspectAsync(AcpRuntimeOptions options, CancellationToken cancellationToken)
+        => InspectAsync(options, known: null, cancellationToken);
+
+    /// <summary>Inspects the agent; <paramref name="known"/> are the models learned before, whose efforts are learned last.</summary>
+    public static async Task<AcpInspection> InspectAsync(AcpRuntimeOptions options, IReadOnlyList<AcpListedModel>? known, CancellationToken cancellationToken)
     {
         var executable = options.Agent.ResolveExecutable();
         if (executable is null)
@@ -221,9 +260,9 @@ internal static class AcpAgentInspector
                 : JsonSerializer.SerializeToElement(session.ConfigOptions, AcpClient.CreateJsonSerializerOptions());
             var current = AcpConfigOptions.Find(configOptions, "model") is { } model ? AcpJson.GetString(model, "currentValue") : null;
             var models = AcpConfigOptions.ReadModels(configOptions);
-            if (options.Quirks.LearnsEffortsByModel)
+            if (options.Quirks.LearnsEffortsByModel(models))
             {
-                models = await LearnEffortsAsync(client, session.SessionId, configOptions, models, options, cancellationToken).ConfigureAwait(false);
+                models = await LearnEffortsAsync(client, session.SessionId, configOptions, models, known, options, cancellationToken).ConfigureAwait(false);
             }
 
             if (capabilities.CloseSession)
@@ -255,11 +294,12 @@ internal static class AcpAgentInspector
         }
     }
 
-    // The options of a session change with its model (the efforts of a model are not those of another): each model is
-    // chosen in turn to read them, within a budget, then the model and the effort the session had are chosen again, as
-    // an agent may keep the last ones chosen for its next sessions. A model the agent refuses keeps unknown efforts.
+    // The options of a session change with its model (the efforts and the context of a model are not those of another):
+    // each model is chosen in turn to read them, within a budget, then the model and the effort the session had are
+    // chosen again, as an agent may keep the last ones chosen for its next sessions. A model the agent refuses keeps
+    // unknown efforts.
     private static async Task<IReadOnlyList<AcpListedModel>> LearnEffortsAsync(AcpClient client, string sessionId, JsonElement configOptions,
-        IReadOnlyList<AcpListedModel> models, AcpRuntimeOptions options, CancellationToken cancellationToken)
+        IReadOnlyList<AcpListedModel> models, IReadOnlyList<AcpListedModel>? known, AcpRuntimeOptions options, CancellationToken cancellationToken)
     {
         if (AcpConfigOptions.Find(configOptions, "model") is not { } modelOption || models.Count < 2)
         {
@@ -268,15 +308,18 @@ internal static class AcpAgentInspector
 
         var modelConfigId = AcpJson.GetString(modelOption, "id") ?? "model";
         var currentModel = AcpJson.GetString(modelOption, "currentValue");
-        var thought = AcpConfigOptions.Find(configOptions, "thought_level");
+        var thought = AcpConfigOptions.EffortOption(configOptions);
         var currentEffort = thought is { } option ? AcpJson.GetString(option, "currentValue") : null;
         var learned = models.ToArray();
+        var learnedBefore = known?.Where(static model => model.Efforts is not null).Select(static model => model.Id).ToHashSet(StringComparer.Ordinal) ?? [];
+        // The models learned before come last: what they had is kept when the budget does not reach them.
+        var order = Enumerable.Range(0, learned.Length).OrderBy(index => learnedBefore.Contains(learned[index].Id) ? 1 : 0).ToArray();
         var changed = false;
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         budget.CancelAfter(options.EffortsBudget);
         try
         {
-            for (var index = 0; index < learned.Length; index++)
+            foreach (var index in order)
             {
                 if (learned[index].Efforts is not null)
                 {
@@ -297,7 +340,12 @@ internal static class AcpAgentInspector
 
                 if (AcpConfigOptions.Find(after, "model") is { } chosen && string.Equals(AcpJson.GetString(chosen, "currentValue"), learned[index].Id, StringComparison.Ordinal))
                 {
-                    learned[index] = learned[index] with { Efforts = AcpConfigOptions.ReadEfforts(after), DefaultEffort = AcpConfigOptions.CurrentEffort(after) };
+                    learned[index] = learned[index] with
+                    {
+                        Efforts = AcpConfigOptions.ReadEfforts(after),
+                        DefaultEffort = AcpConfigOptions.CurrentEffort(after),
+                        Options = AcpConfigOptions.ReadModelOptions(after),
+                    };
                 }
             }
         }

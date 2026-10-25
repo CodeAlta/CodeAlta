@@ -129,6 +129,36 @@ public sealed class DesktopOwnedSessionTests
     });
 
     [TestMethod]
+    public Task ModelOptions_AreNamedByTheChoices_AndSetForTheModelOfTheSession() => RealFixture.RunAsync(async f =>
+    {
+        f.Host.ModelProviderRegistry.RegisterOrReplace(f.Provider.Descriptor, () => new OptionsRuntime(f.Provider));
+        await f.Wait(f.Host.ModelProviderInitializationService.RefreshProviderAsync(f.Provider.Descriptor.ProviderId));
+        f.Provider.Release.TrySetResult();
+        var service = new SessionOperationsService(f.Host.Commands, "fixture-epoch");
+        async Task<SessionChoicesResponse> SetAsync(string optionId, string value, string model = "fixture-model", string epoch = "fixture-epoch")
+            => await f.Wait(f.Keep(service.SetModelOptionAsync(new(epoch, f.SessionId, model, optionId, value), CancellationToken.None)));
+
+        var choices = await f.Wait(f.Keep(service.Choices(new("fixture-epoch", f.SessionId), CancellationToken.None)));
+        var options = choices.Models.Single().Options!;
+        CollectionAssert.AreEqual(new[] { "context", "fast" }, options.Select(static option => option.Id).ToArray());
+        Assert.AreEqual("300k", options[0].Value);
+        Assert.AreEqual("1M", options[0].Values[1].Name);
+        Assert.IsNull(options[0].Toggle);
+        Assert.AreEqual(true, options[1].Toggle, "an option that is on or off");
+
+        // The host keeps the option for the model, and answers the choices as they are then.
+        var set = await SetAsync("context", "1m");
+        Assert.AreEqual("ok", set.Status);
+        Assert.AreEqual("1m", set.Models.Single().Options![0].Value);
+        Assert.AreEqual("1m", (await f.Wait(f.Keep(service.Choices(new("fixture-epoch", f.SessionId), CancellationToken.None)))).Models.Single().Options![0].Value);
+        Assert.AreEqual(OwnedSessionCommandService.InvalidOption, (await SetAsync("context", "2m")).Status);
+        Assert.AreEqual(OwnedSessionCommandService.InvalidOption, (await SetAsync("speed", "1m")).Status);
+        Assert.AreEqual(OwnedSelectionCheck.InvalidModel, (await SetAsync("context", "1m", "other-model")).Status);
+        Assert.AreEqual("invalid_request", (await SetAsync(" ", "1m")).Status);
+        Assert.AreEqual("stale_epoch", (await SetAsync("fast", "true", epoch: "other-epoch")).Status);
+    });
+
+    [TestMethod]
     public Task Tier_IsRecordedForTheSession_AndNamedByItsChoices() => RealFixture.RunAsync(async f =>
     {
         f.Provider.Release.TrySetResult();
@@ -984,6 +1014,39 @@ public sealed class DesktopOwnedSessionTests
             provider.PermissionMode = options.PermissionMode;
             return Task.FromResult<IAgentSession>(new FakeSession(provider, sessionId, options.WorkingDirectory));
         }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    // A provider whose model has options (its context, a fast mode), which it keeps when they are set.
+    private sealed class OptionsRuntime(FakeProvider provider) : IModelProviderSessionRuntime, IModelProviderModelOptions
+    {
+        private readonly FakeRuntime _inner = new(provider);
+        private AgentModelInfo _model = new("fixture-model", "Fixture model")
+        {
+            Options =
+            [
+                new AgentModelOption("context", "Context", [new("300k", "300K"), new("1m", "1M")], "300k"),
+                new AgentModelOption("fast", "Fast", [new("false"), new("true")], "false"),
+            ],
+        };
+
+        public ModelProviderDescriptor Descriptor => provider.Descriptor;
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId, Availability = ModelProviderAvailability.Ready, Models = [_model] });
+        public Task<AgentModelInfo?> SetModelOptionAsync(string modelId, string optionId, string value, CancellationToken cancellationToken = default)
+        {
+            if (modelId != _model.Id) return Task.FromResult<AgentModelInfo?>(null);
+            var option = _model.Options!.FirstOrDefault(option => option.Id == optionId) ?? throw new ArgumentException("No such option.", nameof(optionId));
+            if (!option.Values.Any(offered => offered.Value == value)) throw new ArgumentException("No such value.", nameof(value));
+            _model = _model with { Options = [.. _model.Options!.Select(listed => listed.Id == optionId ? listed with { Value = value } : listed)] };
+            return Task.FromResult<AgentModelInfo?>(_model);
+        }
+        public IModelProviderTurnExecutor CreateTurnExecutor() => _inner.CreateTurnExecutor();
+        public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default) => _inner.CreateSessionAsync(options, cancellationToken);
+        public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
+            => _inner.ResumeSessionAsync(sessionId, options, cancellationToken);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

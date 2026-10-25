@@ -90,6 +90,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             ObservedImageModels = provider => modelProviderInitializationService.CurrentStates
                 .FirstOrDefault(state => state.ProviderId == provider && state.Descriptor.IsEnabled
                     && state.Availability == ModelProviderAvailability.Ready)?.Models ?? [],
+            ModelOptions = modelProviderInitializationService.SetModelOptionAsync,
         };
         Commands.Fallback.ProviderStates = () => modelProviderInitializationService.CurrentStates;
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);

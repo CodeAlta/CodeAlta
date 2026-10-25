@@ -40,7 +40,8 @@ When the agent is not signed in, its form says so and shows how to sign in. A co
 
 - The agent works with its own tools (reading and editing files, running commands) and asks before it acts. The [permission mode](../workspace/settings.md#tool-permissions) of the session answers for it: reads always, edits in **Accept edits**, everything in **Bypass permissions**; you are asked otherwise.
 - CodeAlta's tools reach it through an MCP server of the session: the `alta` tool, the tools of plugins, and the tools turned on during a turn, such as the [UI tools](../ui-tools.md) with `alta ui activate`.
-- The model list shows the agent's models with their names, limits and prices, and the reasoning levels of each, read when the provider is tested. A Cursor model runs at the level of its variant, such as **High** for `grok-4.7[context=256k,reasoning_effort=high,fast=true]`.
+- The model list shows the agent's models with their names, limits and prices, and the reasoning levels of each, read when the provider is tested. An agent with many models, such as Cursor, has the levels of the others read at its next tests.
+- A model that has other options, such as the context size or the fast mode of Cursor's models, shows them in the [Agent chip](../workspace/prompt.md#agent-and-model). CodeAlta sends them with every turn of that model.
 - Its tool calls, plan, thoughts and file changes appear in the timeline, and its usage, when it reports one, in the context usage of the session.
 - The agent keeps its own context and compacts it itself. After a restart, the session goes on in the same session of the agent when the agent can resume one; otherwise the agent is told the conversation.
 

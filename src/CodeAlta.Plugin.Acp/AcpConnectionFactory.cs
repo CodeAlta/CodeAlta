@@ -70,6 +70,8 @@ internal static class AcpClientInfo
     /// <summary>
     /// The capabilities of CodeAlta as a client: no file system and no terminal of its own (the agent uses its own
     /// tools, and asks before it runs them); a sign-in in a terminal; the notices and compactions the agent reports.
+    /// Cursor offers its models with their parameters (effort, context, fast) as options of their own, the way the
+    /// protocol names them, to a client that says <c>parameterizedModelPicker</c>; else one fixed variant of each model.
     /// </summary>
     public static ClientCapabilities CreateCapabilities()
         => new()
@@ -81,6 +83,10 @@ internal static class AcpClientInfo
             {
                 Compaction = new CompactionCapabilities(),
                 Notices = new NoticeCapabilities(),
+            },
+            Meta = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["parameterizedModelPicker"] = JsonSerializer.SerializeToElement(true, AcpPluginJsonContext.Default.Boolean),
             },
         };
 

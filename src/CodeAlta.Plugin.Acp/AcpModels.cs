@@ -25,9 +25,15 @@ internal sealed record AcpListedModel(string Id, string? Name, string? Descripti
     /// <summary>Gets the effort the agent chooses for the model, or <see langword="null"/>.</summary>
     public AgentReasoningEffort? DefaultEffort { get; init; }
 
+    /// <summary>
+    /// Gets the other options of the model (<c>model_config</c>, such as its context and a fast mode), with the values the
+    /// agent gave them, learned with its efforts: <see langword="null"/> while they are not known.
+    /// </summary>
+    public IReadOnlyList<AgentModelOption>? Options { get; init; }
+
     public static AcpListedModel From(AcpOptionValue value) => new(value.Value, value.Name, value.Description, value.Meta);
 
-    /// <summary>Keeps what was learned of each model before, when a new list does not tell its efforts.</summary>
+    /// <summary>Keeps what was learned of each model before, when a new list does not tell its efforts and options.</summary>
     public static IReadOnlyList<AcpListedModel> Merge(IReadOnlyList<AcpListedModel> listed, IReadOnlyList<AcpListedModel>? known)
     {
         if (known is not { Count: > 0 })
@@ -45,7 +51,7 @@ internal sealed record AcpListedModel(string Id, string? Name, string? Descripti
         }
 
         return [.. listed.Select(model => model.Efforts is null && learned.TryGetValue(model.Id, out var earlier)
-            ? model with { Efforts = earlier.Efforts, DefaultEffort = earlier.DefaultEffort }
+            ? model with { Efforts = earlier.Efforts, DefaultEffort = earlier.DefaultEffort, Options = model.Options ?? earlier.Options }
             : model)];
     }
 }
@@ -91,10 +97,17 @@ internal class AcpAgentQuirks
     public virtual string? CatalogProviderId => null;
 
     /// <summary>
-    /// Gets whether the probe chooses each model in turn to read its reasoning efforts. An agent that names them
-    /// otherwise, or for which it takes too long, does not.
+    /// Returns whether the probe chooses each of the models in turn to read its reasoning efforts and its options. An
+    /// agent that names them otherwise, or for which it takes too long, does not.
     /// </summary>
-    public virtual bool LearnsEffortsByModel => true;
+    public virtual bool LearnsEffortsByModel(IReadOnlyList<AcpListedModel> models) => true;
+
+    /// <summary>
+    /// Returns the value of the <c>model</c> option that stands for a model a session asks for: the model itself when
+    /// the agent lists it, else the one an agent with ways of its own lists for it; <see langword="null"/> for none.
+    /// </summary>
+    public virtual string? ListedModelId(string modelId, IReadOnlyList<string> listed)
+        => listed.Contains(modelId, StringComparer.Ordinal) ? modelId : null;
 
     /// <summary>Describes a model: its name and description as the agent gives them, the description left out when it only repeats the name.</summary>
     public virtual AcpModelFacts Describe(AcpListedModel model)
@@ -111,6 +124,22 @@ internal class AcpAgentQuirks
     protected static string CommandFileName(string command)
         => command[(command.LastIndexOfAny(['/', '\\']) + 1)..];
 
+    /// <summary>Reads a size of context as an agent writes it: <c>256k</c>, <c>1m</c>, <c>200000</c>.</summary>
+    internal static long? ParseTokens(string? value)
+    {
+        value = value?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(value))
+        {
+            return null;
+        }
+
+        var multiplier = value.EndsWith('k') ? 1_000L : value.EndsWith('m') ? 1_000_000L : 1L;
+        var digits = multiplier == 1 ? value : value[..^1];
+        return decimal.TryParse(digits, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var number) && number > 0
+            ? (long)(number * multiplier)
+            : null;
+    }
+
     /// <summary>Joins the parts of a description that are there.</summary>
     protected static string? Join(params string?[] parts)
     {
@@ -120,9 +149,11 @@ internal class AcpAgentQuirks
 }
 
 /// <summary>
-/// Cursor names a variant of a model by its parameters (<c>grok-4.7[context=256k,reasoning_effort=high,fast=true]</c>)
-/// and takes only the variants it lists: their reasoning effort is the one of their name, and the session has no
-/// option for it. Choosing each model would take half a minute, and Cursor keeps the last one chosen.
+/// Cursor lists its models by their names, and their parameters as options of the session (its effort, and its
+/// context and a fast mode as <c>model_config</c>), to a client that says <c>parameterizedModelPicker</c>
+/// (<see cref="AcpClientInfo.CreateCapabilities"/>). A version that does not lists one variant of each model, named by
+/// its parameters (<c>grok-4.7[context=256k,reasoning_effort=high,fast=true]</c>), and takes only the variants it
+/// lists: their reasoning effort is the one of their name, and the session has no option for it.
 /// </summary>
 internal sealed class CursorAcpQuirks : AcpAgentQuirks
 {
@@ -132,7 +163,16 @@ internal sealed class CursorAcpQuirks : AcpAgentQuirks
         => string.Equals(agent.AgentId, "cursor", StringComparison.OrdinalIgnoreCase) ||
            CommandFileName(agent.Command).StartsWith("cursor-agent", StringComparison.OrdinalIgnoreCase);
 
-    public override bool LearnsEffortsByModel => false;
+    // Choosing a variant would not tell what the others have, and Cursor keeps the last one chosen.
+    public override bool LearnsEffortsByModel(IReadOnlyList<AcpListedModel> models)
+        => !models.Any(static model => TryParse(model.Id, out _, out _));
+
+    /// <summary>
+    /// Returns the model a session of an earlier version names by its variant
+    /// (<c>claude-opus-5-5[context=300k,effort=medium,fast=false]</c>) as Cursor lists it now, by its name, when it does.
+    /// </summary>
+    public override string? ListedModelId(string modelId, IReadOnlyList<string> listed)
+        => base.ListedModelId(modelId, listed) ?? (TryParse(modelId, out var name, out _) && listed.Contains(name, StringComparer.Ordinal) ? name : null);
 
     public override AcpModelFacts Describe(AcpListedModel model)
     {
@@ -213,15 +253,6 @@ internal sealed class CursorAcpQuirks : AcpAgentQuirks
         return true;
     }
 
-    // 256k, 1m, 200000.
-    private static long? ParseTokens(string value)
-    {
-        var multiplier = value.EndsWith('k') ? 1_000L : value.EndsWith('m') ? 1_000_000L : 1L;
-        var digits = multiplier == 1 ? value : value[..^1];
-        return decimal.TryParse(digits, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var number) && number > 0
-            ? (long)(number * multiplier)
-            : null;
-    }
 }
 
 /// <summary>
@@ -250,27 +281,36 @@ internal sealed class CopilotAcpQuirks : AcpAgentQuirks
 /// <summary>Gives the models of an agent as the window shows them.</summary>
 internal static class AcpModels
 {
-    public static IReadOnlyList<AgentModelInfo> Present(IReadOnlyList<AcpListedModel> models, AcpAgentQuirks quirks, IPluginModelCatalog? catalog)
-        => [.. models.Select(model => Present(model, quirks, catalog))];
+    public static IReadOnlyList<AgentModelInfo> Present(IReadOnlyList<AcpListedModel> models, AcpAgentQuirks quirks, IPluginModelCatalog? catalog,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? choices = null)
+        => [.. models.Select(model => Present(model, quirks, catalog, choices is not null && choices.TryGetValue(model.Id, out var chosen) ? chosen : null))];
 
     /// <summary>
     /// Describes a model by what the agent says of it, then by the catalog of models. Its efforts, once known, are all it
-    /// has: CodeAlta sets no other one.
+    /// has: CodeAlta sets no other one. Its options have the values chosen in CodeAlta, else the ones the agent gave.
     /// </summary>
-    public static AgentModelInfo Present(AcpListedModel model, AcpAgentQuirks quirks, IPluginModelCatalog? catalog)
+    public static AgentModelInfo Present(AcpListedModel model, AcpAgentQuirks quirks, IPluginModelCatalog? catalog,
+        IReadOnlyDictionary<string, string>? chosen = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(quirks);
         var facts = quirks.Describe(model);
+        var options = model.Options is { Count: > 0 } listed
+            ? listed.Select(option => chosen is not null && chosen.TryGetValue(option.Id, out var value) &&
+                option.Values.Any(offered => string.Equals(offered.Value, value, StringComparison.Ordinal))
+                    ? option with { Value = value }
+                    : option).ToArray()
+            : null;
         var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal);
         if (facts.Efforts is not null)
         {
             capabilities[AgentReasoningEffortCapability.CompleteListKey] = true;
         }
 
-        if (facts.ContextWindow is { } context)
+        // The size of the variant the agent runs, or the one its option of context is set to, which the catalog does
+        // not replace.
+        if ((facts.ContextWindow ?? ContextOf(options)) is { } context)
         {
-            // The size of the variant the agent runs, which the catalog does not replace.
             capabilities["contextWindow"] = context;
             capabilities["contextWindowTokens"] = context;
         }
@@ -281,7 +321,16 @@ internal static class AcpModels
             facts.Description,
             DefaultReasoningEffort: facts.Efforts is { Count: > 0 } ? facts.DefaultEffort : null,
             SupportedReasoningEfforts: facts.Efforts,
-            Capabilities: capabilities.Count == 0 ? null : capabilities);
+            Capabilities: capabilities.Count == 0 ? null : capabilities)
+        {
+            Options = options,
+        };
         return catalog?.Describe(info, facts.CatalogModelId, quirks.CatalogProviderId) ?? info;
     }
+
+    // An option named for the context (Cursor's context, the context_size of the protocol) whose values are sizes.
+    private static long? ContextOf(IReadOnlyList<AgentModelOption>? options)
+        => options?.FirstOrDefault(static option => option.Id.Contains("context", StringComparison.OrdinalIgnoreCase)) is { } context
+            ? AcpAgentQuirks.ParseTokens(context.Value)
+            : null;
 }

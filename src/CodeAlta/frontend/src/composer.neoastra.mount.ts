@@ -18,6 +18,15 @@ const permission = () => (window as Window & { fixturePermission?: PermissionFix
  */
 type RemovedFixture = { replacement: string; switched: string[] };
 const removed = () => (window as Window & { fixtureRemoved?: RemovedFixture }).fixtureRemoved;
+/**
+ * What a test of the options of a model sets on the window: the model of the session has a context and a fast mode,
+ * with these values; `calls` are the `model:option=value` the host was asked for.
+ */
+type OptionsFixture = { context: string; fast: string; calls: string[] };
+const modelOptions = () => (window as Window & { fixtureModelOptions?: OptionsFixture }).fixtureModelOptions;
+const optionsOf = (fixture: OptionsFixture) => [
+  { id: "context", name: "Context", value: fixture.context, values: [{ value: "300k", name: "300K" }, { value: "1m", name: "1M" }] },
+  { id: "fast", name: "Fast", value: fixture.fast, values: [{ value: "false", name: "Off" }, { value: "true", name: "On" }], toggle: true }];
 // The provider of the session: the removed one until the host switched it.
 const provider = () => removed()?.switched.at(-1) ?? (removed() ? "fixture-removed" : "fixture-provider");
 export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "unavailable" }), setReviewBeforeCommit: async () => ({ status: "unavailable" }),
@@ -45,12 +54,19 @@ export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "u
       // A model whose provider says it has no reasoning effort (Haiku of Claude Code), when the test asks for one.
       models: [(window as Window & { fixtureNoReasoning?: boolean }).fixtureNoReasoning
         ? { id: "fixture-model", name: "Fixture model", efforts: [], effortsComplete: true, imageInput: null, startEffort: null }
-        : { id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"], imageInput: null, startEffort: "high" }],
+        : { id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"], imageInput: null, startEffort: "high",
+          ...(modelOptions() ? { options: optionsOf(modelOptions()!) } : {}) }],
       ...(modes ? { permissionModes: [{ id: "default" }, { id: "acceptEdits" }, { id: "bypassPermissions" }], defaultPermissionMode: "bypassPermissions" } : {}),
       // The provider of the session was taken out of its space.
       ...((window as Window & { fixtureOutsideSpace?: boolean }).fixtureOutsideSpace ? { providerOutsideSpace: true, providerName: "Fixture Business" } : {}) }),
   epoch: expectedEpoch, sessionId,
-}; }, setPermissionMode: async ({ expectedEpoch, sessionId, permissionMode }: { expectedEpoch: string; sessionId: string; permissionMode: string }) => {
+}; }, setModelOption: async ({ expectedEpoch, sessionId, modelId, optionId, value }: { expectedEpoch: string; sessionId: string; modelId: string; optionId: string; value: string }) => {
+  // The host keeps the option for the model and answers the choices as they are then.
+  const fixture = modelOptions()!;
+  fixture.calls.push(`${modelId}:${optionId}=${value}`);
+  if (optionId === "context") fixture.context = value; else if (optionId === "fast") fixture.fast = value;
+  return sessionOperations.choices({ expectedEpoch, sessionId });
+}, setPermissionMode: async ({ expectedEpoch, sessionId, permissionMode }: { expectedEpoch: string; sessionId: string; permissionMode: string }) => {
   // The host takes the mode at once, or refuses it: "provider" gives the session back the mode of its provider.
   const modes = permission()!;
   modes.calls.push(permissionMode);

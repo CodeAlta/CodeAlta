@@ -22,4 +22,13 @@ public sealed record AgentModelInfo(
     AgentReasoningEffort? DefaultReasoningEffort = null,
     IReadOnlyList<AgentReasoningEffort>? SupportedReasoningEfforts = null,
     [property: JsonConverter(typeof(AgentObjectDictionaryJsonConverter))]
-    IReadOnlyDictionary<string, object?>? Capabilities = null);
+    IReadOnlyDictionary<string, object?>? Capabilities = null)
+{
+    /// <summary>
+    /// Gets the choices of the model other than its reasoning effort, such as the size of its context or a fast mode,
+    /// with the values they have now: set through <see cref="IModelProviderModelOptions"/>. Null or empty for a model
+    /// that has none, or a provider that offers none.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<AgentModelOption>? Options { get; init; }
+}

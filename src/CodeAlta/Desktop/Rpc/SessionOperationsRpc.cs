@@ -214,7 +214,15 @@ internal sealed class SessionOperationsService
                     { PermissionMode = choices.Current.PermissionMode },
                 choices.Prompts.Select(p => new SessionPromptChoice(p.Id, p.Name)).ToArray(),
                 choices.Models.Select(m => new SessionModelChoice(m.Id, m.Name, m.Efforts.Select(e => e.ToString()).ToArray())
-                    { ImageInput = m.ImageInput, StartEffort = m.StartEffort?.ToString(), EffortsComplete = m.EffortsComplete ? true : null }).ToArray())
+                    {
+                        ImageInput = m.ImageInput, StartEffort = m.StartEffort?.ToString(), EffortsComplete = m.EffortsComplete ? true : null,
+                        Options = m.Options.Count == 0 ? null : [.. m.Options.Select(static option => new SessionModelOption(Bound(option.Id), Bound(option.Name),
+                            [.. option.Values.Take(32).Select(static value => new SessionModelOptionValue(Bound(value.Value), Bound(value.Name ?? value.Value)))], Bound(option.Value))
+                            {
+                                Description = option.Description is null ? null : Bound(option.Description),
+                                Toggle = option.IsToggle ? true : null,
+                            })],
+                    }).ToArray())
             {
                 PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode)).ToArray(),
                 DefaultPermissionMode = choices.DefaultPermissionMode,
@@ -234,6 +242,36 @@ internal sealed class SessionOperationsService
         catch (OperationCanceledException) { throw; }
         catch (Exception) { return new("unavailable", _epoch, request.SessionId, null, [], []); }
     }
+
+    /// <summary>
+    /// Sets an option of a model of the provider of a session (its context, a fast mode), for every session of the
+    /// provider, and answers the choices of the session as they are then.
+    /// </summary>
+    [NeoRpcMethod("setModelOption")]
+    public async Task<SessionChoicesResponse> SetModelOptionAsync(SessionModelOptionRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null, [], []);
+            if (!Identity(request.SessionId, 256) || !Identity(request.ModelId, 256) || !Identity(request.OptionId, 256) || !Identity(request.Value, 256))
+                return new("invalid_request", _epoch, request.SessionId, null, [], []);
+        }
+
+        if (_commands is null) return new("unavailable", _epoch, request.SessionId, null, [], []);
+        try
+        {
+            var status = await _commands.SetModelOptionAsync(request.SessionId, request.ModelId, request.OptionId, request.Value, cancellationToken).ConfigureAwait(false);
+            return status == OwnedSelectionCheck.Ok
+                ? await Choices(new(request.ExpectedEpoch, request.SessionId), cancellationToken).ConfigureAwait(false)
+                : new(status, _epoch, request.SessionId, null, [], []);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception) { return new("unavailable", _epoch, request.SessionId, null, [], []); }
+    }
+
+    private static string Bound(string value) => value.Length <= 256 ? value : value[..256];
 
     [NeoRpcMethod("providerChoices")]
     public async Task<SessionProviderChoices> ProviderChoicesAsync(SessionChoicesRequest request, CancellationToken cancellationToken)
@@ -757,7 +795,21 @@ internal sealed record SessionModelChoice(string Id, string Name, IReadOnlyList<
     // where an effort the model does not list may still be sent.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? EffortsComplete { get; init; }
+    // The other choices of the model (its context, a fast mode), set for the model in every session of its provider;
+    // absent for a model that has none.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<SessionModelOption>? Options { get; init; }
 }
+internal sealed record SessionModelOption(string Id, string Name, IReadOnlyList<SessionModelOptionValue> Values, string Value)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; init; }
+    // True when the option is on or off: its values are "false" and "true".
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Toggle { get; init; }
+}
+internal sealed record SessionModelOptionValue(string Value, string Name);
+internal sealed record SessionModelOptionRequest(string ExpectedEpoch, string SessionId, string ModelId, string OptionId, string Value);
 internal sealed record SessionChoicesResponse(string Status, string? Epoch, string SessionId, SessionSelection? Current,
     IReadOnlyList<SessionPromptChoice> Prompts, IReadOnlyList<SessionModelChoice> Models)
 {

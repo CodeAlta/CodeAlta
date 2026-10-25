@@ -15,15 +15,17 @@ const edge = browserExecutable;
 // refuses a Send, starts and ends the run, and takes steering. The last scenario is the permission mode of a session
 // whose model and effort are no longer a pair its provider lists: the host is asked for the mode alone. The session
 // whose provider is no longer in its space sends nothing and opens its configuration. The session whose provider was
-// removed from the configuration takes the default provider by itself.
+// removed from the configuration takes the default provider by itself. The model whose provider offers options (its
+// context, a fast mode) shows them in the form of the Agent chip, and the host is asked for each change.
 const scenarios = [
-  { name: "composer sends, enqueues and explicitly steers on Windows", mac: false, permission: false, outside: false, removed: false },
-  { name: "composer sends, enqueues and explicitly steers on macOS", mac: true, permission: false, outside: false, removed: false },
-  { name: "composer sends the permission mode of a session whose saved selection is not valid", mac: false, permission: true, outside: false, removed: false },
-  { name: "composer asks for another provider when the one of the session is not in its space", mac: false, permission: false, outside: true, removed: false },
-  { name: "composer switches a session whose provider was removed to the default provider", mac: false, permission: false, outside: false, removed: true },
+  { name: "composer sends, enqueues and explicitly steers on Windows", mac: false, permission: false, outside: false, removed: false, options: false },
+  { name: "composer sends, enqueues and explicitly steers on macOS", mac: true, permission: false, outside: false, removed: false, options: false },
+  { name: "composer sends the permission mode of a session whose saved selection is not valid", mac: false, permission: true, outside: false, removed: false, options: false },
+  { name: "composer asks for another provider when the one of the session is not in its space", mac: false, permission: false, outside: true, removed: false, options: false },
+  { name: "composer switches a session whose provider was removed to the default provider", mac: false, permission: false, outside: false, removed: true, options: false },
+  { name: "composer sets the options of the model of the session", mac: false, permission: false, outside: false, removed: false, options: true },
 ];
-for (const { name, mac, permission, outside, removed } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
+for (const { name, mac, permission, outside, removed, options } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -105,7 +107,8 @@ for (const { name, mac, permission, outside, removed } of scenarios) test(name, 
       window.promptText=()=>(document.querySelector('#session-prompt .view-lines')?.textContent??'').replaceAll('\\u00a0',' ');
       ${permission ? "window.fixturePermission={effort:'max',mode:null,status:'ok',calls:[]};" : ""}
       ${outside ? "window.fixtureOutsideSpace=true;" : ""}
-      ${removed ? "window.fixtureRemoved={replacement:'fixture-provider',switched:[]};" : ""}` });
+      ${removed ? "window.fixtureRemoved={replacement:'fixture-provider',switched:[]};" : ""}
+      ${options ? "window.fixtureModelOptions={context:'300k',fast:'false',calls:[]};" : ""}` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
@@ -141,6 +144,32 @@ for (const { name, mac, permission, outside, removed } of scenarios) test(name, 
       assert.equal(await wait("fixture.sendCalls.length===1"), true);
       assert.equal(await evaluate("fixture.sendCalls[0].selection?.providerKey"), "fixture-provider");
       assert.deepEqual(await evaluate("window.fixtureRemoved.switched"), ["fixture-provider"]);
+      assert.deepEqual(exceptions, []);
+      return;
+    }
+
+    if (options) {
+      // The options are under the reasoning: a list for the context, a switch for the fast mode.
+      const chip = "document.querySelector('.composer-selection')";
+      const context = "document.querySelector('#composer-option-fixture-session-context')";
+      const fast = "document.querySelector('#composer-option-fixture-session-fast')";
+      await evaluate(`${chip}.click()`);
+      assert.equal(await wait(`!!${context} && !!${fast}`), true, "the form of the Agent chip has the options of the model");
+      assert.equal(await evaluate(`${context}.value`), "300k");
+      assert.equal(await evaluate(`${fast}.checked`), false);
+      await evaluate(`(() => { const select = ${context}; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, '1m');
+        select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+      assert.equal(await wait(`fixtureModelOptions.calls.length===1 && ${context}.value==='1m'`), true);
+      await evaluate(`${fast}.click()`);
+      assert.equal(await wait(`fixtureModelOptions.calls.length===2 && ${fast}.checked`), true);
+      assert.deepEqual(JSON.parse(await evaluate("JSON.stringify(fixtureModelOptions.calls)")), ["fixture-model:context=1m", "fixture-model:fast=true"]);
+      // The options are the model's, kept by the host: a Send names none of them, nor any other choice.
+      await evaluate(`${chip}.click()`);
+      assert.equal(await wait("!document.querySelector('.composer-selection-popover')"), true);
+      await write("with the options"); await enter();
+      assert.equal(await wait(`fixture.sendCalls.length===1 && ${running}`), true);
+      assert.equal(await evaluate("JSON.stringify(fixture.sendCalls[0].selection ?? null)"), "null");
+      assert.equal(await evaluate("document.querySelectorAll('.bp6-toast').length"), 0);
       assert.deepEqual(exceptions, []);
       return;
     }

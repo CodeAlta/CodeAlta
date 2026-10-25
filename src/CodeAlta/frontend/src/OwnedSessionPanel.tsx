@@ -46,7 +46,7 @@ import { useProviderName } from "./ProviderIcon";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { composerTierEntries, tierLabels, useTiers, type TierName } from "./modelTiers";
-import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
+import { ComposerSurface, ComposerSelectionFields, ModelOptionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { showToast } from "./appToaster";
 import { PermissionModeSelect } from "./PermissionModeSelect";
 import { ReviewBeforeCommitSelect } from "./ReviewBeforeCommitSelect";
@@ -1194,6 +1194,23 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     else if (!selections.set(epoch, sessionId, updated, kept)) { setChoices(updated); setSelection(kept); }
     setChoicesNotice("");
   }
+  // An option of a model (its context, a fast mode) is the model's, in every session of its provider: the host keeps it,
+  // and the choices it answers have it.
+  // One change at a time: the controls wait for the answer, which names every option of the model.
+  const [optionBusy, setOptionBusy] = useState(false);
+  async function applyModelOption(modelId: string, optionId: string, value: string) {
+    const signal = scope.current?.signal;
+    if (!signal || signal.aborted || !canAdmit() || selectionDisabled || optionBusy) return;
+    setOptionBusy(true);
+    const result = await sessions.setModelOption({ expectedEpoch: epoch, sessionId, modelId, optionId, value }, { signal }).catch(() => null)
+      .finally(() => { if (!signal.aborted) setOptionBusy(false); });
+    if (signal.aborted) return;
+    if (result?.status !== "ok" || result.epoch !== epoch || result.sessionId !== sessionId) {
+      showToast({ message: t("The option was not changed ({status}).", { status: result?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
+    setChoices(current => current && current.sessionId === sessionId ? { ...current, models: result.models } : current);
+  }
   const selectedModel = activeChoices?.models.find(m => m.id === selected?.modelId);
   const efforts = selectedModel?.efforts ?? null;
   const reasoning = reasoningShown(selected?.reasoningEffort ?? null, selectedModel);
@@ -1403,6 +1420,8 @@ ${value}` : value);
         title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />}
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} complete={!!selectedModel?.effortsComplete} model={selectedModel?.name} disabled={selectionDisabled}
         onChange={value => select("reasoningEffort", value)} />}
+      modelOptions={selectedModel?.options?.length ? <ModelOptionFields sessionId={sessionId} options={selectedModel.options} disabled={selectionDisabled || optionBusy}
+        onChange={(optionId, value) => void applyModelOption(selectedModel.id, optionId, value)} /> : undefined}
       review={shownReview && <ReviewBeforeCommitSelect id={`composer-review-${sessionId}`} own={shownReview.own} setting={shownReview.setting}
         disabled={invalidEpoch} onChange={value => void applyReview(value)} />}
       permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
