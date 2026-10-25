@@ -5310,25 +5310,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var states = context.Services.Get<IModelProviderInitializationService>()?.CurrentStates ?? [];
-        foreach (var target in tiers.Get(tier))
+        if (ModelTierSelection.SelectForNewSession(scope, tier, states, key => FindProviderDescriptor(context, key), requestedReasoning) is { } choice)
         {
-            if (!scope.IsProviderAvailable(target.ProviderKey)) continue;
-            if (FindProviderDescriptor(context, target.ProviderKey) is not { IsEnabled: true }) continue;
-            var state = states.FirstOrDefault(state => string.Equals(state.ProviderId.Value, target.ProviderKey, StringComparison.OrdinalIgnoreCase));
-            // A provider that was not probed yet may still answer; one that is known not to is skipped.
-            if (state is not null && state.Availability is not (ModelProviderAvailability.Ready or ModelProviderAvailability.Unknown or ModelProviderAvailability.Probing)) continue;
-            var model = state?.Models.FirstOrDefault(model => string.Equals(model.Id, target.ModelId, StringComparison.OrdinalIgnoreCase));
-            if (state is { Availability: ModelProviderAvailability.Ready, Models.Count: > 0 } && model is null) continue;
-            var reasoning = requestedReasoning
-                ?? (model?.SupportedReasoningEfforts is { Count: > 0 } supported && target.Reasoning.Count > 0
-                    ? target.Reasoning.FirstOrDefault(supported.Contains, target.Reasoning[0])
-                    : target.PreferredReasoning);
             var selection = new AltaModelSelection
             {
-                ProviderKey = target.ProviderKey,
-                ModelId = target.ModelId,
-                ReasoningEffort = reasoning,
-                ModelRef = AltaModelRef.Format(target.ProviderKey, target.ModelId, reasoning),
+                ProviderKey = choice.ProviderKey,
+                ModelId = choice.ModelId,
+                ReasoningEffort = choice.Reasoning,
+                ModelRef = AltaModelRef.Format(choice.ProviderKey, choice.ModelId, choice.Reasoning),
             };
             var result = await ValidateAndCompleteModelSelectionAsync(context, selection, requestedReasoning, commandPath, sessionPreparation).ConfigureAwait(false);
             return result with { Tier = tier };
