@@ -105,6 +105,105 @@ public sealed class ExternalSessionFollowerTests
         Assert.IsTrue(await ListsAsync(desktop, session.SessionId));
     }
 
+    [TestMethod]
+    public async Task RunningSession_IsListedWithinTheFollowInterval_NotTheRelistPeriod()
+    {
+        await using var root = new HeadlessTestRoot();
+        var provider = new ScriptedTurnProvider();
+        var (cli, desktop) = await CreateHostsAsync(root, provider);
+        Assert.IsFalse(await ListsAsync(desktop, "none"));
+        // The instance runs before the command line starts, as it does: what it sees is told by its watchers and its follow.
+        await using var follower = new ExternalSessionFollower(desktop.CatalogOptions, desktop.SessionViewCatalog.JournalStore.CreateSessionStore(),
+            desktop.AgentSessionCatalog, desktop.RuntimeService) { FollowInterval = TimeSpan.FromMilliseconds(200), RelistInterval = TimeSpan.FromHours(1) };
+        var changes = Record(follower);
+        follower.Start();
+
+        var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
+        var session = await cli.RuntimeService.CreateProjectSessionAsync(cli.CurrentProject, options, "From the command line");
+        var markers = new SessionMarkerStore(desktop.CatalogOptions);
+        markers.Write(MarkerOf(cli, session.SessionId));
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        provider.Turns.Enqueue(ScriptedTurnProvider.WaitThenReply(gate.Task, "done.", started));
+        var send = cli.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("run") });
+        try
+        {
+            await started.Task.WaitAsync(Hang);
+            // Well within the period of the listing: the watchers and the follow cadence tell it.
+            var listed = false;
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTime.UtcNow < deadline && !(listed = await ListsAsync(desktop, session.SessionId) && markers.List().Count == 0
+                && follower.GetHold(session.SessionId) is not null))
+                await Task.Delay(50);
+
+            Assert.IsTrue(listed, $"The running session is listed while it runs (listed: {await ListsAsync(desktop, session.SessionId)}, "
+                + $"markers left: {markers.List().Count}, followed: {follower.GetHold(session.SessionId) is not null}, "
+                + $"changes: {string.Join(", ", changes.Select(static change => change.Kind))}).");
+            Assert.AreEqual(SessionLeaseOwner.CliKind, follower.GetHold(session.SessionId)?.HolderKind, "The running session is followed.");
+        }
+        finally
+        {
+            gate.TrySetResult();
+        }
+
+        // The end of the turn grows the journal while the command line still holds the session: the change is told.
+        var length = follower.GetHold(session.SessionId)!.JournalLength;
+        changes.Clear();
+        await send.WaitAsync(Hang);
+        await cli.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        await WaitUntilAsync(() => changes.Any(static change => change.Kind == ExternalSessionChangeKind.Updated)
+            && follower.GetHold(session.SessionId)?.JournalLength > length, "The grown journal of a held session is told as an update.");
+        Assert.IsTrue(await cli.RuntimeService.DetachRuntimeSessionAsync(session.SessionId));
+        await WaitUntilAsync(() => follower.GetHold(session.SessionId) is null, "The released session is no longer followed.");
+        CollectionAssert.Contains(changes.Select(static change => change.Kind).ToArray(), ExternalSessionChangeKind.Released);
+    }
+
+    [TestMethod]
+    public async Task Marker_WhoseJournalIsNotASessionYet_IsProjectedAtTheFollowPace_WhileAnotherHandleAppends()
+    {
+        await using var root = new HeadlessTestRoot();
+        var provider = new ScriptedTurnProvider();
+        var (cli, desktop) = await CreateHostsAsync(root, provider);
+        Assert.IsFalse(await ListsAsync(desktop, "none"));
+        var session = await RunInCliAsync(cli, provider, root, "hello");
+        Assert.IsTrue(await cli.RuntimeService.DetachRuntimeSessionAsync(session.SessionId));
+        var marker = MarkerOf(cli, session.SessionId);
+        var markers = new SessionMarkerStore(desktop.CatalogOptions);
+        var journal = markers.GetJournalPath(marker);
+        var records = await File.ReadAllBytesAsync(journal);
+        // The journal is there, not a session yet: as the command line has it before it writes its first records.
+        await File.WriteAllBytesAsync(journal, []);
+        await using var follower = new ExternalSessionFollower(desktop.CatalogOptions, desktop.SessionViewCatalog.JournalStore.CreateSessionStore(),
+            desktop.AgentSessionCatalog, desktop.RuntimeService) { FollowInterval = TimeSpan.FromMilliseconds(200), RelistInterval = TimeSpan.FromHours(1) };
+        var changes = Record(follower);
+        follower.Start();
+        markers.Write(marker);
+        await Task.Delay(500);
+        Assert.AreEqual(1, markers.List().Count, "A marker whose journal is not a session yet is kept.");
+
+        // Another process appends, as a journal writer does, and keeps its handle open on a record it has not finished:
+        // no watcher sees the journal grow.
+        await using var writer = new FileStream(journal, FileMode.Append, FileAccess.Write, FileShare.Read, bufferSize: 0);
+        await writer.WriteAsync(records);
+        await writer.WriteAsync("{\"$type\":\"raw\",\"backendEventType\":\"local.sessionSummary\",\"raw\":{"u8.ToArray());
+        await writer.FlushAsync();
+
+        await WaitUntilAsync(() => markers.List().Count == 0, "The marker is projected at the follow pace, not the listing period.", TimeSpan.FromSeconds(3));
+        Assert.IsTrue(await ListsAsync(desktop, session.SessionId), "The session the marker named is listed.");
+        CollectionAssert.AreEqual(new[] { (session.SessionId, ExternalSessionChangeKind.Listed) },
+            changes.Select(static change => (change.SessionId, change.Kind)).ToArray());
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, string message, TimeSpan? within = null)
+    {
+        var deadline = DateTime.UtcNow + (within ?? TimeSpan.FromSeconds(5));
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline) Assert.Fail(message);
+            await Task.Delay(50);
+        }
+    }
+
     private static async Task<(CodeAltaHost Cli, CodeAltaHost Desktop)> CreateHostsAsync(HeadlessTestRoot root, ScriptedTurnProvider provider)
     {
         // The command line on a private database, the instance on the database of the state root, both on one sessions folder.

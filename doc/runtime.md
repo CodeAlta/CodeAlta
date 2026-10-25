@@ -334,7 +334,8 @@ its own database. Two rules keep one writer per session across processes:
 - **Following.** A host that owns the database of its state root (`FollowExternalSessions`: Desktop, TUI) runs
   `ExternalSessionFollower`: it projects the sessions the command line names in markers, then deletes the markers;
   it follows the sessions another process holds, projecting their journals again as they grow (head and tail only,
-  about once a second, only while held) and once more when released, and raises `Changed` for the frontends. The
+  about once a second, only while held; a marker whose journal is not a session yet is looked at again at that pace)
+  and once more when released, and raises `Changed` for the frontends. The
   folders are watched and listed again on a bounded period, since watchers drop events. This and the reconciliation
   are the only projections of journals another process writes.
 

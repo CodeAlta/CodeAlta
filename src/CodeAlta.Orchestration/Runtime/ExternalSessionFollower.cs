@@ -39,7 +39,8 @@ public sealed record ExternalSessionHold(string SessionId, string? HolderKind, i
 /// session it creates in a marker (<see cref="SessionMarkerStore"/>), and holds the lease of each session it runs
 /// (<see cref="SessionLeaseStore"/>). The follower projects the sessions the markers name into the application database,
 /// then deletes the markers; it follows the sessions another process holds, projecting their journals again as they grow
-/// (about once a second, only while they are held), and once more when they are released.
+/// (about once a second, only while they are held), and once more when they are released. A marker whose journal is not a
+/// session yet is looked at again at that pace too.
 /// </summary>
 /// <remarks>
 /// Only a host that owns the application database of its state root runs one (CodeAlta Desktop and TUI). The folders are
@@ -84,7 +85,7 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
         _runtime = runtime;
     }
 
-    /// <summary>Gets how often the journals of the sessions another process holds are looked at.</summary>
+    /// <summary>Gets how often the journals of the sessions another process holds, and the markers kept, are looked at.</summary>
     public TimeSpan FollowInterval { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>Gets how often the markers and the leases are listed again without a sign from the watchers.</summary>
@@ -138,7 +139,7 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
         {
             await ProjectMarkersAsync(cancellationToken).ConfigureAwait(false);
             DiscoverHeld();
-            await FollowAsync(cancellationToken).ConfigureAwait(false);
+            await FollowAsync(lookUpJournals: true, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -201,9 +202,12 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
     {
         var token = _stop.Token;
         var lastRelist = DateTimeOffset.MinValue;
+        // The sign the loop waits for, kept from one turn to the next: a watcher completes it and puts a new one in its
+        // place, which the loop takes only when it lists the folders again.
+        var signal = Volatile.Read(ref _signal).Task;
+        var pending = false;
         while (!token.IsCancellationRequested)
         {
-            var signal = Volatile.Read(ref _signal).Task;
             try
             {
                 await _pass.WaitAsync(token).ConfigureAwait(false);
@@ -212,14 +216,20 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
                     var now = DateTimeOffset.UtcNow;
                     if (signal.IsCompleted || now - lastRelist >= RelistInterval)
                     {
-                        Interlocked.Exchange(ref _signal, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
-                        signal = Volatile.Read(ref _signal).Task;
+                        var next = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                        Interlocked.Exchange(ref _signal, next);
+                        signal = next.Task;
                         lastRelist = now;
-                        await ProjectMarkersAsync(token).ConfigureAwait(false);
+                        pending = await ProjectMarkersAsync(token).ConfigureAwait(false);
                         DiscoverHeld();
+                        await FollowAsync(lookUpJournals: true, token).ConfigureAwait(false);
                     }
-
-                    await FollowAsync(token).ConfigureAwait(false);
+                    else
+                    {
+                        // A marker whose journal is not a session yet is looked at again with the sessions followed.
+                        if (pending) pending = await ProjectMarkersAsync(token).ConfigureAwait(false);
+                        await FollowAsync(lookUpJournals: false, token).ConfigureAwait(false);
+                    }
                 }
                 finally
                 {
@@ -242,7 +252,7 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
 
             bool following;
             lock (_gate) following = _followed.Count > 0;
-            var wait = following ? FollowInterval : RelistInterval;
+            var wait = following || pending ? FollowInterval : RelistInterval;
             try
             {
                 // A burst of watcher events (the leases of the tabs of this instance) is taken in one pass.
@@ -257,9 +267,10 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
     }
 
     // Projects the sessions the markers name, then deletes the markers; a marker whose journal is gone is dropped, one whose
-    // journal is not a session yet is kept for the next pass.
-    private async Task ProjectMarkersAsync(CancellationToken cancellationToken)
+    // journal is not a session yet is kept for the next pass. Returns whether one was kept.
+    private async Task<bool> ProjectMarkersAsync(CancellationToken cancellationToken)
     {
+        var kept = false;
         foreach (var marker in _markers.List())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -280,7 +291,12 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
                 continue;
             }
 
-            if (!await _store.ProjectJournalAsync(journal, cancellationToken).ConfigureAwait(false)) continue;
+            if (!await _store.ProjectJournalAsync(journal, cancellationToken).ConfigureAwait(false))
+            {
+                kept = true;
+                continue;
+            }
+
             await _catalog.InvalidateAsync(marker.SessionId, cancellationToken).ConfigureAwait(false);
             lock (_gate)
             {
@@ -290,6 +306,8 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
             Drop(marker.SessionId);
             Raise(new ExternalSessionChange(marker.SessionId, ExternalSessionChangeKind.Listed, null));
         }
+
+        return kept;
     }
 
     private void Drop(string sessionId)
@@ -324,8 +342,10 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
         foreach (var change in taken) Raise(change);
     }
 
-    // Projects the journals of the followed sessions that grew, and once more those that were released.
-    private async Task FollowAsync(CancellationToken cancellationToken)
+    // Projects the journals of the followed sessions that grew, and once more those that were released. The journal of a
+    // session is the one its marker names; the store looks for it (in every journal, at worst) only when the folders are
+    // listed again (lookUpJournals), not at each look.
+    private async Task FollowAsync(bool lookUpJournals, CancellationToken cancellationToken)
     {
         Followed[] followed;
         lock (_gate) followed = [.. _followed.Values];
@@ -334,7 +354,9 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             var holder = _leases.TryReadHolder(session.SessionId);
             var released = holder is null || _runtime.GetHeldSessionLeases().Contains(session.SessionId, StringComparer.OrdinalIgnoreCase);
-            session.Journal ??= await _store.GetJournalPathAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+            session.Journal ??= MarkedJournal(session.SessionId);
+            if (session.Journal is null && (lookUpJournals || released))
+                session.Journal = await _store.GetJournalPathAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
             var stamp = session.Journal is { } path ? Stamp(path) : null;
             if (stamp is not null && stamp != session.Stamp)
             {
@@ -351,6 +373,19 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
             // The frontend shows it perhaps: its lease is taken now that the other process let it go.
             _runtime.RetryShownSessionLeases();
             Raise(new ExternalSessionChange(session.SessionId, ExternalSessionChangeKind.Released, null));
+        }
+    }
+
+    // The journal the marker of a session names, when it has one and the journal is there.
+    private string? MarkedJournal(string sessionId)
+    {
+        try
+        {
+            return _markers.TryRead(sessionId) is { } marker && _markers.GetJournalPath(marker) is var path && File.Exists(path) ? path : null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
         }
     }
 
