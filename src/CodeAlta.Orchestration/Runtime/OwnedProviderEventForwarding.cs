@@ -24,6 +24,25 @@ internal sealed class OwnedProviderEventForwarding
     internal int ActiveWorkCount { get { lock (_gate) return _active.Count; } }
     internal int RetainedWorkCount { get { lock (_gate) return _retainedWork.Count; } }
 
+    // Completes at the next change of the work this owner holds (a callback forwarded, work admitted or ended).
+    internal Task Changed { get { lock (_gate) return _changed.Task; } }
+
+    // Whether the provider callbacks of a session are still being forwarded on one of its attachments (their projection,
+    // the plugins, and what they start: a parent notification, a queue drain, a fallback), or work holds the handle of one.
+    internal bool HasSessionWork(string sessionId)
+    {
+        lock (_gate)
+        {
+            foreach (var attachment in _attachments)
+            {
+                if ((attachment.ActiveCallbacks > 0 || attachment.WorkUses > 0)
+                    && string.Equals(attachment.Identity.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+
+            return false;
+        }
+    }
+
     internal static bool HasRetention(Exception failure)
     {
         ArgumentNullException.ThrowIfNull(failure);

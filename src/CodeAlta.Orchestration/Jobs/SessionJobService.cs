@@ -196,6 +196,27 @@ public sealed class SessionJobService : IAsyncDisposable
         lock (_gate) return _jobs.Values.Count(job => job.State == SessionJobState.Running && job.Process is not null && string.Equals(job.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
     }
 
+    // Whether a job of a session has not settled: it runs, or the prompt that tells its end is still being delivered.
+    internal bool HasUnsettled(string sessionId)
+    {
+        lock (_gate) return UnsettledRuns(sessionId).Any() || _pendingDeliveries.Any(job => string.Equals(job.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Completes when the jobs of a session that have not settled now have: their run includes the delivery of their end.
+    internal Task WhenSessionSettledAsync(string sessionId)
+    {
+        Task[] runs;
+        lock (_gate) runs = [.. UnsettledRuns(sessionId).Concat(_pendingDeliveries.Where(job => string.Equals(job.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
+            .Select(static job => job.Run ?? job.Ended.Task))];
+        return runs.Length == 0 ? Task.CompletedTask : Task.WhenAll(runs).ContinueWith(static _ => { }, CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    // Called under _gate. A job being started has no run yet: it is waited for with its end.
+    private IEnumerable<Task> UnsettledRuns(string sessionId)
+        => _jobs.Values.Where(job => string.Equals(job.SessionId, sessionId, StringComparison.OrdinalIgnoreCase) && job.Run is not { IsCompleted: true })
+            .Select(static job => job.Run ?? job.Ended.Task);
+
     /// <summary>Lists the sessions that have a job running.</summary>
     /// <returns>Their identities, each once.</returns>
     public IReadOnlyList<string> ListSessionsWithRunningJobs()

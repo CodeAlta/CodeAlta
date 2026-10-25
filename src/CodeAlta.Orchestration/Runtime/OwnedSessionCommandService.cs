@@ -192,6 +192,23 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         if (enableAsks) runtime.RunAsks = Asks;
         Fallback = new SessionFallbackCoordinator(this, runtime);
         runtime.RunFailureFallback = Fallback.TryClaim;
+        runtime.OwnedWork = HasWork;
+    }
+
+    // Whether a command of this owner for a session is under way (a send, a queued prompt, a steer, a compaction, an
+    // abort), or a fallback that continues its failed run: the settlement of the session waits for it.
+    private bool HasWork(string sessionId)
+    {
+        lock (_gate)
+        {
+            if (!_closed && (_active.ContainsKey(sessionId) || _steering.Contains(sessionId) || _compacting.Contains(sessionId)
+                || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId)
+                || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId)
+                || _queues.Values.Any(operation => !operation.Released && operation.Request.SessionId == sessionId)))
+                return true;
+        }
+
+        return Fallback.IsRunning(sessionId);
     }
 
     /// <summary>Gets what goes on with the next model of a session's tier when a run fails on its provider.</summary>
@@ -1223,6 +1240,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         operation.Released = operation.ReleaseDecision.Released;
         _active.Remove(operation.SessionId);
         operation.Receipt.Complete(result);
+        // Its session may have settled with it. Under _gate: the signal only completes a task, whose waiters run elsewhere.
+        _runtime.PulseSettlement();
     }
 
     private void RecordFailure(Exception failure, bool cleanup, DependencyReleaseDecision? decision = null)

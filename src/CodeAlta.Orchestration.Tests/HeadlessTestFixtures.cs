@@ -31,8 +31,21 @@ internal sealed class ScriptedTurnProvider
     /// <summary>Gets the steps of the next turns, in order.</summary>
     internal ConcurrentQueue<Func<AgentTurnRequest, CancellationToken, Task<AgentTurnResponse>>> Turns { get; } = new();
 
+    /// <summary>Gets the steps of the next turns of one session, taken before <see cref="Turns"/>.</summary>
+    internal ConcurrentDictionary<string, ConcurrentQueue<Func<AgentTurnRequest, CancellationToken, Task<AgentTurnResponse>>>> SessionTurns { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Gets the requests the provider was sent, in order.</summary>
     internal ConcurrentQueue<AgentTurnRequest> Requests { get; } = new();
+
+    /// <summary>Adds steps for the next turns of one session.</summary>
+    internal void Script(string sessionId, params Func<AgentTurnRequest, CancellationToken, Task<AgentTurnResponse>>[] steps)
+    {
+        var queue = SessionTurns.GetOrAdd(sessionId, static _ => new());
+        foreach (var step in steps) queue.Enqueue(step);
+    }
+
+    /// <summary>The requests sent for one session, in order.</summary>
+    internal AgentTurnRequest[] RequestsOf(string sessionId) => [.. Requests.Where(request => string.Equals(request.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))];
 
     internal void Register(ModelProviderRegistry registry)
         => registry.RegisterOrReplace(Descriptor, () => new Runtime(this));
@@ -57,11 +70,20 @@ internal sealed class ScriptedTurnProvider
     internal static Func<AgentTurnRequest, CancellationToken, Task<AgentTurnResponse>> Fail(AgentFailureKind kind, string message = "scripted failure")
         => (_, _) => Task.FromException<AgentTurnResponse>(new AgentProviderFailureException(message, new AgentFailureInfo(kind)));
 
-    /// <summary>A step that waits for a gate, then answers.</summary>
-    internal static Func<AgentTurnRequest, CancellationToken, Task<AgentTurnResponse>> WaitThenReply(Task gate, string text)
+    /// <summary>A step that tells it started, waits for a gate, then answers.</summary>
+    internal static Func<AgentTurnRequest, CancellationToken, Task<AgentTurnResponse>> WaitThenReply(Task gate, string text, TaskCompletionSource? started = null)
         => async (_, cancellationToken) =>
         {
+            started?.TrySetResult();
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return Answer(text);
+        };
+
+    /// <summary>A step that runs an action of the test, then answers.</summary>
+    internal static Func<AgentTurnRequest, CancellationToken, Task<AgentTurnResponse>> DoThenReply(Func<Task> action, string text)
+        => async (_, _) =>
+        {
+            await action().ConfigureAwait(false);
             return Answer(text);
         };
 
@@ -117,7 +139,8 @@ internal sealed class ScriptedTurnProvider
             CancellationToken cancellationToken = default)
         {
             owner.Requests.Enqueue(request);
-            var step = owner.Turns.TryDequeue(out var next) ? next : Reply("Done.");
+            var step = owner.SessionTurns.TryGetValue(request.SessionId, out var own) && own.TryDequeue(out var scripted) ? scripted
+                : owner.Turns.TryDequeue(out var next) ? next : Reply("Done.");
             return await step(request, cancellationToken).ConfigureAwait(false);
         }
     }

@@ -140,6 +140,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         Jobs = new SessionJobService(DeliverJobResultAsync);
         _sessionViewCatalog.JournalStore.StateAppended += OnSessionStateAppended;
         instructionTemplateProvider.SessionToolPatterns = GetDisabledToolPatterns;
+        _events.Published = PulseSettlement;
     }
 
     // A state written to a journal (a prompt queued or sent, a mode, an archive) is in the row of its session: the listing
@@ -2375,6 +2376,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(sendOptions);
 
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
+        // A prompt sent to a session an abort held lets its queue drain again after this run.
+        ReleaseAbortHold(session.SessionId);
         await RestoreArchivedForRunAsync(session.SessionId, session.CreatedAt).ConfigureAwait(false);
         RuntimeSessionEntry? capturedEntry = null;
         OwnedProviderEventForwarding.Use? handleUse = null;
@@ -4562,6 +4565,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     {
                         return null;
                     }
+
+                    // An aborted tree starts nothing by itself: its queue waits for a prompt sent to the session again.
+                    if (_abortHolds.ContainsKey(sessionId)) return null;
 
                     var localState = await ReadLatestLocalStateAsync(sessionId, entry.CreatedAt, actorCancellationToken).ConfigureAwait(false);
                     // Null also represents a failed read; it is not proof that legacy work is absent.

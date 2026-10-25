@@ -42,6 +42,7 @@ public sealed partial class SessionRuntimeService
                 foreach (var id in ids)
                     if (retirement) owner._retentionClaims.Remove(id);
                     else if (--owner._retentionWork[id] == 0) owner._retentionWork.Remove(id);
+            if (!retirement) owner.PulseSettlement();
         }
     }
 

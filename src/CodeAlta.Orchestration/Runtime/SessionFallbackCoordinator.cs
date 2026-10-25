@@ -42,6 +42,8 @@ internal sealed class SessionFallbackCoordinator
     private readonly Dictionary<string, DateTimeOffset> _exhaustedUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SessionFallbackRecord> _last = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Task> _running = [];
+    // The sessions that have a fallback under way, with how many: what is held of their failure is not released yet.
+    private readonly Dictionary<string, int> _runningSessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _closing = new();
 
     internal SessionFallbackCoordinator(OwnedSessionCommandService commands, SessionRuntimeService runtime)
@@ -192,10 +194,26 @@ internal sealed class SessionFallbackCoordinator
 
             task = Task.Run(() => RunAsync(notice, tier, next, states, held));
             _running.Add(task);
+            _runningSessions[notice.SessionId] = _runningSessions.GetValueOrDefault(notice.SessionId) + 1;
         }
 
-        _ = task.ContinueWith(completed => { lock (_gate) _running.Remove(completed); }, CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        _ = task.ContinueWith(completed =>
+        {
+            lock (_gate)
+            {
+                _running.Remove(completed);
+                if (--_runningSessions[notice.SessionId] == 0) _runningSessions.Remove(notice.SessionId);
+            }
+
+            _runtime.PulseSettlement();
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    /// <summary>Gets whether a fallback of a session is under way: it holds what its failure would release.</summary>
+    /// <param name="sessionId">The session.</param>
+    internal bool IsRunning(string sessionId)
+    {
+        lock (_gate) return _runningSessions.ContainsKey(sessionId);
     }
 
     private async Task RunAsync(RunFailureNotice notice, ModelTier tier, ModelTierCandidate? next,

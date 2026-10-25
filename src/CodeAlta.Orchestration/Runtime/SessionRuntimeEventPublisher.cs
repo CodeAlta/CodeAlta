@@ -15,15 +15,22 @@ internal sealed class SessionRuntimeEventPublisher(int capacity = BoundedRuntime
     internal RuntimeToolOutputProjection ToolOutput { get; } = new();
     internal long DroppedCount => _events.DroppedCount;
 
+    // Told after each publication, outside the gate: what waits for the sessions to settle looks at them again.
+    internal Action? Published { get; set; }
+
     internal bool TryPublish(SessionRuntimeEvent runtimeEvent)
     {
+        bool published;
         lock (_gate)
         {
             if (_closed) return false;
             Display.Commit(runtimeEvent);
             ToolOutput.Commit(runtimeEvent);
-            return _events.TryPublish(runtimeEvent);
+            published = _events.TryPublish(runtimeEvent);
         }
+
+        Published?.Invoke();
+        return published;
     }
 
     internal async IAsyncEnumerable<SessionRuntimeEvent> ReadAllAsync(
