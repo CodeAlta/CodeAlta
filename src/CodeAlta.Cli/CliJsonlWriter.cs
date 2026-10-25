@@ -58,7 +58,9 @@ internal sealed class CliJsonlWriter : IAcpEventSink
     private readonly JsonTypeInfo<SessionNotification> _notificationInfo;
     private readonly JsonTypeInfo<Usage> _usageInfo;
     private readonly JsonTypeInfo<Cost> _costInfo;
-    private int _closed;
+    private readonly Lock _gate = new();
+    // Set by the result, under the gate.
+    private bool _closed;
 
     public CliJsonlWriter(CliOutput output)
     {
@@ -69,6 +71,9 @@ internal sealed class CliJsonlWriter : IAcpEventSink
         _usageInfo = (JsonTypeInfo<Usage>)options.GetTypeInfo(typeof(Usage));
         _costInfo = (JsonTypeInfo<Cost>)options.GetTypeInfo(typeof(Cost));
     }
+
+    /// <summary>Gets what is told the method of a line once it is admitted, before it is written, for a test; null for nothing.</summary>
+    internal Action<string>? Admitted { get; init; }
 
     /// <inheritdoc />
     public ValueTask SessionUpdateAsync(string sessionId, SessionUpdate update, CancellationToken cancellationToken)
@@ -159,8 +164,7 @@ internal sealed class CliJsonlWriter : IAcpEventSink
 
             writer.WriteNumber("durationMs", (long)Math.Round(report.Duration.TotalMilliseconds));
             writer.WriteEndObject();
-        });
-        Volatile.Write(ref _closed, 1);
+        }, closes: true);
     }
 
     /// <summary>The tokens of a run in the shape of ACP's <see cref="Usage"/>.</summary>
@@ -178,22 +182,28 @@ internal sealed class CliJsonlWriter : IAcpEventSink
         };
     }
 
-    // One notification, one line; nothing after the result.
-    private void Write(string method, Action<Utf8JsonWriter> writeParameters)
+    // One notification, one line; nothing after the result. A line is admitted, written and, for the result, closes the
+    // stream under one gate: a line admitted before the result is written before it.
+    private void Write(string method, Action<Utf8JsonWriter> writeParameters, bool closes = false)
     {
-        if (Volatile.Read(ref _closed) != 0) return;
-        var buffer = new ArrayBufferWriter<byte>(512);
-        using (var writer = new Utf8JsonWriter(buffer))
+        lock (_gate)
         {
-            writer.WriteStartObject();
-            writer.WriteString("jsonrpc", "2.0");
-            writer.WriteString("method", method);
-            writer.WritePropertyName("params");
-            writeParameters(writer);
-            writer.WriteEndObject();
-        }
+            if (_closed) return;
+            Admitted?.Invoke(method);
+            var buffer = new ArrayBufferWriter<byte>(512);
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                writer.WriteString("jsonrpc", "2.0");
+                writer.WriteString("method", method);
+                writer.WritePropertyName("params");
+                writeParameters(writer);
+                writer.WriteEndObject();
+            }
 
-        _output.WriteLine(buffer.WrittenSpan);
+            _output.WriteLine(buffer.WrittenSpan);
+            _closed = closes;
+        }
     }
 }
 
