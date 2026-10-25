@@ -18,6 +18,8 @@
     <InternalsVisibleTo Include="CodeAlta.Catalog" />
     <InternalsVisibleTo Include="CodeAlta.Orchestration" />
     <InternalsVisibleTo Include="CodeAlta.Orchestration.Tests" />
+    <!-- The sandbox worker: the shell of the tools and the serialization of tool calls and permission requests. -->
+    <InternalsVisibleTo Include="CodeAlta.Sandbox" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
     <!-- CodeAlta Desktop: StagedFileReplacement for the files it saves while others read them. -->
     <InternalsVisibleTo Include="alta" />

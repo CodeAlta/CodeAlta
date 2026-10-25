@@ -14,6 +14,9 @@ using XenoAtom.CommandLine;
 using XenoAtom.Logging;
 using XenoAtom.Terminal;
 
+// The worker of a sandboxed session is this executable too: it runs the tools of the session inside its sandbox.
+if (args is [CodeAlta.Sandbox.Worker.SandboxWorker.Option]) return CodeAlta.Sandbox.Worker.SandboxWorker.RunAsync().GetAwaiter().GetResult();
+
 var mainThreadId = Environment.CurrentManagedThreadId;
 Program.StartupOwner? startupOwner = null;
 try

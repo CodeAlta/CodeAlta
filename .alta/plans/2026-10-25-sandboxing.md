@@ -298,12 +298,14 @@ Their native sandboxes are not the boundary. Claude Code's covers only its shell
 - [x] 5. **The sandbox of a session.** `sandbox` goes into the local state of the journal and its SQLite projection, like `PermissionMode`. `SandboxResolver` applies the precedence at each turn, plus the rules for sessions that agents create, fork or switch, and for fallback. Tests.
 
   **Done** in `SessionRuntimeService.Sandbox.cs`: `GetSessionSandboxAsync` resolves at each call (no separate resolver type); `SetOwnedSandboxAsync` and `OwnedSessionCommandService.SetSandboxAsync` save the session's choice; a session created by a sandboxed one gets its profile; a fork keeps it; a provider switch or fallback pins the profile when the new provider would not sandbox the session. A profile that cannot be resolved keeps the session sandboxed with a problem. The ignored repository table is reported on `SessionSandbox.ProjectSetsSandbox`. Skipping fallback targets that cannot run sandboxed is in step 7, with the refusal of such providers.
-- [ ] 6. **The worker.** `--sandbox-worker` is dispatched first in `Program.Main` of `alta`, `altatui` and `altacli`. It speaks a framed protocol over stdio (`WorkerFrames`):
+- [x] 6. **The worker.** `--sandbox-worker` is dispatched first in `Program.Main` of `alta`, `altatui` and `altacli`. It speaks a framed protocol over stdio (`WorkerFrames`):
   - the file tools, with the handlers of `AgentBuiltInToolFactory` and `AgentWriteGuard` on;
   - commands, with streamed output, cancellation and timeout;
   - jobs.
 
   Tests run the protocol with a plain-process backend. The container tests are skipped where the sandbox is not available, as the browser tests are without Edge.
+
+  **Done** (`src/CodeAlta.Sandbox/Worker`): `SandboxWorker` runs the handlers of `AgentBuiltInToolFactory` unchanged and relays their permission requests, the command guard and their progress; `SandboxWorkerClient` is CodeAlta's side, with cancellation and background commands; messages longer than a frame go in parts. The protocol tests run the worker in the test process on pipes; `CliSandboxWorkerTests` runs `altacli --sandbox-worker` in a real container (ready in about a second here).
 - [ ] 7. **Routing.**
   - `AgentSession.BuildAvailableTools` gives a sandboxed session the tools backed by its worker, and `SessionJobService` starts its jobs in the worker.
   - The worker starts on the first tool call, stops when the session detaches or idles, and starts again when the profile changes.
