@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -21,6 +22,14 @@ public sealed partial class SessionRuntimeService
     // The sessions an abort of their tree holds: they start no run from their queue (a parent told of its aborted child,
     // the end of a job), until a prompt is sent to them again. The value is the reason of the abort.
     private readonly ConcurrentDictionary<string, string> _abortHolds = new(StringComparer.OrdinalIgnoreCase);
+
+    // The order of the aborts: each abort of a tree takes the next number, and each session of the tree keeps the number
+    // of the last abort that reached it. A send takes the current number when it is admitted, and does not start its run
+    // when an abort of its session, or of a session it descends from, came after. Guarded by _abortGate, with the setting
+    // of the holds an abort makes and the release of the hold by a send, so that a send and an abort see each other.
+    private readonly object _abortGate = new();
+    private readonly Dictionary<string, long> _abortSequences = new(StringComparer.OrdinalIgnoreCase);
+    private long _abortSequence;
 
     // Whether the owner of the commands has work under way for a session, a fallback included; set by the owner.
     internal Func<string, bool>? OwnedWork { get; set; }
@@ -110,8 +119,8 @@ public sealed partial class SessionRuntimeService
     }
 
     /// <summary>
-    /// Aborts a session and every session it started (<see cref="GetSessionTree"/>): their runs are stopped, the prompts the
-    /// owner of the commands admitted before the abort and that have not started their run are cancelled, their jobs are
+    /// Aborts a session and every session it started (<see cref="GetSessionTree"/>): their runs are stopped, the prompts
+    /// admitted before the abort that have not started their run never start it, their jobs are
     /// cancelled, and their queues hold what they receive afterwards (the failures of their children, the ends of their
     /// jobs) until a prompt is sent to them again, so that nothing starts after the abort. Each session of the tree that was
     /// at work, and the root, records the abort and its reason in its journal, once its run has stopped.
@@ -128,11 +137,20 @@ public sealed partial class SessionRuntimeService
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
         reason = reason.Trim();
         var tree = GetSessionTree(rootSessionId);
+        lock (_abortGate)
+        {
+            var sequence = ++_abortSequence;
+            foreach (var sessionId in tree)
+            {
+                _abortHolds[sessionId] = reason;
+                _abortSequences[sessionId] = sequence;
+            }
+        }
+
         // The record of an abort belongs to the run it stops, when the session has one.
         var atWork = new List<(string SessionId, AgentRunId? RunId)>();
         foreach (var sessionId in tree)
         {
-            _abortHolds[sessionId] = reason;
             if (string.Equals(sessionId, rootSessionId, StringComparison.OrdinalIgnoreCase)
                 || (await ProbeSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)).Busy)
                 atWork.Add((sessionId, _entries.TryGetValue(sessionId, out var entry) ? entry.ActiveRunId : null));
@@ -166,8 +184,40 @@ public sealed partial class SessionRuntimeService
     public string? GetAbortReason(string sessionId)
         => !string.IsNullOrWhiteSpace(sessionId) && _abortHolds.TryGetValue(sessionId, out var reason) ? reason : null;
 
-    // A prompt sent to a session lifts the hold of an abort: its queue drains again after that run.
-    private void ReleaseAbortHold(string sessionId) => _abortHolds.TryRemove(sessionId, out _);
+    // The number of the last abort, which a send takes when it is admitted (ClaimRunAfterAborts).
+    private long CaptureAbortSequence()
+    {
+        lock (_abortGate) return _abortSequence;
+    }
+
+    // Whether a send admitted at an abort number may start its run: not when an abort of its session, or of a session it
+    // descends from, came after its admission. One that may lifts the hold of an abort: the queue of its session drains
+    // again after that run. A send to a child not attached yet when its tree was aborted is found through its parent.
+    private bool ClaimRunAfterAborts(SessionViewDescriptor session, long admittedSequence)
+    {
+        lock (_abortGate)
+        {
+            if (_abortSequence != admittedSequence && AbortedSince(session, admittedSequence)) return false;
+            _abortHolds.TryRemove(session.SessionId, out _);
+            return true;
+        }
+    }
+
+    private bool AbortedSince(SessionViewDescriptor session, long admittedSequence)
+    {
+        var lineage = new Stack<string?>([session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId]);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (lineage.TryPop(out var sessionId))
+        {
+            if (string.IsNullOrWhiteSpace(sessionId) || !seen.Add(sessionId)) continue;
+            if (_abortSequences.TryGetValue(sessionId, out var aborted) && aborted > admittedSequence) return true;
+            if (!_entries.TryGetValue(sessionId, out var entry)) continue;
+            lineage.Push(entry.ParentSessionId);
+            lineage.Push(entry.CreatedBy?.SourceSessionId);
+        }
+
+        return false;
+    }
 
     private async Task CancelOwnedSendAsync(string sessionId, string reason)
     {

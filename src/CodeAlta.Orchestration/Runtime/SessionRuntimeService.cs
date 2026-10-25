@@ -2385,11 +2385,20 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         AgentSendOptions sendOptions,
         CancellationToken cancellationToken,
         CancellationToken coordinationCancellationToken)
-        => await AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, cancellationToken, CancellationToken.None), coordinationCancellationToken)
+    {
+        // Taken at the admission: an abort of the tree after it wins over this send, even one detached from its caller.
+        var admittedAbortSequence = CaptureAbortSequence();
+        return await AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, admittedAbortSequence, cancellationToken, CancellationToken.None),
+                coordinationCancellationToken)
             .WaitAsync(coordinationCancellationToken).ConfigureAwait(false);
+    }
+
+    // Awaited by a send once it is admitted, before it does anything, with the token that cancels it: what a test orders
+    // itself by. Null in the application.
+    internal Func<string, CancellationToken, Task>? SendStarting { get; set; }
 
     private async Task<AgentRunId> SendOwnedBodyAsync(
-        SessionViewDescriptor session, SessionExecutionOptions options, AgentSendOptions sendOptions,
+        SessionViewDescriptor session, SessionExecutionOptions options, AgentSendOptions sendOptions, long admittedAbortSequence,
         CancellationToken cancellationToken, CancellationToken coordinationCancellationToken,
         SessionPermissionService.OwnedPermissionExecution? permissionExecution = null, bool ownedCommand = false,
         OwnedSessionAskExecution? askExecution = null, OwnedAskSubmission? askSubmission = null)
@@ -2397,12 +2406,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(sendOptions);
+        if (SendStarting is { } starting) await starting(session.SessionId, cancellationToken).ConfigureAwait(false);
         // A send cancelled before it got here (an abort of its tree after its admission) starts nothing, and lifts no hold.
         cancellationToken.ThrowIfCancellationRequested();
 
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
-        // A prompt sent to a session an abort held lets its queue drain again after this run.
-        ReleaseAbortHold(session.SessionId);
         await RestoreArchivedForRunAsync(session.SessionId, session.CreatedAt).ConfigureAwait(false);
         RuntimeSessionEntry? capturedEntry = null;
         OwnedProviderEventForwarding.Use? handleUse = null;
@@ -2414,6 +2422,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var failures = new List<Exception>();
         AgentRunId result = default;
         var ownedDefaultsRejected = false;
+        var abortedBeforeRun = false;
         // The turns made outside CodeAlta on the conversation of an idle session are written before its prompt: the
         // prompt follows them, and the provider is not sent what its conversation already holds.
         await CatchUpBeforeSendAsync(session).ConfigureAwait(false);
@@ -2443,6 +2452,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                             ownedDefaultsRejected = true;
                             return default(AgentSessionHandleId);
                         }
+                        // An abort of the tree after the admission wins: the run is claimed on the actor, as the abort
+                        // finds it. A prompt sent to a session an abort held lets its queue drain again after this run.
+                        if (!ClaimRunAfterAborts(session, admittedAbortSequence))
+                        {
+                            abortedBeforeRun = true;
+                            return default(AgentSessionHandleId);
+                        }
                         candidate.PendingAgentPromptId = null;
                         // This send runs with the model of the attachment, which it chose.
                         candidate.PendingModel = null;
@@ -2456,6 +2472,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 .ConfigureAwait(false);
             if (ownedDefaultsRejected)
                 throw new InvalidOperationException("Owned command requires matching host-owned session defaults.");
+            if (abortedBeforeRun)
+                throw new OperationCanceledException("The session was aborted after this prompt was sent, before its run started.");
             if (handleUse is null) continue;
 
             if (sessionStateUpdated)
@@ -2578,8 +2596,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     internal Task<AgentRunId> SendOwnedCommandAsync(SessionViewDescriptor session, SessionExecutionOptions options,
         AgentSendOptions sendOptions, SessionPermissionService.OwnedPermissionExecution? permissionExecution, CancellationToken cancellationToken,
         OwnedSessionAskExecution? askExecution = null, OwnedAskSubmission? askSubmission = null)
-        => AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, cancellationToken, CancellationToken.None, permissionExecution,
+    {
+        var admittedAbortSequence = CaptureAbortSequence();
+        return AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, admittedAbortSequence, cancellationToken, CancellationToken.None, permissionExecution,
             ownedCommand: true, askExecution: askExecution, askSubmission: askSubmission), CancellationToken.None);
+    }
 
     /// <summary>
     /// Gets or sets the ask owner of the host, when its sends can ask the user: a run the runtime starts by itself
@@ -2791,10 +2812,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         SessionExecutionOptions options,
         string skillName,
         CancellationToken cancellationToken = default)
-        => await AdmitAsync(() => ActivateSkillOwnedBodyAsync(session, options, skillName, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+    {
+        var admittedAbortSequence = CaptureAbortSequence();
+        return await AdmitAsync(() => ActivateSkillOwnedBodyAsync(session, options, skillName, admittedAbortSequence, cancellationToken), cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private async Task<AgentRunId> ActivateSkillOwnedBodyAsync(SessionViewDescriptor session, SessionExecutionOptions options,
-        string skillName, CancellationToken cancellationToken)
+        string skillName, long admittedAbortSequence, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
@@ -2825,6 +2850,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     session,
                     options,
                     new AgentSendOptions { Input = input },
+                    admittedAbortSequence,
                     cancellationToken,
                     CancellationToken.None))
                 .ConfigureAwait(false);

@@ -256,6 +256,63 @@ public sealed class HeadlessSessionDriverTests
         Assert.IsNull(host.RuntimeService.GetAbortReason(session.SessionId));
     }
 
+    [TestMethod]
+    public async Task Cancel_BeforeTheDetachedPromptOfAChildStarts_StartsNoRunOfTheChild_AndALaterPromptToItRuns()
+    {
+        var (root, provider, host) = await CreateAsync();
+        await using var scope = root;
+        var aborted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var grace = TimeSpan.FromSeconds(10);
+        await using var driver = new HeadlessSessionDriver(host, new HeadlessSessionDriverOptions
+        {
+            // A run of the child left going after the abort would make the driver wait this long.
+            AbortGrace = grace,
+            Observer = (item, _) => { if (IsAbortRecord(item.Event)) aborted.TrySetResult(); return ValueTask.CompletedTask; },
+        });
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        var childId = Guid.CreateVersion7().ToString();
+        var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
+        SessionViewDescriptor? child = null;
+        provider.Script(session.SessionId, async (request, cancellationToken) =>
+        {
+            child = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Child", session.SessionId, null, null, null, childId);
+            // As `alta session send` does for an agent: the send to the child is detached from the command that made it.
+            _ = host.RuntimeService.SendAsync(child, options, new AgentSendOptions { Input = AgentInput.Text("child work") }, CancellationToken.None);
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return ScriptedTurnProvider.Answer("never");
+        });
+        provider.Script(childId, ScriptedTurnProvider.WaitThenReply(new TaskCompletionSource().Task, "never"));
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // The send to the child is admitted, then held before it does anything until the abort was recorded.
+        host.RuntimeService.SendStarting = (sessionId, token) =>
+        {
+            if (!string.Equals(sessionId, childId, StringComparison.OrdinalIgnoreCase)) return Task.CompletedTask;
+            held.TrySetResult();
+            return HoldUntilAbortedAsync(aborted.Task, token);
+        };
+        using var signalled = new CancellationTokenSource();
+
+        var run = driver.RunAsync(session, new HeadlessPrompt("delegate"), null, signalled.Token);
+        await held.Task.WaitAsync(Hang);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await signalled.CancelAsync();
+        var result = await run.WaitAsync(Hang);
+        stopwatch.Stop();
+
+        Assert.AreEqual(HeadlessRunStatus.Aborted, result.Status, result.FailureMessage);
+        Assert.AreEqual("cancelled", result.AbortReason);
+        Assert.AreEqual(0, provider.RequestsOf(childId).Length, "A prompt sent to a child before the abort of its tree does not start after it.");
+        Assert.IsTrue(stopwatch.Elapsed < grace, $"The driver does not wait the grace for a child that starts nothing ({stopwatch.Elapsed}).");
+        await host.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+
+        host.RuntimeService.SendStarting = null;
+        provider.SessionTurns.TryRemove(childId, out _);
+        provider.Script(childId, ScriptedTurnProvider.Reply("Later answer."));
+        await host.RuntimeService.SendAsync(child!, options, new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(childId).WaitAsync(Hang);
+        Assert.AreEqual(1, provider.RequestsOf(childId).Length, "The abort does not hold a prompt sent to the child after it.");
+    }
+
     private static bool IsAbortRecord(SessionRuntimeEvent runtimeEvent)
         => runtimeEvent is SessionAgentEvent { Event: AgentSessionUpdateEvent update } && SessionOutcome.AbortReasonOf(update) is not null;
 
