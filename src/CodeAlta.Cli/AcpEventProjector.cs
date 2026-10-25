@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 using CodeAlta.Acp;
 using CodeAlta.Agent;
@@ -306,32 +307,42 @@ internal sealed class AcpEventProjector
             or AgentActivityKind.DynamicToolCall or AgentActivityKind.CollabAgentToolCall or AgentActivityKind.Skill or AgentActivityKind.WebSearch
             or AgentActivityKind.ImageGeneration;
 
-    // The kind of a tool for a client: the built-in tools by name, the others by the kind of their activity.
+    // The kind of a tool for a client: the tools of CodeAlta and of the harnesses of providers by name, the others by the
+    // kind of their activity.
     internal static ToolKind KindOf(string name, AgentActivityKind kind)
-        => name switch
-        {
-            "read_file" or "view_image" or "list_dir" => ToolKind.Read,
-            "grep" => ToolKind.Search,
-            "webget" or AgentToolPatterns.WebSearchToolName or AgentToolPatterns.WebFetchToolName => ToolKind.Fetch,
-            "shell_command" => ToolKind.Execute,
-            "write_file" or "replace_in_file" or "apply_patch" => ToolKind.Edit,
-            "delete_file_or_dir" => ToolKind.Delete,
-            "rename_file_or_dir" => ToolKind.Move,
-            _ => kind switch
+        => ToolKindsByName.TryGetValue(name, out var known) ? known
+            : kind switch
             {
                 AgentActivityKind.CommandExecution => ToolKind.Execute,
                 AgentActivityKind.FileChange => ToolKind.Edit,
                 AgentActivityKind.WebSearch => ToolKind.Fetch,
                 _ => ToolKind.Other,
-            },
-        };
+            };
+
+    // The tools by name, without case: those of CodeAlta; of Claude Code (Read, Edit, Bash...); of Codex (shell,
+    // exec_command, apply_patch...); of Copilot and Gemini CLI (view, str_replace_editor, run_shell_command...); and the
+    // names the ACP plugin gives the calls of an ACP agent by their kind (shell, read, edit, search, fetch, think).
+    private static readonly FrozenDictionary<string, ToolKind> ToolKindsByName = new (string[] Names, ToolKind Kind)[]
+    {
+        (["read_file", "view_image", "list_dir", "Read", "NotebookRead", "LS", "view", "read_many_files", "list_directory"], ToolKind.Read),
+        (["grep", "Glob", "ToolSearch", "search", "grep_files", "search_files", "file_search", "codebase_search", "search_file_content"], ToolKind.Search),
+        (["webget", AgentToolPatterns.WebSearchToolName, AgentToolPatterns.WebFetchToolName, "WebFetch", "WebSearch", "fetch", "google_web_search"], ToolKind.Fetch),
+        (["shell_command", "Bash", "PowerShell", "BashOutput", "KillShell", "KillBash", "shell", "exec_command", "local_shell", "write_stdin",
+            "run_shell_command", "read_bash", "write_bash", "stop_bash", "read_powershell", "write_powershell", "stop_powershell"], ToolKind.Execute),
+        (["write_file", "replace_in_file", "apply_patch", "Write", "Edit", "MultiEdit", "NotebookEdit", "replace", "str_replace",
+            "str_replace_editor", "str_replace_based_edit_tool", "create", "insert"], ToolKind.Edit),
+        (["delete_file_or_dir"], ToolKind.Delete),
+        (["rename_file_or_dir"], ToolKind.Move),
+        (["think", "TodoWrite", "update_plan"], ToolKind.Think),
+        (["switch_mode", "EnterPlanMode", "ExitPlanMode"], ToolKind.SwitchMode),
+    }.SelectMany(static group => group.Names.Select(name => KeyValuePair.Create(name, group.Kind))).ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     // The name of the tool and what it works on: a path, a command, a pattern, an address, or the arguments of alta.
     internal static string Title(string name, JsonElement details)
     {
         if (details.ValueKind != JsonValueKind.Object || !details.TryGetProperty("arguments", out var arguments) || arguments.ValueKind != JsonValueKind.Object)
             return name;
-        foreach (var key in new[] { "path", "command", "pattern", "url", "query", "source" })
+        foreach (var key in new[] { "path", "file_path", "notebook_path", "command", "pattern", "url", "query", "source" })
         {
             if (AcpJson.GetString(arguments, key) is { Length: > 0 } value) return name + " " + Shorten(value);
         }

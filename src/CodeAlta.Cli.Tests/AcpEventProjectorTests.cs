@@ -87,6 +87,38 @@ public sealed class AcpEventProjectorTests
         Assert.AreEqual("exit code 1", call.GetProperty("content")[0].GetProperty("content").GetProperty("text").GetString());
     }
 
+    [TestMethod]
+    public async Task ToolsOfProviderHarnesses_HaveTheirKind_WhateverTheCase()
+    {
+        // A session on Claude Code reports its own tools by their names: Read is a read, not "other".
+        var sink = new CaptureSink();
+        var projector = new AcpEventProjector(sink);
+        var details = JsonDocument.Parse("""{"toolName":"Read","arguments":{"file_path":"/repo/Program.cs"}}""").RootElement.Clone();
+        await projector.ProjectAsync(Of(new AgentActivityEvent(Provider, Root, DateTimeOffset.UtcNow, null, AgentActivityKind.DynamicToolCall, AgentActivityPhase.Started,
+            "call-1", null, "Read", null, details)), default);
+        var call = sink.Updates.Single().Update.Value;
+        Assert.AreEqual("read", call.GetProperty("kind").GetString());
+        Assert.AreEqual("Read /repo/Program.cs", call.GetProperty("title").GetString());
+
+        foreach (var (name, kind) in new[]
+        {
+            ("Read", "read"), ("NotebookRead", "read"), ("LS", "read"), ("view", "read"),
+            ("Edit", "edit"), ("MultiEdit", "edit"), ("Write", "edit"), ("NotebookEdit", "edit"), ("apply_patch", "edit"), ("str_replace_editor", "edit"),
+            ("Bash", "execute"), ("PowerShell", "execute"), ("shell", "execute"), ("exec_command", "execute"), ("run_shell_command", "execute"),
+            ("Grep", "search"), ("Glob", "search"), ("WebFetch", "fetch"), ("WebSearch", "fetch"), ("web_search", "fetch"),
+            ("TodoWrite", "think"), ("update_plan", "think"), ("ExitPlanMode", "switch_mode"),
+            ("delete_file_or_dir", "delete"), ("rename_file_or_dir", "move"),
+            // Without case, as the names of the ACP plugin and of other harnesses vary.
+            ("read", "read"), ("BASH", "execute"), ("glob", "search"), ("webfetch", "fetch"),
+        })
+        {
+            Assert.AreEqual(kind, AcpEventProjector.KindOf(name, AgentActivityKind.DynamicToolCall).Value.GetString(), name);
+        }
+
+        Assert.AreEqual("other", AcpEventProjector.KindOf("mcp__docs__search_pages", AgentActivityKind.McpToolCall).Value.GetString());
+        Assert.AreEqual("execute", AcpEventProjector.KindOf("anything", AgentActivityKind.CommandExecution).Value.GetString());
+    }
+
     private static HeadlessSessionEvent Of(AgentEvent agentEvent) => new(Root, new SessionAgentEvent(agentEvent.SessionId, agentEvent));
 
     private sealed class CaptureSink : IAcpEventSink
