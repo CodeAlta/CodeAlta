@@ -102,6 +102,63 @@ public sealed class ModelsDevMappingTests
     }
 
     [TestMethod]
+    public async Task AModelItsProviderListsNoEffortOf_IsOfferedTheEffortsOfModelsDev_AsASessionNamesThem()
+    {
+        await using var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions());
+
+        // none is no reasoning, which a session asks with no effort.
+        var gpt = AgentModelMetadataEnricher.EnrichModel(new AgentModelInfo("gpt-effort-test"), catalog, "openai", overrides: null);
+        CollectionAssert.AreEqual(
+            new[] { AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High, AgentReasoningEffort.XHigh },
+            gpt.SupportedReasoningEfforts!.ToArray());
+        Assert.AreEqual("xhigh", AgentReasoningEffortCapability.GetHighestEffort(gpt));
+        Assert.IsFalse(AgentReasoningEffortCapability.IsListComplete(gpt), "A list of the catalog is not said to be complete.");
+
+        // max without xhigh is the highest effort, sent as max.
+        var max = AgentModelMetadataEnricher.EnrichModel(new AgentModelInfo("max-effort-test"), catalog, "openai", overrides: null);
+        CollectionAssert.AreEqual(
+            new[] { AgentReasoningEffort.Low, AgentReasoningEffort.High, AgentReasoningEffort.XHigh },
+            max.SupportedReasoningEfforts!.ToArray());
+        Assert.AreEqual("max", AgentReasoningEffortCapability.GetHighestEffort(max));
+
+        // Max is an effort of its own only where the model has both.
+        var both = AgentModelMetadataEnricher.EnrichModel(new AgentModelInfo("both-effort-test"), catalog, "openai", overrides: null);
+        CollectionAssert.AreEqual(
+            new[] { AgentReasoningEffort.Minimal, AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High, AgentReasoningEffort.XHigh, AgentReasoningEffort.Max },
+            both.SupportedReasoningEfforts!.ToArray());
+
+        // A toggle or a token budget gives no level to offer.
+        Assert.IsNull(AgentModelMetadataEnricher.EnrichModel(new AgentModelInfo("budget-test"), catalog, "openai", overrides: null).SupportedReasoningEfforts);
+    }
+
+    [TestMethod]
+    public async Task TheEffortsAProviderLists_AreKept_AndAListItSaysIsComplete_IsNotFilled()
+    {
+        await using var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions());
+
+        var listed = AgentModelMetadataEnricher.EnrichModel(
+            new AgentModelInfo("gpt-effort-test", SupportedReasoningEfforts: [AgentReasoningEffort.High]), catalog, "openai", overrides: null);
+        var none = AgentModelMetadataEnricher.EnrichModel(
+            new AgentModelInfo("gpt-effort-test", Capabilities: new Dictionary<string, object?> { [AgentReasoningEffortCapability.CompleteListKey] = true }),
+            catalog, "openai", overrides: null);
+
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.High }, listed.SupportedReasoningEfforts!.ToArray());
+        Assert.IsNull(AgentReasoningEffortCapability.GetHighestEffort(listed));
+        Assert.IsNull(none.SupportedReasoningEfforts, "A model its provider says has no effort keeps none.");
+    }
+
+    [TestMethod]
+    public void TheShippedCatalog_GivesTheEffortsOfTheModelsOfOpenAI()
+    {
+        var database = ModelsDevDatabaseJson.Deserialize(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Data", "models_dev_db.json")));
+
+        Assert.IsTrue(database.TryGetModel("openai", "gpt-5.5", out var model));
+        var listed = AgentModelMetadataEnricher.ReadModelsDevEfforts(model);
+        Assert.IsNotNull(listed);
+        CollectionAssert.Contains(listed.Value.Efforts.ToArray(), AgentReasoningEffort.High);
+    }
+
+    [TestMethod]
     public async Task AConfiguredProvider_IsMatchedByItsEndpoint_BeforeItsTypeDefault()
     {
         await using var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions());
@@ -190,7 +247,19 @@ public sealed class ModelsDevMappingTests
               "zai-coding-plan": { "id": "zai-coding-plan", "name": "Z.AI Coding Plan", "api": "https://api.z.ai/api/coding/paas/v4", "models": {} },
               "minimax": { "id": "minimax", "name": "MiniMax", "api": "https://api.minimax.io/anthropic/v1", "models": {} },
               "minimax-coding-plan": { "id": "minimax-coding-plan", "name": "MiniMax Coding Plan", "api": "https://api.minimax.io/anthropic/v1", "models": {} },
-              "openai": { "id": "openai", "name": "OpenAI", "models": {} },
+              "openai": {
+                "id": "openai", "name": "OpenAI",
+                "models": {
+                  "gpt-effort-test": { "id": "gpt-effort-test", "name": "GPT Effort Test", "reasoning": true,
+                    "reasoning_options": [ { "type": "effort", "values": ["none", "low", "medium", "high", "xhigh"] } ] },
+                  "max-effort-test": { "id": "max-effort-test", "name": "Max Effort Test", "reasoning": true,
+                    "reasoning_options": [ { "type": "toggle" }, { "type": "effort", "values": ["low", "high", "max"] } ] },
+                  "both-effort-test": { "id": "both-effort-test", "name": "Both Effort Test", "reasoning": true,
+                    "reasoning_options": [ { "type": "effort", "values": ["minimal", "low", "medium", "high", "xhigh", "max"] } ] },
+                  "budget-test": { "id": "budget-test", "name": "Budget Test", "reasoning": true,
+                    "reasoning_options": [ { "type": "toggle" }, { "type": "budget_tokens", "min": 1024, "max": 32000 } ] }
+                }
+              },
               "xai": {
                 "id": "xai", "name": "xAI",
                 "models": { "grok-test": { "id": "grok-test", "name": "Grok Test", "limit": { "context": 2000000, "output": 30000 } } }

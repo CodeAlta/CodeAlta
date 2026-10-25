@@ -310,7 +310,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         if ((request.Provider.Profile?.SupportsReasoningEffort ?? true) &&
             request.ReasoningEffort is { } reasoningEffort &&
             SupportsRequestedReasoningEffort(request, reasoningEffort) &&
-            TryMapReasoningEffort(reasoningEffort, out var reasoningEffortLevel))
+            TryMapReasoningEffort(reasoningEffort, request.ModelInfo, out var reasoningEffortLevel))
         {
             options.ReasoningEffortLevel = reasoningEffortLevel;
         }
@@ -375,8 +375,25 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             supportedReasoningEfforts.Contains(reasoningEffort);
     }
 
-    private static bool TryMapReasoningEffort(AgentReasoningEffort reasoningEffort, out ChatReasoningEffortLevel reasoningEffortLevel)
+    internal static bool TryMapReasoningEffort(AgentReasoningEffort reasoningEffort, AgentModelInfo? model, out ChatReasoningEffortLevel reasoningEffortLevel)
     {
+        // A model models.dev gives xhigh or max is sent the highest effort as that level, and Max as max where it has
+        // both; any other model gets the levels of the API, high at most.
+        if (AgentReasoningEffortCapability.GetHighestEffort(model) is { } highest)
+        {
+            if (reasoningEffort == AgentReasoningEffort.XHigh)
+            {
+                reasoningEffortLevel = new ChatReasoningEffortLevel(highest);
+                return true;
+            }
+
+            if (reasoningEffort == AgentReasoningEffort.Max)
+            {
+                reasoningEffortLevel = new ChatReasoningEffortLevel("max");
+                return true;
+            }
+        }
+
         switch (reasoningEffort)
         {
             case AgentReasoningEffort.Minimal:

@@ -1438,7 +1438,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 options.ReasoningOptions = new ResponseReasoningOptions
                 {
                     ReasoningEffortLevel = supportsEffectiveReasoningEffort
-                        ? MapReasoningEffortLevel(effectiveReasoningEffort!.Value)
+                        ? MapReasoningEffortLevel(effectiveReasoningEffort!.Value, request.ModelInfo)
                         : null,
                 };
                 if (provider.CodexSubscription is null || modelCapabilities.SupportsReasoningSummaries)
@@ -1474,6 +1474,12 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
         return options;
     }
+
+    // The highest effort of a session is sent as max to a model models.dev gives max and no xhigh.
+    internal static ResponseReasoningEffortLevel? MapReasoningEffortLevel(AgentReasoningEffort effort, AgentModelInfo? model)
+        => effort == AgentReasoningEffort.XHigh && AgentReasoningEffortCapability.GetHighestEffort(model) == "max"
+            ? MaxReasoningEffortLevel
+            : MapReasoningEffortLevel(effort);
 
     internal static ResponseReasoningEffortLevel? MapReasoningEffortLevel(AgentReasoningEffort effort)
         => effort switch

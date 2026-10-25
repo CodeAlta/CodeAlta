@@ -75,6 +75,30 @@ public sealed class OpenAIListedModelsTests
         Assert.IsFalse(AgentReasoningEffortCapability.IsListComplete(plain));
     }
 
+    [TestMethod]
+    public void TheHighestEffort_IsSentAsTheLevelTheCatalogGivesTheModel()
+    {
+        var maxOnly = new AgentModelInfo("max-only", Capabilities: new Dictionary<string, object?> { [AgentReasoningEffortCapability.HighestEffortKey] = "max" });
+        var xhigh = new AgentModelInfo("xhigh", Capabilities: new Dictionary<string, object?> { [AgentReasoningEffortCapability.HighestEffortKey] = "xhigh" });
+        var unknown = new AgentModelInfo("unknown");
+
+        // Responses: xhigh, or max for a model that has no xhigh.
+        Assert.AreEqual("max", OpenAIResponsesTurnExecutor.MapReasoningEffortLevel(AgentReasoningEffort.XHigh, maxOnly)!.Value.ToString());
+        Assert.AreEqual("xhigh", OpenAIResponsesTurnExecutor.MapReasoningEffortLevel(AgentReasoningEffort.XHigh, xhigh)!.Value.ToString());
+        Assert.AreEqual("xhigh", OpenAIResponsesTurnExecutor.MapReasoningEffortLevel(AgentReasoningEffort.XHigh, unknown)!.Value.ToString());
+
+        // Chat completions: the level the model has, and high at most for a model the catalog says nothing of.
+        Assert.IsTrue(OpenAIChatTurnExecutor.TryMapReasoningEffort(AgentReasoningEffort.XHigh, maxOnly, out var level));
+        Assert.AreEqual("max", level.ToString());
+        Assert.IsTrue(OpenAIChatTurnExecutor.TryMapReasoningEffort(AgentReasoningEffort.XHigh, xhigh, out level));
+        Assert.AreEqual("xhigh", level.ToString());
+        Assert.IsTrue(OpenAIChatTurnExecutor.TryMapReasoningEffort(AgentReasoningEffort.Max, xhigh, out level));
+        Assert.AreEqual("max", level.ToString());
+        Assert.IsTrue(OpenAIChatTurnExecutor.TryMapReasoningEffort(AgentReasoningEffort.XHigh, unknown, out level));
+        Assert.AreEqual("high", level.ToString());
+        Assert.IsFalse(OpenAIChatTurnExecutor.TryMapReasoningEffort(AgentReasoningEffort.Max, unknown, out _));
+    }
+
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

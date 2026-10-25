@@ -12,6 +12,7 @@ namespace CodeAlta.Agent.ModelCatalog;
 [JsonSerializable(typeof(ModelsDevCostDefinition))]
 [JsonSerializable(typeof(ModelsDevLimitDefinition))]
 [JsonSerializable(typeof(ModelsDevInterleavedDefinition))]
+[JsonSerializable(typeof(ModelsDevReasoningOptionDefinition))]
 internal partial class ModelsDevJsonSerializerContext : JsonSerializerContext
 {
 }

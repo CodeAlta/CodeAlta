@@ -398,7 +398,41 @@ public sealed class ModelsDevModelDefinition
     public ModelsDevInterleavedDefinition? Interleaved { get; set; }
 
     /// <summary>
+    /// Gets or sets how the reasoning of the model is controlled: by effort levels, a toggle or a token budget.
+    /// </summary>
+    [JsonPropertyName("reasoning_options")]
+    public ModelsDevReasoningOptionDefinition[]? ReasoningOptions { get; set; }
+
+    /// <summary>
     /// Gets or sets unrecognized model properties.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+/// <summary>
+/// Represents one way to control the reasoning of a model: <c>effort</c> with its levels, <c>toggle</c>, or
+/// <c>budget_tokens</c>.
+/// </summary>
+public sealed class ModelsDevReasoningOptionDefinition
+{
+    /// <summary>The type of the control used for effort levels.</summary>
+    public const string EffortType = "effort";
+
+    /// <summary>
+    /// Gets or sets the type of the control: <c>effort</c>, <c>toggle</c> or <c>budget_tokens</c>.
+    /// </summary>
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    /// <summary>
+    /// Gets or sets the levels of an <c>effort</c> control, such as <c>low</c>, <c>high</c> or <c>max</c>.
+    /// </summary>
+    [JsonPropertyName("values")]
+    public string[]? Values { get; set; }
+
+    /// <summary>
+    /// Gets or sets unrecognized properties, such as the bounds of a token budget.
     /// </summary>
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }

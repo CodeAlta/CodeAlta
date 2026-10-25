@@ -47,6 +47,7 @@ internal static class AgentModelMetadataEnricher
 
         var displayName = model.DisplayName;
         var description = model.Description;
+        var efforts = model.SupportedReasoningEfforts;
         var capabilities = model.Capabilities is null
             ? null
             : new Dictionary<string, object?>(model.Capabilities, StringComparer.Ordinal);
@@ -56,6 +57,15 @@ internal static class AgentModelMetadataEnricher
             capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
             ApplyModelsDevMetadata(capabilities, foundProviderId, modelsDevModel);
             ApplyModelsDevPrice(capabilities, catalog, foundProviderId, modelsDevModel, model.Id);
+
+            // A provider that lists no effort of the model (the Models API of OpenAI, a compatible endpoint) is offered
+            // the efforts models.dev gives it. The list is not said to be complete: it comes from a catalog. A provider
+            // that says its list is complete has none for the model (Haiku of Claude Code).
+            if (efforts is null && !AgentReasoningEffortCapability.IsListComplete(model) && ReadModelsDevEfforts(modelsDevModel) is { } listed)
+            {
+                efforts = listed.Efforts;
+                SetIfMissing(capabilities, AgentReasoningEffortCapability.HighestEffortKey, listed.HighestEffort);
+            }
 
             if (string.IsNullOrWhiteSpace(displayName) ||
                 string.Equals(displayName, model.Id, StringComparison.Ordinal))
@@ -93,8 +103,46 @@ internal static class AgentModelMetadataEnricher
             Description: description,
             Provider: model.Provider,
             DefaultReasoningEffort: model.DefaultReasoningEffort,
-            SupportedReasoningEfforts: model.SupportedReasoningEfforts,
+            SupportedReasoningEfforts: efforts,
             Capabilities: capabilities ?? model.Capabilities);
+    }
+
+    // The effort levels of models.dev ({"type":"effort","values":["none","low","medium","high","xhigh","max"]}), as a
+    // session names them: XHigh is the highest of xhigh and max, sent as the one the model has; Max is an effort of its
+    // own only where the model has both. "none" is no reasoning, which a session asks with no effort. Null when
+    // models.dev gives no level (a model without reasoning, or one controlled by a toggle or a token budget).
+    internal static (IReadOnlyList<AgentReasoningEffort> Efforts, string? HighestEffort)? ReadModelsDevEfforts(ModelsDevModelDefinition model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        var levels = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var option in model.ReasoningOptions ?? [])
+        {
+            if (option is not null && string.Equals(option.Type, ModelsDevReasoningOptionDefinition.EffortType, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var value in option.Values ?? [])
+                {
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        levels.Add(value.Trim().ToLowerInvariant());
+                    }
+                }
+            }
+        }
+
+        var efforts = new List<AgentReasoningEffort>();
+        if (levels.Contains("minimal")) efforts.Add(AgentReasoningEffort.Minimal);
+        if (levels.Contains("low")) efforts.Add(AgentReasoningEffort.Low);
+        if (levels.Contains("medium")) efforts.Add(AgentReasoningEffort.Medium);
+        if (levels.Contains("high")) efforts.Add(AgentReasoningEffort.High);
+        if (levels.Contains("xhigh") || levels.Contains("max")) efforts.Add(AgentReasoningEffort.XHigh);
+        if (levels.Contains("xhigh") && levels.Contains("max")) efforts.Add(AgentReasoningEffort.Max);
+        if (efforts.Count == 0)
+        {
+            return null;
+        }
+
+        return (efforts, levels.Contains("xhigh") ? "xhigh" : levels.Contains("max") ? "max" : null);
     }
 
     private static bool TryGetOverride(
