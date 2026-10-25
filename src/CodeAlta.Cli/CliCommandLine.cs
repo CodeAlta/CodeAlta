@@ -198,6 +198,7 @@ internal static class CliCommandLine
         switch (name)
         {
             case "--isolated": options.Isolated = true; return true;
+            case "--dev": options.Developer = true; return true;
             case "--ephemeral": options.Ephemeral = true; return true;
             case "--ignore-user-config": options.IgnoreUserConfig = true; return true;
             case "--strict-config": options.StrictConfig = true; return true;
@@ -241,6 +242,7 @@ internal static class CliCommandLine
     {
         command.Add("Storage:");
         command.Add("isolated", "Keep the sessions in ~/.alta/cli, apart from CodeAlta Desktop and TUI", v => options.Isolated = v is not null);
+        command.Add("dev", "Use the sessions of the developer instance (alta --dev): ~/.alta/dev", v => options.Developer = v is not null);
         command.Add("profile=", "Use the separate profile {FOLDER} (or CODEALTA_HOME); it must exist", v => options.Profile = v);
         command.Add("ephemeral", "Persist nothing: the sessions go to a temporary folder deleted at the end", v => options.Ephemeral = v is not null);
         command.Add(_);

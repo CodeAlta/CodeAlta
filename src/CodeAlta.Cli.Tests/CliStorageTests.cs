@@ -91,6 +91,32 @@ public sealed class CliStorageTests
     }
 
     [TestMethod]
+    public async Task Dev_KeepsTheSessionsWithTheDeveloperInstance_AndAnnouncesThemThere()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+
+        var run = await root.RunAsync(provider, ["run", Plain, "--dev", "--format", "jsonl", "hello"]);
+
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+        var sessionId = SessionIdOf(run);
+        var files = CliTestRoot.Files(root.Profile);
+        Assert.IsTrue(files.All(static file => file.StartsWith("dev/sessions/", StringComparison.Ordinal)), string.Join(", ", files));
+        Assert.IsTrue(files.Any(file => file.EndsWith(sessionId + ".jsonl", StringComparison.Ordinal)));
+        Assert.IsNotNull(new SessionMarkerStore(new CatalogOptions { GlobalRoot = root.Profile, StateRoot = Path.Combine(root.Profile, "dev") }).TryRead(sessionId),
+            "The developer instance is told of the session.");
+
+        var isolated = await root.RunAsync(provider, ["run", Plain, "--dev", "--isolated", "--format", "jsonl", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, isolated.ExitCode, isolated.Stderr);
+        Assert.IsTrue(CliTestRoot.Files(root.Profile).Any(file => file.StartsWith("dev/cli/sessions/", StringComparison.Ordinal)
+            && file.EndsWith(SessionIdOf(isolated) + ".jsonl", StringComparison.Ordinal)));
+
+        var profile = Directory.CreateDirectory(Path.Combine(root.Root, "profile")).FullName;
+        var both = await root.RunAsync(provider, ["run", Plain, "--dev", "--profile", profile, "hello"]);
+        Assert.AreEqual(CliExitCodes.InvalidUsage, both.ExitCode);
+    }
+
+    [TestMethod]
     public async Task Profile_MustExist_AndHoldsEverything()
     {
         using var root = new CliTestRoot();

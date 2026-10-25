@@ -17,6 +17,8 @@ internal class CliCommonOptions
 
     public bool Isolated { get; set; }
 
+    public bool Developer { get; set; }
+
     public string? Profile { get; set; }
 
     public bool Ephemeral { get; set; }

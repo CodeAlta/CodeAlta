@@ -1,4 +1,5 @@
 using System.Globalization;
+using CodeAlta.Hosting;
 
 namespace CodeAlta.Cli;
 
@@ -37,7 +38,8 @@ internal sealed record CliStorage(CliStorageMode Mode, bool Ephemeral, string Gl
 
     /// <summary>
     /// Resolves the roots of the options: <c>--profile</c> (or <see cref="CliEnvironment.HomeVariable"/>) first, then
-    /// <c>--isolated</c>, else the visible mode; <c>--ephemeral</c> replaces the state root with a new temporary folder.
+    /// <c>--isolated</c>, else the visible mode; <c>--dev</c> takes the state root of the developer instance
+    /// (<c>~/.alta/dev</c>) instead of the normal one; <c>--ephemeral</c> replaces the state root with a new temporary folder.
     /// </summary>
     /// <returns>False with a message when the profile folder does not exist.</returns>
     public static bool TryResolve(CliCommonOptions options, CliEnvironment environment, out CliStorage? storage, out string? error)
@@ -50,6 +52,12 @@ internal sealed record CliStorage(CliStorageMode Mode, bool Ephemeral, string Gl
         CliStorageMode mode;
         string globalRoot;
         string stateRoot;
+        if (profile is not null && options.Developer)
+        {
+            error = "--dev uses the developer instance of ~/.alta: it does not combine with a separate profile.";
+            return false;
+        }
+
         if (profile is not null)
         {
             var folder = Path.GetFullPath(profile, environment.CurrentDirectory);
@@ -63,15 +71,14 @@ internal sealed record CliStorage(CliStorageMode Mode, bool Ephemeral, string Gl
 
             (mode, globalRoot, stateRoot) = (CliStorageMode.Profile, folder, folder);
         }
-        else if (options.Isolated)
-        {
-            globalRoot = environment.DefaultProfile;
-            (mode, stateRoot) = (CliStorageMode.Isolated, Path.Combine(globalRoot, IsolatedFolderName));
-        }
         else
         {
             globalRoot = environment.DefaultProfile;
-            (mode, stateRoot) = (CliStorageMode.Visible, globalRoot);
+            // The developer instance (alta --dev) keeps its sessions in a folder of its own: the run shares them.
+            var instanceRoot = CodeAltaInstanceProfile.Create(globalRoot, options.Developer).StateRoot;
+            (mode, stateRoot) = options.Isolated
+                ? (CliStorageMode.Isolated, Path.Combine(instanceRoot, IsolatedFolderName))
+                : (CliStorageMode.Visible, instanceRoot);
         }
 
         if (options.Ephemeral)
