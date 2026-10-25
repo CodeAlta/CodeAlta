@@ -73,7 +73,11 @@ Choose **Custom** and give a Hugging Face repository address (`https://huggingfa
 
 - a transducer: `encoder*.onnx`, `decoder*.onnx`, `joiner*.onnx` and `tokens.txt`;
 - Moonshine: `encoder_model.*`, `decoder_model_merged.*` and `tokens.txt`, or the four files of its first version;
-- Whisper: `<name>-encoder*.onnx`, `<name>-decoder*.onnx` and `<name>-tokens.txt`.
+- Whisper: `<name>-encoder*.onnx`, `<name>-decoder*.onnx` and `<name>-tokens.txt`;
+- SenseVoice or Paraformer: one `model*.onnx` and `tokens.txt`, in a repository or folder whose name says `sense-voice` or `paraformer`;
+- FireRedASR: `encoder*.onnx`, `decoder*.onnx` and `tokens.txt`, in a repository whose name says `fire-red`.
+
+SenseVoice finds the language by itself: Chinese, English, Japanese, Korean or Cantonese.
 
 Quantized (`int8`) files are preferred. A repository with none of these is refused before download. A model the engine cannot load is reported after download, and can be deleted on the same page.
 

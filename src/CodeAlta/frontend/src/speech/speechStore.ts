@@ -122,7 +122,7 @@ const failures: Readonly<Record<string, MessageKey>> = Object.freeze({
   network: "The speech model could not be downloaded: check the network connection.",
   not_found: "The speech model was not found at its address.",
   checksum: "The downloaded speech model is damaged: download it again.",
-  unsupported_model: "This speech model is not supported.",
+  unsupported_model: "This speech model is not supported: CodeAlta loads the files of a transducer, Whisper, Moonshine, SenseVoice, Paraformer or FireRedASR model.",
   busy_elsewhere: "Another CodeAlta is downloading this speech model.",
   disk: "The speech model could not be written to the disk.",
   unsupported_platform: "Speech to prompt is not available on this system.",

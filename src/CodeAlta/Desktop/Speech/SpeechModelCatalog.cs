@@ -20,12 +20,21 @@ internal enum SpeechModelFamily
 
     /// <summary>Whisper: encoder and decoder.</summary>
     Whisper,
+
+    /// <summary>SenseVoice: one model file; it finds the language itself.</summary>
+    SenseVoice,
+
+    /// <summary>Paraformer: one model file.</summary>
+    Paraformer,
+
+    /// <summary>FireRedASR: encoder and decoder, without a joiner.</summary>
+    FireRedAsr,
 }
 
 /// <summary>One file to download, with what it is checked against.</summary>
 /// <param name="Name">The file name, without a folder.</param>
 /// <param name="Role">What the file is to the engine: <c>encoder</c>, <c>decoder</c>, <c>joiner</c>, <c>tokens</c>,
-/// <c>preprocessor</c>, <c>uncachedDecoder</c>, <c>cachedDecoder</c>, <c>mergedDecoder</c>, or empty.</param>
+/// <c>preprocessor</c>, <c>uncachedDecoder</c>, <c>cachedDecoder</c>, <c>mergedDecoder</c>, <c>model</c>, or empty.</param>
 /// <param name="Size">The exact size in bytes.</param>
 /// <param name="Sha256">The SHA-256 of the content, in lower-case hexadecimal, when the source gives one.</param>
 /// <param name="GitSha1">The git blob SHA-1 of the content, for a file the source keeps in git itself.</param>

@@ -116,12 +116,24 @@ public sealed class SpeechModelCatalogTests
         var whisper = Classify("owner/whisper", "small-encoder.onnx", "small-encoder.int8.onnx", "small-decoder.onnx", "small-decoder.int8.onnx", "small-tokens.txt")!;
         Assert.AreEqual(SpeechModelFamily.Whisper, whisper.Family);
         CollectionAssert.AreEqual(new[] { "small-encoder.int8.onnx", "small-decoder.int8.onnx", "small-tokens.txt" }, whisper.Files.Select(static file => file.Name).ToArray());
+
+        // One model file: the name of the repository, or of its folder, says the family.
+        var senseVoice = Classify("csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09", "model.int8.onnx", "model.onnx", "tokens.txt", "test_wavs")!;
+        Assert.AreEqual(SpeechModelFamily.SenseVoice, senseVoice.Family);
+        CollectionAssert.AreEqual(new[] { "model.int8.onnx", "tokens.txt" }, senseVoice.Files.Select(static file => file.Name).ToArray());
+        CollectionAssert.AreEqual(new[] { "model", "tokens" }, senseVoice.Files.Select(static file => file.Role).ToArray());
+        Assert.AreEqual(SpeechModelFamily.SenseVoice, Classify("owner/models/tree/main/SenseVoiceSmall", "model.onnx", "tokens.txt")!.Family);
+        Assert.AreEqual(SpeechModelFamily.Paraformer, Classify("csukuangfj/sherpa-onnx-paraformer-zh-2024-03-09", "model.int8.onnx", "tokens.txt")!.Family);
+        var fireRed = Classify("csukuangfj/sherpa-onnx-fire-red-asr-large-zh_en-2025-02-16", "encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt")!;
+        Assert.AreEqual(SpeechModelFamily.FireRedAsr, fireRed.Family);
+        CollectionAssert.AreEqual(new[] { "encoder", "decoder", "tokens" }, fireRed.Files.Select(static file => file.Role).ToArray());
     }
 
     [TestMethod]
     public void Classify_RefusesWhatTheEngineDoesNotLoadHere()
     {
-        Assert.IsNull(Classify("owner/sense-voice", "model.int8.onnx", "tokens.txt"), "one model file is several possible families");
+        Assert.IsNull(Classify("owner/asr", "model.int8.onnx", "tokens.txt"), "one model file of a repository that names no family is several possible families");
+        Assert.IsNull(Classify("owner/asr", "encoder.onnx", "decoder.onnx", "tokens.txt"), "an encoder and a decoder of a repository that names no family");
         Assert.IsNull(Classify("owner/half", "encoder.onnx", "joiner.onnx", "tokens.txt"), "a part is missing");
         Assert.IsNull(Classify("owner/empty"));
         Assert.IsNull(Classify("owner/odd", "enc oder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt"), "a name that is not a plain file name is not downloaded");

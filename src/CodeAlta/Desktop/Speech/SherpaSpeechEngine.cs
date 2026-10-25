@@ -82,6 +82,19 @@ internal sealed class SherpaSpeechEngine : ISpeechEngine
                 config.ModelConfig.Whisper.Decoder = File("decoder");
                 config.ModelConfig.Whisper.Task = "transcribe";
                 break;
+            case SpeechModelFamily.SenseVoice:
+                config.ModelConfig.SenseVoice.Model = File("model");
+                config.ModelConfig.SenseVoice.Language = "auto";
+                // Punctuation and numbers written as figures, where the export of the model does it.
+                config.ModelConfig.SenseVoice.UseInverseTextNormalization = 1;
+                break;
+            case SpeechModelFamily.Paraformer:
+                config.ModelConfig.Paraformer.Model = File("model");
+                break;
+            case SpeechModelFamily.FireRedAsr:
+                config.ModelConfig.FireRedAsr.Encoder = File("encoder");
+                config.ModelConfig.FireRedAsr.Decoder = File("decoder");
+                break;
         }
 
         var recognizer = new Recognizer(config);

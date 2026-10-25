@@ -84,6 +84,9 @@ internal static class SpeechModelSource
         }
 
         static bool Model(string name) => name.EndsWith(".onnx", StringComparison.Ordinal) || name.EndsWith(".ort", StringComparison.Ordinal);
+        // "sense-voice", "SenseVoice" and "sense_voice" are the same name.
+        var named = (repository.Repository + "/" + repository.Folder).ToLowerInvariant().Replace("-", "", StringComparison.Ordinal).Replace("_", "", StringComparison.Ordinal);
+        bool Named(string family) => named.Contains(family, StringComparison.Ordinal);
         var tokens = Pick("tokens", static name => name == "tokens.txt");
         SpeechFile?[] parts;
         SpeechModelFamily family;
@@ -113,6 +116,17 @@ internal static class SpeechModelSource
                 joiner,
                 tokens,
             ]);
+        }
+        // A model of one file, or an encoder and a decoder without a joiner, is several possible families with the
+        // same names: the name of the repository (or of its folder) says which, as sherpa-onnx names its exports.
+        else if (tokens is not null && Named("firered") && Pick("encoder", static name => name.StartsWith("encoder", StringComparison.Ordinal) && Model(name)) is { } fireRedEncoder
+            && Pick("decoder", static name => name.StartsWith("decoder", StringComparison.Ordinal) && Model(name)) is { } fireRedDecoder)
+        {
+            (family, parts) = (SpeechModelFamily.FireRedAsr, [fireRedEncoder, fireRedDecoder, tokens]);
+        }
+        else if (tokens is not null && (Named("sensevoice") || Named("paraformer")) && Pick("model", static name => name.StartsWith("model", StringComparison.Ordinal) && Model(name)) is { } single)
+        {
+            (family, parts) = (Named("sensevoice") ? SpeechModelFamily.SenseVoice : SpeechModelFamily.Paraformer, [single, tokens]);
         }
         else
         {
