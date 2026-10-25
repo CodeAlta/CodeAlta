@@ -34,6 +34,7 @@ per-project provider preferences.
 | --- | --- |
 | `sessions/yyyy/MM/dd/<id>.jsonl`, `<id>.attachments/` | Session journals and their files ([runtime](runtime.md#journals-are-the-source-of-truth)). |
 | `sessions/leases/<id>.lease` | `SessionLeaseStore`: the process that runs a session holds an open handle on its lease, so no other process runs it; the system releases it when the process ends. Never removed by retention. |
+| `sessions/markers/<id>.json` | `SessionMarkerStore`: a process without the database (the command line) names each journal it writes there; the instance lists those sessions, then deletes the markers. Written by rename, never read as journals, never removed by retention. |
 | `data/alta.sqlite3`, `data/backups/`, `data/search.sqlite3` | `ApplicationDatabase` and its copies; the desktop search index (derived). |
 | `saved_statistics_after_deleted_sessions/` | `StatisticsArchiveStore`: statistics of retired sessions (see below). |
 | `ui-state.yaml`, `saved_prompts/` | `SessionViewCatalog` view state, `PromptDraftStore` unsent drafts. |

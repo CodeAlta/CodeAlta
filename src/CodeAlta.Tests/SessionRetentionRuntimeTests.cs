@@ -365,6 +365,8 @@ public sealed class SessionRetentionRuntimeTests
         var orphanAttachment = Write(Path.Combine("2023", "03", "04", "gone.attachments", "nested", "image.png"), old);
         var recentStray = Write("recent.txt", Now.AddDays(-2));
         var protectedJournal = Write(Path.Combine("2024", "05", "06", "open.jsonl"), old, "not a journal");
+        var lease = Write(Path.Combine(AgentRuntimePathLayout.SessionLeasesFolderName, "gone.lease"), old);
+        var marker = Write(Path.Combine(AgentRuntimePathLayout.SessionMarkersFolderName, "gone.json"), old);
         Assert.IsTrue(fixture.Protection.Publish("window", ["open"], true));
 
         var result = await fixture.Service(new FakeArchive()).RunOnceAsync(Now, Now.AddMonths(-3));
@@ -382,6 +384,8 @@ public sealed class SessionRetentionRuntimeTests
         Assert.IsTrue(File.Exists(keptAttachment), "The files of a session that stays stay.");
         Assert.IsTrue(File.Exists(recentStray));
         Assert.IsTrue(File.Exists(protectedJournal), "The files of a session in use stay.");
+        Assert.IsTrue(File.Exists(lease), "The leases belong to the processes that hold them.");
+        Assert.IsTrue(File.Exists(marker), "The markers belong to the instance that lists their sessions.");
         Assert.IsTrue(File.Exists(fixture.Journal("recent")));
         Assert.AreEqual("protected", await File.ReadAllTextAsync(Path.Combine(fixture.Root, "auth", "sentinel")));
     }
