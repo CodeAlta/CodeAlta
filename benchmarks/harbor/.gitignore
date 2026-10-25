@@ -1,0 +1,5 @@
+# The published altacli and its tarball (build-altacli.ps1 / build-altacli.sh)
+dist/
+# Harbor job outputs
+jobs/
+__pycache__/
