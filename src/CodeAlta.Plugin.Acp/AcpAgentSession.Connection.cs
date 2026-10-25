@@ -568,11 +568,3 @@ internal sealed partial class AcpAgentSession
         }
     }
 }
-
-/// <summary>The JSON-RPC error codes ACP names.</summary>
-internal static class AcpErrorCodes
-{
-    public const int MethodNotFound = -32601;
-
-    public const int AuthRequired = -32000;
-}

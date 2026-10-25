@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CodeAlta.Acp;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Harness;
 using CodeAlta.Agent.Runtime;

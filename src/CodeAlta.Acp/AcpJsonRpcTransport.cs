@@ -185,10 +185,18 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
         await WriteBufferAsync(bufferWriter.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
 
+    internal Task SendErrorResponseAsync(
+        RequestId id,
+        int code,
+        string message,
+        CancellationToken cancellationToken = default)
+        => SendErrorResponseAsync(id, code, message, data: null, cancellationToken);
+
     internal async Task SendErrorResponseAsync(
         RequestId id,
         int code,
         string message,
+        JsonElement? data,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -202,6 +210,12 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
             writer.WriteStartObject("error");
             writer.WriteNumber("code", code);
             writer.WriteString("message", message);
+            if (data is { ValueKind: not JsonValueKind.Undefined } value)
+            {
+                writer.WritePropertyName("data");
+                value.WriteTo(writer);
+            }
+
             writer.WriteEndObject();
             writer.WriteEndObject();
         }

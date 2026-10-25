@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodeAlta.Acp;
 using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Plugin.Acp;

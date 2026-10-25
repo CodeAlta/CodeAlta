@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using CodeAlta.Acp;
 using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
 
