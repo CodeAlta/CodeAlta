@@ -56,13 +56,17 @@ internal sealed class CliStartupException(string message) : Exception(message);
 /// <remarks>Disposed in order: the host, the endpoints of the tools of plugin agents, models.dev, the private database, an ephemeral state root.</remarks>
 internal sealed class CliHost : IAsyncDisposable
 {
+    /// <summary>How long the host is waited for when it stops, by default: its sessions stop, its plugins and providers end.</summary>
+    public static readonly TimeSpan DefaultShutdownLimit = TimeSpan.FromSeconds(10);
+
     private readonly PrivateApplicationDatabase _database;
     private readonly ModelsDevCatalogService _modelsDev;
     private readonly LoopbackHarnessToolEndpoints _toolEndpoints;
+    private readonly TimeSpan _shutdownLimit;
     private int _disposed;
 
     private CliHost(CliStorage storage, CodeAltaHost host, AltaCommandDispatcher alta, PrivateApplicationDatabase database,
-        ModelsDevCatalogService modelsDev, LoopbackHarnessToolEndpoints toolEndpoints)
+        ModelsDevCatalogService modelsDev, LoopbackHarnessToolEndpoints toolEndpoints, TimeSpan shutdownLimit)
     {
         Storage = storage;
         Host = host;
@@ -70,6 +74,7 @@ internal sealed class CliHost : IAsyncDisposable
         _database = database;
         _modelsDev = modelsDev;
         _toolEndpoints = toolEndpoints;
+        _shutdownLimit = shutdownLimit;
     }
 
     public CliStorage Storage { get; }
@@ -170,7 +175,12 @@ internal sealed class CliHost : IAsyncDisposable
                 throw new CliStartupException(missing);
             }
 
-            return new CliHost(storage, host, alta, database, modelsDev, toolEndpoints) { Mcp = started, Request = request, Catalog = catalog };
+            return new CliHost(storage, host, alta, database, modelsDev, toolEndpoints, environment.ShutdownLimit ?? DefaultShutdownLimit)
+            {
+                Mcp = started,
+                Request = request,
+                Catalog = catalog,
+            };
         }
         catch
         {
@@ -411,12 +421,20 @@ internal sealed class CliHost : IAsyncDisposable
             ];
         };
 
+    /// <summary>
+    /// Stops the host, waiting for it no longer than the shutdown limit: a session whose provider does not stop is left
+    /// behind, and the process, which exits after the run, ends it.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         try
         {
-            await Host.DisposeAsync().ConfigureAwait(false);
+            await Host.DisposeAsync().AsTask().WaitAsync(_shutdownLimit).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            LogManager.GetLogger("CodeAlta.Cli").Warn($"The host did not stop within {_shutdownLimit}: the run ends without waiting for it.");
         }
         finally
         {

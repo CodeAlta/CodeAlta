@@ -31,7 +31,7 @@ altacli run - < task.md
 - `altacli models` lists the models of the providers that are ready; `altacli auth check --provider ID` tells whether one is ready.
 - `altacli --help` lists the commands; `altacli <command> --help` gives all a command does, takes and writes, with examples: enough for an agent that uses `altacli` on its own.
 
-The run ends when the session and the sessions it started have nothing left to do: the answers of [delegated agents](sessions/readme.md) and the background jobs of the run are waited for. A second Ctrl+C stops at once.
+The run ends when the session and the sessions it started have nothing left to do: the answers of [delegated agents](sessions/readme.md) and the background jobs of the run are waited for. A run stopped by Ctrl+C or `--timeout` is waited for 30 seconds at most, then `altacli` exits all the same; a second Ctrl+C stops at once.
 
 ### Full trust
 

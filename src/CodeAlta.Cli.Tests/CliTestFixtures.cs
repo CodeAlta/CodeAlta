@@ -82,6 +82,14 @@ internal sealed class FakeProvider
         return Answer(text);
     };
 
+    /// <summary>Waits for the gate without the token of the turn: a provider that ignores cancellation.</summary>
+    internal static FakeTurn IgnoreCancellation(Task gate, string text, TaskCompletionSource? started = null) => async (_, _, _) =>
+    {
+        started?.TrySetResult();
+        await gate;
+        return Answer(text);
+    };
+
     internal static FakeTurn DoThenReply(Func<AgentTurnRequest, Task> action, string text) => async (request, _, _) =>
     {
         await action(request);

@@ -34,6 +34,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     private readonly CancellationTokenSource _closing = new();
     // The flushes waiting for the reader to reach their marker.
     private readonly ConcurrentDictionary<FlushMarker, TaskCompletionSource> _flushes = new();
+    // The run in progress of each session, which CancelAsync asks to abort.
+    private readonly ConcurrentDictionary<string, RunAbort> _runs = new(StringComparer.OrdinalIgnoreCase);
     private readonly Task _reader;
     // The events the runtime stream dropped while the reader read it (DroppedEventCount).
     private long _droppedEventCount;
@@ -230,7 +232,9 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     /// <summary>
     /// Sends a prompt to an open session and waits until it and every session it started have settled, or until the time
     /// the run is given runs out: the run is then aborted (<see cref="SessionRuntimeService.AbortTreeAsync"/>) with the
-    /// reason <c>timeout</c>. A run the caller's token cancels is aborted with the reason <c>cancelled</c>.
+    /// reason <c>timeout</c>. A run the caller's token cancels is aborted with the reason <c>cancelled</c>, one that
+    /// <see cref="CancelAsync"/> aborts with its reason. An aborted tree is waited for no longer than
+    /// <see cref="HeadlessSessionDriverOptions.AbortGrace"/>.
     /// </summary>
     /// <param name="session">The session, opened by this driver.</param>
     /// <param name="prompt">The prompt.</param>
@@ -249,12 +253,28 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         if (timeout is { } limit) ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(limit, TimeSpan.Zero, nameof(timeout));
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (!_open.ContainsKey(session.SessionId)) throw new ArgumentException($"Session '{session.SessionId}' is not open in this driver.", nameof(session));
-        var runtime = _host.RuntimeService;
         var stopwatch = Stopwatch.StartNew();
         var startedAt = DateTimeOffset.UtcNow;
         var attachments = prompt.Attachments.Count == 0 ? null : _attachments.Materialize(string.Empty, prompt.Attachments).Input.Items.Skip(1).ToArray();
         using var timer = timeout is { } span ? new CancellationTokenSource(span) : new CancellationTokenSource();
-        using var stop = CancellationTokenSource.CreateLinkedTokenSource(timer.Token, cancellationToken, _closing.Token);
+        using var aborts = new RunAbort();
+        _runs[session.SessionId] = aborts;
+        try
+        {
+            return await RunAsync(session, prompt, timeout, attachments, timer, aborts, stopwatch, startedAt, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _runs.TryRemove(new KeyValuePair<string, RunAbort>(session.SessionId, aborts));
+            aborts.End();
+        }
+    }
+
+    private async Task<HeadlessRunResult> RunAsync(HeadlessSession session, HeadlessPrompt prompt, TimeSpan? timeout, IReadOnlyList<AgentInputItem>? attachments,
+        CancellationTokenSource timer, RunAbort aborts, Stopwatch stopwatch, DateTimeOffset startedAt, CancellationToken cancellationToken)
+    {
+        var runtime = _host.RuntimeService;
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(timer.Token, cancellationToken, _closing.Token, aborts.Token);
         var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest(Guid.NewGuid().ToString("N"), session.SessionId, prompt.Text)
         {
             Selection = session.Selection,
@@ -272,8 +292,10 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
-            abortReason = timer.IsCancellationRequested ? "timeout" : "cancelled";
-            await AbortAndWaitAsync(session.SessionId, abortReason).ConfigureAwait(false);
+            // The run aborts its tree with the reason asked (CancelAsync), and waits for it no longer than the grace.
+            abortReason = timer.IsCancellationRequested ? "timeout" : aborts.Reason ?? "cancelled";
+            await AbortAndWaitAsync(session.SessionId, abortReason, CancellationToken.None).ConfigureAwait(false);
+            aborts.End();
             sent ??= receipt.Completion.IsCompleted ? await receipt.Completion.ConfigureAwait(false) : null;
         }
 
@@ -314,19 +336,30 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
 
     /// <summary>
     /// Aborts the run of an open session and of the sessions it started, with a reason (<c>signal</c>, <c>cancelled</c>...):
-    /// a <see cref="RunAsync"/> that waits for it then returns <see cref="HeadlessRunStatus.Aborted"/>.
+    /// a <see cref="RunAsync"/> that waits for it then returns <see cref="HeadlessRunStatus.Aborted"/> at once, and aborts
+    /// its tree with this reason. The runs are waited for no longer than <see cref="HeadlessSessionDriverOptions.AbortGrace"/>:
+    /// a provider that does not stop does not hold the caller.
     /// </summary>
     /// <param name="session">The session.</param>
     /// <param name="reason">Why the run is aborted.</param>
     /// <param name="cancellationToken">Stops waiting for the runs to stop.</param>
-    /// <returns>A task that completes when the runs have stopped and the abort is recorded.</returns>
+    /// <returns>A task that completes when the runs have stopped and the abort is recorded, or when the grace has passed.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="reason"/> is blank.</exception>
-    public Task CancelAsync(HeadlessSession session, string reason, CancellationToken cancellationToken = default)
+    /// <exception cref="OperationCanceledException">The wait was canceled.</exception>
+    public async Task CancelAsync(HeadlessSession session, string reason, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-        return _host.RuntimeService.AbortTreeAsync(session.SessionId, reason, cancellationToken);
+        if (_runs.TryGetValue(session.SessionId, out var run))
+        {
+            // The run aborts its own tree: one abort, recorded with this reason.
+            run.Request(reason.Trim());
+            await run.Ended.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await AbortAndWaitAsync(session.SessionId, reason, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -538,13 +571,14 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     }
 
     // Aborts a tree and waits a bounded time for it to settle: what does not stop within the grace is reported as it is.
-    private async Task AbortAndWaitAsync(string sessionId, string reason)
+    private async Task AbortAndWaitAsync(string sessionId, string reason, CancellationToken cancellationToken)
     {
         using var grace = new CancellationTokenSource(_options.AbortGrace);
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(grace.Token, cancellationToken);
         try
         {
-            await _host.RuntimeService.AbortTreeAsync(sessionId, reason, grace.Token).ConfigureAwait(false);
-            await _host.RuntimeService.WhenSettledAsync(sessionId, grace.Token).ConfigureAwait(false);
+            await _host.RuntimeService.AbortTreeAsync(sessionId, reason, wait.Token).ConfigureAwait(false);
+            await _host.RuntimeService.WhenSettledAsync(sessionId, wait.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (grace.IsCancellationRequested)
         {
@@ -552,6 +586,39 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         catch (ObjectDisposedException)
         {
         }
+    }
+
+    // How a run in progress is asked to abort (CancelAsync), and when it no longer waits for its tree.
+    private sealed class RunAbort : IDisposable
+    {
+        private readonly CancellationTokenSource _requested = new();
+        private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private string? _reason;
+
+        public CancellationToken Token => _requested.Token;
+
+        // The reason of the first request.
+        public string? Reason => Volatile.Read(ref _reason);
+
+        // Completes once the run aborted its tree (or the grace passed), or ended.
+        public Task Ended => _ended.Task;
+
+        public void Request(string reason)
+        {
+            Interlocked.CompareExchange(ref _reason, reason, null);
+            try
+            {
+                _requested.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The run has ended.
+            }
+        }
+
+        public void End() => _ended.TrySetResult();
+
+        public void Dispose() => _requested.Dispose();
     }
 
     // The usage of the root with what the sessions it started used since the prompt.

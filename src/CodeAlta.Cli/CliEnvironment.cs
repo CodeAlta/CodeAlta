@@ -47,6 +47,15 @@ internal sealed record CliEnvironment
     /// <summary>Gets how long an aborted run is waited for before its result is reported; null for the default of the driver.</summary>
     public TimeSpan? AbortGrace { get; init; }
 
+    /// <summary>Gets how long the host of a run is waited for when it stops; null for <see cref="CliHost.DefaultShutdownLimit"/>.</summary>
+    public TimeSpan? ShutdownLimit { get; init; }
+
+    /// <summary>
+    /// Gets what ends the process with an exit code when a run asked to end (a signal, its timeout) has not ended after its
+    /// bounds (<see cref="CliExitFallback"/>); null for no such fallback (a test).
+    /// </summary>
+    public Action<int>? ExitProcess { get; init; }
+
     /// <summary>Gets what is told the host of a run once it is created, for a test that drives it; null for nothing.</summary>
     public Action<CodeAlta.Orchestration.Hosting.CodeAltaHost>? HostCreated { get; init; }
 
@@ -70,6 +79,7 @@ internal sealed record CliEnvironment
             GetVariable = Environment.GetEnvironmentVariable,
             InitializeLogging = true,
             HandleSignals = true,
+            ExitProcess = Environment.Exit,
         };
     }
 

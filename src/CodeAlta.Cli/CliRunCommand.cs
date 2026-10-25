@@ -18,6 +18,9 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
     // How long the events of a run that settled are waited for, so that the result is written after them.
     private static readonly TimeSpan FlushLimit = TimeSpan.FromSeconds(5);
 
+    // What the process-level fallback adds to the bounds of a run asked to end, so that it fires only when they failed.
+    private static readonly TimeSpan FallbackMargin = TimeSpan.FromSeconds(5);
+
     public async ValueTask<int> RunAsync(CliRunOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -37,6 +40,8 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
         if (!CliConfig.TryCreate(options, environment, storage!.GlobalRoot, out var config, out error)) return Invalid(jsonl, error!);
 
         var ownsLogging = environment.InitializeLogging && CliLogging.Initialize(storage.StateRoot, output, options.Verbose);
+        // Disarmed once the host is disposed, at the end of the method.
+        using var fallback = new CliExitFallback(output, jsonl, environment.ExitProcess);
         try
         {
             await using var host = await CliHost.CreateAsync(new CliHostRequest
@@ -51,7 +56,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
                 ChecksRequired = true,
             }, environment, processToken).ConfigureAwait(false);
             environment.HostCreated?.Invoke(host.Host);
-            return await RunAsync(host, request, new HeadlessPrompt(prompt) { Attachments = attachments }, timeout, schema, options, jsonl).ConfigureAwait(false);
+            return await RunAsync(host, request, new HeadlessPrompt(prompt) { Attachments = attachments }, timeout, schema, options, jsonl, fallback).ConfigureAwait(false);
         }
         catch (CliStartupException exception)
         {
@@ -75,7 +80,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
     }
 
     private async Task<int> RunAsync(CliHost host, HeadlessSessionRequest request, HeadlessPrompt prompt, TimeSpan? timeout, JsonElement? schema,
-        CliRunOptions options, CliJsonlWriter? jsonl)
+        CliRunOptions options, CliJsonlWriter? jsonl, CliExitFallback fallback)
     {
         // The sink of the projection: the lines of JSONL, or the progress of text mode once the session is known.
         IAcpEventSink? sink = jsonl;
@@ -132,15 +137,28 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
                 new ValueTask<CodeAlta.Catalog.SessionViewDescriptor?>(host.Host.RuntimeService.TryGetResumableSessionAsync(sessionId, cancellationToken))));
         }
 
+        // What a run asked to end may take at most: the abort, the events, the shutdown of the host. The process exits after it.
+        var bound = driverOptions.AbortGrace + FlushLimit + (environment.ShutdownLimit ?? CliHost.DefaultShutdownLimit) + FallbackMargin;
+        if (timeout is { } limit)
+        {
+            fallback.Arm(limit + bound, new CliRunReport("timeout", CliExitCodes.Timeout)
+            {
+                SessionId = session.SessionId,
+                AbortReason = "timeout",
+                FailureMessage = $"The run did not end within {limit}, nor stop after it.",
+            });
+        }
+
         // A signal (or the token of a caller in a test) aborts the run with the reason "signal"; a second signal ends the process.
-        // The abort is recorded with its reason first; the token then makes the driver wait (a bounded grace) for the tree to stop.
+        // The run aborts its tree at once and waits for it a bounded time (the abort grace), even when a provider does not stop.
+        // The token covers a signal that comes before the run is in progress: the run then aborts as soon as it starts.
         using var signalled = new CancellationTokenSource();
         var aborting = 0;
         Task? aborter = null;
         var abort = () =>
         {
             if (Interlocked.Exchange(ref aborting, 1) != 0) return;
-            aborter = Task.Run(async () =>
+            Volatile.Write(ref aborter, Task.Run(async () =>
             {
                 try
                 {
@@ -149,11 +167,14 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
                 catch (Exception exception) when (exception is ObjectDisposedException or InvalidOperationException or OperationCanceledException)
                 {
                 }
-                finally
-                {
-                    try { signalled.Cancel(); }
-                    catch (ObjectDisposedException) { }
-                }
+            }));
+            try { signalled.Cancel(); }
+            catch (ObjectDisposedException) { }
+            fallback.Arm(bound, new CliRunReport("aborted", CliExitCodes.Aborted)
+            {
+                SessionId = session.SessionId,
+                AbortReason = "signal",
+                FailureMessage = "The run was aborted: signal. It did not stop in time.",
             });
         };
         using var signals = environment.HandleSignals ? new CliSignals(abort, () =>
@@ -166,7 +187,17 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
         var result = await driver.RunAsync(session, prompt, timeout, signalled.Token).ConfigureAwait(false);
         fromCaller.Dispose();
         signals?.Dispose();
-        if (Volatile.Read(ref aborter) is { } aborted) await aborted.ConfigureAwait(false);
+        if (Volatile.Read(ref aborter) is { } aborted)
+        {
+            try
+            {
+                await aborted.WaitAsync(driverOptions.AbortGrace + FlushLimit).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // The run reported what it could: the abort goes on without the result waiting for it.
+            }
+        }
         if (Volatile.Read(ref aborting) != 0 && result.Status is not HeadlessRunStatus.Timeout)
         {
             // The abort may land as the run ends: the run of a signal is reported as aborted all the same.
@@ -219,6 +250,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
             }
         }
 
+        fallback.Settle(report);
         if (report.Status != "completed") output.Error($"altacli: {report.Status}: {report.FailureMessage ?? report.AbortReason ?? "the run did not complete."}");
         if (jsonl is not null) jsonl.WriteResult(report);
         else if (report.Status == "completed" && report.FinalMessage is { } answer) output.WriteText(answer);

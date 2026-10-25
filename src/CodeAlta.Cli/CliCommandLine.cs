@@ -100,6 +100,8 @@ internal static class CliCommandLine
             "  2 invalid usage or configuration, --resume of an unknown session, or a",
             "    required plugin or MCP server that did not start",
             "  3 aborted (signal)          4 --timeout elapsed",
+            "    (the aborted run is waited for 30 s at most: a provider that does not",
+            "    stop does not hold the exit)",
             "  5 session in use by CodeAlta Desktop, TUI or another altacli",
             "  6 provider not ready: none, a sign-in or a key needed, model not offered",
             "  7 final answer not matching --output-schema",

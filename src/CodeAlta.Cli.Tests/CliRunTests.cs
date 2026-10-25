@@ -324,6 +324,61 @@ public sealed class CliRunTests
     }
 
     [TestMethod]
+    public async Task Cancel_OfAProviderThatIgnoresCancellation_EndsWithinTheGrace_AndExitsWithThree()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        var never = new TaskCompletionSource();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        provider.Turns.Enqueue(FakeProvider.IgnoreCancellation(never.Task, "Too late.", started));
+        using var signal = new CancellationTokenSource();
+        try
+        {
+            var running = root.RunWithEnvironmentAsync(Bounded(root, provider), ["run", Plain, "--format", "jsonl", "wait"], cancellationToken: signal.Token);
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            signal.Cancel();
+            var run = await running.WaitAsync(TimeSpan.FromSeconds(30));
+
+            Assert.IsTrue(watch.Elapsed < TimeSpan.FromSeconds(15), $"Ended after {watch.Elapsed}: the abort and the shutdown are bounded.");
+            Assert.AreEqual(CliExitCodes.Aborted, run.ExitCode, run.Stderr);
+            var result = Result(run);
+            Assert.AreEqual("aborted", result.GetProperty("status").GetString());
+            Assert.AreEqual("signal", result.GetProperty("abortReason").GetString());
+        }
+        finally
+        {
+            never.TrySetResult();
+        }
+    }
+
+    [TestMethod]
+    public async Task Timeout_OfAProviderThatIgnoresCancellation_EndsWithinTheGrace_AndExitsWithFour()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        var never = new TaskCompletionSource();
+        provider.Turns.Enqueue(FakeProvider.IgnoreCancellation(never.Task, "Too late."));
+        try
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var run = await root.RunWithEnvironmentAsync(Bounded(root, provider), ["run", Plain, "--format", "jsonl", "--timeout", "1", "wait"]).WaitAsync(TimeSpan.FromSeconds(30));
+
+            Assert.IsTrue(watch.Elapsed < TimeSpan.FromSeconds(16), $"Ended after {watch.Elapsed}: the abort and the shutdown are bounded.");
+            Assert.AreEqual(CliExitCodes.Timeout, run.ExitCode, run.Stderr);
+            Assert.AreEqual("timeout", Result(run).GetProperty("abortReason").GetString());
+        }
+        finally
+        {
+            never.TrySetResult();
+        }
+    }
+
+    // A short abort grace and shutdown limit, for the runs a provider does not let stop.
+    private static CliEnvironment Bounded(CliTestRoot root, FakeProvider provider)
+        => root.Environment(provider) with { AbortGrace = TimeSpan.FromSeconds(1), ShutdownLimit = TimeSpan.FromSeconds(2) };
+
+    [TestMethod]
     public async Task InvalidArguments_ExitWithTwo_WithAResultInJsonl()
     {
         using var root = new CliTestRoot();
