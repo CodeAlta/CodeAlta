@@ -620,6 +620,52 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Reads the sandbox settings (<c>[sandbox]</c>), from the user's file only: the same table in a project's file is
+    /// never read, since a repository would loosen its own sandbox (<see cref="ProjectSetsSandbox"/> tells it is there).
+    /// </summary>
+    /// <returns>The settings; <see cref="CodeAltaSandboxSettings.Empty"/> when the file sets none.</returns>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read.</exception>
+    public CodeAltaSandboxSettings LoadGlobalSandbox() => CodeAltaSandboxSettings.From(ReadSharedGlobalDocument().Sandbox);
+
+    /// <summary>Saves the sandbox settings; settings that set nothing remove the table.</summary>
+    /// <param name="settings">The settings.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="settings"/> is null.</exception>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public void SaveGlobalSandbox(CodeAltaSandboxSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ThrowIfReadOnly();
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        NormalizeDocument(document);
+        document.Sandbox = settings.ToDocument();
+        Save(_options.ConfigPath, document);
+    }
+
+    /// <summary>
+    /// Says whether the configuration file of a project has a <c>[sandbox]</c> table, which is ignored: only the user's
+    /// own files decide a sandbox.
+    /// </summary>
+    /// <param name="projectRoot">The project root, or null.</param>
+    /// <returns>True when the project's file sets one; false when it does not, or cannot be read.</returns>
+    public bool ProjectSetsSandbox(string? projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot)) return false;
+        var path = Path.Combine(projectRoot, ".alta", "config.toml");
+        try
+        {
+            return File.Exists(path) && ParseDocument(File.ReadAllText(path), path).Sandbox is not null;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Persists the complete global disabled skill set.
     /// </summary>
     /// <remarks>Edits only skill enablement tokens, preserving TOML comments and unknown settings. This is not an external-writer compare-and-swap.</remarks>
@@ -1851,6 +1897,14 @@ public sealed partial class CodeAltaConfigStore
             }
         }
 
+        if (document.Sandbox is { } sandbox)
+        {
+            // Nothing is the default: no session is sandboxed, no profile is added.
+            sandbox.AllSessions = string.IsNullOrWhiteSpace(sandbox.AllSessions) ? null : sandbox.AllSessions.Trim();
+            if (sandbox.Profiles is { Count: 0 }) sandbox.Profiles = null;
+            if (sandbox is { AllSessions: null, Profiles: null }) document.Sandbox = null;
+        }
+
         if (document.Review is { BeforeCommit: not true })
         {
             // The default is not to review before commit: the absence of the section.
@@ -1953,6 +2007,7 @@ public sealed partial class CodeAltaConfigStore
         definition.ApiKey = NormalizeText(definition.ApiKey);
         definition.ApiKeyEnv = NormalizeText(definition.ApiKeyEnv);
         definition.ApiUrl = NormalizeText(definition.ApiUrl);
+        definition.Sandbox = NormalizeText(definition.Sandbox);
         definition.GitHubEnterpriseUrl = NormalizeText(definition.GitHubEnterpriseUrl);
         definition.GitHubTokenEnv = NormalizeText(definition.GitHubTokenEnv);
         definition.CopilotTokenEnv = NormalizeText(definition.CopilotTokenEnv);
@@ -2801,6 +2856,7 @@ public sealed partial class CodeAltaConfigStore
                 var modelOverride = entry.Value ?? new CodeAltaProviderModelOverrideDocument();
                 modelOverride.DisplayName = NormalizeText(modelOverride.DisplayName);
                 modelOverride.Description = NormalizeText(modelOverride.Description);
+                modelOverride.Sandbox = NormalizeText(modelOverride.Sandbox);
                 return KeyValuePair.Create(entry.Key.Trim(), modelOverride);
             })
             .ToDictionary(
@@ -3024,6 +3080,7 @@ public sealed partial class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.Command) ||
                definition.Arguments is { Count: > 0 } ||
                !string.IsNullOrWhiteSpace(definition.PermissionMode) ||
+               !string.IsNullOrWhiteSpace(definition.Sandbox) ||
                !string.IsNullOrWhiteSpace(definition.AnthropicApiKey) ||
                definition.RefusalFallback is not null ||
                !string.IsNullOrWhiteSpace(definition.PromptCacheTtl) ||
@@ -3131,6 +3188,7 @@ public sealed partial class CodeAltaConfigStore
             Command = definition.Command,
             Arguments = definition.Arguments is null ? null : [.. definition.Arguments],
             PermissionMode = definition.PermissionMode,
+            Sandbox = definition.Sandbox,
             AnthropicApiKey = definition.AnthropicApiKey,
             RefusalFallback = definition.RefusalFallback,
             PromptCacheTtl = definition.PromptCacheTtl,
@@ -3450,6 +3508,7 @@ public sealed partial class CodeAltaConfigStore
                 SupportsToolCall = entry.Value.SupportsToolCall,
                 SupportsAttachments = entry.Value.SupportsAttachments,
                 SupportsStructuredOutput = entry.Value.SupportsStructuredOutput,
+                Sandbox = entry.Value.Sandbox,
             },
             StringComparer.OrdinalIgnoreCase);
     }

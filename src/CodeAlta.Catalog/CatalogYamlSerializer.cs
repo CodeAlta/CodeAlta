@@ -51,6 +51,10 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("spaces")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<string>? Spaces { get; set; }
+
+        [JsonPropertyName("sandbox")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Sandbox { get; set; }
     }
 
     private sealed class SpaceFrontMatter
@@ -102,6 +106,10 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("fallback")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public SpaceFallbackFrontMatter? Fallback { get; set; }
+
+        [JsonPropertyName("sandbox")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Sandbox { get; set; }
     }
 
     // The fallback of a space, as [models.fallback] writes it: enabled, and the failures it falls back on.
@@ -300,6 +308,7 @@ public sealed class CatalogYamlSerializer
             Tags = frontMatter.Tags ?? [],
             Spaces = SpaceDescriptor.NormalizeIds(frontMatter.Spaces),
             Archived = frontMatter.Archived ?? false,
+            Sandbox = SpaceNewSessions.IsSandboxName(frontMatter.Sandbox?.Trim()) ? frontMatter.Sandbox!.Trim() : null,
             Checkout = new CheckoutRule
             {
                 PathTemplate = frontMatter.Checkout?.PathTemplate ?? string.Empty,
@@ -332,6 +341,7 @@ public sealed class CatalogYamlSerializer
                 ? null
                 : new CheckoutFrontMatter { PathTemplate = descriptor.Checkout.PathTemplate },
             Spaces = SpaceDescriptor.NormalizeIds(descriptor.Spaces) is { Count: > 0 } spaces ? spaces : null,
+            Sandbox = SpaceNewSessions.IsSandboxName(descriptor.Sandbox?.Trim()) ? descriptor.Sandbox!.Trim() : null,
         };
 
         return SerializeMarkdown(frontMatter, descriptor.MarkdownBody, descriptor.DisplayName);
@@ -384,7 +394,7 @@ public sealed class CatalogYamlSerializer
             ? new SpaceGitIdentity(Text(g.Name), Text(g.Email), Text(g.SshKey), SpaceGitIdentity.ParseSign(g.Sign), Text(g.SigningKey), g.SignOff)
             : null;
         return new SpaceSettings(
-            sessions is null ? null : new SpaceNewSessions(Text(sessions.AgentPrompt), tiers, fallback),
+            sessions is null ? null : new SpaceNewSessions(Text(sessions.AgentPrompt), tiers, fallback, Text(sessions.Sandbox)),
             identity is null ? null : new SpaceIdentity(git,
                 identity.GitHub is { } github ? new SpaceGitHubIdentity(Text(github.ConfigDir)) : null,
                 identity.Jira is { } jira ? new SpaceJiraIdentity(Text(jira.Site), Text(jira.Email), Text(jira.TokenEnv)) : null,
@@ -417,6 +427,7 @@ public sealed class CatalogYamlSerializer
                         On = fallback.OnQuota && fallback.OnUnavailable ? null : [.. fallback.Triggers()],
                     }
                     : null,
+                Sandbox = sessions.Sandbox,
             };
         }
 

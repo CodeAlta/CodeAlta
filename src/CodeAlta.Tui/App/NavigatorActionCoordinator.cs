@@ -316,6 +316,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
             Checkout = project.Checkout,
             SourcePath = project.SourcePath,
             Archived = project.Archived,
+            Sandbox = project.Sandbox,
             MarkdownBody = project.MarkdownBody,
         };
     }

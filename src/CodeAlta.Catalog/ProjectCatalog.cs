@@ -534,6 +534,7 @@ public sealed partial class ProjectCatalog
         Tags = [.. descriptor.Tags],
         Spaces = [.. descriptor.Spaces],
         Archived = descriptor.Archived,
+        Sandbox = descriptor.Sandbox,
         Checkout = new CheckoutRule
         {
             PathTemplate = descriptor.Checkout.PathTemplate,

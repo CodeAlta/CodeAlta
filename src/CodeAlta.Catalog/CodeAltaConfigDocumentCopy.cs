@@ -84,6 +84,25 @@ internal static class CodeAltaConfigDocumentCopy
                 }
                 : null,
             Tools = document.Tools is { } tools ? new CodeAltaToolSettingsDocument { Disabled = Copy(tools.Disabled) } : null,
+            Sandbox = document.Sandbox is { } sandbox
+                ? new CodeAltaSandboxSettingsDocument
+                {
+                    AllSessions = sandbox.AllSessions,
+                    Profiles = Copy(sandbox.Profiles, static profile => new CodeAltaSandboxProfileDocument
+                    {
+                        Extends = profile.Extends,
+                        Write = Copy(profile.Write),
+                        Read = Copy(profile.Read),
+                        Deny = Copy(profile.Deny),
+                        Network = profile.Network,
+                        Hosts = Copy(profile.Hosts),
+                        LocalPorts = profile.LocalPorts is null ? null : [.. profile.LocalPorts],
+                        Env = Copy(profile.Env),
+                        McpServers = Copy(profile.McpServers),
+                        Outside = profile.Outside,
+                    }),
+                }
+                : null,
             Identity = Copy(document.Identity),
         };
     }
@@ -108,6 +127,7 @@ internal static class CodeAltaConfigDocumentCopy
         Command = provider.Command,
         Arguments = Copy(provider.Arguments),
         PermissionMode = provider.PermissionMode,
+        Sandbox = provider.Sandbox,
         AnthropicApiKey = provider.AnthropicApiKey,
         RefusalFallback = provider.RefusalFallback,
         PromptCacheTtl = provider.PromptCacheTtl,
@@ -196,6 +216,7 @@ internal static class CodeAltaConfigDocumentCopy
             SupportsToolCall = modelOverride.SupportsToolCall,
             SupportsAttachments = modelOverride.SupportsAttachments,
             SupportsStructuredOutput = modelOverride.SupportsStructuredOutput,
+            Sandbox = modelOverride.Sandbox,
         }),
         ModelRequest = Copy(provider.ModelRequest, static modelRequest => new CodeAltaProviderModelRequestDocument
         {

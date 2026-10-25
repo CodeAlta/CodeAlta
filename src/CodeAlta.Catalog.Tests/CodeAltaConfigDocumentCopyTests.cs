@@ -149,6 +149,7 @@ public sealed class CodeAltaConfigDocumentCopyTests
             if (underlying == typeof(long)) return (long)number * 1000;
             if (underlying == typeof(double)) return number / 7.0;
             if (type == typeof(List<string>)) return new List<string> { $"{path}#a{number}", $"{path}#b{number}" };
+            if (type == typeof(List<int>)) return new List<int> { number, number + 1 };
             if (type == typeof(IReadOnlyList<CodeAltaUnsupportedProvider>)) return new[] { new CodeAltaUnsupportedProvider($"key{number}", "future") };
             if (type == typeof(TomlTable)) return Table(number);
             if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>) && type.GetGenericArguments()[0] == typeof(string))

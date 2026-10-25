@@ -48,28 +48,41 @@ public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceId
 /// The fallback of the space, which replaces the global one while the space has tiers of its own;
 /// <see langword="null"/> for the global one.
 /// </param>
-public sealed record SpaceNewSessions(string? AgentPrompt = null, SpaceModelTiers? Tiers = null, ModelFallbackSettings? Fallback = null)
+/// <param name="Sandbox">
+/// The sandbox of the sessions of the space: the name of a sandbox profile, or <c>off</c>; <see langword="null"/> for
+/// the setting of every session.
+/// </param>
+public sealed record SpaceNewSessions(string? AgentPrompt = null, SpaceModelTiers? Tiers = null, ModelFallbackSettings? Fallback = null, string? Sandbox = null)
 {
     /// <summary>The longest identifier of an agent prompt.</summary>
     public const int MaximumAgentPromptLength = 128;
 
     /// <summary>Gets whether nothing is set.</summary>
-    public bool IsEmpty => AgentPrompt is null && (Tiers?.IsEmpty ?? true) && Fallback is null;
+    public bool IsEmpty => AgentPrompt is null && (Tiers?.IsEmpty ?? true) && Fallback is null && Sandbox is null;
 
     /// <summary>Tells what is wrong with the settings.</summary>
     /// <returns>The first problem found, or <see langword="null"/>.</returns>
     public string? Problem()
         => AgentPrompt is not null && !IsPromptId(AgentPrompt)
             ? $"'{AgentPrompt}' is not the identifier of an agent prompt."
-            : Tiers?.Problem();
+            : Sandbox is not null && !IsSandboxName(Sandbox)
+                ? $"'{Sandbox}' is not the name of a sandbox profile."
+                : Tiers?.Problem();
 
     /// <summary>Keeps what is valid.</summary>
     /// <returns>The settings without their invalid values; <see langword="null"/> when nothing is left.</returns>
     public SpaceNewSessions? Sanitized()
     {
-        var kept = new SpaceNewSessions(IsPromptId(AgentPrompt) ? AgentPrompt!.Trim() : null, Tiers?.Sanitized(), Fallback);
+        var kept = new SpaceNewSessions(IsPromptId(AgentPrompt) ? AgentPrompt!.Trim() : null, Tiers?.Sanitized(), Fallback,
+            IsSandboxName(Sandbox) ? Sandbox!.Trim() : null);
         return kept.IsEmpty ? null : kept;
     }
+
+    /// <summary>Gets whether a value names a sandbox profile, or <c>off</c>: letters, digits, <c>-</c> and <c>_</c>.</summary>
+    /// <param name="value">The value.</param>
+    /// <returns>True when it may name a sandbox.</returns>
+    public static bool IsSandboxName(string? value)
+        => value is { Length: > 0 and <= 64 } && value.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_');
 
     private static bool IsPromptId(string? value)
         => value is { Length: > 0 and <= MaximumAgentPromptLength }

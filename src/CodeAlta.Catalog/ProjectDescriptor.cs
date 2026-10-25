@@ -69,6 +69,13 @@ public sealed class ProjectDescriptor
     public bool Archived { get; set; }
 
     /// <summary>
+    /// Gets or sets the sandbox of the sessions of the project: the name of a sandbox profile, or <c>off</c>; null for
+    /// the one of its space or of every session. Kept in the user's file of the project, never in the repository.
+    /// </summary>
+    [JsonPropertyName("sandbox")]
+    public string? Sandbox { get; set; }
+
+    /// <summary>
     /// Gets or sets checkout settings.
     /// </summary>
     [JsonPropertyName("checkout")]

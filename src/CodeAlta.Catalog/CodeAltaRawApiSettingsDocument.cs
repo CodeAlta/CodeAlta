@@ -169,6 +169,13 @@ public sealed class CodeAltaProviderModelOverrideDocument
 
     [JsonPropertyName("supports_structured_output")]
     public bool? SupportsStructuredOutput { get; set; }
+
+    /// <summary>
+    /// Gets or sets the sandbox of the sessions on this model: the name of a sandbox profile, or <c>off</c>; null
+    /// for the one of its provider.
+    /// </summary>
+    [JsonPropertyName("sandbox")]
+    public string? Sandbox { get; set; }
 }
 
 /// <summary>
@@ -336,6 +343,13 @@ public sealed class CodeAltaProviderDocument
     /// </summary>
     [JsonPropertyName("permission_mode")]
     public string? PermissionMode { get; set; }
+
+    /// <summary>
+    /// Gets or sets the sandbox of the sessions of the provider: the name of a sandbox profile, or <c>off</c>; null
+    /// for none, when the project, the space or the setting of every session decides.
+    /// </summary>
+    [JsonPropertyName("sandbox")]
+    public string? Sandbox { get; set; }
 
     /// <summary>
     /// Gets or sets whether a <c>claude-code</c> provider gives the CLI the API key of the environment

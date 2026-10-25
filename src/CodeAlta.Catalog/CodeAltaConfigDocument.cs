@@ -95,6 +95,13 @@ public sealed class CodeAltaConfigDocument
     public CodeAltaToolSettingsDocument? Tools { get; set; }
 
     /// <summary>
+    /// Gets or sets the sandbox of sessions: every session, and the profiles. Read from the user's file only: a
+    /// repository would otherwise loosen its own sandbox.
+    /// </summary>
+    [JsonPropertyName("sandbox")]
+    public CodeAltaSandboxSettingsDocument? Sandbox { get; set; }
+
+    /// <summary>
     /// Gets or sets what the sessions of a project work under over the identity of their space: its CLI profiles,
     /// <c>[identity.cli.&lt;name&gt;]</c> with <c>env</c>, <c>check</c> and <c>login</c>. Read from a project file only, as a
     /// table, so that a value of another type is left out without making the rest of the file unreadable

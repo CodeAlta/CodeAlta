@@ -228,6 +228,7 @@ internal sealed class ProjectDetailsDialog
             Tags = [.. project.Tags],
             Spaces = [.. project.Spaces],
             Archived = project.Archived,
+            Sandbox = project.Sandbox,
             Checkout = new CheckoutRule
             {
                 PathTemplate = project.Checkout.PathTemplate,

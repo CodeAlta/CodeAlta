@@ -147,7 +147,7 @@ Each scope names a profile, or `off`. The most specific scope that says somethin
 | Scope | Set in | Stored in |
 | --- | --- | --- |
 | One session | **Sandbox** in the Agent chip and the new-session form, `alta session create --sandbox` | The local state of its journal, like the permission mode. Null follows the scopes |
-| A model | The provider editor, per model | `[providers.<key>.models."<id>"] sandbox = "strict"` |
+| A model | The provider editor, per model | `[providers.<key>.model_overrides."<id>"] sandbox = "strict"` (the per-model table providers already have) |
 | A provider | The provider editor | `[providers.<key>] sandbox = "strict"` |
 | A project | **Sandbox…** in the project row actions of the Explorer | `sandbox: workspace` in `~/.alta/projects/<slug>.md`: your file, not the repository's |
 | A space | **New sessions** on the page of the space | `new_sessions.sandbox` in `~/.alta/spaces/<id>.md` |
@@ -277,20 +277,24 @@ Their native sandboxes are not the boundary. Claude Code's covers only its shell
 
 ### Core, for every frontend
 
-- [ ] 3. **`src/CodeAlta.Sandbox`** (no UI; uses `CodeAlta.Agent` contracts and `Microsoft.Mxc.Sdk`):
+- [x] 3. **`src/CodeAlta.Sandbox`** (no UI; uses `CodeAlta.Agent` contracts and `Microsoft.Mxc.Sdk`):
   - `SandboxProfile`, with the built-in `workspace` and `strict`;
   - `SandboxPolicy`: the folders, network and environment resolved for one session;
   - `ISandboxBackend`, with the mxc backend;
   - `SandboxAvailability`: status, reason and setup hint, from `MxcPlatform` and `Probe`.
 
   Tests: the policy of a project session and of a worktree session, protected paths, an environment without secrets. Add the project to `doc/architecture.md` and to `ArchitectureGuardrailTests`.
-- [ ] 4. **Settings:**
+
+  **Done** (`src/CodeAlta.Sandbox`, `src/CodeAlta.Sandbox.Tests`; a real container test, skipped where no sandbox is available; `doc/sandbox.md` started). The WSLC and `plm` assets of the package are dropped by `src/Directory.Build.targets`.
+- [x] 4. **Settings:**
   - the `[sandbox]` table and its profiles in `CodeAltaConfigDocument` and `CodeAltaConfigStore` (a Load/Save pair; defaults not written);
   - `sandbox` on providers and models;
   - `new_sessions.sandbox` on spaces;
   - `sandbox` in project files.
 
   A `[sandbox]` table in a project's `.alta/config.toml` is ignored with a warning. Tests.
+
+  **Done** in the catalog (`CodeAltaSandboxSettings`, `LoadGlobalSandbox`/`SaveGlobalSandbox`, `ProjectSetsSandbox`; `sandbox` of providers and of `model_overrides`; `new_sessions.sandbox`; `sandbox` of project files). The warning is logged by the runtime (step 5), which reads the table.
 - [ ] 5. **The sandbox of a session.** `sandbox` goes into the local state of the journal and its SQLite projection, like `PermissionMode`. `SandboxResolver` applies the precedence at each turn, plus the rules for sessions that agents create, fork or switch, and for fallback. Tests.
 - [ ] 6. **The worker.** `--sandbox-worker` is dispatched first in `Program.Main` of `alta`, `altatui` and `altacli`. It speaks a framed protocol over stdio (`WorkerFrames`):
   - the file tools, with the handlers of `AgentBuiltInToolFactory` and `AgentWriteGuard` on;
