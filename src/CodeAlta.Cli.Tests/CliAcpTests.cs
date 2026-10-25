@@ -412,6 +412,18 @@ public sealed class CliAcpTests
     }
 
     [TestMethod]
+    public async Task Help_IsWrittenOnStandardOutput()
+    {
+        using var root = new CliTestRoot();
+
+        var help = await root.RunAsync(null, ["acp", "--help"]);
+
+        Assert.AreEqual(0, help.ExitCode, help.Stderr);
+        StringAssert.StartsWith(help.Stdout, "Usage: altacli acp [options]");
+        StringAssert.Contains(help.Stdout, "\"command\": \"altacli\", \"args\": [\"acp\"]");
+    }
+
+    [TestMethod]
     public async Task Executable_AnswersInitializeOverItsStandardStreams_AndExitsWhenTheyClose()
     {
         var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "altacli.exe" : "altacli");
