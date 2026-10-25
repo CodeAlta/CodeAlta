@@ -787,7 +787,8 @@ public sealed class SystemPromptBuilder
 
         // Six characters of a hash of the id: the same for every prompt of the session, and a name of a file whatever the id is.
         var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(session)), 0, 3);
-        return root is null ? null : Path.Combine(root, "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md");
+        var folder = NormalizeOptionalRoot(request.ScratchpadRoot) ?? (root is null ? null : Path.Combine(root, "scratchpad"));
+        return folder is null ? null : Path.Combine(folder, $"<yyyy-mm-dd>-<short-name>-{hash}.md");
     }
 
     private static string BuildToolGuidance(SystemPromptBuildRequest request)
@@ -1360,6 +1361,12 @@ public sealed class SystemPromptBuildRequest
 
     /// <summary>Gets the owning instance's state root for scratchpads, independent of shared user resources.</summary>
     public string? InstanceStateRoot { get; init; }
+
+    /// <summary>
+    /// Gets the folder of the scratchpads, when the instance keeps them elsewhere than in the <c>scratchpad</c> folder of
+    /// <see cref="InstanceStateRoot"/>; null for that folder.
+    /// </summary>
+    public string? ScratchpadRoot { get; init; }
 
     /// <summary>Gets optional prompt part overrides.</summary>
     public PartialSystemPromptPartOptions? PartOptionsOverride { get; init; }

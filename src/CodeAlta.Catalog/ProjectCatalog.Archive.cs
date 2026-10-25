@@ -26,9 +26,11 @@ public sealed partial class ProjectCatalog
     /// <returns>Updated, conflict or unsupported; never automatically retries.</returns>
     /// <exception cref="IOException">A read or conditional save failed; callers must not infer no write.</exception>
     /// <exception cref="OperationCanceledException">Canceled before commit.</exception>
+    /// <exception cref="InvalidOperationException">The catalog is read-only (<see cref="IsReadOnly"/>).</exception>
     public async Task<ProjectDisplayNameRenameStatus> SetArchivedAsync(string projectId, string projectPath, string expectedSourcePath,
         TextFileRevision expectedRevision, bool expectedArchived, bool archived, CancellationToken cancellationToken = default)
     {
+        ThrowIfReadOnly();
         await _projectEditGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {

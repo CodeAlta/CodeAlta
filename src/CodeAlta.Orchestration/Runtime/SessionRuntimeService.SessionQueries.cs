@@ -45,6 +45,57 @@ public sealed partial class SessionRuntimeService
             return null;
         }
 
+        await ApplySessionLocalStateAsync(session, metadata, cancellationToken).ConfigureAwait(false);
+        return session;
+    }
+
+    /// <summary>
+    /// Gets one session by its identifier as <see cref="TryGetRecoverableSessionAsync"/> does, and also a session whose
+    /// folder is no project of the catalog: that folder is then given a transient project
+    /// (<see cref="ProjectCatalog.GetOrAddTransientAsync"/>), which this runtime knows until it ends and which is never
+    /// written, so that the session can be resumed and sent to. A headless process resumes sessions this way.
+    /// </summary>
+    /// <param name="sessionId">The identifier of the session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The session; <see langword="null"/> when the store has no such session, or it names no provider or no folder.</returns>
+    /// <remarks>
+    /// The listings of the sessions (<see cref="ListRecoverableSessionsAsync(CancellationToken)"/>) leave out the sessions of a
+    /// folder outside the catalog until a project of this runtime names it, as before: this lookup is what binds one.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    /// <exception cref="IOException">The journal or the catalog of the projects cannot be read.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public async Task<SessionViewDescriptor?> TryGetResumableSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        var metadata = await _sessionViewCatalog.JournalStore.CreateSessionStore()
+            .GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (metadata is null)
+        {
+            return null;
+        }
+
+        var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var session = TryCreateRecoverableSession(metadata, projects);
+        if (session is null && !string.IsNullOrWhiteSpace(metadata.ProviderKey)
+            && (metadata.Context?.Cwd ?? metadata.WorkspacePath) is { Length: > 0 } folder && Path.IsPathFullyQualified(folder))
+        {
+            await _projectCatalog.GetOrAddTransientAsync(folder, cancellationToken).ConfigureAwait(false);
+            projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+            session = TryCreateRecoverableSession(metadata, projects);
+        }
+
+        if (session is null)
+        {
+            return null;
+        }
+
+        await ApplySessionLocalStateAsync(session, metadata, cancellationToken).ConfigureAwait(false);
+        return session;
+    }
+
+    private async Task ApplySessionLocalStateAsync(SessionViewDescriptor session, AgentSessionMetadata metadata, CancellationToken cancellationToken)
+    {
         if (metadata.ViewState is not null)
         {
             ApplyCachedSessionLocalState(session, metadata.ViewState);
@@ -53,8 +104,6 @@ public sealed partial class SessionRuntimeService
         {
             await ApplyPersistedSessionLocalStateAsync(session, cancellationToken).ConfigureAwait(false);
         }
-
-        return session;
     }
 
     /// <summary>

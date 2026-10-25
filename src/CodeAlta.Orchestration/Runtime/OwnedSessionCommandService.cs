@@ -337,6 +337,32 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
     public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title,
         AltaActorProvenance? createdBy, string? worktreeDirectory, string? spaceId, string? permissionMode)
+        => CreateDraftSessionAsync(project, provider, title, createdBy, worktreeDirectory, spaceId, permissionMode, sessionId: null);
+
+    /// <summary>
+    /// Creates a draft as <see cref="CreateDraftSessionAsync(ProjectDescriptor?, ModelProviderDescriptor, string?, AltaActorProvenance?, string?, string?, string?)"/>
+    /// does, with an identifier the caller chooses.
+    /// </summary>
+    /// <param name="project">An already resolved, trusted catalog project; null creates a global session.</param>
+    /// <param name="provider">An enabled provider selected from the host registry.</param>
+    /// <param name="title">An optional validated title.</param>
+    /// <param name="createdBy">Who creates the session when it is not the user; recorded with the session.</param>
+    /// <param name="worktreeDirectory">The git worktree a project session works in; null for the folder of its project.</param>
+    /// <param name="spaceId">The space the session belongs to, already validated by the caller; null records none.</param>
+    /// <param name="permissionMode">One of the modes the provider offers a session, or null for the one its provider is configured with.</param>
+    /// <param name="sessionId">
+    /// The identifier of the new session (<see cref="SessionRuntimeService.TryNormalizeSessionId"/>); null for one CodeAlta generates.
+    /// </param>
+    /// <returns>The persisted session descriptor.</returns>
+    /// <exception cref="ArgumentNullException">The provider is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// The provider is disabled or does not offer the permission mode, the project is invalid, a worktree is named
+    /// without a project, the space is not a valid identifier, or the session identifier is not valid.
+    /// </exception>
+    /// <exception cref="SessionIdConflictException">A session with that identifier exists or is being created.</exception>
+    /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
+    public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title,
+        AltaActorProvenance? createdBy, string? worktreeDirectory, string? spaceId, string? permissionMode, string? sessionId)
     {
         ArgumentNullException.ThrowIfNull(provider);
         if (!provider.IsEnabled) throw new ArgumentException("An enabled provider is required.", nameof(provider));
@@ -353,8 +379,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         return Plugins is null ? Create(options) : CreateWithPluginsAsync(Plugins, options);
 
         Task<SessionViewDescriptor> Create(SessionExecutionOptions options)
-            => project is null ? _runtime.CreateGlobalSessionAsync(options, title, null, createdBy, spaceId, CancellationToken.None)
-                : _runtime.CreateProjectSessionAsync(project, options, title, null, createdBy, worktreeDirectory, spaceId, CancellationToken.None);
+            => project is null ? _runtime.CreateGlobalSessionAsync(options, title, null, createdBy, spaceId, sessionId, CancellationToken.None)
+                : _runtime.CreateProjectSessionAsync(project, options, title, null, createdBy, worktreeDirectory, spaceId, sessionId, CancellationToken.None);
 
         // With what plugins give every run of this scope, so the first send keeps this attachment.
         async Task<SessionViewDescriptor> CreateWithPluginsAsync(PluginOrchestrationBridge plugins, SessionExecutionOptions options)

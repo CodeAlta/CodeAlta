@@ -37,9 +37,11 @@ public sealed partial class ProjectCatalog
     /// <exception cref="ArgumentNullException"><paramref name="change"/> is <see langword="null"/>.</exception>
     /// <exception cref="IOException">The catalog read or the conditional save failed.</exception>
     /// <exception cref="OperationCanceledException">Cancelled before the save.</exception>
+    /// <exception cref="InvalidOperationException">The catalog is read-only (<see cref="IsReadOnly"/>).</exception>
     public async Task<ProjectSpacesStatus> UpdateSpacesAsync(string projectId, Func<IReadOnlyList<string>, IEnumerable<string>> change,
         CancellationToken cancellationToken = default)
     {
+        ThrowIfReadOnly();
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
         ArgumentNullException.ThrowIfNull(change);
         await _projectEditGate.WaitAsync(cancellationToken).ConfigureAwait(false);

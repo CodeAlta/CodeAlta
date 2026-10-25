@@ -72,9 +72,11 @@ public sealed partial class ProjectCatalog
     /// <exception cref="UnauthorizedAccessException">The source is read-only.</exception>
     /// <exception cref="OperationCanceledException">Cancelled before commit.</exception>
     /// <exception cref="YamlException">A catalog entry contains malformed YAML.</exception>
+    /// <exception cref="InvalidOperationException">The catalog is read-only (<see cref="IsReadOnly"/>).</exception>
     public async Task<ProjectDisplayNameRenameStatus> RenameDisplayNameAsync(string projectId, string projectPath, string expectedSourcePath,
         TextFileRevision expectedRevision, string displayName, CancellationToken cancellationToken = default)
     {
+        ThrowIfReadOnly();
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
         ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedSourcePath);

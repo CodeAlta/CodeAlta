@@ -29,6 +29,29 @@ public sealed class CodeAltaHostOptions
     /// </remarks>
     public string? StateRoot { get; init; }
 
+    /// <summary>
+    /// Gets whether the host leaves the shared state of the global root as it is, for a process that runs beside CodeAlta
+    /// Desktop or TUI on the same profile (a headless run). Default false.
+    /// </summary>
+    /// <remarks>
+    /// The host then writes no coordinator <c>AGENTS.md</c>, seeds no view state, registers no project (a session in a
+    /// folder outside the catalog is bound to a transient project of that folder, <see cref="ProjectCatalog.IsReadOnly"/>),
+    /// and starts no upkeep of the application database (no copy). It does not create the global root. What it still
+    /// writes is the state of its sessions under <see cref="StateRoot"/> (their journals), its scratchpads
+    /// (<see cref="ScratchpadRoot"/>), its application database, and what providers and plugins write themselves
+    /// (sign-in tokens, caches). Such a host owns no startup scratchpad cleanup, and needs an application database of
+    /// its own (<see cref="ApplicationDatabase"/>, for instance a <see cref="PrivateApplicationDatabase"/>) when its
+    /// state root is shared with another instance.
+    /// </remarks>
+    public bool ReadOnlyGlobalState { get; init; }
+
+    /// <summary>
+    /// Gets the folder of the scratchpad files of the sessions, an absolute path; null, the default, for the
+    /// <c>scratchpad</c> folder of the state root. A host whose state root is shared with CodeAlta Desktop names
+    /// another folder: Desktop clears its scratchpad when it starts.
+    /// </summary>
+    public string? ScratchpadRoot { get; init; }
+
     /// <summary>Gets the instance-owned startup pass; null authorizes no deletion.</summary>
     public IStartupScratchpadCleanup? StartupScratchpadCleanup { get; init; }
 

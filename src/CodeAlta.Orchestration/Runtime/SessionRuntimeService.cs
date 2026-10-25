@@ -157,6 +157,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public bool ShowsPromptSuggestions { get; init; }
 
     /// <summary>
+    /// Gets or initializes the folder of the scratchpad files of the sessions, where the file tools of a session without
+    /// the shell may write; null, the default, for the <c>scratchpad</c> folder of the state root. It is the folder the
+    /// instructions name (<see cref="AgentInstructionTemplateProvider.ScratchpadRoot"/>).
+    /// </summary>
+    public string? ScratchpadRoot { get; init; }
+
+    /// <summary>
     /// Gets or initializes what gives a session the identity of its space (its Git author, its GitHub profile), read
     /// when the session attaches and kept while it stays attached. <see cref="SessionIdentityResolver.None"/>, the
     /// default, keeps the usual settings for every session.
@@ -1349,10 +1356,86 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         AltaActorProvenance? createdBy,
         string? spaceId,
         CancellationToken cancellationToken = default)
+        => await CreateGlobalSessionAsync(options, title, parentSessionId, createdBy, spaceId, sessionId: null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Creates a new global session (a chat) as <see cref="CreateGlobalSessionAsync(SessionExecutionOptions, string?, string?, AltaActorProvenance?, string?, CancellationToken)"/>
+    /// does, with an identifier the caller chooses.
+    /// </summary>
+    /// <param name="options">How the session runs.</param>
+    /// <param name="title">The title, or null for the usual one.</param>
+    /// <param name="parentSessionId">The session that this one continues the work of, if any.</param>
+    /// <param name="createdBy">Who creates the session when it is not the user.</param>
+    /// <param name="spaceId">The space the session belongs to for its whole life; null records none.</param>
+    /// <param name="sessionId">
+    /// The identifier of the new session, a GUID written with hyphens (<see cref="TryNormalizeSessionId"/>); null for one
+    /// CodeAlta generates.
+    /// </param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The descriptor of the session.</returns>
+    /// <exception cref="ArgumentException">
+    /// A supplied scoped working or project path is invalid or outside the instruction boundary, the space is not a valid
+    /// identifier, or the session identifier is not a GUID written with hyphens.
+    /// </exception>
+    /// <exception cref="SessionIdConflictException">A session with that identifier exists or is being created.</exception>
+    public async Task<SessionViewDescriptor> CreateGlobalSessionAsync(
+        SessionExecutionOptions options,
+        string? title,
+        string? parentSessionId,
+        AltaActorProvenance? createdBy,
+        string? spaceId,
+        string? sessionId,
+        CancellationToken cancellationToken = default)
     {
         var space = NormalizeSpaceId(spaceId);
-        return await AdmitAsync(() => CreateGlobalSessionOwnedBodyAsync(options, title, parentSessionId, createdBy, space, cancellationToken), cancellationToken)
+        var id = NormalizeRequestedSessionId(sessionId);
+        return await AdmitAsync(() => CreateGlobalSessionOwnedBodyAsync(options, title, parentSessionId, createdBy, space, id, cancellationToken), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Normalizes an identifier a caller chooses for a new session: a GUID written with hyphens
+    /// (<c>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</c>), as CodeAlta writes the ones it generates, in lower case.
+    /// </summary>
+    /// <param name="value">The identifier.</param>
+    /// <param name="sessionId">The identifier in lower case, when it is valid.</param>
+    /// <returns>Whether the identifier is valid.</returns>
+    public static bool TryNormalizeSessionId(string? value, out string sessionId)
+    {
+        sessionId = string.Empty;
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 36 || !Guid.TryParseExact(value, "D", out var guid) || guid == Guid.Empty)
+        {
+            return false;
+        }
+
+        sessionId = guid.ToString("D");
+        return true;
+    }
+
+    private static string? NormalizeRequestedSessionId(string? sessionId)
+    {
+        if (sessionId is null) return null;
+        return TryNormalizeSessionId(sessionId, out var normalized)
+            ? normalized
+            : throw new ArgumentException($"'{sessionId}' is not a session identifier: a session is named by a GUID written with hyphens.", nameof(sessionId));
+    }
+
+    // Takes an identifier a caller chose for a new session, before anything is attached: one the store or this runtime
+    // knows is refused. A creation that fails before the session is written gives it back (ReleaseRequestedSessionId).
+    private async Task ReserveRequestedSessionIdAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false) is not null)
+            throw new SessionIdConflictException(sessionId);
+        lock (_identityGate)
+        {
+            if (_entries.ContainsKey(sessionId) || _transitions.ContainsKey(sessionId) || !_newSessionIds.Add(sessionId))
+                throw new SessionIdConflictException(sessionId);
+        }
+    }
+
+    private void ReleaseRequestedSessionId(string sessionId)
+    {
+        lock (_identityGate) _newSessionIds.Remove(sessionId);
     }
 
     // A space given to a new session is an identifier, or none at all.
@@ -1364,16 +1447,17 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     private async Task<SessionViewDescriptor> CreateGlobalSessionOwnedBodyAsync(SessionExecutionOptions options, string? title,
-        string? parentSessionId, AltaActorProvenance? createdBy, string? spaceId, CancellationToken cancellationToken)
+        string? parentSessionId, AltaActorProvenance? createdBy, string? spaceId, string? requestedSessionId, CancellationToken cancellationToken)
     {
         using var lineage = ClaimRetentionWork(parentSessionId, createdBy?.SourceSessionId);
         ArgumentNullException.ThrowIfNull(options);
         ValidateDiscoveryPaths(null, options);
+        if (requestedSessionId is not null) await ReserveRequestedSessionIdAsync(requestedSessionId, cancellationToken).ConfigureAwait(false);
 
         var now = DateTimeOffset.UtcNow;
         var session = new SessionViewDescriptor
         {
-            SessionId = string.Empty,
+            SessionId = requestedSessionId ?? string.Empty,
             Kind = SessionViewKind.GlobalSession,
             ProviderId = options.ProviderId.Value,
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
@@ -1402,7 +1486,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (requestedSessionId is not null) ReleaseRequestedSessionId(requestedSessionId);
             await ObserveRuntimeFailureAsync(session, failureCapture.Original ?? ex, ex).ConfigureAwait(false);
+            throw;
+        }
+        catch (OperationCanceledException) when (requestedSessionId is not null)
+        {
+            ReleaseRequestedSessionId(requestedSessionId);
             throw;
         }
 
@@ -1492,16 +1582,53 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         string? worktreeDirectory,
         string? spaceId,
         CancellationToken cancellationToken = default)
+        => await CreateProjectSessionAsync(project, options, title, parentSessionId, createdBy, worktreeDirectory, spaceId, sessionId: null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Creates a new project session as
+    /// <see cref="CreateProjectSessionAsync(ProjectDescriptor, SessionExecutionOptions, string?, string?, AltaActorProvenance?, string?, string?, CancellationToken)"/>
+    /// does, with an identifier the caller chooses.
+    /// </summary>
+    /// <param name="project">The project of the session.</param>
+    /// <param name="options">How the session runs; its working directory is the folder of the project.</param>
+    /// <param name="title">The title, or null for the name of the project.</param>
+    /// <param name="parentSessionId">The session that this one continues the work of, if any.</param>
+    /// <param name="createdBy">Who creates the session when it is not the user.</param>
+    /// <param name="worktreeDirectory">The folder of the project in a git worktree, which exists; null for the folder of the project.</param>
+    /// <param name="spaceId">The space the session belongs to for its whole life; null records none.</param>
+    /// <param name="sessionId">
+    /// The identifier of the new session, a GUID written with hyphens (<see cref="TryNormalizeSessionId"/>); null for one
+    /// CodeAlta generates.
+    /// </param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The descriptor of the session.</returns>
+    /// <exception cref="ArgumentException">
+    /// A supplied scoped working or project path is invalid or outside the instruction boundary, the worktree is not
+    /// an absolute folder, the space is not a valid identifier, or the session identifier is not a GUID written with hyphens.
+    /// </exception>
+    /// <exception cref="SessionIdConflictException">A session with that identifier exists or is being created.</exception>
+    public async Task<SessionViewDescriptor> CreateProjectSessionAsync(
+        ProjectDescriptor project,
+        SessionExecutionOptions options,
+        string? title,
+        string? parentSessionId,
+        AltaActorProvenance? createdBy,
+        string? worktreeDirectory,
+        string? spaceId,
+        string? sessionId,
+        CancellationToken cancellationToken = default)
     {
         if (worktreeDirectory is not null && !Path.IsPathFullyQualified(worktreeDirectory))
             throw new ArgumentException("A worktree is an absolute folder.", nameof(worktreeDirectory));
         var space = NormalizeSpaceId(spaceId);
-        return await AdmitAsync(() => CreateProjectSessionOwnedBodyAsync(project, options, title, parentSessionId, createdBy, worktreeDirectory, space, cancellationToken), cancellationToken)
+        var id = NormalizeRequestedSessionId(sessionId);
+        return await AdmitAsync(() => CreateProjectSessionOwnedBodyAsync(project, options, title, parentSessionId, createdBy, worktreeDirectory, space, id, cancellationToken), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SessionViewDescriptor> CreateProjectSessionOwnedBodyAsync(ProjectDescriptor project, SessionExecutionOptions options,
-        string? title, string? parentSessionId, AltaActorProvenance? createdBy, string? worktreeDirectory, string? spaceId, CancellationToken cancellationToken)
+        string? title, string? parentSessionId, AltaActorProvenance? createdBy, string? worktreeDirectory, string? spaceId, string? requestedSessionId,
+        CancellationToken cancellationToken)
     {
         using var lineage = ClaimRetentionWork(parentSessionId, createdBy?.SourceSessionId);
         ArgumentNullException.ThrowIfNull(project);
@@ -1517,11 +1644,23 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         project = await _projectCatalog.EnsurePersistedAsync(project, cancellationToken).ConfigureAwait(false);
         var persistedNewProject = previousProject is null &&
             string.Equals(project.Id, requestedProjectId, StringComparison.OrdinalIgnoreCase);
+        if (requestedSessionId is not null)
+        {
+            try
+            {
+                await ReserveRequestedSessionIdAsync(requestedSessionId, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                await RollBackProjectPersistenceAsync(project, previousProject, persistedNewProject, restoredArchivedProject).ConfigureAwait(false);
+                throw;
+            }
+        }
 
         var now = DateTimeOffset.UtcNow;
         var session = new SessionViewDescriptor
         {
-            SessionId = string.Empty,
+            SessionId = requestedSessionId ?? string.Empty,
             Kind = SessionViewKind.ProjectSession,
             ProviderId = options.ProviderId.Value,
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
@@ -1555,6 +1694,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         catch (Exception ex)
         {
             Exception escaping = ex;
+            if (requestedSessionId is not null) ReleaseRequestedSessionId(requestedSessionId);
             try
             {
                 await RollBackProjectPersistenceAsync(project, previousProject, persistedNewProject, restoredArchivedProject).ConfigureAwait(false);
@@ -1587,7 +1727,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return;
         }
 
-        if (restoredArchivedProject && previousProject is not null)
+        // A read-only catalog restored nothing: it leaves an archived project as it is.
+        if (restoredArchivedProject && previousProject is not null && !_projectCatalog.IsReadOnly)
         {
             await _projectCatalog.SaveAsync(previousProject, CancellationToken.None).ConfigureAwait(false);
         }
@@ -3968,7 +4109,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return new Agent.Runtime.Tools.AgentWriteGuard(
             roots.Where(static root => !string.IsNullOrWhiteSpace(root))!,
             codeAlta.Where(static root => !string.IsNullOrWhiteSpace(root))!,
-            string.IsNullOrWhiteSpace(_catalogOptions.StateRoot) ? [] : [Path.Combine(_catalogOptions.StateRoot, "scratchpad")],
+            !string.IsNullOrWhiteSpace(ScratchpadRoot) ? [ScratchpadRoot]
+                : string.IsNullOrWhiteSpace(_catalogOptions.StateRoot) ? [] : [Path.Combine(_catalogOptions.StateRoot, "scratchpad")],
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
     }
 

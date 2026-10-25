@@ -30,6 +30,12 @@ public sealed class AgentInstructionTemplateProvider
     public bool AppliesSpaceIdentities { get; init; }
 
     /// <summary>
+    /// Gets or initializes the folder the Runtime Context names for the scratchpad files of the sessions; null, the
+    /// default, for the <c>scratchpad</c> folder of the state root.
+    /// </summary>
+    public string? ScratchpadRoot { get; init; }
+
+    /// <summary>
     /// Gets how the prompt lists the skills of a session of a project and a space: <c>full</c> (every skill with its
     /// description), <c>compact</c> (names and titles) or <c>auto</c> (full while there are few). Null, or a host whose
     /// agents cannot search the skills, keeps the full list: the short forms rely on <c>alta search</c>.
@@ -246,6 +252,7 @@ public sealed class AgentInstructionTemplateProvider
             UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
             InstanceStateRoot = _catalogOptions?.StateRoot,
+            ScratchpadRoot = ScratchpadRoot,
             DiscoveryScope = DiscoveryScope,
             AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project, spaceResources, skills),
             SpaceResources = spaceResources,

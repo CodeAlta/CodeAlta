@@ -284,6 +284,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <exception cref="ArgumentException">Scoped host roots are missing, not absolute, or the project is outside the instruction boundary.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Owned receipt capacity is not positive, before host acquisition.</exception>
     /// <exception cref="ArgumentException">An explicit builtin skill root is blank or not fully qualified.</exception>
+    /// <exception cref="ArgumentException">
+    /// The scratchpad root is not an absolute path, or a host with read-only global state is given a startup scratchpad cleanup.
+    /// </exception>
     public static async Task<CodeAltaHost> CreateAsync(
         CodeAltaHostOptions options,
         CancellationToken cancellationToken = default)
@@ -293,6 +296,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
         if (!Enum.IsDefined(options.PluginAuthoringProfile)) throw new ArgumentOutOfRangeException(nameof(options.PluginAuthoringProfile));
         options.DiscoveryScope?.ValidateHostRoots(options.GlobalRoot, options.CurrentProjectPath);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.OwnedCommandReceiptCapacity);
+        if (options.ScratchpadRoot is { } scratchpadRoot && (string.IsNullOrWhiteSpace(scratchpadRoot) || !Path.IsPathFullyQualified(scratchpadRoot)))
+            throw new ArgumentException("The scratchpad root is an absolute path.", nameof(options));
+        if (options.ReadOnlyGlobalState && options.StartupScratchpadCleanup is not null)
+            throw new ArgumentException("A host with read-only global state runs no startup scratchpad cleanup.", nameof(options));
         var builtInSkillRootProvider = options.BuiltInSkillRoot is null
             ? new BuiltInCodeAltaSkillRootProvider()
             : new BuiltInCodeAltaSkillRootProvider(options.BuiltInSkillRoot);
@@ -317,7 +324,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var globalRoot = string.IsNullOrWhiteSpace(options.GlobalRoot)
                 ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta")
                 : Path.GetFullPath(options.GlobalRoot);
-            Directory.CreateDirectory(globalRoot);
+            var readOnlyGlobalState = options.ReadOnlyGlobalState;
+            if (!readOnlyGlobalState) Directory.CreateDirectory(globalRoot);
             var catalogOptions = new CatalogOptions
             {
                 GlobalRoot = globalRoot,
@@ -359,10 +367,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 applicationDatabase = ownedApplicationDatabase = ApplicationDatabase.Create(catalogOptions);
             }
 
-            applicationDatabase.StartMaintenance();
+            // A host that leaves the shared state as it is makes no copy of a database it may share or throw away.
+            if (!readOnlyGlobalState) applicationDatabase.StartMaintenance();
             // The owner of the global root keeps the coordinator instructions current; a second instance on a
             // separate state root is usually another build, and only supplies them when they are missing.
-            if (!catalogOptions.HasSeparateStateRoot || !File.Exists(Path.Combine(globalRoot, "AGENTS.md")))
+            if (!readOnlyGlobalState && (!catalogOptions.HasSeparateStateRoot || !File.Exists(Path.Combine(globalRoot, "AGENTS.md"))))
                 _ = CoordinatorAgentsBootstrapper.Ensure(globalRoot);
             if (options.OwnsLogging && !LogManager.IsInitialized)
             {
@@ -374,7 +383,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 ? Environment.CurrentDirectory
                 : Path.GetFullPath(options.CurrentProjectPath);
             options.StartupStep?.Invoke("Reading the projects…");
-            var projectCatalog = new ProjectCatalog(catalogOptions);
+            var projectCatalog = new ProjectCatalog(catalogOptions) { IsReadOnly = readOnlyGlobalState };
             var currentProject = await ResolveCurrentProjectAsync(projectCatalog, currentProjectPath, cancellationToken).ConfigureAwait(false);
 
             pluginRuntime = options.PrestartedPluginRuntime ?? new PluginRuntimeManager();
@@ -410,7 +419,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             options.StartupStep?.Invoke("Preparing the sessions, skills and providers…");
             var sessionJournalFile = new AgentSessionJournalFile();
             var sessionViewCatalog = new SessionViewCatalog(catalogOptions, sessionJournalFile, serializer: null, applicationDatabase);
-            if (catalogOptions.HasSeparateStateRoot)
+            if (catalogOptions.HasSeparateStateRoot && !readOnlyGlobalState)
                 await SeedViewStateAsync(sessionViewCatalog, globalRoot, cancellationToken).ConfigureAwait(false);
             var pluginOperationOptions = CreatePluginOperationOptions(options, catalogOptions, currentProject);
             var skillCatalog = new SkillCatalog([
@@ -428,6 +437,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 AppliesSpaceIdentities = options.AppliesSpaceIdentities,
                 SkillPromptCatalog = options.SkillPromptCatalog,
                 PreferredSkills = options.PreferredSkills,
+                ScratchpadRoot = options.ScratchpadRoot is { } scratchpad ? Path.GetFullPath(scratchpad) : null,
             };
             // The providers that list the conversations of other programs keep what they read of their files in the
             // database, so that a start reads only the files that changed.
@@ -477,6 +487,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog), projectProfiles: new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles)
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
+                ScratchpadRoot = instructionTemplateProvider.ScratchpadRoot,
             };
             var projectFileSearchService = new ProjectFileSearchService(
                 projectFileSnapshotCache,

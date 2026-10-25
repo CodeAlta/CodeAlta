@@ -16,6 +16,11 @@ public sealed partial class ProjectCatalog
     private readonly ParsedFileCache<ProjectSource> _sources = new();
     private readonly Func<string, string, ProjectSource> _parseSource;
 
+    // The projects of folders the catalog does not list, which this instance works in without registering them. They
+    // live as long as the catalog, never in a file, and a project file for the same folder takes their place.
+    private readonly object _transientGate = new();
+    private readonly List<ProjectDescriptor> _transient = [];
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ProjectCatalog"/> class.
     /// </summary>
@@ -42,7 +47,19 @@ public sealed partial class ProjectCatalog
     public CatalogOptions Options => _options;
 
     /// <summary>
-    /// Loads all known projects from the portable catalog.
+    /// Gets or initializes whether the catalog leaves the project files as they are, for a process that must not write
+    /// the shared state of the global root (a headless run beside CodeAlta Desktop). Default false.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="EnsurePersistedAsync"/> then keeps a project it does not know as a transient project
+    /// (<see cref="GetOrAddTransientAsync"/>), <see cref="DeleteAsync"/> only forgets a transient project, and the other
+    /// methods that write a project file throw <see cref="InvalidOperationException"/>.
+    /// </remarks>
+    public bool IsReadOnly { get; init; }
+
+    /// <summary>
+    /// Loads all known projects from the portable catalog, with the transient projects of this catalog
+    /// (<see cref="GetOrAddTransientAsync"/>) whose folder has no project file.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The known projects, descriptors the caller owns and may change.</returns>
@@ -53,28 +70,114 @@ public sealed partial class ProjectCatalog
     public async Task<IReadOnlyList<ProjectDescriptor>> LoadAsync(CancellationToken cancellationToken = default)
     {
         var projectsRoot = _options.ProjectsRoot;
-        if (!Directory.Exists(projectsRoot))
-        {
-            return [];
-        }
-
         var results = new List<ProjectDescriptor>();
-        foreach (var markdownPath in EnumerateProjectMarkdownPaths(projectsRoot))
+        if (Directory.Exists(projectsRoot))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var source = await _sources.ReadAsync(markdownPath, _parseSource, cancellationToken).ConfigureAwait(false);
-            // A relative path is resolved against the current folder of the process, as each load always did.
-            results.Add(source.Relative ? ParseProject(markdownPath, source.Markdown, out _) : Copy(source.Descriptor));
+            foreach (var markdownPath in EnumerateProjectMarkdownPaths(projectsRoot))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var source = await _sources.ReadAsync(markdownPath, _parseSource, cancellationToken).ConfigureAwait(false);
+                // A relative path is resolved against the current folder of the process, as each load always did.
+                results.Add(source.Relative ? ParseProject(markdownPath, source.Markdown, out _) : Copy(source.Descriptor));
+            }
         }
 
-        return results
+        var persisted = results
             .GroupBy(static project => NormalizePath(project.ProjectPath), StringComparer.OrdinalIgnoreCase)
             .Select(static group => group
                 .OrderByDescending(static project => IsFlatProjectMarkdownPath(project.SourcePath))
                 .ThenBy(static project => project.SourcePath, StringComparer.OrdinalIgnoreCase)
                 .First())
+            .ToList();
+        lock (_transientGate)
+        {
+            if (_transient.Count > 0)
+            {
+                var folders = persisted.Select(static project => NormalizePath(project.ProjectPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                persisted.AddRange(_transient.Where(project => !folders.Contains(project.ProjectPath)).Select(Copy));
+            }
+        }
+
+        return persisted
             .OrderBy(static project => project.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Gets the project of a folder: the one the catalog lists, or a transient project of this catalog, created for the
+    /// folder when it has none. A transient project is kept in memory only, as long as the catalog, and is listed by
+    /// <see cref="LoadAsync"/> until a project file names the same folder.
+    /// </summary>
+    /// <param name="projectPath">The folder, an absolute path; it need not exist.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A copy of the project, which the caller owns.</returns>
+    /// <exception cref="ArgumentException"><paramref name="projectPath"/> is blank or not an absolute path.</exception>
+    public async Task<ProjectDescriptor> GetOrAddTransientAsync(string projectPath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath) || !Path.IsPathFullyQualified(projectPath.Trim()))
+        {
+            throw new ArgumentException("A project folder is an absolute path.", nameof(projectPath));
+        }
+
+        var normalizedPath = NormalizePath(projectPath);
+        var projects = await LoadAsync(cancellationToken).ConfigureAwait(false);
+        var existing = projects.FirstOrDefault(project =>
+            string.Equals(NormalizePath(project.ProjectPath), normalizedPath, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var projectName = ProjectPathNameFormatter.InferName(normalizedPath);
+        var displayName = ProjectPathNameFormatter.InferDisplayName(normalizedPath);
+        var descriptor = new ProjectDescriptor
+        {
+            Id = ProjectId.NewVersion7().ToString(),
+            Slug = EnsureUniqueSlug(Slugify(projectName), projects),
+            Name = projectName,
+            DisplayName = displayName,
+            ProjectPath = normalizedPath,
+            DefaultBranch = "main",
+            MarkdownBody = $"# {displayName}\n\nTransient project context for the current host process.",
+        };
+        return AddTransient(descriptor);
+    }
+
+    // Keeps a project the catalog does not list, or the transient project already kept for its folder.
+    private ProjectDescriptor AddTransient(ProjectDescriptor project)
+    {
+        lock (_transientGate)
+        {
+            var kept = _transient.FirstOrDefault(candidate => string.Equals(candidate.ProjectPath, project.ProjectPath, StringComparison.OrdinalIgnoreCase));
+            if (kept is null)
+            {
+                kept = Copy(project);
+                kept.SourcePath = null;
+                kept.Archived = false;
+                _transient.Add(kept);
+            }
+
+            return Copy(kept);
+        }
+    }
+
+    // Forgets the transient project of a folder; false when the catalog keeps none for it.
+    private bool RemoveTransient(ProjectDescriptor project)
+    {
+        var folder = NormalizePath(project.ProjectPath);
+        lock (_transientGate)
+        {
+            return _transient.RemoveAll(candidate => string.Equals(candidate.Id, project.Id, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(candidate.ProjectPath, folder, StringComparison.OrdinalIgnoreCase)) > 0;
+        }
+    }
+
+    private void ThrowIfReadOnly()
+    {
+        if (IsReadOnly)
+        {
+            throw new InvalidOperationException("The catalog of projects is read-only in this process: no project file is written.");
+        }
     }
 
     /// <summary>
@@ -133,9 +236,11 @@ public sealed partial class ProjectCatalog
     /// </summary>
     /// <param name="project">The project descriptor.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">The catalog is read-only (<see cref="IsReadOnly"/>).</exception>
     public async Task SaveAsync(ProjectDescriptor project, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
+        ThrowIfReadOnly();
         project.Validate();
 
         Directory.CreateDirectory(_options.ProjectsRoot);
@@ -158,7 +263,11 @@ public sealed partial class ProjectCatalog
     /// </summary>
     /// <param name="project">The project descriptor to persist when no existing descriptor has the same path.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The persisted descriptor for the project path.</returns>
+    /// <returns>
+    /// The persisted descriptor for the project path. A read-only catalog (<see cref="IsReadOnly"/>) writes nothing: it
+    /// returns the project it lists for the path as it is, archived or not, and otherwise keeps the project as a
+    /// transient project (<see cref="GetOrAddTransientAsync"/>).
+    /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="project"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="project"/> is invalid.</exception>
     public async Task<ProjectDescriptor> EnsurePersistedAsync(ProjectDescriptor project, CancellationToken cancellationToken = default)
@@ -172,7 +281,7 @@ public sealed partial class ProjectCatalog
             string.Equals(NormalizePath(candidate.ProjectPath), project.ProjectPath, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {
-            if (existing.Archived)
+            if (existing.Archived && !IsReadOnly)
             {
                 existing.Archived = false;
                 await SaveAsync(existing, cancellationToken).ConfigureAwait(false);
@@ -188,6 +297,11 @@ public sealed partial class ProjectCatalog
             project.Slug = EnsureUniqueSlug(project.Slug, projects);
         }
 
+        if (IsReadOnly)
+        {
+            return AddTransient(project);
+        }
+
         await SaveAsync(project, cancellationToken).ConfigureAwait(false);
         return project;
     }
@@ -197,13 +311,22 @@ public sealed partial class ProjectCatalog
     /// </summary>
     /// <param name="project">The project descriptor to delete.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns><see langword="true"/> when at least one project file was deleted; otherwise <see langword="false"/>.</returns>
+    /// <returns>
+    /// <see langword="true"/> when at least one project file was deleted; otherwise <see langword="false"/>. A
+    /// read-only catalog (<see cref="IsReadOnly"/>) deletes no file: it forgets the transient project, and returns
+    /// whether it kept one.
+    /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="project"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="project"/> is invalid.</exception>
     public async Task<bool> DeleteAsync(ProjectDescriptor project, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
         project.Validate();
+        var forgotten = RemoveTransient(project);
+        if (IsReadOnly)
+        {
+            return forgotten;
+        }
 
         var normalizedProjectPath = NormalizePath(project.ProjectPath);
         var markdownPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -257,7 +380,7 @@ public sealed partial class ProjectCatalog
             project.SourcePath = null;
         }
 
-        return deleted;
+        return deleted || forgotten;
     }
 
     /// <summary>
@@ -266,12 +389,15 @@ public sealed partial class ProjectCatalog
     /// <param name="projectPath">The local project path.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The existing or newly created project descriptor.</returns>
+    /// <exception cref="InvalidOperationException">The catalog is read-only (<see cref="IsReadOnly"/>).</exception>
     public async Task<ProjectDescriptor> UpsertFromPathAsync(string projectPath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(projectPath))
         {
             throw new ArgumentException("Project path is required.", nameof(projectPath));
         }
+
+        ThrowIfReadOnly();
 
         var normalizedPath = NormalizePath(projectPath);
         var projects = await LoadAsync(cancellationToken).ConfigureAwait(false);
