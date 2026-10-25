@@ -138,6 +138,8 @@ Override only what the plugin needs.
 
 `[Plugin("id", Frontends = PluginFrontends.Desktop)]` (or `Terminal`) starts the plugin in one application only. `Context.Host.Frontend` says which application runs.
 
+The command-line application (`altacli`, `PluginFrontends.Cli`) has no window and starts only the plugins that name it: `Frontends = PluginFrontends.All | PluginFrontends.Cli` for a plugin whose tools, `alta` commands, prompt text, hooks or model providers work without a window. `All` (the default) is the desktop and the terminal only.
+
 The user can assign a plugin to spaces (`[plugins.<id>] spaces` in `~/.alta/config.toml`). CodeAlta then leaves what the plugin adds out of the sessions and panes of the other spaces: commands, tools, buttons, canvases, cards, prompt text, `OnBeforeAgentRunAsync`. `OnAgentEventAsync` and background work keep running for every space. `context.SpaceId` is the space of the operation (the space of its session, else the one the window shows; null at startup), for a plugin that scopes what it offers itself.
 
 ## Commands
@@ -551,7 +553,7 @@ A dynamic text is asked for each prompt of each session; return null to add noth
 | `change: startFailed` with "its key ... is the key of ..." | Give the plugin another key in `[Plugin("...")]`. |
 | `change: startFailed` with "declares no plugin" | Make the class public, with a public constructor without parameters. |
 | "The plugin command failed" in the window | `alta plugin status <id>`: `diagnostics` has the exception and the line. |
-| `state: unsupported` | The plugin names the other application in `Frontends`. |
+| `state: unsupported` | The plugin does not name this application in `Frontends` (the command-line application needs `Cli`). |
 | `state: disabled` | It is turned off: `[plugins.<id>] enabled = true` in `~/.alta/config.toml`, or Settings > Plugins, then `alta plugin refresh`. |
 | `plugin.otherProject` | A project plugin runs for the project CodeAlta was started in. Create a global plugin instead. |
 | The plugin does not show what you expect | `alta plugin status <id>`: is the contribution listed? Is `sourceChanged` true? Reload. |

@@ -9,6 +9,7 @@ namespace CodeAlta.Plugin.Acp;
 /// one step, or one configured by hand (<c>type = "acp"</c>). An agent runs its own loop and tools, with the
 /// instructions of CodeAlta and its tools through an MCP server of the session.
 /// </summary>
+[Plugin(PluginId, DisplayName = "ACP", Description = "Runs the agents of the Agent Client Protocol (ACP) as model providers.", Frontends = PluginFrontends.All | PluginFrontends.Cli)]
 public sealed class AcpPlugin : PluginBase
 {
     /// <summary>The id of the plugin in the configuration.</summary>

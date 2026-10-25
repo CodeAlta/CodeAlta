@@ -123,6 +123,12 @@ A plugin starts in both apps unless it says otherwise:
 
 An app does not start a plugin that does not support it, and says so in its plugin list.
 
+The command-line application (`altacli`) runs sessions without a window and starts only the plugins that name it. Add `Cli` when what your plugin gives agents works without a window: tools, `alta` commands, prompt text, hooks, model providers.
+
+```csharp
+[Plugin("notes", Frontends = PluginFrontends.All | PluginFrontends.Cli)]
+```
+
 Most of the API is portable: each app shows it its own way. Where the look matters, you give two forms: an HTML fragment for the desktop and `XenoAtom.Terminal.UI` controls for the TUI. `Context.Host.Frontend` tells which app runs.
 
 {.table}

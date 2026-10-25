@@ -19,6 +19,51 @@ public sealed class PluginFrontendTests
         Assert.IsTrue(PluginFrontends.Terminal.Supports(PluginFrontends.None));
         Assert.AreEqual("desktop application", PluginFrontends.Desktop.ToDisplayName());
         Assert.AreEqual("terminal application", PluginFrontends.Terminal.ToDisplayName());
+        Assert.AreEqual("command-line application", PluginFrontends.Cli.ToDisplayName());
+    }
+
+    [TestMethod]
+    public void Cli_IsSupportedOnlyByThePluginsThatNameIt()
+    {
+        // The interactive applications do not include the command-line one: every plugin that says nothing stays out of it.
+        Assert.IsFalse(PluginFrontends.All.Supports(PluginFrontends.Cli));
+        Assert.IsFalse(PluginFrontends.Desktop.Supports(PluginFrontends.Cli));
+        Assert.IsTrue(PluginFrontends.Cli.Supports(PluginFrontends.Cli));
+        Assert.IsTrue((PluginFrontends.All | PluginFrontends.Cli).Supports(PluginFrontends.Cli));
+        Assert.IsTrue((PluginFrontends.All | PluginFrontends.Cli).Supports(PluginFrontends.Desktop));
+        Assert.IsFalse(PluginFrontends.Cli.Supports(PluginFrontends.Terminal));
+        Assert.IsTrue(PluginFrontends.Cli.Supports(PluginFrontends.None));
+        Assert.AreEqual(PluginFrontends.All | PluginFrontends.Cli, PluginDescriptorFactory.FromType(typeof(HeadlessPlugin)).Frontends);
+    }
+
+    [TestMethod]
+    public async Task Start_InTheCommandLineApplication_StartsOnlyThePluginsThatSupportIt()
+    {
+        using var temp = new TestTempDirectory();
+        BuiltInPluginDefinition[] builtIns =
+        [
+            new() { Id = "both", DisplayName = "Both", PluginType = typeof(BothPlugin), Factory = static () => new BothPlugin() },
+            new() { Id = "headless", DisplayName = "Headless", PluginType = typeof(HeadlessPlugin), Factory = static () => new HeadlessPlugin(), Frontends = PluginFrontends.All | PluginFrontends.Cli },
+        ];
+
+        await using var cli = new PluginRuntimeManager();
+        var started = await cli.StartAsync(new PluginRuntimeManagerOptions { GlobalRoot = temp.Path, BuiltIns = builtIns, Frontend = PluginFrontends.Cli, IsHeadless = true });
+
+        var active = started.ActivePlugins.Single();
+        Assert.AreEqual("builtin:headless", active.Descriptor.RuntimeKey);
+        Assert.AreEqual(PluginFrontends.Cli, active.RuntimeContext.Host.Frontend);
+        Assert.IsFalse(active.RuntimeContext.Host.HasInteractiveUi);
+        var skipped = started.Diagnostics.Single(static diagnostic => diagnostic.Metadata.ContainsKey(PluginRuntimeManager.UnsupportedFrontendMetadataKey));
+        Assert.AreEqual(PluginDiagnosticSeverity.Info, skipped.Severity);
+        Assert.AreEqual("builtin:both", skipped.RuntimeKey);
+        Assert.AreEqual("Plugin 'Both' was not started: it does not support the command-line application.", skipped.Message);
+        Assert.AreEqual(nameof(PluginFrontends.Cli), skipped.Metadata[PluginRuntimeManager.UnsupportedFrontendMetadataKey]);
+        Assert.IsFalse(cli.Registry.GetSnapshot().Any(static registration => registration.Handle.PluginRuntimeKey == "builtin:both"));
+
+        // The plugin that opts in to the command-line application still runs in the interactive ones.
+        await using var desktop = new PluginRuntimeManager();
+        var both = await desktop.StartAsync(new PluginRuntimeManagerOptions { GlobalRoot = temp.Path, BuiltIns = builtIns, Frontend = PluginFrontends.Desktop });
+        Assert.AreEqual(2, both.ActivePlugins.Count);
     }
 
     [TestMethod]
@@ -160,6 +205,15 @@ public sealed class PluginFrontendTests
         public override IEnumerable<PluginCommandContribution> GetCommands()
         {
             yield return Command.Shell("terminal-only", "Runs in the terminal application.", static (_, _) => ValueTask.FromResult(PluginCommandResult.Handled));
+        }
+    }
+
+    [Plugin("headless", Frontends = PluginFrontends.All | PluginFrontends.Cli)]
+    public sealed class HeadlessPlugin : PluginBase
+    {
+        public override IEnumerable<PluginCommandContribution> GetCommands()
+        {
+            yield return Command.Shell("headless", "Runs in every application.", static (_, _) => ValueTask.FromResult(PluginCommandResult.Handled));
         }
     }
 

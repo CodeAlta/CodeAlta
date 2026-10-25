@@ -77,6 +77,26 @@ public sealed class DesktopPluginsTests
     }
 
     [TestMethod]
+    public void BuiltIns_ThatNeedNoWindow_SupportTheCommandLineApplication()
+    {
+        string[] headless = ["git", "jira", "mcp", "acp"];
+        BuiltInPluginDefinition[] definitions = [.. DesktopPlugins.BuiltIns, DesktopPlugins.MobileDefinition, DesktopLandingPlugin.Definition()];
+        foreach (var definition in definitions)
+        {
+            var expected = headless.Contains(definition.Id) ? PluginFrontends.All | PluginFrontends.Cli : definition.Id == "mobile" ? PluginFrontends.Desktop : PluginFrontends.All;
+            Assert.AreEqual(expected, definition.CreateDescriptor().Frontends, definition.Id);
+            // The attribute of the plugin says the same as its definition.
+            Assert.AreEqual(expected, PluginDescriptorFactory.FromType(definition.PluginType!).Frontends, definition.Id);
+        }
+
+        // The plugins of the window alone never run in the command-line application.
+        foreach (var type in new[] { typeof(Search.DesktopSearchPlugin), typeof(Ui.DesktopUiPlugin) })
+        {
+            Assert.IsFalse(PluginDescriptorFactory.FromType(type).Frontends.Supports(PluginFrontends.Cli), type.Name);
+        }
+    }
+
+    [TestMethod]
     public async Task TheJournalsOfTheStatistics_AreTheOnesOfTheStateRootOfTheInstance()
     {
         var root = Path.Combine(Path.GetTempPath(), "CodeAlta-desktop-journals-" + Guid.NewGuid().ToString("N"));

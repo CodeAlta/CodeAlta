@@ -8,7 +8,7 @@ namespace CodeAlta.Plugin.Mcp;
 /// <summary>
 /// Built-in plugin that inspects Model Context Protocol server configuration for CodeAlta.
 /// </summary>
-[Plugin("mcp", DisplayName = "MCP", Description = "Connects CodeAlta to configured Model Context Protocol servers.")]
+[Plugin("mcp", DisplayName = "MCP", Description = "Connects CodeAlta to configured Model Context Protocol servers.", Frontends = PluginFrontends.All | PluginFrontends.Cli)]
 public sealed partial class McpPlugin : PluginBase
 {
     private const string ArgumentsJsonPropertyName = "arguments_json";

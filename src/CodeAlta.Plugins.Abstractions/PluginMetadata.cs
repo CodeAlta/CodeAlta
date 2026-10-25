@@ -83,9 +83,14 @@ public sealed class PluginAttribute : Attribute
     public string? MaxCodeAltaVersion { get; init; }
 
     /// <summary>
-    /// Gets or sets the CodeAlta applications the plugin supports. The default is both.
+    /// Gets or sets the CodeAlta applications the plugin supports. The default is the desktop and the terminal
+    /// applications, <see cref="PluginFrontends.All"/>.
     /// </summary>
-    /// <remarks>A host does not start a plugin that does not support its application.</remarks>
+    /// <remarks>
+    /// A host does not start a plugin that does not support its application. The command-line application
+    /// (<c>altacli</c>) starts only the plugins that name it: <c>Frontends = PluginFrontends.All | PluginFrontends.Cli</c>
+    /// for a plugin whose contributions need no window.
+    /// </remarks>
     public PluginFrontends Frontends { get; init; } = PluginFrontends.All;
 }
 
@@ -229,7 +234,8 @@ public sealed record PluginDescriptor
     public string? MaxCodeAltaVersion { get; init; }
 
     /// <summary>
-    /// Gets the CodeAlta applications the plugin supports.
+    /// Gets the CodeAlta applications the plugin supports. The default is the desktop and the terminal
+    /// applications; the command-line application only when the plugin names it.
     /// </summary>
     public PluginFrontends Frontends { get; init; } = PluginFrontends.All;
 }

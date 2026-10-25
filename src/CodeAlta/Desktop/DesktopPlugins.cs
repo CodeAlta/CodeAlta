@@ -31,12 +31,14 @@ internal static class DesktopPlugins
             Id = "git", DisplayName = "Git",
             Description = "Exposes the GitHub, GitLab and Azure DevOps CLIs (gh, glab, az) to sessions when they are available.",
             PluginType = typeof(GitPlugin), Factory = static () => new GitPlugin(),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
         },
         new()
         {
             Id = "jira", DisplayName = "Jira",
             Description = "The issues of a Jira project, for the projects whose configuration names one.",
             PluginType = typeof(JiraPlugin), Factory = static () => new JiraPlugin(),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
         },
         new()
         {
@@ -46,6 +48,7 @@ internal static class DesktopPlugins
             // the servers: a session asks the user on its card before one is loaded.
             PluginType = typeof(McpPlugin),
             Factory = static () => new McpPlugin(new McpPluginOptions { ShowsApps = DesktopMcpAppViews.IsSupported, LoadsSkills = true }),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
         },
         new()
         {
@@ -58,6 +61,7 @@ internal static class DesktopPlugins
             Id = AcpPlugin.PluginId, DisplayName = "ACP",
             Description = "Runs the agents of the Agent Client Protocol (ACP) as model providers: the agents of the ACP registry, installed in one step.",
             PluginType = typeof(AcpPlugin), Factory = static () => new AcpPlugin(),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
         },
     ];
 

@@ -5,6 +5,7 @@ using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugin.Jira;
 using CodeAlta.Plugin.Statistics;
 using CodeAlta.Plugins;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Tui.App;
 
@@ -23,6 +24,7 @@ internal static class CodeAltaBuiltInPlugins
             EnabledByDefault = true,
             PluginType = typeof(GitPlugin),
             Factory = static () => new GitPlugin(GitTerminalContributions.CreatePromptEditorContributions),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
         });
         registry.Add(new BuiltInPluginDefinition
         {
@@ -32,6 +34,7 @@ internal static class CodeAltaBuiltInPlugins
             EnabledByDefault = true,
             PluginType = typeof(McpPlugin),
             Factory = static () => new McpPlugin(McpTerminalContributions.CreatePresentation),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
         });
         registry.Add(new BuiltInPluginDefinition
         {
@@ -41,6 +44,7 @@ internal static class CodeAltaBuiltInPlugins
             EnabledByDefault = true,
             PluginType = typeof(JiraPlugin),
             Factory = static () => new JiraPlugin(),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
         });
         registry.Add(new BuiltInPluginDefinition
         {
@@ -59,6 +63,7 @@ internal static class CodeAltaBuiltInPlugins
             EnabledByDefault = true,
             PluginType = typeof(AcpPlugin),
             Factory = static () => new AcpPlugin(),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
         });
         return registry;
     }

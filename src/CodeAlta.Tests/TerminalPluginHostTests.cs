@@ -11,6 +11,19 @@ namespace CodeAlta.Tests;
 public sealed class TerminalPluginHostTests
 {
     [TestMethod]
+    public void BuiltIns_ThatNeedNoWindow_SupportTheCommandLineApplication()
+    {
+        foreach (var definition in CodeAltaBuiltInPlugins.All)
+        {
+            var expected = definition.Id is "git" or "jira" or "mcp" or "acp" ? PluginFrontends.All | PluginFrontends.Cli : PluginFrontends.All;
+            Assert.AreEqual(expected, definition.CreateDescriptor().Frontends, definition.Id);
+            Assert.AreEqual(expected, PluginDescriptorFactory.FromType(definition.ResolvePluginType()).Frontends, definition.Id);
+        }
+
+        CollectionAssert.AreEquivalent(new[] { "git", "jira", "mcp", "statistics", "acp" }, CodeAltaBuiltInPlugins.All.Select(static definition => definition.Id).ToArray());
+    }
+
+    [TestMethod]
     public async Task PluginsStartedBeforeTheApplication_KeepTheServicesItBindsLater()
     {
         var root = Directory.CreateTempSubdirectory("CodeAlta-terminal-plugins-").FullName;

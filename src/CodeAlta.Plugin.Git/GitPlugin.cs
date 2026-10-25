@@ -10,7 +10,7 @@ namespace CodeAlta.Plugin.Git;
 /// Built-in plugin for projects hosted on GitHub, GitLab or Azure DevOps: an issue prompt picker, and the
 /// provider CLIs (<c>gh</c>, <c>glab</c>, <c>az</c>) as agent tools when they are installed.
 /// </summary>
-[Plugin("git", DisplayName = "Git", Description = "Adds an issue prompt picker for GitHub, GitLab and Azure DevOps repositories and exposes their CLIs (gh, glab, az) when available.")]
+[Plugin("git", DisplayName = "Git", Description = "Adds an issue prompt picker for GitHub, GitLab and Azure DevOps repositories and exposes their CLIs (gh, glab, az) when available.", Frontends = PluginFrontends.All | PluginFrontends.Cli)]
 public sealed class GitPlugin : PluginBase, IIssueTrackerSource
 {
     private readonly Func<GitPlugin, IEnumerable<PluginPromptEditorContribution>>? _createPromptEditorContributions;

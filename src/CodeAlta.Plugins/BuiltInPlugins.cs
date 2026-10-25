@@ -31,7 +31,10 @@ public sealed record BuiltInPluginDefinition
     /// <summary>Gets the concrete plugin type, when known without invoking the factory.</summary>
     public Type? PluginType { get; init; }
 
-    /// <summary>Gets the CodeAlta applications the built-in plugin supports. The default is both.</summary>
+    /// <summary>
+    /// Gets the CodeAlta applications the built-in plugin supports. The default is the desktop and the terminal
+    /// applications; a built-in plugin that runs without a window adds <see cref="PluginFrontends.Cli"/>.
+    /// </summary>
     public PluginFrontends Frontends { get; init; } = PluginFrontends.All;
 
     /// <summary>Gets the built-in plugin descriptor.</summary>

@@ -49,7 +49,11 @@ public sealed class HelloPlugin : PluginBase
   state, database, tasks, canvases, spaces and identity. A host without a window gives no-op services
   (`HasInteractiveUi` is false).
 - **One contract, two applications.** Both hosts run the same runtime. `PluginAttribute.Frontends` says which
-  applications a plugin supports; a host does not activate one made for the other. Portable results carry `Text`,
+  applications a plugin supports; a host does not activate one made for the other. The default, `All`, is the desktop
+  and the terminal: the command-line application (`altacli`, no window and no user) is a third value, `Cli`, that a
+  plugin names explicitly when its contributions for agents work without a window, so a plugin written for a window
+  never starts there by surprise. A host that names no application (`None`, tests and tools) starts every plugin.
+  Portable results carry `Text`,
   `Markdown` and `Html`: the desktop shows the richest, the terminal ignores `Html`. Desktop-only contributions
   (canvases, buttons, landing cards, scripts) are declared everywhere and drawn only by the desktop.
 - **The scope comes from the location.** A plugin under `~/.alta/plugins` is global; one under
@@ -241,15 +245,19 @@ be delayed by static references, native resources or untracked work: collectible
 
 | Id | Project | Applications | What it adds |
 | --- | --- | --- | --- |
-| `git` | `CodeAlta.Plugin.Git` | both | The provider of a repository from its remotes (GitHub, GitLab, Azure DevOps, Bitbucket), its issues and pull requests as an issue tracker, and the provider CLIs (`gh`, `glab`, `az`) as agent tools when installed |
-| `jira` | `CodeAlta.Plugin.Jira` | both | A Jira tracker for projects whose `.alta/issues.toml` names one, through the Atlassian CLI, and `alta jira` |
-| `mcp` | `CodeAlta.Plugin.Mcp` | both | MCP servers, see [MCP](mcp.md) |
-| `statistics` | `CodeAlta.Plugin.Statistics` | both | Timeline cards everywhere; in the desktop the statistics store, canvas, button and landing card, see [statistics](statistics.md) |
-| `acp` | `CodeAlta.Plugin.Acp` | both | The provider type `acp`, see [providers](providers.md) |
+| `git` | `CodeAlta.Plugin.Git` | all three | The provider of a repository from its remotes (GitHub, GitLab, Azure DevOps, Bitbucket), its issues and pull requests as an issue tracker, and the provider CLIs (`gh`, `glab`, `az`) as agent tools when installed |
+| `jira` | `CodeAlta.Plugin.Jira` | all three | A Jira tracker for projects whose `.alta/issues.toml` names one, through the Atlassian CLI, and `alta jira` |
+| `mcp` | `CodeAlta.Plugin.Mcp` | all three | MCP servers, see [MCP](mcp.md) |
+| `statistics` | `CodeAlta.Plugin.Statistics` | desktop, terminal | Timeline cards everywhere; in the desktop the statistics store, canvas, button and landing card, see [statistics](statistics.md) |
+| `acp` | `CodeAlta.Plugin.Acp` | all three | The provider type `acp`, see [providers](providers.md) |
 | `landing` | desktop project | desktop | The canvas of the landing page; the cards on it are other plugins' |
 | `search` | desktop project | desktop | The canvas and landing card of the search index |
 | `mobile` | `CodeAlta.Plugin.Mobile` | desktop, off by default | A local server published on the tailnet by Tailscale Serve that serves the sessions of its spaces to a phone, acting through `alta` |
 | `ui` | desktop project | desktop | On request, the tools that see and drive the window; not offered when the user reviews commands, since a session could then answer its own review |
+
+"All three" is the desktop, the terminal and the command-line application (`Cli`): what these plugins give agents
+(tools, `alta` roots, prompt parts, hooks, provider types) needs no window. Their attribute and their definitions in the
+built-in lists of the hosts say the same.
 
 Two invariants of the integrations:
 

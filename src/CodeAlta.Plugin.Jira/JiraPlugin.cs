@@ -14,7 +14,7 @@ namespace CodeAlta.Plugin.Jira;
 /// login for the whole machine: each use of Jira holds the account from the moment it is checked (and switched or
 /// signed in) until its commands are done, so that sessions of two spaces never work with each other's account.
 /// </remarks>
-[Plugin("jira", DisplayName = "Jira", Description = "The issues of a Jira project, for projects that say so in their configuration.")]
+[Plugin("jira", DisplayName = "Jira", Description = "The issues of a Jira project, for projects that say so in their configuration.", Frontends = PluginFrontends.All | PluginFrontends.Cli)]
 public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSource
 {
     /// <summary>The most events one look at Jira reads.</summary>
