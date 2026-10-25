@@ -99,6 +99,39 @@ public sealed class HeadlessSessionDriverTests
     }
 
     [TestMethod]
+    public async Task FlushEvents_WaitsUntilTheObserverWasGivenEveryEventPublishedBefore()
+    {
+        var (root, provider, host) = await CreateAsync();
+        await using var scope = root;
+        var events = new ConcurrentQueue<HeadlessSessionEvent>();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var driver = new HeadlessSessionDriver(host, new HeadlessSessionDriverOptions
+        {
+            // A slow observer: it takes nothing until the gate opens.
+            Observer = async (item, cancellationToken) =>
+            {
+                await gate.Task.WaitAsync(cancellationToken);
+                events.Enqueue(item);
+            },
+        });
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("The answer."));
+        var result = await driver.RunAsync(session, new HeadlessPrompt("hello")).WaitAsync(Hang);
+        Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
+
+        var flush = driver.FlushEventsAsync();
+        Assert.IsFalse(flush.IsCompleted, "The observer has not taken the events of the run yet.");
+        gate.SetResult();
+        await flush.WaitAsync(Hang);
+
+        Assert.IsTrue(events.Any(static item => item.Event is SessionAgentEvent { Event: AgentContentCompletedEvent { Kind: AgentContentKind.Assistant, Content: "The answer." } }),
+            "Every event published before the flush reached the observer.");
+        Assert.IsTrue(events.All(static item => !string.IsNullOrEmpty(item.Event.SessionId)), "The marker of the flush is not given to the observer.");
+        await using var unobserved = new HeadlessSessionDriver(host);
+        Assert.IsTrue(unobserved.FlushEventsAsync().IsCompleted, "A driver without an observer has nothing to flush.");
+    }
+
+    [TestMethod]
     public async Task Run_ThatFails_IsFailed_AndASignInFailureIsProviderNotReady()
     {
         var (root, provider, host) = await CreateAsync();

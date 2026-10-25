@@ -30,6 +30,22 @@ public sealed class CodeAltaHostOptions
     public string? StateRoot { get; init; }
 
     /// <summary>
+    /// Gets how the host reads and writes the configuration of the user (<see cref="CatalogOptions.Config"/>): the file as
+    /// it is by default; overlays, a strict reading or no write for a process such as the command line.
+    /// </summary>
+    /// <remarks>
+    /// Every store the host builds from its catalog options reads the configuration this way. Plugins that read their own
+    /// tables of the file (MCP) read the file itself.
+    /// </remarks>
+    public CodeAltaConfigOptions Config { get; init; } = CodeAltaConfigOptions.Default;
+
+    /// <summary>
+    /// Gets whether the prompt of a session lists the skills it can use. Default true; false for a run that does without
+    /// skills (<c>altacli run --no-skills</c>).
+    /// </summary>
+    public bool ListsSkills { get; init; } = true;
+
+    /// <summary>
     /// Gets whether the host leaves the shared state of the global root as it is, for a process that runs beside CodeAlta
     /// Desktop or TUI on the same profile (a headless run). Default false.
     /// </summary>

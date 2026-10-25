@@ -35,6 +35,12 @@ public sealed class AgentInstructionTemplateProvider
     /// </summary>
     public string? ScratchpadRoot { get; init; }
 
+    /// <summary>
+    /// Gets or initializes whether the prompt of a session lists the skills it can use. True, the default; false for a run
+    /// that does without skills.
+    /// </summary>
+    public bool ListsSkills { get; init; } = true;
+
     // The patterns over tool names the runtime gives a session (SessionRuntimeService.SetDisabledToolPatterns), expanded
     // over the built-in tools into the tools the session does without; none without a runtime.
     internal Func<string?, IReadOnlyList<string>>? SessionToolPatterns { get; set; }
@@ -377,13 +383,13 @@ public sealed class AgentInstructionTemplateProvider
         }
     }
 
-    // The skills the model of a session sees; null without a catalog.
+    // The skills the model of a session sees; null without a catalog, or when the prompt lists none.
     private async Task<IReadOnlyList<SkillDescriptor>?> ListSessionSkillsAsync(
         ProjectDescriptor? project,
         SpaceFilter space,
         CancellationToken cancellationToken)
     {
-        if (_skillCatalog is null || _catalogOptions is null)
+        if (!ListsSkills || _skillCatalog is null || _catalogOptions is null)
         {
             return null;
         }

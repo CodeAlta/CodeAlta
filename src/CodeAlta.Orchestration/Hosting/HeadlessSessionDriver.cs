@@ -32,6 +32,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     // The session the driver opened that each observed session belongs to. Forgotten when the open sessions change.
     private readonly ConcurrentDictionary<string, string> _rootOf = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _closing = new();
+    // The flushes waiting for the reader to reach their marker.
+    private readonly ConcurrentDictionary<FlushMarker, TaskCompletionSource> _flushes = new();
     private readonly Task _reader;
     private int _disposed;
 
@@ -251,6 +253,31 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         return _host.RuntimeService.AbortTreeAsync(session.SessionId, reason, cancellationToken);
     }
 
+    /// <summary>
+    /// Waits until the observer was given every event the runtime published before the call: a face calls it once a run has
+    /// settled, so that what it writes after it (a result, the response of a prompt) comes after every update of the run.
+    /// </summary>
+    /// <param name="cancellationToken">Stops waiting: the runtime drops the newest events of a full stream, the marker of the flush included.</param>
+    /// <returns>A task that completes when the observer was given the events, at once without an observer or once the driver is disposed.</returns>
+    /// <exception cref="OperationCanceledException">The wait was canceled.</exception>
+    public async Task FlushEventsAsync(CancellationToken cancellationToken = default)
+    {
+        if (_options.Observer is null || Volatile.Read(ref _disposed) != 0) return;
+        var marker = new FlushMarker(Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _flushes[marker] = reached;
+        try
+        {
+            // A reader that ended gives nothing more to the observer.
+            if (_reader.IsCompleted || !_host.RuntimeService.TryPublishToReader(marker)) return;
+            await reached.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _flushes.TryRemove(marker, out _);
+        }
+    }
+
     /// <summary>Closes a session of the driver: its lease is released and its events are no longer observed. The session is kept.</summary>
     /// <param name="session">The session.</param>
     /// <returns>A task that completes when the lease is released.</returns>
@@ -444,6 +471,12 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         {
             await foreach (var runtimeEvent in _host.RuntimeService.StreamEventsAsync(cancellationToken).ConfigureAwait(false))
             {
+                if (runtimeEvent is FlushMarker marker)
+                {
+                    if (_flushes.TryGetValue(marker, out var reached)) reached.TrySetResult();
+                    continue;
+                }
+
                 if (RootOf(runtimeEvent.SessionId) is not { } root) continue;
                 try
                 {
@@ -461,7 +494,15 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         catch (ObjectDisposedException)
         {
         }
+        finally
+        {
+            // Nothing more reaches the observer: a flush still waiting has nothing to wait for.
+            foreach (var reached in _flushes.Values) reached.TrySetResult();
+        }
     }
+
+    // The marker of a flush: an event of no session, which only the reader of the driver sees.
+    private sealed record FlushMarker(Guid Id, DateTimeOffset Timestamp) : SessionRuntimeEvent(string.Empty, Timestamp);
 
     // Only what belongs is kept: a session that starts is published before the runtime holds it under its parent.
     private string? RootOf(string sessionId)

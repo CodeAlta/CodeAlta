@@ -142,6 +142,49 @@ public sealed class HeadlessHostStateTests
     }
 
     [TestMethod]
+    public async Task Config_OfTheHost_IsWhatItsStoresRead_WithItsOverlays_AndNoWrite()
+    {
+        await using var root = new HeadlessTestRoot();
+        File.WriteAllText(Path.Combine(root.GlobalRoot, "config.toml"), "[tools]\ndisabled = [\"grep\"]\n");
+        var provider = new ScriptedTurnProvider();
+        var config = new CodeAltaConfigOptions
+        {
+            Overlays = [CodeAltaConfigOverlay.FromAssignment("tools.disabled=[\"list_dir\"]")],
+            ReadOnly = true,
+        };
+        var host = await root.CreateHostAsync(provider, readOnlyGlobalState: true, config: config);
+
+        Assert.AreSame(config, host.CatalogOptions.Config);
+        CollectionAssert.AreEquivalent(new[] { "list_dir" }, host.RuntimeService.ConfigStore.LoadGlobalDisabledTools().ToArray(), "The overlay wins over the file.");
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, HeadlessTestRoot.Options(provider, root.ProjectRoot), "Overlay");
+        await host.RuntimeService.SendAsync(session, HeadlessTestRoot.Options(provider, root.ProjectRoot), new AgentSendOptions { Input = AgentInput.Text("hello") });
+        Assert.IsTrue(provider.Requests.TryPeek(out var request));
+        CollectionAssert.DoesNotContain(request.Tools.Select(static tool => tool.Spec.Name).ToArray(), "list_dir");
+        Assert.AreEqual("[tools]\ndisabled = [\"grep\"]\n", File.ReadAllText(Path.Combine(root.GlobalRoot, "config.toml")));
+    }
+
+    [TestMethod]
+    public async Task ListsSkills_Off_ListsNoSkillInThePrompt()
+    {
+        await using var root = new HeadlessTestRoot();
+        var skill = Path.Combine(root.GlobalRoot, "skills", "zebra-skill");
+        Directory.CreateDirectory(skill);
+        File.WriteAllText(Path.Combine(skill, "SKILL.md"), "---\nname: zebra-skill\ndescription: Paints zebras in stripes.\n---\n\nPaint.\n");
+
+        foreach (var listsSkills in new[] { true, false })
+        {
+            var provider = new ScriptedTurnProvider();
+            var host = await root.CreateHostAsync(provider, readOnlyGlobalState: true, listsSkills: listsSkills);
+            var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, HeadlessTestRoot.Options(provider, root.ProjectRoot), "Skills");
+            await host.RuntimeService.SendAsync(session, HeadlessTestRoot.Options(provider, root.ProjectRoot), new AgentSendOptions { Input = AgentInput.Text("hello") });
+
+            Assert.IsTrue(provider.Requests.TryPeek(out var request));
+            var instructions = request.SystemMessage + "\n" + request.DeveloperInstructions;
+            Assert.AreEqual(listsSkills, instructions.Contains("zebra-skill", StringComparison.Ordinal), $"Lists skills: {listsSkills}.");
+        }
+    }
+
+    [TestMethod]
     public async Task PrivateDatabase_LivesInAFolderOfItsOwn_DeletedWithIt()
     {
         var databases = Path.Combine(Path.GetTempPath(), "CodeAlta-private-db-" + Guid.NewGuid().ToString("N"));

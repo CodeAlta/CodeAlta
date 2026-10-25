@@ -285,7 +285,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <exception cref="ArgumentOutOfRangeException">Owned receipt capacity is not positive, before host acquisition.</exception>
     /// <exception cref="ArgumentException">An explicit builtin skill root is blank or not fully qualified.</exception>
     /// <exception cref="ArgumentException">
-    /// The scratchpad root is not an absolute path, or a host with read-only global state is given a startup scratchpad cleanup.
+    /// The scratchpad root is not an absolute path, a host with read-only global state is given a startup scratchpad cleanup, or
+    /// the configuration options are null.
     /// </exception>
     public static async Task<CodeAltaHost> CreateAsync(
         CodeAltaHostOptions options,
@@ -330,6 +331,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             {
                 GlobalRoot = globalRoot,
                 StateRoot = string.IsNullOrWhiteSpace(options.StateRoot) ? globalRoot : Path.GetFullPath(options.StateRoot),
+                Config = options.Config ?? throw new ArgumentException("The host has configuration options.", nameof(options)),
             };
             Directory.CreateDirectory(catalogOptions.StateRoot);
             var startupScratchpadCleanup = options.StartupScratchpadCleanup;
@@ -438,6 +440,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 SkillPromptCatalog = options.SkillPromptCatalog,
                 PreferredSkills = options.PreferredSkills,
                 ScratchpadRoot = options.ScratchpadRoot is { } scratchpad ? Path.GetFullPath(scratchpad) : null,
+                ListsSkills = options.ListsSkills,
             };
             // The providers that list the conversations of other programs keep what they read of their files in the
             // database, so that a start reads only the files that changed.

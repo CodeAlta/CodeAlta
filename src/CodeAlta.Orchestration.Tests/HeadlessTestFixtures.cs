@@ -193,7 +193,8 @@ internal sealed class HeadlessTestRoot : IAsyncDisposable
     /// shares the global root; read-only global state gives it a private database.
     /// </summary>
     internal async Task<CodeAltaHost> CreateHostAsync(ScriptedTurnProvider provider, bool readOnlyGlobalState = false, bool separateStateRoot = false,
-        string? scratchpadRoot = null, string? currentProject = null, bool fullTrust = false, bool headlessInstructions = false)
+        string? scratchpadRoot = null, string? currentProject = null, bool fullTrust = false, bool headlessInstructions = false,
+        CodeAltaConfigOptions? config = null, bool listsSkills = true)
     {
         var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
         {
@@ -211,6 +212,8 @@ internal sealed class HeadlessTestRoot : IAsyncDisposable
             ScratchpadRoot = scratchpadRoot,
             FullTrust = fullTrust,
             HeadlessInstructions = headlessInstructions,
+            Config = config ?? CodeAltaConfigOptions.Default,
+            ListsSkills = listsSkills,
             ConfigureModelProviders = provider.Register,
         }, CancellationToken.None);
         _hosts.Add(host);

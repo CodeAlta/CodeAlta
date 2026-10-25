@@ -33,6 +33,15 @@ internal sealed class SessionRuntimeEventPublisher(int capacity = BoundedRuntime
         return published;
     }
 
+    // Publishes an event to the reader alone, after every event published before it: the projections never see it.
+    internal bool TryPublishToReader(SessionRuntimeEvent runtimeEvent)
+    {
+        lock (_gate)
+        {
+            return !_closed && _events.TryPublish(runtimeEvent);
+        }
+    }
+
     internal async IAsyncEnumerable<SessionRuntimeEvent> ReadAllAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

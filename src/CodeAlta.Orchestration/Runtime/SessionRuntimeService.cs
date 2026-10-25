@@ -459,6 +459,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public IAsyncEnumerable<SessionRuntimeEvent> StreamEventsAsync(CancellationToken cancellationToken = default)
         => _events.ReadAllAsync(cancellationToken);
 
+    // Gives the reader of StreamEventsAsync a marker after every event published before it, and nothing else:
+    // false when the stream is closed or full.
+    internal bool TryPublishToReader(SessionRuntimeEvent marker) => _events.TryPublishToReader(marker);
+
     /// <summary>
     /// Appends a CodeAlta-authored session event to the session journal and publishes it to runtime subscribers.
     /// </summary>
