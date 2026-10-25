@@ -24,6 +24,7 @@ altatui
 | --- | --- | --- |
 | **CodeAlta Desktop** | [`CodeAlta`](https://www.nuget.org/packages/CodeAlta/) | `alta` |
 | **CodeAlta TUI** | [`CodeAlta.Tui`](https://www.nuget.org/packages/CodeAlta.Tui/) | `altatui` |
+| **CodeAlta CLI**, without a window ([Command Line](command-line.md)) | [`CodeAlta.Cli`](https://www.nuget.org/packages/CodeAlta.Cli/) | `altacli` |
 
 You can install both; [Desktop and TUI]({{site.basepath}}/docs/desktop-and-tui/) compares them. For the TUI, `dnx --yes CodeAlta.Tui` installs, updates and runs it in one command.
 

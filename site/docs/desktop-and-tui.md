@@ -9,7 +9,7 @@ CodeAlta has two apps:
 - **CodeAlta Desktop** (`alta`) is the app we recommend. It has session tabs you can arrange or move to windows of their own, a code editor, terminals and git changes for your projects, automations, and a single Settings window.
 - **CodeAlta TUI** (`altatui`) is a keyboard-first terminal UI, for when you want to stay in a terminal.
 
-Both apps run the same agents: the same providers, tools, agent prompts, skills, MCP servers and plugins, on the same `~/.alta` profile. This documentation applies to both. Where the two apps differ, the page says so, and screenshots have a **Desktop / TUI** switch.
+Both apps run the same agents: the same providers, tools, agent prompts, skills, MCP servers and plugins, on the same `~/.alta` profile. This documentation applies to both. A third program, **CodeAlta CLI** (`altacli`), runs these agents without a window, for scripts and editors: see [Command Line](command-line.md). Where the two apps differ, the page says so, and screenshots have a **Desktop / TUI** switch.
 
 {{ alta_shot "alta-desktop-home.webp" "alta-home.png" "CodeAlta main workspace" "The same workspace in both apps: projects and sessions on the left, the session timeline, and the prompt at the bottom." }}
 

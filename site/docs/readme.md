@@ -11,7 +11,9 @@ It comes as two apps that run the same agents on the same `~/.alta` profile:
 - **CodeAlta Desktop**, the `alta` command, is the app we recommend: tabs you can split or move to windows of their own, a code editor, terminals, git changes, automations and one Settings window.
 - **CodeAlta TUI**, the `altatui` command: a keyboard-first terminal UI.
 
-This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pages point out where the two apps differ.
+**CodeAlta CLI**, the `altacli` command, runs the same agents without a window, for scripts, CI and editors: see [Command Line](command-line.md).
+
+This guide applies to the two apps. Screenshots have a **Desktop / TUI** switch, and pages point out where the two apps differ.
 
 {{ alta_shot "alta-desktop-home.webp" "alta-home.png" "CodeAlta workspace showing the projects sidebar, a session timeline, the prompt editor, and provider status" "The main workspace keeps projects, sessions, timeline entries, prompt drafting, provider state, agent prompt selection, and context usage in one place." }}
 
@@ -36,6 +38,7 @@ This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pag
 
 ## Tools and integrations
 
+- [Command Line](command-line.md): run a prompt from a script, a CI job or a benchmark with `altacli`, or serve CodeAlta to an editor over ACP.
 - [Search](search.md): find earlier conversations, plans, skills and tools by what they are about.
 - [Speech to Prompt](speech.md): dictate a prompt with a speech model that runs on your computer.
 - [Issues and PRs](issues.md): issues and pull requests from GitHub, GitLab, Azure DevOps, Bitbucket or Jira.

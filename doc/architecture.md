@@ -1,6 +1,6 @@
 # Architecture
 
-CodeAlta runs AI coding agents on local projects. One profile (`~/.alta`) is shared by two frontends: CodeAlta Desktop (`src/CodeAlta`, the `alta` executable, where new features go) and CodeAlta TUI (`src/CodeAlta.Tui`, `altatui`, kept working). Everything else is shared, headless libraries.
+CodeAlta runs AI coding agents on local projects. One profile (`~/.alta`) is shared by two frontends: CodeAlta Desktop (`src/CodeAlta`, the `alta` executable, where new features go) and CodeAlta TUI (`src/CodeAlta.Tui`, `altatui`, kept working). A third executable, CodeAlta CLI (`src/CodeAlta.Cli`, `altacli`), runs the same harness without a user: a prompt to its end for scripts, or an ACP agent for editors. Everything else is shared, headless libraries.
 
 ## Principles
 
@@ -19,12 +19,12 @@ These hold everywhere; the area docs explain how each area applies them.
 
 ```mermaid
 flowchart LR
-    Exe[alta / altatui] --> Host[CodeAltaHost]
+    Exe[alta / altatui / altacli] --> Host[CodeAltaHost]
     Host --> Catalog[Catalog: projects, config, spaces, session views]
     Host --> Plugins[Plugin runtime]
     Host --> Providers[Model provider registry + initialization]
     Host --> Runtime[AgentHub + SessionRuntimeService]
-    Exe --> Frontend[Desktop window / terminal UI]
+    Exe --> Frontend[Desktop window / terminal UI / headless faces]
     Frontend -- commands --> Runtime
     Runtime -- events --> Frontend
     Runtime --> Agent[Agent runtime: sessions, tools, journals]
@@ -39,6 +39,7 @@ flowchart LR
 | --- | --- |
 | `CodeAlta` | Desktop executable: native window (NeoAstra over WebView2), host RPC services, React frontend in `frontend/`. See [desktop](desktop.md). |
 | `CodeAlta.Tui` | Terminal executable. |
+| `CodeAlta.Cli` | Headless executable: `run` (text, or ACP notifications as JSON Lines, with exit codes), `acp` (an ACP agent over stdio), `alta`. It writes journals and markers, never the shared database, the settings or the instance lock. See [runtime](runtime.md#headless-runs). |
 | `CodeAlta.Orchestration` | Headless runtime: `SessionRuntimeService`, `AgentHub`, session actors, queues, skills, plugin bridges, `CodeAltaHost`. See [runtime](runtime.md). |
 | `CodeAlta.Agent` | Provider-neutral contracts and the agent runtime: sessions, events, tools, journals, compaction, provider contracts, the harness for agents that run their own loop. |
 | `CodeAlta.Agent.*` | One package per provider family (OpenAI, Anthropic, Google, Mistral, Copilot, xAI, Claude Code). See [providers](providers.md). |
@@ -49,7 +50,7 @@ flowchart LR
 | `CodeAlta.Plugin.*` | Built-in plugins. |
 | `CodeAlta.Search` | Local search index (words and meaning). |
 | `CodeAlta.NativeEngines` | Pinned native downloads and worker processes (speech, embeddings). |
-| `CodeAlta.Acp` | Agent Client Protocol types and client. |
+| `CodeAlta.Acp` | Agent Client Protocol types, the client (ACP agents as providers) and the agent server (`altacli acp`). |
 
 Dependencies point down: frontends → Orchestration/LiveTool/Hosting → Agent, Catalog, Plugins. Nothing below a frontend references a frontend; `CodeAlta.Search` and `CodeAlta.NativeEngines` know neither the host nor a window. `ArchitectureGuardrailTests` checks the main boundaries.
 
@@ -66,7 +67,7 @@ Dependencies point down: frontends → Orchestration/LiveTool/Hosting → Agent,
 
 ## Where new code goes
 
-- Presentation: `src/CodeAlta` (desktop) or `src/CodeAlta.Tui` (terminal), never shared logic.
+- Presentation: `src/CodeAlta` (desktop), `src/CodeAlta.Tui` (terminal) or `src/CodeAlta.Cli` (headless faces), never shared logic; a session driven to its end without a user goes through `HeadlessSessionDriver` (`CodeAlta.Orchestration`).
 - Session behavior, queues, runtime commands and events: `CodeAlta.Orchestration`.
 - Provider-neutral contracts and the agent loop: `CodeAlta.Agent`; a provider protocol: its `CodeAlta.Agent.*` package.
 - Files and settings of the profile or a project: `CodeAlta.Catalog`.
