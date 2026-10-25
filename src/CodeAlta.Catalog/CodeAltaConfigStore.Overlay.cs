@@ -70,7 +70,7 @@ public sealed partial class CodeAltaConfigStore
         var path = _options.ConfigPath;
         return _config.IgnoreUserConfig || !File.Exists(path)
             ? _overlaysOnly.Value
-            : _globalDocuments.Read(path, (_, content) => ParseGlobal(GlobalLayers(content)));
+            : _globalDocuments.Read(path, _parseGlobalFile);
     }
 
     private CodeAltaConfigDocument LoadOwnedGlobalDocument()

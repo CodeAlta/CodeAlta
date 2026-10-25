@@ -89,6 +89,9 @@ public sealed partial class CodeAltaConfigStore
     // The user's configuration when no file is read: the overlays alone, which do not change.
     private readonly Lazy<CodeAltaConfigDocument> _overlaysOnly;
 
+    // Parses the text of the user's file with the overlays: one delegate for every read.
+    private readonly Func<string, string, CodeAltaConfigDocument> _parseGlobalFile;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="CodeAltaConfigStore"/> class.
     /// </summary>
@@ -117,6 +120,7 @@ public sealed partial class CodeAltaConfigStore
         _textFiles = textFiles;
         // Not kept when it throws: every read reports the error again, as for a file.
         _overlaysOnly = new Lazy<CodeAltaConfigDocument>(() => ParseGlobal(GlobalLayers(null)), LazyThreadSafetyMode.PublicationOnly);
+        _parseGlobalFile = (_, content) => ParseGlobal(GlobalLayers(content));
     }
 
     /// <summary>
