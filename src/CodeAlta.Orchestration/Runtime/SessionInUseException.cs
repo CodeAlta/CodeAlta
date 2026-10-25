@@ -14,12 +14,23 @@ public sealed class SessionInUseException : InvalidOperationException
     public SessionInUseException(string sessionId, string? holderKind, int? holderProcessId)
         : base(holderKind is null
             ? $"Session '{sessionId}' is in use by another process."
-            : $"Session '{sessionId}' is in use by {holderKind}{(holderProcessId is { } pid ? $" (process {pid})" : string.Empty)}.")
+            : $"Session '{sessionId}' is in use by {GetHolderName(holderKind)}{(holderProcessId is { } pid ? $" (process {pid})" : string.Empty)}.")
     {
         SessionId = sessionId;
         HolderKind = holderKind;
         HolderProcessId = holderProcessId;
     }
+
+    /// <summary>Gets the name of a holder as users know it: <c>CodeAlta Desktop</c>, <c>CodeAlta TUI</c>, <c>altacli</c>.</summary>
+    /// <param name="holderKind">The kind of the holder; null when it is not known.</param>
+    /// <returns>The name; <c>another process</c> for an unknown holder, the kind itself for another kind.</returns>
+    public static string GetHolderName(string? holderKind) => holderKind switch
+    {
+        null or "" => "another process",
+        Catalog.SessionLeaseOwner.DesktopKind => "CodeAlta Desktop",
+        Catalog.SessionLeaseOwner.TuiKind => "CodeAlta TUI",
+        _ => holderKind,
+    };
 
     /// <summary>Gets the session.</summary>
     public string SessionId { get; }

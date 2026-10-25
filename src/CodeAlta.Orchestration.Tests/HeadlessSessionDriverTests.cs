@@ -219,7 +219,7 @@ public sealed class HeadlessSessionDriverTests
             Assert.IsNotNull(elsewhere);
             var refused = await driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id });
             Assert.AreEqual(HeadlessOpenStatus.SessionInUse, refused.Status);
-            StringAssert.Contains(refused.Message, SessionLeaseOwner.DesktopKind);
+            StringAssert.Contains(refused.Message, "CodeAlta Desktop");
         }
 
         Assert.AreEqual(HeadlessOpenStatus.Opened, (await driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id })).Status, "Once released, the session is continued.");

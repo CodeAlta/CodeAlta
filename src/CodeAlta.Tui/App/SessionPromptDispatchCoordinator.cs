@@ -328,7 +328,7 @@ internal sealed class SessionPromptDispatchCoordinator
             }
 
             tab.ActiveRunStartedAt = null;
-            _commandContext.SetSessionStatus(tab, SR.T("This session is in use by {0}: send it again once that ends.", inUse.HolderKind ?? SR.T("another process")),
+            _commandContext.SetSessionStatus(tab, SR.T("This session is in use by {0}: send it again once that ends.", inUse.HolderKind is null ? SR.T("another process") : SessionInUseException.GetHolderName(inUse.HolderKind)),
                 false, StatusTone.Warning);
         }
         catch (Exception ex) when (responseDispatch is null)
