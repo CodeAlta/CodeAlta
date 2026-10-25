@@ -152,8 +152,11 @@ internal sealed class DesktopSearchHost : ISearchHost, IMeaningSettings
         foreach (var session in snapshot.Sessions)
         {
             snapshot.SessionHeaders.TryGetValue(session.SessionId, out var header);
+            // The project the list of sessions shows it in, when the one it records is no project of the catalog.
+            var projectId = header is null ? null
+                : ProjectCatalog.ResolveSessionProject(header.ProjectRef, header.WorkingDirectory, snapshot.Projects)?.Id ?? header.ProjectRef;
             map[session.SessionId] = new SearchSessionInfo(session.SessionId, SessionRuntimeService.ListedTitle(session, null, null),
-                header?.ProjectRef, header?.SpaceId ?? session.SpaceId, session.ViewState?.Archived == true);
+                projectId, header?.SpaceId ?? session.SpaceId, session.ViewState?.Archived == true);
         }
 
         lock (_gate)

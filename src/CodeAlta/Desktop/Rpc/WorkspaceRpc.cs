@@ -218,11 +218,12 @@ internal sealed partial class WorkspaceService
                 recordedSpace = header.SpaceId ?? recordedSpace;
                 if (header.Kind == SessionViewKind.GlobalSession && header.ProjectRef is null)
                     scopeKind = "global";
-                else if (header.Kind == SessionViewKind.ProjectSession && header.ProjectRef is { } reference
-                    && projects.Any(project => project.Id == reference && project.ProjectPath == session.WorkspacePath))
+                // The project it records, or the project added since for its folder when it records none of the catalog.
+                else if (header.Kind == SessionViewKind.ProjectSession
+                    && ProjectCatalog.ResolveSessionProject(header.ProjectRef, session.WorkspacePath, projects) is { } project)
                 {
                     scopeKind = "project";
-                    projectId = reference;
+                    projectId = project.Id;
                 }
             }
             // A session that was never named keeps the text it was created with as its saved title, while its summary

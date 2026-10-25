@@ -432,6 +432,30 @@ public sealed class DesktopWorkspaceTests
         Assert.AreEqual("Checking the catalog", snapshot.Sessions[0].Title);
     }
 
+    [TestMethod]
+    public void Projection_SessionOfAFolderAddedSinceIsListedUnderItsProject_NeverOneOfAnotherProject()
+    {
+        // altacli records the transient project of a folder outside the catalog; the project added later for that folder
+        // has another id. A session that records another project of the catalog is never given to the project of its folder.
+        var transient = Session("transient");
+        var foreign = Session("foreign");
+        var projects = new[] { Project("p"), Project("q") };
+        var headers = new Dictionary<string, SessionViewJournalHeader>
+        {
+            ["transient"] = new() { SessionId = "transient", Kind = SessionViewKind.ProjectSession, ProjectRef = Guid.NewGuid().ToString("D"), CreatedAt = transient.CreatedAt, WorkingDirectory = transient.WorkspacePath! },
+            ["foreign"] = new() { SessionId = "foreign", Kind = SessionViewKind.ProjectSession, ProjectRef = "q", CreatedAt = foreign.CreatedAt, WorkingDirectory = foreign.WorkspacePath! },
+        };
+
+        var snapshot = WorkspaceService.ProjectSnapshot(projects, [transient, foreign], headers);
+
+        var adopted = snapshot.Sessions.Single(session => session.Id == "transient");
+        Assert.AreEqual("project", adopted.ScopeKind);
+        Assert.AreEqual("p", adopted.ProjectId);
+        var other = snapshot.Sessions.Single(session => session.Id == "foreign");
+        Assert.IsNull(other.ScopeKind);
+        Assert.IsNull(other.ProjectId);
+    }
+
     private static Dictionary<string, SessionViewJournalHeader> ProjectHeader(AgentSessionMetadata session) => new()
     {
         [session.SessionId] = new() { SessionId = session.SessionId, Kind = SessionViewKind.ProjectSession, ProjectRef = "p", CreatedAt = session.CreatedAt, WorkingDirectory = session.WorkspacePath! },

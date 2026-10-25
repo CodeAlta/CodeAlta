@@ -74,9 +74,10 @@ internal sealed class BookmarksService
                 if (headers.TryGetValue(session.SessionId, out var header) && header.SessionId == session.SessionId && header.WorkingDirectory == session.WorkspacePath)
                 {
                     if (header.Kind == SessionViewKind.GlobalSession && header.ProjectRef is null) kind = SessionViewKind.GlobalSession;
-                    else if (header.Kind == SessionViewKind.ProjectSession && header.ProjectRef is { } reference)
+                    else if (header.Kind == SessionViewKind.ProjectSession)
                     {
-                        project = snapshot.Projects.FirstOrDefault(candidate => candidate.Id == reference && candidate.ProjectPath == session.WorkspacePath);
+                        // As the list of sessions shows it: the project added since for its folder when it records none of the catalog.
+                        project = ProjectCatalog.ResolveSessionProject(header.ProjectRef, session.WorkspacePath, snapshot.Projects);
                         if (project is not null) kind = SessionViewKind.ProjectSession;
                     }
                 }

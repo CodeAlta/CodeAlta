@@ -178,6 +178,33 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
+    public Task OwnedState_AdoptsASessionOfAFolderAddedSince_NeverOneOfAnotherProject() => Fixture.Run(async f =>
+    {
+        // altacli records the transient project of a folder outside the catalog: once the folder is a project, the
+        // session is that project's, as the runtime binds it by its folder.
+        var adopted = f.NewSession();
+        adopted.ProjectRef = Guid.NewGuid().ToString("D");
+        await f.Persist(adopted);
+        var observe = (SessionViewDescriptor session) => f.Runtime.ObserveOwnedStateAsync(session.SessionId, session.CreatedAt, "project", f.ProjectId, f.ProjectPath);
+        Assert.AreEqual("ok", (await f.Wait(observe(adopted))).Status);
+        adopted.ProjectRef = f.ProjectId;
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(adopted, f.Options));
+        var attached = await f.Wait(observe(adopted));
+        Assert.AreEqual("ok", attached.Status);
+        Assert.IsNotNull(attached.State!.Entry);
+        Assert.AreEqual("no_observation", (await f.Wait(f.Runtime.ReadOwnedUsageAsync(adopted.SessionId, "project", f.ProjectId, f.ProjectPath))).Status);
+
+        // A session that records another project of the catalog stays that project's, whatever its folder.
+        var otherPath = Path.Combine(Path.GetDirectoryName(f.ProjectPath)!, "other");
+        Directory.CreateDirectory(otherPath);
+        var other = await new ProjectCatalog(new CatalogOptions { GlobalRoot = f.GlobalRoot }).UpsertFromPathAsync(otherPath);
+        var foreign = f.NewSession();
+        foreign.ProjectRef = other.Id;
+        await f.Persist(foreign);
+        Assert.AreEqual("scope_mismatch", (await f.Wait(observe(foreign))).Status);
+    });
+
+    [TestMethod]
     public Task OwnedUsage_RefusesChangedPersistedHeaderAndIncompleteOrAmbiguousCatalog() => Fixture.Run(async f =>
     {
         await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
@@ -188,10 +215,15 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
         Assert.AreEqual("metadata_missing", (await f.Wait(read())).Status);
         await File.WriteAllTextAsync(journal, new string('x', SessionViewJournalStore.MaximumBoundedHeaderBytes + 1) + "\n");
         Assert.AreEqual("metadata_incomplete", (await f.Wait(read())).Status);
-        await File.WriteAllTextAsync(journal, originalHeader.Replace(f.ProjectId, Guid.NewGuid().ToString("D"), StringComparison.Ordinal));
-        Assert.AreEqual("metadata_mismatch", (await f.Wait(read())).Status);
-        await File.WriteAllTextAsync(journal, originalHeader);
+        // A header that names another project of the catalog (an unknown one in the same folder is adopted by its project).
         var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = f.GlobalRoot });
+        var otherPath = Path.Combine(Path.GetDirectoryName(f.ProjectPath)!, "other");
+        Directory.CreateDirectory(otherPath);
+        var other = await catalog.UpsertFromPathAsync(otherPath);
+        await File.WriteAllTextAsync(journal, originalHeader.Replace(f.ProjectId, other.Id, StringComparison.Ordinal));
+        Assert.AreEqual("metadata_mismatch", (await f.Wait(read())).Status);
+        Assert.IsTrue(await catalog.DeleteAsync(other));
+        await File.WriteAllTextAsync(journal, originalHeader);
         var descriptor = (await catalog.GetByIdAsync(f.ProjectId))!;
         var projectFile = Path.Combine(f.GlobalRoot, "projects", descriptor.Slug + ".md");
         var originalProject = await File.ReadAllTextAsync(projectFile);

@@ -41,8 +41,10 @@ public sealed partial class SessionRuntimeService
         if (header.SchemaVersion != 1 || header.SessionId != id || header.CreatedAt != createdAt
             || (scope == "global" ? header.Kind != SessionViewKind.GlobalSession || header.ProjectRef is not null
                 || header.WorkingDirectory != _projectCatalog.Options.GlobalRoot
-                : header.Kind != SessionViewKind.ProjectSession || header.ProjectRef != projectId || header.WorkingDirectory != projectPath))
+                : header.Kind != SessionViewKind.ProjectSession || header.WorkingDirectory != projectPath
+                    || await HeaderProjectIdAsync(header, projectId, token).ConfigureAwait(false) != projectId))
             return new("scope_mismatch", null);
+        var headerProjectId = scope == "project" ? projectId : header.ProjectRef;
         if (scope == "project")
         {
             var ownership = await _observedOwnership.ReadAsync(_projectCatalog.Options.ProjectsRoot,
@@ -61,13 +63,24 @@ public sealed partial class SessionRuntimeService
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 if (!_sessionActors.TryGet(id, out var current) || !ReferenceEquals(current, actor))
                     return ValueTask.FromResult(new OwnedRuntimeObservation("stale_attachment", null));
-                if (_entries.TryGetValue(id, out var entry) && (entry.Kind != header.Kind || entry.ProjectId != header.ProjectRef
+                if (_entries.TryGetValue(id, out var entry) && (entry.Kind != header.Kind || entry.ProjectId != headerProjectId
                     || entry.WorkingDirectory != header.WorkingDirectory || entry.CreatedAt != header.CreatedAt
                     || entry.ProviderId.Value != header.ProviderId || entry.ProviderKey != header.ProviderKey))
                     return ValueTask.FromResult(new OwnedRuntimeObservation("scope_mismatch", null));
                 return ValueTask.FromResult(new OwnedRuntimeObservation("ok", CaptureCurrentState(id)));
             }
         }, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    // The project the header of a project session names, as the runtime binds the session (by its folder) and the lists
+    // show it: the one it records, or, when that is no project of the catalog, the project of the catalog in its folder
+    // (ProjectCatalog.ResolveSessionProject). The catalog is read only when the header records another project than the
+    // one expected, which only a session written before its folder was a project of the catalog does.
+    private async ValueTask<string?> HeaderProjectIdAsync(SessionViewJournalHeader header, string? expectedProjectId, CancellationToken cancellationToken)
+    {
+        if (header.ProjectRef == expectedProjectId) return header.ProjectRef;
+        var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        return ProjectCatalog.ResolveSessionProject(header.ProjectRef, header.WorkingDirectory, projects)?.Id ?? header.ProjectRef;
     }
 }
 

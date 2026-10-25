@@ -77,7 +77,8 @@ public sealed partial class SessionRuntimeService
                 _ => "read_failed",
             });
         var header = persisted.Header!;
-        if (header.SchemaVersion != 1 || header.Kind != original.Kind || header.ProjectRef != original.ProjectId
+        if (header.SchemaVersion != 1 || header.Kind != original.Kind
+            || await HeaderProjectIdAsync(header, original.ProjectId, token).ConfigureAwait(false) != original.ProjectId
             || header.WorkingDirectory != original.WorkingDirectory || header.ProviderId != original.ProviderId.Value
             || header.ProviderKey != original.ProviderKey || header.SessionId != original.SessionId
             || header.CreatedAt != original.CreatedAt)
