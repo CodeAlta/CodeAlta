@@ -32,12 +32,19 @@ internal static class CliApplication
                     return CliExitCodes.InvalidUsage;
                 }
 
+                // The help of altacli alta itself, then the commands of the alta tool.
+                if (alta.Arguments is [] or ["--help"] or ["-h"])
+                {
+                    await WriteHelpAsync(output, streams, [CliCommandLine.AltaCommand, "--help"]).ConfigureAwait(false);
+                    output.WriteText(string.Empty);
+                }
+
                 return await commands.AltaAsync(alta).ConfigureAwait(false);
             }
 
             if (args.Length == 0)
             {
-                await WriteHelpAsync(output, streams).ConfigureAwait(false);
+                await WriteHelpAsync(output, streams, ["--help"]).ConfigureAwait(false);
                 return CliExitCodes.InvalidUsage;
             }
 
@@ -87,12 +94,12 @@ internal static class CliApplication
         }
     }
 
-    private static async Task WriteHelpAsync(CliOutput output, CliStreams streams)
+    private static async Task WriteHelpAsync(CliOutput output, CliStreams streams, string[] args)
     {
         var help = new StringWriter();
         await CliCommandLine.Create(new CliCommandHandlers(
                 static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0)))
-            .RunAsync(["--help"], new CommandRunConfig { Out = help, Error = streams.Stderr }).ConfigureAwait(false);
+            .RunAsync(args, new CommandRunConfig { Out = help, Error = streams.Stderr }).ConfigureAwait(false);
         output.WriteText(help.ToString());
     }
 

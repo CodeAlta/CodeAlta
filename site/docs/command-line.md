@@ -29,6 +29,7 @@ altacli run - < task.md
 - `--resume ID` continues a session; `--session-id ID` opens the session `ID`, or creates it with this id.
 - `--timeout DURATION` (seconds, or `hh:mm:ss`) stops the run when the time is up.
 - `altacli models` lists the models of the providers that are ready; `altacli auth check --provider ID` tells whether one is ready.
+- `altacli --help` lists the commands; `altacli <command> --help` gives all a command does, takes and writes, with examples: enough for an agent that uses `altacli` on its own.
 
 The run ends when the session and the sessions it started have nothing left to do: the answers of [delegated agents](sessions/readme.md) and the background jobs of the run are waited for. A second Ctrl+C stops at once.
 
@@ -55,7 +56,7 @@ By default, standard output holds the final answer only, so `altacli run "..." >
 | --- | --- |
 | 0 | completed |
 | 1 | failed: an error of the provider or of a tool |
-| 2 | could not start: an option, the configuration, a session that does not exist |
+| 2 | could not start: an option, the configuration, a session that does not exist, a required plugin or MCP server that did not start |
 | 3 | was stopped (Ctrl+C, a signal) |
 | 4 | ran out of time (`--timeout`) |
 | 5 | found its session in use by CodeAlta Desktop, TUI or another `altacli` |
@@ -80,7 +81,7 @@ A session is run by one program at a time: `altacli --resume` of a session that 
 
 `altacli` reads the settings of `~/.alta/config.toml` and never writes them. A run can change them for itself:
 
-- `-c KEY=VALUE` sets one setting, as in `config.toml`: `-c default_provider="anthropic"`, `-c providers.anthropic.api_key_env="MY_KEY"`. Repeat it for several.
+- `-c KEY=VALUE` sets one setting, as in `config.toml`: `-c chat.default_provider=anthropic`, `-c providers.anthropic.api_key_env=MY_KEY`, `-c plugins.mcp.servers.docs.enabled=false`. Repeat it for several.
 - The variable `CODEALTA_CONFIG_CONTENT` holds settings in TOML, read after `config.toml` and before `-c`.
 - `--ignore-user-config` does without `config.toml`: only the two above count.
 - `--strict-config` refuses the settings CodeAlta does not know.
@@ -88,18 +89,22 @@ A session is run by one program at a time: `altacli --resume` of a session that 
 On a computer without CodeAlta set up, such as a container, give the provider in the configuration and its key in a variable:
 
 ```sh
-export CODEALTA_CONFIG_CONTENT='default_provider = "anthropic"
+export CODEALTA_CONFIG_CONTENT='[chat]
+default_provider = "anthropic"
+
 [providers.anthropic]
 type = "anthropic"
 api_key_env = "ANTHROPIC_API_KEY"'
 altacli run --ephemeral "Fix the failing test"
 ```
 
+A run that must not go on with less than it was set up with marks what it needs as required: `required = true` in `[plugins.<id>]` for a plugin, in `[plugins.mcp.servers.<key>]` for an [MCP server](plugins/mcp.md). `altacli run` and `altacli acp` then start the required MCP servers before the session, and stop with exit code 2, naming what did not start and why. `--no-plugins` and `--no-mcp` turn the check off with what they turn off.
+
 The commands an agent runs get `CODEALTA_SESSION_ID`, `CODEALTA_MODEL` and `AI_AGENT=codealta` in their environment, in the apps too.
 
 ## The alta commands
 
-`altacli alta ARGS...` runs the commands of the `alta` tool, as the agents do: `altacli alta session list`, `altacli alta project list`, `altacli alta model list`. `altacli alta --help` lists those of the command line.
+`altacli alta ARGS...` runs the commands of the `alta` tool, as the agents do: `altacli alta session list`, `altacli alta project list`, `altacli alta model list`. `altacli alta --help` lists those of the command line. The commands that would change the configuration files, such as `alta mcp server add` or `alta mcp server disable`, fail there: `altacli` leaves them as they are.
 
 ## Editors (ACP)
 
