@@ -316,6 +316,28 @@ public sealed class CliAcpTests
     }
 
     [TestMethod]
+    public async Task Load_WritesTheMarkerOfTheSessionAgain()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        var markers = new SessionMarkerStore(new CatalogOptions { GlobalRoot = root.Profile });
+        string sessionId;
+        await using (var first = await AcpHarness.StartAsync(root, provider))
+        {
+            sessionId = (await first.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+            await first.PromptAsync(sessionId, "hello");
+            Assert.AreEqual(0, await first.CloseInputAsync());
+        }
+
+        Assert.IsTrue(markers.Delete(sessionId), "Desktop lists it and deletes the marker.");
+        await using var acp = await AcpHarness.StartAsync(root, provider);
+        await acp.Client.SessionLoadAsync(new LoadSessionRequest { SessionId = sessionId, Cwd = root.ProjectRoot }).WaitAsync(Timeout);
+        await acp.PromptAsync(sessionId, "again");
+
+        Assert.IsNotNull(markers.TryRead(sessionId), "A loaded session is announced again.");
+    }
+
+    [TestMethod]
     public async Task ListAndFork_FindTheSessionsOfAFolder_AndForkOneWithItsHistory()
     {
         using var root = new CliTestRoot();

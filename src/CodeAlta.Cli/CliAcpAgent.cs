@@ -169,7 +169,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
             AgentPromptId = _defaults.AgentPromptId,
             DisabledToolPatterns = _defaults.DisabledToolPatterns,
         }, cancellationToken).ConfigureAwait(false);
-        var state = await RegisterAsync(opened, null, cancellationToken).ConfigureAwait(false);
+        var state = await RegisterAsync(opened, cancellationToken).ConfigureAwait(false);
         await AttachMcpServersAsync(state, servers, cwd).ConfigureAwait(false);
         var (modes, options) = await DescribeAsync(state.Session, cancellationToken).ConfigureAwait(false);
         return new NewSessionResponse { SessionId = state.Session.SessionId, Modes = modes, ConfigOptions = options };
@@ -214,7 +214,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         var opened = await _driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = forked.SessionId, DisabledToolPatterns = _defaults.DisabledToolPatterns },
             cancellationToken).ConfigureAwait(false);
         // CodeAlta Desktop does not know the fork: it is marked as a new session is.
-        var state = await RegisterAsync(opened, created: true, cancellationToken).ConfigureAwait(false);
+        var state = await RegisterAsync(opened, cancellationToken).ConfigureAwait(false);
         await RequireResourcesAsync(state, cancellationToken).ConfigureAwait(false);
         await AttachMcpServersAsync(state, servers, state.Session.Descriptor.WorkingDirectory).ConfigureAwait(false);
         var (modes, options) = await DescribeAsync(state.Session, cancellationToken).ConfigureAwait(false);
@@ -366,7 +366,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
                 result = result with { Status = HeadlessRunStatus.Aborted, AbortReason = "cancelled" };
             }
 
-            if (state.Markers is { } markers) await markers.TryWriteAsync(CancellationToken.None).ConfigureAwait(false);
+            if (state.Markers is { } markers) await markers.TryWriteTreeAsync(CancellationToken.None).ConfigureAwait(false);
             await FlushAsync().ConfigureAwait(false);
             return Respond(result);
         }
@@ -425,10 +425,10 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
 
     private async ValueTask ObserveAsync(HeadlessSessionEvent item, CancellationToken cancellationToken)
     {
-        if (_sessions.TryGetValue(item.RootSessionId, out var state) && state.Markers is { Written: false } markers
-            && string.Equals(item.Event.SessionId, item.RootSessionId, StringComparison.OrdinalIgnoreCase))
+        // The session and the sessions it starts, once their journal exists.
+        if (_sessions.TryGetValue(item.RootSessionId, out var state) && state.Markers is { } markers && !markers.IsWritten(item.Event.SessionId))
         {
-            await markers.TryWriteAsync(cancellationToken).ConfigureAwait(false);
+            await markers.TryWriteAsync(item.Event.SessionId, cancellationToken).ConfigureAwait(false);
         }
 
         await _projector.ProjectAsync(item, cancellationToken).ConfigureAwait(false);
@@ -442,7 +442,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         var servers = ReadMcpServers(mcpServers);
         var opened = await _driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id, DisabledToolPatterns = _defaults.DisabledToolPatterns },
             cancellationToken).ConfigureAwait(false);
-        var state = await RegisterAsync(opened, created: false, cancellationToken).ConfigureAwait(false);
+        var state = await RegisterAsync(opened, cancellationToken).ConfigureAwait(false);
         await RequireResourcesAsync(state, cancellationToken).ConfigureAwait(false);
         await AttachMcpServersAsync(state, servers, state.Session.Descriptor.WorkingDirectory).ConfigureAwait(false);
         return state;
@@ -519,7 +519,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
     }
 
     // The session of an opening, as the client knows it from now on; the error of the opening otherwise.
-    private async Task<AcpSession> RegisterAsync(HeadlessSessionOpenResult opened, bool? created, CancellationToken cancellationToken)
+    private async Task<AcpSession> RegisterAsync(HeadlessSessionOpenResult opened, CancellationToken cancellationToken)
     {
         if (opened.Session is not { } session)
         {
@@ -536,11 +536,12 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
             };
         }
 
+        // A session that exists gets its marker again: Desktop refreshes what the run writes to it.
         CliSessionMarkers? markers = null;
-        if ((created ?? session.Created) && _host.Storage.WritesMarkers)
+        if (_host.Storage.WritesMarkers)
         {
-            markers = new CliSessionMarkers(_host.Host.CatalogOptions, session.SessionId);
-            await markers.TryWriteAsync(cancellationToken).ConfigureAwait(false);
+            markers = new CliSessionMarkers(_host.Host.CatalogOptions, _host.Host.RuntimeService, session.SessionId);
+            await markers.TryWriteAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
         }
 
         var state = new AcpSession(session, markers);
@@ -696,7 +697,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         }
 
         await _driver.CloseAsync(state.Session).ConfigureAwait(false);
-        if (state.Markers is { } markers) await markers.TryWriteAsync(CancellationToken.None).ConfigureAwait(false);
+        if (state.Markers is { } markers) await markers.TryWriteTreeAsync(CancellationToken.None).ConfigureAwait(false);
         state.Selection.Dispose();
     }
 
@@ -790,7 +791,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         return plus < 0 ? version : version[..plus];
     }
 
-    // A session of the client: what its next prompts run with, its marker, and its prompt in progress.
+    // A session of the client: what its next prompts run with, the markers of its tree, and its prompt in progress.
     private sealed class AcpSession(HeadlessSession session, CliSessionMarkers? markers)
     {
         private HeadlessSession _session = session;

@@ -54,7 +54,7 @@ public sealed class CliStorageTests
     }
 
     [TestMethod]
-    public async Task Visible_Resume_ContinuesTheSession_WithoutANewMarker()
+    public async Task Visible_Resume_ContinuesTheSession_AndWritesItsMarkerAgain()
     {
         using var root = new CliTestRoot();
         var provider = new FakeProvider();
@@ -71,7 +71,42 @@ public sealed class CliStorageTests
         Assert.AreEqual(sessionId, header.GetProperty("sessionId").GetString());
         Assert.IsFalse(header.GetProperty("created").GetBoolean());
         Assert.AreEqual("Again.", CliRunTests.Result(second).GetProperty("finalMessage").GetString());
-        Assert.IsNull(markers.TryRead(sessionId), "A session that exists is not announced again.");
+        // A run that ends between two looks of Desktop leaves no lease to find: the marker tells it the session changed.
+        Assert.IsNotNull(markers.TryRead(sessionId), "A resumed session is announced again.");
+    }
+
+    [TestMethod]
+    public async Task Visible_WritesAMarkerForEveryChildSessionOfTheRun()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        var childId = Guid.CreateVersion7().ToString();
+        provider.Script(childId, FakeProvider.Reply("Child result."));
+        provider.Turns.Enqueue(FakeProvider.DoThenReply(async request =>
+        {
+            var host = root.LastHost!;
+            var options = new CodeAlta.Orchestration.Runtime.SessionExecutionOptions
+            {
+                ProviderId = provider.Descriptor.ProviderId,
+                ProviderKey = provider.Descriptor.ProviderId.Value,
+                Model = provider.Model,
+                WorkingDirectory = root.ProjectRoot,
+                ProjectRoots = [root.ProjectRoot],
+                OnPermissionRequest = static (_, _) => Task.FromResult(new CodeAlta.Agent.AgentPermissionDecision(CodeAlta.Agent.AgentPermissionDecisionKind.AllowOnce)),
+            };
+            var child = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Child work", request.SessionId, null, null, null, childId);
+            _ = host.RuntimeService.SendAsync(child, options, new CodeAlta.Agent.AgentSendOptions { Input = CodeAlta.Agent.AgentInput.Text("child work") });
+        }, "Started a child."));
+        provider.Turns.Enqueue(FakeProvider.Reply("The child said it."));
+
+        var run = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "delegate"]);
+
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+        var markers = new SessionMarkerStore(new CatalogOptions { GlobalRoot = root.Profile });
+        Assert.IsNotNull(markers.TryRead(SessionIdOf(run)));
+        var child = markers.TryRead(childId);
+        Assert.IsNotNull(child, "The child is announced to Desktop and TUI, which may be closed while it runs.");
+        StringAssert.EndsWith(child.JournalPath, childId + ".jsonl");
     }
 
     [TestMethod]

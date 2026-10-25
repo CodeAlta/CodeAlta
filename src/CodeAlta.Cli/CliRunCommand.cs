@@ -85,9 +85,10 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
         {
             Observer = async (item, cancellationToken) =>
             {
-                if (markers is { Written: false } pending && string.Equals(item.Event.SessionId, item.RootSessionId, StringComparison.OrdinalIgnoreCase))
+                // The root and the sessions it starts, once their journal exists.
+                if (Volatile.Read(ref markers) is { } pending && !pending.IsWritten(item.Event.SessionId))
                 {
-                    await pending.TryWriteAsync(cancellationToken).ConfigureAwait(false);
+                    await pending.TryWriteAsync(item.Event.SessionId, cancellationToken).ConfigureAwait(false);
                 }
 
                 if (Volatile.Read(ref projector) is { } projection) await projection.ProjectAsync(item, cancellationToken).ConfigureAwait(false);
@@ -114,10 +115,11 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
             return code;
         }
 
-        if (session.Created && host.Storage.WritesMarkers)
+        if (host.Storage.WritesMarkers)
         {
-            markers = new CliSessionMarkers(host.Host.CatalogOptions, session.SessionId);
-            await markers.TryWriteAsync(processToken).ConfigureAwait(false);
+            var created = new CliSessionMarkers(host.Host.CatalogOptions, host.Host.RuntimeService, session.SessionId);
+            await created.TryWriteAsync(session.SessionId, processToken).ConfigureAwait(false);
+            Volatile.Write(ref markers, created);
         }
 
         jsonl?.WriteHeader(new CliSessionHeader(session.SessionId, session.Created, session.Descriptor.WorkingDirectory ?? request.ProjectFolder!,
@@ -171,7 +173,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
             result = result with { Status = HeadlessRunStatus.Aborted, AbortReason = "signal", FailureMessage = "The run was aborted: signal." };
         }
 
-        if (markers is not null) await markers.TryWriteAsync(CancellationToken.None).ConfigureAwait(false);
+        if (markers is not null) await markers.TryWriteTreeAsync(CancellationToken.None).ConfigureAwait(false);
         using (var flushLimit = new CancellationTokenSource(FlushLimit))
         {
             try

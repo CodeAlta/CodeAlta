@@ -456,9 +456,10 @@ internal static class CliCommandLine
     {
         command.Add("Storage (one of; the default is visible):");
         command.Add("  visible: the sessions of ~/.alta, shared with CodeAlta Desktop and TUI. A");
-        command.Add("  new session gets a marker (sessions/markers) that makes them list it, and");
-        command.Add("  a lease while it runs (sessions/leases/<id>.lease): Desktop shows it");
-        command.Add("  \"Running in altacli\", read-only. A session leased elsewhere is exit 5.");
+        command.Add("  session the run writes (new, resumed, or a sub-agent) gets a marker");
+        command.Add("  (sessions/markers) that makes them list it, and a lease while it runs");
+        command.Add("  (sessions/leases/<id>.lease): Desktop shows it \"Running in altacli\",");
+        command.Add("  read-only. A session leased elsewhere is exit 5.");
         command.Add("  Every mode: a private database, no alta.lock, no project registered.");
         command.Add("  Written: sessions/ and logs/altacli.log of the state root; auth/ and");
         command.Add("  cache/ of the profile, by providers. config.toml is never written.");
