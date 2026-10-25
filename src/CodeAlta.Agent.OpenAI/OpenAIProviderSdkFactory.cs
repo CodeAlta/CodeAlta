@@ -158,16 +158,9 @@ internal static class OpenAIProviderSdkFactory
 
             var client = CreateModelClient(provider);
             var collection = await client.GetModelsAsync(cancellationToken).ConfigureAwait(false);
+            var listed = ReadListedModels(collection.GetRawResponse().Content);
             return collection.Value
-                .Select(model => new AgentModelInfo(
-                    model.Id,
-                    DisplayName: model.Id,
-                    Provider: providerDescriptor.ProviderKey,
-                    Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
-                    {
-                        ["createdAt"] = model.CreatedAt,
-                        ["ownedBy"] = model.OwnedBy,
-                    }))
+                .Select(model => CreateListedModelInfo(model, providerDescriptor, listed.GetValueOrDefault(model.Id)))
                 .ToArray();
         }
         catch (OperationCanceledException)
@@ -178,6 +171,106 @@ internal static class OpenAIProviderSdkFactory
         {
             return models;
         }
+    }
+
+    // A model of the list of /models, with what an endpoint of another vendor says of it beyond the fields of OpenAI:
+    // Kimi for Coding gives its name, the context of the plan of the account, whether it takes images, and its
+    // efforts ({"reasoning":{"type":"only","effort":{"valid":["low","high","max"],"default":"high"}}}).
+    internal static AgentModelInfo CreateListedModelInfo(
+        OpenAIModel model,
+        ModelProviderRuntimeDescriptor providerDescriptor,
+        JsonElement listed)
+    {
+        var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["createdAt"] = model.CreatedAt,
+            ["ownedBy"] = model.OwnedBy,
+        };
+        if (listed.ValueKind != JsonValueKind.Object)
+        {
+            return new AgentModelInfo(model.Id, DisplayName: model.Id, Provider: providerDescriptor.ProviderKey, Capabilities: capabilities);
+        }
+
+        if (listed.TryGetProperty("context_length", out var contextLength) &&
+            contextLength.ValueKind == JsonValueKind.Number &&
+            contextLength.TryGetInt64(out var contextTokens) && contextTokens > 0)
+        {
+            capabilities["contextWindow"] = contextTokens;
+            capabilities["contextWindowTokens"] = contextTokens;
+        }
+
+        if (listed.TryGetProperty("supports_image_in", out var imageInput) && imageInput.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            capabilities["supportsImageInput"] = imageInput.ValueKind == JsonValueKind.True;
+        }
+
+        IReadOnlyList<AgentReasoningEffort>? efforts = null;
+        AgentReasoningEffort? defaultEffort = null;
+        if (listed.TryGetProperty("reasoning", out var reasoning) && reasoning.ValueKind == JsonValueKind.Object)
+        {
+            // A model whose reasoning names no effort thinks as it does, and is sent none.
+            capabilities[AgentReasoningEffortCapability.CompleteListKey] = true;
+            efforts = [];
+            if (reasoning.TryGetProperty("effort", out var effort) && effort.ValueKind == JsonValueKind.Object)
+            {
+                if (effort.TryGetProperty("valid", out var valid) && valid.ValueKind == JsonValueKind.Array)
+                {
+                    efforts = valid.EnumerateArray()
+                        .Select(static value => value.ValueKind == JsonValueKind.String ? ParseReasoningEffort(value.GetString()) : null)
+                        .OfType<AgentReasoningEffort>()
+                        .Distinct()
+                        .ToArray();
+                }
+
+                if (effort.TryGetProperty("default", out var value) && value.ValueKind == JsonValueKind.String &&
+                    ParseReasoningEffort(value.GetString()) is { } parsed && efforts.Contains(parsed))
+                {
+                    defaultEffort = parsed;
+                }
+            }
+        }
+
+        var displayName = listed.TryGetProperty("display_name", out var name) && name.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(name.GetString())
+                ? name.GetString()
+                : model.Id;
+        return new AgentModelInfo(
+            model.Id,
+            DisplayName: displayName,
+            Provider: providerDescriptor.ProviderKey,
+            DefaultReasoningEffort: defaultEffort,
+            SupportedReasoningEfforts: efforts,
+            Capabilities: capabilities);
+    }
+
+    // The entries of the data of /models by id, as the endpoint wrote them.
+    private static Dictionary<string, JsonElement> ReadListedModels(BinaryData content)
+    {
+        var models = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        try
+        {
+            using var document = JsonDocument.Parse(content);
+            if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                document.RootElement.TryGetProperty("data", out var data) &&
+                data.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var model in data.EnumerateArray())
+                {
+                    if (model.ValueKind == JsonValueKind.Object &&
+                        model.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String &&
+                        id.GetString() is { Length: > 0 } modelId)
+                    {
+                        models.TryAdd(modelId, model.Clone());
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // The SDK has read the list: what it does not hold is only left out.
+        }
+
+        return models;
     }
 
     private static async ValueTask<IReadOnlyList<AgentModelInfo>> ListCodexSubscriptionModelsAsync(

@@ -34,6 +34,12 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
     /// </summary>
     internal const string HighestEffortKey = "codealta.anthropic.highest_effort";
 
+    /// <summary>
+    /// The key of <see cref="ChatOptions.AdditionalProperties"/> that holds <c>true</c> when the endpoint says the model
+    /// takes adaptive thinking and its effort, as a model of another vendor (Kimi for Coding) that is not a Claude model.
+    /// </summary>
+    internal const string AdaptiveThinkingKey = "codealta.anthropic.adaptive_thinking";
+
     private const string BetaHeader = "anthropic-beta";
 
     public void Dispose() => inner.Dispose();
@@ -96,7 +102,7 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
 
         if (options.Reasoning?.Effort is { } reasoningEffort && reasoningEffort != MicrosoftReasoningEffort.None)
         {
-            if (!SupportsAdaptiveThinking(options.ModelId))
+            if (!SupportsAdaptiveThinking(options.ModelId) && !IsListedAdaptive(options))
             {
                 return options;
             }
@@ -243,6 +249,9 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
             (TryReadClaudeVersion(normalizedClaudeModelId, out var major, out var minor) &&
                 (major > 4 || major == 4 && minor >= 6));
     }
+
+    private static bool IsListedAdaptive(ChatOptions options)
+        => options.AdditionalProperties?.TryGetValue(AdaptiveThinkingKey, out var value) == true && value is true;
 
     private static AnthropicEffort ToAnthropicEffort(ChatOptions options, MicrosoftReasoningEffort reasoningEffort)
         => reasoningEffort switch

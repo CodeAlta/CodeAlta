@@ -18,6 +18,10 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
 {
     // The capability of a model that names the effort its highest effort is sent as: "xhigh" or "max".
     private const string HighestEffortCapabilityKey = "anthropicHighestEffort";
+
+    // The capability of a model that the endpoint says takes adaptive thinking and its effort, whatever its name.
+    private const string AdaptiveThinkingCapabilityKey = "anthropicAdaptiveThinking";
+
     // The wait of a rate limit of the API whose retry-after is not known: its limits are per minute.
     private const int UnknownRateLimitRetryAfterSeconds = 30;
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Anthropic");
@@ -371,6 +375,12 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.HighestEffortKey] = highestEffort;
         }
 
+        // A model of another vendor (Kimi for Coding) is sent adaptive thinking where its endpoint lists its efforts.
+        if (IsTrue(request.ModelInfo?.Capabilities, AdaptiveThinkingCapabilityKey))
+        {
+            (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.AdaptiveThinkingKey] = true;
+        }
+
         if (options.MaxOutputTokens is not null)
         {
             return;
@@ -600,6 +610,11 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             capabilities[HighestEffortCapabilityKey] = highestEffort;
         }
 
+        if (TakesAdaptiveThinking(model.RawData))
+        {
+            capabilities[AdaptiveThinkingCapabilityKey] = true;
+        }
+
         // A deprecated model still runs until it retires: it is marked with the status models.dev gives a model.
         if (ReadLifecycle(model.RawData) == "deprecated")
         {
@@ -610,9 +625,20 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             }
         }
 
-        if (ReadImageInput(model.RawData) is { } imageInput)
+        // Kimi for Coding says so with supports_image_in.
+        if ((ReadImageInput(model.RawData) ?? ReadFlag(model.RawData, "supports_image_in")) is { } imageInput)
         {
             capabilities["supportsImageInput"] = imageInput;
+        }
+
+        // The context Kimi for Coding gives the model depends on the plan of the account (262,144 or 1,048,576 tokens
+        // for K3.1 Pro): models.dev cannot know it.
+        if (model.RawData.TryGetValue("context_length", out var contextLength) &&
+            contextLength.ValueKind == JsonValueKind.Number &&
+            contextLength.TryGetInt64(out var contextTokens) && contextTokens > 0)
+        {
+            capabilities["contextWindow"] = contextTokens;
+            capabilities["contextWindowTokens"] = contextTokens;
         }
 
         if (ReadSupported(model.RawData, "pdf_input") is { } pdfInput)
@@ -625,21 +651,24 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             DisplayName: model.DisplayName,
             Description: null,
             Provider: provider.ProviderKey,
+            DefaultReasoningEffort: ReadDefaultEffort(model.RawData),
             SupportedReasoningEfforts: efforts,
             Capabilities: capabilities);
     }
 
     // The efforts a model takes, from the capabilities of the Models API:
-    // {"effort":{"supported":true,"low":{"supported":true},"medium":{...},"high":{...},"xhigh":{...},"max":{...}}}.
-    // Null when the endpoint says nothing of them (an Anthropic-compatible endpoint, an older API).
+    // {"effort":{"supported":true,"low":{"supported":true},"medium":{...},"high":{...},"xhigh":{...},"max":{...}}},
+    // or from the reasoning the models of Kimi for Coding describe:
+    // {"reasoning":{"type":"only","effort":{"valid":["low","high","max"],"default":"high"}}}.
+    // Null when the endpoint says nothing of them (another Anthropic-compatible endpoint, an older API).
     internal static IReadOnlyList<AgentReasoningEffort>? ReadReasoningEfforts(IReadOnlyDictionary<string, JsonElement> rawData)
     {
-        if (!rawData.TryGetValue("capabilities", out var capabilities) ||
-            capabilities.ValueKind != JsonValueKind.Object ||
-            !capabilities.TryGetProperty("effort", out var effort) ||
-            effort.ValueKind != JsonValueKind.Object)
+        if (!TryGetEffortCapability(rawData, out var capabilities, out var effort))
         {
-            return null;
+            // A model whose reasoning names no effort (Kimi's K2.7 Code Highspeed) thinks as it does, and is sent none.
+            return TryGetReasoning(rawData, out var reasoning)
+                ? ReadListedEffortLevels(reasoning) is { } listed ? ToEfforts(listed) : []
+                : null;
         }
 
         if (!IsSupported(effort))
@@ -652,27 +681,7 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
                 : [];
         }
 
-        var efforts = new List<AgentReasoningEffort>();
-        if (IsSupported(effort, "low")) efforts.Add(AgentReasoningEffort.Low);
-        if (IsSupported(effort, "medium")) efforts.Add(AgentReasoningEffort.Medium);
-        if (IsSupported(effort, "high")) efforts.Add(AgentReasoningEffort.High);
-        // XHigh is sent as xhigh where the model takes it, else as max (AnthropicAdaptiveThinkingChatClient); Max is an
-        // effort of its own only where the model takes both.
-        if (IsSupported(effort, "xhigh") || IsSupported(effort, "max")) efforts.Add(AgentReasoningEffort.XHigh);
-        if (IsSupported(effort, "xhigh") && IsSupported(effort, "max")) efforts.Add(AgentReasoningEffort.Max);
-        return efforts;
-
-        static bool IsSupported(JsonElement element, string? level = null)
-        {
-            if (level is not null && !element.TryGetProperty(level, out element))
-            {
-                return false;
-            }
-
-            return element.ValueKind == JsonValueKind.Object &&
-                element.TryGetProperty("supported", out var supported) &&
-                supported.ValueKind == JsonValueKind.True;
-        }
+        return ToEfforts(ReadSupportedEffortLevels(effort));
 
         // {"thinking":{"supported":true,"types":{"enabled":{"supported":true}}}}
         static bool TakesThinkingBudget(JsonElement capabilities)
@@ -682,24 +691,133 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
     }
 
     // The effort the highest effort of a session is sent as: "xhigh" where the model lists it, else "max" where it lists
-    // that. Null when the Models API says neither.
+    // that. Null when the endpoint says neither.
     internal static string? ReadHighestEffort(IReadOnlyDictionary<string, JsonElement> rawData)
+        => ReadEffortLevels(rawData) is not { } levels ? null
+            : levels.Contains("xhigh") ? "xhigh"
+            : levels.Contains("max") ? "max"
+            : null;
+
+    // The effort a model thinks with when it is sent none, where the endpoint names it (Kimi for Coding does).
+    internal static AgentReasoningEffort? ReadDefaultEffort(IReadOnlyDictionary<string, JsonElement> rawData)
     {
-        if (!rawData.TryGetValue("capabilities", out var capabilities) ||
-            capabilities.ValueKind != JsonValueKind.Object ||
-            !capabilities.TryGetProperty("effort", out var effort) ||
-            effort.ValueKind != JsonValueKind.Object)
+        if (!TryGetReasoning(rawData, out var reasoning) ||
+            ReadListedEffortLevels(reasoning) is not { } levels ||
+            !reasoning.TryGetProperty("effort", out var effort) ||
+            !effort.TryGetProperty("default", out var value) ||
+            value.ValueKind != JsonValueKind.String)
         {
             return null;
         }
 
-        return IsSupported(effort, "xhigh") ? "xhigh" : IsSupported(effort, "max") ? "max" : null;
+        var name = value.GetString()?.Trim().ToLowerInvariant();
+        return name switch
+        {
+            "low" => AgentReasoningEffort.Low,
+            "medium" => AgentReasoningEffort.Medium,
+            "high" => AgentReasoningEffort.High,
+            "xhigh" => AgentReasoningEffort.XHigh,
+            "max" => levels.Contains("xhigh") ? AgentReasoningEffort.Max : AgentReasoningEffort.XHigh,
+            _ => null,
+        };
+    }
 
-        static bool IsSupported(JsonElement effort, string level)
-            => effort.TryGetProperty(level, out var element) &&
-                element.ValueKind == JsonValueKind.Object &&
-                element.TryGetProperty("supported", out var supported) &&
-                supported.ValueKind == JsonValueKind.True;
+    // Whether the model takes adaptive thinking with output_config.effort: a model of the Models API that lists both,
+    // or a model of Kimi for Coding that lists its efforts (its endpoint takes them as the Claude API does).
+    internal static bool TakesAdaptiveThinking(IReadOnlyDictionary<string, JsonElement> rawData)
+    {
+        if (TryGetEffortCapability(rawData, out var capabilities, out var effort))
+        {
+            return IsSupported(effort) &&
+                capabilities.TryGetProperty("thinking", out var thinking) && IsSupported(thinking) &&
+                thinking.TryGetProperty("types", out var types) && types.ValueKind == JsonValueKind.Object &&
+                IsSupported(types, "adaptive");
+        }
+
+        return TryGetReasoning(rawData, out var reasoning) && ReadListedEffortLevels(reasoning) is { Count: > 0 };
+    }
+
+    // XHigh is sent as xhigh where the model takes it, else as max (AnthropicAdaptiveThinkingChatClient); Max is an
+    // effort of its own only where the model takes both.
+    private static List<AgentReasoningEffort> ToEfforts(IReadOnlySet<string> levels)
+    {
+        var efforts = new List<AgentReasoningEffort>();
+        if (levels.Contains("low")) efforts.Add(AgentReasoningEffort.Low);
+        if (levels.Contains("medium")) efforts.Add(AgentReasoningEffort.Medium);
+        if (levels.Contains("high")) efforts.Add(AgentReasoningEffort.High);
+        if (levels.Contains("xhigh") || levels.Contains("max")) efforts.Add(AgentReasoningEffort.XHigh);
+        if (levels.Contains("xhigh") && levels.Contains("max")) efforts.Add(AgentReasoningEffort.Max);
+        return efforts;
+    }
+
+    // The effort levels the endpoint lists for the model, in either form; null when it lists none.
+    private static IReadOnlySet<string>? ReadEffortLevels(IReadOnlyDictionary<string, JsonElement> rawData)
+        => TryGetEffortCapability(rawData, out _, out var effort) ? ReadSupportedEffortLevels(effort)
+            : TryGetReasoning(rawData, out var reasoning) ? ReadListedEffortLevels(reasoning)
+            : null;
+
+    private static bool TryGetEffortCapability(IReadOnlyDictionary<string, JsonElement> rawData, out JsonElement capabilities, out JsonElement effort)
+    {
+        effort = default;
+        return rawData.TryGetValue("capabilities", out capabilities) &&
+            capabilities.ValueKind == JsonValueKind.Object &&
+            capabilities.TryGetProperty("effort", out effort) &&
+            effort.ValueKind == JsonValueKind.Object;
+    }
+
+    // {"low":{"supported":true},"high":{"supported":false},...}
+    private static HashSet<string> ReadSupportedEffortLevels(JsonElement effort)
+    {
+        var levels = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var level in (ReadOnlySpan<string>)["low", "medium", "high", "xhigh", "max"])
+        {
+            if (IsSupported(effort, level))
+            {
+                levels.Add(level);
+            }
+        }
+
+        return levels;
+    }
+
+    // The reasoning of a model of Kimi for Coding: {"type":"only","effort":{"valid":[...],"default":"..."}}.
+    private static bool TryGetReasoning(IReadOnlyDictionary<string, JsonElement> rawData, out JsonElement reasoning)
+        => rawData.TryGetValue("reasoning", out reasoning) && reasoning.ValueKind == JsonValueKind.Object;
+
+    // {"effort":{"valid":["low","high","max"]}}; null when the reasoning names no effort.
+    private static HashSet<string>? ReadListedEffortLevels(JsonElement reasoning)
+    {
+        if (!reasoning.TryGetProperty("effort", out var effort) ||
+            effort.ValueKind != JsonValueKind.Object ||
+            !effort.TryGetProperty("valid", out var valid) ||
+            valid.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var levels = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var value in valid.EnumerateArray())
+        {
+            if (value.ValueKind == JsonValueKind.String && value.GetString() is { } level && !string.IsNullOrWhiteSpace(level))
+            {
+                levels.Add(level.Trim().ToLowerInvariant());
+            }
+        }
+
+        return levels;
+    }
+
+    // {"supported":true}, or the level of that name in it.
+    private static bool IsSupported(JsonElement element, string? level = null)
+    {
+        if (level is not null && !element.TryGetProperty(level, out element))
+        {
+            return false;
+        }
+
+        return element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty("supported", out var supported) &&
+            supported.ValueKind == JsonValueKind.True;
     }
 
     // "active", "deprecated" or "retired"; null when the endpoint says nothing of it (an Anthropic-compatible endpoint).
@@ -752,6 +870,16 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         };
         return effort is "xhigh" or "max" ? effort : null;
     }
+
+    private static bool? ReadFlag(IReadOnlyDictionary<string, JsonElement> rawData, string name)
+        => rawData.TryGetValue(name, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.ValueKind == JsonValueKind.True
+            : null;
+
+    // A flag of a listed model; one read back from a saved list may be a JSON value.
+    private static bool IsTrue(IReadOnlyDictionary<string, object?>? capabilities, string key)
+        => capabilities?.TryGetValue(key, out var value) == true &&
+            value is true or JsonElement { ValueKind: JsonValueKind.True };
 
     // Whether a model takes images, from the capabilities of the Models API: {"image_input":{"supported":true}}.
     // Null when the endpoint says nothing of it (an Anthropic-compatible endpoint, an older API).

@@ -80,11 +80,13 @@ On first run, CodeAlta writes a `~/.alta/config.toml` with these providers, all 
 | `copilot` | Copilot | `copilot` | `claude-sonnet-4.6`, high reasoning | GitHub sign-in |
 | `deepseek` | DeepSeek | `openai-chat` | `deepseek-v4-pro` | `CODEALTA_DEEPSEEK_API_KEY` |
 | `gemini` | Gemini | `google-genai` | listed by the provider | `CODEALTA_GEMINI_API_KEY` |
-| `kimi-for-coding` | Kimi for Coding | `anthropic` compatible | `K2P6`, high reasoning | `CODEALTA_KIMI_API_KEY` |
+| `kimi-for-coding` | Kimi for Coding | `anthropic` compatible | `kimi-for-coding`, high reasoning | `CODEALTA_KIMI_API_KEY` |
 | `minimax` | MiniMax | `anthropic` compatible | `MiniMax-M2.7`, low reasoning | `CODEALTA_MINIMAX_API_KEY` |
 | `openai` | OpenAI | `openai-responses` | `gpt-5.5`, high reasoning | `CODEALTA_OPENAI_API_KEY` |
 | `xai` | xAI Grok | `xai` | `grok-4.3`, high reasoning | xAI sign-in |
 | `zai` | Z.ai | `openai-chat` | `glm-5.1` | `CODEALTA_ZAI_API_KEY` |
+
+Kimi for Coding uses its international endpoint, `https://api.kimi.ai/coding/`. For an account in China, set **API URL** to `https://api.kimi.com/coding/`.
 
 ### Default provider
 

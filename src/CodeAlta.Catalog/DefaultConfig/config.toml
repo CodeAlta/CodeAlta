@@ -59,10 +59,10 @@ api_key_env = "CODEALTA_GEMINI_API_KEY"
 enabled = false
 display_name = "Kimi for Coding"
 type = "anthropic"
-model = "K2P6"
+model = "kimi-for-coding"
 reasoning_effort = "high"
 api_key_env = "CODEALTA_KIMI_API_KEY"
-api_url = "https://api.kimi.com/coding/"
+api_url = "https://api.kimi.ai/coding/"
 
 [providers.minimax]
 enabled = false

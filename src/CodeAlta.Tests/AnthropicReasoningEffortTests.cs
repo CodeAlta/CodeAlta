@@ -83,6 +83,34 @@ public sealed class AnthropicReasoningEffortTests
         }
         """;
 
+    // The Models API of Kimi for Coding, as it answers: the efforts of a model under reasoning.effort, its context for the
+    // plan of the account, and a model that always thinks and takes no effort.
+    private const string KimiModelsJson =
+        """
+        {
+          "data": [
+            {
+              "id": "kimi-for-coding", "created": 1761264000, "created_at": "2025-10-24T00:00:00Z", "object": "model", "display_name": "K2.8 Preview",
+              "type": "model", "max_tokens": 32768, "context_length": 1048576, "supports_reasoning": true, "supports_image_in": true, "supports_thinking_type": "only",
+              "think_efforts": { "support": true, "valid_efforts": ["low", "high", "max"], "default_effort": "max" },
+              "reasoning": { "type": "only", "effort": { "valid": ["low", "high", "max"], "default": "max" } }, "limit": { "context": 1048576 }
+            },
+            {
+              "id": "kimi-for-coding-highspeed", "created": 1761264000, "created_at": "2025-10-24T00:00:00Z", "object": "model", "display_name": "K2.7 Code Highspeed",
+              "type": "model", "max_tokens": 32768, "context_length": 262144, "supports_reasoning": true, "supports_image_in": true, "supports_thinking_type": "only",
+              "reasoning": { "type": "only" }, "limit": { "context": 262144 }
+            },
+            {
+              "id": "k3.1-pro", "created": 1761264000, "created_at": "2025-10-24T00:00:00Z", "object": "model", "display_name": "K3.1 Pro",
+              "type": "model", "max_tokens": 32768, "context_length": 262144, "supports_reasoning": true, "supports_image_in": true, "supports_thinking_type": "only",
+              "think_efforts": { "support": true, "valid_efforts": ["low", "high", "max"], "default_effort": "high" },
+              "reasoning": { "type": "only", "effort": { "valid": ["low", "high", "max"], "default": "high" } }, "limit": { "context": 262144 }
+            }
+          ],
+          "object": "list", "first_id": "kimi-for-coding", "last_id": "k3.1-pro", "has_more": false
+        }
+        """;
+
     private const string MessageStream =
         """
         event: message_start
@@ -376,6 +404,56 @@ public sealed class AnthropicReasoningEffortTests
         }
     }
 
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_ListModels_ReadsTheEffortsKimiForCodingLists()
+    {
+        await using var providerRuntime = CreateRuntime(new List<string>(), KimiModelsJson);
+
+        var models = await providerRuntime.ListModelsAsync().ConfigureAwait(false);
+
+        // low, high and max: max is the highest effort, sent as max.
+        var k31 = models.Single(static model => model.Id == "k3.1-pro");
+        CollectionAssert.AreEqual(
+            new[] { AgentReasoningEffort.Low, AgentReasoningEffort.High, AgentReasoningEffort.XHigh },
+            k31.SupportedReasoningEfforts!.ToArray());
+        Assert.IsTrue(AgentReasoningEffortCapability.IsListComplete(k31));
+        Assert.AreEqual(AgentReasoningEffort.High, k31.DefaultReasoningEffort);
+        // The context of the plan of the account, which the catalog of models.dev cannot know.
+        Assert.AreEqual(262_144L, k31.Capabilities!["contextWindow"]);
+        Assert.AreEqual(true, AgentImageInputCapability.Read(k31));
+        Assert.AreEqual(AgentReasoningEffort.XHigh, models.Single(static model => model.Id == "kimi-for-coding").DefaultReasoningEffort);
+        // A model that always thinks and names no effort offers none.
+        var highspeed = models.Single(static model => model.Id == "kimi-for-coding-highspeed");
+        Assert.AreEqual(0, highspeed.SupportedReasoningEfforts!.Count);
+        Assert.IsTrue(AgentReasoningEffortCapability.IsListComplete(highspeed));
+    }
+
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_SendsAdaptiveThinkingAndItsEffort_ToAModelOfKimiForCoding()
+    {
+        var bodies = new List<string>();
+        await using var providerRuntime = CreateRuntime(bodies, KimiModelsJson);
+        using var temp = TestTempDirectory.Create();
+
+        using (var body = await SendAsync(providerRuntime, temp.Path, "k3.1-pro", bodies, AgentReasoningEffort.Low).ConfigureAwait(false))
+        {
+            Assert.AreEqual("adaptive", body.RootElement.GetProperty("thinking").GetProperty("type").GetString());
+            Assert.AreEqual("low", body.RootElement.GetProperty("output_config").GetProperty("effort").GetString());
+        }
+
+        using (var body = await SendAsync(providerRuntime, temp.Path, "k3.1-pro", bodies, AgentReasoningEffort.XHigh).ConfigureAwait(false))
+        {
+            Assert.AreEqual("max", body.RootElement.GetProperty("output_config").GetProperty("effort").GetString());
+        }
+
+        // A model that takes no effort is sent no thinking: it thinks all the same.
+        using (var body = await SendAsync(providerRuntime, temp.Path, "kimi-for-coding-highspeed", bodies).ConfigureAwait(false))
+        {
+            Assert.IsFalse(body.RootElement.TryGetProperty("thinking", out _));
+            Assert.IsFalse(body.RootElement.TryGetProperty("output_config", out _));
+        }
+    }
+
     private static Task<JsonDocument> SendAsync(AnthropicModelProviderRuntime providerRuntime, string workingDirectory, string modelId, List<string> bodies)
         => SendAsync(providerRuntime, workingDirectory, modelId, bodies, new AgentInputItem.Text("Hello"));
 
@@ -408,6 +486,9 @@ public sealed class AnthropicReasoningEffortTests
     }
 
     private static AnthropicModelProviderRuntime CreateRuntime(List<string> bodies)
+        => CreateRuntime(bodies, ModelsJson);
+
+    private static AnthropicModelProviderRuntime CreateRuntime(List<string> bodies, string modelsJson)
         => new(new AnthropicModelProviderRuntimeOptions
         {
             StateRootPath = Path.GetTempPath(),
@@ -423,7 +504,7 @@ public sealed class AnthropicReasoningEffortTests
                     {
                         if (request.RequestUri!.AbsolutePath == "/v1/models")
                         {
-                            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(ModelsJson, Encoding.UTF8, "application/json") };
+                            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(modelsJson, Encoding.UTF8, "application/json") };
                         }
 
                         Assert.AreEqual("/v1/messages", request.RequestUri.AbsolutePath);
