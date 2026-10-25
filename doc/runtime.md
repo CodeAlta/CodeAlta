@@ -276,8 +276,8 @@ whose transcript VS Code and the CLI also write). The CodeAlta journal stays the
 files are only read.
 
 - **Catch-up** (`SessionRuntimeService.CatchUp.cs`) adds the turns written elsewhere to an idle session before a prompt
-  is admitted and when the desktop shows a session: observed and committed on the actor, read off it, refused while
-  anything runs, and written as runs `external:<guid>` that the statistics skip. Counts in the provider state are
+  is admitted and when the desktop shows a session: observed and committed on the actor, read off it, under the lease of
+  the session from the observation to the append, refused while anything runs, and written as runs `external:<guid>` that the statistics skip. Counts in the provider state are
   advanced by exactly what was written, never recounted from the copy. The attachment is then retired, because its
   process holds the old conversation.
 - **Held conversations.** A conversation open in another live process is never resumed silently: the run asks

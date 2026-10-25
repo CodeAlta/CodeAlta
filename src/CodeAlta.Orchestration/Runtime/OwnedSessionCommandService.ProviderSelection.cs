@@ -70,6 +70,7 @@ public sealed partial class OwnedSessionCommandService
     /// working on the conversation now: nothing is read), <c>stale</c>, or <c>closed</c>.
     /// </returns>
     /// <exception cref="ArgumentException">The session identity is empty.</exception>
+    /// <exception cref="SessionLeaseUnavailableException">The host takes leases and the lease of the session cannot be taken.</exception>
     public async Task<string> CatchUpExternalTurnsAsync(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);

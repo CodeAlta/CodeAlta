@@ -49,6 +49,7 @@ public sealed partial class SessionRuntimeService
     /// from the journal. When nothing was found, nothing is written and the attachment stays.
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    /// <exception cref="SessionLeaseUnavailableException">The runtime takes leases and the lease of the session cannot be taken.</exception>
     internal Task<string> CatchUpExternalTurnsAsync(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -58,8 +59,11 @@ public sealed partial class SessionRuntimeService
     // The catch-up of a work already admitted (a send).
     private async Task<string> CatchUpExternalTurnsCoreAsync(string sessionId)
     {
-        // A session another process runs is written by that process alone.
-        if (RefuseIfHeldElsewhere(sessionId) is not null) return CatchUpBusy;
+        // A session another process runs is written by that process alone. The lease is held from the observation of the
+        // session to the end of the append and of the retirement it leads to: a probe alone would let another process take
+        // the session while the conversation is read, and write after it.
+        if (!TryHoldForWrite(sessionId, out var lease)) return CatchUpBusy;
+        using var held = lease;
         var joined = false;
         while (true)
         {

@@ -177,6 +177,40 @@ public sealed class SessionCatchUpTests
     }
 
     [TestMethod]
+    public async Task CatchUp_HoldsTheLease_FromTheReadOfTheConversationToTheAppend()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new ExternalProvider();
+        await using var host = await CreateHostAsync(temp, provider, SessionLeaseOwner.DesktopKind);
+        var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Leased catch-up")).SessionId;
+        await SendAsync(host, sessionId, "one");
+        // Without an attachment, nothing else holds the lease of the session.
+        Assert.IsTrue(await host.RuntimeService.DetachRuntimeSessionAsync(sessionId));
+        var leases = new SessionLeaseStore(host.CatalogOptions);
+        Assert.IsNull(leases.TryReadHolder(sessionId));
+
+        provider.External = state => provider.Turns(state, AgentExternalTurnOrigin.VsCode, "From VS Code.", "Answered there.");
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        provider.ReadGate = gate;
+        var catchUp = host.Commands.CatchUpExternalTurnsAsync(sessionId);
+        await provider.ReadStarted.Task.WaitAsync(Timeout);
+        SessionLease? other;
+        try
+        {
+            // Another process that wants the session while the conversation is read does not get it.
+            other = leases.TryAcquire(sessionId, new SessionLeaseOwner(SessionLeaseOwner.CliKind, "other"));
+            other?.Dispose();
+        }
+        finally { gate.TrySetResult(); }
+
+        Assert.IsNull(other, "The catch-up holds the lease while it reads the conversation it will append.");
+        Assert.AreEqual("appended", await catchUp.WaitAsync(Timeout));
+        Assert.IsNull(leases.TryReadHolder(sessionId), "The lease goes with the catch-up.");
+        using (other = leases.TryAcquire(sessionId, new SessionLeaseOwner(SessionLeaseOwner.CliKind, "other")))
+            Assert.IsNotNull(other, "Another process takes the session once the catch-up ended.");
+    }
+
+    [TestMethod]
     public async Task CatchUp_IsNotDoneWhileACompactionHoldsTheAttachment()
     {
         using var temp = TempDirectory.Create();
@@ -273,7 +307,7 @@ public sealed class SessionCatchUpTests
         return null!;
     }
 
-    private static Task<CodeAltaHost> CreateHostAsync(TempDirectory temp, ExternalProvider provider)
+    private static Task<CodeAltaHost> CreateHostAsync(TempDirectory temp, ExternalProvider provider, string? sessionLeaseOwner = null)
         => CodeAltaHost.CreateAsync(
             new CodeAltaHostOptions
             {
@@ -282,6 +316,7 @@ public sealed class SessionCatchUpTests
                 IsHeadless = true,
                 AutoApproveOwnedPermissions = true,
                 OwnedCommandReceiptCapacity = 32,
+                SessionLeaseOwner = sessionLeaseOwner,
                 ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
             },
             CancellationToken.None);
