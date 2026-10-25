@@ -84,7 +84,6 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
 
                 if (Volatile.Read(ref projector) is { } projection) await projection.ProjectAsync(item, cancellationToken).ConfigureAwait(false);
             },
-            AcquireSessionLease = CliSessionLeases.For(host.Host.CatalogOptions),
             AbortGrace = environment.AbortGrace ?? new HeadlessSessionDriverOptions().AbortGrace,
         };
         await using var driver = new HeadlessSessionDriver(host.Host, driverOptions);

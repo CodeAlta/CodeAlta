@@ -101,6 +101,8 @@ internal sealed class CliHost : IAsyncDisposable
                 ScratchpadRoot = Path.Combine(database.Directory, "scratchpad"),
                 FullTrust = true,
                 HeadlessInstructions = true,
+                // A session another process runs (another altacli, CodeAlta Desktop or TUI) is refused as in use, exit code 5.
+                SessionLeaseOwner = SessionLeaseOwner.CliKind,
                 ListsSkills = request.ListsSkills,
                 IsHeadless = true,
                 HasInteractiveUi = false,
