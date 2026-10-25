@@ -21,7 +21,7 @@ const list: List = async request => {
   return { status: "ok", hostEpoch: epoch, sessionId: request.sessionId, hasMore: false, entries: answered.has(request.sessionId) ? [] : [{
     handle: { operationId: epoch, runtimeInstanceId: epoch, attachmentGeneration: "1", sessionId: request.sessionId, runId: null, interactionId: "request",
       attemptId: attempts[request.sessionId] },
-    providerId: "provider", kind: "commandExecution", command: `echo ${request.sessionId}`, workingDirectory: "Q:\\work", grantRoot: null, reason: null, shortened: false, skill: null }] };
+    providerId: "provider", kind: "commandExecution", command: `echo ${request.sessionId}`, workingDirectory: "Q:\\work", grantRoot: null, reason: null, shortened: false, outsideSandbox: false, skill: null }] };
 };
 const resolve: Resolve = async request => {
   decisions.push(request);

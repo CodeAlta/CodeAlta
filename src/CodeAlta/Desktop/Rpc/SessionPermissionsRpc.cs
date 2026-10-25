@@ -77,6 +77,7 @@ internal sealed class SessionPermissionsService
                 entries.Add(new(wireHandle, summary.ProviderId.Value, summary.Kind, summary.Command, summary.WorkingDirectory, summary.GrantRoot, summary.Reason)
                 {
                     Shortened = summary.Shortened,
+                    OutsideSandbox = summary.OutsideSandbox,
                     Skill = summary.Skill is { } skillSummary
                         ? new(skillSummary.Server, skillSummary.Name, skillSummary.Uri, skillSummary.FileCount, (int)skillSummary.TotalBytes, skillSummary.Dynamic)
                         : null,
@@ -185,6 +186,9 @@ internal sealed record SessionPermissionCommand(SessionPermissionCommandHandle H
 {
     /// <summary>True when the command or the reason is cut: what is allowed is longer than what is shown.</summary>
     public bool Shortened { get; init; }
+
+    /// <summary>True when a sandboxed session asks to run the command outside its sandbox, with the rights of the user.</summary>
+    public bool OutsideSandbox { get; init; }
 
     /// <summary>The skill of an MCP server a <c>skill</c> request asks to load; null for another kind.</summary>
     public SessionPermissionSkillEntry? Skill { get; init; }

@@ -243,6 +243,36 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task TheCheckOfASandbox_SaysEachStep_AndStopsAtTheFirstThatCannotGoOn()
+    {
+        var backend = new InProcessBackend { Available = false };
+        await using var f = await Fixture.CreateAsync(backend);
+        async Task<List<SandboxCheckStep>> CheckAsync(string profile)
+        {
+            var steps = new List<SandboxCheckStep>();
+            await foreach (var step in f.Runtime.CheckSandboxAsync(profile).WithCancellation(CancellationToken.None)) steps.Add(step);
+            return steps;
+        }
+
+        var unavailable = (await CheckAsync("strict")).Single();
+        Assert.AreEqual(("available", false), (unavailable.Id, unavailable.Passed));
+        Assert.Contains("the test has none", unavailable.Detail);
+
+        backend.Available = true;
+        var unknown = await CheckAsync("missing");
+        Assert.AreEqual("profile", unknown[^1].Id);
+        Assert.IsFalse(unknown[^1].Passed);
+
+        // The worker of this test runs here, without a container: what it checks is that every step is run and told.
+        var steps = await CheckAsync("strict");
+        CollectionAssert.AreEqual(new[] { "available", "profile", "start", "dotnet", "git", "write", "secrets" }, steps.Select(static step => step.Id).ToArray(),
+            "a profile without network checks none");
+        Assert.IsTrue(steps.Take(4).All(static step => step.Passed), string.Join("\n", steps));
+        Assert.HasCount(1, backend.Starts);
+        Assert.AreEqual("strict", backend.Starts[0].ProfileName);
+    }
+
+    [TestMethod]
     public async Task WebGetOfASandboxWithoutNetwork_IsRefused_BeforeAnyRequest()
     {
         await using var f = await Fixture.CreateAsync(new InProcessBackend());

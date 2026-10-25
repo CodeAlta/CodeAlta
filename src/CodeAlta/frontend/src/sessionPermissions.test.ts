@@ -11,7 +11,7 @@ function command(): SessionPermissionCommand {
   return { handle: { operationId: epoch, runtimeInstanceId: runtime, attachmentGeneration: "9223372036854775807",
     sessionId: "selected", runId: null, interactionId: "interaction", attemptId: epoch },
     providerId: "fake", kind: "commandExecution", command: "inert command\ncomplete", workingDirectory: "Q:\\fixture",
-    grantRoot: null, reason: null, shortened: false, skill: null };
+    grantRoot: null, reason: null, shortened: false, outsideSandbox: false, skill: null };
 }
 function fileChange(): SessionPermissionCommand {
   return { ...command(), kind: "fileChange", command: null, workingDirectory: null, grantRoot: "Q:\\fixture" };

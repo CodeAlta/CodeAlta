@@ -945,6 +945,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddProviderLoginService(providerLogin);
                     providerUsage = new ProviderUsageService(configStore, options.CatalogRoot!, epoch);
                     builder.AddProviderUsageService(providerUsage);
+                    builder.AddSandboxSettingsService(new SandboxSettingsService(configStore, host.RuntimeService, host.Commands, host.ProjectCatalog, host.SpaceCatalog, epoch));
                     // An instance on explicit roots is automation and stays off the network: it downloads no model.
                     speech = roots.Home is not null ? new SpeechService() : new SpeechService(catalog, epoch);
                     speech.DictatingChanged += dictating => search?.Meaning?.SetDictating(dictating);
@@ -1368,6 +1369,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddStorageService(new StorageService());
             builder.AddProviderLoginService(new ProviderLoginService());
             builder.AddProviderUsageService(new ProviderUsageService());
+            builder.AddSandboxSettingsService(new SandboxSettingsService());
             builder.AddSpeechService(new SpeechService());
             builder.AddClaudeCliService(new ClaudeCliService());
             builder.AddMcpServersService(new McpServersService());

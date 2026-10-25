@@ -201,7 +201,7 @@ internal sealed partial class WorkspaceService
                     break;
                 case AgentCommandPermissionRequest permission:
                     type = "permissionCommand"; kind = permission.Kind; interactionId = permission.InteractionId;
-                    name = "Command permission"; text = FormatCommandPermission(permission);
+                    name = permission.OutsideSandbox ? "Run outside the sandbox" : "Command permission"; text = FormatCommandPermission(permission);
                     break;
                 case AgentFileChangePermissionRequest permission:
                     type = "permissionFileChange"; kind = permission.Kind; interactionId = permission.InteractionId;

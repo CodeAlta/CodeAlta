@@ -187,6 +187,14 @@ export const claudeCli = Object.freeze({
   install: async () => ({ status: "unavailable" }), cancelInstall: async () => ({ status: "unavailable" }),
   watch: async () => (async function* (): AsyncGenerator<{ state: string; receivedBytes: string; totalBytes: string; error: string | null }> { })(),
 });
+// A browser preview runs no command, so it has no sandbox.
+const noSandboxSession = async () => ({ status: "unavailable", own: null, profile: null, source: "none", problem: null, choices: [] });
+export const sandboxSettings = Object.freeze({
+  read: async () => ({ status: "unavailable", availability: null, allSessions: null, profiles: [], scopes: [] }),
+  saveAllSessions: unavailable, saveProfile: unavailable, deleteProfile: unavailable, setScope: unavailable,
+  session: noSandboxSession, setSession: noSandboxSession, draft: noSandboxSession,
+  check: async () => (async function* (): AsyncGenerator<{ status: string; id: string | null; passed: boolean | null; detail: string | null }> { })(),
+});
 export const terminals = Object.freeze({ acknowledge: unavailable, attach: unavailable, close: unavailable, create: unavailable, detach: unavailable, input: unavailable,
   open: unavailable, profiles: unavailable, rename: unavailable, resize: unavailable, show: unavailable, watch: unavailable });
 // The demo starts no session by itself: its automations tab says so.

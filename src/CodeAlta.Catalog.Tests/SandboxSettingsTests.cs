@@ -87,6 +87,37 @@ public sealed class SandboxSettingsTests
     }
 
     [TestMethod]
+    public void TheSandboxOfAProviderOrModel_IsSaved_AndNothingElseOfTheProvider()
+    {
+        using var temp = TempFolder.Create();
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        File.WriteAllText(store.ConfigPath, """
+            [providers.local]
+            type = "openai-chat"
+            api_key_env = "LOCAL_KEY"
+            api_url = "http://127.0.0.1:1234/v1"
+
+            [providers.local.model_overrides."qwen"]
+            context_window = 32000
+            """);
+
+        Assert.IsTrue(store.SaveGlobalProviderSandbox("local", null, "strict"));
+        Assert.IsTrue(store.SaveGlobalProviderSandbox("local", "qwen", "off"));
+        Assert.IsTrue(store.SaveGlobalProviderSandbox("local", "llama", "workspace"));
+        var provider = store.LoadGlobal().Providers!["local"];
+        Assert.AreEqual(("strict", "off", 32000L, "workspace"), (provider.Sandbox, provider.ModelOverrides!["qwen"].Sandbox, provider.ModelOverrides["qwen"].ContextWindow, provider.ModelOverrides["llama"].Sandbox));
+        Assert.AreEqual("LOCAL_KEY", provider.ApiKeyEnv);
+
+        Assert.IsTrue(store.SaveGlobalProviderSandbox("local", "llama", null));
+        Assert.IsTrue(store.SaveGlobalProviderSandbox("local", "qwen", null));
+        provider = store.LoadGlobal().Providers!["local"];
+        Assert.IsFalse(provider.ModelOverrides!.ContainsKey("llama"), "an override with nothing left goes");
+        Assert.AreEqual(32000L, provider.ModelOverrides["qwen"].ContextWindow);
+        Assert.IsFalse(store.SaveGlobalProviderSandbox("missing", null, "strict"));
+        Assert.ThrowsExactly<ArgumentException>(() => store.SaveGlobalProviderSandbox("local", null, "no such name!"));
+    }
+
+    [TestMethod]
     public void SpacesAndProjects_WriteTheirSandboxInTheUsersFiles()
     {
         var serializer = new CatalogYamlSerializer();
@@ -104,6 +135,30 @@ public sealed class SandboxSettingsTests
         Assert.AreEqual("workspace", serializer.DeserializeProjectMarkdown(projectText).Sandbox);
         Assert.IsNull(serializer.DeserializeProjectMarkdown(projectText.Replace("sandbox: workspace", "sandbox: '../x'")).Sandbox);
         Assert.DoesNotContain("sandbox", serializer.SerializeProjectMarkdown(new ProjectDescriptor { Id = "p2", Slug = "b", Name = "b", ProjectPath = "C:/b" }));
+    }
+
+    [TestMethod]
+    public async Task TheSandboxOfAProject_IsWrittenInItsFile_AndNothingElseOfItChanges()
+    {
+        using var temp = TempFolder.Create();
+        var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = System.IO.Path.Combine(temp.Path, "alta") });
+        var project = await catalog.UpsertFromPathAsync(Directory.CreateDirectory(System.IO.Path.Combine(temp.Path, "lib")).FullName);
+        project.Description = "A library.\n\nWith notes.";
+        await catalog.SaveAsync(project);
+        var before = File.ReadAllText(project.SourcePath!);
+
+        Assert.AreEqual(ProjectSpacesStatus.Updated, await catalog.UpdateSandboxAsync(project.Id, "off"));
+        var text = File.ReadAllText(project.SourcePath!);
+        Assert.Contains("sandbox: \"off\"", text, "quoted, as YAML reads a bare off as false");
+        Assert.AreEqual("off", (await catalog.GetByIdAsync(project.Id))!.Sandbox);
+        Assert.AreEqual(ProjectSpacesStatus.Unchanged, await catalog.UpdateSandboxAsync(project.Id, "off"));
+
+        Assert.AreEqual(ProjectSpacesStatus.Updated, await catalog.UpdateSandboxAsync(project.Id, "strict"));
+        Assert.AreEqual("strict", (await catalog.GetByIdAsync(project.Id))!.Sandbox);
+        Assert.AreEqual(ProjectSpacesStatus.Updated, await catalog.UpdateSandboxAsync(project.Id, null));
+        Assert.AreEqual(before, File.ReadAllText(project.SourcePath!), "taking the choice away gives the file back as it was");
+        Assert.AreEqual(ProjectSpacesStatus.NotFound, await catalog.UpdateSandboxAsync("missing", "strict"));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => catalog.UpdateSandboxAsync(project.Id, "../x"));
     }
 
     private sealed class TempFolder : IDisposable

@@ -646,6 +646,52 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Saves the sandbox of the sessions of a provider, or of one of its models (<c>[providers.x.model_overrides."id"]</c>),
+    /// and nothing else of the provider. An override that is left with nothing is removed.
+    /// </summary>
+    /// <param name="providerKey">The provider.</param>
+    /// <param name="modelId">The model, or null for the provider itself.</param>
+    /// <param name="sandbox">A sandbox profile, <c>off</c>, or null for none.</param>
+    /// <returns>False when the file has no such provider; nothing is written then.</returns>
+    /// <exception cref="ArgumentException">The key is empty, or <paramref name="sandbox"/> is not a sandbox name.</exception>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public bool SaveGlobalProviderSandbox(string providerKey, string? modelId, string? sandbox)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        sandbox = CodeAltaSandboxSettings.Text(sandbox);
+        if (sandbox is not null && !SpaceNewSessions.IsSandboxName(sandbox)) throw new ArgumentException($"'{sandbox}' is not a sandbox name.", nameof(sandbox));
+        ThrowIfReadOnly();
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        NormalizeDocument(document);
+        if (document.Providers is null || !document.Providers.TryGetValue(providerKey.Trim(), out var provider)) return false;
+        if (CodeAltaSandboxSettings.Text(modelId) is not { } model)
+        {
+            provider.Sandbox = sandbox;
+        }
+        else
+        {
+            provider.ModelOverrides ??= new Dictionary<string, CodeAltaProviderModelOverrideDocument>(StringComparer.Ordinal);
+            if (!provider.ModelOverrides.TryGetValue(model, out var entry))
+            {
+                if (sandbox is null) return true;
+                provider.ModelOverrides[model] = entry = new CodeAltaProviderModelOverrideDocument();
+            }
+
+            entry.Sandbox = sandbox;
+            if (entry is { Sandbox: null, DisplayName: null, Description: null, ContextWindow: null, InputTokenLimit: null, OutputTokenLimit: null, MaxTokens: null,
+                SupportsReasoning: null, SupportsToolCall: null, SupportsAttachments: null, SupportsStructuredOutput: null })
+                provider.ModelOverrides.Remove(model);
+            if (provider.ModelOverrides.Count == 0) provider.ModelOverrides = null;
+        }
+
+        Save(_options.ConfigPath, document);
+        return true;
+    }
+
+    /// <summary>
     /// Says whether the configuration file of a project has a <c>[sandbox]</c> table, which is ignored: only the user's
     /// own files decide a sandbox.
     /// </summary>
