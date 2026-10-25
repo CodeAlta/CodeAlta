@@ -4203,6 +4203,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             {
                 return UsageError(context, "usage.invalidScope", ex.Message, commandPath);
             }
+            if (ex is UnauthorizedAccessException && options.Scope == "global" && context.Services.Get<CatalogOptions>() is { ReadOnlyGlobalState: true })
+            {
+                return PermissionDenied(context, "prompt.readOnly", ex.Message + " A prompt of the project (--scope project) can be written.");
+            }
             AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "prompt.storageFailed", AltaExitCodes.Failure, ex.Message, commandPath);
             return AltaExitCodes.Failure;
         }
@@ -4212,7 +4216,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     {
         var roots = new AgentPromptCatalog().ResolveRoots(query);
         return new PromptResourceStore(roots.ShippedPromptRoot, roots.GlobalPromptRoot, roots.ProjectPromptRoot,
-            context.Services.Get<TextFileCodec>() ?? new TextFileCodec());
+            context.Services.Get<TextFileCodec>() ?? new TextFileCodec())
+        {
+            IsGlobalReadOnly = context.Services.Get<CatalogOptions>() is { ReadOnlyGlobalState: true },
+        };
     }
 
     private static PromptResourceIdentity GetPromptIdentity(string promptId, PromptManagementOptions options)

@@ -1189,6 +1189,13 @@ internal sealed partial class BuiltInAltaCommandContributor
             return NotFound(context, "project.notFound", $"Project '{reference}' was not found.");
         }
 
+        // A read-only catalog removes no project file: nothing is deleted, its sessions included.
+        if (catalog.IsReadOnly && project.SourcePath is not null)
+        {
+            return SpaceRefused(context, "project.readOnly",
+                $"The catalog of projects is read-only in this process: the project '{project.Slug}' was not removed, and none of its sessions was deleted.");
+        }
+
         // A project is never removed without knowing its sessions: they would stay behind with no project to show them in.
         if (await LoadSessionInfosAsync(context).ConfigureAwait(false) is not { } infos)
         {

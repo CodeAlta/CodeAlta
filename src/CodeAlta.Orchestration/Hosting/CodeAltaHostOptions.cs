@@ -52,7 +52,7 @@ public sealed class CodeAltaHostOptions
     /// <remarks>
     /// The host then writes no coordinator <c>AGENTS.md</c>, seeds no view state, registers no project (a session in a
     /// folder outside the catalog is bound to a transient project of that folder, <see cref="ProjectCatalog.IsReadOnly"/>),
-    /// and starts no upkeep of the application database (no copy). It does not create the global root. What it still
+    /// refuses to change the spaces and the global prompts (<see cref="CatalogOptions.ReadOnlyGlobalState"/>), and starts no upkeep of the application database (no copy). It does not create the global root. What it still
     /// writes is the state of its sessions under <see cref="StateRoot"/> (their journals), its scratchpads
     /// (<see cref="ScratchpadRoot"/>), its application database, and what providers and plugins write themselves
     /// (sign-in tokens, caches). Such a host owns no startup scratchpad cleanup, and needs an application database of

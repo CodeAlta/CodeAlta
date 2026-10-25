@@ -342,6 +342,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 GlobalRoot = globalRoot,
                 StateRoot = string.IsNullOrWhiteSpace(options.StateRoot) ? globalRoot : Path.GetFullPath(options.StateRoot),
                 Config = options.Config ?? throw new ArgumentException("The host has configuration options.", nameof(options)),
+                // Every store built from these options leaves the projects, the spaces and the global prompts as they are.
+                ReadOnlyGlobalState = readOnlyGlobalState,
             };
             Directory.CreateDirectory(catalogOptions.StateRoot);
             var startupScratchpadCleanup = options.StartupScratchpadCleanup;
@@ -395,7 +397,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 ? Environment.CurrentDirectory
                 : Path.GetFullPath(options.CurrentProjectPath);
             options.StartupStep?.Invoke("Reading the projects…");
-            var projectCatalog = new ProjectCatalog(catalogOptions) { IsReadOnly = readOnlyGlobalState };
+            var projectCatalog = new ProjectCatalog(catalogOptions);
             var currentProject = await ResolveCurrentProjectAsync(projectCatalog, currentProjectPath, cancellationToken).ConfigureAwait(false);
 
             pluginRuntime = options.PrestartedPluginRuntime ?? new PluginRuntimeManager();

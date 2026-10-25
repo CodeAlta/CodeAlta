@@ -84,6 +84,13 @@ public sealed class PromptResourceStore
         _textFiles = textFiles;
     }
 
+    /// <summary>
+    /// Gets whether the global prompts are read-only as the built-in ones are, for a process that leaves the shared state
+    /// of the global root as it is (<see cref="CatalogOptions.ReadOnlyGlobalState"/>): a write of the global scope throws
+    /// <see cref="UnauthorizedAccessException"/>. The project prompts stay writable. Default false.
+    /// </summary>
+    public bool IsGlobalReadOnly { get; init; }
+
     /// <summary>Validates a portable single-component file/system id (without extension).</summary>
     /// <exception cref="ArgumentException">Id is empty, unsafe or a reserved device name.</exception>
     public static void ValidateId(string id)
@@ -273,6 +280,8 @@ public sealed class PromptResourceStore
     {
         var path = GetPath(identity);
         if (writable && identity.Scope == PromptResourceScope.BuiltIn) throw new UnauthorizedAccessException("Built-in prompts are read-only.");
+        if (writable && identity.Scope == PromptResourceScope.Global && IsGlobalReadOnly)
+            throw new UnauthorizedAccessException("The global prompts are read-only in this process: no file of the global profile is written.");
         for (string? component = path; component is not null; component = Path.GetDirectoryName(component))
         {
             try

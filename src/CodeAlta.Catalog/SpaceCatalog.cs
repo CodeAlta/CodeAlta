@@ -76,6 +76,17 @@ public sealed class SpaceCatalog
     public ProjectCatalog Projects => _projects;
 
     /// <summary>
+    /// Gets whether the spaces are read-only, as the project catalog they group is (<see cref="ProjectCatalog.IsReadOnly"/>),
+    /// for a process that leaves the shared state of the global root as it is. The changes then write nothing and end
+    /// <see cref="SpaceChangeStatus.Refused"/>, and <see cref="SeedAsync"/> does nothing.
+    /// </summary>
+    public bool IsReadOnly => _projects.IsReadOnly;
+
+    private const string ReadOnlyMessage = "The spaces are read-only in this process: no file of the global profile is written. Change them in CodeAlta Desktop or TUI.";
+
+    private static SpaceChange ReadOnlyChange() => new(SpaceChangeStatus.Refused, Message: ReadOnlyMessage);
+
+    /// <summary>
     /// Loads the spaces: the default one first, then the others by their place and their name. A file that
     /// cannot be read as a space is left out, so that one bad file never hides the others.
     /// </summary>
@@ -173,6 +184,7 @@ public sealed class SpaceCatalog
     public async Task<SpaceChange> CreateAsync(string name, string? description = null, string? icon = null, string? color = null,
         CancellationToken cancellationToken = default)
     {
+        if (IsReadOnly) return ReadOnlyChange();
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -216,6 +228,7 @@ public sealed class SpaceCatalog
     public async Task<SpaceChange> UpdateAsync(string id, SpaceEdit edit, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(edit);
+        if (IsReadOnly) return ReadOnlyChange();
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -251,6 +264,7 @@ public sealed class SpaceCatalog
     public async Task<SpaceChange> UpdateSettingsAsync(string id, Func<SpaceSettings, SpaceSettings> change, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(change);
+        if (IsReadOnly) return ReadOnlyChange();
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -283,6 +297,7 @@ public sealed class SpaceCatalog
     /// <exception cref="IOException">A file could not be changed.</exception>
     public async Task<SpaceChange> DeleteAsync(string id, CancellationToken cancellationToken = default)
     {
+        if (IsReadOnly) return ReadOnlyChange();
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -317,6 +332,7 @@ public sealed class SpaceCatalog
     public async Task<SpaceChange> ReorderAsync(IReadOnlyList<string> ids, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(ids);
+        if (IsReadOnly) return ReadOnlyChange();
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -357,6 +373,7 @@ public sealed class SpaceCatalog
         if (string.IsNullOrWhiteSpace(projectId)) return new(SpaceChangeStatus.NotFound, Message: "A project is required.");
         if (join.Contains(SpaceDescriptor.DefaultId, StringComparer.Ordinal) || leave.Contains(SpaceDescriptor.DefaultId, StringComparer.Ordinal))
             return new(SpaceChangeStatus.Refused, Message: "Every project is in the default space.");
+        if (IsReadOnly) return ReadOnlyChange();
         var known = (await LoadAsync(cancellationToken).ConfigureAwait(false)).Select(static space => space.Id).ToHashSet(StringComparer.Ordinal);
         if (join.FirstOrDefault(id => !known.Contains(id)) is { } missing)
             return new(SpaceChangeStatus.NotFound, Message: $"No space has the id '{missing}'.");
@@ -381,6 +398,7 @@ public sealed class SpaceCatalog
     /// <exception cref="IOException">A file could not be written.</exception>
     public async Task<bool> SeedAsync(CancellationToken cancellationToken = default)
     {
+        if (IsReadOnly) return false;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {

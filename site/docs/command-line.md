@@ -65,7 +65,7 @@ By default, standard output holds the final answer only, so `altacli run "..." >
 
 ## Sessions and storage
 
-By default, the sessions of `altacli` are those of CodeAlta Desktop and TUI: they are listed there as they are written. While `altacli` runs a session, the app shows it with a mark, **Running in altacli**, and follows it without letting you change it; once the run is over, you can continue it in the app. `altacli` never writes the settings, the projects or the database of the apps: a session in a folder that is not a project of yours is listed once you add the project.
+By default, the sessions of `altacli` are those of CodeAlta Desktop and TUI: they are listed there as they are written. While `altacli` runs a session, the app shows it with a mark, **Running in altacli**, and follows it without letting you change it; once the run is over, you can continue it in the app. `altacli` never writes the settings, the projects, the spaces, the agent prompts of your profile or the database of the apps; its agents can still write the agent prompts of a project. A session in a folder that is not a project of yours is listed once you add the project.
 
 A session is run by one program at a time: `altacli --resume` of a session that is open in a tab of CodeAlta Desktop, or running there, stops with exit code 5. Close the tab first.
 

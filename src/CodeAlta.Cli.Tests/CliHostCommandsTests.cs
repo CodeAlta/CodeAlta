@@ -41,6 +41,46 @@ public sealed class CliHostCommandsTests
     }
 
     [TestMethod]
+    public async Task Alta_LeavesTheSpacesProjectsAndGlobalPromptsOfTheProfileAsTheyAre()
+    {
+        using var root = new CliTestRoot();
+        var catalog = new CodeAlta.Catalog.ProjectCatalog(new CodeAlta.Catalog.CatalogOptions { GlobalRoot = root.Profile });
+        var project = await catalog.UpsertFromPathAsync(root.ProjectRoot);
+        var projectFile = project.SourcePath!;
+        var provider = new FakeProvider();
+        var sessionId = CliStorageTests.SessionIdOf(await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "hello"]));
+        var other = Path.Combine(root.Root, "other");
+        Directory.CreateDirectory(other);
+
+        var space = await root.RunAsync(provider, ["alta", Plain, "space", "create", "--name", "Work"]);
+        Assert.AreNotEqual(0, space.ExitCode, space.Stdout);
+        StringAssert.Contains(space.Stdout, "read-only");
+        Assert.IsFalse(Directory.Exists(Path.Combine(root.Profile, "spaces")), "No space file is written.");
+
+        var globalPrompt = await root.RunAsync(provider, ["alta", Plain, "prompt", "create", "reviewer", "--scope", "global", "--content", "Review."]);
+        Assert.AreNotEqual(0, globalPrompt.ExitCode, globalPrompt.Stdout);
+        StringAssert.Contains(globalPrompt.Stdout, "prompt.readOnly");
+        Assert.IsFalse(Directory.Exists(Path.Combine(root.Profile, "prompts")), "No global prompt is written.");
+
+        // The prompts of the project are the project's files: they stay writable.
+        var projectPrompt = await root.RunAsync(provider, ["alta", Plain, "prompt", "create", "reviewer", "--scope", "project", "--content", "Review."]);
+        Assert.AreEqual(0, projectPrompt.ExitCode, projectPrompt.Stdout);
+        Assert.IsTrue(File.Exists(Path.Combine(root.ProjectRoot, ".alta", "prompts", "agents", "reviewer.prompt.md")));
+
+        var added = await root.RunAsync(provider, ["alta", Plain, "project", "add", other]);
+        Assert.AreNotEqual(0, added.ExitCode, added.Stdout);
+        StringAssert.Contains(added.Stdout, "read-only");
+
+        // Refused before anything is deleted: the project file and the session stay.
+        var removed = await root.RunAsync(provider, ["alta", Plain, "project", "remove", project.Slug, "--delete-sessions"]);
+        Assert.AreNotEqual(0, removed.ExitCode, removed.Stdout);
+        StringAssert.Contains(removed.Stdout, "project.readOnly");
+        Assert.IsTrue(File.Exists(projectFile));
+        StringAssert.Contains((await root.RunAsync(provider, ["alta", Plain, "session", "list", "--state", "all"])).Stdout, sessionId);
+        CollectionAssert.AreEqual(new[] { Path.GetFileName(projectFile) }, CliTestRoot.Files(Path.Combine(root.Profile, "projects")));
+    }
+
+    [TestMethod]
     public async Task Models_ListsTheModelsOfTheReadyProviders()
     {
         using var root = new CliTestRoot();

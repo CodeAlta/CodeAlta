@@ -35,6 +35,14 @@ public sealed class CatalogOptions
         && !string.Equals(Path.GetFullPath(_stateRoot), Path.GetFullPath(GlobalRoot),
             OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
+    /// <summary>
+    /// Gets or sets whether the stores built from these options leave the shared files of <see cref="GlobalRoot"/> as they
+    /// are, for a process that runs beside CodeAlta Desktop or TUI (a headless run): the project catalog
+    /// (<see cref="ProjectCatalog.IsReadOnly"/>), the spaces (<see cref="SpaceCatalog.IsReadOnly"/>) and the global prompts
+    /// (<see cref="PromptResourceStore.IsGlobalReadOnly"/>) refuse to write. Default false.
+    /// </summary>
+    public bool ReadOnlyGlobalState { get; set; }
+
     private CodeAltaConfigOptions _config = CodeAltaConfigOptions.Default;
 
     /// <summary>

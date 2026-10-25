@@ -10,6 +10,7 @@ public sealed partial class ProjectCatalog
 {
     private readonly CatalogOptions _options;
     private readonly CatalogYamlSerializer _serializer;
+    private readonly bool _readOnly;
 
     // The project files as this catalog read them, read and parsed again only when a file changes; forgotten after each
     // write of the catalog. The descriptors kept are never handed out: each load gets copies.
@@ -53,9 +54,14 @@ public sealed partial class ProjectCatalog
     /// <remarks>
     /// <see cref="EnsurePersistedAsync"/> then keeps a project it does not know as a transient project
     /// (<see cref="GetOrAddTransientAsync"/>), <see cref="DeleteAsync"/> only forgets a transient project, and the other
-    /// methods that write a project file throw <see cref="InvalidOperationException"/>.
+    /// methods that write a project file throw <see cref="InvalidOperationException"/>. It is true whenever the options say
+    /// so (<see cref="CatalogOptions.ReadOnlyGlobalState"/>).
     /// </remarks>
-    public bool IsReadOnly { get; init; }
+    public bool IsReadOnly
+    {
+        get => _readOnly || _options.ReadOnlyGlobalState;
+        init => _readOnly = value;
+    }
 
     /// <summary>
     /// Loads all known projects from the portable catalog, with the transient projects of this catalog
