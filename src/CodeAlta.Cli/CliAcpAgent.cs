@@ -721,7 +721,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         }
         catch (OperationCanceledException) when (limit.IsCancellationRequested)
         {
-            // The stream dropped the marker of the flush: the response is sent without waiting more.
+            // The observer did not reach the marker in time (a stalled client): the response is sent without waiting more.
         }
     }
 
