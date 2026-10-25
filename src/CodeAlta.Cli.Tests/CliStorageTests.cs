@@ -1,0 +1,205 @@
+using System.Text.Json;
+using CodeAlta.Catalog;
+
+namespace CodeAlta.Cli.Tests;
+
+/// <summary>Where a run writes, per storage mode, and the configuration it reads.</summary>
+[TestClass]
+public sealed class CliStorageTests
+{
+    private const string Plain = "--no-plugins";
+
+    [TestMethod]
+    public async Task Visible_WritesTheJournalAndAMarker_AndNothingElseUnderTheProfile()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+
+        var run = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "hello"]);
+
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+        var sessionId = SessionIdOf(run);
+        var files = CliTestRoot.Files(root.Profile);
+        var journal = files.Single(file => file.EndsWith("/" + sessionId + ".jsonl", StringComparison.Ordinal));
+        StringAssert.StartsWith(journal, "sessions/");
+        Assert.IsTrue(files.All(static file => file.StartsWith("sessions/", StringComparison.Ordinal)), "Only sessions: " + string.Join(", ", files));
+        Assert.IsFalse(files.Any(static file => file.EndsWith("alta.sqlite3", StringComparison.Ordinal)), "No application database of the profile.");
+        Assert.IsFalse(File.Exists(Path.Combine(root.Profile, "alta.lock")));
+        Assert.IsFalse(File.Exists(Path.Combine(root.Profile, "config.toml")), "The configuration is not written.");
+        Assert.IsFalse(File.Exists(Path.Combine(root.Profile, "AGENTS.md")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(root.ProjectRoot, ".alta")), "No project state is written.");
+
+        var marker = new SessionMarkerStore(new CatalogOptions { GlobalRoot = root.Profile }).TryRead(sessionId);
+        Assert.IsNotNull(marker, "The new session is announced to Desktop and TUI.");
+        Assert.AreEqual(journal["sessions/".Length..], marker.JournalPath);
+        Assert.AreEqual(SessionLeaseOwner.CliKind, marker.Writer);
+        Assert.AreEqual(0, CliTestRoot.Files(Path.Combine(root.Profile, "sessions", "leases")).Length, "The lease is released.");
+        Assert.AreEqual(0, CliTestRoot.Files(Path.Combine(root.TempRoot, PrivateApplicationDatabase.DefaultFolderName)).Length, "The private database is deleted.");
+    }
+
+    [TestMethod]
+    public async Task Visible_WithTheBuiltInPlugins_WritesOnlySessionsAndCachesUnderTheProfile()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+
+        var run = await root.RunAsync(provider, ["run", "--format", "jsonl", "hello"]);
+
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+        var files = CliTestRoot.Files(root.Profile);
+        var others = files.Where(static file => !file.StartsWith("sessions/", StringComparison.Ordinal) && !file.StartsWith("cache/", StringComparison.Ordinal)
+            && !file.StartsWith("auth/", StringComparison.Ordinal)).ToArray();
+        CollectionAssert.AreEqual(Array.Empty<string>(), others, "Written under the profile: " + string.Join(", ", files));
+        CollectionAssert.IsSubsetOf(new[] { "Git", "MCP", "ACP" }, root.LastPlugins, "The built-in plugins that declare the command-line application: " + string.Join(", ", root.LastPlugins));
+    }
+
+    [TestMethod]
+    public async Task Visible_Resume_ContinuesTheSession_WithoutANewMarker()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        var first = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "hello"]);
+        var sessionId = SessionIdOf(first);
+        var markers = new SessionMarkerStore(new CatalogOptions { GlobalRoot = root.Profile });
+        Assert.IsTrue(markers.Delete(sessionId), "Desktop lists it and deletes the marker.");
+        provider.Turns.Enqueue(FakeProvider.Reply("Again."));
+
+        var second = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "--resume", sessionId, "again"]);
+
+        Assert.AreEqual(CliExitCodes.Completed, second.ExitCode, second.Stderr);
+        var header = JsonDocument.Parse(second.Lines[0]).RootElement.GetProperty("params");
+        Assert.AreEqual(sessionId, header.GetProperty("sessionId").GetString());
+        Assert.IsFalse(header.GetProperty("created").GetBoolean());
+        Assert.AreEqual("Again.", CliRunTests.Result(second).GetProperty("finalMessage").GetString());
+        Assert.IsNull(markers.TryRead(sessionId), "A session that exists is not announced again.");
+    }
+
+    [TestMethod]
+    public async Task Isolated_KeepsTheSessionsInCli_WithoutMarkers()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+
+        var run = await root.RunAsync(provider, ["run", Plain, "--isolated", "--format", "jsonl", "hello"]);
+
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+        Assert.AreEqual("isolated", JsonDocument.Parse(run.Lines[0]).RootElement.GetProperty("params").GetProperty("storage").GetString());
+        var files = CliTestRoot.Files(root.Profile);
+        Assert.IsTrue(files.All(static file => file.StartsWith("cli/sessions/", StringComparison.Ordinal)), string.Join(", ", files));
+        Assert.IsTrue(files.Any(file => file.EndsWith(SessionIdOf(run) + ".jsonl", StringComparison.Ordinal)));
+        Assert.IsFalse(files.Any(static file => file.Contains("/markers/", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task Profile_MustExist_AndHoldsEverything()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        var profile = Path.Combine(root.Root, "profile");
+
+        var missing = await root.RunAsync(provider, ["run", Plain, "--profile", profile, "hello"]);
+        Assert.AreEqual(CliExitCodes.InvalidUsage, missing.ExitCode);
+        StringAssert.Contains(missing.Stderr, "does not exist");
+
+        Directory.CreateDirectory(profile);
+        var run = await root.RunAsync(provider, ["run", Plain, "--profile", profile, "--format", "jsonl", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+        Assert.AreEqual("profile", JsonDocument.Parse(run.Lines[0]).RootElement.GetProperty("params").GetProperty("storage").GetString());
+        Assert.IsTrue(CliTestRoot.Files(profile).Any(file => file.StartsWith("sessions/", StringComparison.Ordinal) && file.EndsWith(SessionIdOf(run) + ".jsonl", StringComparison.Ordinal)));
+        Assert.AreEqual(0, CliTestRoot.Files(root.Profile).Length, "~/.alta is not touched.");
+
+        root.Variables[CliEnvironment.HomeVariable] = profile;
+        var fromVariable = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, fromVariable.ExitCode, fromVariable.Stderr);
+        Assert.IsTrue(CliTestRoot.Files(profile).Any(file => file.EndsWith(SessionIdOf(fromVariable) + ".jsonl", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task Ephemeral_PersistsNothing()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+
+        var run = await root.RunAsync(provider, ["run", Plain, "--ephemeral", "--format", "jsonl", "hello"]);
+
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+        Assert.AreEqual("visible+ephemeral", JsonDocument.Parse(run.Lines[0]).RootElement.GetProperty("params").GetProperty("storage").GetString());
+        Assert.AreEqual(0, CliTestRoot.Files(root.Profile).Length, string.Join(", ", CliTestRoot.Files(root.Profile)));
+        Assert.AreEqual(0, CliTestRoot.Files(root.TempRoot).Length, string.Join(", ", CliTestRoot.Files(root.TempRoot)));
+    }
+
+    [TestMethod]
+    public async Task Config_OverridesApply_AndTheUserFileCanBeIgnored()
+    {
+        using var root = new CliTestRoot();
+        Directory.CreateDirectory(root.Profile);
+        File.WriteAllText(Path.Combine(root.Profile, "config.toml"), "[tools]\ndisabled = [\"grep\"]\n");
+        var provider = new FakeProvider();
+
+        var fromFile = await root.RunAsync(provider, ["run", Plain, "-c", "tools.disabled=[\"grep\", \"list_dir\"]", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, fromFile.ExitCode, fromFile.Stderr);
+        var tools = ToolsOfLastRequest(provider);
+        CollectionAssert.DoesNotContain(tools, "grep");
+        CollectionAssert.DoesNotContain(tools, "list_dir", "-c wins over the file.");
+
+        var ignored = await root.RunAsync(provider, ["run", Plain, "--ignore-user-config", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, ignored.ExitCode, ignored.Stderr);
+        CollectionAssert.Contains(ToolsOfLastRequest(provider), "grep", "The user's file is not read.");
+
+        root.Variables[CodeAltaConfigOverlay.InlineContentVariable] = "[tools]\ndisabled = [\"read_file\"]\n";
+        var inline = await root.RunAsync(provider, ["run", Plain, "--ignore-user-config", "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, inline.ExitCode, inline.Stderr);
+        CollectionAssert.DoesNotContain(ToolsOfLastRequest(provider), "read_file");
+        Assert.AreEqual("[tools]\ndisabled = [\"grep\"]\n", File.ReadAllText(Path.Combine(root.Profile, "config.toml")), "The file is never written.");
+    }
+
+    [TestMethod]
+    public async Task Config_ThatIsInvalidOrUnknownInStrictMode_ExitsWithTwo()
+    {
+        using var root = new CliTestRoot();
+        Directory.CreateDirectory(root.Profile);
+        File.WriteAllText(Path.Combine(root.Profile, "config.toml"), "[[[ not toml");
+        var provider = new FakeProvider();
+
+        var broken = await root.RunAsync(provider, ["run", Plain, "hello"]);
+        Assert.AreEqual(CliExitCodes.InvalidUsage, broken.ExitCode, broken.Stderr);
+        Assert.AreEqual(CliExitCodes.Completed, (await root.RunAsync(provider, ["run", Plain, "--ignore-user-config", "hello"])).ExitCode);
+
+        var strict = await root.RunAsync(provider, ["run", Plain, "--ignore-user-config", "--strict-config", "-c", "no_such_setting=1", "hello"]);
+        Assert.AreEqual(CliExitCodes.InvalidUsage, strict.ExitCode);
+        StringAssert.Contains(strict.Stderr, "no_such_setting");
+        Assert.AreEqual(CliExitCodes.InvalidUsage, (await root.RunAsync(provider, ["run", Plain, "-c", "not an assignment", "hello"])).ExitCode);
+    }
+
+    [TestMethod]
+    public async Task DisableTools_AndNoSkills_ShapeTheTools()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+
+        var skill = Path.Combine(root.Profile, "skills", "zebra-skill");
+        Directory.CreateDirectory(skill);
+        File.WriteAllText(Path.Combine(skill, "SKILL.md"), "---\nname: zebra-skill\ndescription: Paints zebras in stripes.\n---\n\nPaint.\n");
+
+        var listed = await root.RunAsync(provider, ["run", Plain, "hello"]);
+        Assert.AreEqual(CliExitCodes.Completed, listed.ExitCode, listed.Stderr);
+        StringAssert.Contains(PromptOfLastRequest(provider), "zebra-skill", "A skill of the profile is listed by default.");
+
+        var run = await root.RunAsync(provider, ["run", Plain, "--disable-tools", "web,grep", "--no-skills", "hello"]);
+
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+        var tools = ToolsOfLastRequest(provider);
+        CollectionAssert.DoesNotContain(tools, "webget");
+        CollectionAssert.DoesNotContain(tools, "grep");
+        CollectionAssert.Contains(tools, "alta");
+        Assert.IsFalse(PromptOfLastRequest(provider).Contains("zebra-skill", StringComparison.Ordinal), "--no-skills lists no skill.");
+    }
+
+    private static string PromptOfLastRequest(FakeProvider provider)
+        => provider.Requests.Last().SystemMessage + "\n" + provider.Requests.Last().DeveloperInstructions;
+
+    internal static string SessionIdOf(CliRun run)
+        => JsonDocument.Parse(run.Lines[0]).RootElement.GetProperty("params").GetProperty("sessionId").GetString()!;
+
+    private static string[] ToolsOfLastRequest(FakeProvider provider) => [.. provider.Requests.Last().Tools.Select(static tool => tool.Spec.Name)];
+}

@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <PackAsTool>true</PackAsTool>
+    <RootNamespace>CodeAlta.Cli</RootNamespace>
+    <PackageId>CodeAlta.Cli</PackageId>
+    <AssemblyName>altacli</AssemblyName>
+    <ToolCommandName>altacli</ToolCommandName>
+
+    <!-- Enable AOT analyzers -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <RuntimeIdentifiers>linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;win-x64;win-arm64;osx-arm64;osx-x64</RuntimeIdentifiers>
+    <PublishSelfContained>false</PublishSelfContained>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <ApplicationIcon>..\..\img\alta.ico</ApplicationIcon>
+    <Description>CodeAlta CLI: the CodeAlta harness without a window, for scripts, CI jobs, containers and benchmarks. Run a prompt to its end with altacli run, with text or JSONL output and exit codes that tell how it ended.</Description>
+    <PackageTags>agentic;ai;coding-agent;llm;mcp;cli;headless;automation</PackageTags>
+    <PackageReadmeFile>readme.md</PackageReadmeFile>
+    <PackageIcon>CodeAlta.png</PackageIcon>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageProjectUrl>https://github.com/CodeAlta/CodeAlta</PackageProjectUrl>
+    <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../img/CodeAlta.png" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../readme.md" Pack="true" PackagePath="/" />
+    <!-- The user guide of the site, for the agents: they answer questions about CodeAlta from it. Its pages only: the
+         pictures show the windows of the other applications. They are read beside the application: Pack="false" keeps
+         the copies NuGet adds for content files out of the package. -->
+    <Content Include="../../site/docs/**/*.md" Link="content/user-guide/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="XenoAtom.CommandLine" />
+    <PackageReference Include="XenoAtom.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeAlta.Acp\CodeAlta.Acp.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.Copilot\CodeAlta.Agent.Copilot.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.Xai\CodeAlta.Agent.Xai.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.OpenAI\CodeAlta.Agent.OpenAI.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.Anthropic\CodeAlta.Agent.Anthropic.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.GoogleGenAI\CodeAlta.Agent.GoogleGenAI.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.Mistral\CodeAlta.Agent.Mistral.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Hosting\CodeAlta.Hosting.csproj" />
+    <ProjectReference Include="..\CodeAlta.LiveTool\CodeAlta.LiveTool.csproj" />
+    <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
+    <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Acp\CodeAlta.Plugin.Acp.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Git\CodeAlta.Plugin.Git.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Jira\CodeAlta.Plugin.Jira.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Mcp\CodeAlta.Plugin.Mcp.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugins\CodeAlta.Plugins.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Cli.Tests" />
+  </ItemGroup>
+</Project>

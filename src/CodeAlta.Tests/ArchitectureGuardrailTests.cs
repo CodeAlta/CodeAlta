@@ -156,6 +156,27 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void CommandLineApplication_IsReferencedByItsTestsAlone_AndReferencesNoOtherFrontend()
+    {
+        var sourceRoot = GetSourceRoot();
+        var violations = Directory.EnumerateFiles(sourceRoot, "*.csproj", SearchOption.AllDirectories)
+            .Where(static file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) &&
+                !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(static file => Path.GetFileName(file) is not ("CodeAlta.Cli.csproj" or "CodeAlta.Cli.Tests.csproj"))
+            .Where(static file => File.ReadAllText(file).Contains("CodeAlta.Cli.csproj", StringComparison.Ordinal))
+            .Select(file => Path.GetRelativePath(sourceRoot, file).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        CollectionAssert.AreEqual(Array.Empty<string>(), violations);
+
+        var cliProject = File.ReadAllText(Path.Combine(sourceRoot, "CodeAlta.Cli", "CodeAlta.Cli.csproj"));
+        foreach (var frontend in new[] { "CodeAlta.csproj\"", "CodeAlta.Tui.csproj", "CodeAlta.Plugins.Tui.csproj", "XenoAtom.Terminal", "XenoAtom.CommandLine.Terminal", "XenoAtom.Logging.Terminal" })
+        {
+            Assert.IsFalse(cliProject.Contains(frontend, StringComparison.Ordinal), $"CodeAlta.Cli references {frontend}.");
+        }
+    }
+
+    [TestMethod]
     public void Repository_DoesNotReferenceAkkaNetWithoutDecisionRecord()
     {
         var sourceRoot = GetSourceRoot();
