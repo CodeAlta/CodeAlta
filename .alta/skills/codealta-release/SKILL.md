@@ -15,6 +15,34 @@ step 0 fail. A request for a release is permission for the steps of this skill f
 The steps are in order. Do not skip one silently: when a step does not apply (a small release, nothing changed
 in the UI), say so in the report.
 
+## The release script
+
+[`scripts/release.py`](scripts/release.py) does the steps that are the same each time (Python 3, standard library,
+`git` and `gh` on PATH). Run it from the repository; `--help` lists the commands:
+
+```sh
+python .alta/skills/codealta-release/scripts/release.py <command>
+```
+
+| Command | Step |
+| --- | --- |
+| `preflight` | 0: account, branch, clean tree, up to date, last release |
+| `changes --milestone X.Y.Z` | 1: commits by kind, issues, merged pull requests, contributors |
+| `pictures` | 2: pictures the site references that are missing, and unused ones |
+| `links <file>` | 6: every link of the tour answers (heading anchors of the site included) |
+| `push main` / `push X.Y.Z` | 8, 10: push over HTTPS with the credential of `gh` |
+| `ci [main\|X.Y.Z]` | 8, 10: waits for the ci run of the commit and says how it ended |
+| `tag X.Y.Z [--commit <sha>]` | 10: refuses without a green ci run, then tags and pushes |
+| `notes X.Y.Z --tour <file>` | 11: the tour above the generated notes, folded in **All changes** |
+| `site --check <file>` | 11: deploys the website, then checks the site links of the tour |
+| `nuget X.Y.Z` | 12: waits until every package lists the version |
+
+`ci`, `site` and `nuget` wait for minutes: start them with `alta job start`. Improve the script when a release
+needs another step that will come back, rather than writing a one-off script.
+
+Keep the files of a release (the checklist, the tour, the composed notes) in the ignored `tmp/release-X.Y.Z/`:
+CodeAlta clears the scratchpad of its instance when it starts, which can happen during a release.
+
 ## Small and feature releases
 
 - A **feature release** (`X.Y.0`) runs every step below.
@@ -32,31 +60,23 @@ in the UI), say so in the report.
 
 ## 0. Before anything
 
-- `gh api user -q .login` must answer `xoofx`. Anything else: stop, this skill is not for that account.
-- The repository is `C:\code\CodeAlta` (or the owner's checkout): on `main`, nothing uncommitted that is not
-  part of the release (`git status`), up to date with `origin/main`.
+- `release.py preflight` must pass: the `gh` account is `xoofx` (anything else: stop, this skill is not for that
+  account), the checkout (`C:\code\CodeAlta` or the owner's) is on `main`, has nothing uncommitted outside
+  `.alta/`, and is up to date with `origin/main`. It also names the last public release: the range of the release
+  is `<last tag>..main`.
 - Pushes go over HTTPS with the credential of `gh`, without touching the git configuration (SSH has no key in
-  an agent session):
-
-  ```sh
-  git -c credential.helper= -c "credential.helper=!gh auth git-credential" fetch https://github.com/CodeAlta/CodeAlta.git main:refs/remotes/origin/main
-  git -c credential.helper= -c "credential.helper=!gh auth git-credential" push https://github.com/CodeAlta/CodeAlta.git main
-  ```
-
-- Find the last public release: `gh release list --repo CodeAlta/CodeAlta --limit 5` (the one marked
-  `Latest`). The range of the release is `<last tag>..main`.
+  an agent session): `release.py push` does it.
 - Choose the version with the owner's request: a tag is `X.Y.Z`, without `v`. New features give a minor
   version, fixes only give a patch. Nothing in the repository holds the version: the tag is the version.
-- Write the owner's request and this checklist in the scratchpad of the session, and keep it up to date: a
+- Write the owner's request and this checklist in `tmp/release-X.Y.Z/checklist.md`, and keep it up to date: a
   release takes hours and the context may be compacted on the way.
 
 ## 1. Review every change since the last public release
 
-- `git log --oneline <last tag>..main` and `git diff --stat <last tag>..main`. Read the commits by area; read
-  the code of what the subjects do not explain.
-- The milestone of the version: `gh issue list --repo CodeAlta/CodeAlta --milestone <X.Y.Z> --state all`, and
-  the pull requests merged in the range (`gh pr list --state merged --search "merged:>=<date of last tag>"`).
-  Read the comments of the issues: the owner and the reporters add requirements there.
+- `release.py changes --milestone X.Y.Z` lists the commits by kind, the issues they name, the issues of the
+  milestone and the pull requests merged since the last release, with their authors. Read the commits by area
+  (`git diff --stat <last tag>..main`); read the code of what the subjects do not explain, and the comments of
+  the issues: the owner and the reporters add requirements there.
 - Make a list of the features and changes **a user sees**: what is new, what moved or looks different, what
   was fixed. Group the many commits of one feature. Note for each: the issue or PR numbers, the contributors
   (`@login` of a PR author or of an issue reporter that shaped it), the page of the site that describes it,
@@ -84,8 +104,8 @@ The pictures are `site/img/alta-desktop-*.webp`; how to take them is written in
   - every picture that shows a part of the window that changed for everyone (the title bar, the Explorer,
     the prompt, the tabs, Settings navigation, a theme): when such a part changed, retake all the pictures
     that show it, not only the new ones;
-  - list the pictures the site references (`grep -rhoE "alta-desktop-[a-z0-9-]+\.webp" site | sort -u`) and
-    compare with `site/img`: a picture no page uses is removed, a page that needs one gets it.
+  - `release.py pictures` compares the pictures the site references with `site/img`: a picture no page uses is
+    removed, a page that needs one gets it.
 - Captures are taken on the **developer instance** (`alta --dev`, MCP server `codealta-dev`) built from the
   release commit, in the **Dark** theme, at 1600x1000 CSS pixels (2400x1500 pictures), with public projects
   only (a space of public projects), exported as WebP. An isolated profile (`--data-root` ...) starts no
@@ -169,8 +189,9 @@ To @<login> for <their pull requests>, and to @<login> for <the ideas and report
 - Every picture link uses the tag in its URL, so it keeps working when `main` changes; every **More →** link
   goes to a page that the deployed website has (step 11 deploys it).
 - Thank the contributors of the range: PR authors and the people whose issues shaped a feature.
-- Write it in a file outside the repository (the scratchpad) and show it to the owner before step 10 when he
-  is there to read it.
+- Write it in `tmp/release-X.Y.Z/tour.md` and show it to the owner before step 10 when he is there to read it.
+  `release.py links tmp/release-X.Y.Z/tour.md` checks its links; the pictures of the tag answer only once the tag
+  is pushed, and a page that the release adds once the website is deployed.
 
 ## 7. Verify locally
 
@@ -194,9 +215,8 @@ cd ../../../site && lunet build
 
 - Commit the pictures, docs, front page and banner in logical commits (`Update doc ...`, prefixed as `AGENTS.md`
   says). Never commit the scratchpad or `tmp/`.
-- Push `main` (step 0's command) and watch the run of the `ci` workflow until it ends:
-  `gh run list --repo CodeAlta/CodeAlta --branch main --limit 3`, then
-  `gh run watch <id> --repo CodeAlta/CodeAlta --exit-status` started as a background job.
+- `release.py push main`, then `release.py ci main` as a background job: it waits for the run of the `ci`
+  workflow on that commit and says how it ended.
 - The `ci` workflow ignores pushes that only change `doc/`, `site/`, `img/` or `*.md`: then the last run that
   counts is the one of the last code commit. It must be green, on the commit the tag will be on or on its last
   code ancestor.
@@ -210,48 +230,32 @@ once it is empty.
 
 ## 10. Tag
 
-```sh
-git tag -a X.Y.Z -m "X.Y.Z" <commit of the green run>
-git -c credential.helper= -c "credential.helper=!gh auth git-credential" push https://github.com/CodeAlta/CodeAlta.git X.Y.Z
-```
+`release.py tag X.Y.Z` tags `main` (or `--commit <sha>`) and pushes the tag, after checking that the ci run of the
+commit, or of its last code ancestor, is green.
 
 The tag starts the `ci` workflow again, which builds, tests, packs, publishes the NuGet packages and creates the
-GitHub release with the generated notes (dotnet-releaser). Watch it to the end with `gh run watch`; it takes
-about 15 minutes.
+GitHub release with the generated notes (dotnet-releaser). Watch it to the end with `release.py ci X.Y.Z` as a
+background job; it takes 15 to 25 minutes.
 
 ## 11. Release notes and website
 
-- Once the release exists (`gh release view X.Y.Z --repo CodeAlta/CodeAlta`), put the tour above the generated
-  notes and fold those in **All changes**:
-
-  ```sh
-  gh release view X.Y.Z --repo CodeAlta/CodeAlta --json body -q .body > generated.md
-  # write release.md = the tour + "<details><summary>All changes</summary>" + generated.md + "</details>"
-  gh release edit X.Y.Z --repo CodeAlta/CodeAlta --notes-file release.md
-  ```
-
-  Small release: leave the generated notes as they are. Deploy the website only when a doc changed.
-- Deploy the website: run the `site` workflow of the repository of the website
-  (https://github.com/CodeAlta/codealta.github.io/actions/workflows/site.yml):
-
-  ```sh
-  gh workflow run site.yml --repo CodeAlta/codealta.github.io
-  gh run list --repo CodeAlta/codealta.github.io --workflow site.yml --limit 1
-  gh run watch <id> --repo CodeAlta/codealta.github.io --exit-status
-  ```
-
-  Then check that the pages the tour links to answer (`https://codealta.github.io/docs/<page>/`) and that the
-  home page shows the new pictures.
-- Open the release page and check the pictures and links of the tour render.
+- Deploy the website: `release.py site --check tmp/release-X.Y.Z/tour.md` runs the `site` workflow of the
+  repository of the website (https://github.com/CodeAlta/codealta.github.io/actions/workflows/site.yml), waits for
+  it, then checks the pages and headings the tour links to. It does not depend on the release run: start it
+  once the tag is pushed. Look at the home page for the new pictures. Small release: deploy only when a doc
+  changed.
+- Once the release exists, `release.py notes X.Y.Z --tour tmp/release-X.Y.Z/tour.md` puts the tour above the
+  generated notes, folded in **All changes**, and checks every link of the result. Small release: leave the
+  generated notes as they are.
+- Open the release page and check that the pictures and links of the tour render.
 
 ## 12. NuGet packages
 
 The release publishes the tool packages `CodeAlta` and `CodeAlta.Tui` and one package per runtime of each (six
 for the desktop, eight for the TUI with `linux-musl-*`): sixteen in all. They appear one after the other over
-about twenty minutes, the tool packages first. Check each with
-`https://api.nuget.org/v3-flatcontainer/<lowercase id>/index.json` (plain JSON with the versions; it can flicker
-between CDN nodes for a minute) until all sixteen list `X.Y.Z`. Wait with a background job or a reminder, not
-with sleeps.
+about twenty minutes (up to an hour), the tool packages first. `release.py nuget X.Y.Z`, started as a background
+job, waits until each lists `X.Y.Z` on nuget.org; it reads the runtimes from the `<RuntimeIdentifiers>` of the two
+projects, so a runtime added there is checked too.
 
 ## 13. Report
 
