@@ -9,7 +9,8 @@ namespace CodeAlta.Orchestration.Runtime;
 /// longer runs or shows it.
 /// </summary>
 /// <remarks>
-/// A claim on a session another process holds is refused with <see cref="SessionInUseException"/>. Claims are counted in
+/// A claim on a session another process holds is refused with <see cref="SessionInUseException"/>, and a claim whose lease
+/// cannot be taken (the folder cannot be written) with <see cref="SessionLeaseUnavailableException"/>. Claims are counted in
 /// memory under one lock; the lease itself is an open handle the operating system releases when the process ends.
 /// </remarks>
 internal sealed class SessionLeaseRegistry : IDisposable
@@ -64,6 +65,7 @@ internal sealed class SessionLeaseRegistry : IDisposable
 
     /// <summary>Claims a session for its attachment; repeated claims count once.</summary>
     /// <exception cref="SessionInUseException">Another process holds the session.</exception>
+    /// <exception cref="SessionLeaseUnavailableException">The lease cannot be taken.</exception>
     internal void ClaimEntry(string sessionId)
     {
         lock (_gate)
@@ -87,6 +89,7 @@ internal sealed class SessionLeaseRegistry : IDisposable
     /// <summary>Holds a session until the returned handle is disposed.</summary>
     /// <returns>The handle; disposing it more than once releases once.</returns>
     /// <exception cref="SessionInUseException">Another process holds the session.</exception>
+    /// <exception cref="SessionLeaseUnavailableException">The lease cannot be taken.</exception>
     internal IDisposable Hold(string sessionId)
     {
         lock (_gate)
@@ -122,8 +125,9 @@ internal sealed class SessionLeaseRegistry : IDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // A folder that cannot be written takes no lease, as a host without leases: the session runs.
-            return null;
+            // Fails closed: a lease that cannot be taken would let another process write the session too, while its journal
+            // stays writable here.
+            throw new SessionLeaseUnavailableException(sessionId, exception);
         }
 
         if (lease is null)

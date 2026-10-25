@@ -63,6 +63,7 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">The driver is disposed.</exception>
     /// <exception cref="OperationCanceledException">The opening was canceled.</exception>
+    /// <exception cref="SessionLeaseUnavailableException">The host takes leases and the lease of the session cannot be taken.</exception>
     public async Task<HeadlessSessionOpenResult> OpenAsync(HeadlessSessionRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);

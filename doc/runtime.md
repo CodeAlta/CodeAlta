@@ -329,7 +329,9 @@ its own database. Two rules keep one writer per session across processes:
   released when the process ends) from the moment it attaches it (`SessionLeaseRegistry`: the attachment, the holds of
   a frontend that shows it or of a headless driver that opened it, and the hold of a change being written). A session
   another process holds is neither attached nor changed: `SessionInUseException`, or the status `session_in_use` of
-  the commands that report one; a fork, which writes a new session, is allowed. The lease goes when the attachment goes
+  the commands that report one; a fork, which writes a new session, is allowed. Leases fail closed: a lease that cannot
+  be taken (the folder cannot be written) refuses the attachment and the change too (`SessionLeaseUnavailableException`),
+  since the journal alone would still be writable. The lease goes when the attachment goes
   for good (after its retirement) and no hold is left. A frontend says what it shows (`SetShownSessions`); from then
   on a session it does not show is detached once it has had nothing to do for a while (no run, queue, job, background
   task, pending agent prompt or remote control), so a closed tab lets another process continue the session.

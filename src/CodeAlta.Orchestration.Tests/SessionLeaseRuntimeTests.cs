@@ -88,6 +88,43 @@ public sealed class SessionLeaseRuntimeTests
     }
 
     [TestMethod]
+    public async Task ALeaseThatCannotBeTaken_RefusesTheAttachmentAndTheChanges_WhileTheJournalStaysWritable()
+    {
+        await using var root = new HeadlessTestRoot();
+        var provider = new ScriptedTurnProvider();
+        var host = await root.CreateHostAsync(provider, readOnlyGlobalState: true, sessionLeaseOwner: SessionLeaseOwner.CliKind);
+        var runtime = host.RuntimeService;
+        var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
+        var session = await runtime.CreateProjectSessionAsync(host.CurrentProject, options, "Unusable leases");
+        await runtime.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("first") });
+        await runtime.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
+        Assert.IsTrue(await runtime.DetachRuntimeSessionAsync(session.SessionId));
+        var journal = Directory.EnumerateFiles(Path.Combine(host.CatalogOptions.StateRoot, "sessions"), session.SessionId + ".jsonl", SearchOption.AllDirectories).Single();
+
+        // The folder of the leases becomes a file: no lease can be taken there, and the journals stay writable.
+        var leasesRoot = host.CatalogOptions.SessionLeasesRoot;
+        if (Directory.Exists(leasesRoot)) Directory.Delete(leasesRoot, recursive: true);
+        await File.WriteAllTextAsync(leasesRoot, "not a folder");
+        using (new FileStream(journal, FileMode.Open, FileAccess.Write, FileShare.ReadWrite)) { }
+        var before = new FileInfo(journal).Length;
+
+        var hold = Assert.ThrowsExactly<SessionLeaseUnavailableException>(() => runtime.HoldSession(session.SessionId));
+        StringAssert.StartsWith(hold.Message, $"The lease of session '{session.SessionId}' cannot be taken: ");
+        Assert.AreEqual(session.SessionId, hold.SessionId);
+        await Assert.ThrowsExactlyAsync<SessionLeaseUnavailableException>(() => runtime.UpdateNotesAsync(session.SessionId, "notes", AgentNotesUpdateKind.Set, static _ => { }));
+        await Assert.ThrowsExactlyAsync<SessionLeaseUnavailableException>(() => runtime.SetSessionTitleAsync(session.SessionId, "Renamed", changeMode: false, mode: null));
+        await Assert.ThrowsExactlyAsync<SessionLeaseUnavailableException>(() => runtime.QueuePromptAsync(session, "later", "send", submittedBy: null));
+        await Assert.ThrowsExactlyAsync<SessionLeaseUnavailableException>(() => runtime.DeliverHostPromptAsync(session.SessionId, "a job ended", "job"));
+        var send = await Assert.ThrowsAsync<Exception>(() => runtime.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("refused") }));
+        Assert.IsTrue(Contains<SessionLeaseUnavailableException>(send), $"The send fails on the lease: {send}");
+        Assert.IsNull(SessionRuntimeService.FindSessionInUse(send), "Nobody is known to hold the session.");
+
+        Assert.AreEqual(1, provider.RequestsOf(session.SessionId).Length, "Nothing ran without the lease.");
+        Assert.AreEqual(before, new FileInfo(journal).Length, "Nothing was written without the lease.");
+        Assert.IsEmpty(runtime.GetHeldSessionLeases());
+    }
+
+    [TestMethod]
     public async Task ShownSessions_HoldTheirLeases_AndAnIdleSessionNobodyShows_IsReleased()
     {
         await using var root = new HeadlessTestRoot();
@@ -135,6 +172,18 @@ public sealed class SessionLeaseRuntimeTests
         Assert.IsFalse(host.RuntimeService.TakesSessionLeases);
         Assert.IsNull(new SessionLeaseStore(host.CatalogOptions).TryReadHolder(session.SessionId));
         using (host.RuntimeService.HoldSession(session.SessionId)) { }
+    }
+
+    private static bool Contains<T>(Exception? exception) where T : Exception
+    {
+        for (var depth = 0; exception is not null && depth < 8; depth++)
+        {
+            if (exception is T) return true;
+            if (exception is AggregateException aggregate) return aggregate.InnerExceptions.Any(Contains<T>);
+            exception = exception.InnerException;
+        }
+
+        return false;
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)

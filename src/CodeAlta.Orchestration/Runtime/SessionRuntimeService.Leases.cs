@@ -80,6 +80,7 @@ public sealed partial class SessionRuntimeService
     /// <returns>The handle; a handle that holds nothing for a runtime that takes no leases.</returns>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
     /// <exception cref="SessionInUseException">Another process holds the session.</exception>
+    /// <exception cref="SessionLeaseUnavailableException">The lease cannot be taken: the folder of the leases cannot be written.</exception>
     public IDisposable HoldSession(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -142,6 +143,10 @@ public sealed partial class SessionRuntimeService
             {
                 // Shown as used elsewhere; taken when it is released.
             }
+            catch (SessionLeaseUnavailableException)
+            {
+                // Taken at a later retry; meanwhile its attachment and its changes are refused all the same.
+            }
         }
     }
 
@@ -150,12 +155,13 @@ public sealed partial class SessionRuntimeService
         lock (_shownGate) return _shown.ContainsKey(sessionId);
     }
 
-    // Holds a session while a change is written to it: a session another process runs is not changed.
-    // Throws SessionInUseException.
+    // Holds a session while a change is written to it: a session another process runs is not changed, nor one whose lease
+    // cannot be taken. Throws SessionInUseException, SessionLeaseUnavailableException.
     private IDisposable HoldForWrite(string sessionId)
         => Leases is null || string.IsNullOrWhiteSpace(sessionId) ? NoLease.Instance : Leases.Hold(sessionId.Trim());
 
-    // Holds a session while a change that reports a status is written to it; false when another process holds it.
+    // Holds a session while a change that reports a status is written to it; false when another process holds it. A lease
+    // that cannot be taken throws SessionLeaseUnavailableException.
     private bool TryHoldForWrite(string sessionId, out IDisposable lease)
     {
         try
@@ -174,7 +180,8 @@ public sealed partial class SessionRuntimeService
     private string? RefuseIfHeldElsewhere(string sessionId)
         => Leases?.HeldElsewhere(sessionId) is not null ? "session_in_use" : null;
 
-    // The attachment of a session claims its lease before anything is written for it. Throws SessionInUseException.
+    // The attachment of a session claims its lease before anything is written for it. Throws SessionInUseException,
+    // SessionLeaseUnavailableException.
     private void ClaimEntryLease(string sessionId) => Leases?.ClaimEntry(sessionId);
 
     // Called where an attachment goes away for good (not where it is replaced).
