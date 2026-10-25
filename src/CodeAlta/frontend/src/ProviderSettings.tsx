@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
 import { globalConfig, modelCatalog, providerLogin, providerUsage, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogCapability, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
@@ -26,9 +26,13 @@ import { PluginProviderFields } from "./pluginProviders/PluginProviderFields";
 import { PluginProviderPanel } from "./pluginProviders/PluginProviderPanel";
 import { ProviderCatalogDialog } from "./pluginProviders/ProviderCatalogDialog";
 import { pluginFieldsProblem, pluginSettingValues, pluginType } from "./pluginProviders/pluginProviderForm";
+import { groupProviders, isFavoriteProvider, orderProviders, persistProviderListPreferences, providerListKey, renameFavoriteProvider, restoreProviderListPreferences,
+  setFavoriteProvider, type ProviderGroupKind, type ProviderListPreferences } from "./providerListOrder";
+import type { MessageKey } from "./localization";
 
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 const newProvider = "\u0000new";
+const groupTitles: Readonly<Record<ProviderGroupKind, MessageKey>> = { favorites: "Favorites", enabled: "Enabled", disabled: "Disabled", others: "Other providers" };
 
 // A text field that can be left to its default: blank shows the default as its placeholder with a "Default"
 // tag, and an overridden value has a button that goes back to it. `unset` says what a blank field without a
@@ -96,6 +100,15 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   // After a save, select the saved provider once the refreshed listing arrives.
   const selectAfterLoad = useRef<string | null>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  // The order of the list: the favorite providers first, and the enabled ones before the disabled ones.
+  const [listPreferences, setListPreferences] = useState(() => restoreProviderListPreferences(() => localStorage.getItem(providerListKey)));
+  const listOrder = useRef(listPreferences);
+  function changeList(change: (current: ProviderListPreferences) => ProviderListPreferences) {
+    const next = change(listOrder.current);
+    if (next === listOrder.current) return;
+    listOrder.current = next; setListPreferences(next);
+    persistProviderListPreferences(value => localStorage.setItem(providerListKey, value), next);
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -113,7 +126,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
       const wanted = selectAfterLoad.current; selectAfterLoad.current = null;
       setSelected(current => {
         const key = wanted ?? current;
-        const next = key && key !== newProvider && value.providers.some(provider => provider.key === key) ? key : value.providers[0]?.key ?? null;
+        const next = key && key !== newProvider && value.providers.some(provider => provider.key === key) ? key : orderProviders(value.providers, listOrder.current)[0]?.key ?? null;
         setForm(next ? providerForm(value.providers.find(provider => provider.key === next)!, value.defaultProvider, value.providerTypes) : null);
         return next;
       });
@@ -123,6 +136,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   }, [config, readRuntime, epoch, generation]);
 
   const providers = listing?.providers ?? [];
+  const groups = groupProviders(providers, listPreferences);
   const pluginTypes = listing?.pluginTypes ?? [];
   const catalogs = pluginTypes.filter(type => type.hasCatalog);
   // Once the providers are listed, and only the first time nothing is enabled.
@@ -173,13 +187,13 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   const automaticLogo = logoSource && providerBrand(logoSource);
   const shownLogo = logoSource && providerBrand({ ...logoSource, icon: form!.icon, color: form!.color });
 
-  async function settle(run: () => Promise<{ status: string; message: string | null; providersApplied: number }>, select: string | null) {
+  async function settle(run: () => Promise<{ status: string; message: string | null; providersApplied: number }>, select: string | null, saved?: () => void) {
     setBusy(true); setNotice(null); setDiagnostic(null);
     try {
       const result = await run();
       if (!alive.current) return;
       setNotice(configSaveNotice(result, true)); setDiagnostic(result.message);
-      if (result.status === "ok" || result.status === "apply_failed") { selectAfterLoad.current = select; setGeneration(value => value + 1); onApplied?.(); }
+      if (result.status === "ok" || result.status === "apply_failed") { saved?.(); selectAfterLoad.current = select; setGeneration(value => value + 1); onApplied?.(); }
     } catch {
       if (alive.current) setNotice({ key: "The save did not complete; reload to see what is on disk.", intent: "danger" });
     } finally { if (alive.current) setBusy(false); }
@@ -191,18 +205,20 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   function save() {
     if (!form || !listing || problem || busy) return;
     setConfirmFolder(false);
+    // A favorite given another key stays a favorite.
+    const renamed = (key: string | null) => () => { if (original && key) changeList(current => renameFavoriteProvider(current, original.key, key)); };
     if (formPlugin) {
       const optional = (value: string) => value.trim() ? value.trim() : null;
       const key = form.key.trim().toLowerCase();
       void settle(() => plugins.savePluginProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null, key, type: form.type,
         enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model), reasoningEffort: optional(form.reasoningEffort),
         values: pluginSettingValues(formPlugin, form.plugin), makeDefault: form.makeDefault, icon: optional(form.icon)?.toLowerCase() ?? null,
-        color: optional(form.color), permissionMode: optional(form.permissionMode) }, { timeoutMilliseconds: 60000 }), key);
+        color: optional(form.color), permissionMode: optional(form.permissionMode) }, { timeoutMilliseconds: 60000 }), key, renamed(key));
       return;
     }
     const wire = providerEdit(form);
     void settle(() => config.saveProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null,
-      provider: wire, makeDefault: form.makeDefault, applyProviders: true }, { timeoutMilliseconds: 60000 }), wire.key);
+      provider: wire, makeDefault: form.makeDefault, applyProviders: true }, { timeoutMilliseconds: 60000 }), wire.key, renamed(wire.key));
   }
   // A provider CodeAlta knows: it is added as CodeAlta ships it, and shown so that its credential can be given.
   function addBuiltIn(key: string) {
@@ -224,8 +240,9 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   function remove() {
     if (!original || !listing || busy) return;
     setConfirmRemove(false);
-    void settle(() => config.deleteProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, key: original.key, applyProviders: true },
-      { timeoutMilliseconds: 60000 }), null);
+    const key = original.key;
+    void settle(() => config.deleteProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, key, applyProviders: true },
+      { timeoutMilliseconds: 60000 }), null, () => changeList(current => setFavoriteProvider(current, key, false)));
   }
   async function test() {
     if (!original || probing || dirty) return;
@@ -296,8 +313,15 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
     {!listing ? <NonIdealState icon={loading ? <ActivitySpinner size={28} /> : <AppIcon name="model" size={36} />}
         title={t(loading ? "Loading configured providers." : "Provider configuration unavailable")} />
       : <div className="provider-settings-layout">
+        <div className="provider-settings-column">
+        {providers.length > 1 && <Switch className="provider-settings-order" checked={listPreferences.enabledFirst} label={t("Enabled providers first")}
+          onChange={event => { const enabledFirst = event.currentTarget.checked; changeList(current => ({ ...current, enabledFirst })); }} />}
         <CardList compact className="provider-settings-list" aria-label={t("Configured providers")}>
-          {providers.map(provider => { const state = status(provider.key, provider.enabled); return <Card key={provider.key} interactive selected={selected === provider.key}
+          {groups.map(group => <Fragment key={group.kind}>
+          {/* A title only where there is more than one group: a list of enabled providers alone needs none. */}
+          {groups.length > 1 && <div className="provider-settings-group" role="presentation">{group.kind === "favorites" && <AppIcon name="star" size={11} />}<span>{t(groupTitles[group.kind])}</span></div>}
+          {group.providers.map(provider => { const state = status(provider.key, provider.enabled); const favorite = isFavoriteProvider(listPreferences, provider.key);
+            return <Card key={provider.key} interactive selected={selected === provider.key}
             data-provider-key={provider.key} aria-current={selected === provider.key ? "true" : undefined} onClick={() => choose(provider.key)}>
             <span className="provider-settings-logo"><ProviderIcon providerKey={provider.key} size={20} fallback="model"
               known={{ type: provider.type, name: provider.effectiveName, apiUrl: provider.effectiveApiUrl, icon: provider.icon, color: provider.color, iconData: provider.plugin?.iconData }} /></span>
@@ -305,14 +329,20 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             <span className="provider-settings-tags">{provider.key === (listing.startingProvider ?? listing.defaultProvider) && <Tag minimal round intent="primary" title={t("New sessions start with this provider.")}>{t("Default")}</Tag>}
               {provider.plugin?.tag && <Tag minimal round className="provider-plugin-tag">{provider.plugin.tag}</Tag>}
               <Tag minimal round intent={state.intent}>{state.label}</Tag></span>
+            {/* A favorite is a preference of this window: it saves nothing, so it is never blocked by a save. */}
+            <Button variant="minimal" size="small" className="provider-settings-favorite" data-on={favorite} aria-pressed={favorite} icon={<AppIcon name="star" size={14} />}
+              aria-label={t(favorite ? "Remove {name} from favorites" : "Add {name} to favorites", { name: provider.effectiveName })}
+              title={t(favorite ? "Remove from favorites" : "Add to favorites")}
+              onClick={event => { event.stopPropagation(); changeList(current => setFavoriteProvider(current, provider.key, !favorite)); }} />
             {/* The spaces go on a row of their own: however many there are, they never take the room of the name. */}
             {spaceScope && <span className="provider-settings-spaces">
               <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={provider.key} name={provider.effectiveName} disabled={busy} /></span>}
-          </Card>; })}
+          </Card>; })}</Fragment>)}
           {selected === newProvider && <Card interactive selected><span className="provider-settings-logo">{shownLogo && <Logo brand={shownLogo} size={20} fallback="model" />}</span><span className="provider-settings-name"><strong>{form?.displayName || t("New provider")}</strong>
             <small>{form?.key || "…"} · {form?.type}</small></span><Tag minimal round intent="warning">{t("Unsaved changes")}</Tag></Card>}
           {providers.length === 0 && selected !== newProvider && <Card><span className="bp6-text-muted">{t("No providers are configured yet.")}</span></Card>}
         </CardList>
+        </div>
         {form && <Section className="provider-settings-form" icon={shownLogo ? <Logo brand={shownLogo} size={20} fallback="model" /> : undefined} title={original ? original.effectiveName : t("New provider")}
           subtitle={original ? `${original.key} · ${original.type}` : t("Not saved yet")}
           rightElement={<Switch checked={form.enabled} disabled={busy} label={t("Enabled")} alignIndicator="end"

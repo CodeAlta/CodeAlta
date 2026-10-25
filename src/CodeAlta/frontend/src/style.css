@@ -1182,8 +1182,23 @@ dialog::backdrop { background: var(--scrim); }
 .provider-settings-layout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
 /* A provider is its logo, its name and its tags on a first row, and its spaces on a row of their own under the name:
    the name is always read whole, whatever the number of tags and of spaces. */
+.provider-settings-column { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.provider-settings-order.bp6-control { align-self: flex-end; margin: 0; color: var(--muted); font-size: 12px; }
 .provider-settings-list.bp6-card-list > .bp6-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; }
 .provider-settings-list.bp6-card-list > .bp6-card > .bp6-text-muted { grid-column: 1 / -1; }
+/* The providers have a star after their tags; the other lists of this look (pull requests) do not. */
+.provider-settings-column > .provider-settings-list.bp6-card-list > .bp6-card { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+/* The groups of the list: the favorites, then the enabled and the disabled providers. */
+.provider-settings-group { display: flex; align-items: center; gap: 5px; padding: 8px 12px 4px; color: var(--muted);
+  font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; user-select: none; }
+.provider-settings-group:not(:first-child) { border-top: 1px solid var(--line); }
+.provider-settings-group > svg { color: #e0a83a; fill: currentColor; }
+/* The star of a row keeps its room, shown on a favorite and on the row in use. */
+.provider-settings-favorite.bp6-button { margin-inline-start: -6px; color: var(--muted); opacity: 0; }
+.provider-settings-list .bp6-card:hover .provider-settings-favorite, .provider-settings-list .bp6-card:focus-within .provider-settings-favorite,
+.provider-settings-list .bp6-card[aria-current] .provider-settings-favorite, .provider-settings-favorite[data-on="true"].bp6-button { opacity: 1; }
+.provider-settings-favorite[data-on="true"].bp6-button, .provider-settings-favorite[data-on="true"].bp6-button:hover { color: #e0a83a; }
+.provider-settings-favorite[data-on="true"] svg { fill: currentColor; }
 .provider-settings-list .provider-settings-logo { margin-inline-end: 0; }
 .provider-settings-name { display: grid; gap: 2px; min-width: 0; }
 .provider-settings-spaces { grid-column: 2 / -1; display: flex; min-width: 0; }

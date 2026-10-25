@@ -21,6 +21,8 @@ A model provider is an account CodeAlta sends requests to: its credentials, its 
 
 Both apps edit the same `~/.alta/config.toml` and share the same credentials: a provider set up or signed in from one app is ready in the other.
 
+In CodeAlta Desktop, the list shows the enabled providers first, then the disabled ones; turn off **Enabled providers first** above the list to keep the order of the file. The star of a row makes a provider a favorite: the favorites come before all the others.
+
 To set up a provider:
 
 1. Select it, or add it with **Add provider**.

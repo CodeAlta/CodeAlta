@@ -83,6 +83,25 @@ test("the question of a removal closes once answered and when another provider i
   }, options);
 });
 
+test("a favorite provider comes first, and the enabled providers before the disabled ones", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const order = `[...document.querySelectorAll('.provider-settings-list [data-provider-key]')].map(card => card.dataset.providerKey).join()`;
+    const titles = `[...document.querySelectorAll('.provider-settings-group')].map(title => title.textContent).join()`;
+    await page.until(`${order} === 'claude-code,claude-tools'`, "the order of the configuration");
+    assert.equal(await page.evaluate(titles), "", "one group needs no title");
+    await page.click('[aria-label="Add Claude Tools to favorites"]');
+    await page.until(`${order} === 'claude-tools,claude-code'`, "the favorite first");
+    assert.equal(await page.evaluate(titles), "Favorites,Enabled");
+    assert.equal(await page.evaluate(`document.querySelector('[data-provider-key="claude-code"]').getAttribute('aria-current')`), "true", "the star selects no row");
+    assert.deepEqual(await page.evaluate(`JSON.parse(localStorage.getItem('codealta.desktop.providerList.v1'))`), { enabledFirst: true, favorites: ["claude-tools"] });
+    // Without the option, the others keep the order of the configuration under a title of their own.
+    await page.clickText('.provider-settings-order', 'Enabled providers first');
+    await page.until(`${titles} === 'Favorites,Other providers'`, "the others");
+    await page.click('[aria-label="Remove Claude Tools from favorites"]');
+    await page.until(`${order} === 'claude-code,claude-tools' && ${titles} === ''`, "the order of the configuration again");
+  }, options);
+});
+
 test("changing the folder of a provider that has sessions asks first, and Duplicate adds another account", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#provider-config-dir')`, "the form");

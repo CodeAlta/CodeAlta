@@ -2282,6 +2282,8 @@ export const messages = dictionary({
   "Remove from favorites": ["Quitar de favoritos", "Retirer des favoris", "Aus Favoriten entfernen", "お気に入りから削除", "从收藏中移除"],
   "Add {name} to favorites": ["Añadir {name} a favoritos", "Ajouter {name} aux favoris", "{name} zu Favoriten hinzufügen", "{name} をお気に入りに追加", "将 {name} 添加到收藏"],
   "Remove {name} from favorites": ["Quitar {name} de favoritos", "Retirer {name} des favoris", "{name} aus Favoriten entfernen", "{name} をお気に入りから削除", "将 {name} 从收藏中移除"],
+  "Other providers": ["Otros proveedores", "Autres fournisseurs", "Weitere Anbieter", "その他のプロバイダー", "其他提供商"],
+  "Enabled providers first": ["Proveedores habilitados primero", "Fournisseurs activés en premier", "Aktivierte Anbieter zuerst", "有効なプロバイダーを先頭に", "已启用的提供商优先"],
   "Collapse all": ["Contraer todo", "Tout réduire", "Alle zuklappen", "すべて折りたたむ", "全部折叠"],
   "Search": ["Buscar", "Rechercher", "Suchen", "検索", "搜索"],
   "Worktrees": ["Worktrees", "Worktrees", "Worktrees", "ワークツリー", "工作树"],
