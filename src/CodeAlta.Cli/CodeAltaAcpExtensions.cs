@@ -4,7 +4,7 @@ namespace CodeAlta.Cli;
 /// What CodeAlta adds to the Agent Client Protocol, by its extensibility rules: custom notifications whose methods start
 /// with <c>_codealta/</c> for what ACP has no update for, and the <see cref="MetaKey"/> object in the <c>_meta</c> of the
 /// standard types for small extras. Clients ignore the notifications they do not know. <c>altacli run --format jsonl</c>
-/// writes them, and <c>altacli acp</c> sends them and advertises <see cref="Methods"/> in <c>agentCapabilities._meta</c>.
+/// writes them, and <c>altacli acp</c> sends them and advertises <see cref="AcpMethods"/> in <c>agentCapabilities._meta</c>.
 /// </summary>
 /// <remarks>Every notification names the session it is about in <c>sessionId</c>.</remarks>
 internal static class CodeAltaAcpExtensions
@@ -45,4 +45,11 @@ internal static class CodeAltaAcpExtensions
     /// <summary>Gets every method of the extensions, for a capability object.</summary>
     public static IReadOnlyList<string> Methods { get; } =
         [SessionMethod, ResultMethod, SessionStartedMethod, CompactionMethod, RetryMethod, FallbackMethod, ErrorMethod];
+
+    /// <summary>
+    /// Gets the methods <c>altacli acp</c> sends, which it advertises in <c>agentCapabilities._meta.codealta.notifications</c>:
+    /// those of the events of a run. The header and the result are the lines of JSONL only: an ACP client has the responses
+    /// of <c>session/new</c> and <c>session/prompt</c> for them.
+    /// </summary>
+    public static IReadOnlyList<string> AcpMethods { get; } = [SessionStartedMethod, CompactionMethod, RetryMethod, FallbackMethod, ErrorMethod];
 }

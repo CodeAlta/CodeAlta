@@ -139,15 +139,7 @@ internal sealed class CliJsonlWriter : IAcpEventSink
             writer.WritePropertyName("usage");
             if (report.Usage is { } usage)
             {
-                JsonSerializer.Serialize(writer, new Usage
-                {
-                    InputTokens = (ulong)Math.Max(0, usage.InputTokens),
-                    OutputTokens = (ulong)Math.Max(0, usage.OutputTokens),
-                    TotalTokens = (ulong)Math.Max(0, usage.TotalTokens),
-                    CachedReadTokens = (ulong)Math.Max(0, usage.CachedInputTokens),
-                    CachedWriteTokens = (ulong)Math.Max(0, usage.CacheWriteTokens),
-                    ThoughtTokens = (ulong)Math.Max(0, usage.ReasoningTokens),
-                }, _usageInfo);
+                JsonSerializer.Serialize(writer, ToUsage(usage), _usageInfo);
             }
             else
             {
@@ -169,6 +161,21 @@ internal sealed class CliJsonlWriter : IAcpEventSink
             writer.WriteEndObject();
         });
         Volatile.Write(ref _closed, 1);
+    }
+
+    /// <summary>The tokens of a run in the shape of ACP's <see cref="Usage"/>.</summary>
+    internal static Usage ToUsage(SessionUsageTotals usage)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+        return new Usage
+        {
+            InputTokens = (ulong)Math.Max(0, usage.InputTokens),
+            OutputTokens = (ulong)Math.Max(0, usage.OutputTokens),
+            TotalTokens = (ulong)Math.Max(0, usage.TotalTokens),
+            CachedReadTokens = (ulong)Math.Max(0, usage.CachedInputTokens),
+            CachedWriteTokens = (ulong)Math.Max(0, usage.CacheWriteTokens),
+            ThoughtTokens = (ulong)Math.Max(0, usage.ReasoningTokens),
+        };
     }
 
     // One notification, one line; nothing after the result.

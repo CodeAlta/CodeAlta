@@ -74,6 +74,20 @@ internal sealed class CliRunOptions : CliCommonOptions
     public List<string> DisableTools { get; } = [];
 }
 
+/// <summary>The options of <c>altacli acp</c>: the common ones, and what its new sessions start with.</summary>
+internal sealed class CliAcpOptions : CliCommonOptions
+{
+    public string? Model { get; set; }
+
+    public string? Tier { get; set; }
+
+    public string? Reasoning { get; set; }
+
+    public string? PromptId { get; set; }
+
+    public List<string> DisableTools { get; } = [];
+}
+
 /// <summary>The options of <c>altacli models</c> and <c>altacli auth check</c>.</summary>
 internal sealed class CliProviderOptions : CliCommonOptions
 {

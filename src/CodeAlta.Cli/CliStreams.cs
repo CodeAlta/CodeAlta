@@ -16,6 +16,12 @@ internal sealed class CliStreams
     /// <summary>Gets whether standard input is redirected (a pipe or a file), rather than a terminal.</summary>
     public bool IsStdinRedirected { get; init; }
 
+    /// <summary>
+    /// Gets standard input as bytes, for <c>altacli acp</c>, which reads the messages of its client there; null when the run
+    /// has none. Only one of it and <see cref="Stdin"/> is read by a run.
+    /// </summary>
+    public Stream? StdinStream { get; init; }
+
     /// <summary>Gets standard output, written in UTF-8 by <see cref="CliOutput"/> only.</summary>
     public required Stream Stdout { get; init; }
 
@@ -31,11 +37,13 @@ internal sealed class CliStreams
     {
         var stdout = Console.OpenStandardOutput();
         var stderr = new StreamWriter(Console.OpenStandardError(), Utf8) { AutoFlush = true };
-        var stdin = new StreamReader(Console.OpenStandardInput(), Utf8, detectEncodingFromByteOrderMarks: true);
+        var input = Console.OpenStandardInput();
+        var stdin = new StreamReader(input, Utf8, detectEncodingFromByteOrderMarks: true);
         return new CliStreams
         {
             Stdin = stdin,
             IsStdinRedirected = Console.IsInputRedirected,
+            StdinStream = input,
             Stdout = stdout,
             Stderr = TakeOverConsole(stderr),
         };

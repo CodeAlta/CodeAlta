@@ -18,14 +18,19 @@ internal delegate Task<AgentTurnResponse> FakeTurn(AgentTurnRequest request, Fun
 /// </summary>
 internal sealed class FakeProvider
 {
-    internal FakeProvider(string id = "fake", string model = "fake-model", ModelProviderAvailability availability = ModelProviderAvailability.Ready)
+    internal FakeProvider(string id = "fake", string model = "fake-model", ModelProviderAvailability availability = ModelProviderAvailability.Ready,
+        IReadOnlyList<AgentModelInfo>? models = null)
     {
         Model = model;
         Availability = availability;
+        Models = models ?? [new AgentModelInfo(model, DisplayName: "Fake Model")];
         Descriptor = new ModelProviderDescriptor(new ModelProviderId(id), "Fake " + id) { DefaultModelId = model };
     }
 
     internal string Model { get; }
+
+    /// <summary>Gets the models the provider lists when it is ready, the default one first.</summary>
+    internal IReadOnlyList<AgentModelInfo> Models { get; }
     internal ModelProviderAvailability Availability { get; }
     internal ModelProviderDescriptor Descriptor { get; }
     internal ConcurrentQueue<FakeTurn> Turns { get; } = new();
@@ -50,7 +55,12 @@ internal sealed class FakeProvider
         var half = text.Length / 2;
         await onUpdate(new AgentTurnDelta { Kind = AgentContentKind.Assistant, ContentId = "answer-1", Text = text[..half] }, cancellationToken);
         await onUpdate(new AgentTurnDelta { Kind = AgentContentKind.Assistant, ContentId = "answer-1", Text = text[half..] }, cancellationToken);
-        return Answer(text);
+        var answer = Answer(text);
+        // The reasoning streamed is part of the answer, as a provider gives it.
+        return reasoning is null ? answer : answer with
+        {
+            AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Reasoning(reasoning), .. answer.AssistantMessage.Parts]),
+        };
     };
 
     internal static FakeTurn CallTool(string name, string argumentsJson, string callId = "call-1") => (_, _, _) =>
@@ -112,7 +122,7 @@ internal sealed class FakeProvider
             {
                 ProviderId = owner.Descriptor.ProviderId,
                 Availability = owner.Availability,
-                Models = owner.Availability == ModelProviderAvailability.Ready ? [new AgentModelInfo(owner.Model, DisplayName: "Fake Model")] : [],
+                Models = owner.Availability == ModelProviderAvailability.Ready ? owner.Models : [],
                 SelectedModelId = owner.Model,
                 StatusMessage = owner.Availability == ModelProviderAvailability.Ready ? null : "Sign in first.",
             });

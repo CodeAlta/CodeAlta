@@ -28,7 +28,8 @@ internal interface IAcpEventSink
 /// session it belongs to, a session the root started included:
 /// </para>
 /// <list type="bullet">
-/// <item><c>agent_message_chunk</c> and <c>agent_thought_chunk</c> for the deltas of the answer and of the reasoning;</item>
+/// <item><c>agent_message_chunk</c> and <c>agent_thought_chunk</c> for the deltas of the answer and of the reasoning, or
+/// for the whole text when the provider streamed none;</item>
 /// <item><c>tool_call</c> when a tool call starts (kind, title, locations, raw input, and in <c>_meta.codealta</c> the name
 /// of the CodeAlta tool and the run), <c>tool_call_update</c> when it ends (status) and when its output is known (a bounded
 /// text, a diff);</item>
@@ -51,6 +52,10 @@ internal sealed class AcpEventProjector
     // The sessions seen, and the tool calls announced, by session and call.
     private readonly HashSet<string> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<(string Session, string Call)> _tools = [];
+    // The texts streamed since the last completed one, by session and channel (answer or thought), and the contents they
+    // were streamed for: a completed text whose deltas were streamed is not sent again, one that had none is sent whole.
+    private readonly HashSet<(string Session, bool Thought)> _streamed = [];
+    private readonly HashSet<(string Session, string Content)> _streamedContents = [];
 
     /// <summary>Creates a projection to a sink.</summary>
     /// <param name="sink">What takes the updates and the notifications.</param>
@@ -84,6 +89,42 @@ internal sealed class AcpEventProjector
         }
     }
 
+    /// <summary>
+    /// Replays the stored history of a session as the updates of a conversation, as <c>session/load</c> sends them: the
+    /// messages of the user (<c>user_message_chunk</c>), the answers and the reasoning of the agent, each whole, and the
+    /// tool calls with their output and their final status, and the plans. What is not conversation (usage, compaction,
+    /// retries, errors) is not replayed.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="history">Its stored events, in order (<see cref="SessionRuntimeService.TryReadStoredHistoryAsync(SessionViewDescriptor, CancellationToken)"/>).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async ValueTask ReplayAsync(string sessionId, IEnumerable<AgentEvent> history, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(history);
+        foreach (var agentEvent in history)
+        {
+            switch (agentEvent)
+            {
+                case AgentContentCompletedEvent { Kind: AgentContentKind.User, Content.Length: > 0 } user:
+                    await UpdateAsync(sessionId, AcpSessionUpdates.UserMessageChunk(user.Content), cancellationToken).ConfigureAwait(false);
+                    break;
+                case AgentContentCompletedEvent { Kind: AgentContentKind.Assistant, Content.Length: > 0 } answer:
+                    await UpdateAsync(sessionId, AcpSessionUpdates.AgentMessageChunk(answer.Content), cancellationToken).ConfigureAwait(false);
+                    break;
+                case AgentContentCompletedEvent { Kind: AgentContentKind.Reasoning or AgentContentKind.ReasoningSummary, Content.Length: > 0 } thought:
+                    await UpdateAsync(sessionId, AcpSessionUpdates.AgentThoughtChunk(thought.Content), cancellationToken).ConfigureAwait(false);
+                    break;
+                case AgentContentDeltaEvent or AgentSessionUpdateEvent or AgentErrorEvent
+                    or AgentContentCompletedEvent { Kind: AgentContentKind.User or AgentContentKind.Assistant or AgentContentKind.Reasoning or AgentContentKind.ReasoningSummary }:
+                    break;
+                default:
+                    await ProjectAgentEventAsync(sessionId, agentEvent, cancellationToken).ConfigureAwait(false);
+                    break;
+            }
+        }
+    }
+
     private async ValueTask AnnounceSessionAsync(HeadlessSessionEvent item, CancellationToken cancellationToken)
     {
         var sessionId = item.Event.SessionId;
@@ -112,10 +153,19 @@ internal sealed class AcpEventProjector
         switch (agentEvent)
         {
             case AgentContentDeltaEvent { Kind: AgentContentKind.Assistant, Delta.Length: > 0 } delta:
+                Streamed(sessionId, thought: false, delta.ContentId);
                 await UpdateAsync(sessionId, AcpSessionUpdates.AgentMessageChunk(delta.Delta), cancellationToken).ConfigureAwait(false);
                 break;
             case AgentContentDeltaEvent { Kind: AgentContentKind.Reasoning or AgentContentKind.ReasoningSummary, Delta.Length: > 0 } delta:
+                Streamed(sessionId, thought: true, delta.ContentId);
                 await UpdateAsync(sessionId, AcpSessionUpdates.AgentThoughtChunk(delta.Delta), cancellationToken).ConfigureAwait(false);
+                break;
+            case AgentContentCompletedEvent { Kind: AgentContentKind.Assistant, Content.Length: > 0 } answer when !WasStreamed(sessionId, thought: false, answer.ContentId):
+                await UpdateAsync(sessionId, AcpSessionUpdates.AgentMessageChunk(answer.Content), cancellationToken).ConfigureAwait(false);
+                break;
+            case AgentContentCompletedEvent { Kind: AgentContentKind.Reasoning or AgentContentKind.ReasoningSummary, Content.Length: > 0 } thought
+                when !WasStreamed(sessionId, thought: true, thought.ContentId):
+                await UpdateAsync(sessionId, AcpSessionUpdates.AgentThoughtChunk(thought.Content), cancellationToken).ConfigureAwait(false);
                 break;
             case AgentActivityEvent activity when IsToolActivity(activity.Kind) && !string.IsNullOrEmpty(activity.ActivityId):
                 await ProjectToolActivityAsync(sessionId, activity, cancellationToken).ConfigureAwait(false);
@@ -238,6 +288,18 @@ internal sealed class AcpEventProjector
                 break;
         }
     }
+
+    private void Streamed(string sessionId, bool thought, string contentId)
+    {
+        _streamed.Add((sessionId, thought));
+        // Bounded: the contents of a provider that names its completed texts otherwise are never matched.
+        if (_streamedContents.Count >= 1024) _streamedContents.Clear();
+        _streamedContents.Add((sessionId, contentId));
+    }
+
+    // Whether the deltas of a completed text were sent: its own, or those streamed since the last completed text.
+    private bool WasStreamed(string sessionId, bool thought, string contentId)
+        => _streamedContents.Remove((sessionId, contentId)) | _streamed.Remove((sessionId, thought));
 
     private static bool IsToolActivity(AgentActivityKind kind)
         => kind is AgentActivityKind.ToolCall or AgentActivityKind.CommandExecution or AgentActivityKind.FileChange or AgentActivityKind.McpToolCall

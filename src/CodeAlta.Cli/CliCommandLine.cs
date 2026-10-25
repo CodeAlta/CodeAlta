@@ -5,11 +5,12 @@ namespace CodeAlta.Cli;
 /// <summary>What the commands of <c>altacli</c> run once their options are parsed.</summary>
 internal sealed record CliCommandHandlers(
     Func<CliRunOptions, ValueTask<int>> Run,
+    Func<CliAcpOptions, ValueTask<int>> Acp,
     Func<CliProviderOptions, ValueTask<int>> Models,
     Func<CliProviderOptions, ValueTask<int>> AuthCheck);
 
 /// <summary>
-/// The command line of <c>altacli</c>: <c>run</c>, <c>alta</c>, <c>models</c> and <c>auth check</c>, with their options.
+/// The command line of <c>altacli</c>: <c>run</c>, <c>acp</c>, <c>alta</c>, <c>models</c> and <c>auth check</c>, with their options.
 /// <c>alta</c> passes its arguments through to the <c>alta</c> command of the host, so it is read here
 /// (<see cref="TryParseAlta"/>) rather than by the strict parser of the others.
 /// </summary>
@@ -78,6 +79,38 @@ internal static class CliCommandLine
             return handlers.Run(run);
         });
 
+        var acp = new CliAcpOptions();
+        var acpCommand = new Command("acp", "Serve CodeAlta as an ACP agent over standard input and output")
+        {
+            new CommandUsage("Usage: {NAME} [options]"),
+            _,
+            "Runs CodeAlta as an agent of the Agent Client Protocol (ACP) for an",
+            "editor or another harness: the client writes its requests to standard",
+            "input and reads the answers and the updates of the sessions on standard",
+            "output. The log goes to its file, errors to standard error. Sessions are",
+            "visible to CodeAlta Desktop and TUI unless --isolated or --profile is",
+            "given. The command ends with code 0 when the client closes standard input.",
+            _,
+            "New sessions:",
+            { "C|project=", "The {FOLDER} of the configuration of the project; the current folder by default (each session works in its cwd)", v => acp.Project = v },
+            { "m|model=", "The model, as provider:model or provider:model@reasoning", v => acp.Model = v },
+            { "tier=", "Take the model from a tier: {complex|standard|quick}", v => acp.Tier = v },
+            { "reasoning=", "The reasoning {EFFORT}, over the one of the model or the tier", v => acp.Reasoning = v },
+            { "prompt-id=", "The agent prompt: {ID} (default, plan...)", v => acp.PromptId = v },
+            _,
+            "Network and tools:",
+            { "offline", "Do not refresh the catalog of models.dev", v => acp.Offline = v is not null },
+            { "disable-tools=", "Turn tools off by {PATTERN[,PATTERN]} (`web` for every tool that reaches the web); repeatable", v => acp.DisableTools.Add(v!) },
+            { "no-mcp", "Start no MCP server", v => acp.NoMcp = v is not null },
+            { "no-plugins", "Start no plugin", v => acp.NoPlugins = v is not null },
+            { "no-skills", "List no skill to the agents, and offer no skill command", v => acp.NoSkills = v is not null },
+            { "verbose", "Warnings and the log on standard error too", v => acp.Verbose = v is not null },
+            _,
+        };
+        AddStorage(acpCommand, acp);
+        acpCommand.Add(new HelpOption());
+        acpCommand.Add((_, _) => handlers.Acp(acp));
+
         var modelsCommand = new Command("models", "List the models of the providers that are ready")
         {
             new CommandUsage("Usage: {NAME} [options]"),
@@ -138,6 +171,7 @@ internal static class CliCommandLine
             _,
             "Commands:",
             runCommand,
+            acpCommand,
             altaCommand,
             modelsCommand,
             authCommand,

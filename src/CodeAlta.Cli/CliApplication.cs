@@ -43,6 +43,7 @@ internal static class CliApplication
 
             var handlers = new CliCommandHandlers(
                 options => new CliRunCommand(streams, output, environment, cancellationToken).RunAsync(options),
+                options => new CliAcpCommand(streams, output, environment, cancellationToken).RunAsync(options),
                 commands.ModelsAsync,
                 commands.AuthCheckAsync);
             // Parsed first by a tree of its own (its callbacks fill options that are thrown away): an invalid command line
@@ -90,7 +91,7 @@ internal static class CliApplication
     {
         var help = new StringWriter();
         await CliCommandLine.Create(new CliCommandHandlers(
-                static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0)))
+                static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0)))
             .RunAsync(["--help"], new CommandRunConfig { Out = help, Error = streams.Stderr }).ConfigureAwait(false);
         output.WriteText(help.ToString());
     }
