@@ -201,9 +201,29 @@ public sealed partial class SessionRuntimeService
             events = SessionOutcome.SelectLastTurn(await TryReadStoredLastTurnHistoryAsync(session, null, cancellationToken).ConfigureAwait(false) ?? []);
         }
 
-        var running = _entries.TryGetValue(session.SessionId, out var entry) && !entry.IsTerminated && (entry.HasActiveRun || entry.QueueDrainInProgress);
-        return SessionOutcome.From(events, running);
+        return SessionOutcome.From(events, IsRunning(session.SessionId));
     }
+
+    /// <summary>
+    /// Reads how the runs of a session ended from its journal (<see cref="SessionOutcome"/>), from the events written since
+    /// an instant: for a prompt whose run is not known (one aborted before it started, or before it answered).
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="since">The instant the prompt was sent.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The outcome of the events since then; <see cref="SessionOutcomeStatus.Unknown"/> with nothing in it when there are none.</returns>
+    /// <remarks>The journal is read from the turn of its last answer, or whole when it has none.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public async Task<SessionOutcome> ReadOutcomeSinceAsync(SessionViewDescriptor session, DateTimeOffset since, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var events = await TryReadStoredLastTurnHistoryAsync(session, null, cancellationToken).ConfigureAwait(false) ?? [];
+        return SessionOutcome.From([.. events.Where(item => item.Timestamp >= since)], IsRunning(session.SessionId));
+    }
+
+    private bool IsRunning(string sessionId)
+        => _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated && (entry.HasActiveRun || entry.QueueDrainInProgress);
 
     // The records from the first one of a run to the end of the journal; the whole history from that run when the turns
     // of the index do not name it.

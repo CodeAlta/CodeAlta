@@ -172,7 +172,9 @@ registered through `AgentToolInvocation.RunTools` and offered on the next model 
 - **Command guards.** A command refused in every mode is an `AgentCommandGuard`, checked before any permission by the
   shell tool and by the Claude Code hook.
 - **Tools turned off.** A session does without the union of `[tools] disabled` (global), `tools.disabled` of its space
-  and `disabled_tools` of its agent prompt; prompt files can branch on a tool with `<!-- if-tool: name -->`. Without
+  and `disabled_tools` of its agent prompt; prompt files can branch on a tool with `<!-- if-tool: name -->`. A runtime
+  can also give a session patterns over tool names (`SetDisabledToolPatterns`, `AgentToolPatterns`: MCP, plugin and
+  provider web tools included), never offered to the model and inherited by the sessions it creates. Without
   `shell_command` nothing may start a program for the session: `alta` commands that start programs refuse, plugin tools
   that start programs (`PluginToolActivationPolicy.StartsPrograms`) are refused, Claude Code runs restricted without
   its shell tools, and a session never hands a wider tool set to another session. The rules are in the code that
@@ -185,6 +187,8 @@ registered through `AgentToolInvocation.RunTools` and offered on the next model 
   `shell_command.timeoutMs` bounds both the process and the collection of its output.
 - **Running output.** What a tool writes while it runs is not journaled; `RuntimeToolOutputProjection` keeps it for
   observers while the call runs, and the finished result is the persisted record.
+- **Child processes** (commands, jobs, the CLI of a provider) start with the environment of the session's identity and
+  `CODEALTA_SESSION_ID`, `CODEALTA_MODEL`, `AI_AGENT=codealta` (`SessionProcessEnvironment`), fixed per attachment.
 
 ## System prompt and instructions
 
@@ -291,6 +295,26 @@ or journal writer. The parent link gives:
   `<notify-parent>` update) as a host prompt, steered into a running turn or queued (`DeliverHostPromptAsync`);
 - nesting in session lists, and deletion and retention families (`SessionLineage`): a parent is not removed before
   its descendants.
+
+## Headless runs
+
+`HeadlessSessionDriver` is the one loop the faces without a user share (a command line run, an ACP server): it opens
+a session (new, resumed, or named by the caller), checks that its provider and model can run, sends prompts through
+the owned commands, owns the single reader of `SessionRuntimeEvent` and gives an observer the events of its sessions
+and of the sessions they started, and reports how each run ended from the journal (`SessionOutcome`).
+
+- **Settlement.** A run is over when its tree has settled, not at the first `Idle`: the answer of a child starts its
+  parent again, a queued prompt drains, a job tells its end, a fallback continues. `WhenSettledAsync` waits until the
+  root and every session it started have no run, queue drain or pending prompt, provider background task, job or job
+  delivery, retention claim (sends, parent notifications, host prompts in delivery), owned command, fallback or
+  forwarded callback. It wakes on the signals of the runtime and ends after two consecutive idle probes on the
+  actors; a slow re-check only bounds what a missed signal would cost.
+- **Abort.** `AbortTreeAsync` stops the runs and jobs of a tree and holds their queues until a prompt is sent to them
+  again, so that nothing starts after a timeout or a signal; each journal records the abort and its reason.
+- **A host without a user.** `FullTrust` grants every request, `HeadlessInstructions` ends every system prompt with one
+  fixed paragraph and turns review before commit off, and `ReadOnlyGlobalState` lets the process run beside Desktop:
+  it writes nothing shared under the global root (a folder outside the catalog gets a transient project, and the
+  database is a private, throwaway one), only the journals of its sessions.
 
 ## Owned session commands
 

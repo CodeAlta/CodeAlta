@@ -455,6 +455,11 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 throw new ArgumentException("Images require an explicit model and text within the prompt limit.", nameof(request));
             request = request with { Images = Array.AsReadOnly(images.ToArray()) };
         }
+        if (request.Attachments is { Count: > 0 } attachments)
+        {
+            if (attachments.Any(static item => item is null)) throw new ArgumentException("An attachment is null.", nameof(request));
+            request = request with { Attachments = Array.AsReadOnly(attachments.ToArray()) };
+        }
         if (request.References is { } scope && (request.Text.Length > 32768 || string.IsNullOrWhiteSpace(scope.ProjectId)
             || scope.ProjectId.Length > 256 || string.IsNullOrWhiteSpace(scope.ProjectPath) || scope.ProjectPath.Length > 4096))
             throw new ArgumentException("Invalid bounded reference scope.", nameof(request));
@@ -476,6 +481,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                     string.Equals(previous.Send.SessionId, sent.SessionId, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(previous.Send.Text, sent.Text, StringComparison.Ordinal) && previous.Send.Selection == sent.Selection
                     && previous.Send.References == sent.References
+                    && (previous.Send.Attachments ?? []).SequenceEqual(sent.Attachments ?? [])
                     && string.Equals(previous.Send.Provenance, sent.Provenance, StringComparison.Ordinal)
                     && (previous.Send.Images ?? []).SequenceEqual(sent.Images ?? [])) is { } known)
                 return known;
@@ -1080,6 +1086,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             }
             // Preserve exact empty request identity without inventing a textual provider prompt.
             if (operation.Request.Text.Length == 0) input = new AgentInput([]);
+            if (operation.Request.Attachments is { Count: > 0 } attached) input = new AgentInput([.. input.Items, .. attached]);
             var selection = operation.Request.Selection;
             // An image needs a model that reads images; a file is given to any model in a form it reads.
             var hasImages = operation.Request.Images?.Any(OwnedPromptImages.IsImage) == true;

@@ -122,12 +122,14 @@ public sealed partial class SessionRuntimeService
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
         reason = reason.Trim();
         var tree = GetSessionTree(rootSessionId);
-        var atWork = new List<string>();
+        // The record of an abort belongs to the run it stops, when the session has one.
+        var atWork = new List<(string SessionId, AgentRunId? RunId)>();
         foreach (var sessionId in tree)
         {
             _abortHolds[sessionId] = reason;
             if (string.Equals(sessionId, rootSessionId, StringComparison.OrdinalIgnoreCase)
-                || (await ProbeSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)).Busy) atWork.Add(sessionId);
+                || (await ProbeSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)).Busy)
+                atWork.Add((sessionId, _entries.TryGetValue(sessionId, out var entry) ? entry.ActiveRunId : null));
         }
 
         // Every stop is started before any is waited for: a parent that waits for its child is stopped too.
@@ -140,10 +142,10 @@ public sealed partial class SessionRuntimeService
         }
 
         await Task.WhenAll(stops).WaitAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var sessionId in atWork)
+        foreach (var (sessionId, runId) in atWork)
         {
             await WhenRunEndedAsync(sessionId, cancellationToken).ConfigureAwait(false);
-            await RecordAbortAsync(sessionId, reason).ConfigureAwait(false);
+            await RecordAbortAsync(sessionId, reason, runId).ConfigureAwait(false);
         }
 
         PulseSettlement();
@@ -194,7 +196,7 @@ public sealed partial class SessionRuntimeService
     }
 
     // The record of an abort in the journal of a session, which its history shows and the outcome of the run reads.
-    private async Task RecordAbortAsync(string sessionId, string reason)
+    private async Task RecordAbortAsync(string sessionId, string reason, AgentRunId? runId)
     {
         try
         {
@@ -202,7 +204,7 @@ public sealed partial class SessionRuntimeService
             if (session is null) return;
             using var details = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, string> { [AbortReasonDetail] = reason }));
             await AppendSessionEventAsync(session, new AgentSessionUpdateEvent(new ModelProviderId(session.ResolvedProviderKey), sessionId, DateTimeOffset.UtcNow,
-                null, AgentSessionUpdateKind.Warning, $"The run was aborted: {reason}.", details.RootElement.Clone()), CancellationToken.None).ConfigureAwait(false);
+                runId, AgentSessionUpdateKind.Warning, $"The run was aborted: {reason}.", details.RootElement.Clone()), CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or IOException or UnauthorizedAccessException)
         {

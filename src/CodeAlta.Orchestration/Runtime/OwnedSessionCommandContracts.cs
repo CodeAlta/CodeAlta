@@ -29,6 +29,11 @@ public sealed record OwnedTextSendRequest(string ClientRequestId, string Session
     /// <summary>Gets the optional configuration captured for this send, never for an already-running turn.</summary>
     public OwnedSessionSelection? Selection { get; init; }
     /// <summary>
+    /// Gets input items given after the text, by reference: files, folders and images by their path, text blocks
+    /// (<see cref="Prompts.HeadlessPromptAttachmentService"/>); null for none. They are read when the run reads them.
+    /// </summary>
+    public IReadOnlyList<AgentInputItem>? Attachments { get; init; }
+    /// <summary>
     /// Gets the provenance of a prompt the host sends (see <see cref="CodeAlta.Agent.AgentPromptProvenance"/>), recorded
     /// with the user message; null for a prompt the user typed.
     /// </summary>
