@@ -302,6 +302,21 @@ public sealed class DesktopUiToolsTests
     }
 
     [TestMethod]
+    public async Task ASandboxedSession_DoesNotDriveTheWindow()
+    {
+        using var temp = new TempFolder();
+        var ui = new FakeUi(temp.Path);
+        var sessions = new DesktopUiSessions { Sandboxed = (sessionId, _) => ValueTask.FromResult(sessionId == "boxed") };
+        sessions.Set("boxed", active: true);
+
+        Assert.AreEqual(DesktopUiPlugin.SandboxedRefusal, await sessions.RefusalAsync("boxed", CancellationToken.None));
+        Assert.IsNull(await sessions.RefusalAsync("free", CancellationToken.None));
+        var click = await Invoke(DesktopUiPlugin.CreateTools(ui, sessions, temp.Path), "click", "boxed", """{"uid":"1_2"}""");
+        Assert.AreEqual(DesktopUiPlugin.SandboxedRefusal, click.Error, "the window is outside its sandbox");
+        Assert.HasCount(0, ui.Calls);
+    }
+
+    [TestMethod]
     public async Task ASessionAnAgentCreates_DoesNotAsk_UnlessTheUserChoseThatItAsksWhatItsCreatorAsks()
     {
         using var temp = new TempFolder();

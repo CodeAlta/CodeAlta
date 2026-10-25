@@ -455,7 +455,8 @@ public sealed class PluginContributionAdapterService
                 messages.AddRange(result.AdditionalMessages);
                 prompts.AddRange(result.TemporaryPromptContributions);
                 preferredTools.AddRange(result.PreferredToolNames);
-                additionalTools.AddRange(result.AdditionalTools);
+                // A plugin tool runs here, outside the sandbox of a sandboxed session: it gets those of a plugin that chose them for it.
+                if (template.SandboxMcpServers is null || result.AdditionalToolsFollowSandbox) additionalTools.AddRange(result.AdditionalTools);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -1500,6 +1501,7 @@ public sealed class PluginContributionAdapterService
             ActiveToolNames = template.ActiveToolNames,
             LoadedTools = template.LoadedTools,
             ProviderDefersTools = template.ProviderDefersTools,
+            SandboxMcpServers = template.SandboxMcpServers,
             CancellationToken = cancellationToken,
         };
 

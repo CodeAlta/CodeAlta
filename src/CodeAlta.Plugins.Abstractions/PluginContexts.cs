@@ -332,6 +332,13 @@ public sealed class PluginBeforeAgentRunContext : PluginOperationContext
     /// them. False where the host does not say.
     /// </summary>
     public bool ProviderDefersTools { get; init; }
+
+    /// <summary>
+    /// Gets the MCP servers a sandboxed session may use, as its sandbox profile lists them, or <see langword="null"/> when
+    /// the session is not sandboxed. A plugin that gives a session the tools of servers gives a sandboxed one only the
+    /// tools of these servers: the others would run outside its sandbox.
+    /// </summary>
+    public IReadOnlyList<string>? SandboxMcpServers { get; init; }
 }
 
 /// <summary>Context for plugin tool-call interception.</summary>

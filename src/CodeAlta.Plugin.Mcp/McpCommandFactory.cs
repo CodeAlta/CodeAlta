@@ -129,11 +129,14 @@ internal static class McpCommandFactory
             var projectDirectory = ResolveProjectDirectory(context, options);
             var scopeKey = ResolveActivationScopeKey(context, projectDirectory);
             var request = await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false);
+            // The servers a sandboxed session activated before its sandbox are not started for it.
+            var sandboxServers = context.ResolveSourceSandboxMcpServersAsync is { } sandboxOf ? await sandboxOf(context.CancellationToken).ConfigureAwait(false) : null;
             var listed = await ListActivatedToolsAsync(
                     context,
                     options,
                     request,
-                    usedServers.Concat(activationState.GetUsedServers(scopeKey)).Distinct(StringComparer.Ordinal).ToArray())
+                    usedServers.Concat(activationState.GetUsedServers(scopeKey).Where(server => sandboxServers is null || sandboxServers.Contains(server, StringComparer.Ordinal)))
+                        .Distinct(StringComparer.Ordinal).ToArray())
                 .ConfigureAwait(false);
             // A tool the server does not give, or that the policy turns off, is not activated: the server answered without it.
             var failedServers = listed.Diagnostics.Select(static diagnostic => diagnostic.Server).OfType<string>().ToHashSet(StringComparer.Ordinal);
@@ -457,6 +460,11 @@ internal static class McpCommandFactory
             if (!TryParseArguments(argumentsJson, out var arguments, out var errorMessage))
             {
                 return WriteError(context, "invalid_arguments", errorMessage!);
+            }
+
+            if (await RefuseOutsideSandboxAsync(context, [serverKey]).ConfigureAwait(false) is { } unlisted)
+            {
+                return unlisted;
             }
 
             var diagnostics = new List<McpRuntimeDiagnostic>();
@@ -950,14 +958,28 @@ internal static class McpCommandFactory
             projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory));
     }
 
-    // Refuses, for a session, the servers its space does not have: nothing is activated or enabled then.
+    // Refuses, for a session, the servers its space does not have, and for a sandboxed session the servers its profile does
+    // not list, which would run outside its sandbox: nothing is activated, enabled or called then.
     internal static async ValueTask<int?> RefuseOutsideSpaceAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options, IEnumerable<string> keys)
     {
+        keys = keys.ToArray();
+        if (await RefuseOutsideSandboxAsync(context, keys).ConfigureAwait(false) is { } unlisted) return unlisted;
         if (await SourceSpaceAsync(context).ConfigureAwait(false) is not { } spaceId) return null;
         var policy = LoadPolicy(context, options);
         var outside = keys.Where(key => !policy.IsServerInSpace(key, spaceId)).Distinct(StringComparer.Ordinal).OrderBy(static key => key, StringComparer.Ordinal).ToArray();
         return outside.Length == 0 ? null
             : WriteError(context, "server_not_in_space", string.Join(" ", outside.Select(key => McpRuntimeService.NotInSpaceMessage(key, spaceId))));
+    }
+
+    // Refuses, for a sandboxed session, the servers its sandbox profile does not list.
+    private static async ValueTask<int?> RefuseOutsideSandboxAsync(PluginAltaCommandContext context, IEnumerable<string> keys)
+    {
+        if (context.ResolveSourceSandboxMcpServersAsync is not { } sandboxOf || await sandboxOf(context.CancellationToken).ConfigureAwait(false) is not { } sandboxServers)
+            return null;
+        var unlisted = keys.Where(key => !sandboxServers.Contains(key, StringComparer.Ordinal)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        return unlisted.Length == 0 ? null
+            : WriteError(context, "server_not_in_sandbox",
+                $"This session is sandboxed, and its sandbox profile does not list the MCP server(s) {string.Join(", ", unlisted)}: they would run outside its sandbox. Ask the user to add them to the profile (`mcp_servers`).");
     }
 
     // Refuses what starts a program, or reaches a server, of the caller's choice to a session that may not do it: one

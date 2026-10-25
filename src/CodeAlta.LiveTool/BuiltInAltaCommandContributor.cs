@@ -954,6 +954,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("no-worktree", "Work in the project folder, also when the calling session works in a worktree.", value => options.NoWorktree = value is not null);
         command.Add("space=", "The space the session belongs to: id, start of id, or name. A session creates sessions only in its own space.", value => options.Space = value);
         command.Add("permission-mode=", "The permission mode the session starts in, one its provider offers (default, acceptEdits, bypassPermissions; Claude Code also auto, dontAsk).", value => options.PermissionMode = value);
+        command.Add("sandbox=", "The sandbox the session runs in: a profile (workspace, strict, or one of the user's), or `off`. Without it, the settings of the user decide. An agent turns a sandbox on, never off.", value => options.Sandbox = value);
         command.Add(async (_, _) => await HandleSessionCreateAsync(context, options).ConfigureAwait(false));
         AddHelpText(
             command,
@@ -1006,6 +1007,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("model=", "Model of the provider of the session for this turn and the next ones, as listed by `alta session choices`.", value => options.Model = NormalizeOptionalText(value));
         command.Add("reasoning=", "Reasoning effort of the model: minimal, low, medium, high, xhigh, max, or none.", value => options.Reasoning = ParseReasoningOption(value));
         command.Add("permission-mode=", "Permission mode of the session, one of `alta session choices`, or `provider` for the one its provider is configured with.", value => options.PermissionMode = NormalizeOptionalText(value));
+        command.Add("sandbox=", "Sandbox of the session from this prompt on: a profile of `alta session choices`, `off`, or `scope` for what the settings of the user decide. An agent turns a sandbox on, never off.", value => options.Sandbox = NormalizeOptionalText(value));
     }
 
     private static Command CreateSessionChoicesCommand(AltaCommandContext context)
@@ -2097,7 +2099,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         {
             SessionMetrics? metrics = null;
             metricsBySessionId?.TryGetValue(info.Session.SessionId, out metrics);
-            WriteSession(context, "alta.session.item", info, includeChildren: false, infos, metrics);
+            WriteSession(context, "alta.session.item", info, includeChildren: false, infos, metrics, await SessionSandboxRecordAsync(context, info.Session.SessionId).ConfigureAwait(false));
         }
 
         WriteSummary(context, "alta.session.summary", emitted.Count, truncated);
@@ -2123,7 +2125,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var metrics = recordType is "alta.session.info" or "alta.session.detail"
             ? await BuildCompactMetricsAsync(context, info).ConfigureAwait(false)
             : null;
-        WriteSession(context, recordType, info, includeChildren: true, infoResult.Infos, metrics);
+        WriteSession(context, recordType, info, includeChildren: true, infoResult.Infos, metrics, await SessionSandboxRecordAsync(context, info.Session.SessionId).ConfigureAwait(false));
         return AltaExitCodes.Success;
     }
 
@@ -2800,6 +2802,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             }
         }
 
+        if (await RefuseSandboxChoiceAsync(context, runtime, options.Sandbox, null, "alta session create").ConfigureAwait(false) is { } sandboxRefused)
+        {
+            return sandboxRefused;
+        }
+
         var workingDirectory = project?.ProjectPath ?? GetGlobalRootOrCwd(context);
         // Where a project session works: a worktree of its own, the worktree of the session that creates it, or
         // the folder of the project.
@@ -2834,7 +2841,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             promptId,
             worktreeDirectory,
             // The mode named, else what the host gives a session that another session creates: by default it does not ask.
-            permissionMode ?? runtime.GetCreatedSessionPermissionMode(context.Caller.SourceSessionId, modelSelection.Selection!.ProviderKey));
+            permissionMode ?? runtime.GetCreatedSessionPermissionMode(context.Caller.SourceSessionId, modelSelection.Selection!.ProviderKey),
+            NormalizeOptionalText(options.Sandbox));
 
         SessionViewDescriptor session;
         try
@@ -2881,6 +2889,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             modelSelection = ToModelSelectionPayload(modelSelection.Selection!, promptId),
             tier = modelSelection.Tier is { } chosenTier ? ModelTiers.NameOf(chosenTier) : null,
             permissionMode = session.PermissionMode,
+            sandbox = SandboxRecord(await runtime.GetSessionSandboxAsync(session.SessionId, context.CancellationToken).ConfigureAwait(false)),
         });
         return AltaExitCodes.Success;
     }
@@ -3028,6 +3037,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var source = read.Session!;
+        if (await RefuseOtherSessionToSandboxAsync(context, source).ConfigureAwait(false) is { } notOwn)
+        {
+            return notOwn;
+        }
+
         // And the agent prompt it records, with the tools that come with it.
         if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(source, null, context.CancellationToken), "the fork").ConfigureAwait(false) is { } wider)
         {
@@ -3055,6 +3069,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             if (parent is null)
             {
                 return NotFound(context, "session.parentNotFound", $"Parent session '{parentSessionId}' was not found.");
+            }
+
+            // The parent is told of the fork's work: a sandboxed session tells only itself and its own sessions.
+            if (await RefuseOtherSessionToSandboxAsync(context, parent).ConfigureAwait(false) is { } notOwnParent)
+            {
+                return notOwnParent;
             }
 
             parentSessionId = parent.SessionId;
@@ -3430,6 +3450,26 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             }
         }
 
+        // The sandbox chosen with the prompt is the session's from now on: saved before the prompt is given.
+        if (options.Sandbox is { } sandbox)
+        {
+            if (await RefuseSandboxChoiceAsync(context, runtime, sandbox, info.Session.SessionId, CommandPathForPrompt(kind)).ConfigureAwait(false) is { } sandboxRefused)
+            {
+                return sandboxRefused;
+            }
+
+            if (!context.TryGetRequired<OwnedSessionCommandService>(nameof(OwnedSessionCommandService), out var owner))
+            {
+                return AltaExitCodes.ServiceUnavailable;
+            }
+
+            var saved = await owner.SetSandboxAsync(info.Session.SessionId, sandbox, context.CancellationToken).ConfigureAwait(false);
+            if (saved.Status != "ok")
+            {
+                return Unsupported(context, "session.sandboxUnavailable", $"The sandbox of session '{info.Session.SessionId}' cannot be chosen now ({saved.Status}).");
+            }
+        }
+
         var executionOptions = await BuildExecutionOptionsForSessionAsync(context, info, options.PromptId, completeModel: kind != PromptDispatchKind.Queue, selection).ConfigureAwait(false);
         var agentInput = AgentInput.Text(inputText);
 
@@ -3634,6 +3674,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 : new { id = mode, name = mode, description = (string?)null }).ToArray(),
             defaultPermissionMode = choices.DefaultPermissionMode,
             tier = choices.Tier,
+            sandbox = await SandboxChoicesAsync(context, session.SessionId).ConfigureAwait(false),
         });
         return AltaExitCodes.Success;
     }
@@ -4901,6 +4942,37 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static async Task<SessionInfoResolutionResult> ResolveSessionInfoAsync(
         AltaCommandContext context, string sessionId, bool includeLocalState = false, bool includeChildren = false)
     {
+        var result = await ResolveAnySessionInfoAsync(context, sessionId, includeLocalState, includeChildren).ConfigureAwait(false);
+        return result.Info is { } info && await RefuseOtherSessionToSandboxAsync(context, info.Session).ConfigureAwait(false) is { } refused
+            ? SessionInfoResolutionResult.Fail(refused)
+            : result;
+    }
+
+    // A sandboxed session reads, controls and hands prompts only to itself and to the sessions it created, directly or
+    // through them: they are sandboxed as it is. Any other would read or do for it what its sandbox keeps from it.
+    // Null when allowed.
+    private static async Task<int?> RefuseOtherSessionToSandboxAsync(AltaCommandContext context, SessionViewDescriptor target)
+    {
+        if (NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
+            || IsCaller(context, target.SessionId)
+            || await AltaSandboxGate.OfAsync(context, callerId).ConfigureAwait(false) is not { } sandbox
+            || await IsOwnSessionAsync(context, target, callerId).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return PermissionDenied(context, "sandbox.notOwnSession",
+            $"This session is sandboxed (profile '{sandbox.Profile}'): it reaches only itself and the sessions it created, and session '{target.SessionId}' is not one of them. Ask the user.");
+    }
+
+    // Whether a session was created by another, or descends from it through its parents.
+    private static async Task<bool> IsOwnSessionAsync(AltaCommandContext context, SessionViewDescriptor session, string creatorId)
+        => string.Equals(NormalizeOptionalText(session.CreatedBy?.SourceSessionId), creatorId, StringComparison.OrdinalIgnoreCase)
+           || await DescendsFromAsync(context, session.ParentSessionId, creatorId).ConfigureAwait(false);
+
+    private static async Task<SessionInfoResolutionResult> ResolveAnySessionInfoAsync(
+        AltaCommandContext context, string sessionId, bool includeLocalState, bool includeChildren)
+    {
         if (context.Services.Get<SessionRuntimeService>() is { } runtime)
         {
             var activeSession = await runtime.TryGetActiveSessionDescriptorAsync(sessionId, context.CancellationToken).ConfigureAwait(false);
@@ -4999,7 +5071,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         string? sourceProjectId,
         string? promptId = null,
         string? worktreeDirectory = null,
-        string? permissionMode = null)
+        string? permissionMode = null,
+        string? sandbox = null)
         => new()
         {
             ProviderId = new ModelProviderId(selection.ProviderKey),
@@ -5009,6 +5082,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             Model = selection.ModelId,
             ReasoningEffort = selection.ReasoningEffort,
             PermissionMode = permissionMode,
+            Sandbox = sandbox,
             AgentPromptId = NormalizeOptionalText(promptId),
             // The commands of the session resolve paths from the folder it works in.
             Tools = CreateAltaSessionTools(context, selection.ProviderKey, sourceSessionIdProvider, sourceProjectId, worktreeDirectory ?? workingDirectory, workingDirectory),
@@ -6215,6 +6289,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 return ParentSessionResolutionResult.Fail(NotFound(context, "session.parentNotFound", $"Parent session '{parentSessionId}' was not found."));
             }
 
+            // The parent is told of the new session's work: a sandboxed session tells only itself and its own sessions.
+            if (await RefuseOtherSessionToSandboxAsync(context, parent).ConfigureAwait(false) is { } notOwn)
+            {
+                return ParentSessionResolutionResult.Fail(notOwn);
+            }
+
             return ParentSessionResolutionResult.Success(parent.SessionId);
         }
 
@@ -6266,7 +6346,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             projects = projects.Select(static project => new[] { project.Slug, project.ProjectPath }).ToArray(),
         });
 
-    private static void WriteSession(AltaCommandContext context, string type, AltaSessionInfo info, bool includeChildren, IReadOnlyList<AltaSessionInfo> infos, SessionMetrics? metrics = null)
+    private static void WriteSession(AltaCommandContext context, string type, AltaSessionInfo info, bool includeChildren, IReadOnlyList<AltaSessionInfo> infos, SessionMetrics? metrics = null,
+        object? sandbox = null)
     {
         var children = includeChildren ? GetChildren(infos, info, recursive: false).ToArray() : [];
         AltaJsonlWriter.WriteRecord(context.Stdout, new
@@ -6310,8 +6391,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             metrics = metrics is null ? null : ToCompactMetricsPayload(metrics),
             childCount = includeChildren ? children.Length : (int?)null,
             childSessionIds = includeChildren ? children.Select(static child => child.Session.SessionId).ToArray() : null,
+            sandbox,
         });
     }
+
+    // The sandbox of a session for its record; null where the host has no runtime.
+    private static async Task<object?> SessionSandboxRecordAsync(AltaCommandContext context, string sessionId)
+        => context.Services.Get<SessionRuntimeService>() is { } runtime
+            ? SandboxRecord(await runtime.GetSessionSandboxAsync(sessionId, context.CancellationToken).ConfigureAwait(false))
+            : null;
 
     private static void WriteSessionMetrics(AltaCommandContext context, string type, AltaSessionInfo info, SessionMetrics metrics)
     {
@@ -7135,9 +7223,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     }
 
     // Why the caller may not start a program of its choice, or null when it may: what the commands of plugins refuse with.
+    // A program a plugin starts runs here, outside the sandbox of a sandboxed caller.
     internal static async ValueTask<string?> CommandRefusalAsync(AltaCommandContext context, string what)
         => ReviewsCommands(context) ? $"The user reviews the commands of this session: it cannot {what}."
             : await ShellTurnedOffAsync(context).ConfigureAwait(false) ? ShellTurnedOffMessage(what)
+            : await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } sandbox ? AltaSandboxGate.Refusal(sandbox, what)
             : null;
 
     private static int ShellTurnedOffDenied(AltaCommandContext context, string code, string what)
@@ -7217,6 +7307,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public string? Space { get; set; }
 
         public string? PermissionMode { get; set; }
+
+        public string? Sandbox { get; set; }
     }
 
     private sealed class SessionForkOptions
@@ -7347,6 +7439,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public AgentReasoningEffort? Reasoning { get; set; }
 
         public string? PermissionMode { get; set; }
+
+        // The sandbox the session runs in from this prompt on; saved before the prompt is given.
+        public string? Sandbox { get; set; }
 
         // Whether the prompt chooses a model, an effort or a permission mode for the session.
         public bool HasSelection => Model is not null || Reasoning is not null || PermissionMode is not null;

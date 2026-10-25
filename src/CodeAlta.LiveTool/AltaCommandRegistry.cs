@@ -209,6 +209,15 @@ public sealed class AltaCommandRegistry
                 return CaptureResult(exitCode, context, stopwatch.Elapsed, isHelp: true, error: null);
             }
 
+            // A sandboxed session runs only the commands that keep it in its sandbox: they all run here, outside it.
+            if (!AltaSandboxGate.Allows(parseResult.ResolvedCommandPath)
+                && await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } sandbox)
+            {
+                var what = $"run `{parseResult.ResolvedCommandPath}`";
+                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "sandbox.refused", AltaExitCodes.PolicyDenied, AltaSandboxGate.Refusal(sandbox, what));
+                return CaptureResult(AltaExitCodes.PolicyDenied, context, stopwatch.Elapsed, isHelp: false, error: what);
+            }
+
             var runApp = CreateCommandApp(context);
             commandExitCode = await runApp.RunAsync(
                     args,

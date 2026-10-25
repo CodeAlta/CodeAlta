@@ -76,7 +76,15 @@ public sealed record AgentCommandPermissionRequest(
     AgentNetworkAccessRequest? Network,
     IReadOnlyList<string>? ProposedExecPolicyAmendment,
     IReadOnlyList<AgentNetworkPolicyAmendment>? ProposedNetworkPolicyAmendments)
-    : AgentPermissionRequest(ProviderId, SessionId, Timestamp, RunId, InteractionId, Kind: "commandExecution");
+    : AgentPermissionRequest(ProviderId, SessionId, Timestamp, RunId, InteractionId, Kind: "commandExecution")
+{
+    /// <summary>
+    /// Gets a value indicating whether a sandboxed session asks to run the command outside its sandbox, on this
+    /// computer with the rights of the user; <see cref="AgentCommandPermissionRequest.Reason"/> says why. No permission
+    /// mode answers such a request for the user, and a host that has no user refuses it.
+    /// </summary>
+    public bool OutsideSandbox { get; init; }
+}
 
 /// <summary>
 /// Permission request for file changes.

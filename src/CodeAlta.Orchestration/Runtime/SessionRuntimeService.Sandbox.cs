@@ -183,9 +183,19 @@ public sealed partial class SessionRuntimeService
     }
 
     // The sandbox a new session saves as its own: the one of the sandboxed session that creates it, whatever was asked
-    // (an agent never makes a session less sandboxed than itself), else the one asked for, else none.
-    private async Task<string?> CreatedSandboxAsync(string? asked, AltaActorProvenance? createdBy, CancellationToken cancellationToken)
-        => await GetCreatedSessionSandboxAsync(createdBy?.SourceSessionId, cancellationToken).ConfigureAwait(false) ?? NormalizeOptionalText(asked);
+    // (an agent never makes a session less sandboxed than itself), else the one asked for, else none. A session an
+    // agent creates takes what the agent asks only where the settings of the user do not sandbox it: an agent turns a
+    // sandbox on, it never takes one away nor replaces the one the user chose.
+    private async Task<string?> CreatedSandboxAsync(string? asked, AltaActorProvenance? createdBy, string? providerKey, string? modelId, string? projectId, string? spaceId,
+        CancellationToken cancellationToken)
+    {
+        if (await GetCreatedSessionSandboxAsync(createdBy?.SourceSessionId, cancellationToken).ConfigureAwait(false) is { } creator) return creator;
+        if (NormalizeOptionalText(asked) is not { } wanted) return null;
+        if (string.IsNullOrWhiteSpace(createdBy?.SourceSessionId)) return wanted;
+        if (string.Equals(wanted, SandboxProfiles.Off, StringComparison.OrdinalIgnoreCase)) return null;
+        var scoped = await ResolveSandboxAsync(null, providerKey, modelId, projectId, spaceId, cancellationToken).ConfigureAwait(false);
+        return scoped.IsSandboxed ? null : wanted;
+    }
 
     // The sandbox of a provider, and of a model of it, as the user's configuration sets them.
     private (string? Provider, string? Model) ProviderSandbox(string? providerKey, string? modelId)

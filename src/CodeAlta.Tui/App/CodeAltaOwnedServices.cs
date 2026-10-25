@@ -210,7 +210,10 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                     cancellationToken)
                 .ConfigureAwait(false);
             var pluginRuntime = sharedHost.PluginRuntime;
-            var pluginHostBridge = new PluginHostBridge(pluginRuntime, () => sharedHost.CurrentProject, pluginAltaServiceBridge, pluginServices.TerminalUi);
+            var pluginHostBridge = new PluginHostBridge(pluginRuntime, () => sharedHost.CurrentProject, pluginAltaServiceBridge, pluginServices.TerminalUi)
+            {
+                SandboxMcpServersOf = sharedHost.RuntimeService.GetSandboxMcpServersAsync,
+            };
 
             return new CodeAltaOwnedServices(
                 ownsLogging,

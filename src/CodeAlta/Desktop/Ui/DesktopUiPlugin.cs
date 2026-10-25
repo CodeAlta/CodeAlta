@@ -62,10 +62,22 @@ internal sealed class DesktopUiSessions
         set => Volatile.Write(ref _shellTurnedOff, value);
     }
 
+    private Func<string, CancellationToken, ValueTask<bool>>? _sandboxed;
+
+    /// <summary>
+    /// Gets or sets what says whether a session is sandboxed. Null until the host that knows the sessions exists: no
+    /// session is sandboxed.
+    /// </summary>
+    internal Func<string, CancellationToken, ValueTask<bool>>? Sandboxed
+    {
+        get => Volatile.Read(ref _sandboxed);
+        set => Volatile.Write(ref _sandboxed, value);
+    }
+
     /// <summary>
     /// Why a session does not drive the window, or null when it does. A session whose commands the user reviews
     /// could answer the review itself; a session without the shell could open a terminal there, or turn the shell
-    /// back on in the settings.
+    /// back on in the settings; a sandboxed session could do there what its sandbox keeps from it.
     /// </summary>
     /// <param name="sessionId">The session; null for a caller that is none.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
@@ -73,8 +85,9 @@ internal sealed class DesktopUiSessions
     {
         if (string.IsNullOrWhiteSpace(sessionId)) return null;
         if (IsReviewed(sessionId)) return DesktopUiPlugin.ReviewedRefusal;
-        return ShellTurnedOff is { } shellTurnedOff && await shellTurnedOff(sessionId, cancellationToken).ConfigureAwait(false)
-            ? DesktopUiPlugin.ShellTurnedOffRefusal
+        if (ShellTurnedOff is { } shellTurnedOff && await shellTurnedOff(sessionId, cancellationToken).ConfigureAwait(false)) return DesktopUiPlugin.ShellTurnedOffRefusal;
+        return Sandboxed is { } sandboxed && await sandboxed(sessionId, cancellationToken).ConfigureAwait(false)
+            ? DesktopUiPlugin.SandboxedRefusal
             : null;
     }
 
@@ -193,6 +206,7 @@ internal sealed class DesktopUiPlugin : PluginBase
             {
                 ReviewedRefusal => ReviewedGuidance,
                 ShellTurnedOffRefusal => ShellTurnedOffGuidance,
+                SandboxedRefusal => SandboxedGuidance,
                 _ => Guidance(_sessions.IsActive(context.SessionId)),
             },
             title: "UI tools",
@@ -228,6 +242,12 @@ internal sealed class DesktopUiPlugin : PluginBase
 
     /// <summary>What a tool, or the command that turns the tools on, answers a session whose <c>shell_command</c> is turned off.</summary>
     internal const string ShellTurnedOffRefusal = "`shell_command` is turned off for this session: it cannot see or drive the window of CodeAlta Desktop, where it could open a terminal or turn the shell back on.";
+
+    /// <summary>What the instructions of a sandboxed session say.</summary>
+    internal const string SandboxedGuidance = "UI tools: unavailable. This session is sandboxed, and the window of CodeAlta Desktop is outside its sandbox.";
+
+    /// <summary>What a tool, or the command that turns the tools on, answers a sandboxed session.</summary>
+    internal const string SandboxedRefusal = "This session is sandboxed: it cannot see or drive the window of CodeAlta Desktop, which is outside its sandbox.";
 
     /// <summary>What the instructions of a session say about the tools.</summary>
     internal static string Guidance(bool active) => active

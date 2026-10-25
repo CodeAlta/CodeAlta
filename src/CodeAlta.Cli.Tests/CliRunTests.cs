@@ -406,6 +406,9 @@ public sealed class CliRunTests
 
         Assert.AreEqual(CliExitCodes.InvalidUsage, (await root.RunAsync(provider, [])).ExitCode);
         Assert.AreEqual(CliExitCodes.InvalidUsage, (await root.RunAsync(provider, ["run", Plain, "--disable-tools", "[", "hi"])).ExitCode);
+        var noProfile = await root.RunAsync(provider, ["run", Plain, "--sandbox", "nowhere", "hi"]);
+        Assert.AreEqual(CliExitCodes.InvalidUsage, noProfile.ExitCode, noProfile.Stderr);
+        StringAssert.Contains(noProfile.Stderr, "not a sandbox profile");
     }
 
     [TestMethod]

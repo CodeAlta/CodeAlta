@@ -2,14 +2,15 @@ namespace CodeAlta.Agent.Runtime.Tools;
 
 /// <summary>
 /// Decides where the built-in tools of a session run: the host gives one to a session whose tools may run elsewhere
-/// than in its own process, such as in the worker of a sandbox.
+/// than in its own process, such as in the worker of a sandbox. At the start of each run, the session calls
+/// <see cref="RefuseRunAsync"/>, then <see cref="Route"/>.
 /// </summary>
 public interface IAgentBuiltInToolRouter
 {
     /// <summary>Gives the built-in tools of a session, each with the handler that runs it where it must run.</summary>
     /// <param name="options">What the tools were made with: the session, its folder, its permission handler and guards.</param>
     /// <param name="tools">The built-in tools, as <see cref="AgentBuiltInToolFactory.CreateDefaultTools"/> made them.</param>
-    /// <returns>The tools, with the same specifications.</returns>
+    /// <returns>The tools, with the specifications that apply to the run: a tool may take one more parameter there.</returns>
     IReadOnlyList<AgentToolDefinition> Route(AgentBuiltInToolOptions options, IReadOnlyList<AgentToolDefinition> tools);
 
     /// <summary>

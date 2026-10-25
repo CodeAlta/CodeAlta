@@ -400,6 +400,14 @@ public sealed record PluginToolActivationPolicy
     /// <c>shell_command</c> is turned off cannot use it: the host refuses its calls there.
     /// </summary>
     public bool StartsPrograms { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether a sandboxed session may use the tool. A plugin tool runs in CodeAlta, with the
+    /// rights of the user, outside the sandbox of the session: only a tool that reads or changes nothing the sandbox keeps
+    /// from the session (no file outside its folders, no program, no account of the user) is marked so. The host gives
+    /// a sandboxed session the tools marked so, and refuses the calls of the others.
+    /// </summary>
+    public bool SafeInSandbox { get; init; }
 }
 
 /// <summary>Describes the result of a tool-call hook.</summary>

@@ -26,6 +26,9 @@ internal sealed record CliAcpDefaults
     public string? AgentPromptId { get; init; }
 
     public IReadOnlyList<string> DisabledToolPatterns { get; init; } = [];
+
+    // The sandbox every session it serves runs in, from `--sandbox`; null for what the settings decide.
+    public string? Sandbox { get; init; }
 }
 
 /// <summary>
@@ -168,6 +171,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
             Reasoning = _defaults.Reasoning,
             AgentPromptId = _defaults.AgentPromptId,
             DisabledToolPatterns = _defaults.DisabledToolPatterns,
+            Sandbox = _defaults.Sandbox,
         }, cancellationToken).ConfigureAwait(false);
         var state = await RegisterAsync(opened, cancellationToken).ConfigureAwait(false);
         await AttachMcpServersAsync(state, servers, cwd).ConfigureAwait(false);
@@ -211,7 +215,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
                 : Error(AcpErrorCodes.InvalidRequest, $"Session '{sourceId}' could not be forked ({fork.Status}).", fork.Status, sourceId);
         }
 
-        var opened = await _driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = forked.SessionId, DisabledToolPatterns = _defaults.DisabledToolPatterns },
+        var opened = await _driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = forked.SessionId, DisabledToolPatterns = _defaults.DisabledToolPatterns, Sandbox = _defaults.Sandbox },
             cancellationToken).ConfigureAwait(false);
         // CodeAlta Desktop does not know the fork: it is marked as a new session is.
         var state = await RegisterAsync(opened, cancellationToken).ConfigureAwait(false);
@@ -440,7 +444,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
         var id = NormalizeSessionId(sessionId);
         if (_sessions.ContainsKey(id)) throw Error(AcpErrorCodes.InternalError, $"Session '{id}' is already open in this connection.", "session_in_use", id);
         var servers = ReadMcpServers(mcpServers);
-        var opened = await _driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id, DisabledToolPatterns = _defaults.DisabledToolPatterns },
+        var opened = await _driver.OpenAsync(new HeadlessSessionRequest { ResumeSessionId = id, DisabledToolPatterns = _defaults.DisabledToolPatterns, Sandbox = _defaults.Sandbox },
             cancellationToken).ConfigureAwait(false);
         var state = await RegisterAsync(opened, cancellationToken).ConfigureAwait(false);
         await RequireResourcesAsync(state, cancellationToken).ConfigureAwait(false);

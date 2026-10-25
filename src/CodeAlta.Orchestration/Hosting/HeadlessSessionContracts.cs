@@ -40,6 +40,12 @@ public sealed record HeadlessSessionRequest
 
     /// <summary>Gets patterns over the names of the tools the session does without (<see cref="AgentToolPatterns"/>).</summary>
     public IReadOnlyList<string> DisabledToolPatterns { get; init; } = [];
+
+    /// <summary>
+    /// Gets the sandbox profile the session runs in, saved as its own choice (<c>workspace</c>, <c>strict</c>, a profile
+    /// of the user, or <c>off</c>); null for what the settings decide.
+    /// </summary>
+    public string? Sandbox { get; init; }
 }
 
 /// <summary>How the opening of a headless session went.</summary>

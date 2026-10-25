@@ -5820,6 +5820,12 @@
   fr: "Racine"
   ja: "ルート"
   zh: "根目录"
+"Run outside the sandbox: the command runs on this computer with your rights.":
+  de: "Außerhalb der Sandbox ausführen: Der Befehl läuft auf diesem Computer mit Ihren Rechten."
+  es: "Ejecutar fuera del sandbox: el comando se ejecuta en este equipo con sus permisos."
+  fr: "Exécuter hors du bac à sable : la commande s’exécute sur cet ordinateur avec vos droits."
+  ja: "サンドボックスの外で実行: コマンドはこのコンピューター上であなたの権限で実行されます。"
+  zh: "在沙盒外运行：该命令将以你的权限在此计算机上运行。"
 "Running":
   de: "Wird ausgeführt"
   es: "corriendo"

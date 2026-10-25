@@ -42,6 +42,9 @@ internal sealed class PluginHostBridge
 
     public PluginAltaServiceBridge? Alta => _alta;
 
+    /// <summary>Gets or initializes what reads the MCP servers a sandboxed session may use; null for a session that is not sandboxed.</summary>
+    public Func<string, CancellationToken, ValueTask<IReadOnlyList<string>?>>? SandboxMcpServersOf { get; init; }
+
     /// <summary>Gets the window service of the plugins, which the application attaches itself to.</summary>
     public CodeAlta.Tui.Plugins.TerminalPluginUi? Ui => _ui;
 
@@ -191,7 +194,9 @@ internal sealed class PluginHostBridge
 
         var isManaged = IsCodeAltaManagedProvider(executionOptions.ProviderId);
         var options = CreateOptions(session, tab, isManaged);
-        var activeTools = MergeTools(executionOptions.Tools, options);
+        // A plugin tool runs here, outside the sandbox of a sandboxed session: it gets only those that keep it there.
+        var sandboxServers = SandboxMcpServersOf is { } sandboxOf ? await sandboxOf(session.SessionId, cancellationToken) : null;
+        var activeTools = MergeTools(executionOptions.Tools, options, sandboxed: sandboxServers is not null);
         var seed = activePlugins[0];
         var beforeTemplate = new PluginBeforeAgentRunContext
         {
@@ -200,6 +205,7 @@ internal sealed class PluginHostBridge
             PromptText = ExtractText(input),
             Input = input,
             ActiveToolNames = (activeTools ?? []).Select(static tool => tool.Spec.Name).ToArray(),
+            SandboxMcpServers = sandboxServers,
         };
         var before = await _runtime.Adapter.BeforeAgentRunAsync(_runtime.ActivePlugins, beforeTemplate, options, cancellationToken);
         if (before.Result.Cancel)
@@ -248,7 +254,7 @@ internal sealed class PluginHostBridge
         };
     }
 
-    public IReadOnlyList<AgentToolDefinition>? MergeTools(IReadOnlyList<AgentToolDefinition>? existingTools, PluginAdapterOperationOptions options)
+    public IReadOnlyList<AgentToolDefinition>? MergeTools(IReadOnlyList<AgentToolDefinition>? existingTools, PluginAdapterOperationOptions options, bool sandboxed = false)
     {
         var tools = new List<AgentToolDefinition>();
         if (existingTools is not null)
@@ -258,6 +264,7 @@ internal sealed class PluginHostBridge
 
         foreach (var contribution in _runtime.Adapter.GetAgentTools(options))
         {
+            if (sandboxed && !contribution.ActivationPolicy.SafeInSandbox) continue;
             tools.Add(WrapPluginTool(contribution.Definition, options));
         }
 

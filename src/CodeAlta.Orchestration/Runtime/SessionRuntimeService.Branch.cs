@@ -159,6 +159,8 @@ public sealed partial class SessionRuntimeService
         var target = await CreateBranchDescriptorAsync(source, request.Title, "fork", cancellationToken).ConfigureAwait(false);
         target.ParentSessionId = NormalizeOptionalText(request.ParentSessionId);
         target.CreatedBy = request.CreatedBy;
+        // A sandboxed session forks only into its sandbox, whatever the source had.
+        target.Sandbox = await GetCreatedSessionSandboxAsync(request.CreatedBy?.SourceSessionId, cancellationToken).ConfigureAwait(false) ?? target.Sandbox;
         target.WorktreeDirectory = request.LeaveWorktree ? null : NormalizeOptionalText(request.WorktreeDirectory) ?? source.WorktreeDirectory;
         SessionViewBranchResult result;
         try

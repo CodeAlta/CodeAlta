@@ -166,6 +166,106 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ASandboxedAgent_RunsOnlyTheCommandsThatKeepItInItsSandbox()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
+        fixture.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        var agent = Agent(await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false));
+
+        // Each of them runs here, outside the sandbox, and changes what runs outside it.
+        foreach (var arguments in new[] { new[] { "prompt", "create", "mine", "--scope", "global", "--stdin" }, ["space", "create", "--name", "Mine"], ["space", "update", "personal", "--name", "Mine"], ["project", "add", fixture.Options.GlobalRoot!] })
+        {
+            var refused = await fixture.Dispatcher.InvokeAsync(arguments, caller: agent).ConfigureAwait(false);
+            AssertSandboxRefused(refused, "sandbox.refused");
+            StringAssert.Contains(refused.Stdout + refused.Stderr, "profile 'workspace'");
+        }
+
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Dispatcher.InvokeAsync(["space", "list"], caller: agent).ConfigureAwait(false)).ExitCode, "reading is allowed");
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Dispatcher.InvokeAsync(["prompt", "create", "--help"], caller: agent).ConfigureAwait(false)).ExitCode, "and the help of every command");
+        var user = await fixture.Dispatcher.InvokeAsync(["space", "create", "--name", "Mine"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, user.ExitCode, "the user is not sandboxed: " + user.Stdout + user.Stderr);
+    }
+
+    [TestMethod]
+    public async Task ASandboxedAgent_ReachesOnlyItselfAndTheSessionsItCreated()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
+        fixture.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        var creator = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
+        var agent = Agent(creator);
+        var child = await fixture.CreateAsync(agent, "--global").ConfigureAwait(false);
+        var unrelated = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
+
+        void AssertAllowed(AltaCommandResult result) => Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stdout + result.Stderr);
+        AssertAllowed(await fixture.Dispatcher.InvokeAsync(["session", "queue", Id(child), "--message", "hello"], caller: agent).ConfigureAwait(false));
+        AssertAllowed(await fixture.Dispatcher.InvokeAsync(["session", "queue", Id(creator), "--message", "later"], caller: agent).ConfigureAwait(false));
+        AssertAllowed(await fixture.Dispatcher.InvokeAsync(["session", "fork", Id(child)], caller: agent).ConfigureAwait(false));
+        foreach (var arguments in new[]
+        {
+            new[] { "session", "queue", Id(unrelated), "--message", "hello" }, ["session", "send", Id(unrelated), "--message", "hello"], ["session", "message", Id(unrelated), "--message", "hello"],
+            ["session", "fork", Id(unrelated)], ["session", "create", "--global", "--parent", Id(unrelated)],
+            ["reminder", "create", "--session", Id(unrelated), "--duration", "00:10:00", "--content", "check"],
+        })
+        {
+            AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(arguments, caller: agent).ConfigureAwait(false), "sandbox.notOwnSession");
+        }
+
+        // A session that is not sandboxed reaches the others of its space, as before.
+        fixture.WriteConfig("");
+        AssertAllowed(await fixture.Dispatcher.InvokeAsync(["session", "queue", Id(unrelated), "--message", "hello"], caller: agent).ConfigureAwait(false));
+    }
+
+    [TestMethod]
+    public async Task SessionCommands_ChooseTheSandbox_AndAnAgentTurnsOneOnButNeverOff()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: true).ConfigureAwait(false);
+        static JsonElement Sandbox(JsonElement record) => record.GetProperty("sandbox");
+
+        // The user chooses any; the record says which, and where it comes from.
+        var strict = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal", "--sandbox", "strict").ConfigureAwait(false);
+        Assert.AreEqual(("strict", "session"), (Sandbox(strict).GetProperty("profile").GetString(), Sandbox(strict).GetProperty("source").GetString()));
+        // Off as its own choice: no setting sandboxes it.
+        var plain = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal", "--sandbox", "off").ConfigureAwait(false);
+        Assert.IsFalse(Sandbox(plain).TryGetProperty("profile", out _), "a session that is not sandboxed has no profile");
+        Assert.AreEqual("session", Sandbox(plain).GetProperty("source").GetString());
+        AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(["session", "create", "--global", "--sandbox", "nowhere"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false), "usage.invalidSandbox", AltaExitCodes.Usage);
+
+        // An agent turns a sandbox on for a session that has none, and never takes one away nor replaces it.
+        var agent = Agent(plain);
+        var boxed = await fixture.CreateAsync(agent, "--global", "--sandbox", "workspace").ConfigureAwait(false);
+        Assert.AreEqual("workspace", Sandbox(boxed).GetProperty("profile").GetString());
+        AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(["session", "create", "--global", "--sandbox", "off"], caller: agent).ConfigureAwait(false), "sandbox.choiceDenied");
+        var child = await fixture.CreateAsync(agent, "--global").ConfigureAwait(false);
+        var turnedOn = await fixture.Dispatcher.InvokeAsync(["session", "queue", Id(child), "--message", "hi", "--sandbox", "strict"], caller: agent).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, turnedOn.ExitCode, turnedOn.Stdout + turnedOn.Stderr);
+        Assert.AreEqual("strict", (await fixture.Runtime.GetSessionSandboxAsync(Id(child)).ConfigureAwait(false)).Choice.Profile);
+        AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(["session", "queue", Id(child), "--message", "hi", "--sandbox", "workspace"], caller: agent).ConfigureAwait(false), "sandbox.choiceDenied");
+        AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(["session", "queue", Id(child), "--message", "hi", "--sandbox", "scope"], caller: agent).ConfigureAwait(false), "sandbox.choiceDenied");
+
+        // A session the settings sandbox keeps the sandbox of the user when an agent asks for another.
+        fixture.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
+        var kept = await fixture.CreateAsync(agent, "--global", "--sandbox", "workspace").ConfigureAwait(false);
+        Assert.AreEqual(("strict", "all_sessions"), (Sandbox(kept).GetProperty("profile").GetString(), Sandbox(kept).GetProperty("source").GetString()));
+
+        // A sandboxed agent chooses no sandbox: what it creates has its own.
+        AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(["session", "create", "--global", "--sandbox", "strict"], caller: Agent(strict)).ConfigureAwait(false), "sandbox.choiceDenied");
+    }
+
+    private static void AssertSandboxRefused(AltaCommandResult result, string code, int exitCode)
+    {
+        Assert.AreEqual(exitCode, result.ExitCode, result.Stdout + result.Stderr);
+        var error = ReadJsonLines(result.Stdout + result.Stderr).First(static line => line.GetProperty("type").GetString() == "alta.error");
+        Assert.AreEqual(code, error.GetProperty("code").GetString(), result.Stdout + result.Stderr);
+    }
+
+    private static void AssertSandboxRefused(AltaCommandResult result, string code)
+    {
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, result.ExitCode, result.Stdout + result.Stderr);
+        var error = ReadJsonLines(result.Stdout + result.Stderr).First(static line => line.GetProperty("type").GetString() == "alta.error");
+        Assert.AreEqual(code, error.GetProperty("code").GetString(), result.Stdout + result.Stderr);
+    }
+
+    [TestMethod]
     public async Task SessionArchive_HidesTheSessionFromTheList_UntilRestored_AndAnAgentArchivesOnlyInItsOwnSpace()
     {
         await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
@@ -216,7 +316,10 @@ public sealed partial class AltaLiveToolTests
 
         public AltaCommandDispatcher Dispatcher { get; }
 
-        public static async Task<SpaceResourceFixture> CreateAsync(params string[] moreProviders)
+        public static Task<SpaceResourceFixture> CreateAsync(params string[] moreProviders) => CreateAsync(withOwner: false, moreProviders);
+
+        // withOwner: the command owner of the host, which the commands that change an attached session need.
+        public static async Task<SpaceResourceFixture> CreateAsync(bool withOwner, params string[] moreProviders)
         {
             var root = TempDirectory.Create();
             var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "global") };
@@ -235,7 +338,9 @@ public sealed partial class AltaLiveToolTests
             }
             var runtime = CreateRuntime(options, registry);
             var view = new ShownSpaceView { ShownSpaceId = "personal" };
-            var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            var services = new AltaServiceCollection();
+            if (withOwner) services.Add(new OwnedSessionCommandService(runtime, projectCatalog, options, 8, () => true));
+            var dispatcher = CreateDispatcher(services
                 .Add(options)
                 .Add(projectCatalog)
                 .Add(spaces)

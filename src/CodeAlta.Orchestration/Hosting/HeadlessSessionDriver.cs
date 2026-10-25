@@ -81,6 +81,10 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             if (AgentToolPatterns.Validate(pattern) is { } error) return Invalid(error);
         }
 
+        if (request.Sandbox is { } asked && !asked.Equals(CodeAlta.Sandbox.SandboxProfiles.Off, StringComparison.OrdinalIgnoreCase)
+            && !CodeAlta.Sandbox.SandboxProfiles.Names(_host.RuntimeService.ReadSandboxSettings().Profiles).Contains(asked, StringComparer.OrdinalIgnoreCase))
+            return Invalid($"'{asked}' is not a sandbox profile: name `off` or one of {string.Join(", ", CodeAlta.Sandbox.SandboxProfiles.Names(_host.RuntimeService.ReadSandboxSettings().Profiles))}.");
+
         string? existingId = null;
         if ((request.ResumeSessionId ?? request.SessionId) is { } named)
         {
@@ -138,6 +142,9 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             }
 
             if (model.Tier is { } tier) await runtime.SetSessionTierAsync(sessionId, tier, cancellationToken).ConfigureAwait(false);
+            // The sandbox asked is the session's own choice: no setting makes the run leave it.
+            if (request.Sandbox is { } sandbox && await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false) is { Status: not "ok" } refused)
+                return NotReady($"The sandbox of session '{sessionId}' cannot be chosen now ({refused.Status}).");
             var check = await _host.Commands.CheckSelectionAsync(sessionId, model.ModelId, model.Effort, request.AgentPromptId ?? (existing is null ? AgentPromptCatalog.DefaultPromptName : null),
                 bypass, cancellationToken).ConfigureAwait(false);
             if (check is not { Status: OwnedSelectionCheck.Ok, Selection: { } selection })

@@ -731,6 +731,14 @@ internal static class ChatMarkdownFormatter
                     .Append(": ")
                     .Append(SR.T("command execution"));
 
+                // A sandboxed session asks to leave its sandbox: the command would run with the rights of the user.
+                if (command.OutsideSandbox)
+                {
+                    builder.AppendLine()
+                        .AppendLine()
+                        .Append("**").Append(SR.T("Run outside the sandbox: the command runs on this computer with your rights.")).Append("**");
+                }
+
                 if (!string.IsNullOrWhiteSpace(command.Command))
                 {
                     builder.AppendLine()

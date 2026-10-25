@@ -93,6 +93,61 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task ASandboxedSession_UsesOnlyTheMcpServersOfItsProfile()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null);
+        WriteProjectPolicy(project.Path, """
+            [plugins.mcp]
+            direct_exposure = "allowlist"
+
+            [plugins.mcp.servers.tiny]
+            direct_tools = ["echo"]
+            allowed_tools = ["echo"]
+            """);
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
+        var contribution = plugin.GetAltaCommands().Single();
+        async Task<(int ExitCode, string Stdout)> RunAsync(IReadOnlyList<string>? sandbox, params string[] args)
+        {
+            var stdout = new StringWriter(CultureInfo.InvariantCulture);
+            var stderr = new StringWriter(CultureInfo.InvariantCulture);
+            var context = CreateAltaContext(stdout, stderr, project.Path, "session-1") with
+            {
+                ResolveSourceSandboxMcpServersAsync = _ => ValueTask.FromResult(sandbox),
+            };
+            var app = new CommandApp("alta", "test") { contribution.CreateCommandNode(context) };
+            return (await app.RunAsync(["mcp", .. args], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }), stdout.ToString());
+        }
+
+        PluginBeforeAgentRunContext Run(IReadOnlyList<string>? sandbox) => new()
+        {
+            Plugin = CreatePluginDescriptor(),
+            Services = NoopPluginServices.Create(),
+            ProjectPath = project.Path,
+            SessionId = "session-1",
+            SandboxMcpServers = sandbox,
+        };
+
+        // The server runs outside the sandbox: a profile that does not list it does not get it, activated or called.
+        foreach (var args in new[] { new[] { "activate", "tiny" }, ["tool", "call", "--server", "tiny", "--tool", "echo"] })
+        {
+            var (exitCode, stdout) = await RunAsync([], args);
+            Assert.AreEqual(1, exitCode, stdout);
+            using var error = JsonDocument.Parse(stdout.Trim().Split('\n').Last());
+            Assert.AreEqual("server_not_in_sandbox", error.RootElement.GetProperty("code").GetString());
+            StringAssert.Contains(error.RootElement.GetProperty("message").GetString(), "tiny");
+        }
+
+        // A profile that lists it uses it; the session keeps it, and gets it only while its sandbox lists it.
+        Assert.AreEqual(0, (await RunAsync(["tiny"], "activate", "tiny")).ExitCode);
+        var listed = await plugin.OnBeforeAgentRunAsync(Run(["tiny"]), CancellationToken.None);
+        Assert.AreEqual("mcp__tiny__echo", listed!.AdditionalTools.Single().Spec.Name);
+        Assert.IsTrue(listed.AdditionalToolsFollowSandbox);
+        Assert.IsNull(await plugin.OnBeforeAgentRunAsync(Run([]), CancellationToken.None));
+        Assert.AreEqual("mcp__tiny__echo", (await plugin.OnBeforeAgentRunAsync(Run(null), CancellationToken.None))!.AdditionalTools.Single().Spec.Name, "out of the sandbox, it is there again");
+    }
+
+    [TestMethod]
     public async Task ASessionThatMayNotStartPrograms_NeitherAddsNorTurnsOnAServer()
     {
         using var project = TempDirectory.Create();

@@ -164,6 +164,27 @@ public sealed class SessionOwnedRunBindingTests
     });
 
     [TestMethod]
+    public Task CommandOutsideTheSandbox_WaitsForTheUserInEveryMode() => Fixture.Run(async f =>
+    {
+        // Bypass, and a host that approves by itself: a command of the session would be allowed at once.
+        f.AutoApprove = true;
+        f.Permissions.SessionPolicy = static _ => SessionPermissionPolicy.Approve;
+        f.Permissions.SessionReviewTarget = id => id == "session" ? new(Guid.NewGuid(), f.SessionAttachment, new("inert")) : null;
+        var outside = f.Request("outside", null) with { OutsideSandbox = true };
+
+        var asked = f.Keep(f.Permissions.OwnedDefaultPermissionHandler(outside, CancellationToken.None));
+        var entry = await f.WaitForOwned("session");
+
+        Assert.IsTrue(entry.Request.OutsideSandbox, "the card says the command leaves the sandbox");
+        Assert.AreEqual(0, await f.Wait(f.Permissions.GrantWaitingOwnedAsync("session", SessionPermissionPolicy.Approve).AsTask()), "a change of the mode answers nothing of it");
+        Assert.IsFalse(asked.IsCompleted);
+        Assert.IsTrue(await f.Wait(f.Permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Wait(asked)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Wait(f.Permissions.OwnedDefaultPermissionHandler(f.Request("inside", null), CancellationToken.None))).Kind,
+            "a command in the sandbox follows the mode");
+    });
+
+    [TestMethod]
     public Task SkillRequest_WaitsForTheUserInEveryMode_AndOnlyACheckableSkillIsAllowedFromNowOn() => Fixture.Run(async f =>
     {
         // Bypass, and a host that approves by itself: a command of the session would be allowed at once.

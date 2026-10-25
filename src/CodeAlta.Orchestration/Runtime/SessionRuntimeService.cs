@@ -1562,7 +1562,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = options.Model,
             ReasoningEffort = options.ReasoningEffort,
             PermissionMode = NormalizeOptionalText(options.PermissionMode),
-            Sandbox = await CreatedSandboxAsync(options.Sandbox, createdBy, cancellationToken).ConfigureAwait(false),
+            Sandbox = await CreatedSandboxAsync(options.Sandbox, createdBy, options.ProviderKey ?? options.ProviderId.Value, options.Model, null, spaceId,
+                cancellationToken).ConfigureAwait(false),
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
         };
         ReserveSessionIdentity(session);
@@ -1770,7 +1771,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = options.Model,
             ReasoningEffort = options.ReasoningEffort,
             PermissionMode = NormalizeOptionalText(options.PermissionMode),
-            Sandbox = await CreatedSandboxAsync(options.Sandbox, createdBy, cancellationToken).ConfigureAwait(false),
+            Sandbox = await CreatedSandboxAsync(options.Sandbox, createdBy, options.ProviderKey ?? options.ProviderId.Value, options.Model, project.Id, spaceId,
+                cancellationToken).ConfigureAwait(false),
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
             // A child reviews before commit when its parent does: its changes reach the user through it.
             ReviewBeforeCommit = NormalizeOptionalText(parentSessionId) is { } parent && GetEffectiveReviewBeforeCommit(parent) ? true : null,
@@ -2323,6 +2325,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             TitleMode = titleMode,
             OwnReviewBeforeCommit = startNewSession ? session.ReviewBeforeCommit : savedLocalState?.ReviewBeforeCommit,
             ReviewNoted = startNewSession ? null : savedLocalState?.ReviewNoted,
+            SandboxNoted = startNewSession ? null : savedLocalState?.SandboxNoted,
             DisabledTools = instructions.PromptBundle?.DisabledTools ?? System.Collections.Frozen.FrozenSet<string>.Empty,
             DisabledToolPatterns = toolPatterns,
             PublishedBy = ticket,
@@ -2543,6 +2546,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     sendOptions = sendOptions.WithInput(new AgentInput([.. sendOptions.Input.Items, new AgentInputItem.HostContext("review", ReviewNoteText(told))]));
                 }
 
+                // And what its sandbox allows, the same way: when it differs from what the agent was told.
+                var sandboxNote = await SandboxNoteForAsync(candidate, execution.Token).ConfigureAwait(false);
+                if (sandboxNote is { } sandboxTold)
+                {
+                    sendOptions = sendOptions.WithInput(new AgentInput([.. sendOptions.Input.Items, new AgentInputItem.HostContext("sandbox", sandboxTold.Text)]));
+                }
+
                 Task<AgentRunId>? runOriginal = null;
                 runInvocation.Launch(() => runOriginal = RunCapturedAsync(sessionHandleId, sendOptions, execution.Token));
                 if (await runInvocation.Outcome.ConfigureAwait(false) is { } runFailure) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(runFailure);
@@ -2551,6 +2561,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 if (reviewNote is { } noted)
                 {
                     await RecordReviewNotedAsync(session, candidate, noted).ConfigureAwait(false);
+                }
+
+                if (sandboxNote is { } sandboxNoted)
+                {
+                    await RecordSandboxNotedAsync(session, candidate, sandboxNoted.Noted).ConfigureAwait(false);
                 }
             }
             catch (Exception failure)
@@ -5883,6 +5898,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         private int _reviewNoted;
 
+        private string? _sandboxNoted;
+
+        /// <summary>
+        /// What the agent was last told of its sandbox (the value of the note of its runs); null when
+        /// nothing, or when a compaction may have dropped it. Read and written on the actor of the session.
+        /// </summary>
+        public string? SandboxNoted
+        {
+            get => Volatile.Read(ref _sandboxNoted);
+            set => Volatile.Write(ref _sandboxNoted, value);
+        }
+
         public string? Model { get; }
 
         public AgentReasoningEffort? ReasoningEffort { get; }
@@ -6018,7 +6045,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         public void ObserveEvent(AgentEvent @event)
         {
             // A compaction may drop the note of the review before commit: the next prompt tells it again.
-            if (@event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.CompactionCompleted }) ReviewNoted = null;
+            if (@event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.CompactionCompleted })
+            {
+                ReviewNoted = null;
+                SandboxNoted = null;
+            }
 
             if (@event.RunId is { } runId && ShouldTrackRunId(@event))
             {

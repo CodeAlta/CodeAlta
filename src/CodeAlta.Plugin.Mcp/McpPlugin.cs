@@ -300,7 +300,11 @@ public sealed partial class McpPlugin : PluginBase
 
         // What the session loaded is in its journal: a resumed session, or one of another run of the application, gets it again.
         RestoreLoadedTools(activationScope, context.LoadedTools);
-        var usedServers = _activationState.GetUsedServers(activationScope);
+        // A sandboxed session uses only the servers of its profile: the others run outside its sandbox. It keeps the
+        // others it activated, which come back when it is no longer sandboxed.
+        IReadOnlyList<string> usedServers = context.SandboxMcpServers is { } sandboxServers
+            ? _activationState.GetUsedServers(activationScope).Where(server => sandboxServers.Contains(server, StringComparer.Ordinal)).ToArray()
+            : _activationState.GetUsedServers(activationScope);
         if (usedServers.Count == 0)
         {
             return CachedToolsResult(await CreateCachedToolsAsync(context, projectPath, []).ConfigureAwait(false));
@@ -313,7 +317,7 @@ public sealed partial class McpPlugin : PluginBase
             if (usedServers.Any(server => !policy.IsServerInSpace(server, spaceId)))
             {
                 _activationState.RetainServers(activationScope, server => policy.IsServerInSpace(server, spaceId));
-                usedServers = _activationState.GetUsedServers(activationScope);
+                usedServers = [.. usedServers.Where(server => policy.IsServerInSpace(server, spaceId))];
                 if (usedServers.Count == 0)
                 {
                     return CachedToolsResult(await CreateCachedToolsAsync(context, projectPath, []).ConfigureAwait(false));
@@ -329,7 +333,7 @@ public sealed partial class McpPlugin : PluginBase
             usedServers,
             cancellationToken).ConfigureAwait(false);
         // A server activated as a whole gives all its tools; another only the tools the session loaded.
-        var direct = listed with { Tools = listed.Tools.Where(tool => _activationState.IsActive(activationScope, tool.Server, tool.Name)).ToArray() };
+        var direct = listed with { Tools = listed.Tools.Where(tool => _activationState.IsActive(activationScope, tool.Server, tool.Name) && usedServers.Contains(tool.Server, StringComparer.Ordinal)).ToArray() };
         _activationState.UpdateToolCounts(
             activationScope,
             direct.Tools
@@ -345,6 +349,7 @@ public sealed partial class McpPlugin : PluginBase
         return new PluginBeforeAgentRunResult
         {
             AdditionalTools = [.. activeTools, .. cached],
+            AdditionalToolsFollowSandbox = true,
             TemporaryPromptContributions = CreateDirectToolDiagnosticsPrompt(direct.Diagnostics),
         };
     }
@@ -401,15 +406,18 @@ public sealed partial class McpPlugin : PluginBase
             return definition with { Spec = definition.Spec with { Deferred = true, Group = tool.Server } };
         }
 
+        // A sandboxed session is offered the tools of the servers of its profile only.
+        bool Offered(McpRuntimeTool tool) => !active.Contains(tool.Alias)
+            && (context.SandboxMcpServers is not { } sandboxServers || sandboxServers.Contains(tool.Server, StringComparer.Ordinal));
         return
         [
-            .. cached.Loaded.Where(tool => !active.Contains(tool.Alias)).Select(Create),
-            .. cached.Deferred.Where(tool => !active.Contains(tool.Alias)).Select(Defer),
+            .. cached.Loaded.Where(Offered).Select(Create),
+            .. cached.Deferred.Where(Offered).Select(Defer),
         ];
     }
 
     private static PluginBeforeAgentRunResult? CachedToolsResult(IReadOnlyList<AgentToolDefinition> tools)
-        => tools.Count == 0 ? null : new PluginBeforeAgentRunResult { AdditionalTools = tools };
+        => tools.Count == 0 ? null : new PluginBeforeAgentRunResult { AdditionalTools = tools, AdditionalToolsFollowSandbox = true };
 
     private void RestoreLoadedTools(string activationScope, IReadOnlyList<string> loadedTools)
     {

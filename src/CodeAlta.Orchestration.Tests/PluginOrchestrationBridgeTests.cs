@@ -126,6 +126,35 @@ public sealed class PluginOrchestrationBridgeTests
     }
 
     [TestMethod]
+    public async Task ASandboxedSession_UsesOnlyThePluginToolsMarkedSafeInASandbox()
+    {
+        var registry = new PluginContributionRegistry();
+        var runs = 0;
+        PluginAgentToolContribution Tool(string name, bool safe) => new()
+        {
+            Definition = new AgentToolDefinition(
+                new AgentToolSpec(name, "A tool.", JsonDocument.Parse("{}").RootElement.Clone()),
+                (_, _) => { runs++; return Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ran")])); }),
+            ActivationPolicy = new PluginToolActivationPolicy { SafeInSandbox = safe },
+        };
+        registry.Register(new PluginDescriptor { RuntimeKey = "plugin:mixed", TypeName = "Plugin", AssemblyName = "plugin" }, PluginScope.Global,
+            scopeProjectId: null, scopeProjectPath: null, PluginPoint.AgentTool, [Tool("accounts", safe: false), Tool("clock", safe: true)], activationGeneration: 1);
+        var bridge = CreateBridge(registry);
+        bridge.SandboxMcpServersOf = (sessionId, _) => ValueTask.FromResult<IReadOnlyList<string>?>(sessionId == "boxed" ? [] : null);
+        var tools = bridge.CreateAgentTools();
+        async Task<AgentToolResult> CallAsync(string name, string session)
+            => await tools.Single(tool => tool.Spec.Name == name).Handler(
+                new AgentToolInvocation(new ModelProviderId("provider-1"), session, "call-1", name, JsonDocument.Parse("{}").RootElement.Clone()), CancellationToken.None);
+
+        var refused = await CallAsync("accounts", "boxed");
+        Assert.IsFalse(refused.Success);
+        StringAssert.Contains(refused.Error, "This session is sandboxed");
+        Assert.AreEqual(0, runs);
+        Assert.IsTrue((await CallAsync("clock", "boxed")).Success, "A tool marked safe runs.");
+        Assert.IsTrue((await CallAsync("accounts", "free")).Success, "A session that is not sandboxed runs every tool.");
+    }
+
+    [TestMethod]
     public async Task RunCompactionAsync_ReturnsEmptyResultWhenNoCompactionContributionsApply()
     {
         var bridge = CreateBridge(new PluginContributionRegistry());

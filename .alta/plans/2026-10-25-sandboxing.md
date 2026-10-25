@@ -317,18 +317,24 @@ Their native sandboxes are not the boundary. Claude Code's covers only its shell
 - [x] 8. **`SandboxNetworkProxy`**, as described above. The `webget` of a sandboxed session follows the same host list. Tests for the patterns and for each refused kind of address.
 
   **Done** (`src/CodeAlta.Sandbox/Network`): CONNECT and plain HTTP, a 403 that names the host, `RecentRefusals` for the note of step 10; CodeAlta's MCP ports are never reached.
-- [ ] 9. **Gates for sandboxed callers** in `BuiltInAltaCommandContributor`, the plugin bridge and the MCP plugin, as in the table above, with a test for each refusal. Add the sandbox-safe flag to `PluginToolActivationPolicy`.
-- [ ] 10. **The agent's side.**
+- [x] 9. **Gates for sandboxed callers** in `BuiltInAltaCommandContributor`, the plugin bridge and the MCP plugin, as in the table above, with a test for each refusal. Add the sandbox-safe flag to `PluginToolActivationPolicy`.
+
+  **Done**, as an allow list rather than a list of refusals: `AltaSandboxGate` (LiveTool) lets a sandboxed caller run only the listed `alta` commands, checked once in `AltaCommandRegistry.InvokeAsync` after parsing, so the commands of plugins (`alta jira`, user plugins) are refused unless listed; help stays readable. `ResolveSessionInfoAsync`, `fork` and `--parent` refuse sessions the caller did not create (`sandbox.notOwnSession`); a fork by a sandboxed session gets its profile; `alta search` hides the conversations of other sessions. Plugin tools need `SafeInSandbox`, and the tools a before-run hook adds need `AdditionalToolsFollowSandbox` (the MCP plugin sets it and gives only the servers of the profile, `PluginBeforeAgentRunContext.SandboxMcpServers`); `mcp activate`, `tool call` and skills refuse unlisted servers (`server_not_in_sandbox`). `alta ui` and the window tools refuse a sandboxed session. The TUI's own plugin bridge applies the same filter.
+- [x] 10. **The agent's side.**
   - The sandbox paragraph of the runtime context, and the host-context note when it changes.
   - `outside_sandbox` on `shell_command`: an `AgentCommandPermissionRequest` marked as outside the sandbox, which every mode asks and `FullTrust` refuses, the TUI included.
   - The note after a failed command.
 
   Tests.
-- [ ] 11. **`alta session` and `altacli`.**
+
+  **Done**, with one deviation: what the sandbox allows is only a host-context note (`<codealta-context>Sandbox: …`), told at the first run of a sandboxed session and again when it changes or after a compaction (`SandboxNoted` in the local state, like `ReviewNoted`), not a paragraph of the runtime context: the system prompt stays the same for the cache of the provider. The note names the scratchpad folder of the sandbox. `AgentCommandPermissionRequest.OutsideSandbox` is always asked (`AlwaysAsks`, also skipped by `GrantWaitingOwnedAsync`), refused by `FullTrust`, and shown by the TUI dialog. The router learns the profile in `RefuseRunAsync`, which `AgentSession` now calls before it builds the tools (`SandboxOutsideCommands`).
+- [x] 11. **`alta session` and `altacli`.**
   - `alta session`: `create --sandbox`, `send` and `queue --sandbox`, `sandbox` in `choices`, `info`, `status` and `list`, and their help texts.
   - `altacli run` and `acp` take `--sandbox <profile>`.
 
   Tests.
+
+  **Done.** The user chooses any sandbox; an agent turns one on for a session that has none, never `off` nor `scope`, and does not replace one (`sandbox.choiceDenied`); a sandboxed agent chooses none. A session an agent creates keeps the sandbox of the user's settings when they sandbox it (`CreatedSandboxAsync`). The records carry `sandbox` (`profile`, `source`, `problem`); `choices` lists `off` and the profiles. `altacli run` and `acp` save `--sandbox` as the session's own choice (`HeadlessSessionRequest.Sandbox`), for new, resumed, forked and loaded sessions.
 
 ### CodeAlta Desktop
 

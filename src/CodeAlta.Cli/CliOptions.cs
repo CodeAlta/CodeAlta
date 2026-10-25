@@ -37,6 +37,9 @@ internal class CliCommonOptions
 
     public bool NoSkills { get; set; }
 
+    // The sandbox profile of the sessions of run and acp, or `off`; null for what the settings decide.
+    public string? Sandbox { get; set; }
+
     public bool Verbose { get; set; }
 
     public bool Quiet { get; set; }

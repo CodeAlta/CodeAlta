@@ -878,6 +878,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // Nor does a session without the shell: the window has terminals and the settings that turn the shell back on.
                 uiSessions.ShellTurnedOff = async (sessionId, token) =>
                     (await host.RuntimeService.GetDisabledToolsAsync(sessionId, token).ConfigureAwait(false)).Contains(CodeAlta.Orchestration.Runtime.SystemPrompts.PromptToolConditions.ShellCommand);
+                // Nor does a sandboxed session: the window is outside its sandbox.
+                uiSessions.Sandboxed = async (sessionId, token) => (await host.RuntimeService.GetSessionSandboxAsync(sessionId, token).ConfigureAwait(false)).IsSandboxed;
                 automations.Start();
                 workspacePrepared.TrySetResult();
                 {

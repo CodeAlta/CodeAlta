@@ -75,5 +75,7 @@ public sealed class HeadlessTrustTests
             "skill://server/skill/SKILL.md", 1, 10, Dynamic: false);
         Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await host.RuntimeService.Permissions.RequestForSessionAsync(session.SessionId, skill, CancellationToken.None)).Kind,
             "The load of a skill, which asks the user in every mode, is granted too.");
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await host.RuntimeService.Permissions.OwnedDefaultPermissionHandler(command with { OutsideSandbox = true }, CancellationToken.None)).Kind,
+            "But not a command out of a sandbox: the user chose the sandbox, and nobody is there to let the command out.");
     }
 }

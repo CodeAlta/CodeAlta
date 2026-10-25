@@ -37,6 +37,12 @@ public sealed record SessionPermissionSnapshot(
 
     /// <summary>Gets the skill of an MCP server the request asks to load, for a request of kind <c>skill</c>; null otherwise.</summary>
     public SessionPermissionSkill? Skill { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether a sandboxed session asks to run the command outside its sandbox
+    /// (<see cref="AgentCommandPermissionRequest.OutsideSandbox"/>): no permission mode answers it for the user.
+    /// </summary>
+    public bool OutsideSandbox { get; init; }
 }
 
 /// <summary>The skill of an MCP server a permission request asks to load, as the review shows it.</summary>
@@ -130,7 +136,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private async Task<AgentPermissionDecision> HandleOwnedDefaultAsync(AgentPermissionRequest request, CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
-        if (FullTrust) return new(AgentPermissionDecisionKind.AllowOnce);
+        if (FullTrust) return new(IsOutsideSandbox(request) ? AgentPermissionDecisionKind.Deny : AgentPermissionDecisionKind.AllowOnce);
         if (SessionPolicy is not { } policyOf || string.IsNullOrWhiteSpace(request.SessionId))
             return new(_autoApproveOwnedPermissions() && !AlwaysAsks(request) ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny);
         var policy = policyOf(request.SessionId);
@@ -168,7 +174,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(request);
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
-        if (FullTrust) return new(AgentPermissionDecisionKind.AllowOnce);
+        if (FullTrust) return new(IsOutsideSandbox(request) ? AgentPermissionDecisionKind.Deny : AgentPermissionDecisionKind.AllowOnce);
         if (SessionReviewTarget?.Invoke(sessionId) is not { } target) return new(AgentPermissionDecisionKind.Deny);
         request = request with { SessionId = sessionId, ProviderId = target.ProviderId };
         // A review of its own that asks whatever the mode of the session: it follows no policy.
@@ -187,8 +193,12 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     }
 
     // A request no permission mode answers for the user: the load of a skill of an MCP server, whose instructions may ask
-    // for commands. It waits for the user, or is denied where nobody can be asked.
-    internal static bool AlwaysAsks(AgentPermissionRequest request) => request is AgentSkillPermissionRequest;
+    // for commands, and a command a sandboxed session asks to run outside its sandbox. It waits for the user, or is
+    // denied where nobody can be asked.
+    internal static bool AlwaysAsks(AgentPermissionRequest request) => request is AgentSkillPermissionRequest || IsOutsideSandbox(request);
+
+    // A host that trusts its sessions fully still has nobody to let a command out of a sandbox: the user chose the sandbox.
+    private static bool IsOutsideSandbox(AgentPermissionRequest request) => request is AgentCommandPermissionRequest { OutsideSandbox: true };
 
     /// <summary>
     /// Gets or sets whether every request the host answers by default is granted, the loads of skills that otherwise
@@ -419,8 +429,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             {
                 if (pending.OwnedExecution is not { FollowsSessionPolicy: true } execution || execution.SessionId != sessionId) continue;
                 if (policy == SessionPermissionPolicy.AcceptEdits && pending.Snapshot.Kind != FileChangeKind) continue;
-                // The load of a skill of an MCP server waits for the user whatever the mode.
-                if (pending.Snapshot.Kind == AgentSkillPermissionRequest.SkillKind) continue;
+                // The load of a skill of an MCP server, and a command out of a sandbox, wait for the user whatever the mode.
+                if (pending.Snapshot.Kind == AgentSkillPermissionRequest.SkillKind || pending.Snapshot.OutsideSandbox) continue;
                 if (Complete(pending.Snapshot.Handle, AgentPermissionDecisionKind.AllowOnce)) allowed++;
             }
             return allowed;
@@ -598,6 +608,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
                 Shown(command.Command, OwnedCommandLimit), command.WorkingDirectory, Shown(command.Reason, OwnedReasonLimit), null)
             {
                 Shortened = command.Command!.Length > OwnedCommandLimit || command.Reason?.Length > OwnedReasonLimit,
+                OutsideSandbox = command.OutsideSandbox,
             },
             AgentFileChangePermissionRequest change => new(handle, request.ProviderId, request.Timestamp, request.Kind,
                 null, null, Shown(change.Reason, OwnedReasonLimit), change.GrantRoot)
@@ -654,6 +665,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             command?.Command, command?.WorkingDirectory, command?.Reason ?? file?.Reason, file?.GrantRoot)
         {
             Skill = request is AgentSkillPermissionRequest skill ? new(skill.Server, skill.SkillName, skill.Uri, skill.FileCount, skill.TotalBytes, skill.Dynamic) : null,
+            OutsideSandbox = command?.OutsideSandbox == true,
         };
         var completion = new TaskCompletionSource<AgentPermissionDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
         var registered = await ExecuteAsync(() =>

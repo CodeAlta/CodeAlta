@@ -162,6 +162,87 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task ACommandOutsideTheSandbox_IsAskedWithItsReason_AndRunsHereOnlyWhenAllowed()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        await f.CreateSessionAsync("s");
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        var asked = new List<AgentCommandPermissionRequest>();
+        var answer = AgentPermissionDecisionKind.Deny;
+        var router = f.Runtime.CreateSandboxToolRouter("s", "codex", [f.Project.ProjectPath]);
+        var tools = f.RoutedTools("s", router, (request, _) =>
+        {
+            if (request is AgentCommandPermissionRequest command) lock (asked) asked.Add(command);
+            return Task.FromResult(new AgentPermissionDecision(request is AgentCommandPermissionRequest { OutsideSandbox: true } ? answer : AgentPermissionDecisionKind.AllowOnce));
+        });
+        Assert.IsNull(await router.RefuseRunAsync(false, CancellationToken.None));
+        // The parameter is offered to a profile that lets commands out, from the run on.
+        tools = f.RoutedTools("s", router, tools.Permissions);
+        Assert.IsTrue(tools.Spec("shell_command").InputSchema.GetProperty("properties").TryGetProperty("outside_sandbox", out _));
+
+        var refused = await tools.CallAsync("shell_command", new { command = "echo out", outside_sandbox = "It needs the NuGet API key." });
+        Assert.IsFalse(refused.Success);
+        Assert.Contains("did not allow", refused.Error!);
+        var request = asked.Single(static request => request.OutsideSandbox);
+        Assert.AreEqual(("echo out", "It needs the NuGet API key."), (request.Command, request.Reason));
+        Assert.AreEqual(0, backend.Starts.Count, "nothing ran, in the sandbox or out of it");
+
+        answer = AgentPermissionDecisionKind.AllowOnce;
+        var allowed = await tools.CallAsync("shell_command", new { command = "echo out", outside_sandbox = "It needs the NuGet API key." });
+        Assert.IsTrue(allowed.Success, allowed.Error);
+        Assert.StartsWith("exit_code: 0", RoutedToolSet.Text(allowed), "the output keeps the form the timelines read");
+        Assert.Contains("ran outside the sandbox", RoutedToolSet.Text(allowed));
+        Assert.Contains("out", RoutedToolSet.Text(allowed));
+        Assert.AreEqual(0, backend.Starts.Count, "it ran here");
+        Assert.HasCount(2, asked.Where(static request => request.OutsideSandbox), "the shell of the host does not ask it a second time");
+
+        Assert.IsFalse((await tools.CallAsync("shell_command", new { command = "echo out", outside_sandbox = " " })).Success, "a reason is given");
+        f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
+        Assert.IsNull(await router.RefuseRunAsync(false, CancellationToken.None));
+        tools = f.RoutedTools("s", router, tools.Permissions);
+        Assert.IsFalse(tools.Spec("shell_command").InputSchema.GetProperty("properties").TryGetProperty("outside_sandbox", out _), "a profile that lets no command out offers nothing");
+        var never = await tools.CallAsync("shell_command", new { command = "echo out", outside_sandbox = "Please." });
+        Assert.Contains("runs no command outside", never.Error!);
+    }
+
+    [TestMethod]
+    public async Task TheAgentIsToldWhatItsSandboxAllows_OnceAndAgainWhenItChanges()
+    {
+        await using var f = await Fixture.CreateAsync(new InProcessBackend());
+        await f.CreateSessionAsync("s");
+        Assert.AreEqual("off", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(await f.Runtime.GetSessionSandboxAsync("s"), null).Noted);
+
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        var workspace = CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(await f.Runtime.GetSessionSandboxAsync("s"), "C:/scratch/s");
+        Assert.Contains("profile `workspace`", workspace.Text);
+        Assert.Contains("nuget.org", workspace.Text);
+        Assert.Contains("`outside_sandbox", workspace.Text);
+        Assert.Contains("C:/scratch/s", workspace.Text);
+
+        f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
+        var strict = CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(await f.Runtime.GetSessionSandboxAsync("s"), null);
+        Assert.Contains("have no network", strict.Text);
+        Assert.Contains("No command runs outside", strict.Text);
+        Assert.AreNotEqual(workspace.Noted, strict.Noted, "another sandbox is told again");
+    }
+
+    [TestMethod]
+    public void ACommandTheSandboxBlocked_GetsANoteThatSaysWhat()
+    {
+        var profile = SandboxProfiles.Resolve("workspace", []);
+        var failed = new AgentToolResult(false, [new AgentToolResultItem.Text("error: could not lock config file C:/code/Lib/.git/config: Permission denied")], "shell_command exited with code 255.");
+
+        Assert.Contains("writes only in the folders of the session", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(profile, failed, [], [])!);
+        var network = CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(profile,
+            new AgentToolResult(false, [new AgentToolResultItem.Text("Unable to load the service index")], null), ["a.org:443"], ["a.org:443", "api.example.com:443"])!;
+        Assert.Contains("refused api.example.com:443", network);
+        Assert.DoesNotContain("a.org", network, "only what this command was refused");
+        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(profile, new AgentToolResult(false, [new AgentToolResultItem.Text("1 test failed")], null), [], []),
+            "a failure the sandbox did not cause gets no note");
+    }
+
+    [TestMethod]
     public async Task WebGetOfASandboxWithoutNetwork_IsRefused_BeforeAnyRequest()
     {
         await using var f = await Fixture.CreateAsync(new InProcessBackend());
@@ -175,8 +256,14 @@ public sealed class SessionSandboxTests
     }
 
     // The tools of a session as its agent gets them, through the router of the runtime.
-    private sealed class RoutedToolSet(IReadOnlyList<AgentToolDefinition> tools, string sessionId)
+    private sealed class RoutedToolSet(IReadOnlyList<AgentToolDefinition> tools, string sessionId, AgentPermissionRequestHandler permissions)
     {
+        public AgentPermissionRequestHandler Permissions => permissions;
+
+        public AgentToolSpec Spec(string tool) => tools.Single(candidate => candidate.Spec.Name == tool).Spec;
+
+        public static string Text(AgentToolResult result) => string.Concat(result.Items.OfType<AgentToolResultItem.Text>().Select(static item => item.Value));
+
         public async Task<AgentToolResult> CallAsync(string tool, object arguments)
             => await tools.Single(candidate => candidate.Spec.Name == tool).Handler(
                 new AgentToolInvocation(new ModelProviderId("codex"), sessionId, Guid.NewGuid().ToString("N"), tool, System.Text.Json.JsonSerializer.SerializeToElement(arguments)),
@@ -303,16 +390,19 @@ public sealed class SessionSandboxTests
         }
 
         public RoutedToolSet RoutedTools(string sessionId)
+            => RoutedTools(sessionId, Runtime.CreateSandboxToolRouter(sessionId, "codex", [Project.ProjectPath]),
+                (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)));
+
+        public RoutedToolSet RoutedTools(string sessionId, CodeAlta.Agent.Runtime.Tools.IAgentBuiltInToolRouter router, AgentPermissionRequestHandler permissions)
         {
             var options = new CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolOptions
             {
                 ProviderId = new ModelProviderId("codex"),
                 SessionId = sessionId,
                 WorkingDirectory = Project.ProjectPath,
-                OnPermissionRequest = (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                OnPermissionRequest = permissions,
             };
-            var router = Runtime.CreateSandboxToolRouter(sessionId, "codex", [Project.ProjectPath]);
-            return new RoutedToolSet(router.Route(options, CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolFactory.CreateDefaultTools(options)), sessionId);
+            return new RoutedToolSet(router.Route(options, CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolFactory.CreateDefaultTools(options)), sessionId, permissions);
         }
 
         public SessionRuntimeService CreateRuntime()

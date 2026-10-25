@@ -62,6 +62,14 @@ public sealed class PluginOrchestrationBridge
     public Func<string, string?, CancellationToken, ValueTask<bool>>? DefersToolsOf { get; set; }
 
     /// <summary>
+    /// Gets or sets what reads the MCP servers a sandboxed session may use: null for a session that is not sandboxed. A
+    /// sandboxed session gets only the plugin tools marked <see cref="PluginToolActivationPolicy.SafeInSandbox"/>, and the
+    /// before-run hooks are told its servers (<see cref="PluginBeforeAgentRunContext.SandboxMcpServers"/>). Null where the
+    /// host keeps no sessions: no session is sandboxed.
+    /// </summary>
+    public Func<string, CancellationToken, ValueTask<IReadOnlyList<string>?>>? SandboxMcpServersOf { get; set; }
+
+    /// <summary>
     /// Runs prompt submission hooks for a headless orchestration prompt.
     /// </summary>
     /// <param name="text">The prompt text.</param>
@@ -171,7 +179,8 @@ public sealed class PluginOrchestrationBridge
         }
 
         var effectiveOptions = MarkHeadless(options);
-        var activeTools = MergeTools(executionOptions.Tools, effectiveOptions);
+        var sandboxServers = await SandboxMcpServersAsync(effectiveOptions.SessionId, cancellationToken).ConfigureAwait(false);
+        var activeTools = MergeTools(executionOptions.Tools, effectiveOptions, sandboxed: sandboxServers is not null);
         var seed = activePlugins[0];
         var beforeTemplate = new PluginBeforeAgentRunContext
         {
@@ -185,6 +194,7 @@ public sealed class PluginOrchestrationBridge
                 : [],
             ProviderDefersTools = isRun && DefersToolsOf is { } defersToolsOf && !string.IsNullOrWhiteSpace(effectiveOptions.ProviderId)
                 && await defersToolsOf(effectiveOptions.ProviderId, effectiveOptions.Model, cancellationToken).ConfigureAwait(false),
+            SandboxMcpServers = sandboxServers,
         };
         var before = isRun
             ? (await _adapter.BeforeAgentRunAsync(activePlugins, beforeTemplate, effectiveOptions, cancellationToken).ConfigureAwait(false)).Result
@@ -411,7 +421,7 @@ public sealed class PluginOrchestrationBridge
         CancellationToken cancellationToken = default)
         => _adapter.RunCompactionAsync(before, instructions, reducer, after, MarkHeadless(options), cancellationToken);
 
-    private IReadOnlyList<AgentToolDefinition>? MergeTools(IReadOnlyList<AgentToolDefinition>? existingTools, PluginAdapterOperationOptions options)
+    private IReadOnlyList<AgentToolDefinition>? MergeTools(IReadOnlyList<AgentToolDefinition>? existingTools, PluginAdapterOperationOptions options, bool sandboxed)
     {
         var tools = new List<AgentToolDefinition>();
         if (existingTools is not null)
@@ -421,6 +431,8 @@ public sealed class PluginOrchestrationBridge
 
         foreach (var contribution in _adapter.GetAgentTools(options))
         {
+            // A plugin tool runs here: a sandboxed session gets only those that keep it in its sandbox.
+            if (sandboxed && !contribution.ActivationPolicy.SafeInSandbox) continue;
             tools.Add(WrapPluginTool(contribution.Definition, options, contributed: true));
         }
 
@@ -487,6 +499,14 @@ public sealed class PluginOrchestrationBridge
                     return new AgentToolResult(false, [new AgentToolResultItem.Text(refused)], refused);
                 }
 
+                // The sandbox of a session can have come since the tool was given to it.
+                if (contribution is { ActivationPolicy.SafeInSandbox: false }
+                    && await SandboxMcpServersAsync(string.IsNullOrWhiteSpace(invocation.SessionId) ? options.SessionId : invocation.SessionId, cancellationToken).ConfigureAwait(false) is not null)
+                {
+                    var refused = $"This session is sandboxed: it cannot use '{given.Spec.Name}', a tool of a plugin that runs outside its sandbox. Use the other tools of the session, or ask the user.";
+                    return new AgentToolResult(false, [new AgentToolResultItem.Text(refused)], refused);
+                }
+
                 var activePlugins = _getActivePlugins();
                 if (activePlugins.Count == 0)
                 {
@@ -511,6 +531,9 @@ public sealed class PluginOrchestrationBridge
             },
         };
     }
+
+    private async ValueTask<IReadOnlyList<string>?> SandboxMcpServersAsync(string? sessionId, CancellationToken cancellationToken)
+        => SandboxMcpServersOf is { } sandboxOf && !string.IsNullOrWhiteSpace(sessionId) ? await sandboxOf(sessionId, cancellationToken).ConfigureAwait(false) : null;
 
     private async ValueTask<bool> ShellTurnedOffAsync(PluginAdapterOperationOptions options, string? sessionId, CancellationToken cancellationToken)
     {

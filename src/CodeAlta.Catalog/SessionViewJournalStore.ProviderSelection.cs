@@ -87,6 +87,7 @@ public sealed partial class SessionViewJournalStore
         if (carryOver?.Sandbox is { } sandbox) local.Sandbox = sandbox;
         // The agent of the new provider is told of the review before commit again at its first prompt.
         local.ReviewNoted = null;
+        local.SandboxNoted = null;
         var selected = SessionViewJournalHeader.FromDescriptor(session).ToDescriptor();
         selected.ProviderId = target.ProviderId.Value;
         selected.ProviderKey = target.ProviderId.Value;

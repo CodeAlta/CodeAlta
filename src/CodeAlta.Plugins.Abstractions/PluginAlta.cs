@@ -100,6 +100,14 @@ public sealed record PluginAltaCommandContext
     public Func<string, CancellationToken, ValueTask<string?>>? ResolveSourceCommandRefusalAsync { get; init; }
 
     /// <summary>
+    /// Gets what reads the MCP servers the session that calls may use when it is sandboxed: the servers its sandbox
+    /// profile lists, or <see langword="null"/> when it is not sandboxed or no session calls. A command gives a sandboxed
+    /// session only these servers: the others would run outside its sandbox. <see langword="null"/> where the host has
+    /// no sandbox.
+    /// </summary>
+    public Func<CancellationToken, ValueTask<IReadOnlyList<string>?>>? ResolveSourceSandboxMcpServersAsync { get; init; }
+
+    /// <summary>
     /// Gets what asks the user to allow what the command would do, on the card of the session that calls it, in every
     /// permission mode for a request no mode answers (<see cref="CodeAlta.Agent.AgentSkillPermissionRequest"/>). The host
     /// gives the request the session and its provider. The answer is

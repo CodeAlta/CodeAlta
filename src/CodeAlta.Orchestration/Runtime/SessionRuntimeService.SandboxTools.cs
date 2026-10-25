@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime.Tools;
+using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Jobs;
 using CodeAlta.Orchestration.Runtime.Sandbox;
 using CodeAlta.Sandbox;
@@ -88,6 +89,55 @@ public sealed partial class SessionRuntimeService
         }, null);
     }
 
+    /// <summary>
+    /// Gets the MCP servers a sandboxed session may use, as its profile lists them; null for a session that is not
+    /// sandboxed. A sandboxed session whose profile cannot be used may use none.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The servers, or null.</returns>
+    public async ValueTask<IReadOnlyList<string>?> GetSandboxMcpServersAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        var sandbox = await GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return sandbox.IsSandboxed ? sandbox.Profile?.McpServers ?? [] : null;
+    }
+
+    // The note a run carries about the sandbox of its session: what it allows, when the agent was told something else, or
+    // nothing yet while it is sandboxed. Null when there is nothing to tell. The instructions stay the same: their text
+    // is what the provider keeps in its cache.
+    private async Task<(string Text, string Noted)?> SandboxNoteForAsync(RuntimeSessionEntry entry, CancellationToken cancellationToken)
+    {
+        var sandbox = await GetSessionSandboxAsync(entry.SessionId, cancellationToken).ConfigureAwait(false);
+        var scratchpad = sandbox.IsSandboxed && !string.IsNullOrWhiteSpace(ScratchpadRoot) ? Path.Combine(ScratchpadRoot, "sandbox", entry.SessionId) : null;
+        var note = SandboxOutsideCommands.Note(sandbox, scratchpad);
+        return entry.SandboxNoted is { } told ? told == note.Noted ? null : note : note.Noted == "off" ? null : note;
+    }
+
+    // What the agent was told is kept with the session, so that a session that comes back is not told twice.
+    private async Task RecordSandboxNotedAsync(SessionViewDescriptor session, RuntimeSessionEntry entry, string noted)
+    {
+        entry.SandboxNoted = noted;
+        try
+        {
+            await GetActorForWork(session.SessionId).QueryAsync(async actorCancellationToken =>
+            {
+                var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, actorCancellationToken).ConfigureAwait(false);
+                if (localState is not null && localState.SandboxNoted != noted)
+                {
+                    localState.SandboxNoted = noted;
+                    await _sessionViewCatalog.JournalStore.AppendStateAsync(session, localState, actorCancellationToken).ConfigureAwait(false);
+                }
+
+                return true;
+            }, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException or OperationCanceledException)
+        {
+            // The next run of a session that comes back tells it again, which is harmless.
+        }
+    }
+
     // The router of the built-in tools of a session, which reads its sandbox at each call.
     internal IAgentBuiltInToolRouter CreateSandboxToolRouter(string sessionId, string providerId, IReadOnlyList<string> projectRoots)
         => new SandboxToolRouter(this, sessionId, providerId, projectRoots);
@@ -156,17 +206,31 @@ public sealed partial class SessionRuntimeService
     private sealed class SandboxToolRouter(SessionRuntimeService runtime, string sessionId, string providerId, IReadOnlyList<string> projectRoots) : IAgentBuiltInToolRouter
     {
         private const string WebGet = "webget";
+        private const string ShellCommand = "shell_command";
+
+        // The profile of the session when its run started, for the parameters its tools get in that run.
+        private ResolvedSandboxProfile? _runProfile;
 
         public IReadOnlyList<AgentToolDefinition> Route(AgentBuiltInToolOptions options, IReadOnlyList<AgentToolDefinition> tools)
-            => [.. tools.Select(tool => SandboxWorker.Tools.Contains(tool.Spec.Name)
-                ? tool with { Handler = (invocation, cancellationToken) => RunInWorkerAsync(tool, options, invocation, cancellationToken) }
-                : tool.Spec.Name == WebGet
-                    ? tool with { Handler = (invocation, cancellationToken) => WebGetAsync(tool, options, invocation, cancellationToken) }
-                    : tool)];
+        {
+            var profile = Volatile.Read(ref _runProfile);
+            return [.. tools.Select(tool => tool.Spec.Name == ShellCommand
+                ? tool with
+                {
+                    Spec = profile is { Outside: SandboxOutside.Ask } ? SandboxOutsideCommands.WithParameter(tool.Spec) : tool.Spec,
+                    Handler = (invocation, cancellationToken) => ShellCommandAsync(tool, options, invocation, cancellationToken),
+                }
+                : SandboxWorker.Tools.Contains(tool.Spec.Name)
+                    ? tool with { Handler = (invocation, cancellationToken) => RunInWorkerAsync(tool, options, invocation, cancellationToken) }
+                    : tool.Spec.Name == WebGet
+                        ? tool with { Handler = (invocation, cancellationToken) => WebGetAsync(tool, options, invocation, cancellationToken) }
+                        : tool)];
+        }
 
         public async ValueTask<string?> RefuseRunAsync(bool providerRunsItsOwnTools, CancellationToken cancellationToken)
         {
             var sandbox = await runtime.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            Volatile.Write(ref _runProfile, sandbox.IsSandboxed ? sandbox.Profile : null);
             if (!sandbox.IsSandboxed) return null;
             if (sandbox.Profile is not { } profile) return SandboxProblem(sandbox);
             if (providerRunsItsOwnTools)
@@ -182,14 +246,52 @@ public sealed partial class SessionRuntimeService
             if (sandbox.Profile is not { } profile) return Refused(tool, SandboxProblem(sandbox));
             try
             {
+                var refusedBefore = runtime.SandboxWorkers.RecentRefusals(sessionId);
                 using var lease = await runtime.SandboxWorkers.AcquireAsync(StartOf(profile, options), cancellationToken).ConfigureAwait(false);
-                return await lease.Client.InvokeAsync(invocation, new SandboxToolHost(options.OnPermissionRequest,
+                var result = await lease.Client.InvokeAsync(invocation, new SandboxToolHost(options.OnPermissionRequest,
                     options.CommandGuard is { } guard ? (command, folder, token) => guard(command, folder, token) : null), cancellationToken).ConfigureAwait(false);
+                // What blocked a command, when it can be told, stops the agent from trying it again the same way.
+                return tool.Spec.Name == ShellCommand && !result.Success
+                    && SandboxOutsideCommands.FailureNote(profile, result, refusedBefore, runtime.SandboxWorkers.RecentRefusals(sessionId)) is { } note
+                    ? result with { Items = [.. result.Items, new AgentToolResultItem.Text(note)] }
+                    : result;
             }
             catch (SandboxUnavailableException unavailable)
             {
                 return Refused(tool, unavailable.Message);
             }
+        }
+
+        // A command of a sandboxed session runs in its worker; one it asks to run outside, with a reason, runs here once
+        // the user allows it, whatever the permission mode.
+        private async Task<AgentToolResult> ShellCommandAsync(AgentToolDefinition tool, AgentBuiltInToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)
+        {
+            if (!SandboxOutsideCommands.TryTake(invocation, out var inside, out var reason))
+                return await RunInWorkerAsync(tool, options, invocation, cancellationToken).ConfigureAwait(false);
+            var sandbox = await runtime.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            // A session that is no longer sandboxed runs its commands here, as it asks for them.
+            if (!sandbox.IsSandboxed) return await tool.Handler(inside, cancellationToken).ConfigureAwait(false);
+            if (sandbox.Profile is not { } profile) return Refused(tool, SandboxProblem(sandbox));
+            if (profile.Outside != SandboxOutside.Ask)
+                return Refused(tool, $"the sandbox of this session (profile '{profile.Name}') runs no command outside it. Ask the user to run it.");
+            if (string.IsNullOrWhiteSpace(reason))
+                return Refused(tool, "`outside_sandbox` says why the command needs to run outside the sandbox: the user reads it before allowing it.");
+            var command = inside.Arguments.TryGetProperty("command", out var text) && text.ValueKind == System.Text.Json.JsonValueKind.String ? text.GetString() : null;
+            var folder = inside.Arguments.TryGetProperty("workdir", out var workdir) && workdir.ValueKind == System.Text.Json.JsonValueKind.String
+                ? Path.GetFullPath(Path.Combine(options.WorkingDirectory ?? Environment.CurrentDirectory, workdir.GetString()!))
+                : options.WorkingDirectory;
+            var request = new AgentCommandPermissionRequest(options.ProviderId, options.SessionId, DateTimeOffset.UtcNow, RunId: null, InteractionId: invocation.ToolCallId,
+                ApprovalId: null, Command: command, WorkingDirectory: folder, Actions: null, Reason: reason.Trim(), Network: null, ProposedExecPolicyAmendment: null,
+                ProposedNetworkPolicyAmendments: null) { OutsideSandbox = true };
+            var decision = await options.OnPermissionRequest(request, cancellationToken).ConfigureAwait(false);
+            if (decision.Kind is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.AllowForSession))
+                return Refused(tool, "the user did not allow it to run outside the sandbox.");
+            // Allowed once, for this command: the shell of the host does not ask it again.
+            var allowed = Copy(options, null, static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)));
+            var host = AgentBuiltInToolFactory.CreateDefaultTools(allowed).Single(static candidate => candidate.Spec.Name == ShellCommand);
+            var result = await host.Handler(inside, cancellationToken).ConfigureAwait(false);
+            // After the output, which starts with its exit code as the timelines read it.
+            return result with { Items = [.. result.Items, new AgentToolResultItem.Text($"[sandbox: {profile.Name}] The command ran outside the sandbox, as the user allowed.")] };
         }
 
         private async Task<AgentToolResult> WebGetAsync(AgentToolDefinition tool, AgentBuiltInToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)
@@ -200,7 +302,7 @@ public sealed partial class SessionRuntimeService
             if (profile.Network == SandboxNetwork.Off) return Refused(tool, $"the sandbox of this session (profile '{profile.Name}') has no network.");
             var policy = runtime.SandboxWorkers.PolicyOf(StartOf(profile, options));
             using var http = SandboxHttp.Create(policy, runtime.SandboxWorkers.ReservedPorts);
-            var sandboxed = AgentBuiltInToolFactory.CreateDefaultTools(WithHttpClient(options, http)).Single(static candidate => candidate.Spec.Name == WebGet);
+            var sandboxed = AgentBuiltInToolFactory.CreateDefaultTools(Copy(options, http, null)).Single(static candidate => candidate.Spec.Name == WebGet);
             return await sandboxed.Handler(invocation, cancellationToken).ConfigureAwait(false);
         }
 
@@ -209,19 +311,20 @@ public sealed partial class SessionRuntimeService
 
         private static AgentToolResult Refused(AgentToolDefinition tool, string reason) => new(false, [], $"{tool.Spec.Name} did not run: {reason}");
 
-        private static AgentBuiltInToolOptions WithHttpClient(AgentBuiltInToolOptions options, HttpClient http) => new()
+        // The options of the tools of the session, with another client for the web or another answer to their permissions.
+        private static AgentBuiltInToolOptions Copy(AgentBuiltInToolOptions options, HttpClient? http, AgentPermissionRequestHandler? permissions) => new()
         {
             ProviderId = options.ProviderId,
             SessionId = options.SessionId,
             WorkingDirectory = options.WorkingDirectory,
             Environment = options.Environment,
-            OnPermissionRequest = options.OnPermissionRequest,
+            OnPermissionRequest = permissions ?? options.OnPermissionRequest,
             OnUserInputRequest = options.OnUserInputRequest,
             EnableUserInputTool = false,
             DisabledTools = options.DisabledTools,
             WriteGuard = options.WriteGuard,
             CommandGuard = options.CommandGuard,
-            HttpClient = http,
+            HttpClient = http ?? options.HttpClient,
             Provider = options.Provider,
             DefaultReadFileLineLimit = options.DefaultReadFileLineLimit,
             MaxReadFileLineLimit = options.MaxReadFileLineLimit,

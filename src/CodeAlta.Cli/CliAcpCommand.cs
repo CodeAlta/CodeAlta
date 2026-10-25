@@ -125,6 +125,7 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
             Reasoning = reasoning,
             AgentPromptId = options.PromptId,
             DisabledToolPatterns = patterns,
+            Sandbox = options.Sandbox,
         };
         error = null;
         return true;

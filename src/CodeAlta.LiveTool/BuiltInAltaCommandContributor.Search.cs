@@ -107,8 +107,10 @@ internal sealed partial class BuiltInAltaCommandContributor
         }, context.CancellationToken).ConfigureAwait(false);
 
         var rank = 0;
+        var sandbox = await SandboxSearchFilterAsync(context).ConfigureAwait(false);
         foreach (var hit in response.Hits)
         {
+            if (sandbox is not null && !await sandbox(hit).ConfigureAwait(false)) continue;
             WriteCanvasRecord(context, HitRecord(context, hit, ++rank));
         }
 
@@ -344,7 +346,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (shown is null) return NotFound(context, "search.notFound", $"The index holds nothing named '{value}'. Search again: refs change when a journal is rewritten.");
         // An agent only reads what it may reach: another space's sessions and skills are refused like a miss.
         var scope = await SearchScopeAsync(context, null, includeCurrent: true).ConfigureAwait(false);
-        if (!IsVisible(scope, shown.Hit)) return NotFound(context, "search.notFound", $"The index holds nothing named '{value}' in your space.");
+        if (!await IsVisibleAsync(scope, shown.Hit, await SandboxSearchFilterAsync(context).ConfigureAwait(false)).ConfigureAwait(false)) return NotFound(context, "search.notFound", $"The index holds nothing named '{value}' in your space.");
         var hit = shown.Hit;
         var record = HitRecord(context, hit, 0);
         record["type"] = "alta.search.item";
@@ -526,6 +528,19 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         return null;
     }
+
+    // A sandboxed session finds the conversations of itself and of the sessions it created only: the others hold what
+    // its sandbox keeps from it. Null for a caller that is not sandboxed.
+    private static async Task<Func<SearchHit, Task<bool>>?> SandboxSearchFilterAsync(AltaCommandContext context)
+    {
+        if (NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
+            || await AltaSandboxGate.OfAsync(context, callerId).ConfigureAwait(false) is null)
+            return null;
+        return async hit => NormalizeOptionalText(hit.SessionId) is not { } sessionId || await DescendsFromAsync(context, sessionId, callerId).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> IsVisibleAsync(SearchScope scope, SearchHit hit, Func<SearchHit, Task<bool>>? sandbox)
+        => IsVisible(scope, hit) && (sandbox is null || await sandbox(hit).ConfigureAwait(false));
 
     private static bool IsVisible(SearchScope scope, SearchHit hit)
     {

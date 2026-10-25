@@ -356,6 +356,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
             ResumeSessionId = options.Resume,
             SessionId = options.SessionId,
             DisabledToolPatterns = patterns,
+            Sandbox = options.Sandbox,
         };
         error = null;
         return true;

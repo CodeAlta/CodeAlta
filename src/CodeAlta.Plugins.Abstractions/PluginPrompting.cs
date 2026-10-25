@@ -622,6 +622,13 @@ public sealed record PluginBeforeAgentRunResult
     /// <summary>Gets additional agent tools that should be available for this run.</summary>
     public IReadOnlyList<AgentToolDefinition> AdditionalTools { get; init; } = [];
 
+    /// <summary>
+    /// Gets a value indicating whether <see cref="AdditionalTools"/> follow the sandbox of the session: for a sandboxed
+    /// session (<see cref="PluginBeforeAgentRunContext.SandboxMcpServers"/>), only tools it may use outside its sandbox.
+    /// The host drops the additional tools of a result that does not say so from the runs of a sandboxed session.
+    /// </summary>
+    public bool AdditionalToolsFollowSandbox { get; init; }
+
     /// <summary>Gets an optional model hint.</summary>
     public string? ModelHint { get; init; }
 

@@ -174,12 +174,15 @@ public sealed partial class SessionViewJournalStore
             ModelId = sourceLocal?.ModelId,
             ReasoningEffort = sourceLocal?.ReasoningEffort,
             PermissionMode = sourceLocal?.PermissionMode,
-            // A fork keeps the sandbox of its source: it continues the same work, written by the same model.
-            Sandbox = sourceLocal?.Sandbox,
+            // A fork keeps the sandbox of its source: it continues the same work, written by the same model. The one
+            // the runtime gives it comes first: the sandbox of the session that forks, when that one is sandboxed.
+            Sandbox = string.IsNullOrWhiteSpace(target.Sandbox) ? sourceLocal?.Sandbox : target.Sandbox,
             TitleMode = sourceLocal?.TitleMode,
             // A fork keeps the choice of review; what its agent was told is in the conversation it continues.
             ReviewBeforeCommit = sourceLocal?.ReviewBeforeCommit,
             ReviewNoted = sourceLocal?.ReviewNoted,
+            // The sandbox of a fork can be another than its source's: its agent is told again at its first prompt.
+            SandboxNoted = string.IsNullOrWhiteSpace(target.Sandbox) ? sourceLocal?.SandboxNoted : null,
             Tier = sourceLocal?.Tier,
             AgentPromptId = sourceLocal?.AgentPromptId,
             Archived = target.Status == SessionViewStatus.Archived,

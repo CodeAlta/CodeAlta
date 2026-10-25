@@ -702,14 +702,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
             var permissionRequestHandler = options.OnPermissionRequest ?? _options.OnPermissionRequest;
             var userInputRequestHandler = options.OnUserInputRequest ?? _options.OnUserInputRequest;
-            var allTools = WithoutDisabledTools(AppendSendTools(BuildAvailableTools(permissionRequestHandler,
-                userInputRequestHandler, options.EnableUserInputTool), options.AdditionalTools));
             // A provider that runs tools itself answers its own permission prompts and questions through the run.
             var providerToolHost = _turnExecutor as IAgentProviderToolHost;
             // A session whose tools must run elsewhere (in a sandbox) does not start a run whose tools would run here.
             if (_options.BuiltInToolRouter is { } router
                 && await router.RefuseRunAsync(providerToolHost is not null, linkedCts.Token).ConfigureAwait(false) is { } refusal)
                 throw new InvalidOperationException(refusal);
+            var allTools = WithoutDisabledTools(AppendSendTools(BuildAvailableTools(permissionRequestHandler,
+                userInputRequestHandler, options.EnableUserInputTool), options.AdditionalTools));
             providerToolHost?.AttachRun(new AgentProviderRunContext(SessionId, runId, permissionRequestHandler,
                 options.EnableUserInputTool ? userInputRequestHandler : null, options.IsProviderInitiated,
                 options.OnConversationHeld ?? _options.OnConversationHeld));

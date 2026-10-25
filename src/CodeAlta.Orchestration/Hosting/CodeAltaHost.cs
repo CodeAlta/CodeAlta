@@ -86,6 +86,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 LoadedToolsOf = runtimeService.GetLoadedToolsAsync,
                 DisabledToolsOf = async (sessionId, token) => await runtimeService.GetDisabledToolsAsync(sessionId, token).ConfigureAwait(false),
                 DefersToolsOf = (provider, model, token) => DefersToolsAsync(modelProviderRegistry, provider, model, token),
+                SandboxMcpServersOf = runtimeService.GetSandboxMcpServersAsync,
             },
             ObservedImageModels = provider => modelProviderInitializationService.CurrentStates
                 .FirstOrDefault(state => state.ProviderId == provider && state.Descriptor.IsEnabled
