@@ -46,6 +46,15 @@ public sealed record SessionUsageTotals(
     /// <summary>Gets totals with no operation.</summary>
     public static SessionUsageTotals None { get; } = new(0, 0, 0, 0, 0);
 
+    /// <summary>Gets whether an operation reported the part of its input read from the prompt cache: <see cref="CachedInputTokens"/> is unknown otherwise, not zero.</summary>
+    public bool ReportsCachedInputTokens { get; init; }
+
+    /// <summary>Gets whether an operation reported the part of its input written to the prompt cache: <see cref="CacheWriteTokens"/> is unknown otherwise, not zero.</summary>
+    public bool ReportsCacheWriteTokens { get; init; }
+
+    /// <summary>Gets whether an operation reported its reasoning tokens: <see cref="ReasoningTokens"/> is unknown otherwise, not zero.</summary>
+    public bool ReportsReasoningTokens { get; init; }
+
     /// <summary>Gets the input and output tokens together.</summary>
     public long TotalTokens => InputTokens + OutputTokens;
 }
@@ -213,6 +222,7 @@ public sealed record SessionOutcome(
         double? cost = null;
         string? costUnit = null;
         var operationCount = 0;
+        bool cacheReadReported = false, cacheWriteReported = false, reasoningReported = false;
         foreach (var usage in usageUpdates)
         {
             if (usage.Usage?.LastOperation is not { } operation) continue;
@@ -228,6 +238,10 @@ public sealed record SessionOutcome(
             cachedInputTokens += input?.CacheRead ?? 0;
             reasoningTokens += operation.ReasoningTokens ?? 0;
             cacheWriteTokens += input?.CacheWrite ?? 0;
+            // A count no operation reported is unknown, not zero.
+            cacheReadReported |= (operation.CachedInputTokens ?? operation.CacheReadTokens) is not null;
+            cacheWriteReported |= operation.CacheWriteTokens is not null;
+            reasoningReported |= operation.ReasoningTokens is not null;
             // Costs add up in one unit: the unit of the first operation that reports one.
             if (operation.Cost is { } operationCost && (cost is null || string.Equals(costUnit, operation.CostUnit, StringComparison.Ordinal)))
             {
@@ -236,7 +250,12 @@ public sealed record SessionOutcome(
             }
         }
 
-        return new SessionUsageTotals(operationCount, inputTokens, outputTokens, cachedInputTokens, reasoningTokens, cacheWriteTokens, cost, costUnit);
+        return new SessionUsageTotals(operationCount, inputTokens, outputTokens, cachedInputTokens, reasoningTokens, cacheWriteTokens, cost, costUnit)
+        {
+            ReportsCachedInputTokens = cacheReadReported,
+            ReportsCacheWriteTokens = cacheWriteReported,
+            ReportsReasoningTokens = reasoningReported,
+        };
     }
 
     private static bool IsToolCall(AgentActivityKind kind)

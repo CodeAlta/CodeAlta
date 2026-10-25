@@ -577,7 +577,12 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             root.ReasoningTokens + children.ReasoningTokens,
             root.CacheWriteTokens + children.CacheWriteTokens,
             root.Cost is null && children.Cost is null ? null : (root.Cost ?? 0) + (sameUnit ? children.Cost ?? 0 : 0),
-            root.CostUnit ?? children.CostUnit);
+            root.CostUnit ?? children.CostUnit)
+        {
+            ReportsCachedInputTokens = root.ReportsCachedInputTokens || children.ReportsCachedInputTokens,
+            ReportsCacheWriteTokens = root.ReportsCacheWriteTokens || children.ReportsCacheWriteTokens,
+            ReportsReasoningTokens = root.ReportsReasoningTokens || children.ReportsReasoningTokens,
+        };
     }
 
     private async Task ReadEventsAsync(Func<HeadlessSessionEvent, CancellationToken, ValueTask> observer, long droppedAtStart, CancellationToken cancellationToken)

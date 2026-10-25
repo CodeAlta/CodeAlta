@@ -50,7 +50,7 @@ By default, standard output holds the final answer only, so `altacli run "..." >
 | `_codealta/session` | First line: the session, its folder, provider, model and storage. |
 | `session/update` | Messages, thinking, tool calls and their results, plans and token use, as in ACP. The lines of a delegated agent carry its own `sessionId`. |
 | `_codealta/session_started`, `_codealta/compaction`, `_codealta/retry`, `_codealta/fallback`, `_codealta/error` | What ACP has no update for: a delegated agent starts, a compaction, a retry, a [fallback](model-tiers.md) to another model, an error (`events_dropped` when updates were lost: the whole answer is in the result). |
-| `_codealta/result` | Last line: the status, exit code, final answer, tokens, cost when the provider gives one, and duration. |
+| `_codealta/result` | Last line: the status, exit code, final answer, tokens and cost when the provider gives them (null otherwise, never 0), and duration. |
 
 | Exit code | The run |
 | --- | --- |

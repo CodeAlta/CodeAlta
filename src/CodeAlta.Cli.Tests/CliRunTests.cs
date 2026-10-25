@@ -152,6 +152,36 @@ public sealed class CliRunTests
     }
 
     [TestMethod]
+    public async Task Jsonl_UsageTheProviderDidNotReport_IsNull_NotZero()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        provider.Turns.Enqueue((_, _, _) => Task.FromResult(FakeProvider.Answer("No usage.") with { Usage = null }));
+
+        var none = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "hello"]);
+
+        Assert.AreEqual(CliExitCodes.Completed, none.ExitCode, none.Stderr);
+        Assert.AreEqual(JsonValueKind.Null, Result(none).GetProperty("usage").ValueKind, "No usage reported: unknown, not zero.");
+        Assert.AreEqual(JsonValueKind.Null, Result(none).GetProperty("cost").ValueKind);
+
+        provider.Turns.Enqueue((_, _, _) => Task.FromResult(FakeProvider.Answer("Some usage.") with
+        {
+            Usage = new AgentSessionUsage(LastOperation: new AgentOperationUsageSnapshot(Model: "fake-model", InputTokens: 10, OutputTokens: 2)),
+        }));
+
+        var partial = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "hello"]);
+
+        Assert.AreEqual(CliExitCodes.Completed, partial.ExitCode, partial.Stderr);
+        var usage = Result(partial).GetProperty("usage");
+        Assert.AreEqual(10, usage.GetProperty("inputTokens").GetInt32());
+        Assert.AreEqual(2, usage.GetProperty("outputTokens").GetInt32());
+        foreach (var unknown in new[] { "cachedReadTokens", "cachedWriteTokens", "thoughtTokens" })
+        {
+            Assert.IsTrue(!usage.TryGetProperty(unknown, out var value) || value.ValueKind == JsonValueKind.Null, $"{unknown} was not reported: {usage}");
+        }
+    }
+
+    [TestMethod]
     public async Task Jsonl_IsReadByAnAcpClient()
     {
         using var root = new CliTestRoot();
