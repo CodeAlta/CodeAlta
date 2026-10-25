@@ -171,6 +171,86 @@ public sealed class SessionStateRowTests
         Assert.AreEqual(0, journal.JournalStateReadCount);
     }
 
+    [TestMethod]
+    public async Task AJournalAnotherProcessGrows_IsProjectedAgainWithoutReadingItsHistory()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var session = await CreateSessionAsync(options, "session-followed");
+        var path = JournalPath(options, session);
+        // Records of another process that change neither the header nor the view state: the state of its provider.
+        var record = File.ReadAllLines(path).Last(static line => line.Contains("\"local.sessionState\"", StringComparison.Ordinal)) + "\n";
+        var growth = string.Concat(Enumerable.Repeat(record, 500));
+
+        var journal = new SessionViewCatalog(options).JournalStore;
+        var cache = (SessionJournalSqliteCache)journal.ProjectionCache;
+        var store = journal.CreateSessionStore();
+        var point = await store.ProjectJournalAsync(path, null);
+        Assert.IsNotNull(point);
+        var reads = cache.JournalViewReadCount;
+        for (var index = 0; index < 4; index++)
+        {
+            await File.AppendAllTextAsync(path, growth);
+            point = await store.ProjectJournalAsync(path, point);
+            Assert.AreEqual(new FileInfo(path).Length, point?.Stamp.Length);
+            Assert.AreEqual(reads, cache.JournalViewReadCount, $"Growth {index}: the view is kept, the history is not read again.");
+        }
+
+        Assert.AreEqual("model-1", (await journal.ReadLatestStateAsync(session.SessionId, session.CreatedAt))!.ModelId);
+
+        // A view state written by the other process is read.
+        var state = JsonNode.Parse(File.ReadAllLines(path).Last(static line => line.Contains(SessionViewJournalStore.SessionStateEventType, StringComparison.Ordinal)))!;
+        state["raw"]!["model_id"] = "outside-model";
+        await File.AppendAllTextAsync(path, state.ToJsonString() + "\n");
+        point = await store.ProjectJournalAsync(path, point);
+        Assert.AreEqual(reads + 1, cache.JournalViewReadCount);
+        Assert.AreEqual("outside-model", JsonNode.Parse(ReadRowState(options, session.SessionId))!["model_id"]!.GetValue<string>());
+
+        // A journal replaced by a longer one (a rewind writes its header again) is read whole.
+        var lines = File.ReadAllLines(path);
+        var header = JsonNode.Parse(lines[0])!;
+        header["raw"]!["rewind_count"] = 1;
+        lines[0] = header.ToJsonString();
+        await File.WriteAllTextAsync(path, string.Join("\n", lines) + "\n" + growth);
+        point = await store.ProjectJournalAsync(path, point);
+        Assert.AreEqual(reads + 2, cache.JournalViewReadCount, "Another first line: the journal is read whole.");
+    }
+
+    [TestMethod]
+    public async Task AViewStateAppendedByAnotherProcess_IsFound_WhereverItsNameFallsInTheAppendedBytes()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var session = await CreateSessionAsync(options, "session-cut");
+        var path = JournalPath(options, session);
+        var record = File.ReadAllLines(path).Last(static line => line.Contains("\"local.sessionState\"", StringComparison.Ordinal));
+        var state = JsonNode.Parse(File.ReadAllLines(path).Last(static line => line.Contains(SessionViewJournalStore.SessionStateEventType, StringComparison.Ordinal)))!;
+        state["raw"]!["model_id"] = "outside-model";
+        var stateLine = state.ToJsonString();
+        var name = Encoding.UTF8.GetByteCount(stateLine[..stateLine.IndexOf(SessionViewJournalStore.SessionStateEventType, StringComparison.Ordinal)]);
+
+        var journal = new SessionViewCatalog(options).JournalStore;
+        var cache = (SessionJournalSqliteCache)journal.ProjectionCache;
+        var store = journal.CreateSessionStore();
+        var point = await store.ProjectJournalAsync(path, null);
+        var reads = cache.JournalViewReadCount;
+
+        // The appended bytes are read in chunks of 64 KiB from the line end before them: the name of the state is cut by the
+        // end of the first chunk.
+        var padding = new StringBuilder();
+        var target = 64 * 1024 - 10 - name - 1;
+        while (padding.Length + 2 * (record.Length + 1) <= target) padding.Append(record).Append('\n');
+        var spaces = target - padding.Length - record.Length - 1;
+        padding.Append(record).Append(' ', spaces).Append('\n');
+        Assert.AreEqual(target, Encoding.UTF8.GetByteCount(padding.ToString()));
+        await File.AppendAllTextAsync(path, padding + stateLine + "\n");
+
+        point = await store.ProjectJournalAsync(path, point);
+        Assert.IsNotNull(point);
+        Assert.AreEqual(reads + 1, cache.JournalViewReadCount, "The state is seen: the view is read again.");
+        Assert.AreEqual("outside-model", JsonNode.Parse(ReadRowState(options, session.SessionId))!["model_id"]!.GetValue<string>());
+    }
+
     private static async Task<SessionViewDescriptor> CreateSessionAsync(CatalogOptions options, string sessionId)
     {
         var catalog = new SessionViewCatalog(options);

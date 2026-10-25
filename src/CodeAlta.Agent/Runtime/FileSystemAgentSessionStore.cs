@@ -303,6 +303,43 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         return true;
     }
 
+    /// <summary>
+    /// Projects one journal into the listing cache as <see cref="ProjectJournalAsync(string, CancellationToken)"/> does, as the
+    /// continuation of the projection that stopped at <paramref name="previous"/>: when the journal is the one projected then
+    /// (same first line) followed by complete records that change neither its header nor its view state, the cache keeps the
+    /// view it read then. The work of a journal that grows is then bounded by what it grew, not by its history: only the
+    /// appended bytes are read for the view, beside the head and the tail the listing reads.
+    /// </summary>
+    /// <param name="sessionFile">The path of the journal.</param>
+    /// <param name="previous">Where the previous projection of the journal stopped; null for a first projection.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// Where this projection stopped, for the next one; <see langword="null"/> when the journal was not projected: the store
+    /// keeps no cache, the file is gone, or it is not (yet) the journal of a session.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionFile"/> is empty.</exception>
+    /// <exception cref="AgentSessionCacheLockedException">The cache database is locked.</exception>
+    public async Task<AgentJournalProjectionPoint?> ProjectJournalAsync(string sessionFile, AgentJournalProjectionPoint? previous,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionFile);
+        if (_projectionCache is null || !File.Exists(sessionFile)) return null;
+        var firstLine = await TryReadFirstLineAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        var projection = await ProjectSessionFileForCacheAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        if (projection is null) return null;
+        // The first line is read again after the appended bytes: a journal replaced meanwhile (a rewind) is read whole.
+        if (previous is { FirstLine: { } previousLine } && string.Equals(firstLine, previousLine, StringComparison.Ordinal)
+            && projection.Stamp.Length > previous.Stamp.Length
+            && await AppendedRecordsKeepTheViewAsync(sessionFile, previous.Stamp.Length, projection.Stamp.Length, cancellationToken).ConfigureAwait(false)
+            && string.Equals(await TryReadFirstLineAsync(sessionFile, cancellationToken).ConfigureAwait(false), firstLine, StringComparison.Ordinal))
+        {
+            projection = projection with { ContinuesFrom = previous.Stamp };
+        }
+
+        await _projectionCache.UpsertSessionAsync(projection, cancellationToken).ConfigureAwait(false);
+        return new AgentJournalProjectionPoint(projection.Stamp, firstLine);
+    }
+
     /// <summary>Gets the path of the journal of a session, as the store finds it.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -1192,6 +1229,90 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         var lines = new List<string>(await ReadHeadLinesAsync(sessionFile, MetadataProbeHeadByteCount, cancellationToken).ConfigureAwait(false));
         lines.AddRange(await ReadTailLinesAsync(sessionFile, MetadataProbeTailByteCount, cancellationToken).ConfigureAwait(false));
         return lines;
+    }
+
+    // The first line of a journal, its CodeAlta header; null when it cannot be read or is longer than a header can be.
+    private static async Task<string?> TryReadFirstLineAsync(string path, CancellationToken cancellationToken)
+    {
+        const int MaximumHeaderBytes = 64 * 1024;
+        try
+        {
+            await using var stream = await OpenReadStreamAsync(path, cancellationToken).ConfigureAwait(false);
+            var buffer = ArrayPool<byte>.Shared.Rent((int)Math.Min(MaximumHeaderBytes, Math.Max(1, stream.Length)));
+            try
+            {
+                var read = 0;
+                while (read < buffer.Length)
+                {
+                    var current = await stream.ReadAsync(buffer.AsMemory(read), cancellationToken).ConfigureAwait(false);
+                    if (current == 0) break;
+                    var end = Array.IndexOf(buffer, (byte)'\n', read, current);
+                    if (end >= 0) return Utf8WithoutBom.GetString(buffer, 0, end);
+                    read += current;
+                }
+
+                return null;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    // Whether the bytes of a journal from one length to another are complete records that change neither its CodeAlta header
+    // nor its view state: the journal ended a line at the first length, and the appended bytes name neither record. Reads only
+    // the appended bytes.
+    private static async Task<bool> AppendedRecordsKeepTheViewAsync(string path, long from, long to, CancellationToken cancellationToken)
+    {
+        if (from <= 0 || to <= from) return false;
+        try
+        {
+            await using var stream = await OpenReadStreamAsync(path, cancellationToken).ConfigureAwait(false);
+            if (stream.Length < to) return false;
+            stream.Seek(from - 1, SeekOrigin.Begin);
+            var header = Encoding.UTF8.GetBytes(CodeAltaSessionHeaderEventType);
+            var state = Encoding.UTF8.GetBytes(CodeAltaSessionStateEventType);
+            // A name cut by the end of a chunk is found with the bytes kept from that chunk.
+            var overlap = Math.Max(header.Length, state.Length) - 1;
+            var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+            try
+            {
+                var remaining = to - from + 1;
+                var kept = 0;
+                var first = true;
+                while (remaining > 0)
+                {
+                    var read = await stream.ReadAsync(buffer.AsMemory(kept, (int)Math.Min(buffer.Length - kept, remaining)), cancellationToken).ConfigureAwait(false);
+                    if (read == 0) return false;
+                    remaining -= read;
+                    var span = buffer.AsSpan(0, kept + read);
+                    if (first)
+                    {
+                        if (span[0] != (byte)'\n') return false;
+                        first = false;
+                    }
+
+                    if (span.IndexOf(header) >= 0 || span.IndexOf(state) >= 0) return false;
+                    kept = Math.Min(overlap, span.Length);
+                    span[^kept..].CopyTo(buffer);
+                }
+
+                return true;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private async Task<SessionProjection> ProjectSessionFileWithHistoryAsync(

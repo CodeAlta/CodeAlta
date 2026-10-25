@@ -144,6 +144,14 @@ public sealed record AgentSessionCacheProjection(
 public readonly record struct AgentSessionCacheFileStamp(DateTime LastWriteTimeUtc, long Length);
 
 /// <summary>
+/// Describes where a projection of a journal another process writes stopped, so that the next one continues it
+/// (<see cref="FileSystemAgentSessionStore.ProjectJournalAsync(string, AgentJournalProjectionPoint?, CancellationToken)"/>).
+/// </summary>
+/// <param name="Stamp">The stamp of the journal as it was projected.</param>
+/// <param name="FirstLine">The first line of the journal then, its CodeAlta header, which a rewind writes again; null when it was not read.</param>
+public sealed record AgentJournalProjectionPoint(AgentSessionCacheFileStamp Stamp, string? FirstLine);
+
+/// <summary>
 /// Describes the result of reconciling cached session projections with journals on disk.
 /// </summary>
 /// <param name="Changed">Whether visible cached metadata changed.</param>

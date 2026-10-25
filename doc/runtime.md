@@ -342,8 +342,9 @@ its own database. Two rules keep one writer per session across processes:
   task, pending agent prompt or remote control), so a closed tab lets another process continue the session.
 - **Following.** A host that owns the database of its state root (`FollowExternalSessions`: Desktop, TUI) runs
   `ExternalSessionFollower`: it projects the sessions the command line names in markers, then deletes the markers;
-  it follows the sessions another process holds, projecting their journals again as they grow (head and tail only,
-  about once a second, only while held; a marker whose journal is not a session yet is looked at again at that pace)
+  it follows the sessions another process holds, projecting their journals again as they grow (the head, the tail and
+  the bytes appended since the previous projection, which each projection continues, never the history; about once a
+  second, only while held; a marker whose journal is not a session yet is looked at again at that pace)
   and once more when released, and raises `Changed` for the frontends. The
   folders are watched and listed again on a bounded period, since watchers drop events. This and the reconciliation
   are the only projections of journals another process writes.

@@ -360,9 +360,11 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
             var stamp = session.Journal is { } path ? Stamp(path) : null;
             if (stamp is not null && stamp != session.Stamp)
             {
-                if (await _store.ProjectJournalAsync(session.Journal!, cancellationToken).ConfigureAwait(false))
+                // Each projection continues the previous one: what the journal grew is read, not its history.
+                if (await _store.ProjectJournalAsync(session.Journal!, session.Projected, cancellationToken).ConfigureAwait(false) is { } projected)
                 {
                     session.Stamp = stamp;
+                    session.Projected = projected;
                     await _catalog.InvalidateAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
                     if (!released) Raise(new ExternalSessionChange(session.SessionId, ExternalSessionChangeKind.Updated, session.Holder.OwnerKind));
                 }
@@ -424,6 +426,9 @@ public sealed class ExternalSessionFollower : IAsyncDisposable
         public string? Journal { get; set; }
 
         public (long Length, DateTime LastWriteUtc)? Stamp { get; set; }
+
+        // Where the last projection of its journal stopped, which the next one continues.
+        public AgentJournalProjectionPoint? Projected { get; set; }
 
         public ExternalSessionHold ToHold() => new(SessionId, Holder.OwnerKind, Holder.ProcessId, Stamp?.Length);
     }
