@@ -22,6 +22,8 @@ test("usage validates exact bounded decimal strings, zero, unknown, flags and at
   // When the prompt cache expires, where the provider says it.
   assert.equal(validateUsage(target, { ...base, observation: { ...base.observation!, promptCacheExpiresAt: "2026-09-25T11:00:00.0000000+00:00" } })?.observation?.promptCacheExpiresAt,
     "2026-09-25T11:00:00.0000000+00:00");
+  // The estimate of a session whose provider reports no usage is an observation too.
+  assert.equal(validateUsage(target, { ...base, observation: { ...base.observation!, source: "LocalEstimate" } })?.observation?.source, "LocalEstimate");
   assert.match(usageMessage("no_observation"), /No usage observation/);
   assert.match(usageMessage("metadata_incomplete"), /metadata/);
   assert.doesNotMatch(usageMessage("private/file/name"), /private/);

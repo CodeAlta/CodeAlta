@@ -5,7 +5,7 @@ import { AppIcon } from "./AppIcon";
 import { ProviderIcon } from "./ProviderIcon";
 import { AppWindow } from "./AppWindow";
 import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, inputTokens, mergeUsageObservation, operationSegments, persistedCacheExpiry, persistedContextUsage,
-  persistedOperation, persistedUsageFields, usageIntent, usageMarkdown, type UsageSegment } from "./contextUsage";
+  persistedOperation, persistedUsageFields, persistedUsageIsEstimate, usageIntent, usageMarkdown, type UsageSegment } from "./contextUsage";
 import { UsageLimitList, usageNote, useProviderUsage } from "./UsageLimits";
 import { CacheCountdown, ContextRing } from "./promptSurface/PromptSurfaceParts";
 import { limitsMarkdown, liveLimitsAreCurrent, planLabel, providerLimits, sessionLimits } from "./subscriptionUsage";
@@ -45,7 +45,7 @@ function UsageCard({ title, aside, children }: { title: ReactNode; aside?: React
  * back to the last persisted usage record of the loaded timeline. The totals of the whole session are read from its
  * journal when the window opens and on a refresh, once each, and stay shown until the window closes.
  */
-export function SessionUsageInspector({ target, capability, refreshKey, persisted, provider, model, subscription = providerUsage }: {
+export function SessionUsageInspector({ target, capability, refreshKey, persisted, provider, model, subscription = providerUsage, onOpenDocumentation }: {
   target: UsageTarget; capability: ReturnType<typeof createMutationCapability>;
   /** Changes when a new observation is likely (run state or live revision). */
   refreshKey?: string;
@@ -55,6 +55,8 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   provider?: string | null; model?: string | null;
   /** Reads the usage of the subscription of the provider, for a session whose turns reported none. */
   subscription?: Pick<typeof providerUsage, "read">;
+  /** Opens a page of the user guide, for the note of a usage that is only estimated. */
+  onOpenDocumentation?: (page: string, anchor: string | null) => void;
 }) {
   const { t } = useShellLanguage();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -131,11 +133,14 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const observed = contextUsage(observation?.window?.currentTokens, observation?.window?.tokenLimit);
   const usage = observed ?? persistedContextUsage(persisted);
   const fromHistory = !observed && !!usage;
+  // The provider has reported no usage: the host estimated the context from the conversation.
+  const estimated = observed ? observation?.source === "LocalEstimate" : !!usage && persistedUsageIsEstimate(persisted);
   const percent = usage?.percent ?? null;
   const intent = usageIntent(percent);
-  const summary = usage ? `${compactTokens(usage.used)}${usage.limit ? ` / ${compactTokens(usage.limit)}` : ""}` : null;
+  const summary = usage ? `${estimated ? "~" : ""}${compactTokens(usage.used)}${usage.limit ? ` / ${compactTokens(usage.limit)}` : ""}` : null;
+  const shownSummary = percent === null ? summary! : `${Math.round(percent)}% · ${summary}`;
   const label = usage
-    ? t("Context usage: {summary}", { summary: percent === null ? summary! : `${Math.round(percent)}% · ${summary}` })
+    ? estimated ? t("Estimated context usage: {summary}", { summary: shownSummary }) : t("Context usage: {summary}", { summary: shownSummary })
     : t("Context usage unknown");
   const operation = observation?.lastOperation ?? persistedOperation(persisted);
   const history = new Map(persistedUsageFields(persisted).map(field => [field.label.toLowerCase(), field.value]));
@@ -182,7 +187,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
       disabled={!allowed} aria-label={label} aria-haspopup="dialog" aria-expanded={open && allowed} title={label} onClick={() => { if (capability.canMutate()) { setOpen(true); read(open ? "periodic" : "open"); } }}>
       {usage ? <ContextRing percent={percent} /> : <AppIcon name="usage" size={15} />}
       {usage && percent !== null && <span className="context-usage-text">{`${Math.round(percent)}%`}</span>}
-      {usage && <span className="context-usage-tokens">{compactTokens(usage.used)}{usage.limit ? <><span className="context-usage-slash">/</span>{compactTokens(usage.limit)}</> : null}</span>}
+      {usage && <span className="context-usage-tokens">{estimated && "~"}{compactTokens(usage.used)}{usage.limit ? <><span className="context-usage-slash">/</span>{compactTokens(usage.limit)}</> : null}</span>}
     </Button>
     <CacheCountdown expiresAt={cacheExpiresAt} />
     {open && allowed && <AppWindow storageKey="codealta.desktop.window.usage.v2" className="session-usage-dialog" titleId="session-usage-title" title={t("Context usage")}
@@ -196,6 +201,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
         <header className="context-usage-subject">
           <div><strong className="with-logo"><ProviderIcon providerKey={provider} size={15} />{provider ?? t("session provider")}</strong>{modelName && <span>{modelName}</span>}</div>
           <div>{fromHistory && <Tag minimal round>{t("From saved history")}</Tag>}
+            {estimated && <Tag minimal round>{t("Estimated")}</Tag>}
             {updatedTime && <span className="bp6-text-muted">{t("updated {time}", { time: updatedTime })}</span>}
             <span role="status" className="bp6-text-muted">{copied === true ? t("Usage copied.") : copied === false ? t("Clipboard unavailable; nothing copied.") : ""}</span></div>
         </header>
@@ -204,7 +210,12 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
             <span>{usage ? usage.limit ? t("{used} / {limit} input tokens", { used: groupedTokens(usage.used), limit: groupedTokens(usage.limit) })
               : t("{used} tokens", { used: groupedTokens(usage.used) }) : t("Waiting for usage data from the active session.")}</span></div>
           <UsageBreakdown segments={contextSegments(usage)} label={t("Context window")} />
-          {envelope && <p className="usage-card-note">{t("Indicative model limits")}: {envelope}</p>}
+          {estimated && <p className="usage-card-note context-usage-estimate">
+            {t("Estimated from the conversation: the provider of this session has not reported its token usage. Agents that run their own loop, such as ACP agents, may never report it.")}
+            {!usage?.limit && <> {t("The context limit of the model is not known.")}</>}
+            {onOpenDocumentation && <> <a href="#" onClick={event => { event.preventDefault(); close(); onOpenDocumentation("model-providers/acp-agents.md", "limitations"); }}>
+              {t("Limitations of ACP agents")}</a></>}</p>}
+          {envelope &&<p className="usage-card-note">{t("Indicative model limits")}: {envelope}</p>}
         </UsageCard>
         {operation && <UsageCard title={operation.label ?? t("Last operation")} aside={operationFacts.join(" · ")}>
           {operations.length ? <UsageBreakdown segments={operations} label={operation.label ?? t("Last operation")} />

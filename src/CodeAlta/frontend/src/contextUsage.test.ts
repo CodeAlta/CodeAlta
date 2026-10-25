@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionUsageObservation } from "#neoastra";
 import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, inputTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
-  persistedOperation, persistedUsageFields, rateWindowSummary, usageIntent, usageMarkdown, usageSegments } from "./contextUsage";
+  persistedOperation, persistedUsageFields, persistedUsageIsEstimate, rateWindowSummary, usageIntent, usageMarkdown, usageSegments } from "./contextUsage";
 
 const record = "Idle\r\n\n**Context:** 124701 / 272000 tokens (45.8%)\r\n\n**Messages in context:** 145\r\n\n**Model:** gpt-test\r\n\n**Input tokens:** 88319\r\n\n**Output tokens:** 270\r\n\n**Cached input tokens:** 87936\r\n\n**Reasoning tokens:** 0\r\n\n**Duration:** 1500.5 ms\r\n\n**Usage scope/source:** CurrentWindow · ProviderUsage";
 const observation = (patch: Partial<SessionUsageObservation> = {}): SessionUsageObservation => ({ sequence: "1", sourceUpdatedAt: null, eventTimestamp: null,
@@ -40,6 +40,11 @@ test("a persisted usage record yields the context line, its other fields and the
   assert.deepEqual(persistedContextUsage(record), { used: "124701", limit: "272000", percent: 45.8 });
   assert.deepEqual(persistedContextUsage("**Context:** 1 000 / 2 000"), { used: "1000", limit: "2000", percent: 50 });
   assert.equal(persistedContextUsage("**Context:** unknown"), null);
+  // The estimate of a provider that reports no usage, for a model whose limit is not known.
+  const estimate = "Usage updated.\n\n**Context:** 13093 / unknown tokens\n\n**Messages in context:** 2\n\n**Usage scope/source:** CurrentWindow · LocalEstimate";
+  assert.deepEqual(persistedContextUsage(estimate), { used: "13093", limit: null, percent: null });
+  assert.equal(persistedUsageIsEstimate(estimate), true);
+  assert.equal(persistedUsageIsEstimate(record), false);
   assert.equal(persistedContextUsage("no context here"), null);
   assert.equal(persistedContextUsage(null), null);
   assert.deepEqual(persistedUsageFields("**Context:** 1 / 2 tokens\r\n\n**Messages in context:** 145\r\n\n**Cost:** \r\n**Model:** gpt"),

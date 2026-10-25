@@ -48,7 +48,7 @@ When the agent is not signed in, its form says so and shows how to sign in. A co
 
 An ACP agent runs its own loop with its own tools, context and account: CodeAlta sees only what the agent reports, and some of its features work less well than with a provider it drives itself, such as Codex, Claude Code or an API key. Check the tags of the provider after its test.
 
-- **Usage and cost.** Some agents, such as Cursor, report no token usage: the context usage of the session is an estimate, without the limit of the model, and their turns add no tokens or cost to [Statistics](../plugins/statistics.md). The usage of the agent's own subscription is not shown.
+- **Usage and cost.** Some agents, such as Cursor, report no token usage: the context usage of the session is estimated from the conversation (`~13.1k/256k` below the prompt, marked **Estimated** in its window), and their turns add no tokens or cost to [Statistics](../plugins/statistics.md). The usage of the agent's own subscription is not shown.
 - **CodeAlta's tools.** Without the **CodeAlta tools** tag, the agent runs without `alta` and the tools of plugins: no sub-agents, notes, reminders, reviews or UI tools in its sessions.
 - **Instructions.** Without the **System prompt** tag, CodeAlta's instructions and the agent prompt come with the first prompt of a session and after a compaction, and the agent may follow them less closely.
 - **Review before commit** only asks the agent not to commit: CodeAlta cannot refuse a commit the agent runs with its own tools.

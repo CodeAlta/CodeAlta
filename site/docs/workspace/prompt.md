@@ -208,6 +208,8 @@ Open it with the context ring below the prompt, or `Ctrl+G Ctrl+U`. It shows the
 - **Current session** (desktop): the same for the whole session, with the time and the cost; a fork counts from the fork. **Copy as Markdown** copies it.
 - **Subscription usage** (desktop; Codex, Copilot and Claude Code): the limits of your plan and when they reset. See [Usage of a subscription](../model-providers/readme.md#subscription-usage).
 
+When the provider reports no token usage, as some [ACP agents](../model-providers/acp-agents.md#limitations) do, CodeAlta estimates the context from the conversation: the count starts with `~` and the window says **Estimated**.
+
 <figure class="alta-figure my-4" style="max-width: 30rem;">
   <img src="{{site.basepath}}/img/alta-desktop-current-session-costs.webp" alt="Context usage popup of CodeAlta Desktop with the Current session card under the last operation: a token bar, the duration and the cost of the whole session" loading="lazy">
   <figcaption class="small text-secondary mt-2">Current session adds up the tokens, the duration and the cost of every request of the session.</figcaption>

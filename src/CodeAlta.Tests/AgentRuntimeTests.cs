@@ -925,7 +925,8 @@ public sealed class AgentRuntimeTests
         string protocolFamily,
         AgentTransportKind transportKind,
         ModelProviderId ProviderId,
-        IAgentSessionProjectionCache? projectionCache = null)
+        IAgentSessionProjectionCache? projectionCache = null,
+        IModelProviderModelCatalog? modelCatalog = null)
     {
         return new AgentRuntime(
             new ModelProviderId(ProviderId.Value),
@@ -957,9 +958,49 @@ public sealed class AgentRuntimeTests
                             },
                         },
                         TurnExecutor = executor,
+                        ModelCatalog = modelCatalog,
                     },
                 ],
             });
+    }
+
+    [TestMethod]
+    public async Task AgentRuntime_AProviderWhoseCatalogIsNotItsExecutor_GivesTheSessionTheLimitOfItsModel()
+    {
+        // A provider type of a plugin (an ACP agent): its catalog is the runtime, its executor reports no usage, and
+        // nothing has read its models before the session starts.
+        using var temp = TestTempDirectory.Create();
+        var runtime = CreateAgentRuntime(temp.Path, new NoUsageTurnExecutor(), "agent", "Agent", "acp", AgentTransportKind.AgentClientProtocol,
+            new ModelProviderId("agent"), modelCatalog: new FixedModelCatalog(new AgentModelInfo("grok[context=256k]", "Grok",
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal) { ["contextWindow"] = 256_000L })));
+        await runtime.StartAsync().ConfigureAwait(false);
+        await using var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = "agent", Model = "grok[context=256k]",
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }).ConfigureAwait(false);
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Hello") }).ConfigureAwait(false);
+
+        var usage = (await session.GetHistoryAsync().ConfigureAwait(false)).OfType<AgentSessionUpdateEvent>()
+            .Last(static update => update.Kind == AgentSessionUpdateKind.UsageUpdated).Usage;
+        Assert.AreEqual((256_000L, AgentUsageSource.LocalEstimate), (usage?.TokenLimit, usage?.Source));
+    }
+
+    private sealed class NoUsageTurnExecutor : IModelProviderTurnExecutor
+    {
+        public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("ok")]),
+            });
+    }
+
+    private sealed class FixedModelCatalog(params AgentModelInfo[] models) : IModelProviderModelCatalog
+    {
+        public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(ModelProviderRuntimeDescriptor provider, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentModelInfo>>(models);
     }
 
     private sealed class TransferFaultCache(Action<AgentSessionCacheProjection> onWrite) : IAgentSessionProjectionCache

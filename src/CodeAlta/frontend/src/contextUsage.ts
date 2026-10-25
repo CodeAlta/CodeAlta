@@ -33,13 +33,18 @@ export function contextUsage(currentTokens: string | null | undefined, tokenLimi
   return { used: currentTokens, limit, percent };
 }
 
-/** Reads "124,701 / 272,000" style text from a persisted usage record ("**Context:** ..."). */
+/** Reads "124,701 / 272,000" style text from a persisted usage record ("**Context:** ..."); a limit written "unknown" is unknown. */
 export function persistedContextUsage(text: string | null | undefined): ContextUsage | null {
   const context = text?.match(/\*\*Context:\*\*\s*([^\n]+)/i)?.[1];
-  const numbers = context?.match(/([\d][\d,._\s]*)\s*\/\s*([\d][\d,._\s]*)/);
+  const numbers = context?.match(/([\d][\d,._\s]*)\s*\/\s*([\d][\d,._\s]*|unknown)/i);
   if (!numbers) return null;
   const digits = (value: string) => value.replace(/[^\d]/g, "");
-  return contextUsage(digits(numbers[1]), digits(numbers[2]));
+  return contextUsage(digits(numbers[1]), digits(numbers[2]) || null);
+}
+
+/** Whether a persisted usage record is an estimate of the host, for a provider that has reported no usage. */
+export function persistedUsageIsEstimate(text: string | null | undefined): boolean {
+  return /\*\*Usage scope\/source:\*\*[^\n]*·\s*LocalEstimate\b/i.test(text ?? "");
 }
 
 /** Meter color: calm until the window is mostly used (the TUI's thresholds). */

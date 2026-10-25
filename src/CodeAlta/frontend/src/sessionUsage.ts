@@ -90,7 +90,7 @@ const max64 = 9223372036854775807n;
 const scopes = new Set(["Unknown", "CurrentWindow", "LastOperation", "SessionTotal", "Compaction", "Truncation", "RateLimitOnly"]);
 const sources = new Set(["Unknown", "CopilotSessionUsageInfo", "CopilotAssistantUsage", "CopilotAccountQuota",
   "CopilotCompactionComplete", "CopilotTruncation", "CodexSessionTokenUsageUpdated", "CodexTokenCountEvent",
-  "CodexAccountRateLimitsUpdated", "RecoveredHistory", "LocalProviderUsage"]);
+  "CodexAccountRateLimitsUpdated", "RecoveredHistory", "LocalProviderUsage", "LocalEstimate"]);
 const failures = new Set(["invalid_request", "missing_session", "scope_mismatch", "transition", "stale_attachment",
   "metadata_missing", "metadata_incomplete", "metadata_invalid", "metadata_mismatch", "missing_project", "ambiguous_project",
   "incomplete_project", "invalid_project", "archived_project", "read_failed", "wire_limit", "closed", "stale_epoch", "metadata_unavailable", "project_unverified"]);

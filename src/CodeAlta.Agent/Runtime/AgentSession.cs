@@ -140,6 +140,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
     }
 
+    /// <summary>
+    /// The model catalog of the provider when it is not its turn executor (a provider type of a plugin, such as an ACP
+    /// agent): the session reads the limits of its model there when the runtime had no model of the provider yet.
+    /// </summary>
+    internal IModelProviderModelCatalog? ModelCatalog { get; init; }
+
     // earlierHistory: what the journal holds before history, for a session read again without all of it.
     internal AgentSession(
         ModelProviderId providerId,
@@ -1863,7 +1869,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         if (usage is null)
         {
-            return null;
+            // A provider that has reported usage before only skipped this answer: what it said stands. One that never
+            // has (an agent that does not report it) still gets the limit of the model, against an estimate.
+            return IsEstimateOnly(previousUsage) && conversation.Count > 0
+                ? CreateEstimateOnlyUsage(AgentTokenEstimator.EstimatePromptTokens(systemMessage, developerInstructions, conversation, usage: null).Tokens,
+                    modelInfo, conversation.Count)
+                : null;
         }
 
         // A provider that keeps the context counts all of it with each request, and trims it by itself (it clears
@@ -1889,6 +1900,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             ? null
             : snapshot with { PromptCacheExpiresAt = AgentUsageFactory.ResolvePromptCacheExpiry(previousUsage, usage) };
     }
+
+    // Whether the usage of the session is no more than an estimate: the provider has reported none yet.
+    private static bool IsEstimateOnly(AgentSessionUsage? usage) => usage is null or { Source: AgentUsageSource.LocalEstimate };
+
+    private static AgentSessionUsage? CreateEstimateOnlyUsage(long tokens, AgentModelInfo? modelInfo, int messageCount)
+        => AgentUsageFactory.AttachWindowEstimate(null, modelInfo, tokens, messageCount, DateTimeOffset.UtcNow, "Estimated active context") is { } usage
+            ? usage with { Source = AgentUsageSource.LocalEstimate, LastOperation = null }
+            : null;
 
     private static AgentSessionUsage SelectUsageForConversationEstimate(
         AgentSessionUsage? previousUsage,
@@ -2055,13 +2074,15 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         var label = estimate.IsEstimated
             ? "Estimated active context"
             : "Active context window";
-        var refreshedUsage = AgentUsageFactory.AttachWindowEstimate(
-            _state.Usage,
-            modelInfo,
-            estimate.Tokens,
-            providerConversation.Messages.Count,
-            DateTimeOffset.UtcNow,
-            label);
+        var refreshedUsage = IsEstimateOnly(_state.Usage)
+            ? CreateEstimateOnlyUsage(estimate.Tokens, modelInfo, providerConversation.Messages.Count)
+            : AgentUsageFactory.AttachWindowEstimate(
+                _state.Usage,
+                modelInfo,
+                estimate.Tokens,
+                providerConversation.Messages.Count,
+                DateTimeOffset.UtcNow,
+                label);
         if (refreshedUsage is null || Equals(refreshedUsage, _state.Usage))
         {
             return;
@@ -3371,6 +3392,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             LastOperation = operation,
             UpdatedAt = now,
+            // The provider counted this request: the usage is no longer only an estimate.
+            Source = IsEstimateOnly(_state.Usage) ? AgentUsageSource.ProviderUsage : _state.Usage!.Source,
         };
         _state = _state with { Usage = usage, UpdatedAt = now };
         await UpdateSummaryAsync(summary => summary with { Usage = usage, UpdatedAt = now }, cancellationToken, persist: false).ConfigureAwait(false);
@@ -4994,7 +5017,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_cachedModels.Count == 0 && _turnExecutor is IModelProviderModelCatalog modelCatalog)
+            if (_cachedModels.Count == 0 && (ModelCatalog ?? _turnExecutor as IModelProviderModelCatalog) is { } modelCatalog)
             {
                 _cachedModels = await modelCatalog.ListModelsAsync(Provider, cancellationToken).ConfigureAwait(false);
             }

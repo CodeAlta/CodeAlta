@@ -2184,6 +2184,43 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_SendAsync_AProviderThatReportsNoUsage_KeepsTheLimitOfTheModel_WithAnEstimate()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-no-usage");
+        var state = CreateState("session-no-usage");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        var model = new AgentModelInfo("gpt-5.4", "GPT-5.4", Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal) { ["contextWindow"] = 256_000L });
+        // The answer carries no usage, as an agent that does not report it.
+        var executor = new ScriptedTurnExecutor(
+            [model],
+            null,
+            (_, _, _) => Task.FromResult(new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done " + new string('a', 400))]),
+            }));
+
+        await using var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store, executor, CreateOptions(provider, temp.Path));
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Hello") }).ConfigureAwait(false);
+
+        var usage = (await session.GetHistoryAsync().ConfigureAwait(false))
+            .OfType<AgentSessionUpdateEvent>()
+            .Last(static evt => evt.Kind == AgentSessionUpdateKind.UsageUpdated).Usage;
+        Assert.IsNotNull(usage);
+        Assert.AreEqual(256_000L, usage.TokenLimit);
+        Assert.IsTrue(usage.Window!.CurrentTokens > 100, $"{usage.Window.CurrentTokens} tokens");
+        Assert.AreEqual(AgentUsageSource.LocalEstimate, usage.Source);
+        Assert.AreEqual("Estimated active context", usage.Window.Label);
+        // Nothing the provider did not say is shown as if it had: no operation, no cost.
+        Assert.IsNull(usage.LastOperation);
+        var stored = (await store.GetStateAsync("session-no-usage").ConfigureAwait(false))!.Usage;
+        Assert.AreEqual((256_000L, AgentUsageSource.LocalEstimate), (stored?.TokenLimit, stored?.Source));
+    }
+
+    [TestMethod]
     public async Task AgentSession_CompactAsync_RecordsWhatTheSummaryRequestUsed()
     {
         using var temp = TestTempDirectory.Create();

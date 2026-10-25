@@ -267,7 +267,13 @@ public enum AgentUsageSource
     /// Live usage data reported by a provider turn executor.
     /// </summary>
     [JsonStringEnumMemberName("LocalProviderUsage")]
-    ProviderUsage
+    ProviderUsage,
+
+    /// <summary>
+    /// An estimate of the context from the conversation, for a session whose provider has reported no usage (an agent
+    /// that does not report it): no token was counted by the provider.
+    /// </summary>
+    LocalEstimate
 }
 
 /// <summary>
