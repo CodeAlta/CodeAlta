@@ -407,6 +407,13 @@ def comment_message(path: Path) -> str:
 
 
 def cmd_close(args: argparse.Namespace) -> int:
+    def last_comment(number):
+        comments = gh_json("api", f"repos/{REPO}/issues/{number}/comments?per_page=100") or []
+        return comments[-1] if comments else None
+
+    def same_text(posted, message):
+        return posted.replace("\r\n", "\n").strip() == message.replace("\r\n", "\n").strip()
+
     version = args.version
     folder = ROOT / "tmp" / f"release-{version}" / "comments"
     issues = gh_json("issue", "list", "--repo", REPO, "--milestone", version, "--state", "open", "--json", "number,title,author") or []
@@ -420,11 +427,15 @@ def cmd_close(args: argparse.Namespace) -> int:
         if args.dry_run:
             print("  " + messages[number].splitlines()[0][:160])
             continue
-        message_file = folder / f".posted-{number}.md"
-        message_file.write_text(messages[number], encoding="utf-8")
-        run("gh", "issue", "comment", str(number), "--repo", REPO, "--body-file", str(message_file))
-        posted = gh_json("api", f"repos/{REPO}/issues/{number}/comments?per_page=100")[-1]
-        if posted["body"].strip() != messages[number].strip():
+        # A run stopped after a comment was posted leaves it as the last one: it is not posted twice.
+        posted = last_comment(number)
+        if posted is None or not same_text(posted["body"], messages[number]):
+            message_file = folder / f".posted-{number}.md"
+            # Written with LF: on Windows, the CRLF of text mode would reach GitHub as is.
+            message_file.write_text(messages[number], encoding="utf-8", newline="\n")
+            run("gh", "issue", "comment", str(number), "--repo", REPO, "--body-file", str(message_file))
+            posted = last_comment(number)
+        if posted is None or not same_text(posted["body"], messages[number]):
             raise SystemExit(f"error: the comment of #{number} is not the message ({posted['html_url']}); the issue stays open")
         run("gh", "issue", "close", str(number), "--repo", REPO, "--reason", "completed")
         print(f"  commented and closed: {posted['html_url']}")
