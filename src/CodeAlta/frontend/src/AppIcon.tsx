@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import {
   House,
   Orbit,
+  Tag,
   GripVertical,
   ArrowLeft,
   ArrowRight,
@@ -161,6 +162,7 @@ const icons = {
   newFolder: FolderPlus,
   collapseAll: CopyMinus,
   star: Star,
+  tag: Tag,
   bookmark: Bookmark,
   bookmarkAdd: BookmarkPlus,
   bookmarkRemove: BookmarkMinus,

@@ -3,7 +3,7 @@ import { colorSchemeIds, colorSchemeOf, colorSchemeStorageKey, customSchemeIdOf,
   parseCustomScheme, schemePalette, type ColorScheme, type ColorVariant, type CustomColorScheme, type ShownAppearance } from "./colorSchemes";
 import type { PreferenceIssue } from "./localization";
 import { readRecentSessionCount, readSubAgentCount, recentSessionCountKey, subAgentCountKey, validRecentSessionCount } from "./recentSessions";
-import { persistProjectSort, projectSortStorageKey, type ProjectSort } from "./explorer/projectRail";
+import { persistProjectSort, projectGroupingStorageKey, projectSortStorageKey, type ProjectGrouping, type ProjectSort } from "./explorer/projectRail";
 import { persistProjectRailCollapsed, projectRailVisibilityKey, resetNarrowRail, toggleProjectRail, type ProjectRailState } from "./explorer/projectRailVisibility";
 
 /** The theme the user picked; "system" follows the operating system. */
@@ -115,6 +115,7 @@ export function useWindowPreferences() {
     rail: readPreference(projectRailVisibilityKey, ["expanded", "collapsed"], "expanded"),
     confirm: Object.fromEntries(confirmations.map(value => [value, readPreference(confirmationStorageKey(value), ["ask", "skip"], "ask").value === "ask"])) as Record<Confirmation, boolean>,
     singleTab: readPreference(singleSessionTabStorageKey, ["on", "off"], "off").value === "on",
+    grouping: readPreference(projectGroupingStorageKey, ["labels", "flat"], "labels").value as ProjectGrouping,
   }));
   const [theme, updateTheme] = useState<Theme>(initial.theme.value);
   const [darker, updateDarker] = useState(initial.darker.value === "on");
@@ -200,6 +201,12 @@ export function useWindowPreferences() {
     updateSingleSessionTab(value);
     try { localStorage.setItem(singleSessionTabStorageKey, value ? "on" : "off"); } catch { /* Several tabs again at the next start. */ }
   }
+  // Whether the Explorer lists the projects under their labels. A choice that could not be kept still stands until the window is closed.
+  const [projectGrouping, updateGrouping] = useState<ProjectGrouping>(initial.grouping);
+  function setProjectGrouping(value: ProjectGrouping) {
+    updateGrouping(value);
+    try { localStorage.setItem(projectGroupingStorageKey, value); } catch { /* Grouped again at the next start. */ }
+  }
   function setProjectSort(value: ProjectSort) {
     updateSort(value);
     save("sort", () => persistProjectSort(value => localStorage.setItem(projectSortStorageKey, value), value));
@@ -219,5 +226,5 @@ export function useWindowPreferences() {
   const appearance: ShownAppearance = useMemo(() => ({ theme: shownTheme, scheme: colorScheme, palette: schemePalette(shownScheme, variant) }), [shownTheme, colorScheme, shownScheme, variant]);
   return { theme, shownTheme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes,
     projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm,
-    singleSessionTab, setSingleSessionTab };
+    singleSessionTab, setSingleSessionTab, projectGrouping, setProjectGrouping };
 }

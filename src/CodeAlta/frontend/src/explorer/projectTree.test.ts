@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isClaudeCodeOpen, isCollapsed, isExpanded, isFavorite, persistProjectTree, projectTreeLimit, restoreProjectTree, setClaudeCodeOpen,
-  scopeKey, setCollapsed, setFavorite, toggleScope, type ProjectTree } from "./projectTree";
+import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isClaudeCodeOpen, isCollapsed, isExpanded, isFavorite, isLabelFolded, persistProjectTree, projectTreeLimit, restoreProjectTree, setClaudeCodeOpen,
+  scopeKey, setCollapsed, setFavorite, setLabelFolded, toggleScope, type ProjectTree } from "./projectTree";
 
 test("scopes open and close one by one, and all close at once", () => {
   let tree = expandScope(expandScope(emptyProjectTree, "a"), null);
@@ -90,4 +90,16 @@ test("the group of Claude Code sessions of a project is closed until it is opene
   persistProjectTree(value => { stored = value; }, closed);
   assert.deepEqual(restoreProjectTree(() => stored), { expanded: [], favorites: [], collapsed: [] }, "nothing is stored while every group is closed");
   assert.equal(setClaudeCodeOpen(emptyProjectTree, "", true), emptyProjectTree);
+});
+
+test("the projects of a label are shown until it is folded, and stay as they were left", () => {
+  assert.equal(isLabelFolded(emptyProjectTree, "infra"), false);
+  const folded = setLabelFolded(emptyProjectTree, "infra", true);
+  assert.equal(isLabelFolded(folded, "infra"), true);
+  assert.equal(setLabelFolded(folded, "infra", true), folded);
+  let stored = "";
+  persistProjectTree(value => { stored = value; }, folded);
+  assert.deepEqual(restoreProjectTree(() => stored), { expanded: [], favorites: [], collapsed: [], labelsFolded: ["infra"] });
+  persistProjectTree(value => { stored = value; }, setLabelFolded(folded, "infra", false));
+  assert.deepEqual(restoreProjectTree(() => stored), { expanded: [], favorites: [], collapsed: [] });
 });

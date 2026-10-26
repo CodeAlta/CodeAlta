@@ -20,7 +20,7 @@ import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, runtimeNotification, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
 import {
-  boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
+  boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, labels as labelsApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, conversationHeld, type BootStatus, type CanvasItem, canvases as canvasesApi, documentation as documentationApi, plugins as pluginsApi,
   type ReminderListRequest,
   type ReminderListResponse,
@@ -159,7 +159,14 @@ import { copyResumeCommand, isOpenElsewhereAction, openElsewhereCommandAction, o
 import { claudeCodeOpenHostApi } from "./claudeCodeOpen/hostApi";
 import { ConversationElsewhereBanner, ConversationElsewhereLine, promptFocusTarget, useConversationElsewhere } from "./claudeCodeOpen/ConversationElsewhereNotice";
 import { openElsewhereEntries } from "./claudeCodeOpen/openElsewhereEntries";
-import { projectRailProjection } from "./explorer/projectRail";
+import { projectRailGroups, projectRailProjection } from "./explorer/projectRail";
+import { createLabelsHub } from "./labels/labelsHub";
+import { canMoveLabel, labelsOfSpace, projectLabels } from "./labels/labels";
+import { LabelRailRow, type LabelRowEditing } from "./labels/LabelRailRow";
+import { LabelDragGhost, LabelFormPopover } from "./labels/LabelViews";
+import { LabelSettings } from "./labels/LabelSettings";
+import { ProjectLabelBadges, ProjectLabelsPopover } from "./labels/ProjectLabels";
+import { labelMoveTarget, useRailDrag, type RailDrag, type RailDrop } from "./labels/labelDrag";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import { createTerminalWorkspace } from "./terminal/terminalWorkspace";
 import { TerminalPanel } from "./terminal/TerminalPanel";
@@ -202,7 +209,7 @@ import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type Sess
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
 import { startSplitterDrag } from "./splitterPress";
 import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isCollapsed, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey, setCollapsed,
-  setFavorite, toggleScope, isClaudeCodeOpen, unplacedClaudeCodeKey, setClaudeCodeOpen, type ProjectTree } from "./explorer/projectTree";
+  setFavorite, toggleScope, isClaudeCodeOpen, unplacedClaudeCodeKey, setClaudeCodeOpen, isLabelFolded, setLabelFolded, type ProjectTree } from "./explorer/projectTree";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./explorer/projectRailVisibility";
 import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences";
@@ -302,6 +309,7 @@ import "./pluginProviders/pluginProviders.css";
 import "./review/review.css";
 import "./windows/windows.css";
 import "./explorer/explorer.css";
+import "./labels/labels.css";
 import "./terminal/terminal.css";
 import "./automations/automations.css";
 import "./workItems/workItems.css";
@@ -404,7 +412,7 @@ const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 if (!demoMode) installLocalCallPolicy(createSlowCallWatch(reportToHost));
 const noSubscription = () => () => { };
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
-type View = "workspace" | "appearance" | "general" | "windows" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sandbox" | "sessions" | "storage" | "speech" | "search" | "plugin";
+type View = "workspace" | "appearance" | "general" | "windows" | "spaces" | "labels" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sandbox" | "sessions" | "storage" | "speech" | "search" | "plugin";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse | null }) {
@@ -428,6 +436,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The buttons of plugins that the user hid are a view state of this window, as its open tabs are.
   const [hiddenPluginButtons] = useState(() => createHiddenButtons(typeof localStorage === "undefined" ? null : localStorage));
   const spacesState = useSyncExternalStore(spacesHub.subscribe, spacesHub.getSnapshot);
+  // The labels of the projects: the Explorer lists the projects of the shown space under them.
+  const [labelsHub] = useState(() => createLabelsHub(labelsApi));
+  const labelsState = useSyncExternalStore(labelsHub.subscribe, labelsHub.getSnapshot);
   // The spaces of the resources, which the pages of Settings show and change beside each row.
   const resourceScope = useMemo(() => resourceSpacesOf(spacesState, spacesHub), [spacesState, spacesHub]);
   // The spaces of each provider as the hub reads them again after every change: what a new session is offered.
@@ -734,7 +745,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     else if (scope.kind === "project") { closeSettings(); selectProject(scope.id); }
   }
   const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm,
-    singleSessionTab: singleTab, setSingleSessionTab: setSingleTab } = useWindowPreferences();
+    singleSessionTab: singleTab, setSingleSessionTab: setSingleTab, projectGrouping, setProjectGrouping } = useWindowPreferences();
   // With a single tab for the sessions, whatever opens a session shows it in that tab, in the place of the one that
   // was there, and the tabs the window keeps are the one of the session shown.
   const tabMode = (mode: SessionTabMode): SessionTabMode => singleTab ? "single" : mode;
@@ -1121,6 +1132,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (hostAnswered) spacesHub.unavailable();
     return undefined;
   }, [spacesHub, spacesEpoch, hostAnswered]);
+  useEffect(() => {
+    if (spacesEpoch) return labelsHub.connect(spacesEpoch);
+    if (hostAnswered) labelsHub.unavailable();
+    return undefined;
+  }, [labelsHub, spacesEpoch, hostAnswered]);
   // The host is told which space the window shows: the commands of the sessions read it as their current space.
   useEffect(() => { if (spacesEpoch && spacesState.available) spacesHub.shown(spaceId); }, [spacesHub, spacesEpoch, spacesState.available, spaceId]);
   useEffect(() => {
@@ -1156,6 +1172,39 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const fullListing = snapshot ? projectRailProjection(snapshot, projectSort, projectTree.favorites) : null;
   const projectListing = fullListing && filterView ? { ...fullListing, projects: fullListing.projects.filter(project => filterView.projects.has(project.id)),
     favorites: fullListing.projects.slice(0, fullListing.favorites).filter(project => filterView.projects.has(project.id)).length } : fullListing;
+  // The labels of the shown space, and the parts of the Explorer when it lists the projects under them: while the list
+  // is filtered, only the labels with a project that matches, unfolded.
+  const spaceLabels = useMemo(() => labelsOfSpace(labelsState.labels, spaceId), [labelsState.labels, spaceId]);
+  const railGroups = projectListing && labelsState.available && projectGrouping === "labels"
+    ? projectRailGroups(projectListing.projects, projectListing.favorites, spaceLabels, !filterView) : [];
+  // A label made from the Explorer at the top is in the shown space, or in every space from the default one.
+  const labelSpace = spaceId === defaultSpaceId ? null : spaceId;
+  const [newLabel, setNewLabel] = useState<{ busy: boolean; error: string | null } | null>(null);
+  async function createTopLabel(name: string, icon: string, color: string) {
+    setNewLabel({ busy: true, error: null });
+    const outcome = await labelsHub.create(name, { icon: icon || null, color: color || null, space: labelSpace });
+    setNewLabel(outcome.ok ? null : { busy: false, error: outcome.message ?? t("The label could not be created.") });
+  }
+  const labelEditing: LabelRowEditing = useMemo(() => ({ catalog: labelsState.labels, update: labelsHub.update, move: labelsHub.move, remove: labelsHub.remove,
+    create: (name, look) => labelsHub.create(name, { ...look, space: look.parent ? null : labelSpace }) }), [labelsState.labels, labelsHub, labelSpace]);
+  // A label dragged before, after or under another one; a project dragged onto a label gets it, and leaves the label
+  // it was dragged out of unless Ctrl or Alt is held; dropped on the projects of no label, it leaves that label.
+  function railDropAccepts(drag: RailDrag, drop: RailDrop): boolean {
+    const all = labelsState.labels;
+    if (drag.kind === "project") {
+      if (!drop.labelId) return drag.from !== null;
+      return drop.labelId !== drag.from && !all.find(label => label.id === drop.labelId)?.projectIds.includes(drag.projectId);
+    }
+    const target = labelMoveTarget(all, drag.labelId, drop);
+    return !!target && canMoveLabel(drag.labelId, target.parent, all);
+  }
+  async function railDropped(drag: RailDrag, drop: RailDrop, copy: boolean) {
+    const outcome = drag.kind === "project"
+      ? await labelsHub.assign(drag.projectId, drop.labelId ? [drop.labelId] : [], drag.from && (!copy || !drop.labelId) ? [drag.from] : [])
+      : await (async () => { const target = labelMoveTarget(labelsState.labels, drag.labelId, drop); return target ? labelsHub.move(drag.labelId, target.parent, target.index) : null; })();
+    if (outcome && !outcome.ok) showToast({ message: outcome.message ?? t("The labels could not be changed."), intent: "danger" });
+  }
+  const railDrag = useRailDrag(railDropAccepts, (drag, drop, copy) => void railDropped(drag, drop, copy));
   // The projects of the shown space changed without a read of the catalog (a project joined it, here or through
   // a command): the window is given the catalog again as that space now has it.
   useEffect(() => {
@@ -1504,7 +1553,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // What reaches the window from elsewhere: a command asks for a space, or changed the spaces or the projects.
   // A change of the spaces, or of a session another process writes (listed, grown, released): the list is read again.
   const spaceRequest = useRef<(kind: SpacesRequestKind, id: string | null) => void>(() => { });
-  spaceRequest.current = (kind, id) => { if (kind === "show" && id) showSpace(id); else readSessionList.current(); };
+  spaceRequest.current = (kind, id) => {
+    if (kind === "show" && id) showSpace(id);
+    else readSessionList.current();
+    // A window or a command that changes the labels says the spaces changed.
+    if (kind === "changed") void labelsHub.refresh();
+  };
   useEffect(() => { spacesHub.onRequest((kind, id) => spaceRequest.current(kind, id)); }, [spacesHub]);
   // The sessions that need the user in a space that is not shown: listed at the foot of the Explorer, and said
   // once, when a session starts to wait, in a message that leads to it.
@@ -5000,13 +5054,21 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         <WindowControls snapshot={windowSnapshot} />
         <SessionContentLayout sessionsHidden={!railVisible}
           projects={sessions => { const railHead = <>
-          <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}<span className="count">{snapshot?.projects.length ?? 0}</span></span><span>
+          <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}<span className="count">{snapshot?.projects.length ?? 0}</span>
+            {newLabel && <span className="label-new-anchor"><LabelFormPopover heading={t("New label")} submitLabel={t("Create")} labels={labelsState.labels} parent={null} ownId={null}
+              initial={{ name: "", icon: "", color: "" }} busy={newLabel.busy} error={newLabel.error}
+              onSubmit={look => void createTopLabel(look.name, look.icon, look.color)} onCancel={() => setNewLabel(null)} /></span>}</span><span>
             {snapshot && <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="collapseAll" size={16} />} aria-label={t("Collapse all")} title={t("Collapse all")}
               disabled={!projectTree.expanded.length} onClick={() => setProjectTree(collapseAllScopes)} />}
             {snapshot && <PopoverNext placement="bottom-end" content={<Menu aria-label={t("Project actions")}>
               <MenuDivider title={t("Sort projects")} />
               <MenuItem roleStructure="listoption" selected={projectSort === "name"} text={t("Name")} onClick={() => setProjectSort("name")} />
               <MenuItem roleStructure="listoption" selected={projectSort === "recent"} text={t("Recent visible updates")} onClick={() => setProjectSort("recent")} />
+              {labelsState.available && <><MenuDivider title={t("Labels")} />
+                <MenuItem roleStructure="listoption" selected={projectGrouping === "labels"} text={t("Group by labels")} onClick={() => setProjectGrouping("labels")} />
+                <MenuItem roleStructure="listoption" selected={projectGrouping === "flat"} text={t("One list")} onClick={() => setProjectGrouping("flat")} />
+                {owned && <MenuItem icon={<AppIcon name="tag" size={15} />} text={`${t("New label")}…`} onClick={() => setNewLabel({ busy: false, error: null })} />}
+                <MenuItem icon={<AppIcon name="settings" size={15} />} text={`${t("Organize labels")}…`} onClick={() => navigate("labels")} /></>}
               <MenuDivider />
               <MenuItem icon={<AppIcon name="open" size={15} />} text={`${t("Open project")}…`} label="Ctrl+O" onClick={() => setDialog("project")} />
               <MenuItem icon={<AppIcon name="archive" size={15} />} text={t(confirms.projectArchive ? selectedProject?.archived ? "Unarchive project…" : "Archive project…"
@@ -5036,9 +5098,21 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           </div>)}
           </>;
           return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
+          <LabelDragGhost view={railDrag.view} />
           {!snapshot && railHead}
           {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={id => showScopeDraft(id)} onKeep={id => showScopeDraft(id, true)} children={sessions}
             drop={owned ? projectDropTarget : undefined} footer={claudeCodeConfigured ? claudeCodeGroup(null) : undefined}
+            labels={labelsState.available ? {
+              groups: railGroups,
+              folded: id => !filterView && isLabelFolded(projectTree, id),
+              row: group => <LabelRailRow group={group} labels={spaceLabels} folded={!filterView && isLabelFolded(projectTree, group.label.id)}
+                onFold={value => setProjectTree(current => setLabelFolded(current, group.label.id, value))} editing={owned ? labelEditing : undefined}
+                drop={railDrag.view?.over?.labelId === group.label.id ? railDrag.view.over.place : undefined}
+                drag={owned ? railDrag.source({ kind: "label", labelId: group.label.id }, group.label.name) : undefined} />,
+              badges: project => <ProjectLabelBadges labels={projectLabels(project.id, spaceLabels)} all={spaceLabels} />,
+              drag: owned && spaceLabels.length ? (project, from) => railDrag.source({ kind: "project", projectId: project.id, from }, project.name) : undefined,
+              otherDrop: railDrag.view?.over?.labelId === "" ? "into" : undefined,
+            } : undefined}
             filter={<SidebarFilterBox value={sidebarText} onChange={setSidebarText}
               empty={!!filterView && !filterView.scopes.size && !filterView.projects.size && !filterView.claudeCode.size && (!claudeCodeConfigured || claudeCodeSearched)} />}
             tree={{ expanded: id => filterView && filterOpens(filterView, id) ? !filterFolded.has(id) : isExpanded(projectTree, id),
@@ -5091,6 +5165,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               open: selectProject, rename: () => void beginProjectRename(), archive: beginProjectArchive, archiveAsks: confirms.projectArchive, delete: beginProjectDelete,
               worktrees: owned ? project => openWorktrees(project) : undefined,
               sandbox: owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: sandboxSettings } : undefined,
+              labels: owned && labelsState.available ? (project, close) => <ProjectLabelsPopover projectId={project.id} projectName={project.name} labels={spaceLabels}
+                assign={labelsHub.assign} create={(name, projectIds) => labelsHub.create(name, { space: labelSpace }, projectIds)} onClose={close} /> : undefined,
               search: owned && searchOn ? { excluded: project => isExcluded(localSearchHub.getSnapshot(), "project", project.id),
                 set: (project, excluded) => void localSearchHub.setExcluded("project", project.id, excluded).then(status => {
                   if (!creationAlive.current) return;
@@ -5443,6 +5519,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         chats={spaceChatCounts(catalog.current?.sessions ?? [])} showOthers={showOthers} onShowOthers={setShowOthers}
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)}
         page={spacePage} onPage={setSpacePage} onOpenPage={owned ? navigate : undefined} />
+      : settingsSection === "labels" ? <LabelSettings hub={labelsHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
+        canEdit={owned && !!mutation?.capability.canMutate()} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
       : settingsSection === "plugin" && pluginPage ? <PluginCanvasSettingsPage key={`${pluginPage.pluginKey}/${pluginPage.canvasId}`} page={pluginPage} hub={canvasHub}
@@ -5686,6 +5764,8 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
             <h3>{t("Spaces")}</h3>
             <button type="button" aria-current={section === "spaces" && !spacePage ? "page" : undefined} data-settings-section="spaces"
               onClick={() => { onSection("spaces"); onSpacePage(null); }}><AppIcon name="canvases" size={16} /><span>{t("Overview")}</span></button>
+            <button type="button" aria-current={section === "labels" ? "page" : undefined} data-settings-section="labels"
+              onClick={() => onSection("labels")}><AppIcon name="tag" size={16} /><span>{t("Labels")}</span></button>
             {spaces.map(space => <button key={space.id} type="button" aria-current={section === "spaces" && spacePage?.spaceId === space.id ? "page" : undefined}
               data-settings-space={space.id} onClick={() => { onSection("spaces"); onSpacePage({ spaceId: space.id, section: spacePage?.section ?? "general" }); }}>
               <SpaceIcon space={space} size={16} /><span>{space.name}</span></button>)}

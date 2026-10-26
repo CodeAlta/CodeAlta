@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { CanvasItem, WorkspaceProject } from "#neoastra";
 import { canvasRef } from "../canvases/canvasPages";
 import { AppIcon } from "../AppIcon";
@@ -41,6 +41,8 @@ export type ProjectRowAuthority = {
   search?: Readonly<{ excluded: (project: WorkspaceProject) => boolean; set: (project: WorkspaceProject, excluded: boolean) => void }>;
   /** The host the sandbox of a project is chosen with, in a popover beside its row. Absent where the window owns no host. */
   sandbox?: Readonly<{ epoch: string; api: SandboxScopeApi }>;
+  /** The labels of a project, chosen in a popover beside its row. Absent where the host keeps no labels. */
+  labels?: (project: WorkspaceProject, close: () => void) => ReactNode;
 };
 type Review = { project: WorkspaceProject; context: ProjectRowContext; origin: HTMLButtonElement;
   row: HTMLLIElement; details: boolean; opening: boolean };
@@ -48,9 +50,11 @@ type Review = { project: WorkspaceProject; context: ProjectRowContext; origin: H
 /** How the row of a project shows that a session dragged over it would be dropped there. */
 export type ProjectRowDrop = Readonly<{ "data-over"?: string }>;
 
-export function ProjectRowActions({ project, authority, favorite, drop, children }: {
+export function ProjectRowActions({ project, authority, favorite, drop, drag, children }: {
   project: WorkspaceProject; authority?: ProjectRowAuthority;
   drop?: ProjectRowDrop;
+  /** What starts a drag of the row onto a label. */
+  drag?: Readonly<{ onPointerDown?: (event: ReactPointerEvent<HTMLElement>) => void }>;
   /** Whether the project is a favorite, and how that is changed. */
   favorite?: Readonly<{ value: boolean; set: (value: boolean) => void }>;
   children: ReactNode;
@@ -63,6 +67,8 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
   const [shown, setShown] = useState<Review | null>(null);
   // The project whose sandbox is being chosen, beside the row, once the menu is closed.
   const [sandboxing, setSandboxing] = useState<WorkspaceProject | null>(null);
+  // The project whose labels are being chosen, beside the row.
+  const [labeling, setLabeling] = useState<WorkspaceProject | null>(null);
   function current(value: Review) {
     const context = latest.current?.current();
     return review.current === value && !!context && value.row === row.current && value.row.isConnected
@@ -153,6 +159,16 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
     dismiss();
     setSandboxing(value.project);
   }
+  function labelsAction(original: Review) {
+    const value = review.current;
+    if (!value || value !== original || value.details || !latest.current?.labels || !current(value) || modalDialogOpen()) return;
+    dismiss();
+    setLabeling(value.project);
+  }
+  function closeLabels() {
+    setLabeling(null);
+    if (!modalDialogOpen()) row.current?.querySelector<HTMLElement>(":scope > button")?.focus();
+  }
   function closeSandbox() {
     setSandboxing(null);
     // The focus goes back to the row, as after its rename.
@@ -191,7 +207,7 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
   const pluginEntries = usePluginMenuEntries("ProjectMenu", visible && !visible.details ? { projectId: visible.project.id, sessionId: null } : null);
   // Beside the actions of the project, what the plugins offer for it: a few lines, then the page of the canvases.
   const canvases = visible && authority?.canvases && !visible.project.archived ? authority.canvases.list() : null;
-  return <li ref={row} className="project-action-row" {...drop} onContextMenu={event => {
+  return <li ref={row} className="project-action-row" {...drop} data-movable={drag?.onPointerDown ? "true" : undefined} onPointerDown={drag?.onPointerDown} onContextMenu={event => {
     if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [role="menu"], dialog')) return;
     event.preventDefault(); open();
   }} onKeyDown={event => {
@@ -217,6 +233,7 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
         ...(favorite ? [{ key: "favorite", label: t(favorite.value ? "Remove from favorites" : "Add to favorites"), icon: "star" as const,
           onSelect: () => setFavorite(visible, !favorite.value) }] : []),
         { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
+        ...(authority?.labels ? [{ key: "labels", label: `${t("Labels")}…`, icon: "tag" as const, onSelect: () => labelsAction(visible) }] : []),
         ...(authority?.worktrees && !project.archived ? [{ key: "worktrees", label: `${t("Worktrees")}…`, icon: "worktree" as const, onSelect: () => worktreesAction(visible) }] : []),
         ...(authority?.sandbox && !project.archived ? [{ key: "sandbox", label: `${t("Sandbox")}…`, icon: "sandbox" as const, onSelect: () => sandboxAction(visible) }] : []),
         // The folder of the project outside CodeAlta: in the editor the user chose, and in the file manager of the system.
@@ -237,6 +254,7 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
           ...(canvases.more ? [{ key: "canvases-more", label: t("More…"), icon: "canvases" as const, onSelect: () => canvasAction(null, visible) }] : [])] : []),
         ...pluginEntries,
       ]} />}
+    {labeling && authority?.labels?.(labeling, closeLabels)}
     {sandboxing && authority?.sandbox && <ProjectSandboxPopover epoch={authority.sandbox.epoch} api={authority.sandbox.api} projectId={sandboxing.id}
       projectName={sandboxing.name} onClose={closeSandbox} />}
     {visible?.details && visible.context.snapshot && <ProjectDetailsDialog project={visible.project} snapshot={visible.context.snapshot}

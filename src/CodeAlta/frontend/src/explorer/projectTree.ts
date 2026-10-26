@@ -11,6 +11,8 @@ export type ProjectTree = Readonly<{
   collapsed: readonly string[];
   /** The projects whose group of Claude Code sessions started elsewhere is open, by id; absent while none was. */
   claudeCode?: readonly string[];
+  /** The labels whose projects are folded in the Explorer, by id; absent while none was. */
+  labelsFolded?: readonly string[];
 }>;
 
 export const emptyProjectTree: ProjectTree = Object.freeze({ expanded: [], favorites: [], collapsed: [] });
@@ -43,14 +45,16 @@ export function restoreProjectTree(read: () => string | null): ProjectTree | nul
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const stored = value as Record<string, unknown>;
     const claudeCode = ids(stored.claudeCode, false);
+    const labelsFolded = ids(stored.labelsFolded, false);
     return { expanded: ids(stored.expanded, true), favorites: ids(stored.favorites, false), collapsed: ids(stored.collapsed, false),
-      ...claudeCode.length ? { claudeCode } : {} };
+      ...claudeCode.length ? { claudeCode } : {}, ...labelsFolded.length ? { labelsFolded } : {} };
   } catch { return null; }
 }
 
 export function persistProjectTree(write: (value: string) => void, tree: ProjectTree): boolean {
   try {
-    write(JSON.stringify({ expanded: tree.expanded, favorites: tree.favorites, collapsed: tree.collapsed, ...tree.claudeCode?.length ? { claudeCode: tree.claudeCode } : {} }));
+    write(JSON.stringify({ expanded: tree.expanded, favorites: tree.favorites, collapsed: tree.collapsed, ...tree.claudeCode?.length ? { claudeCode: tree.claudeCode } : {},
+      ...tree.labelsFolded?.length ? { labelsFolded: tree.labelsFolded } : {} }));
     return true;
   }
   catch { return false; }
@@ -104,4 +108,13 @@ export function setClaudeCodeOpen(tree: ProjectTree, projectId: string, open: bo
   if (!projectId || projectId.length > longestId || isClaudeCodeOpen(tree, projectId) === open) return tree;
   const claudeCode = open ? added(tree.claudeCode ?? [], projectId) : (tree.claudeCode ?? []).filter(value => value !== projectId);
   return { ...tree, claudeCode };
+}
+
+/** Whether the projects of a label are folded in the Explorer: they are shown until the label is folded. */
+export const isLabelFolded = (tree: ProjectTree, labelId: string): boolean => tree.labelsFolded?.includes(labelId) ?? false;
+
+/** Folds or unfolds the projects of a label; the same tree is returned when nothing changes. */
+export function setLabelFolded(tree: ProjectTree, labelId: string, folded: boolean): ProjectTree {
+  if (!labelId || labelId.length > longestId || isLabelFolded(tree, labelId) === folded) return tree;
+  return { ...tree, labelsFolded: folded ? added(tree.labelsFolded ?? [], labelId) : (tree.labelsFolded ?? []).filter(value => value !== labelId) };
 }

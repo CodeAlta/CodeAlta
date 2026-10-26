@@ -1,9 +1,10 @@
 import type { WorkspaceProject } from "#neoastra";
-import { Fragment, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
 import { ProjectRowActions, type ProjectRowAuthority, type ProjectRowDrop } from "./ProjectRowActions";
 import { SessionTabMenu } from "../SessionTabMenu";
+import { railGroupHidden, type RailGroup, type RailLabelGroup } from "./projectRail";
 
 /** What the Explorer remembers and shows of its scopes: which are open, which projects are favorites. */
 export type ProjectTreeView = Readonly<{
@@ -20,7 +21,7 @@ export type ProjectTreeView = Readonly<{
 /** A tab of a project that its row opens: the code editor, the changes. */
 type ProjectTabs = Readonly<{ open: (id: string) => boolean; show: (project: WorkspaceProject) => void }>;
 
-const rowSelector = ".project-action-row > button:first-child, .session-row > button:first-child";
+const rowSelector = ".project-action-row > button:first-child, .session-row > button:first-child, .project-label-row > button:first-child";
 
 /**
  * Arrow keys in the rows of the Explorer: up and down go from row to row, right opens a scope, left closes it
@@ -32,12 +33,16 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   const rows = () => Array.from((row.closest(".project-rail") ?? event.currentTarget).querySelectorAll<HTMLElement>(rowSelector)).filter(value => value.offsetParent !== null);
   const scope = row.dataset.scope;
   const open = row.getAttribute("aria-expanded");
+  // The title of a label folds and unfolds its projects as a scope opens and closes.
+  const label = row.dataset.label !== undefined;
   let target: HTMLElement | null | undefined;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     const all = rows();
     target = all[all.indexOf(row) + (event.key === "ArrowDown" ? 1 : -1)] ?? row;
   } else if (event.key === "Home") target = rows()[0];
   else if (event.key === "End") target = rows().at(-1);
+  else if (label && (event.key === "ArrowRight" && open === "false" || event.key === "ArrowLeft" && open === "true")) row.click();
+  else if (label && (event.key === "ArrowRight" || event.key === "ArrowLeft")) { /* Already as asked. */ }
   else if (event.key === "ArrowRight" && scope !== undefined && open === "false") toggle(scope || null);
   else if (event.key === "ArrowLeft" && scope !== undefined && open === "true") toggle(scope || null);
   else if (event.key === "ArrowLeft" && scope === undefined)
@@ -47,7 +52,23 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   target?.focus();
 }
 
-export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, creating, editor, changes, terminals, tree, head, drop, footer, filter }: {
+/** What the Explorer shows of the labels: the parts of the list grouped under them, or their badges in the plain list. */
+export type ProjectRailLabels = Readonly<{
+  /** The parts of the list when it is grouped under labels; empty for the plain list. */
+  groups: readonly RailGroup[];
+  /** The title of a label, above its projects. */
+  row: (group: RailLabelGroup) => ReactNode;
+  /** Whether the projects of a label are folded. */
+  folded: (id: string) => boolean;
+  /** The labels of a project, as badges after its name, in the plain list. */
+  badges?: (project: WorkspaceProject) => ReactNode;
+  /** What makes the row of a project draggable onto a label, with the label it is dragged out of (null from elsewhere). */
+  drag?: (project: WorkspaceProject, from: string | null) => Readonly<{ onPointerDown?: (event: PointerEvent<HTMLElement>) => void }> | undefined;
+  /** Where a project dragged onto the title of the projects of no label would drop: it then loses the label it was dragged out of. */
+  otherDrop?: "into";
+}>;
+
+export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, creating, editor, changes, terminals, tree, head, drop, footer, filter, labels }: {
   activity?: (projectId: string | null) => ReactNode;
   /** The projects listed, the favorite ones first. */
   projects: WorkspaceProject[];
@@ -86,6 +107,8 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   footer?: ReactNode;
   /** What comes first, above the chats: the filter of the sidebar. */
   filter?: ReactNode;
+  /** The labels of the projects; absent where the host keeps none. */
+  labels?: ProjectRailLabels;
 }) {
   const { t } = useShellLanguage();
   const [folded, setFolded] = useState<{ id: string | null } | null>(null);
@@ -117,18 +140,23 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     onPointerDown={() => { closing.current = creating?.id === id; }}
     onClick={event => { const closed = closing.current && event.detail > 0; closing.current = false; if (!closed) sessions.create(id); }}>
     <AppIcon name="plus" size={15} /></button>;
-  const row = (project: WorkspaceProject) => {
+  // A project listed under several labels: its first row is its own (its forms, the sessions of the selected scope),
+  // the others show the same project.
+  const listed = new Set<string>();
+  const row = (project: WorkspaceProject, place = "", from: string | null = null) => {
+    const primary = !listed.has(project.id);
+    listed.add(project.id);
     const favorite = !!tree?.favorite(project.id);
     const editing = !!editor?.open(project.id);
     const changing = !!changes?.open(project.id);
     const running = terminals?.count(project.id) ?? 0;
-    return <Fragment key={project.id}><ProjectRowActions project={project} authority={actions} drop={drop?.(project)}
+    return <Fragment key={`${place}:${project.id}`}><ProjectRowActions project={project} authority={actions} drop={drop?.(project)} drag={labels?.drag?.(project, from)}
       favorite={tree ? { value: favorite, set: value => tree.setFavorite(project, value) } : undefined}>
       <button type="button" title={`${project.name}\n${project.path}`} aria-pressed={selectedId === project.id} aria-expanded={open(project.id)}
         data-scope={project.id} onClick={() => select(project.id)} onDoubleClick={() => onKeep?.(project.id)}>
         {twist(project.id)}
         <span className="project-icon" data-file-tone={project.archived ? "muted" : "gold"}><AppIcon name={project.archived ? "archive" : open(project.id) ? "open" : "folder"} size={15} /></span>
-        <strong>{project.name}</strong>{activity?.(project.id)}{project.archived && <small>{t("Archived")}</small>}
+        <strong>{project.name}</strong>{!labels?.groups.length && labels?.badges?.(project)}{activity?.(project.id)}{project.archived && <small>{t("Archived")}</small>}
       </button>
       {tree && <button type="button" className="icon-button project-row-action project-favorite-trigger" data-on={favorite}
         aria-label={t(favorite ? "Remove {name} from favorites" : "Add {name} to favorites", { name: project.name })}
@@ -147,13 +175,25 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
         onClick={() => terminals.create(project)}>
         <AppIcon name="terminal" size={15} /></button>}
       {!project.archived && newSession(project.id, t("New session in {name}", { name: project.name }), t("New session"))}
-      {renaming?.id === project.id && renaming.form}
-      {asking?.id === project.id && asking.form}
-      {creating?.id === project.id && creating.form}
-    </ProjectRowActions>{branch(project.id)}</Fragment>;
+      {primary && renaming?.id === project.id && renaming.form}
+      {primary && asking?.id === project.id && asking.form}
+      {primary && creating?.id === project.id && creating.form}
+    </ProjectRowActions>{primary ? branch(project.id) : tree && open(project.id) ? <li className="project-session-branch">{tree.sessions(project.id)}{tree.after?.(project.id)}</li> : null}</Fragment>;
   };
-  const title = (key: "Favorites" | "Other projects", icon: boolean) => <li className="project-section" role="presentation">
+  const title = (key: "Favorites" | "Other projects", icon: boolean, dropTarget = false) => <li key={key} className="project-section" role="presentation"
+    {...dropTarget ? { "data-label-drop": "", "data-drop": labels?.otherDrop } : {}}>
     {icon && <AppIcon name="star" size={11} />}<span>{t(key)}</span></li>;
+  // Grouped under labels: the favorite projects, the labels with their projects, and the projects of no label. A
+  // folded label hides its projects and the labels under it; the sessions of the selected scope stay in the page.
+  const grouped = (shown: ProjectRailLabels) => {
+    const parts = shown.groups.filter(group => group.kind !== "label" || !railGroupHidden(group, shown.folded)).map(group => group.kind === "favorites"
+      ? <Fragment key="favorites">{title("Favorites", true)}{group.projects.map(project => row(project, "favorites"))}</Fragment>
+      : group.kind === "other" ? <Fragment key="other">{title("Other projects", false, true)}{group.projects.map(project => row(project, "other"))}</Fragment>
+      : <Fragment key={`label:${group.label.id}`}>{shown.row(group)}{!shown.folded(group.label.id)
+        && group.projects.map(project => row(project, `label:${group.label.id}`, group.label.id))}</Fragment>);
+    const kept = selectedId !== null && !listed.has(selectedId) ? <li className="project-session-branch" hidden>{children}</li> : null;
+    return <>{parts}{kept}</>;
+  };
   // The chats, the sessions of no project, come first: one row, closed until it is opened.
   return <>
     {filter}
@@ -178,10 +218,12 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     </ul>
     {head}
     <ul id="project-list" className="nav-list project-list" aria-label={t("Projects")} onKeyDown={event => rowKey(event, toggle)}>
-      {favorites > 0 && title("Favorites", true)}
-      {projects.slice(0, favorites).map(row)}
-      {favorites > 0 && favorites < projects.length && title("Other projects", false)}
-      {projects.slice(favorites).map(row)}
+      {labels?.groups.length ? grouped(labels) : <>
+        {favorites > 0 && title("Favorites", true)}
+        {projects.slice(0, favorites).map(project => row(project))}
+        {favorites > 0 && favorites < projects.length && title("Other projects", false)}
+        {projects.slice(favorites).map(project => row(project))}
+      </>}
       {footer && <li className="project-list-footer">{footer}</li>}
     </ul>
   </>;

@@ -1,0 +1,94 @@
+/* Labels: badges of an icon and a name on a tint of their color, the titles of the Explorer, their forms and their page. */
+
+.label-badge { --label-color: var(--muted); display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; padding: 1px 8px 1px 6px;
+  border-radius: 999px; background: color-mix(in srgb, var(--label-color) 15%, transparent); color: color-mix(in srgb, var(--label-color) 62%, var(--text));
+  font-size: 11.5px; font-weight: 600; line-height: 18px; letter-spacing: normal; text-transform: none; white-space: nowrap; }
+.label-badge[data-colored] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--label-color) 28%, transparent); }
+.label-badge-name, .label-badge-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.label-badge-name { flex: 0 1 auto; }
+.label-badge-path { flex: 0 100 auto; font-weight: 500; opacity: .65; }
+.label-badge[data-small] { gap: 3px; padding: 0 6px 0 4px; font-size: 10.5px; font-weight: 500; line-height: 16px; }
+.label-icon { display: inline-flex; flex: none; color: var(--label-color); }
+.label-badge:not([data-colored]) .label-icon { color: var(--muted); }
+
+/* The title of a label in the Explorer: a row of its own above its projects, which do not step in. A sub-label steps
+   in once, whatever its depth. */
+.ide-shell .project-list > .project-label-row { position: relative; display: flex; align-items: center; margin-top: 6px; border-radius: 4px; }
+.ide-shell .project-list > .project-label-row:first-child { margin-top: 0; }
+.ide-shell .project-list > .project-label-row[data-depth="1"] { margin-top: 2px; padding-left: 12px; }
+.ide-shell .project-list > .project-label-row:hover { background: var(--panel-2); }
+.ide-shell .project-label-row > .project-label-toggle { display: flex; flex: 1; align-items: center; gap: 6px; width: auto; min-width: 0; min-height: 26px;
+  padding: 2px 5px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font-size: 12px; }
+.ide-shell .project-label-row > .project-label-toggle:hover { background: transparent; }
+.ide-shell .project-list > .project-label-row:has(> .project-label-toggle:focus-visible) { outline: 1px solid var(--accent); outline-offset: -1px; }
+.ide-shell .project-label-count { flex: none; margin-left: auto; padding-right: 2px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ide-shell .project-label-row > .label-row-action { display: none; flex: 0 0 22px; width: 22px; min-height: 22px; height: 22px; padding: 0; border: 0;
+  border-radius: 4px; align-items: center; justify-content: center; background: transparent; color: var(--muted); }
+.ide-shell .project-label-row > .label-row-action:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.ide-shell .project-label-row:hover > .label-row-action, .ide-shell .project-label-row:focus-within > .label-row-action,
+.ide-shell .project-label-row > .label-actions-trigger[aria-expanded="true"] { display: inline-flex; }
+/* A favorite label keeps its star in sight: it says why the label is on top. */
+.ide-shell .project-label-row > .label-favorite-trigger[data-on="true"] { display: inline-flex; color: #e0a83a; }
+.ide-shell .project-label-row > .label-favorite-trigger[data-on="true"] > svg { fill: currentColor; }
+@media (hover: none) {
+  .ide-shell .project-label-row > .label-row-action { display: inline-flex; }
+}
+
+/* The labels of a project in the plain list, after its name: they shrink before the name does. */
+.ide-shell .project-action-row > button:first-child > .project-label-badges { display: inline-flex; flex: 0 4 auto; align-items: center; gap: 3px; min-width: 0; overflow: hidden; }
+.ide-shell .project-label-badges > .label-badge { flex: 0 1 auto; min-width: 24px; }
+.ide-shell .project-label-more { flex: none; color: var(--muted); font-size: 10.5px; }
+
+/* Where a drag would drop: under a label, before or after it, or on the projects of no label. */
+body.rail-dragging, body.rail-dragging * { cursor: grabbing !important; user-select: none; }
+.ide-shell .project-label-row[data-drop="into"], .label-tree-row[data-drop="into"] { background: color-mix(in srgb, var(--accent) 20%, transparent); box-shadow: inset 0 0 0 1px var(--accent); }
+.ide-shell .project-label-row[data-drop="before"]::before, .ide-shell .project-label-row[data-drop="after"]::after,
+.label-tree-row[data-drop="before"]::before, .label-tree-row[data-drop="after"]::after {
+  content: ""; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; }
+.ide-shell .project-label-row[data-drop="before"]::before, .label-tree-row[data-drop="before"]::before { top: -1px; }
+.ide-shell .project-label-row[data-drop="after"]::after, .label-tree-row[data-drop="after"]::after { bottom: -1px; }
+.ide-shell .project-list > .project-section[data-drop] { color: var(--accent); }
+
+/* The form of a label, beside the row it is opened from; the form of a new label at the top, beside the title of the projects. */
+.ide-shell .project-rail .panel-title { position: relative; }
+.label-new-anchor { position: absolute; inset: 0; pointer-events: none; }
+.settings-editor-actions .label-new-anchor { position: relative; inset: auto; pointer-events: auto; }
+.settings-editor-actions .label-new-anchor > .rename-anchor { pointer-events: none; }
+.label-form, .project-labels-form { display: grid; gap: 8px; width: min(300px, calc(100vw - 32px)); padding: 12px 14px 10px; }
+.label-form .bp6-form-group { margin: 0; }
+.label-form .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.label-form-heading { font-size: 12.5px; }
+.label-form-icon { display: grid; place-items: center; width: 30px; height: 30px; }
+.bp6-small .label-form-icon, .project-labels-new .label-form-icon { width: 24px; height: 24px; }
+.label-form-colors { display: flex; }
+
+/* The labels of a project: a check box for each label of the space, and a field for a new one. */
+.project-labels-checks { display: grid; gap: 1px; max-height: min(320px, 50vh); overflow-y: auto; }
+.project-labels-checks .bp6-checkbox { display: flex; align-items: center; margin: 0; padding-block: 2px; }
+.project-labels-new { display: flex; gap: 6px; align-items: center; }
+.project-labels-new .bp6-input-group { flex: 1; }
+
+/* Settings > Labels: the tree of the labels beside the form of the one selected. */
+.label-board { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.2fr); gap: 14px; align-items: start; }
+@container (max-width: 640px) { .label-board { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { .label-board { grid-template-columns: 1fr; } }
+.label-space-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
+.label-tree { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.label-tree-row { position: relative; display: flex; align-items: center; gap: 6px; min-height: 30px; padding-right: 4px; border-radius: 4px; cursor: default; }
+.label-tree-row:hover { background: var(--panel-2); }
+.label-tree-row[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.label-grip { flex: none; color: var(--muted); cursor: grab; }
+.label-tree-row > button.label-tree-open { display: inline-flex; flex: 0 1 auto; min-width: 0; padding: 2px; border: 0; border-radius: 4px; background: transparent; box-shadow: none; cursor: pointer; }
+.label-tree-favorite { flex: none; color: #e0a83a; fill: currentColor; }
+.label-tree-space { display: inline-flex; flex: none; margin-left: auto; color: var(--muted); }
+.label-tree-count { flex: 0 0 22px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.label-tree-tools { display: inline-flex; flex: none; opacity: 0; }
+.label-tree-row:hover > .label-tree-tools, .label-tree-row:focus-within > .label-tree-tools { opacity: 1; }
+@media (hover: none) { .label-tree-tools { opacity: 1; } }
+.label-tree-empty { padding: 8px; color: var(--muted); }
+.label-form-card > h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 14px; }
+.label-form-path { overflow: hidden; color: var(--muted); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.label-form-projects { display: flex; align-items: center; gap: 6px; margin: 14px 0 6px; font-size: 13px; }
+.label-form-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.label-delete-anchor { position: relative; }
+.label-form-empty { color: var(--muted); }

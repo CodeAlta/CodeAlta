@@ -84,7 +84,7 @@ In the left bar, without opening Settings:
 | Label header, on hover | ★ favorite, **…** menu: *Edit…* (popover with name, icon and color, the pickers of the space dialog), *New sub-label…*, *Move up / Move down*, *Delete* (the small confirmation popover beside the row) |
 | Label header, drag | Reorders it among its siblings. Dropping it in the middle of another header nests it there. |
 | Project row, drag onto a label header | Adds that label to the project (the drop pattern of `useProjectDrag`) |
-| Project **…** menu | **Labels ›** a checklist of the space's labels, and *New label…* |
+| Project **…** menu | **Labels…**: a popover beside the row with a checklist of the space's labels, and a field for a new label |
 | PROJECTS **…** menu | *New label…*, *Group by labels* |
 
 Drags use the existing pointer hooks (WebView2 ends a native HTML5 drag at once), with Escape to cancel and a scroll of the list at its edges. The menu items give the same moves without a mouse.
@@ -143,10 +143,10 @@ flowchart LR
 - [x] 3. **Cascades.** Deleting a label cleans the projects and moves its sub-labels up. Deleting a space deletes its labels. Add tests.
 - [x] 4. **`alta label`** and `project list --label`, with policies (read, mutating, disruptive), the sandbox allow-list, own-space containment, help text and `NotifyChanged`. Add tests beside `AltaSpaceCommandsTests.cs`.
 - [x] 5. **`LabelsRpc`**, registered with the desktop host, with tests beside `SpacesRpcTests.cs`. Add the service to `demo-api.ts` and `projectFocus.neoastra.mount.ts`.
-- [ ] 6. **Rail grouping as a pure function.** `projectRailGroups` in `explorer/projectRail.ts` turns the projects (after the sidebar filter), the labels, the favorites and the sort into ordered groups. Add unit tests for favorite sub-labels, several labels, empty labels and the filter.
-- [ ] 7. **Rail rendering.** `ProjectRailRows` takes the groups; label headers, folding (`collapsedLabels` in `ProjectTree`), flat-mode badges, the *Group by labels* item in `windowPreferences`, and keyboard row navigation that includes the headers. Add SSR tests in `ProjectRailRows.test.ts`.
-- [ ] 8. **Editing in the rail.** The header menu and its popovers, the project **Labels ›** submenu, a project dropped on a header, and header drag to reorder or nest (a new pointer hook beside `projectDrag.ts`). Add a browser test for the drags.
-- [ ] 9. **Settings › Labels page**: the tree, drag and buttons, the form, the project picker. Add a browser test.
+- [x] 6. **Rail grouping as a pure function.** `projectRailGroups` in `explorer/projectRail.ts` turns the projects (after the sidebar filter), the labels, the favorites and the sort into ordered groups. Add unit tests for favorite sub-labels, several labels, empty labels and the filter.
+- [x] 7. **Rail rendering.** `ProjectRailRows` takes the groups; label headers, folding (`collapsedLabels` in `ProjectTree`), flat-mode badges, the *Group by labels* item in `windowPreferences`, and keyboard row navigation that includes the headers. Add SSR tests in `ProjectRailRows.test.ts`.
+- [x] 8. **Editing in the rail.** The header menu and its popovers, the project **Labels…** popover (a submenu does not exist in the row menu), a project dropped on a header, and header drag to reorder or nest (a new pointer hook beside `projectDrag.ts`). Add a browser test for the drags.
+- [x] 9. **Settings › Labels page**: the tree, drag and buttons, the form, the project picker. Add a browser test.
 - [ ] 10. **Docs.** A new `site/docs/labels.md` in `menu.yml` (left bar, Settings, agents), a link from `spaces.md`, and `labels/` in `doc/catalog-and-config.md` (files table and Projects section). Add `label` to the command table in `doc/live-tool.md`, and a line on labels to `readme.md`.
 
 ## How it is verified

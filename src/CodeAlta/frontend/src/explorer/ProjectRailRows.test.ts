@@ -7,7 +7,7 @@ import { locales, translate } from "../localization";
 import { sessionHierarchy } from "../sessionHierarchy";
 import { ShellLanguageContext } from "../shellLanguage";
 import { ExplorerSessions, sessionTwistKey } from "./ExplorerSessions";
-import { projectRailProjection } from "./projectRail";
+import { projectRailGroups, projectRailProjection } from "./projectRail";
 import { ProjectRailRows, type ProjectTreeView } from "./ProjectRailRows";
 import type { ProjectRowAuthority } from "./ProjectRowActions";
 import { sessionList } from "./sessionTree";
@@ -219,4 +219,23 @@ test("left hides the sub-agents of a row and right shows them; any other key is 
     assert.equal(press(key, collapsed), "", `${key} ${collapsed}`);
   assert.equal(press("ArrowLeft", false, { ctrlKey: true }), "");
   assert.equal(press("ArrowRight", true, { altKey: true }), "");
+});
+
+test("grouped under labels, a label is a title above its projects, a project is listed under each of its labels, and a folded label hides its projects", () => {
+  const projects = [project("a", "Alpha"), project("b", "Beta"), project("c", "Gamma")];
+  const infra = { id: "infra", name: "Infra", description: null, icon: null, color: "#2d72d2", order: 1, parent: null, favorite: false, space: null, projectIds: ["a", "b"] };
+  const helm = { ...infra, id: "helm", name: "Helm", parent: "infra", projectIds: ["b"] };
+  const render = (folded: readonly string[], selectedId: string | null = null) => renderToStaticMarkup(createElement(ProjectRailRows, { projects, selectedId,
+    onSelect: never, canRename: true, renameBusy: false, onRename: never, tree: tree(selectedId ? [selectedId] : []), children: createElement("i", null, "kept"),
+    labels: { groups: projectRailGroups(projects, 0, [infra, helm]), folded: id => folded.includes(id),
+      row: group => createElement("li", { className: "project-label-row", "data-depth": group.depth }, `title ${group.label.name}`) } }));
+  const html = render([]);
+  const order = ["title Infra", ">Alpha<", ">Beta<", "title Helm", ">Beta<", "Other projects", ">Gamma<"];
+  let at = 0;
+  for (const part of order) { const next = html.indexOf(part, at); assert.ok(next >= at, `${part} after ${at}: ${html}`); at = next + part.length; }
+  assert.match(html, /data-depth="1">title Helm/);
+  // Folding Infra hides its projects and the labels under it; the sessions of the selected project stay in the page.
+  const folded = render(["infra"], "b");
+  assert.doesNotMatch(folded, /Alpha|Beta|title Helm/);
+  assert.match(folded, /<li class="project-session-branch" hidden="">.*kept/);
 });
