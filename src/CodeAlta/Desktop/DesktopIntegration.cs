@@ -160,10 +160,15 @@ internal static class DesktopIntegration
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (home.Length == 0) return null;
         if (OperatingSystem.IsMacOS()) return Path.Combine(home, "Applications", "CodeAlta.app");
-        var data = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
-        return Path.Combine(string.IsNullOrWhiteSpace(data) || !Path.IsPathFullyQualified(data) ? Path.Combine(home, ".local", "share") : data,
-            "applications", "codealta.desktop");
+        return LinuxEntryPath(home, Environment.GetEnvironmentVariable("XDG_DATA_HOME"));
     }
+
+    /// <summary>The desktop entry of Linux: in the data folder of the user (<c>XDG_DATA_HOME</c>, else <c>~/.local/share</c>), named by <see cref="LinuxApplicationId"/>.</summary>
+    /// <param name="home">The home folder of the user.</param>
+    /// <param name="dataHome">The value of <c>XDG_DATA_HOME</c>, or null; it is used when it is an absolute path.</param>
+    internal static string LinuxEntryPath(string home, string? dataHome)
+        => Path.Combine(string.IsNullOrWhiteSpace(dataHome) || !Path.IsPathFullyQualified(dataHome) ? Path.Combine(home, ".local", "share") : dataHome,
+            "applications", LinuxApplicationId + ".desktop");
 
     /// <summary>
     /// Whether the user is told that the application was added to the desktop, and on macOS shown how it gets
@@ -271,6 +276,7 @@ internal static class DesktopIntegration
         entry.Append("Terminal=false\n");
         entry.Append("Categories=Development;IDE;\n");
         entry.Append("StartupNotify=true\n");
+        entry.Append("StartupWMClass=").Append(LinuxApplicationId).Append('\n');
         return entry.ToString();
     }
 
@@ -328,6 +334,29 @@ internal static class DesktopIntegration
         Directory.SetLastWriteTimeUtc(bundle, DateTime.UtcNow);
         return iconChanged;
     }
+
+    /// <summary>
+    /// The identifier a window of the application gives its desktop on Linux (the <c>app_id</c> of Wayland, the
+    /// window class of X11): the name of the desktop entry without its extension, which is how the dock and the
+    /// task switcher find the entry, and so the icon, of a window. The developer instance has it too: it has no entry
+    /// of its own, so it shares the icon, and groups with the installed application in the dock.
+    /// </summary>
+    internal const string LinuxApplicationId = "codealta";
+
+    /// <summary>
+    /// Names the program <see cref="LinuxApplicationId"/> before the toolkit opens a window. GTK takes the
+    /// identifier of its windows from the program name, and without one it says <c>GTK Application</c>, which no
+    /// desktop entry has: the window then has the generic icon in the dock.
+    /// </summary>
+    [SupportedOSPlatform("linux")]
+    internal static void SetLinuxApplicationId()
+    {
+        try { g_set_prgname(LinuxApplicationId); }
+        catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException) { /* The identifier stays the toolkit's. */ }
+    }
+
+    [DllImport("libglib-2.0.so.0")]
+    private static extern void g_set_prgname([MarshalAs(UnmanagedType.LPUTF8Str)] string name);
 
     private static void WriteLinuxEntry(string path, string launcher, string? icon)
     {

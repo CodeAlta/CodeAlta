@@ -490,9 +490,22 @@ public sealed class DesktopShellTests
         StringAssert.Contains(entry, "Exec=\"/home/me/.dotnet/tools/alta\"\n");
         StringAssert.Contains(entry, "Icon=/home/me/.local/share/CodeAlta/desktop/integration/alta.png\n");
         StringAssert.Contains(entry, "Terminal=false\n");
+        // The window's identifier is the entry's file name: the dock finds the icon by it.
+        StringAssert.Contains(entry, "StartupWMClass=" + DesktopIntegration.LinuxApplicationId + "\n");
         Assert.IsFalse(DesktopIntegration.LinuxDesktopEntry("/home/me/.dotnet/tools/alta", null).Contains("Icon=", StringComparison.Ordinal));
         // Characters the entry's syntax reserves are escaped.
         Assert.AreEqual("\"/home/a b/50%%/\\$x/alta\"", DesktopIntegration.DesktopEntryArgument("/home/a b/50%/$x/alta"));
+    }
+
+    [TestMethod]
+    public void LinuxEntryPath_IsNamedByTheIdentifierOfTheWindow()
+    {
+        // The dock finds the icon of a window by its identifier: it is the file name of the entry.
+        var applications = Path.Combine("applications", DesktopIntegration.LinuxApplicationId + ".desktop");
+        Assert.AreEqual(Path.Combine("/home/me", ".local", "share", applications), DesktopIntegration.LinuxEntryPath("/home/me", null));
+        Assert.AreEqual(Path.Combine("/home/me", ".local", "share", applications), DesktopIntegration.LinuxEntryPath("/home/me", "relative/data"));
+        var data = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "xdg-data"));
+        Assert.AreEqual(Path.Combine(data, applications), DesktopIntegration.LinuxEntryPath("/home/me", data));
     }
 
     [TestMethod]
