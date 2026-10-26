@@ -79,6 +79,7 @@ The selection is shared by every session and connected application. Ask an agent
 - The server listens at `http://127.0.0.1:2582/mcp`. Only programs on your computer reach it.
 - `alta --mcp-port <port>` starts CodeAlta with another port. When the usual port is taken, CodeAlta takes a free one: **Settings** shows the address, and the file `~/.alta/mcp_url.txt` holds it.
 - `alta --mcp-host <address>` listens on another address of your computer. Other computers then reach the server, and send the access token that **Settings** shows.
+- The address can be a name of your computer, such as its name on a Tailscale network: `alta --mcp-host my-pc.tailnet-name.ts.net`. The server listens on the addresses of that name, and **Settings** gives the name to clients, for those that do not accept an IP address.
 - Turn off **Run the MCP server** to stop it. CodeAlta remembers the choice.
 
 ## Good to know

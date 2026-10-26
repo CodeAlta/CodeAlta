@@ -40,7 +40,8 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
     internal bool EnableOwnedUserInput { get; init; }
 
     /// <summary>
-    /// The address the MCP server listens on: <c>localhost</c> or an IP address; null for the loopback address.
+    /// The address the MCP server listens on: <c>localhost</c>, an IP address or a host name; null for the loopback
+    /// address.
     /// </summary>
     internal string? McpHost { get; init; }
 
@@ -127,8 +128,9 @@ internal static class DesktopCommandLine
         at http://127.0.0.1:2582/mcp (port 2583 with --dev). Settings shows the address and turns
         the server off. Any start that opens the window can say where it listens:
           --mcp-port <port>      The port; 0 takes a free one.
-          --mcp-host <address>   localhost or an IP address. An address other computers can
-                                 reach asks for the access token that Settings shows.
+          --mcp-host <address>   localhost, an IP address or a host name of this computer, such
+                                 as its Tailscale name. An address other computers can reach
+                                 asks for the access token that Settings shows.
 
         Isolated roots, for tests and development. The ~/.alta profile is not used, and every
         directory is an absolute path outside .alta:
@@ -423,12 +425,30 @@ internal static class DesktopCommandLine
         return true;
     }
 
-    /// <summary>Whether <paramref name="host"/> names an address a server can listen on: <c>localhost</c> or an IP address.</summary>
+    /// <summary>
+    /// Whether <paramref name="host"/> names an address a server can listen on: <c>localhost</c>, an IP address or
+    /// the host name of this computer.
+    /// </summary>
     internal static bool IsMcpHost(string? host) =>
         string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
         // An IPv4 address is written with its four parts: a number alone also parses as one.
         (host is { Length: > 0 } && !host.Contains('%') && IPAddress.TryParse(host, out var address) &&
-            (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 || host.Count(static c => c == '.') == 3));
+            (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 || host.Count(static c => c == '.') == 3)) ||
+        IsHostName(host);
+
+    // A DNS name, such as the name of the computer on a Tailscale network: labels of letters, digits and hyphens,
+    // with a letter somewhere so that it is not an address written another way.
+    private static bool IsHostName(string? host)
+    {
+        if (host is not { Length: > 0 and <= 253 } || !host.Any(char.IsAsciiLetter)) return false;
+        foreach (var label in host.TrimEnd('.').Split('.'))
+        {
+            if (label.Length is 0 or > 63 || label[0] == '-' || label[^1] == '-') return false;
+            if (!label.All(static c => char.IsAsciiLetterOrDigit(c) || c == '-')) return false;
+        }
+
+        return true;
+    }
 
     private static bool ContainsAlta(string path) => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
         .Any(part => part.TrimEnd(' ', '.').Equals(".alta", StringComparison.OrdinalIgnoreCase));

@@ -7,7 +7,10 @@ using System.Text;
 namespace CodeAlta.Desktop.Mcp;
 
 /// <summary>Where the MCP server of the application listens.</summary>
-/// <param name="Host"><c>localhost</c> or an IP address.</param>
+/// <param name="Host">
+/// <c>localhost</c>, an IP address, or a host name: the server listens on the addresses of that name, and clients
+/// reach it by the name.
+/// </param>
 /// <param name="Port">The port; 0 for a free one.</param>
 /// <param name="Chosen">
 /// Whether the user named the port for this start. A port of the application's own choice that is taken is
@@ -44,7 +47,24 @@ internal sealed record DesktopMcpEndpoint(string Host, int Port, bool Chosen)
     internal DesktopMcpEndpoint On(int port) => this with { Port = port };
 
     /// <summary>Whether only programs of this computer reach the address.</summary>
+    /// <remarks>A host name is not: whatever it resolves to, a server on a name asks for the access token.</remarks>
     internal bool IsLoopback => IsLoopbackHost(Host);
+
+    /// <summary>
+    /// The addresses the server listens on: the address of <see cref="Host"/>, or those its name resolves to, IPv4
+    /// first; null for <c>localhost</c>, which Kestrel listens on by itself.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the resolution of a name.</param>
+    /// <exception cref="SocketException">The name cannot be resolved.</exception>
+    /// <exception cref="InvalidOperationException">The name resolves to no address.</exception>
+    internal async Task<IReadOnlyList<IPAddress>?> ResolveAsync(CancellationToken cancellationToken)
+    {
+        if (string.Equals(Host, "localhost", StringComparison.OrdinalIgnoreCase)) return null;
+        if (IPAddress.TryParse(Host, out var address)) return [address];
+        var addresses = await Dns.GetHostAddressesAsync(Host, cancellationToken).ConfigureAwait(false);
+        if (addresses.Length == 0) throw new InvalidOperationException($"The name {Host} resolves to no address.");
+        return [.. addresses.Distinct().OrderBy(static resolved => resolved.AddressFamily != AddressFamily.InterNetwork)];
+    }
 
     /// <summary>The address of the endpoint as a client names it.</summary>
     internal string Url

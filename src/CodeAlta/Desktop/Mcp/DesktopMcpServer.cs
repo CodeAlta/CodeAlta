@@ -158,15 +158,16 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
         try
         {
             if (!_endpoint.IsLoopback) token = DesktopMcpGuard.ReadOrCreateToken(TokenPath);
+            var addresses = await _endpoint.ResolveAsync(CancellationToken.None).ConfigureAwait(false);
             WebApplication application;
             try
             {
-                application = await ListenAsync(_endpoint.Port, token).ConfigureAwait(false);
+                application = await ListenAsync(addresses, _endpoint.Port, token).ConfigureAwait(false);
             }
             catch (IOException) when (_endpoint.Port != 0 && !_endpoint.Chosen)
             {
                 // The port of the application's own choice is taken, by another program or another user's CodeAlta.
-                application = await ListenAsync(0, token).ConfigureAwait(false);
+                application = await ListenAsync(addresses, 0, token).ConfigureAwait(false);
             }
 
             _application = application;
@@ -205,19 +206,22 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
 
     // A server of its own, with nothing read from the folder the application was started in: no settings file,
     // no environment variable and no console decides where it listens or when it stops.
-    private async Task<WebApplication> ListenAsync(int port, string? token)
+    // The addresses are null for localhost.
+    private async Task<WebApplication> ListenAsync(IReadOnlyList<IPAddress>? addresses, int port, string? token)
     {
         var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { ApplicationName = "CodeAlta", ContentRootPath = AppContext.BaseDirectory });
         builder.WebHost.UseKestrelCore().ConfigureKestrel(kestrel =>
         {
             kestrel.AddServerHeader = false;
-            if (string.Equals(_endpoint.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+            if (addresses is null)
             {
                 // Both loopback addresses, except for a free port, which the two would not share.
                 if (port == 0) kestrel.Listen(IPAddress.Loopback, 0);
                 else kestrel.ListenLocalhost(port);
             }
-            else kestrel.Listen(IPAddress.Parse(_endpoint.Host), port);
+            // Every address of a name, except for a free port, which they would not share: the first one, IPv4.
+            else if (port == 0) kestrel.Listen(addresses[0], 0);
+            else foreach (var address in addresses) kestrel.Listen(address, port);
         });
         builder.Services.AddRoutingCore();
         builder.Services.AddSingleton<IHostLifetime, QuietLifetime>();

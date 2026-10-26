@@ -84,7 +84,7 @@ the window and clicks in it. See `AGENTS.md`.
 | `alta --wait` | Starts the app and keeps the terminal until it exits, alone or with `--dev`. |
 | `alta --exit` | Asks the running app to exit. It asks first about unsaved files and running sessions. |
 | `--mcp-port <port>` | With a start that opens the window: the port of the MCP server (0 takes a free one). |
-| `--mcp-host <address>` | With a start that opens the window: the address the MCP server listens on, `localhost` or an IP address. |
+| `--mcp-host <address>` | With a start that opens the window: the address the MCP server listens on, `localhost`, an IP address or a host name of this computer (its Tailscale name, for example). |
 | `alta --version` | Prints the version. |
 | `alta --help` | Prints the options. |
 

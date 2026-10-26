@@ -29,6 +29,9 @@ public sealed class DesktopMcpTests
         var developer = Parse("--dev", "--mcp-host", "::1", "--mcp-port", "4101")!;
         Assert.IsTrue(developer.Developer);
         Assert.AreEqual(("::1", 4101), (developer.McpHost, developer.McpPort));
+        // The name of the computer, such as its name on a Tailscale network, for clients that want a name.
+        Assert.AreEqual("build-box", Parse("--mcp-host", "build-box")!.McpHost);
+        Assert.AreEqual("build-box.tail1234.ts.net", Parse("--mcp-host", "build-box.tail1234.ts.net")!.McpHost);
         Assert.IsTrue(Parse("--mcp-port", "4100", "--wait")!.Wait);
         // The start is otherwise the one without the options.
         Assert.AreEqual(Parse()!.DataRoot, Parse("--mcp-port", "4100")!.DataRoot);
@@ -40,8 +43,9 @@ public sealed class DesktopMcpTests
         foreach (var args in new string[][]
         {
             ["--mcp-port"], ["--mcp-host"], ["--mcp-port", "4100", "--mcp-port", "4101"], ["--mcp-host", "localhost", "--mcp-host", "127.0.0.1"],
-            ["--mcp-port", "65536"], ["--mcp-port", "-1"], ["--mcp-port", "http"], ["--mcp-port", "+80"], ["--mcp-host", "example.com"], ["--mcp-host", "2582"],
-            ["--mcp-host", "fe80::1%eth0"], ["--mcp-host", ""], ["--mcp-port", "4100", "--unknown"],
+            ["--mcp-port", "65536"], ["--mcp-port", "-1"], ["--mcp-port", "http"], ["--mcp-port", "+80"], ["--mcp-host", "2582"], ["--mcp-host", "10.1.2"],
+            ["--mcp-host", "fe80::1%eth0"], ["--mcp-host", ""], ["--mcp-host", "-box"], ["--mcp-host", "build_box"], ["--mcp-host", "build..box"],
+            ["--mcp-host", "http://build-box"], ["--mcp-host", "*"], ["--mcp-port", "4100", "--unknown"],
             // A start that only asks the running application to exit opens no server.
             ["--exit", "--mcp-port", "4100"], ["--dev", "--exit", "--mcp-host", "localhost"],
         })
@@ -83,6 +87,9 @@ public sealed class DesktopMcpTests
         Assert.AreEqual("http://192.168.1.20:2582/mcp", new DesktopMcpEndpoint("192.168.1.20", 2582, false).Url);
         // A server on every address is reached by the name of the computer.
         Assert.AreEqual($"http://{Dns.GetHostName()}:2582/mcp", new DesktopMcpEndpoint("0.0.0.0", 2582, false).Url);
+        // A server on a name is reached by that name, and asks for the token.
+        Assert.AreEqual("http://build-box.tail1234.ts.net:2582/mcp", new DesktopMcpEndpoint("build-box.tail1234.ts.net", 2582, false).Url);
+        Assert.IsFalse(new DesktopMcpEndpoint("build-box", 1, false).IsLoopback);
 
         foreach (var host in new[] { "localhost", "LOCALHOST", "127.0.0.1", "127.8.9.10", "::1", "[::1]" }) Assert.IsTrue(DesktopMcpEndpoint.IsLoopbackHost(host), host);
         foreach (var host in new[] { null, "", "0.0.0.0", "::", "192.168.1.20", "example.com", "localhost.example.com", "127.0.0.1.example.com" })
@@ -267,6 +274,30 @@ public sealed class DesktopMcpTests
             Assert.IsFalse(string.IsNullOrWhiteSpace(status.Error));
             Assert.IsFalse(File.Exists(server.UrlPath));
         }
+    }
+
+    [TestMethod]
+    public async Task Endpoint_ListensOnTheAddressesOfItsName()
+    {
+        Assert.IsNull(await new DesktopMcpEndpoint("localhost", 1, false).ResolveAsync(CancellationToken.None));
+        CollectionAssert.AreEqual(new[] { IPAddress.Parse("192.168.1.20") }, (await new DesktopMcpEndpoint("192.168.1.20", 1, false).ResolveAsync(CancellationToken.None))!.ToArray());
+        CollectionAssert.AreEqual(new[] { IPAddress.IPv6Loopback }, (await new DesktopMcpEndpoint("::1", 1, false).ResolveAsync(CancellationToken.None))!.ToArray());
+
+        // The name of this computer resolves to its addresses, IPv4 first: a free port is taken on the first one.
+        var addresses = (await new DesktopMcpEndpoint(Dns.GetHostName(), 1, false).ResolveAsync(CancellationToken.None))!;
+        Assert.IsTrue(addresses.Count > 0);
+        Assert.AreEqual(addresses.Count, addresses.Distinct().Count());
+        var families = addresses.Select(static address => address.AddressFamily).ToArray();
+        CollectionAssert.AreEqual(families.OrderBy(static family => family != AddressFamily.InterNetwork).ToArray(), families);
+
+        // A name that resolves to nothing leaves the server stopped, with the reason.
+        using var temp = new TempFolder();
+        await using var server = new DesktopMcpServer(new DesktopMcpEndpoint("codealta-no-such-host.invalid", 0, false), () => [], temp.Path, "1");
+        await server.StartAsync();
+        Assert.AreEqual(DesktopMcpStatus.Failed, server.Status.State);
+        Assert.IsNull(server.Status.Url);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(server.Status.Error));
+        Assert.IsFalse(File.Exists(server.UrlPath));
     }
 
     [TestMethod]
