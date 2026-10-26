@@ -118,6 +118,8 @@ A [fallback](../model-providers/readme.md) never moves a sandboxed session to a 
 - **macOS**: built in, on Apple silicon.
 - **Linux**: install `bubblewrap`, and `slirp4netns` for a network.
 
+On macOS and Linux, a sandbox with a network reaches it through a proxy of CodeAlta, which programs find in `HTTPS_PROXY`: a program that ignores that variable reaches no host.
+
 **Check** says what is missing. Where the sandbox cannot run, a sandboxed session runs no command at all: it never runs them without the sandbox.
 
 ## On the command line

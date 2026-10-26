@@ -74,7 +74,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
                 SandboxNetworkProxy? proxy = null;
                 try
                 {
-                    if (policy.Network == SandboxNetwork.Hosts) proxy = SandboxNetworkProxy.Start(policy.Hosts, policy.LocalPorts, _reservedPorts);
+                    if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, _reservedPorts);
                     var client = await SandboxWorkerClient.StartAsync(_backend, policy, _commandLine(), proxy?.Endpoint,
                         new SandboxWorkerInit(start.SessionId, start.ProviderId, policy.WorkingDirectory, [policy.WorkingDirectory, .. start.Folders.Writable],
                             start.Folders.Scratchpad, Host().HomeDirectory, start.CommandGuard), cancellationToken).ConfigureAwait(false);
@@ -115,7 +115,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
         SandboxNetworkProxy? proxy = null;
         try
         {
-            if (policy.Network == SandboxNetwork.Hosts) proxy = SandboxNetworkProxy.Start(policy.Hosts, policy.LocalPorts, _reservedPorts);
+            if (policy.ThroughProxy) proxy = SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, _reservedPorts);
             var process = await _backend.StartAsync(policy, SandboxCommandLine.Create(launch.FileName, launch.Arguments), proxy?.Endpoint, cancellationToken).ConfigureAwait(false);
             return new AgentProcess(process, proxy);
         }

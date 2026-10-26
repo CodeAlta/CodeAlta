@@ -82,7 +82,9 @@ worker, the only address mxc lets the container reach, and sets it as the proxy 
 CONNECT and forwards plain HTTP (certificate revocation checks need it) to the hosts of the profile only. It resolves
 names itself and refuses the addresses of this computer and of its networks, CodeAlta's own ports always, except the
 `local_ports` of the profile; a refusal is a 403 that names the host, and the last ones are kept for the note of a
-failed command. `on` reaches any host by the same proxy, with the same refusals.
+failed command. `on` reaches any host of the internet: on macOS and Linux by the same proxy, with the same refusals,
+since Seatbelt filters no address but this computer and the rules of Bubblewrap leave no route; on Windows directly,
+with the private, link-local and multicast networks denied by the container and the loopback of the host closed.
 
 ## What a sandboxed session does with CodeAlta
 

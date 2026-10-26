@@ -94,24 +94,33 @@ internal static class MxcRequests
         }
     }
 
-    private static NetworkPolicy Network(SandboxPolicy policy, string? proxyEndpoint) => OperatingSystem.IsWindows() ? WindowsNetwork(policy, proxyEndpoint) : policy.Network switch
+    // The addresses of the networks of this computer and of the cloud it may run in (private, carrier-grade, link-local
+    // with its metadata service, multicast and reserved), which a network that is on never reaches. The loopback of the
+    // container stays its own: that of the host is closed by the ingress policy.
+    private static readonly string[] LocalNetworks =
+    [
+        "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/4", "240.0.0.0/4",
+        "fc00::/7", "fe80::/10", "ff00::/8",
+    ];
+
+    private static NetworkEgressPolicy InternetOnly() => new()
     {
+        Default = NetworkAction.Allow,
+        Deny = [new NetworkRulePolicy { To = [.. LocalNetworks.Select(static cidr => new NetworkPeerPolicy(cidr))] }],
+    };
+
+    private static NetworkPolicy Network(SandboxPolicy policy, string? proxyEndpoint) => OperatingSystem.IsWindows() ? WindowsNetwork(policy, proxyEndpoint) : policy.ThroughProxy
         // Nothing comes in, and the loopback of this computer stays closed: Seatbelt opens every port of this computer
-        // for an allowed host loopback (only the port of the proxy is opened then), and Bubblewrap refuses ingress.
-        SandboxNetwork.Hosts => new NetworkPolicy
+        // for an allowed host loopback (only the port of the proxy is opened then), and Bubblewrap refuses ingress. A
+        // network that is on goes through the proxy too, with every host (SandboxPolicy.ThroughProxy).
+        ? new NetworkPolicy
         {
             Egress = new NetworkEgressPolicy { Default = NetworkAction.Deny },
             Ingress = new NetworkIngressPolicy { Default = NetworkAction.Deny, HostLoopback = NetworkAction.Deny },
             RuntimeConfig = new NetworkRuntimeConfig { NetworkProxy = proxyEndpoint },
-        },
-        SandboxNetwork.On => new NetworkPolicy
-        {
-            Egress = new NetworkEgressPolicy { Default = NetworkAction.Allow },
-            Ingress = new NetworkIngressPolicy { Default = NetworkAction.Deny, HostLoopback = NetworkAction.Deny },
-        },
+        }
         // The container has a network namespace of its own, with its own loopback.
-        _ => new NetworkPolicy { Egress = new NetworkEgressPolicy { Default = NetworkAction.Deny } },
-    };
+        : new NetworkPolicy { Egress = new NetworkEgressPolicy { Default = NetworkAction.Deny } };
 
     private static NetworkPolicy WindowsNetwork(SandboxPolicy policy, string? proxyEndpoint) => policy.Network switch
     {
@@ -125,7 +134,7 @@ internal static class MxcRequests
         },
         SandboxNetwork.On => new NetworkPolicy
         {
-            Egress = new NetworkEgressPolicy { Default = NetworkAction.Allow },
+            Egress = InternetOnly(),
             Ingress = new NetworkIngressPolicy { Default = NetworkAction.Allow, HostLoopback = NetworkAction.Deny },
         },
         // No network; the loopback of the container is allowed, so that its own programs talk to each other (a test

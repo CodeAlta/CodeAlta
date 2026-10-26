@@ -148,6 +148,60 @@ public sealed class CliSandboxEscapeTests
         }
     }
 
+    [TestMethod]
+    public async Task TheNetworkThatIsOn_ReachesTheInternet_NotTheNetworkOfThisComputer()
+    {
+        var backend = new MxcSandboxBackend();
+        if (backend.GetAvailability() is { } availability && (!availability.IsAvailable || !availability.Networks.Contains(SandboxNetwork.On)))
+            Assert.Inconclusive(availability.Reason ?? "No sandbox with a network on this computer.");
+        if (System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+                .Where(static adapter => adapter.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up)
+                .SelectMany(static adapter => adapter.GetIPProperties().UnicastAddresses).Select(static unicast => unicast.Address)
+                .FirstOrDefault(static address => address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address) && SandboxNetworkProxy.IsLocalAddress(address))
+            is not { } local)
+        {
+            Assert.Inconclusive("This computer has no address of a local network.");
+            return;
+        }
+
+        var root = Directory.CreateDirectory(Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), "tests", "network-on-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+        using var service = new TcpListener(IPAddress.Any, 0);
+        service.Start();
+        var port = ((IPEndPoint)service.LocalEndpoint).Port;
+        try
+        {
+            var profile = SandboxProfiles.Resolve(SandboxProfiles.Workspace, []) with { Network = SandboxNetwork.On };
+            var policy = SandboxPolicyBuilder.Build(profile, new SandboxSessionFolders { WorkingDirectory = project }, SandboxHostDiscovery.Current(Path.Combine(root, "data"), []), [], "network-on");
+            await using var proxy = policy.ThroughProxy ? SandboxNetworkProxy.Start(policy.ProxyHosts, policy.LocalPorts, new HashSet<int>()) : null;
+            var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "altacli.exe" : "altacli");
+            await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{executable}\" {SandboxWorker.Option}", proxy?.Endpoint,
+                new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None).WaitAsync(Deadline);
+            var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
+            async Task<string> Connect(string address, int to)
+            {
+                var command = OperatingSystem.IsWindows()
+                    ? $"try {{ $c = [Net.Sockets.TcpClient]::new(); if ($c.ConnectAsync('{address}', {to}).Wait(10000)) {{ 'connected' }} else {{ 'refused' }} }} catch {{ 'refused' }}"
+                    : $"timeout 10 bash -c '(exec 3<>/dev/tcp/{address}/{to}) 2>/dev/null' && echo connected || echo refused";
+                return Text(await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WaitAsync(Deadline));
+            }
+
+            // On macOS a network that is on goes through the proxy, which programs reach by its variables.
+            if (!policy.ThroughProxy) Assert.Contains("connected", await Connect("api.nuget.org", 443), "the internet");
+            Assert.Contains("refused", await Connect(local.ToString(), port), "a service of this computer on its local address");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
     private static bool TryLink(string link, string target)
     {
         try

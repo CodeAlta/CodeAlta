@@ -96,4 +96,14 @@ public sealed record SandboxPolicy
 
     /// <summary>Gets whether a command may be asked to run outside the sandbox.</summary>
     public required SandboxOutside Outside { get; init; }
+
+    /// <summary>
+    /// Gets whether the network goes through a proxy of CodeAlta: the hosts of <see cref="SandboxNetwork.Hosts"/>, and
+    /// on macOS and Linux every host of <see cref="SandboxNetwork.On"/>, where the container does not keep the local
+    /// network out by itself (Seatbelt filters no address but this computer, and the rules of Bubblewrap leave no route).
+    /// </summary>
+    public bool ThroughProxy => Network == SandboxNetwork.Hosts || (Network == SandboxNetwork.On && !OperatingSystem.IsWindows());
+
+    /// <summary>Gets the host patterns the proxy lets through: null for every host of the internet.</summary>
+    public IReadOnlyList<string>? ProxyHosts => Network == SandboxNetwork.On ? null : Hosts;
 }

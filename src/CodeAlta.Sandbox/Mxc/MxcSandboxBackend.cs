@@ -24,7 +24,7 @@ public sealed class MxcSandboxBackend : ISandboxBackend
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentException.ThrowIfNullOrWhiteSpace(commandLine);
         if (GetAvailability().Refusal(policy.Network) is { } refusal) throw new SandboxUnavailableException(refusal);
-        if (policy.Network == SandboxNetwork.Hosts && string.IsNullOrWhiteSpace(proxyEndpoint))
+        if (policy.ThroughProxy && string.IsNullOrWhiteSpace(proxyEndpoint))
             throw new ArgumentException("The network of the policy goes through a proxy, and none is given.", nameof(proxyEndpoint));
         return StartCoreAsync(policy, commandLine, proxyEndpoint, cancellationToken);
     }

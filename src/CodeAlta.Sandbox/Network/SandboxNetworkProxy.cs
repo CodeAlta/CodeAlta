@@ -20,14 +20,14 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
     private const int MaximumRefusals = 16;
 
     private readonly TcpListener _listener;
-    private readonly IReadOnlyList<string> _hosts;
+    private readonly IReadOnlyList<string>? _hosts;
     private readonly IReadOnlySet<int> _localPorts;
     private readonly IReadOnlySet<int> _reservedPorts;
     private readonly CancellationTokenSource _closing = new();
     private readonly ConcurrentQueue<string> _refusals = new();
     private readonly Task _accepting;
 
-    private SandboxNetworkProxy(TcpListener listener, IReadOnlyList<string> hosts, IReadOnlySet<int> localPorts, IReadOnlySet<int> reservedPorts)
+    private SandboxNetworkProxy(TcpListener listener, IReadOnlyList<string>? hosts, IReadOnlySet<int> localPorts, IReadOnlySet<int> reservedPorts)
     {
         _listener = listener;
         _hosts = hosts;
@@ -43,21 +43,20 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
     public IReadOnlyList<string> RecentRefusals => [.. _refusals];
 
     /// <summary>Starts a proxy on a free loopback port.</summary>
-    /// <param name="hosts">The host patterns of the profile (<see cref="SandboxHostPattern"/>).</param>
+    /// <param name="hosts">The host patterns of the profile (<see cref="SandboxHostPattern"/>), or null for every host of the internet.</param>
     /// <param name="localPorts">The ports of this computer the sandbox may reach.</param>
     /// <param name="reservedPorts">Ports of this computer that are never reached, whatever the profile: CodeAlta's own.</param>
     /// <returns>The proxy.</returns>
-    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentNullException">An argument other than <paramref name="hosts"/> is null.</exception>
     /// <exception cref="SocketException">No port could be listened on.</exception>
-    public static SandboxNetworkProxy Start(IEnumerable<string> hosts, IEnumerable<int> localPorts, IEnumerable<int> reservedPorts)
+    public static SandboxNetworkProxy Start(IEnumerable<string>? hosts, IEnumerable<int> localPorts, IEnumerable<int> reservedPorts)
     {
-        ArgumentNullException.ThrowIfNull(hosts);
         ArgumentNullException.ThrowIfNull(localPorts);
         ArgumentNullException.ThrowIfNull(reservedPorts);
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var reserved = reservedPorts.ToHashSet();
-        return new SandboxNetworkProxy(listener, [.. hosts], localPorts.Where(port => !reserved.Contains(port)).ToHashSet(), reserved);
+        return new SandboxNetworkProxy(listener, hosts is null ? null : [.. hosts], localPorts.Where(port => !reserved.Contains(port)).ToHashSet(), reserved);
     }
 
     /// <summary>Says whether the sandbox may reach a host and port, as the proxy decides it (also for the <c>webget</c> of CodeAlta).</summary>
@@ -218,7 +217,9 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
 
     private async Task RefuseAsync(NetworkStream stream, string target)
     {
-        var body = Encoding.UTF8.GetBytes($"The sandbox of this session does not reach {target}: it is not a host of its profile.\n");
+        var body = Encoding.UTF8.GetBytes(_hosts is null
+            ? $"The sandbox of this session does not reach {target}: it reaches the internet, not this computer nor its network.\n"
+            : $"The sandbox of this session does not reach {target}: it is not a host of its profile.\n");
         var head = Encoding.ASCII.GetBytes($"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\nX-CodeAlta-Sandbox: refused\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
         await stream.WriteAsync(head, _closing.Token).ConfigureAwait(false);
         await stream.WriteAsync(body, _closing.Token).ConfigureAwait(false);
