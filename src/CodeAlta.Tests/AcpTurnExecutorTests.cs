@@ -235,6 +235,47 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ToolsOfAntigravity_EndWhenItGoesOn_ThoughItReportsTheirEndOnlyWithThePrompt()
+    {
+        // Antigravity reports the end of its reads only when its prompt ends: the session must not wait for it.
+        var answered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answerSeenBeforeTheEnd = false;
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                await prompt.StartToolAsync("run-1", "Running run_command", "execute", new JsonObject { ["command"] = "dotnet --version" });
+                await prompt.EndToolAsync("run-1", "10.0.100");
+                await prompt.StartToolAsync("read-1", "Running view_file", "read", new JsonObject { ["AbsolutePath"] = "a.md" });
+                await prompt.StartToolAsync("read-2", "Running view_file", "read", new JsonObject { ["AbsolutePath"] = "b.md" });
+                await prompt.SendTextAsync("Both read.");
+                answerSeenBeforeTheEnd = await Task.WhenAny(answered.Task, Task.Delay(TimeSpan.FromSeconds(5))) == answered.Task;
+                await prompt.EndToolAsync("read-1", "late");
+                await prompt.EndToolAsync("read-2", "late");
+                return "end_turn";
+            },
+        };
+        var settings = new AcpAgentSettings("dotnet", [], new Dictionary<string, string>(), "antigravity-acp", "1.4.3");
+        await using var fixture = new Fixture(agent, settings, AcpAgentQuirks.For(settings))
+        {
+            OnDelta = delta =>
+            {
+                if (delta.Text?.Contains("Both read.", StringComparison.Ordinal) == true)
+                {
+                    answered.TrySetResult();
+                }
+            },
+        };
+
+        var conversation = await fixture.RunAsync([User("read a.md and b.md")]);
+
+        Assert.IsTrue(answerSeenBeforeTheEnd, "the answer reaches the session while the agent has not reported the end of its reads");
+        Assert.AreEqual("10.0.100", ToolResult(conversation[2]), "a call whose end it reports keeps its result");
+        CollectionAssert.AreEqual(new[] { "read-1", "read-2" }, conversation.SelectMany(static message => message.Parts.OfType<AgentMessagePart.ToolCall>()).Skip(1).Select(static call => call.CallId).ToArray());
+        Assert.AreEqual("Both read.", Text(conversation[^1]));
+    }
+
+    [TestMethod]
     public async Task PermissionRequest_IsAnsweredByTheUser_WithTheOptionOfTheDecision()
     {
         JsonNode? outcome = null;
@@ -762,6 +803,8 @@ public sealed class AcpTurnExecutorTests
         Assert.IsInstanceOfType<CursorAcpQuirks>(AcpAgentQuirks.For(Agent("agent", "cursor")));
         Assert.IsInstanceOfType<CopilotAcpQuirks>(AcpAgentQuirks.For(Agent("npx", null, "--yes", "@github/copilot@1.0.103", "--acp")));
         Assert.IsInstanceOfType<CopilotAcpQuirks>(AcpAgentQuirks.For(Agent("npx", "github-copilot-cli")));
+        Assert.IsInstanceOfType<AntigravityAcpQuirks>(AcpAgentQuirks.For(Agent("C:\\agents\\antigravity-acp\\1.4.3\\windows-x86_64\\agy_acp_server.exe", null)));
+        Assert.IsInstanceOfType<AntigravityAcpQuirks>(AcpAgentQuirks.For(Agent("./agy_acp_server", "antigravity-acp")));
         Assert.AreSame(AcpAgentQuirks.Protocol, AcpAgentQuirks.For(Agent("npx", "gemini", "@google/gemini-cli", "--experimental-acp")));
     }
 
@@ -919,6 +962,9 @@ public sealed class AcpTurnExecutorTests
 
         public Action<List<AgentConversationMessage>>? BeforeNextTurn { get; init; }
 
+        /// <summary>Gets what is told each text the executor streams, as the window shows it.</summary>
+        public Action<AgentTurnDelta>? OnDelta { get; init; }
+
         public IAgentProcessHost? ProcessHost { get; init; }
 
         public async Task<List<AgentConversationMessage>> RunAsync(IReadOnlyList<AgentConversationMessage> start, CancellationToken cancellationToken = default)
@@ -928,7 +974,14 @@ public sealed class AcpTurnExecutorTests
             var steered = false;
             while (true)
             {
-                var response = await Executor.ExecuteTurnAsync(CreateRequest(conversation), static (_, _) => ValueTask.CompletedTask, cancellationToken);
+                var response = await Executor.ExecuteTurnAsync(
+                    CreateRequest(conversation),
+                    (delta, _) =>
+                    {
+                        OnDelta?.Invoke(delta);
+                        return ValueTask.CompletedTask;
+                    },
+                    cancellationToken);
                 conversation.Add(response.AssistantMessage);
                 if (response.ProviderState is { } providerState)
                 {

@@ -176,6 +176,28 @@ public sealed class HarnessToolCallBridge
         }
     }
 
+    /// <summary>
+    /// Gives a result to every call of the harness's own tools that waits for one: the harness went on without
+    /// reporting their end. A result it reports later for one of them is ignored.
+    /// </summary>
+    /// <param name="result">The result of those calls.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="result" /> is <see langword="null" />.</exception>
+    public void CompleteOwnOutstanding(AgentToolResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        HarnessToolCall[] calls;
+        lock (_gate)
+        {
+            calls = [.. _order.Where(static call => !call.IsCodeAltaTool && !call.Result.Task.IsCompleted)];
+        }
+
+        foreach (var call in calls)
+        {
+            call.Started.TrySetResult();
+            call.Result.TrySetResult(result);
+        }
+    }
+
     /// <summary>Forgets the calls that have their result.</summary>
     public void ForgetCompleted()
     {

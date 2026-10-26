@@ -95,11 +95,16 @@ internal static class AcpToolCalls
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            text = success ? "(no output)" : "The tool call failed.";
+            text = success ? NoOutput : "The tool call failed.";
         }
 
         return new AgentToolResult(success, [new AgentToolResultItem.Text(text)], success ? null : text);
     }
+
+    /// <summary>Creates the result of a call the agent went on from without reporting its end.</summary>
+    public static AgentToolResult CreateUnreportedResult() => new(true, [new AgentToolResultItem.Text(NoOutput)]);
+
+    private const string NoOutput = "(no output)";
 
     /// <summary>Renders a <c>plan</c> update as a checklist.</summary>
     public static string RenderPlan(JsonElement update)

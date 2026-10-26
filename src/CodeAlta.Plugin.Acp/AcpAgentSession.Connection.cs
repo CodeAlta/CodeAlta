@@ -435,6 +435,7 @@ internal sealed partial class AcpAgentSession
         switch (AcpJson.GetString(update, "sessionUpdate"))
         {
             case "agent_message_chunk" when AcpJson.TryGetObject(update, "content", out var content):
+                EndToolCallsLeftBehind();
                 if (AcpPrompts.RenderContentBlock(content) is { Length: > 0 } text)
                 {
                     connection.Post(new ChunkEvent(AgentContentKind.Assistant, text));
@@ -442,6 +443,7 @@ internal sealed partial class AcpAgentSession
 
                 break;
             case "agent_thought_chunk" when AcpJson.TryGetObject(update, "content", out var thought):
+                EndToolCallsLeftBehind();
                 if (AcpPrompts.RenderContentBlock(thought) is { Length: > 0 } reasoning)
                 {
                     connection.Post(new ChunkEvent(AgentContentKind.Reasoning, reasoning));
@@ -519,10 +521,25 @@ internal sealed partial class AcpAgentSession
             return;
         }
 
+        if (_bridge.Find(callId) is null)
+        {
+            EndToolCallsLeftBehind();
+        }
+
         var (name, arguments, codeAlta) = AcpToolCalls.Map(update, ExposedTools, connection.WorkingDirectory);
         _bridge.Register(callId, name, arguments, codeAlta);
         connection.Post(new ToolCallEvent(callId, name, arguments));
         OnToolCallUpdate(update);
+    }
+
+    // An agent that reports the end of its tool calls only with its prompt went on: the calls of its own tools it
+    // started before are done, and the session goes on with it instead of showing nothing until the prompt ends.
+    private void EndToolCallsLeftBehind()
+    {
+        if (_options.Quirks.EndsToolCallsWithThePrompt)
+        {
+            _bridge.CompleteOwnOutstanding(AcpToolCalls.CreateUnreportedResult());
+        }
     }
 
     private void OnToolCallUpdate(JsonElement update)

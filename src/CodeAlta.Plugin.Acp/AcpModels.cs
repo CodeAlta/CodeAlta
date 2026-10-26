@@ -90,11 +90,22 @@ internal class AcpAgentQuirks
             return CursorAcpQuirks.Instance;
         }
 
+        if (AntigravityAcpQuirks.Runs(agent))
+        {
+            return AntigravityAcpQuirks.Instance;
+        }
+
         return CopilotAcpQuirks.Runs(agent) ? CopilotAcpQuirks.Instance : Protocol;
     }
 
     /// <summary>Gets the provider of the catalog of models that serves the models of the agent, or <see langword="null"/> to find each by its vendor.</summary>
     public virtual string? CatalogProviderId => null;
+
+    /// <summary>
+    /// Gets whether the agent reports the end of some of its tool calls only when its prompt ends: a call of its own
+    /// tools that waits for its end is then ended when the agent goes on, with a new tool call or with text.
+    /// </summary>
+    public virtual bool EndsToolCallsWithThePrompt => false;
 
     /// <summary>
     /// Returns what the agent needs from the computer in the sandbox of a session, the same for every agent: a home
@@ -301,6 +312,21 @@ internal sealed class CursorAcpQuirks : AcpAgentQuirks
         return true;
     }
 
+}
+
+/// <summary>
+/// Google Antigravity reports its reads (<c>view_file</c>) as they start, but their end only when its prompt ends, with
+/// no output: a session that waited for it would show nothing of a long turn after its first read.
+/// </summary>
+internal sealed class AntigravityAcpQuirks : AcpAgentQuirks
+{
+    public static AntigravityAcpQuirks Instance { get; } = new();
+
+    public static bool Runs(AcpAgentSettings agent)
+        => string.Equals(agent.AgentId, "antigravity-acp", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(Path.GetFileNameWithoutExtension(CommandFileName(agent.Command)), "agy_acp_server", StringComparison.OrdinalIgnoreCase);
+
+    public override bool EndsToolCallsWithThePrompt => true;
 }
 
 /// <summary>
