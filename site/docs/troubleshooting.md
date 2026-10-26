@@ -151,7 +151,8 @@ A session whose [sandbox](sessions/sandbox.md) cannot run runs no command, and s
 - **Linux**: install `bubblewrap`, and `slirp4netns` for a profile with a network.
 - **The profile cannot be used**: a profile was removed or renamed while a provider, a space or a project still names it. Choose another one there.
 - **A host is refused**: the profile does not list it. Add it to the hosts of a profile of yours.
-- **The provider runs its own tools** (an ACP agent): choose another provider for the session, or turn its sandbox off.
+- **The provider runs its own tools** and the sandbox cannot start it: choose another provider for the session, or turn its sandbox off.
+- **An ACP agent is not signed in, in a sandbox**: it has a home folder of its own there, without your sign-in. Give its provider a token or an API key in its **Environment** (Settings > Providers). An agent that reaches no host of its service needs them in **Hosts in a sandbox**.
 - **Claude Code is not signed in, in a sandbox on macOS**: its sign-in is in the Keychain, out of reach. Set `CLAUDE_CODE_OAUTH_TOKEN` with a token from `claude setup-token`, or use an API key.
 - **Commands start in `C:\` instead of the project (Windows)**: a folder above the project holds tens of thousands of entries, as the temporary folder does, and the sandbox keeps such a folder out of reach. Move the project elsewhere.
 - **`dotnet build` fails without an error (Windows)**: MSBuild cannot start its worker nodes in the sandbox. Build with `-m:1`; the agent is told to.

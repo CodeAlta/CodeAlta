@@ -95,7 +95,7 @@ When the sandbox blocks a command, the agent is told what blocked it, a host or 
 
 The tools of CodeAlta itself run outside the container, so a sandboxed agent uses only the ones that keep it inside:
 
-- It reaches itself and the sessions it creates, never your other sessions. The sessions it creates are sandboxed as it is.
+- It reaches itself and the sessions it creates that run in its sandbox, never your other sessions nor another project. The sessions it creates are sandboxed as it is.
 - It uses notes, plans, tasks, reviews, reminders, background jobs and questions to you as usual.
 - It does not open terminals, drive the window, build plugins, run automations, add MCP servers, or change prompts, skills, spaces and projects.
 - It uses the plugin tools made for a sandbox, and the MCP servers of its profile.
@@ -104,11 +104,12 @@ An agent can turn a sandbox on for a session it creates, never turn one off.
 
 ## Providers
 
-A sandboxed session runs on the providers whose model CodeAlta drives with its own tools (the API providers, Codex, GitHub Copilot) and on [Claude Code](claude-code.md):
+A sandboxed session runs on the providers whose model CodeAlta drives with its own tools (the API providers, Codex, GitHub Copilot), on [Claude Code](claude-code.md) and on the ACP agents:
 
 - **Claude Code** runs in the sandbox of the session. It writes in its account folder (its sign-in and its transcripts), so the agent can read its own sign-in, never the ones of CodeAlta. It reaches the hosts of Anthropic, even with a profile without network. On Windows its commands run with the shell of CodeAlta, in the same sandbox.
 - **On macOS**, Claude Code keeps its sign-in in the Keychain, outside the sandbox: give it a token of its own (`claude setup-token`, then `CLAUDE_CODE_OAUTH_TOKEN`) or an API key.
-- **The ACP agents** run their tools in their own process, which the sandbox does not start yet: a sandboxed session does not run on them, and says why.
+- **The ACP agents** (Copilot CLI, Cursor, Grok Build and the others) run in the sandbox of the session, in a home folder of their own that each provider keeps between sessions. They are not signed in there at first: give the provider a token or an API key in its **Environment** (Settings > Providers), such as `COPILOT_GITHUB_TOKEN`, `CURSOR_API_KEY` or `XAI_API_KEY`. Its variables reach the sandbox with their values.
+- **An ACP agent CodeAlta does not know** reaches the hosts its provider lists in **Hosts in a sandbox**, besides those of the profile.
 
 A [fallback](../model-providers/readme.md) never moves a sandboxed session to a provider it cannot run on.
 

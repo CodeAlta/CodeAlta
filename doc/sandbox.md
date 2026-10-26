@@ -74,12 +74,18 @@ permission, the command guard, its progress) comes back to CodeAlta, which answe
   sandbox starts another process, which resumes the conversation. On Windows the shells of the CLI do not run in a
   container (msys2 needs a named object it refuses), so they are turned off and the CLI is offered `shell_command`,
   which runs in the worker of the session.
+- **The process of an ACP agent** starts the same way, for every agent alike: a home folder of its own per provider
+  (`OwnHome`, under `agents/` of the sandbox data folder), kept between sessions and reached by no other process of a
+  sandbox, since the user's sign-in stays out of reach; the variables of its provider with their values, where a token
+  signs it in; the hosts its provider and CodeAlta know for it. It reaches the tools of CodeAlta at the harness MCP
+  endpoint, opened before it starts so that its port is among the local ports of its proxy.
 
 ## The network
 
 `network = "off"` gives the container no network at all. `hosts` starts a `SandboxNetworkProxy` on loopback for the
 worker, the only address mxc lets the container reach, and sets it as the proxy of the container. The proxy tunnels
-CONNECT and forwards plain HTTP (certificate revocation checks need it) to the hosts of the profile only. It resolves
+CONNECT and forwards plain HTTP (certificate revocation checks, the MCP endpoint of an agent) to the hosts of the
+profile only, one request per connection, since only the first request of a connection is read. It resolves
 names itself and refuses the addresses of this computer and of its networks, CodeAlta's own ports always, except the
 `local_ports` of the profile; a refusal is a 403 that names the host, and the last ones are kept for the note of a
 failed command. `on` reaches any host of the internet: on macOS and Linux by the same proxy, with the same refusals,
@@ -91,11 +97,13 @@ with the private, link-local and multicast networks denied by the container and 
 `alta`, plugins and MCP servers run in CodeAlta with the rights of the user, outside the container. A sandboxed caller
 is therefore limited where they run:
 
-- **`alta` is an allow list** (`AltaSandboxGate`), checked once in `AltaCommandRegistry` after parsing: the commands of
-  plugins are refused unless listed. Sessions are reached only when the caller created them, directly or through its
-  children (`ResolveSessionInfoAsync`, `fork`, `--parent`); conversations found by `alta search` are filtered the same
-  way. An agent turns a sandbox on, never off, and a sandboxed agent chooses none: what it creates or forks has its
-  profile.
+- **`alta` is an allow list** (`AltaSandboxGate`), checked once in `AltaCommandRegistry` after parsing, which also
+  runs the command in the folder of the caller's session: the commands of plugins are refused unless listed, and no
+  plugin takes the name of a listed command. Sessions are reached only when the caller created them, directly or
+  through its children (`ResolveSessionInfoAsync`, `fork`, `--parent`), and when they run in its profile, so that a
+  child the user made less sandboxed is not driven by it; jobs, reminders and the conversations found by `alta search`
+  are filtered the same way, and what belongs to another project (its sessions, skills, prompts, diffs) is refused. An
+  agent turns a sandbox on, never off, and a sandboxed agent chooses none: what it creates or forks has its profile.
 - **Plugin tools** reach a sandboxed session only when marked `SafeInSandbox`; the tools a before-run hook adds only
   when the hook says they follow the sandbox. The MCP plugin gives the tools of the servers the profile lists
   (`SandboxMcpServers`) and refuses the others in its commands.

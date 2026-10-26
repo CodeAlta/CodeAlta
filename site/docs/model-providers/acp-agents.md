@@ -53,6 +53,7 @@ An ACP agent runs its own loop with its own tools, context and account: CodeAlta
 - **CodeAlta's tools.** Without the **CodeAlta tools** tag, the agent runs without `alta` and the tools of plugins: no sub-agents, notes, reminders, reviews or UI tools in its sessions.
 - **Instructions.** Without the **System prompt** tag, CodeAlta's instructions and the agent prompt come with the first prompt of a session and after a compaction, and the agent may follow them less closely.
 - **Review before commit** only asks the agent not to commit: CodeAlta cannot refuse a commit the agent runs with its own tools.
+- **Sandbox.** In a [sandboxed session](../sessions/sandbox.md#providers), the agent runs in the sandbox with a home folder of its own: it signs in there with a token or an API key set in the **Environment** of its provider.
 - **Fork, rewind and other providers.** When the agent's session no longer matches the conversation (a fork, a rewind, turns of another provider), the agent starts a new session that is told the conversation as text: it loses its own state and its prompt cache.
 
 ## Update or turn off
@@ -72,6 +73,7 @@ command = "my-agent"         # a program on PATH, or a full path
 arguments = ["--acp"]        # what starts it in ACP mode
 env = { MY_AGENT_LOG = "1" } # optional: variables of its process
 permission_mode = "default"  # optional: default, acceptEdits or bypassPermissions
+sandbox_hosts = ["api.example.com"] # optional: the hosts of its service, in a sandbox
 ```
 
 An agent added from the registry also has `agent` and `agent_version`, the name and version of its registry entry.
