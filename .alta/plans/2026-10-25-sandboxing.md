@@ -1,6 +1,6 @@
 ---
 title: Run agent sessions in an optional OS sandbox (#80)
-status: in-progress
+status: blocked
 created: 2026-10-25
 summary: A sandboxed session runs its commands and file tools in a worker inside an mxc container, which sees the project and the developer tools but never CodeAlta's credentials or the user's secrets, and reaches only the hosts its profile allows. Off by default; turned on for every session, a space, a project, a provider or model, or one session.
 ---
@@ -371,7 +371,7 @@ Their native sandboxes are not the boundary. Claude Code's covers only its shell
   **Done**, verified live on Windows with `altacli run --sandbox workspace -m claude-code:haiku` (a command, its folder, a refused read of `~/.alta`, the note of the sandbox). Deviations: on Windows the CLI's Bash (msys2 refuses to start in a container) and PowerShell tool (exit code 5 for every command) are turned off, and the CLI runs its commands with CodeAlta's `shell_command` in the worker. macOS (decided, not verified): the Keychain stays out of reach; a sandboxed Claude Code there needs `CLAUDE_CODE_OAUTH_TOKEN` or an API key, as the guide says. The live tests of the repository were not extended: they need a signed-in CLI and the sandbox, and the run above covers the path.
 - [ ] 16. **ACP agents in the container**: their home folder and runtime (Node, the `npx` cache), and the harness MCP endpoint through the proxy.
 
-  **Blocked** (2026-10-26). A spike through a sandboxed Claude Code session on Windows: `node --version` runs in the container, but `npx --yes @github/copilot@1.0.103 --version` hangs past 4 minutes, with the `workspace` profile and with a profile whose network is `on` alike. Two of the three ACP agents configured here start with `npx`; the third is a `.cmd`, and every agent keeps its sign-in in its own place (Copilot may use the Credential Manager). ACP agents stay refused for a sandboxed session, which says why, as before. Decision needed: investigate npm in a Windows container (and the sign-in of each agent) as follow-up work, or keep ACP out of the sandbox for this release.
+  **Blocked** (2026-10-26). The `npx` hang of the first spike came from the worker: its commands inherited the pipe of its protocol as their input (fixed; git, npm and npx now run in the container). A second spike ran the three ACP agents configured here in a `hosts` container, with their folders (`~/.copilot`, `~/.cursor`, `~/.grok`, the Cursor package) and their vendor's hosts: all three start and reach their service through the proxy (`HTTP_PROXY`/`HTTPS_PROXY` set by mxc), and none is signed in: Copilot CLI ("No authentication information found") and Cursor ("Not logged in") keep their sign-in in the credential store of Windows, and Grok Build says "Not signed in" although `~/.grok/auth.json` is readable. In a sandbox an ACP agent would then work only with a token in a variable the profile passes (`COPILOT_GITHUB_TOKEN`, `XAI_API_KEY`, `CURSOR_API_KEY`), besides the stdio bridge to CodeAlta's MCP endpoint (an agent without `mcpCapabilities.http` gets no tool of CodeAlta today). ACP agents stay refused for a sandboxed session, which says why, as before. Decision needed: build ACP in the sandbox with tokens in variables (and the bridge) as follow-up work, or keep ACP out of the sandbox for this release.
 
   **Design of 15–16** (from the map of the launches; 15 is done, 16 is not written):
   - A neutral `IAgentProcessHost` in `CodeAlta.Agent` (start an executable with arguments, folder, environment and what it needs: read-only and read-write folders, hosts), carried by `AgentTurnRequest`; the router of a sandboxed session gives it after `RefuseRunAsync`, which then allows `claude-code` and `acp`.
@@ -381,23 +381,28 @@ Their native sandboxes are not the boundary. Claude Code's covers only its shell
 
 ## How it is verified
 
-- [ ] `dotnet test -c <Configuration>` and `npm test` pass; the .NET tests also pass on Linux in WSL.
-- [ ] **Escape suite** (container tests, on this computer):
+- [x] `dotnet test -c <Configuration>` and `npm test` pass; the .NET tests also pass on Linux in WSL. (2026-10-26, Debug: every .NET test project passes; `npm test`: 2211 tests pass.)
+- [x] **Escape suite** (container tests, on this computer; `CliSandboxEscapeTests`, with network tests of `hosts` on macOS and Linux and of `on` on every system, the Linux ones run in WSL with bubblewrap 0.9 and slirp4netns 1.2):
   - from `shell_command` and from the file tools, `~/.alta/auth/*`, `~/.ssh/*` and a link in the project pointing to them cannot be read;
   - `.git/hooks/pre-commit`, `.git/config`, `.alta/plugins/x/plugin.cs` and `.vscode/tasks.json` cannot be written;
   - `curl http://127.0.0.1:2582/mcp` fails;
   - a host outside the list gets the proxy's 403;
   - `env` shows none of the `api_key_env` variables;
   - a process started with `Start-Process` is gone once the worker ends.
-- [ ] **Transparency suite**, in a sandboxed session of the developer instance (Codex, GPT-6.1 Sol, low effort):
+- [x] **Transparency suite**, run with `altacli run --sandbox` (the runtime of the developer instance; Codex, GPT-6.1 Sol, low effort):
   - with `workspace`, `dotnet build` and `dotnet test` of a small solution, `git commit` and `npm install` succeed;
   - with `strict`, `dotnet restore` fails, with a note that names the network.
-- [ ] **Desktop**, in the developer instance:
+
+  **Done** (2026-10-26), with what it found fixed: commands inherited the protocol pipe of the worker as their input (git, npm and npx hung); an empty `outside_sandbox` refused every command of a model with strict schemas; MSBuild needs `-m:1` in the Windows container (its node pipes admit the user alone), which the agent is now told; a restore without network got no note. With `workspace`, build, `npm install` and the commit pass; `dotnet test` (VSTest) cannot connect on this build (26200.9457, see Risks) and gets a note. With `strict`, a restore of a package outside the private cache fails with the note of the network.
+- [x] **Desktop**, in the developer instance:
   - **Check** passes on Settings > Sandbox;
   - a session sandboxed by a provider rule shows it on its chip;
   - a request to run outside is asked in Bypass permissions;
   - both themes and a 900×650 window look right.
-- [ ] `lunet build` passes.
+
+  **Done** (2026-10-26): Check passes for `workspace` (every step, start in 711 ms); a session sandboxed with `workspace` in Bypass permissions asked "Run outside the sandbox?" with the command, its folder and the reason, and the denied command did not run; the chip shows the mark and "Sandbox: workspace · Chosen for this session" (shown for the session's own choice, not a provider rule: the configuration is shared with the normal instance of the user); dark and light themes, and Settings > Sandbox at 900×650 without overflow. The check found that an existing database could not list or create sessions (`no such column: c.local_sandbox`: the column was added without raising the version of the session cache), fixed.
+- [x] `lunet build` passes.
+- [x] **Adversarial review** (2026-10-26), in a child session on Codex, GPT-6.1 Sol, maximum effort, of `main...feature/sandbox`. Of its 17 findings, all were valid; fixed, each with a test that fails without the fix where one could be written: the `.git` file of a worktree granting what it names; a global session given `~/.alta`; `alta task`/`plan` following links on the host, and other projects; `alta mcp tool search`/`describe` starting unlisted servers; the network of macOS (every port of the computer open) and of Linux (no network at all); a model change leaving the sandbox of its model; secrets passed under other names by an identity; an unreadable configuration turning sandboxes off; the executable settings of Claude Code writable; git hooks run by a worktree creation; paths in the results of the worker read on the host, and startup-hook variables; races and hangs of the worker client; the command guard left to the worker; leases of refused jobs; Every session showing `off` wrong; the network `on` reaching the local network. Left as risks: an MCP tool loaded in a run is not checked again when the sandbox tightens during that run; a model change to a model the user gave a weaker profile takes that profile.
 
 ## Decisions
 
