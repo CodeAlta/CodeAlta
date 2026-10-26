@@ -178,6 +178,19 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public void ABackgroundCommandOfAGlobalSession_StartsInTheFolderItsSandboxGivesIt()
+    {
+        // A global session works in the folder of CodeAlta, which its sandbox does not grant: it works in one of its own.
+        var alta = Path.Combine(Path.GetTempPath(), "home", ".alta");
+        var work = Path.Combine(Path.GetTempPath(), "sandbox", "sessions", "g", "work");
+
+        Assert.AreEqual(work, SessionRuntimeService.JobFolder(alta + Path.DirectorySeparatorChar, alta, work));
+        var project = Path.Combine(Path.GetTempPath(), "project");
+        Assert.AreEqual(project, SessionRuntimeService.JobFolder(project, alta, work), "a folder the command names stays");
+        Assert.AreEqual(project, SessionRuntimeService.JobFolder(project, project, project), "the folder of a project session is its sandbox's");
+    }
+
+    [TestMethod]
     public async Task ACommandOutsideTheSandbox_IsAskedWithItsReason_AndRunsHereOnlyWhenAllowed()
     {
         var backend = new InProcessBackend();

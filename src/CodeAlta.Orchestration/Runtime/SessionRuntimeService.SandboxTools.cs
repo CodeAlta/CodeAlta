@@ -70,7 +70,8 @@ public sealed partial class SessionRuntimeService
         if (sandbox.Profile is not { } profile) return (null, null, SandboxProblem(sandbox));
         if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated)
             return (null, null, "The session is not attached: its sandbox starts with its next turn.");
-        var start = SandboxStartOf(sessionId, entry.ProviderKey, profile, entry.WorktreeDirectory ?? entry.WorkingDirectory, entry.ProjectRoots, entry.ProcessEnvironment, commandGuard: false);
+        var sessionFolder = entry.WorktreeDirectory ?? entry.WorkingDirectory;
+        var start = SandboxStartOf(sessionId, entry.ProviderKey, profile, sessionFolder, entry.ProjectRoots, entry.ProcessEnvironment, commandGuard: false);
         SessionSandboxWorkers.Lease lease;
         try
         {
@@ -87,7 +88,7 @@ public sealed partial class SessionRuntimeService
         return ((command, folder, sessionVariables, onOutput) =>
         {
             var held = Interlocked.Exchange(ref taken, 1) == 0 ? lease : null;
-            var process = lease.Client.StartProcess(command, folder, onOutput);
+            var process = lease.Client.StartProcess(command, JobFolder(folder, sessionFolder, lease.Policy.WorkingDirectory), onOutput);
             if (held is not null) process.Completion.ContinueWith(_ => held.Dispose(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             return new SandboxedShellCommand(process);
         }, new Unused(() =>
@@ -95,6 +96,20 @@ public sealed partial class SessionRuntimeService
             // A job that was refused before it started any command gives the worker back.
             if (Interlocked.Exchange(ref taken, 1) == 0) lease.Dispose();
         }), null);
+    }
+
+    /// <summary>
+    /// The folder a background command of a sandboxed session starts in: the folder of the session is the one its
+    /// sandbox gives it, which differs when the session works in a folder of secrets (a global session, in the folder of
+    /// CodeAlta, which the sandbox does not grant).
+    /// </summary>
+    internal static string JobFolder(string folder, string? sessionFolder, string sandboxFolder)
+    {
+        if (sessionFolder is null) return folder;
+        var comparison = OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        return string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(sessionFolder)), comparison)
+            ? sandboxFolder
+            : folder;
     }
 
     private sealed class Unused(Action release) : IDisposable
