@@ -207,19 +207,33 @@ function SandboxStatus({ epoch, api, availability, profiles, preferred }: {
   </Card>;
 }
 
+/**
+ * What the setting of every session says, as the runtime reads it: `off` (in any case) or nothing is no sandbox; a
+ * profile is matched without case. `known` is the profile of the list it names, null for one that does not exist.
+ */
+export function everySessionChoice(profiles: readonly string[], value: string | null): { sandboxed: string | null; known: string | null } {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed === "" || trimmed.toLowerCase() === "off") return { sandboxed: null, known: null };
+  return { sandboxed: trimmed, known: profiles.find(name => name.toLowerCase() === trimmed.toLowerCase()) ?? null };
+}
+
 // The sandbox of every session that no other place sandboxes: none, or a profile.
 function EverySession({ profiles, value, disabled, onChange }: { profiles: readonly string[]; value: string | null; disabled: boolean; onChange: (profile: string | null) => void }) {
   const { t } = useShellLanguage();
-  const [chosen, setChosen] = useState(value ?? (profiles.includes(workspaceProfile) ? workspaceProfile : profiles[0] ?? workspaceProfile));
-  useEffect(() => { if (value) setChosen(value); }, [value]);
+  const { sandboxed, known } = everySessionChoice(profiles, value);
+  const [chosen, setChosen] = useState(known ?? (profiles.includes(workspaceProfile) ? workspaceProfile : profiles[0] ?? workspaceProfile));
+  useEffect(() => { if (known) setChosen(known); }, [known]);
+  // A profile the settings name that does not exist is shown as it is: sessions run no command with it.
+  const missing = sandboxed && !known ? sandboxed : null;
   return <Card className="appearance-settings sandbox-every-session" aria-labelledby="sandbox-every-session-title">
     <h2 id="sandbox-every-session-title">{t("Every session")}</h2>
-    <RadioGroup className="sandbox-every-session-choice" selectedValue={value ? "on" : "off"} disabled={disabled}
+    <RadioGroup className="sandbox-every-session-choice" selectedValue={sandboxed ? "on" : "off"} disabled={disabled}
       onChange={event => onChange(event.currentTarget.value === "on" ? chosen : null)}>
       <Radio value="off" label={t("Not sandboxed")} />
       <Radio value="on" label={t("Sandboxed with")} />
-      <HTMLSelect aria-label={t("Profile of every session")} value={chosen} disabled={disabled}
-        onChange={event => { const next = event.currentTarget.value; setChosen(next); if (value) onChange(next); }}>
+      <HTMLSelect aria-label={t("Profile of every session")} value={missing ?? chosen} disabled={disabled}
+        onChange={event => { const next = event.currentTarget.value; setChosen(next); if (sandboxed) onChange(next); }}>
+        {missing && <option value={missing}>{t("{profile}, which cannot be used", { profile: missing })}</option>}
         {profiles.map(name => <option key={name} value={name}>{name}</option>)}
       </HTMLSelect>
     </RadioGroup>

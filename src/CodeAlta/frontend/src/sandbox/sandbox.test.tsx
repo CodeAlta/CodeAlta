@@ -6,6 +6,7 @@ import { ShellLanguageContext } from "../shellLanguage";
 import { SandboxNoteLine } from "./SandboxNoteLine";
 import { modelSandboxes, nextSessionSandbox, resolveSandboxProfile, sandboxProfileChoices, scopeSandbox, sessionSandboxSummary } from "./sandboxChoices";
 import { SandboxScopeSelect } from "./SandboxScopeControls";
+import { everySessionChoice } from "./SandboxSettings";
 import { SessionSandboxSelect } from "./SessionSandboxSelect";
 
 const reply = (change: Partial<SandboxSessionResponse>): SandboxSessionResponse =>
@@ -15,6 +16,14 @@ const profile = (change: Partial<SandboxProfileItem> & { name: string }): Sandbo
 const render = (node: React.ReactNode, locale = "en") => renderToStaticMarkup(<ShellLanguageContext.Provider value={{ locale: locale as "en", choice: locale as "en", setLanguage: () => {} }}>
   {node}</ShellLanguageContext.Provider>);
 const options = (markup: string) => [...markup.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(match => `${match[1]}=${match[2]}`);
+
+test("the setting of every session is shown as the runtime reads it", () => {
+  const profiles = ["workspace", "strict", "Mine"];
+  assert.deepEqual(everySessionChoice(profiles, null), { sandboxed: null, known: null });
+  assert.deepEqual(everySessionChoice(profiles, " OFF "), { sandboxed: null, known: null }, "off written by hand is no sandbox");
+  assert.deepEqual(everySessionChoice(profiles, "mine"), { sandboxed: "mine", known: "Mine" }, "a profile is matched without case");
+  assert.deepEqual(everySessionChoice(profiles, "gone"), { sandboxed: "gone", known: null }, "a profile that does not exist still sandboxes, and is shown");
+});
 
 test("what the settings give is known while the session follows them, and kept once it has its own", () => {
   const first = nextSessionSandbox(null, "e:s", reply({}));

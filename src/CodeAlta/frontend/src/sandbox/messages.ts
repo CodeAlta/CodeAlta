@@ -23,6 +23,7 @@ export const sandboxMessages = {
   "Not sandboxed": ["Sin sandbox", "Hors bac à sable", "Ohne Sandbox", "サンドボックスなし", "不使用沙箱"],
   "Sandboxed with": ["En sandbox con", "Dans le bac à sable", "In der Sandbox mit", "サンドボックスのプロファイル", "使用沙箱配置"],
   "Profile of every session": ["Perfil de todas las sesiones", "Profil de toutes les sessions", "Profil jeder Sitzung", "すべてのセッションのプロファイル", "所有会话的配置"],
+  "{profile}, which cannot be used": ["{profile}, que no se puede usar", "{profile}, inutilisable", "{profile}, das nicht verwendet werden kann", "{profile} (使用できません)", "{profile}（无法使用）"],
   "A provider, a model, a space, a project or a session can choose otherwise.": ["Un proveedor, un modelo, un espacio, un proyecto o una sesión pueden elegir otra cosa.", "Un fournisseur, un modèle, un espace, un projet ou une session peut en choisir un autre.", "Ein Anbieter, ein Modell, ein Bereich, ein Projekt oder eine Sitzung kann etwas anderes wählen.", "プロバイダー、モデル、スペース、プロジェクト、セッションは別のものを選べます。", "提供商、模型、空间、项目或会话可以另作选择。"],
   "Profiles": ["Perfiles", "Profils", "Profile", "プロファイル", "配置"],
   "A profile of CodeAlta. A new profile can start from it and add to it.": ["Un perfil de CodeAlta. Un perfil nuevo puede partir de él y ampliarlo.", "Un profil de CodeAlta. Un nouveau profil peut partir de lui et le compléter.", "Ein Profil von CodeAlta. Ein neues Profil kann darauf aufbauen und es ergänzen.", "CodeAlta のプロファイルです。新しいプロファイルはこれを元にして追加できます。", "CodeAlta 的配置。新配置可以以它为基础并加以补充。"],
