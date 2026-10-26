@@ -450,7 +450,7 @@ internal static class CliCommandLine
         command.Add("no-mcp", "Start no MCP server", v => options.NoMcp = v is not null);
         command.Add("no-plugins", "Start no plugin (nor MCP)", v => options.NoPlugins = v is not null);
         command.Add("no-skills", "List and offer no skill to the agents", v => options.NoSkills = v is not null);
-        command.Add("code-mode", "Offer exec and wait (Code Mode) to the agents", v => options.CodeMode = v is not null);
+        command.Add("code-mode:", "Code Mode: {MODE} on (default), only or off", v => options.CodeMode = v ?? "on");
         command.Add("sandbox=", "Run the tools in the sandbox {PROFILE} (or off)", v => options.Sandbox = v);
         command.Add(_);
     }

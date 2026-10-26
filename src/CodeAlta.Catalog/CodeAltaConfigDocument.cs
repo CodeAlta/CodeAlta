@@ -119,7 +119,8 @@ public sealed class CodeAltaConfigDocument
 public sealed class CodeAltaCodeModeSettingsDocument
 {
     /// <summary>
-    /// Gets or sets the mode: <c>off</c> (when absent), or <c>on</c> for <c>exec</c> and <c>wait</c> beside the other tools.
+    /// Gets or sets the mode: <c>off</c> (when absent), <c>on</c> for <c>exec</c> and <c>wait</c> beside the other tools, or
+    /// <c>only</c> for them alone (the model calls the other tools through scripts).
     /// </summary>
     [JsonPropertyName("mode")]
     public string? Mode { get; set; }

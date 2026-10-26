@@ -23,6 +23,9 @@ public sealed record CodeModeToolOptions
 
     /// <summary>Gets the folder where the runs of a session keep their source, by session id, or null to keep none.</summary>
     public Func<string, string?>? SourceFolder { get; init; }
+
+    /// <summary>Gets whether <c>exec</c> takes over the other tools (the <c>only</c> mode): the model calls them through scripts.</summary>
+    public bool TakesOver { get; init; }
 }
 
 /// <summary>
@@ -99,7 +102,7 @@ public static class CodeModeToolFactory
         return
         [
             new AgentToolDefinition(
-                new AgentToolSpec(ExecToolName, ExecDescription, Parse(ExecSchema)) { Exposure = AgentToolExposure.Model },
+                new AgentToolSpec(ExecToolName, ExecDescription, Parse(ExecSchema)) { Exposure = AgentToolExposure.Model, ScriptsTakeOver = options.TakesOver },
                 (invocation, cancellationToken) => ExecAsync(dispatcher, caller, options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(WaitToolName, WaitDescription, Parse(WaitSchema)) { Exposure = AgentToolExposure.Model },

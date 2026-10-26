@@ -267,6 +267,47 @@ internal sealed partial class GlobalConfigService
         }
     }
 
+    /// <summary>Reads whether sessions get the tools of Code Mode (<c>[code_mode] mode</c>), and the modes.</summary>
+    [NeoRpcMethod("codeModeSettings")]
+    public GlobalConfigCodeModeSettingsResponse CodeModeSettings(GlobalConfigSessionTitlesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var modes = CodeAltaConfigStore.CodeModeModes;
+        if (_store is null) return new("unavailable", null, modes);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, modes);
+        try
+        {
+            lock (_gate) return new("ok", _store.LoadCodeModeMode(), modes);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new("config_invalid", null, modes);
+        }
+    }
+
+    /// <summary>Saves whether sessions get the tools of Code Mode; a session takes it with its next prompt.</summary>
+    [NeoRpcMethod("saveCodeModeSettings")]
+    public GlobalConfigCodeModeSettingsResponse SaveCodeModeSettings(GlobalConfigSaveCodeModeSettingsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var modes = CodeAltaConfigStore.CodeModeModes;
+        if (_store is null) return new("unavailable", null, modes);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, modes);
+        if (request.Mode is not { } mode || !modes.Contains(mode, StringComparer.Ordinal)) return new("invalid", null, modes);
+        lock (_gate)
+        {
+            try
+            {
+                _store.SaveCodeModeMode(mode);
+                return new("ok", _store.LoadCodeModeMode(), modes);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
+            {
+                return new("write_failed", null, modes);
+            }
+        }
+    }
+
     /// <summary>Reads the tools every session does without (<c>[tools] disabled</c>), and the names of the built-in tools.</summary>
     [NeoRpcMethod("disabledTools")]
     public GlobalConfigDisabledToolsResponse DisabledTools(GlobalConfigSessionTitlesRequest request)
@@ -920,6 +961,15 @@ internal sealed record GlobalConfigSavePromptSuggestionSettingsRequest(string? E
 /// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c> or <c>write_failed</c>.</param>
 /// <param name="Enabled">Whether the model suggests the next prompt at the end of a turn.</param>
 internal sealed record GlobalConfigPromptSuggestionSettingsResponse(string Status, bool Enabled);
+
+/// <param name="ExpectedEpoch">The host epoch the page was loaded with.</param>
+/// <param name="Mode">One of the modes of Code Mode: <c>off</c> or <c>on</c>.</param>
+internal sealed record GlobalConfigSaveCodeModeSettingsRequest(string? ExpectedEpoch, string? Mode);
+
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>config_invalid</c>, <c>invalid</c> or <c>write_failed</c>.</param>
+/// <param name="Mode">The mode in the settings; null unless <c>ok</c>.</param>
+/// <param name="Modes">The modes this version knows.</param>
+internal sealed record GlobalConfigCodeModeSettingsResponse(string Status, string? Mode, IReadOnlyList<string> Modes);
 
 /// <summary>The tools every session does without.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>

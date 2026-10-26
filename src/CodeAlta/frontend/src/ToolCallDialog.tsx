@@ -12,13 +12,15 @@ import { altaEnvelope, callDuration, changedFiles, countLines, formatDuration, f
   toolCallFromItem, toolCallFromRecord, toolFamily, type ToolCall, type ToolCallRecord, type ToolFamily } from "./toolCall";
 import type { ToolCallRead, ToolCallReader } from "./toolCallReader";
 import { useToolOutput, type ToolOutputs } from "./toolOutput";
-import { DetailsView, EditView, GenericView, ReadView, ShellView, ToolImages } from "./ToolCallViews";
+import { CodeBlock, DetailsView, EditView, GenericView, ReadView, ShellView, ToolImages } from "./ToolCallViews";
+import { ScriptCalls } from "./scriptCard/ScriptCalls";
 import { ToolStateTag } from "./ToolCallChrome";
 
 /** The icon that stands for a call: what it does when that is known, a tool otherwise. */
 export function toolIcon(call: Pick<ToolCall, "name" | "kind">, family: ToolFamily): IconName {
   const name = call.name.toLowerCase();
   if (family === "shell") return "terminal";
+  if (family === "script") return "code";
   if (family === "edit") return "file";
   if (family === "read" || name === "read_file") return "fileCode";
   if (name === "grep" || name.includes("search")) return "search";
@@ -151,12 +153,15 @@ export function ToolCallDialog({ item, reader, outputs, imageSource, current, on
       </div>}
       {error && <Callout compact intent="danger" className="tool-error">{error}</Callout>}
       <Tabs id={`${id}-tabs`} className="tool-tabs" selectedTabId={tab} onChange={value => setTab(String(value))} renderActiveTabPanelOnly>
-        <Tab id="main" disabled={false} title={t(family === "shell" ? "Output" : family === "read" ? "File" : family === "edit" ? "Changes" : "Result")} panel={<div className="tool-panel" data-view={family}>
-          {family === "shell" ? <><ShellView call={shown} live={live} settled={settled} />{images}</>
+        <Tab id="main" disabled={false} title={t(family === "shell" ? "Output" : family === "read" ? "File" : family === "edit" ? "Changes" : family === "script" ? "Console" : "Result")} panel={<div className="tool-panel" data-view={family}>
+          {family === "script" ? <>{item.scriptCalls && <ScriptCalls calls={item.scriptCalls} />}<GenericView call={{ ...shown, arguments: null }} args={null} images={images} /></>
+            : family === "shell" ? <><ShellView call={shown} live={live} settled={settled} />{images}</>
             : family === "edit" ? <><EditView call={shown} args={args} />{images}</>
               : family === "read" ? <ReadView call={shown} args={args} images={images} />
                 : <GenericView call={shown} args={args} images={images} />}
         </div>} />
+        {family === "script" && <Tab id="script" disabled={false} title={t("Script")} panel={<div className="tool-panel" data-view="script-source">
+          <CodeBlock text={typeof args?.code === "string" ? args.code : call.arguments?.text ?? ""} language="javascript" /></div>} />}
         <Tab id="details" disabled={false} title={t("Details")} panel={<div className="tool-panel" data-view="details"><DetailsView item={item} call={call} duration={duration} /></div>} />
       </Tabs>
     </AppWindowSurface>

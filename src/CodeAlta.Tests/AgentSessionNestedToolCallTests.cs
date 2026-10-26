@@ -154,6 +154,50 @@ public sealed partial class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AToolThatTakesOver_LeavesTheModelItsOwnToolsAndThoseThatStayDirect_AndScriptsTheOthers()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-take-over") with { WorkingDirectory = temp.Path };
+        var state = CreateState(summary.SessionId);
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(state);
+        string[] listed = [];
+        var script = ScriptTool((tools, _) =>
+        {
+            listed = [.. tools.ListTools().Select(static spec => spec.Name)];
+            return Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("done")]));
+        });
+        script = script with { Spec = script.Spec with { ScriptsTakeOver = true } };
+        IReadOnlyList<string> offered = [];
+        await using var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor(
+                (request, update, token) =>
+                {
+                    offered = [.. request.Tools.Select(static tool => tool.Spec.Name)];
+                    return CallScript()(request, update, token);
+                },
+                static (_, _, _) => Task.FromResult(new AgentTurnResponse { AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]) })),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            });
+
+        await session.SendAsync(new() { Input = AgentInput.Text("Work"), AdditionalTools = [script] });
+
+        CollectionAssert.Contains(offered.ToArray(), "script");
+        CollectionAssert.Contains(offered.ToArray(), "view_image", "the model looks at images itself");
+        CollectionAssert.DoesNotContain(offered.ToArray(), "read_file");
+        CollectionAssert.DoesNotContain(offered.ToArray(), "shell_command");
+        CollectionAssert.Contains(listed, "read_file", "scripts still call the tools the model is not offered");
+        CollectionAssert.Contains(listed, "shell_command");
+    }
+
+    [TestMethod]
     public async Task NestedCalls_ReachTheJournalTogether_BeforeTheirToolCallEndsThere()
     {
         using var temp = TestTempDirectory.Create();

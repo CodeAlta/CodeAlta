@@ -1,0 +1,18 @@
+/* The calls the script of a call made (Code Mode's exec), under its tile: their counts, then a line per call shown. */
+.script-calls { display: grid; gap: 2px; min-width: 0; margin: 4px 0 0; padding: 0 0 0 10px; border-left: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.script-calls-counts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--muted); font-size: 11.5px; }
+.script-calls-running { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); }
+.script-calls-failed { color: var(--red); }
+.script-calls-list { display: grid; gap: 1px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.script-calls-list li { --step-tone: var(--muted); display: grid; grid-template-columns: auto minmax(0, max-content) auto minmax(0, 1fr) auto; align-items: center; gap: 7px;
+  min-width: 0; padding: 1px 6px; color: var(--muted); font: 11.5px/18px var(--bp-typography-family-mono); }
+.script-calls-list li[data-state="completed"] { --step-tone: var(--green); }
+.script-calls-list li[data-state="failed"] { --step-tone: var(--red); }
+.script-calls-list li:is([data-state="running"], [data-state="pending"]) { --step-tone: var(--accent); }
+.script-calls-list strong { overflow: hidden; color: var(--step-tone); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.script-call-dot { width: 6px; height: 6px; margin-inline: 2px; border-radius: 50%; background: var(--step-tone); }
+.script-call-spinner { color: var(--step-tone); }
+.script-call-step { padding: 0 5px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 12%, transparent); white-space: nowrap; }
+.script-call-error { min-width: 0; overflow: hidden; color: var(--red); text-overflow: ellipsis; white-space: nowrap; }
+.script-call-duration { white-space: nowrap; }
+.tool-panel .script-calls { margin: 0 0 12px; }

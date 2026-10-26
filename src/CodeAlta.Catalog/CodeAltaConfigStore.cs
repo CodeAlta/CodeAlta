@@ -619,8 +619,11 @@ public sealed partial class CodeAltaConfigStore
         Save(_options.ConfigPath, document);
     }
 
-    /// <summary>The modes of Code Mode: <c>off</c>, and <c>on</c> for its tools beside the others.</summary>
-    public static IReadOnlyList<string> CodeModeModes { get; } = ["off", "on"];
+    /// <summary>
+    /// The modes of Code Mode: <c>off</c>; <c>on</c> for its tools beside the others; <c>only</c> for its tools alone,
+    /// through which the model calls the others.
+    /// </summary>
+    public static IReadOnlyList<string> CodeModeModes { get; } = ["off", "on", "only"];
 
     /// <summary>Reads whether sessions get the tools of Code Mode (<c>[code_mode] mode</c>), from the user's file only.</summary>
     /// <returns><c>off</c> when the file sets none, or sets a mode this version does not know.</returns>

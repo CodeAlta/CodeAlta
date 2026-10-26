@@ -10,11 +10,11 @@ namespace CodeAlta.LiveTool.Scripts;
 /// send, so a change of the setting reaches a session at its next send.
 /// </summary>
 /// <param name="options">The options of the host's Code Mode tools.</param>
-/// <param name="enabled">Says whether Code Mode is on now.</param>
-public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<bool> enabled)
+/// <param name="mode">Says the mode of Code Mode now: <c>off</c>, <c>on</c>, or <c>only</c>.</param>
+public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<string> mode)
 {
     private readonly CodeModeToolOptions _options = options ?? throw new ArgumentNullException(nameof(options));
-    private readonly Func<bool> _enabled = enabled ?? throw new ArgumentNullException(nameof(enabled));
+    private readonly Func<string> _mode = mode ?? throw new ArgumentNullException(nameof(mode));
 
     /// <summary>Gets the options of the host's Code Mode tools.</summary>
     public CodeModeToolOptions Options => _options;
@@ -43,16 +43,19 @@ public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<bool>
         {
             try
             {
-                return store.LoadCodeModeMode() == "on";
+                return store.LoadCodeModeMode();
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException)
             {
-                return false;
+                return "off";
             }
         });
     }
 
-    /// <summary>Returns the tools of a session, with <c>exec</c> and <c>wait</c> after them while Code Mode is on.</summary>
+    /// <summary>
+    /// Returns the tools of a session, with <c>exec</c> and <c>wait</c> after them while Code Mode is on; in <c>only</c>,
+    /// <c>exec</c> takes over the others, which the model then calls through scripts.
+    /// </summary>
     /// <param name="dispatcher">The dispatcher of <c>alta</c>.</param>
     /// <param name="caller">Who the session is, as for its <c>alta</c> tool.</param>
     /// <param name="tools">The other tools the host gives the session.</param>
@@ -61,6 +64,11 @@ public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<bool>
     public IReadOnlyList<AgentToolDefinition> Create(AltaCommandDispatcher dispatcher, AltaSessionToolOptions caller, IReadOnlyList<AgentToolDefinition> tools)
     {
         ArgumentNullException.ThrowIfNull(tools);
-        return _enabled() ? [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options)] : tools;
+        return _mode() switch
+        {
+            "on" => [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options)],
+            "only" => [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options with { TakesOver = true })],
+            _ => tools,
+        };
     }
 }

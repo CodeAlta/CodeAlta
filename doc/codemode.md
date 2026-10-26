@@ -43,6 +43,22 @@ paths of the functions, their schemas) and an `ICodeModeCallHandler` (what runs 
 - **Locations.** The innermost frame of the script in the engine's stack gives the line of each call. The bridge
   calls the host from a plain function: an async function in between would hide the script's frames.
 
+## Hosts
+
+`exec` and `wait` (`CodeModeToolFactory`, in `CodeAlta.LiveTool`) are tools of the session, given by the host beside
+`alta` while `[code_mode] mode` is `on` (`CodeModeSessionTools`, read at each send). Each `exec` binds the functions of
+its run: the session's tools through `AgentToolInvocation.Tools` (`ToolScriptBinding`: `tools.*`, `mcp.<server>.*`), the
+typed `alta` commands for its caller (`AltaScriptBinding`), and discovery over that same API (`CodeModeDiscovery`).
+A tool's structured value (`AgentToolResult.Structured`) is what a script receives; the model reads its text.
+
+Runs belong to the host (`CodeModeRunRegistry`, owned by `CodeAltaHost`), not to a turn:
+
+- `exec` waits for its run until the yield time; the run then goes on in the background, and the turn may end.
+- Its result is taken once: by the `exec` that waited, by a `wait` that waits when it ends, or else delivered to its
+  session as a prompt of provenance `workflow`.
+- Limits count runs (per session, per host) and refuse a run over them, never queue it.
+- The host stops every run before its sessions close.
+
 ## Limits
 
 The limits protect the process: memory, statements and CPU time per synchronous slice (awaited time does not count),

@@ -483,6 +483,27 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task CodeMode_IsOffByDefault_AndOffRemovesItsTable()
+    {
+        await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");
+        var read = fixture.Service.CodeModeSettings(new(Epoch));
+        Assert.AreEqual("ok", read.Status);
+        Assert.AreEqual("off", read.Mode);
+        CollectionAssert.AreEqual(new[] { "off", "on", "only" }, read.Modes.ToArray());
+
+        Assert.AreEqual("on", fixture.Service.SaveCodeModeSettings(new(Epoch, "on")).Mode);
+        Assert.AreEqual("on", fixture.Service.CodeModeSettings(new(Epoch)).Mode);
+        var text = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(text, "[code_mode]");
+        StringAssert.Contains(text, "sk-kept", "The other settings stay.");
+
+        Assert.AreEqual("off", fixture.Service.SaveCodeModeSettings(new(Epoch, "off")).Mode);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("[code_mode]", StringComparison.Ordinal), "off is the absence of the setting");
+        Assert.AreEqual("invalid", fixture.Service.SaveCodeModeSettings(new(Epoch, "sometimes")).Status);
+        Assert.AreEqual("stale_epoch", fixture.Service.CodeModeSettings(new("another")).Status);
+    }
+
+    [TestMethod]
     public async Task PromptSuggestions_AreOnByDefault_AndSavedBesideTheTitleOfTheSessions()
     {
         await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");

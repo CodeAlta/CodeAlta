@@ -183,17 +183,21 @@ public sealed class CodeModeToolTests
     {
         using var root = TestTempDirectory.Create();
         var (dispatcher, _) = Dispatcher(root.Path);
-        var on = false;
-        var codeMode = new CodeModeSessionTools(new CodeModeToolOptions { Runs = new CodeModeRunRegistry(null), Cache = new CodeModeScriptCache() }, () => on);
+        var mode = "off";
+        var codeMode = new CodeModeSessionTools(new CodeModeToolOptions { Runs = new CodeModeRunRegistry(null), Cache = new CodeModeScriptCache() }, () => mode);
         AgentToolDefinition[] others = [new(new AgentToolSpec("alta", "alta", Schema("{}")), static (_, _) => Task.FromResult(new AgentToolResult(true, [])))];
 
         var off = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
-        on = true;
+        mode = "on";
         var with = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
+        mode = "only";
+        var only = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
 
         CollectionAssert.AreEqual(new[] { "alta" }, off.Select(static tool => tool.Spec.Name).ToArray());
         CollectionAssert.AreEqual(new[] { "alta", "exec", "wait" }, with.Select(static tool => tool.Spec.Name).ToArray());
         Assert.IsTrue(with.Skip(1).All(static tool => tool.Spec.Exposure == AgentToolExposure.Model), "a script does not run scripts through exec");
+        Assert.IsFalse(with.Any(static tool => tool.Spec.ScriptsTakeOver));
+        Assert.IsTrue(only.Single(static tool => tool.Spec.Name == "exec").Spec.ScriptsTakeOver, "in only, exec takes over the other tools");
     }
 
     [TestMethod]

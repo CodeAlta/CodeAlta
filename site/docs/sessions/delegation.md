@@ -212,7 +212,7 @@ The agent finds the turn with `alta session turns`, by its number or its run id,
 
 ## What agents can use
 
-The `alta` commands depend on the host, the plugins turned on and the session. An agent reaches only the sessions of its own [space](../spaces.md), and the resources its space has.
+The `alta` commands depend on the host, the plugins turned on and the session. An agent reaches only the sessions of its own [space](../spaces.md), and the resources its space has. With [Code Mode](code-mode.md), a script of the agent calls them as functions, such as `alta.session.list({ limit: 20 })`.
 
 {.table}
 | Group | What the agent can do | Example prompt | Good to know |

@@ -8,7 +8,7 @@ Settings holds your preferences and the pages that manage providers, models, pro
 
 ## Settings window
 
-Open it with `Ctrl+,`, the gear of the title bar, `Ctrl+G Ctrl+W` or `/settings`. CodeAlta Desktop has one window with a page per area: **Appearance**, **General**, **Windows**, **Speech**, **Sessions**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**, plus a page for each [space](../spaces.md). It opens on Appearance, and closes with `Esc`, its close button or a click outside it.
+Open it with `Ctrl+,`, the gear of the title bar, `Ctrl+G Ctrl+W` or `/settings`. CodeAlta Desktop has one window with a page per area: **Appearance**, **General**, **Windows**, **Speech**, **Sessions**, **Permissions**, **Code Mode**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**, plus a page for each [space](../spaces.md). It opens on Appearance, and closes with `Esc`, its close button or a click outside it.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page" loading="lazy">
@@ -26,7 +26,7 @@ Most settings are files. Each page shows its paths, with **Edit in the code edit
 | Page | Files and folders |
 | --- | --- |
 | **Configuration file** | `~/.alta/config.toml`, and `.alta/config.toml` of the selected project |
-| **Providers**, **Sessions**, **Worktrees**, **Work items** | `~/.alta/config.toml` |
+| **Providers**, **Sessions**, **Code Mode**, **Worktrees**, **Work items** | `~/.alta/config.toml` |
 | **MCP Servers** | `~/.alta/mcp.json`, `.alta/mcp.json` of the project, and the files of other tools CodeAlta reads |
 | **Agent prompts** | `~/.alta/prompts`, `.alta/prompts` of the project, and the selected prompt |
 | **Skills** | `~/.alta/skills`, `.alta/skills` of the project, and the selected skill |
@@ -125,6 +125,8 @@ Agents ask before running commands or changing files, depending on the [permissi
 In CodeAlta TUI, **Auto approve commands**, in the Workspace Settings, is on by default; turn it off to answer each request with **Allow Once**, **Allow for Session** or **Deny**.
 
 A mode decides what you are asked; an agent that is not sandboxed runs with your user privileges. **Settings > Sandbox** limits what it can read, write and reach whatever you approve: see [sandbox](../sessions/sandbox.md).
+
+**Settings > Code Mode** lets agents write scripts that call their tools; each call of a script asks as a call of the agent does. See [Code Mode](../sessions/code-mode.md).
 
 ### Answer a request
 

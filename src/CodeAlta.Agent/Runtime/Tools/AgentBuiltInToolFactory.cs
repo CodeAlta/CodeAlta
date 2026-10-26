@@ -189,7 +189,8 @@ public static class AgentBuiltInToolFactory
                 new AgentToolSpec(
                     ViewImageToolName,
                     ViewImageToolDescription,
-                    ViewImageSchema) { RunsInParallel = true },
+                    // The model looks at the image itself: a script would receive only its description.
+                    ViewImageSchema) { RunsInParallel = true, StaysDirect = true },
                 (invocation, cancellationToken) => ViewImageAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
@@ -250,7 +251,8 @@ public static class AgentBuiltInToolFactory
         if (options.EnableUserInputTool && options.OnUserInputRequest is not null)
         {
             tools = [.. tools, new AgentToolDefinition(
-                new AgentToolSpec("request_user_input", "Request structured user input.", RequestUserInputSchema),
+                // A script cannot wait for the user: the question is the model's.
+                new AgentToolSpec("request_user_input", "Request structured user input.", RequestUserInputSchema) { Exposure = AgentToolExposure.Model },
                 (invocation, cancellationToken) => RequestUserInputAsync(options, invocation, cancellationToken))];
         }
 

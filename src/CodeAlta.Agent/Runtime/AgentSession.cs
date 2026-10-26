@@ -2175,12 +2175,21 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo, _pdfInputs).ToArray(),
             EarlierConversation = _earlierConversation,
             // The tools of scripts only are never offered to the model: a script calls them through its tool call.
-            Tools = [.. tools.Where(static tool => tool.Spec.Exposure != AgentToolExposure.Scripts)],
+            Tools = ModelTools(tools),
             CanUseProviderContinuation = _allowProviderContinuation,
             State = _state,
         };
         // Deferred tools stay callable; what the provider is sent of them depends on whether it defers tools.
         return AgentToolDeferral.Apply(request, _turnExecutor is IModelProviderToolDeferral deferral && deferral.DefersTools(request));
+    }
+
+    // The tools offered to the model: not those of scripts only, and, while a tool takes over the others (Code Mode's
+    // `only`), the tools of the model and those that stay direct alone.
+    private static AgentToolDefinition[] ModelTools(IReadOnlyList<AgentToolDefinition> tools)
+    {
+        var takeOver = tools.Any(static tool => tool.Spec.ScriptsTakeOver);
+        return [.. tools.Where(tool => tool.Spec.Exposure != AgentToolExposure.Scripts
+            && (!takeOver || tool.Spec.Exposure == AgentToolExposure.Model || tool.Spec.StaysDirect))];
     }
 
     private AgentInlineMediaPruneResult CreateProviderConversation()

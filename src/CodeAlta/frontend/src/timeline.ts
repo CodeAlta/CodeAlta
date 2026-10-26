@@ -82,7 +82,15 @@ export type TimelineItem = Readonly<{
   notSent?: true;
   /** What a system prompt record says: its row is one line, and its texts are read by its window. */
   prompt?: PromptRow;
+  /** The calls the script of a tool call made (Code Mode's `exec`), in their order: shown inside its row. */
+  scriptCalls?: ReadonlyArray<ScriptCall>;
+  /** The title of the script of a tool call, from the `// @exec: {"title": …}` line of its code. */
+  scriptTitle?: string;
 }>;
+
+/** A call that the script of a tool call made: a line of the card of that call. */
+export type ScriptCall = Readonly<{ key: string; activityId: string; name: string; phase: string | null; startedAt: string | null; endedAt: string | null;
+  stepId: string | null; error: string | null }>;
 
 /**
  * The identity of a tool call and where its records are. `offset` is the journal offset of its newest
@@ -158,7 +166,7 @@ export function externalOrigin(contentId: string | null | undefined): ExternalOr
 // refreshed. Remembering the item of a record keeps a long timeline cheap to rebuild and lets its rows
 // see that nothing changed.
 const presented = new WeakMap<HistoryEntry, TimelineItem>();
-const folded = new WeakMap<HistoryEntry, { first: HistoryEntry; output: HistoryEntry | undefined; item: TimelineItem }>();
+const folded = new WeakMap<HistoryEntry, { first: HistoryEntry; output: HistoryEntry | undefined; scriptCalls: ReadonlyArray<ScriptCall> | undefined; item: TimelineItem }>();
 function presentedItem(entry: HistoryEntry): TimelineItem {
   let item = presented.get(entry);
   if (!item) presented.set(entry, item = toTimelineItem(entry, false));
@@ -179,6 +187,8 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     // A record that ended the call is not replaced by a late report of its start.
     else if (!isTerminalPhase(call.last.phase) || isTerminalPhase(entry.phase)) call.last = entry;
   }
+  // The calls a script made are lines of the card of the call that ran it, not rows of their own.
+  const children = scriptChildren(calls);
   const deltas = new Map<string, TimelineItem>();
   const outputs = new Map<string, HistoryEntry>();
   for (const entry of entries) {
@@ -224,7 +234,8 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
       result.push(item.category === "user" && entry.runId && unsent.has(entry.runId) ? notSentItem(item) : item);
       continue;
     }
-    if (entry === call.first) result.push(callItem(call.first, call.last, outputs.get(activityKey(entry))));
+    if (children.nested.has(call.first)) continue;
+    if (entry === call.first) result.push(callItem(call.first, call.last, outputs.get(activityKey(entry)), children.of.get(activityKey(entry))));
   }
   return result.filter(item => item.category !== "reasoning" || !!item.markdown?.trim());
 }
@@ -232,19 +243,99 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
 // The row of a call: what its newest record says, at the time of its first one, with the output record of the
 // call when there is one. A typed completed output belongs to this exact session/provider/run/activity; a
 // bounded preview or retained streaming deltas are never counted as a total.
-function callItem(first: HistoryEntry, last: HistoryEntry, output: HistoryEntry | undefined): TimelineItem {
+function callItem(first: HistoryEntry, last: HistoryEntry, output: HistoryEntry | undefined, scriptCalls?: ReadonlyArray<ScriptCall>): TimelineItem {
   const known = folded.get(last);
-  if (known && known.first === first && known.output === output) return known.item;
+  if (known && known.first === first && known.output === output && sameScriptCalls(known.scriptCalls, scriptCalls)) return known.item;
   const base = presentedItem(last);
   const attached = output?.tool ? output : undefined;
-  const item: TimelineItem = { ...base, timestamp: first.timestamp,
+  const title = scriptTitleOf(first, last);
+  // A script reads by its title, under the name of its tool.
+  const item: TimelineItem = { ...base, timestamp: first.timestamp, ...scriptCalls ? { scriptCalls } : {},
+    ...title ? { scriptTitle: title, summary: title, summaryIsCode: false } : {},
     toolCall: base.toolCall && { ...base.toolCall, outputOffset: attached?.offset ?? null, images: projectTimelineImages(attached?.images),
       startedAt: isTerminalPhase(first.phase) ? null : first.timestamp, endedAt: isTerminalPhase(last.phase) ? last.timestamp : null },
     ...attached ? { toolOutput: attached.tool!.output, toolOutputLines: attached.tool!.outputLines, toolOutputBytes: attached.tool!.outputBytes,
       toolExitCode: attached.tool!.exitCode ?? base.toolExitCode, toolSandbox: attached.tool!.sandbox ?? base.toolSandbox,
       toolFields: [...(base.toolFields ?? []), { path: "content", text: attached.text ?? "", truncated: attached.textTruncated || attached.bodyOmitted }] } : {} };
-  folded.set(last, { first, output, item });
+  folded.set(last, { first, output, scriptCalls, item });
   return item;
+}
+
+// The calls of scripts, and the call each belongs to. A call names the call that ran its script as its parent; a call
+// made after the run of its parent ended (the script went on in the background) has no run, so the parent is found by
+// its session, its provider and its identifier.
+function scriptChildren(calls: ReadonlyMap<string, { first: HistoryEntry; last: HistoryEntry }>) {
+  const owners = new Map<string, string>();
+  for (const [key, call] of calls) owners.set(JSON.stringify([call.first.sessionId, call.first.providerId, call.first.activityId]), key);
+  const nested = new Set<HistoryEntry>();
+  const of = new Map<string, ScriptCall[]>();
+  for (const [key, call] of calls) {
+    const parentId = call.first.parentActivityId;
+    if (!parentId || parentId === call.first.activityId) continue;
+    const owner = owners.get(JSON.stringify([call.first.sessionId, call.first.providerId, parentId]));
+    if (!owner || owner === key) continue;
+    nested.add(call.first);
+    let list = of.get(owner);
+    if (!list) of.set(owner, list = []);
+    list.push(scriptCall(call.first, call.last));
+  }
+  return { nested, of };
+}
+
+const scriptCalls = new WeakMap<HistoryEntry, { first: HistoryEntry; call: ScriptCall }>();
+function scriptCall(first: HistoryEntry, last: HistoryEntry): ScriptCall {
+  const known = scriptCalls.get(last);
+  if (known && known.first === first) return known.call;
+  const details = parseDetails(last.details) ?? parseDetails(first.details);
+  const phase = last.phase?.toLowerCase() ?? null;
+  const call: ScriptCall = { key: last.offset, activityId: last.activityId!, name: last.name?.trim() || friendly(last.kind || "Tool"), phase,
+    startedAt: isTerminalPhase(first.phase) ? null : first.timestamp, endedAt: isTerminalPhase(last.phase) ? last.timestamp : null,
+    stepId: stringAt(details, "script", "stepId"), error: phase === "failed" ? last.text?.trim() || null : null };
+  scriptCalls.set(last, { first, call });
+  return call;
+}
+
+function sameScriptCalls(a: ReadonlyArray<ScriptCall> | undefined, b: ReadonlyArray<ScriptCall> | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((call, index) => call === b[index]);
+}
+
+/** The records of the calls scripts made, which are shown inside the row of the call that ran the script. */
+export function scriptCallRecords(entries: readonly HistoryEntry[]): ReadonlySet<HistoryEntry> {
+  const calls = new Map<string, { first: HistoryEntry; last: HistoryEntry }>();
+  for (const entry of entries) {
+    if (entry.eventType !== "activity" || !entry.activityId) continue;
+    const key = activityKey(entry);
+    if (!calls.has(key)) calls.set(key, { first: entry, last: entry });
+  }
+  const { nested } = scriptChildren(calls);
+  const keys = new Set([...nested].map(activityKey));
+  return new Set(entries.filter(entry => entry.eventType === "activity" && entry.activityId && keys.has(activityKey(entry))));
+}
+
+// The title of a script: the `title` of the `// @exec: {...}` line that starts its code, when the record has it.
+function scriptTitleOf(first: HistoryEntry, last: HistoryEntry): string | null {
+  if (last.name !== "exec" && first.name !== "exec") return null;
+  for (const entry of [last, first]) {
+    const code = stringAt(parseDetails(entry.details), "arguments", "code")
+      ?? entry.tool?.fields?.find(field => field.path === "arguments")?.text ?? null;
+    const title = code ? execTitle(code) : null;
+    if (title) return title;
+  }
+  return null;
+}
+
+/** Reads the title of a script of Code Mode from its first line, `// @exec: {"title": "…"}`; null when it has none. */
+export function execTitle(code: string): string | null {
+  // In the arguments of a call the code is a JSON string: its first line ends at an escaped line break.
+  const match = /\/\/\s*@exec:\s*(\{[^\n]*?\})\s*(?:\n|\\n|$)/u.exec(code);
+  if (!match) return null;
+  try {
+    const options: unknown = JSON.parse(match[1].replaceAll('\\"', '"'));
+    const title = isObject(options) && typeof options.title === "string" ? options.title.trim() : "";
+    return title || null;
+  } catch { return null; }
 }
 
 function contentKey(entry: HistoryEntry): string {

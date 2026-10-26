@@ -36,8 +36,8 @@ internal sealed record CliHostRequest
 
     public bool Offline { get; init; }
 
-    /// <summary>Gets whether the sessions get the tools of Code Mode, whatever <c>[code_mode]</c> of the configuration says.</summary>
-    public bool CodeMode { get; init; }
+    /// <summary>Gets the mode of Code Mode of the sessions (<c>off</c>, <c>on</c>, <c>only</c>), or null for <c>[code_mode]</c> of the configuration.</summary>
+    public string? CodeMode { get; init; }
 
     /// <summary>
     /// Gets whether the host checks, once started, that the plugins and the MCP servers the configuration marks required
@@ -173,12 +173,13 @@ internal sealed class CliHost : IAsyncDisposable
                 },
             }, cancellationToken).ConfigureAwait(false);
             var alta = ComposeAlta(host, request.ListsSkills);
-            host.Commands.SessionTools = CreateSessionTools(alta, request.CodeMode || new CodeAltaConfigStore(catalog).LoadCodeModeMode() == "on" ? new CodeModeSessionTools(new CodeModeToolOptions
+            var codeMode = request.CodeMode ?? new CodeAltaConfigStore(catalog).LoadCodeModeMode();
+            host.Commands.SessionTools = CreateSessionTools(alta, codeMode is "on" or "only" ? new CodeModeSessionTools(new CodeModeToolOptions
             {
                 Runs = host.CodeModeRuns,
                 Cache = new CodeAlta.CodeMode.CodeModeScriptCache(),
                 SourceFolder = sessionId => Path.Combine(storage.GlobalRoot, "scratchpad", "codemode", sessionId),
-            }, static () => true) : null);
+            }, () => codeMode) : null);
             // The MCP plugin that runs: one that was created but did not start is not used.
             var started = Volatile.Read(ref mcp) is { } created && host.PluginRuntime.ActivePlugins.Any(plugin => ReferenceEquals(plugin.Instance, created)) ? created : null;
             if (request.ChecksRequired && await CheckRequiredAsync(host, started, request, catalog, cancellationToken).ConfigureAwait(false) is { } missing)

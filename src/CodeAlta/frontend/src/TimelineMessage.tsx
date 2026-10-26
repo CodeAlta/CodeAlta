@@ -29,6 +29,7 @@ import { usePromptChange } from "./systemPromptReader";
 import { TimelineClaudeCli } from "./claudeCli/timelineCard";
 import { promptProvenanceTitle } from "./promptProvenance";
 import type { MessageKey } from "./localization";
+import { ScriptCalls } from "./scriptCard/ScriptCalls";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -287,6 +288,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           : item.toolOutputBytes != null && item.toolOutputLines != null && <span className="tool-output-stats">{item.toolOutputLines}L · {(item.toolOutputBytes / 1024).toFixed(1)} KB</span>}
         {toolOutput && <span className="tool-result-preview" title={toolOutput.slice(0, 512)}>{commandPreview(toolOutput)}</span>}
       </div>}
+      {toolTile && item.scriptCalls && <ScriptCalls calls={item.scriptCalls} />}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}

@@ -100,6 +100,19 @@ public sealed record AgentToolSpec
     public string? ScriptName { get; init; }
 
     /// <summary>
+    /// Gets whether the tool takes over the others (Code Mode's <c>only</c> mode): while a run has it, the model is offered
+    /// only the tools of the model (<see cref="AgentToolExposure.Model"/>) and those that stay direct
+    /// (<see cref="StaysDirect"/>); the scripts it runs still call every other tool.
+    /// </summary>
+    public bool ScriptsTakeOver { get; init; }
+
+    /// <summary>
+    /// Gets whether the model keeps the tool when a tool takes over the others (<see cref="ScriptsTakeOver"/>): what it gives
+    /// cannot pass through a script, such as an image the model looks at.
+    /// </summary>
+    public bool StaysDirect { get; init; }
+
+    /// <summary>
     /// Deconstructs this tool specification into its components.
     /// </summary>
     /// <param name="name">The tool name.</param>
