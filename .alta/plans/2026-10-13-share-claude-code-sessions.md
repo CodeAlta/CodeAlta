@@ -1,6 +1,6 @@
 ---
 title: Share Claude Code sessions with VS Code and the Claude CLI
-status: in-progress
+status: done
 created: 2026-10-13
 summary: Detect a Claude Code conversation open in another Claude process before resuming it and ask the user; catch up turns added outside CodeAlta; list and import sessions started in VS Code or a terminal; open a CodeAlta session in VS Code or the CLI in one click.
 ---

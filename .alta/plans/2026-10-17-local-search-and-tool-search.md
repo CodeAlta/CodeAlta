@@ -1,6 +1,6 @@
 ---
 title: Local search and tool search
-status: in-progress
+status: done
 created: 2026-10-17
 summary: One local index of the conversations, plans, skills, tools, MCP servers, plugins and documentation. Keyword search works at once; search by meaning is turned on by the user from a dialog that downloads a small model, and everything stays on the computer. The search window (Ctrl+P) and agents (`alta search`) use the same index, and agents find skills and MCP tools through it instead of a list that grows in every prompt.
 ---

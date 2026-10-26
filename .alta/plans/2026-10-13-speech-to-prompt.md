@@ -1,6 +1,6 @@
 ---
 title: Speech to prompt with a local model
-status: in-progress
+status: done
 created: 2026-10-13
 summary: A microphone button beside Send dictates into the prompt with a speech model that runs on the computer. The model and its engine are downloaded on first use, with progress in a toast, and a Speech settings page chooses the model.
 ---

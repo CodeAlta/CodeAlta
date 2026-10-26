@@ -1,6 +1,6 @@
 ---
 title: Run agent sessions in an optional OS sandbox (#80)
-status: blocked
+status: done
 created: 2026-10-25
 summary: A sandboxed session runs its commands and file tools in a worker inside an mxc container, which sees the project and the developer tools but never CodeAlta's credentials or the user's secrets, and reaches only the hosts its profile allows. Off by default; turned on for every session, a space, a project, a provider or model, or one session.
 ---
