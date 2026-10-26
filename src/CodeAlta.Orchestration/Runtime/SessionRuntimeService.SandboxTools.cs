@@ -155,11 +155,13 @@ public sealed partial class SessionRuntimeService
     {
         // A sandboxed session writes a scratchpad of its own: the shared one would let it leave instructions for others.
         string? scratchpad = string.IsNullOrWhiteSpace(ScratchpadRoot) ? null : Path.Combine(ScratchpadRoot, "sandbox", sessionId);
+        // The session writes its working directory, never its project folder besides: a session in a worktree leaves
+        // the checkout of the user as it is. The project folders are the repositories whose git folder its worktree
+        // may write.
         var folders = new SandboxSessionFolders
         {
             WorkingDirectory = Path.GetFullPath(workingDirectory),
-            Writable = [.. projectRoots.Where(static root => !string.IsNullOrWhiteSpace(root)).Select(Path.GetFullPath)
-                .Where(root => !string.Equals(root, Path.GetFullPath(workingDirectory), StringComparison.OrdinalIgnoreCase))],
+            Repositories = [.. projectRoots.Where(static root => !string.IsNullOrWhiteSpace(root)).Select(Path.GetFullPath)],
             Scratchpad = scratchpad,
         };
         return new SessionSandboxStart(sessionId, providerId, profile, folders, environment?.Variables ?? [], commandGuard);

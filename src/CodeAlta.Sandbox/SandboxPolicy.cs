@@ -6,8 +6,15 @@ public sealed record SandboxSessionFolders
     /// <summary>Gets the working directory of the session: its project folder or its worktree.</summary>
     public required string WorkingDirectory { get; init; }
 
-    /// <summary>Gets more folders the session writes in (other roots of the session); the git folders of a worktree are found by themselves.</summary>
+    /// <summary>Gets more folders the session writes in (other roots of the session).</summary>
     public IReadOnlyList<string> Writable { get; init; } = [];
+
+    /// <summary>
+    /// Gets the repositories a worktree of the session may belong to, as CodeAlta knows them (its project folders): the
+    /// git folder a worktree names is written only when it is the one of such a repository, since the <c>.git</c> file
+    /// that names it is in the writable working tree.
+    /// </summary>
+    public IReadOnlyList<string> Repositories { get; init; } = [];
 
     /// <summary>Gets the scratchpad folder of the session, or null.</summary>
     public string? Scratchpad { get; init; }

@@ -39,14 +39,55 @@ public sealed class SandboxPolicyBuilderTests
         var worktree = temp.Folder("worktrees/wt");
         File.WriteAllText(Path.Combine(worktree, ".git"), $"gitdir: {gitDir}\n");
 
-        var policy = Build(temp, SandboxProfiles.Resolve("strict", []), worktree);
+        var policy = Build(temp, SandboxProfiles.Resolve("strict", []), worktree, repositories: [repository]);
 
-        CollectionAssert.Contains(policy.ReadWrite.ToList(), gitDir);
-        CollectionAssert.Contains(policy.ReadWrite.ToList(), common);
+        CollectionAssert.Contains(policy.ReadWrite.ToList(), common, "the common folder holds the one of the worktree");
         CollectionAssert.Contains(policy.Protected.ToList(), Path.Combine(common, "hooks"));
         CollectionAssert.Contains(policy.Protected.ToList(), Path.Combine(common, "config"));
         CollectionAssert.Contains(policy.Protected.ToList(), Path.Combine(gitDir, "config.worktree"));
         Assert.IsFalse(policy.ReadWrite.Contains(repository, StringComparer.OrdinalIgnoreCase), "the working tree of the repository is not granted");
+    }
+
+    [TestMethod]
+    public void TheGitFileOfAWorktree_GrantsOnlyTheGitFolderOfARepositoryCodeAltaGives()
+    {
+        using var temp = new TempTree();
+        var repository = temp.Folder("repo");
+        Directory.CreateDirectory(Path.Combine(repository, ".git", "worktrees", "wt"));
+        var worktree = temp.Folder("worktrees/wt");
+        var home = temp.Folder("home");
+        var dotGit = Path.Combine(worktree, ".git");
+        var strict = SandboxProfiles.Resolve("strict", []);
+
+        // The sandbox writes the `.git` file of its worktree: it names the home folder, through a commondir of its own.
+        var forged = Directory.CreateDirectory(Path.Combine(worktree, "forged")).FullName;
+        File.WriteAllText(Path.Combine(forged, "commondir"), home);
+        File.WriteAllText(dotGit, $"gitdir: {forged}\n");
+        var policy = Build(temp, strict, worktree, repositories: [repository]);
+        Assert.IsFalse(policy.ReadWrite.Any(path => path.StartsWith(home, StringComparison.OrdinalIgnoreCase)), "a forged common folder is not granted");
+
+        // Nor the git folder of a repository CodeAlta does not give, nor a worktree folder outside `worktrees`.
+        var other = temp.Folder("other");
+        Directory.CreateDirectory(Path.Combine(other, ".git", "worktrees", "x"));
+        File.WriteAllText(Path.Combine(other, ".git", "worktrees", "x", "commondir"), "../..");
+        File.WriteAllText(dotGit, $"gitdir: {Path.Combine(other, ".git", "worktrees", "x")}\n");
+        Assert.IsFalse(Build(temp, strict, worktree, repositories: [repository]).ReadWrite.Any(path => path.StartsWith(other, StringComparison.OrdinalIgnoreCase)));
+        File.WriteAllText(Path.Combine(repository, ".git", "commondir"), ".");
+        File.WriteAllText(dotGit, $"gitdir: {Path.Combine(repository, ".git")}\n");
+        Assert.IsFalse(Build(temp, strict, worktree, repositories: [repository]).ReadWrite.Contains(Path.Combine(repository, ".git"), StringComparer.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public void TheGitFolderOfTheWorkingTree_IsProtectedAsItIsFound()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+
+        var policy = Build(temp, SandboxProfiles.Resolve("strict", []), project);
+
+        CollectionAssert.Contains(policy.Protected.ToList(), Path.Combine(project, ".git", "config"));
+        CollectionAssert.Contains(policy.Protected.ToList(), Path.Combine(project, ".git", "hooks"));
     }
 
     [TestMethod]
@@ -98,8 +139,9 @@ public sealed class SandboxPolicyBuilderTests
             Assert.IsFalse(SandboxPolicyBuilder.IsSecretName(name), name);
     }
 
-    private static SandboxPolicy Build(TempTree temp, ResolvedSandboxProfile profile, string workingDirectory, Dictionary<string, string>? session = null)
-        => SandboxPolicyBuilder.Build(profile, new SandboxSessionFolders { WorkingDirectory = workingDirectory },
+    private static SandboxPolicy Build(TempTree temp, ResolvedSandboxProfile profile, string workingDirectory, Dictionary<string, string>? session = null,
+        IReadOnlyList<string>? repositories = null)
+        => SandboxPolicyBuilder.Build(profile, new SandboxSessionFolders { WorkingDirectory = workingDirectory, Repositories = repositories ?? [] },
             new SandboxHost
             {
                 DataRoot = temp.Folder("data"),

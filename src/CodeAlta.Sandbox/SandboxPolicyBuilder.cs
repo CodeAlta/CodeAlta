@@ -73,8 +73,9 @@ public static class SandboxPolicyBuilder
         var temp = Path.Combine(Full(host.DataRoot), "sessions", SafeName(sessionKey), "temp");
 
         var readWrite = new List<string> { workingDirectory };
-        var gitFolders = GitFolders(workingDirectory);
-        readWrite.AddRange(gitFolders.Where(folder => !IsInside(workingDirectory, folder)));
+        var gitFolders = GitFolders(workingDirectory, folders.Repositories.Select(Full).ToList());
+        // The common folder of a worktree holds its own git folder: that one is not granted by itself.
+        readWrite.AddRange(gitFolders.Take(1).Where(folder => !IsInside(workingDirectory, folder)));
         readWrite.AddRange(folders.Writable.Select(Full));
         if (folders.Scratchpad is { } scratchpad) readWrite.Add(Full(scratchpad));
         readWrite.AddRange(profile.Write.Select(path => Expand(path, home)));
@@ -90,12 +91,14 @@ public static class SandboxPolicyBuilder
         if (Directory.Exists(userPackages)) readOnly.Add(userPackages);
 
         var protectedEntries = new List<string>();
-        foreach (var root in readWrite.Take(1).Concat(folders.Writable.Select(Full)).Distinct(comparer))
+        var roots = readWrite.Take(1).Concat(folders.Writable.Select(Full)).Distinct(comparer).ToList();
+        foreach (var root in roots)
         {
             protectedEntries.AddRange(ProtectedEntries.Select(entry => Path.Combine(root, entry)));
         }
 
-        foreach (var gitFolder in gitFolders)
+        // The git folder of each writable root is protected as it is found, whatever a `.git` file names.
+        foreach (var gitFolder in gitFolders.Concat(roots.Select(static root => Path.Combine(root, ".git")).Where(Directory.Exists)).Distinct(comparer))
         {
             protectedEntries.Add(Path.Combine(gitFolder, "hooks"));
             protectedEntries.Add(Path.Combine(gitFolder, "config"));
@@ -192,8 +195,10 @@ public static class SandboxPolicyBuilder
         return environment;
     }
 
-    // The git folders of a working tree: itself, or the folder of a worktree and the common folder it names.
-    internal static IReadOnlyList<string> GitFolders(string workingDirectory)
+    // The git folders of a working tree: its own, or the common folder of a worktree first, then the folder of the
+    // worktree in it. The `.git` file of a worktree is written by the sandbox: what it names is taken only when it is
+    // the git folder of one of the repositories CodeAlta gives, and one of its worktrees; else nothing is.
+    internal static IReadOnlyList<string> GitFolders(string workingDirectory, IReadOnlyList<string> repositories)
     {
         var dotGit = Path.Combine(workingDirectory, ".git");
         if (Directory.Exists(dotGit)) return [dotGit];
@@ -204,8 +209,12 @@ public static class SandboxPolicyBuilder
             if (line is null) return [];
             var gitDir = Full(Path.GetFullPath(line["gitdir:".Length..].Trim(), workingDirectory));
             var commonFile = Path.Combine(gitDir, "commondir");
-            var common = File.Exists(commonFile) ? Full(Path.GetFullPath(File.ReadAllText(commonFile).Trim(), gitDir)) : null;
-            return common is null || PathComparer.Equals(common, gitDir) ? [gitDir] : [gitDir, common];
+            if (!File.Exists(commonFile)) return [];
+            var common = Full(Path.GetFullPath(File.ReadAllText(commonFile).Trim(), gitDir));
+            var known = repositories.Select(static repository => Path.Combine(repository, ".git"))
+                .Any(folder => PathComparer.Equals(folder, common) && Directory.Exists(folder));
+            var worktrees = Path.Combine(common, "worktrees");
+            return known && IsInside(worktrees, gitDir) && !PathComparer.Equals(worktrees, gitDir) ? [common, gitDir] : [];
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
