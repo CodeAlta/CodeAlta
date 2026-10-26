@@ -123,6 +123,20 @@ public sealed class DesktopMcpTests
         Assert.AreEqual(401, DesktopMcpGuard.Check("127.0.0.1", null, "Bearer other", "secret-token"));
         Assert.AreEqual(401, DesktopMcpGuard.Check("127.0.0.1", null, "Basic secret-token", "secret-token"));
         Assert.AreEqual(401, DesktopMcpGuard.Check("127.0.0.1", null, "secret-token", "secret-token"));
+
+        // A connection from another computer sends the token, whatever host it names; one from this computer through
+        // the loopback address is checked as on a server of the loopback address.
+        var tailnet = IPAddress.Parse("100.64.0.9");
+        Assert.AreEqual(401, DesktopMcpGuard.Check("127.0.0.1", null, null, "secret-token", tailnet));
+        Assert.AreEqual(401, DesktopMcpGuard.Check("build-box.tail1234.ts.net", null, null, "secret-token", tailnet));
+        Assert.AreEqual(DesktopMcpGuard.Allowed, DesktopMcpGuard.Check("build-box.tail1234.ts.net", null, "Bearer secret-token", "secret-token", tailnet));
+        Assert.AreEqual(DesktopMcpGuard.Allowed, DesktopMcpGuard.Check("127.0.0.1", null, null, "secret-token", IPAddress.Loopback));
+        Assert.AreEqual(DesktopMcpGuard.Allowed, DesktopMcpGuard.Check("[::1]", null, null, "secret-token", IPAddress.IPv6Loopback));
+        // A page of a browser of this computer does not pass for a program, and the token is asked of it.
+        Assert.AreEqual(401, DesktopMcpGuard.Check("127.0.0.1", "https://evil.example", null, "secret-token", IPAddress.Loopback));
+        Assert.AreEqual(401, DesktopMcpGuard.Check("evil.example", null, null, "secret-token", IPAddress.Loopback));
+        Assert.AreEqual(DesktopMcpGuard.Allowed, DesktopMcpGuard.Check("build-box.tail1234.ts.net", null, "Bearer secret-token", "secret-token", IPAddress.Loopback));
+        Assert.AreEqual(401, DesktopMcpGuard.Check("127.0.0.1", null, null, "secret-token", null));
     }
 
     [TestMethod]
@@ -301,6 +315,100 @@ public sealed class DesktopMcpTests
     }
 
     [TestMethod]
+    public void Tailnet_IsReadFromTheStatusOfTailscale()
+    {
+        var node = DesktopTailnet.Parse("""
+            {"BackendState":"Running","Self":{"DNSName":"build-box.tail1234.ts.net.","TailscaleIPs":["fd7a:115c:a1e0::1","100.64.0.7","100.64.0.7"]}}
+            """)!;
+        Assert.AreEqual("build-box.tail1234.ts.net", node.Name);
+        CollectionAssert.AreEqual(new[] { IPAddress.Parse("100.64.0.7"), IPAddress.Parse("fd7a:115c:a1e0::1") }, node.Addresses.ToArray());
+        // The server is reached by that name, and listens on the loopback address too, last: a free port does without it.
+        var endpoint = new DesktopMcpEndpoint("127.0.0.1", 2582, false).On(node);
+        Assert.AreEqual("http://build-box.tail1234.ts.net:2582/mcp", endpoint.Url);
+        Assert.IsFalse(endpoint.IsLoopback);
+        CollectionAssert.AreEqual(new[] { IPAddress.Parse("100.64.0.7"), IPAddress.Parse("fd7a:115c:a1e0::1"), IPAddress.Loopback }, endpoint.Addresses!.ToArray());
+        // Without MagicDNS, clients reach the computer by its address on the tailnet.
+        Assert.AreEqual("100.64.0.7", DesktopTailnet.Parse("""{"BackendState":"Running","Self":{"DNSName":"","TailscaleIPs":["100.64.0.7"]}}""")!.Name);
+
+        // Stopped, signed out, without an address, or with no answer in JSON: the computer is on no tailnet.
+        foreach (var output in new[]
+        {
+            """{"BackendState":"Stopped","Self":{"DNSName":"build-box.tail1234.ts.net.","TailscaleIPs":["100.64.0.7"]}}""",
+            """{"BackendState":"NeedsLogin","Self":{"DNSName":"","TailscaleIPs":[]}}""",
+            """{"BackendState":"Running","Self":{"DNSName":"build-box.tail1234.ts.net.","TailscaleIPs":["not an address"]}}""",
+            """{"BackendState":"Running"}""", "[]", "failed to connect to local tailscaled; it doesn't appear to be running", "",
+        })
+        {
+            Assert.IsNull(DesktopTailnet.Parse(output), output);
+        }
+    }
+
+    [TestMethod]
+    public async Task Server_ListensOnTheTailnet_WhenTheUserChoseItAndTheComputerIsOnOne()
+    {
+        using var temp = new TempFolder();
+        // A tailnet whose address is the loopback one: the test listens on no address other computers reach.
+        DesktopTailnetNode? node = new("build-box.tail1234.ts.net", [IPAddress.Loopback]);
+        var remembered = new List<bool>();
+        var tailnet = new DesktopTailnetChoice(false, remembered.Add, _ => Task.FromResult<DesktopTailnetNode?>(node));
+        await using var server = new DesktopMcpServer(new DesktopMcpEndpoint("127.0.0.1", 0, false), () => [], temp.Path, "1", tailnet: tailnet);
+        var service = new McpHostService(server, () => [], "epoch");
+        await server.StartAsync();
+        Assert.AreEqual((DesktopMcpStatus.Running, DesktopMcpStatus.TailnetOff, (string?)null), (server.Status.State, server.Status.Tailnet, server.Status.Token));
+        StringAssert.StartsWith(server.Status.Url, "http://127.0.0.1:");
+        using var client = new HttpClient();
+
+        // Turned on: the server starts again on the tailnet, under the name of the computer there, and asks for the token.
+        var on = await service.SetTailnetAsync(new("epoch", true), CancellationToken.None);
+        Assert.AreEqual(("ok", "running", "on"), (on.Status, on.State, on.Tailnet));
+        StringAssert.Matches(on.Url!, new System.Text.RegularExpressions.Regex(@"^http://build-box\.tail1234\.ts\.net:[1-9][0-9]*/mcp$"));
+        Assert.IsNotNull(on.Token);
+        Assert.AreEqual(on.Url, File.ReadAllText(server.UrlPath).Trim());
+        // The programs of this computer keep reaching it on the loopback address, as before.
+        var local = "http://127.0.0.1:" + new Uri(on.Url!).Port + "/mcp";
+        Assert.AreEqual(HttpStatusCode.OK, (await PostAsync(client, local, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")).Status);
+        Assert.AreEqual(HttpStatusCode.OK, (await PostAsync(client, local, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""",
+            request => request.Headers.Authorization = new("Bearer", on.Token))).Status);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await PostAsync(client, local, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""",
+            request => request.Headers.Add("Origin", "https://evil.example"))).Status);
+
+        // On no tailnet, the server listens where it would otherwise, and says why.
+        node = null;
+        var unavailable = await service.SetTailnetAsync(new("epoch", true), CancellationToken.None);
+        Assert.AreEqual(("running", "unavailable", (string?)null), (unavailable.State, unavailable.Tailnet, unavailable.Token));
+        StringAssert.StartsWith(unavailable.Url, "http://127.0.0.1:");
+
+        // A server that is turned off keeps the choice for when it is turned on again.
+        await server.SetEnabledAsync(false);
+        var off = await service.SetTailnetAsync(new("epoch", false), CancellationToken.None);
+        Assert.AreEqual(("stopped", "off"), (off.State, off.Tailnet));
+        CollectionAssert.AreEqual(new[] { true, true, false }, remembered);
+
+        // A start that named the address does not offer the choice.
+        await using var named = new DesktopMcpServer(new DesktopMcpEndpoint("127.0.0.1", 0, false), () => [], temp.Path, "1");
+        await named.StartAsync();
+        await named.SetTailnetAsync(true);
+        Assert.AreEqual((DesktopMcpStatus.Running, (string?)null), (named.Status.State, named.Status.Tailnet));
+        StringAssert.StartsWith(named.Status.Url, "http://127.0.0.1:");
+    }
+
+    [TestMethod]
+    public void Preferences_KeepTheTailnet_OnlyWhenItWasChosen()
+    {
+        using var temp = new TempFolder();
+        Assert.IsFalse(DesktopPreferences.Load(temp.Path).McpTailnet);
+        Assert.IsTrue((DesktopPreferences.Default with { McpTailnet = true }).Save(temp.Path));
+        Assert.IsTrue(DesktopPreferences.Load(temp.Path).McpTailnet);
+        StringAssert.Contains(File.ReadAllText(Path.Combine(temp.Path, "preferences.json")), "\"mcpTailnet\":true");
+        Assert.IsTrue(DesktopPreferences.Default.Save(temp.Path));
+        Assert.IsFalse(File.ReadAllText(Path.Combine(temp.Path, "preferences.json")).Contains("mcpTailnet", StringComparison.Ordinal));
+        File.WriteAllText(Path.Combine(temp.Path, "preferences.json"), """{"closeToTray":true,"mcpTailnet":true}""");
+        Assert.IsTrue(DesktopPreferences.Load(temp.Path).McpTailnet);
+        File.WriteAllText(Path.Combine(temp.Path, "preferences.json"), """{"mcpTailnet":"yes"}""");
+        Assert.IsFalse(DesktopPreferences.Load(temp.Path).McpTailnet);
+    }
+
+    [TestMethod]
     public async Task SettingsPage_TurnsTheServerOnAndOff_AndKeepsTheChoice()
     {
         using var temp = new TempFolder();
@@ -311,7 +419,7 @@ public sealed class DesktopMcpTests
 
         // A server that is turned off does not listen when the application starts.
         await server.StartAsync();
-        Assert.AreEqual(new McpHostResponse("ok", "stopped", false, null, null, null, []), Equatable(service.Status(new("epoch"))));
+        Assert.AreEqual(new McpHostResponse("ok", "stopped", false, null, null, null, [], null), Equatable(service.Status(new("epoch"))));
         Assert.IsFalse(File.Exists(server.UrlPath));
 
         var on = await service.SetEnabledAsync(new("epoch", true), CancellationToken.None);
@@ -324,7 +432,7 @@ public sealed class DesktopMcpTests
         Assert.AreEqual(on.Url, (await service.SetEnabledAsync(new("epoch", true), CancellationToken.None)).Url);
 
         var off = await service.SetEnabledAsync(new("epoch", false), CancellationToken.None);
-        Assert.AreEqual(new McpHostResponse("ok", "stopped", false, null, null, null, []), Equatable(off));
+        Assert.AreEqual(new McpHostResponse("ok", "stopped", false, null, null, null, [], null), Equatable(off));
         Assert.IsFalse(File.Exists(server.UrlPath));
         await Assert.ThrowsExactlyAsync<HttpRequestException>(() => client.PostAsync(on.Url, new StringContent("{}", Encoding.UTF8, "application/json")));
         CollectionAssert.AreEqual(new[] { true, true, false }, remembered);

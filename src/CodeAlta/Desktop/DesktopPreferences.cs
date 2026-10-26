@@ -71,6 +71,12 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
     internal ExternalEditorChoice ExternalEditor { get; init; } = ExternalEditorChoice.None;
 
     /// <summary>
+    /// Whether the MCP server listens on the Tailscale network when the computer is on one, for the applications of
+    /// the other computers of that network. Off unless the user turned it on.
+    /// </summary>
+    internal bool McpTailnet { get; init; }
+
+    /// <summary>
     /// The preferences CodeAlta starts with: without the reconnect setting, the sessions that had Remote Control on
     /// are off now, and are forgotten, so that the setting turned on later turns on again only those that are on
     /// when CodeAlta exits next.
@@ -151,13 +157,16 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             var editor = root.TryGetProperty("externalEditor", out var chosen) && chosen.ValueKind == JsonValueKind.Object
                 ? ExternalEditorChoice.Valid(Text(chosen, "id"), Text(chosen, "program"), Text(chosen, "arguments")) ?? ExternalEditorChoice.None
                 : ExternalEditorChoice.None;
+            // The server listens on this computer alone unless the file says otherwise.
+            var tailnet = root.TryGetProperty("mcpTailnet", out var onTailnet) && onTailnet.ValueKind == JsonValueKind.True;
             if (root.TryGetProperty("onClose", out var value) && value.ValueKind == JsonValueKind.String && TryParse(value.GetString(), out var behavior))
-                return new(behavior, server, width, zoom, review, inherit, reconnect, awake) { RemoteControlSessions = remote, ExternalEditor = editor };
+                return new(behavior, server, width, zoom, review, inherit, reconnect, awake) { RemoteControlSessions = remote, ExternalEditor = editor, McpTailnet = tailnet };
             // Written before the question existed, by the switch of the settings: the user had chosen.
             return root.TryGetProperty("closeToTray", out var tray) && tray.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? new(tray.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review, inherit, reconnect, awake) { RemoteControlSessions = remote, ExternalEditor = editor }
+                ? new(tray.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review, inherit, reconnect, awake)
+                    { RemoteControlSessions = remote, ExternalEditor = editor, McpTailnet = tailnet }
                 : Default with { McpServer = server, SessionWidth = width, Zoom = zoom, ReviewPermissions = review, InheritPermissions = inherit,
-                    ReconnectRemoteControl = reconnect, KeepAwake = awake, RemoteControlSessions = remote, ExternalEditor = editor };
+                    ReconnectRemoteControl = reconnect, KeepAwake = awake, RemoteControlSessions = remote, ExternalEditor = editor, McpTailnet = tailnet };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
         {
@@ -176,6 +185,7 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             // The server runs unless the file says otherwise: only the choice to turn it off is written.
             File.WriteAllText(temporary, "{\"onClose\":\"" + Name(OnClose) + "\"" + (McpServer ? "" : ",\"mcpServer\":false")
+                + (McpTailnet ? ",\"mcpTailnet\":true" : "")
                 + (SessionWidth == DefaultSessionWidth ? "" : ",\"sessionWidth\":" + SessionWidth.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 + (Zoom == DefaultZoom ? "" : ",\"zoom\":" + Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 + (ReviewPermissions ? ",\"reviewPermissions\":true" : "") + (InheritPermissions ? ",\"inheritPermissions\":true" : "")

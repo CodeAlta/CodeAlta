@@ -43,22 +43,38 @@ internal sealed record DesktopMcpEndpoint(string Host, int Port, bool Chosen)
         return new DesktopMcpEndpoint(options.McpHost ?? DefaultHost, port, options.McpPort is not null);
     }
 
+    /// <summary>The addresses of <see cref="Host"/> when they are known without resolving it: those of the tailnet.</summary>
+    internal IReadOnlyList<IPAddress>? Addresses { get; init; }
+
     /// <summary>The same address with another port.</summary>
     internal DesktopMcpEndpoint On(int port) => this with { Port = port };
+
+    /// <summary>
+    /// The same port on this computer's tailnet, by its name there, and on the loopback address too: the programs of
+    /// this computer keep reaching the server where they did. The loopback address is the last one, which a free port
+    /// does without.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="node"/> is null.</exception>
+    internal DesktopMcpEndpoint On(DesktopTailnetNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        return this with { Host = node.Name, Addresses = [.. node.Addresses.Where(static address => !IPAddress.IsLoopback(address)), IPAddress.Loopback] };
+    }
 
     /// <summary>Whether only programs of this computer reach the address.</summary>
     /// <remarks>A host name is not: whatever it resolves to, a server on a name asks for the access token.</remarks>
     internal bool IsLoopback => IsLoopbackHost(Host);
 
     /// <summary>
-    /// The addresses the server listens on: the address of <see cref="Host"/>, or those its name resolves to, IPv4
-    /// first; null for <c>localhost</c>, which Kestrel listens on by itself.
+    /// The addresses the server listens on: <see cref="Addresses"/>, the address of <see cref="Host"/>, or those its
+    /// name resolves to, IPv4 first; null for <c>localhost</c>, which Kestrel listens on by itself.
     /// </summary>
     /// <param name="cancellationToken">Cancels the resolution of a name.</param>
     /// <exception cref="SocketException">The name cannot be resolved.</exception>
     /// <exception cref="InvalidOperationException">The name resolves to no address.</exception>
     internal async Task<IReadOnlyList<IPAddress>?> ResolveAsync(CancellationToken cancellationToken)
     {
+        if (Addresses is { Count: > 0 }) return Addresses;
         if (string.Equals(Host, "localhost", StringComparison.OrdinalIgnoreCase)) return null;
         if (IPAddress.TryParse(Host, out var address)) return [address];
         var addresses = await Dns.GetHostAddressesAsync(Host, cancellationToken).ConfigureAwait(false);
@@ -103,7 +119,8 @@ internal sealed record DesktopMcpEndpoint(string Host, int Port, bool Chosen)
 /// comes from the page of another site is refused.
 /// </para>
 /// <para>
-/// A server other computers can reach asks every request for the access token.
+/// A server other computers can reach asks every request for the access token, except one that comes from this
+/// computer through the loopback address: that one is checked as on a server of the loopback address.
 /// </para>
 /// </remarks>
 internal static class DesktopMcpGuard
@@ -112,6 +129,20 @@ internal static class DesktopMcpGuard
     internal const int Allowed = 200;
 
     /// <summary>Checks a request.</summary>
+    /// <param name="host">The host of the request, without its port.</param>
+    /// <param name="origin">The <c>Origin</c> header of the request, if it has one.</param>
+    /// <param name="authorization">The <c>Authorization</c> header of the request, if it has one.</param>
+    /// <param name="token">The access token the server asks for; null when it asks for none.</param>
+    /// <param name="remote">
+    /// The address the connection comes from. Unlike the host, a client cannot choose it: a loopback one is a
+    /// program of this computer.
+    /// </param>
+    /// <returns><see cref="Allowed"/>, or the HTTP status the request is refused with: 401 or 403.</returns>
+    internal static int Check(string? host, string? origin, string? authorization, string? token, IPAddress? remote)
+        => remote is not null && IPAddress.IsLoopback(remote) && Check(host, origin, authorization, null) == Allowed
+            ? Allowed : Check(host, origin, authorization, token);
+
+    /// <summary>Checks a request, whatever the connection comes from.</summary>
     /// <param name="host">The host of the request, without its port.</param>
     /// <param name="origin">The <c>Origin</c> header of the request, if it has one.</param>
     /// <param name="authorization">The <c>Authorization</c> header of the request, if it has one.</param>

@@ -28,11 +28,20 @@ internal sealed record DesktopMcpTool(string Name, string Description, JsonEleme
 /// <param name="Url">The address clients connect to while it runs.</param>
 /// <param name="Token">The access token clients send, when the server asks for one.</param>
 /// <param name="Error">Why it is not listening, when it failed.</param>
-internal sealed record DesktopMcpStatus(string State, bool Enabled, string? Url, string? Token, string? Error)
+/// <param name="Tailnet">
+/// Whether it listens on the Tailscale network: <c>off</c>, <c>on</c>, or <c>unavailable</c> (turned on, and this
+/// computer was on no tailnet when the server started: it listens where it would otherwise); null when the start
+/// named the address and the choice is not offered.
+/// </param>
+internal sealed record DesktopMcpStatus(string State, bool Enabled, string? Url, string? Token, string? Error, string? Tailnet = null)
 {
     internal const string Running = "running";
     internal const string Stopped = "stopped";
     internal const string Failed = "failed";
+
+    internal const string TailnetOff = "off";
+    internal const string TailnetOn = "on";
+    internal const string TailnetUnavailable = "unavailable";
 }
 
 /// <summary>
@@ -65,6 +74,8 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
     private readonly string _stateRoot;
     private readonly string _version;
     private readonly Action<bool>? _remember;
+    private readonly DesktopTailnetChoice? _tailnet;
+    private bool _onTailnet;
     private WebApplication? _application;
     private DesktopMcpStatus _status;
     private bool _disposed;
@@ -76,9 +87,13 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
     /// <param name="version">The version of the application, which clients are told.</param>
     /// <param name="enabled">Whether the server is turned on.</param>
     /// <param name="remember">Keeps whether the server is turned on, for the next start.</param>
+    /// <param name="tailnet">
+    /// Whether it listens on the Tailscale network instead of <paramref name="endpoint"/>, when this computer is on
+    /// one; null when the choice is not offered, because the start named the address.
+    /// </param>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     internal DesktopMcpServer(DesktopMcpEndpoint endpoint, Func<IReadOnlyList<DesktopMcpTool>> tools, string stateRoot, string version,
-        bool enabled = true, Action<bool>? remember = null)
+        bool enabled = true, Action<bool>? remember = null, DesktopTailnetChoice? tailnet = null)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         ArgumentNullException.ThrowIfNull(tools);
@@ -89,7 +104,9 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
         _stateRoot = stateRoot;
         _version = version;
         _remember = remember;
-        _status = new DesktopMcpStatus(DesktopMcpStatus.Stopped, enabled, null, null, null);
+        _tailnet = tailnet;
+        _onTailnet = tailnet?.Enabled ?? false;
+        _status = new DesktopMcpStatus(DesktopMcpStatus.Stopped, enabled, null, null, null, TailnetChoice());
     }
 
     /// <summary>The file that holds the address of the running server: one line, removed when it stops.</summary>
@@ -133,11 +150,38 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
             else
             {
                 await StopCoreAsync().ConfigureAwait(false);
-                Set(new DesktopMcpStatus(DesktopMcpStatus.Stopped, false, null, null, null));
+                Set(new DesktopMcpStatus(DesktopMcpStatus.Stopped, false, null, null, null, TailnetChoice()));
             }
         }
         finally { _transition.Release(); }
     }
+
+    /// <summary>
+    /// Makes the server listen on the Tailscale network or not, now and for the next starts. A server that is turned
+    /// on starts again where it now listens. Nothing changes when the choice is not offered.
+    /// </summary>
+    internal async Task SetTailnetAsync(bool enabled)
+    {
+        await _transition.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed || _tailnet is null) return;
+            _tailnet.Remember?.Invoke(enabled);
+            _onTailnet = enabled;
+            if (!Status.Enabled)
+            {
+                Set(Status with { Tailnet = TailnetChoice() });
+                return;
+            }
+
+            await StopCoreAsync().ConfigureAwait(false);
+            await StartCoreAsync().ConfigureAwait(false);
+        }
+        finally { _transition.Release(); }
+    }
+
+    // What the status says of the tailnet before the server looked for it.
+    private string? TailnetChoice() => _tailnet is null ? null : _onTailnet ? DesktopMcpStatus.TailnetOn : DesktopMcpStatus.TailnetOff;
 
     /// <summary>Stops listening for good.</summary>
     public async ValueTask DisposeAsync()
@@ -155,32 +199,45 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
     private async Task StartCoreAsync()
     {
         string? token = null;
+        var endpoint = _endpoint;
+        var tailnet = TailnetChoice();
         try
         {
-            if (!_endpoint.IsLoopback) token = DesktopMcpGuard.ReadOrCreateToken(TokenPath);
-            var addresses = await _endpoint.ResolveAsync(CancellationToken.None).ConfigureAwait(false);
+            // The tailnet is looked for at each start: Tailscale may have started or stopped since the last one.
+            if (_tailnet is not null && _onTailnet)
+            {
+                if (await _tailnet.FindAsync(CancellationToken.None).ConfigureAwait(false) is { } node) endpoint = endpoint.On(node);
+                else
+                {
+                    tailnet = DesktopMcpStatus.TailnetUnavailable;
+                    Info("This computer is on no Tailscale network: the MCP server listens on its own address.");
+                }
+            }
+
+            if (!endpoint.IsLoopback) token = DesktopMcpGuard.ReadOrCreateToken(TokenPath);
+            var addresses = await endpoint.ResolveAsync(CancellationToken.None).ConfigureAwait(false);
             WebApplication application;
             try
             {
-                application = await ListenAsync(addresses, _endpoint.Port, token).ConfigureAwait(false);
+                application = await ListenAsync(addresses, endpoint.Port, token).ConfigureAwait(false);
             }
-            catch (IOException) when (_endpoint.Port != 0 && !_endpoint.Chosen)
+            catch (IOException) when (endpoint.Port != 0 && !endpoint.Chosen)
             {
                 // The port of the application's own choice is taken, by another program or another user's CodeAlta.
                 application = await ListenAsync(addresses, 0, token).ConfigureAwait(false);
             }
 
             _application = application;
-            var url = _endpoint.On(BoundPort(application)).Url;
+            var url = endpoint.On(BoundPort(application)).Url;
             WriteUrl(url);
             Info($"The MCP server listens at {url}");
-            Set(new DesktopMcpStatus(DesktopMcpStatus.Running, true, url, token, null));
+            Set(new DesktopMcpStatus(DesktopMcpStatus.Running, true, url, token, null, tailnet));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException
             or System.Net.Sockets.SocketException or FormatException)
         {
-            Warn($"The MCP server could not listen on {_endpoint.Host}:{_endpoint.Port}: {exception.Message}");
-            Set(new DesktopMcpStatus(DesktopMcpStatus.Failed, true, null, null, exception.Message));
+            Warn($"The MCP server could not listen on {endpoint.Host}:{endpoint.Port}: {exception.Message}");
+            Set(new DesktopMcpStatus(DesktopMcpStatus.Failed, true, null, null, exception.Message, tailnet));
         }
     }
 
@@ -236,7 +293,8 @@ internal sealed class DesktopMcpServer : IAsyncDisposable
         var application = builder.Build();
         application.Use(async (context, next) =>
         {
-            var status = DesktopMcpGuard.Check(context.Request.Host.Host, context.Request.Headers.Origin, context.Request.Headers.Authorization, token);
+            var status = DesktopMcpGuard.Check(context.Request.Host.Host, context.Request.Headers.Origin, context.Request.Headers.Authorization, token,
+                context.Connection.RemoteIpAddress);
             if (status != DesktopMcpGuard.Allowed)
             {
                 context.Response.StatusCode = status;

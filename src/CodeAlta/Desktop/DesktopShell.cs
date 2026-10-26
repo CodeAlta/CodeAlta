@@ -624,6 +624,16 @@ internal sealed class DesktopShell
         _writer.Write();
     }
 
+    /// <summary>Whether the MCP server of the application listens on the Tailscale network when the computer is on one.</summary>
+    internal bool McpTailnet { get { lock (_gate) return _preferences.McpTailnet; } }
+
+    /// <summary>Makes the MCP server listen on the Tailscale network or not for the next starts; the server itself moves by its owner.</summary>
+    internal void SetMcpTailnet(bool value)
+    {
+        lock (_gate) _preferences = _preferences with { McpTailnet = value };
+        _writer.Write();
+    }
+
     /// <summary>
     /// Hides the window and leaves the application running: the user's answer to the question asked when the
     /// window was closed.

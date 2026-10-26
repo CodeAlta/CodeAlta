@@ -1,5 +1,7 @@
 /* Settings page of the MCP server of the application. */
 .mcp-host-settings .mcp-host-switch { margin: 6px 0 14px; }
+.mcp-host-settings .mcp-host-switch:has(+ .mcp-host-tailnet) { margin-bottom: 8px; }
+.mcp-host-settings .mcp-host-tailnet { margin-top: 0; }
 .mcp-host-field { display: grid; gap: 4px; max-width: 720px; margin-bottom: 12px; }
 .mcp-host-field > span { color: var(--muted); font-size: 12px; }
 .mcp-host-field input { font-family: var(--bp-typography-family-mono); font-size: 12px; }

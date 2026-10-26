@@ -1591,6 +1591,13 @@ export const messages = dictionary({
     "ほかのアプリケーションは、このサーバーを通じてこのウィンドウを表示・操作し、CodeAlta のコマンドを実行します。",
     "其他应用程序通过此服务器查看和操作此窗口，并运行 CodeAlta 命令。"],
   "Run the MCP server": ["Ejecutar el servidor MCP", "Exécuter le serveur MCP", "MCP-Server ausführen", "MCP サーバーを実行する", "运行 MCP 服务器"],
+  "Listen on the Tailscale network": ["Escuchar en la red Tailscale", "Écouter sur le réseau Tailscale", "Im Tailscale-Netzwerk lauschen", "Tailscale ネットワークで待ち受ける", "在 Tailscale 网络上监听"],
+  "This computer is on no Tailscale network: only the applications of this computer reach the server.": [
+    "Este equipo no está en ninguna red Tailscale: solo las aplicaciones de este equipo llegan al servidor.",
+    "Cet ordinateur n’est sur aucun réseau Tailscale : seules les applications de cet ordinateur atteignent le serveur.",
+    "Dieser Computer ist in keinem Tailscale-Netzwerk: Nur die Anwendungen dieses Computers erreichen den Server.",
+    "このコンピューターはどの Tailscale ネットワークにも参加していません。サーバーに接続できるのはこのコンピューターのアプリケーションだけです。",
+    "此计算机不在任何 Tailscale 网络中：只有此计算机上的应用程序可以访问服务器。"],
   "Address": ["Dirección", "Adresse", "Adresse", "アドレス", "地址"],
   "Access token": ["Token de acceso", "Jeton d’accès", "Zugriffstoken", "アクセストークン", "访问令牌"],
   "Copy token": ["Copiar token", "Copier le jeton", "Token kopieren", "トークンをコピー", "复制令牌"],

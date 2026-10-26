@@ -17,7 +17,7 @@ export function McpHostSettings({ epoch, developer, api = mcpHost, copy = text =
   epoch: string | null;
   /** Whether this is the developer instance, which clients know under another name. */
   developer: boolean;
-  api?: Pick<typeof mcpHost, "status" | "setEnabled">;
+  api?: Pick<typeof mcpHost, "status" | "setEnabled" | "setTailnet">;
   copy?: Copy;
 }) {
   const { t } = useShellLanguage();
@@ -27,13 +27,17 @@ export function McpHostSettings({ epoch, developer, api = mcpHost, copy = text =
     notice={notice} loading={loading} busy={busy} onReload={reload}>
     {!listing ? <SettingsUnavailable loading={loading} icon="remote" title="MCP server unavailable" />
       : <McpHostView state={listing} developer={developer} busy={busy} copy={copy}
-        onEnable={enabled => void mutate(async () => ({ status: (await api.setEnabled({ expectedEpoch: epoch, enabled }, { timeoutMilliseconds: 30_000 })).status }))} />}
+        onEnable={enabled => void mutate(async () => ({ status: (await api.setEnabled({ expectedEpoch: epoch, enabled }, { timeoutMilliseconds: 30_000 })).status }))}
+        onTailnet={enabled => void mutate(async () => ({ status: (await api.setTailnet({ expectedEpoch: epoch, enabled }, { timeoutMilliseconds: 30_000 })).status }))} />}
   </SettingsPage>;
 }
 
-/** What the page shows of the server: its switch, and what a client needs while it runs. */
-export function McpHostView({ state, developer, busy, onEnable, copy }: {
-  state: McpHostState; developer: boolean; busy: boolean; onEnable: (enabled: boolean) => void; copy: Copy;
+/**
+ * What the page shows of the server: its switches, and what a client needs while it runs. The Tailscale switch is
+ * there unless the start named the address the server listens on.
+ */
+export function McpHostView({ state, developer, busy, onEnable, onTailnet, copy }: {
+  state: McpHostState; developer: boolean; busy: boolean; onEnable: (enabled: boolean) => void; onTailnet: (enabled: boolean) => void; copy: Copy;
 }) {
   const { t } = useShellLanguage();
   const running = state.state === "running" && !!state.url;
@@ -41,6 +45,10 @@ export function McpHostView({ state, developer, busy, onEnable, copy }: {
   return <>
     <Switch className="mcp-host-switch" checked={state.enabled} disabled={busy} label={t("Run the MCP server")}
       onChange={event => onEnable(event.currentTarget.checked)} />
+    {state.tailnet && <Switch className="mcp-host-switch mcp-host-tailnet" checked={state.tailnet !== "off"} disabled={busy} label={t("Listen on the Tailscale network")}
+      onChange={event => onTailnet(event.currentTarget.checked)} />}
+    {state.tailnet === "unavailable" && state.enabled && <Callout intent="warning" compact role="status">
+      {t("This computer is on no Tailscale network: only the applications of this computer reach the server.")}</Callout>}
     {state.state === "failed" && <Callout intent="warning" compact role="alert">
       {t("The MCP server is not listening.")}{state.error && <div className="config-editor-diagnostic">{state.error}</div>}</Callout>}
     {running && <>

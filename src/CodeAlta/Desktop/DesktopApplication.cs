@@ -414,8 +414,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 return new Ui.DesktopUiFiles(ui.FilesDirectory, folders, $"the folder of a project of CodeAlta, or {ui.FilesDirectory}");
             });
             IReadOnlyList<Mcp.DesktopMcpTool> McpTools() => Volatile.Read(ref altaTool) is { } alta ? [.. windowTools, alta] : windowTools;
+            // The Tailscale network is a choice of Settings, unless the start named the address.
+            var tailnet = options.McpHost is null ? new Mcp.DesktopTailnetChoice(shell.McpTailnet, shell.SetMcpTailnet, Mcp.DesktopTailnet.FindAsync) : null;
             mcp = new Mcp.DesktopMcpServer(Mcp.DesktopMcpEndpoint.For(options), McpTools, options.StateRoot ?? options.CatalogRoot!,
-                DesktopCommandLine.Version, shell.McpServer, shell.SetMcpServer);
+                DesktopCommandLine.Version, shell.McpServer, shell.SetMcpServer, tailnet);
             _ = mcp.StartAsync(); // A server that cannot listen says so in Settings: the application does not wait for it.
             // The installed tool becomes an application of this desktop; the page says so the first time.
             var entry = options.Developer || roots.Home is not null ? Task.FromResult(default(DesktopIntegration.DesktopEntryChange))

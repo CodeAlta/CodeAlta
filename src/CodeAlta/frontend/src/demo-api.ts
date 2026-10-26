@@ -161,7 +161,7 @@ export const projectGit = Object.freeze({ status: unavailable, changes: unavaila
 export const worktrees = Object.freeze({ list: unavailable, remove: unavailable, branches: unavailable, switch: unavailable, settings: unavailable, saveSettings: unavailable,
   inventory: unavailable, removeMany: unavailable, openEditor: unavailable, openExternal: unavailable });
 export const externalEditors = Object.freeze({ list: unavailable, set: unavailable, openFolder: unavailable });
-export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavailable });
+export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavailable, setTailnet: unavailable });
 // A browser preview neither measures nor edits the user's real profile.
 export const storage = Object.freeze({
   readSettings: async () => ({ status: "unavailable", rootPath: null, settings: null, error: null }),

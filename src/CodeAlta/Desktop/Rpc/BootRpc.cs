@@ -663,6 +663,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(McpAppCloseResponse))]
 [JsonSerializable(typeof(McpHostRequest))]
 [JsonSerializable(typeof(McpHostEnableRequest))]
+[JsonSerializable(typeof(McpHostTailnetRequest))]
 [JsonSerializable(typeof(McpHostResponse))]
 [JsonSerializable(typeof(AutomationsRequest))]
 [JsonSerializable(typeof(AutomationsListResponse))]

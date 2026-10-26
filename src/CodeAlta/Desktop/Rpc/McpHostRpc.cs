@@ -54,14 +54,28 @@ internal sealed class McpHostService
         return Describe();
     }
 
+    /// <summary>
+    /// Makes the server listen on the Tailscale network or not, now and for the next starts, and says what it is
+    /// doing then.
+    /// </summary>
+    [NeoRpcMethod("setTailnet", TimeoutMilliseconds = 30_000)]
+    public async Task<McpHostResponse> SetTailnetAsync(McpHostTailnetRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return Refused(refused);
+        // The server finishes what it started whatever becomes of this call.
+        await _server!.SetTailnetAsync(request.Enabled).WaitAsync(cancellationToken).ConfigureAwait(false);
+        return Describe();
+    }
+
     private McpHostResponse Describe()
     {
         var status = _server!.Status;
         return new McpHostResponse("ok", status.State, status.Enabled, status.Url, status.Token, status.Error,
-            status.State == DesktopMcpStatus.Running ? [.. _tools!().Select(static tool => tool.Name)] : []);
+            status.State == DesktopMcpStatus.Running ? [.. _tools!().Select(static tool => tool.Name)] : [], status.Tailnet);
     }
 
-    private static McpHostResponse Refused(string status) => new(status, DesktopMcpStatus.Stopped, false, null, null, null, []);
+    private static McpHostResponse Refused(string status) => new(status, DesktopMcpStatus.Stopped, false, null, null, null, [], null);
 
     private string? Refuse(string? expectedEpoch)
         => _server is null || _tools is null ? "unavailable"
@@ -77,6 +91,11 @@ internal sealed record McpHostRequest(string? ExpectedEpoch);
 /// <param name="Enabled">Whether the server is to run.</param>
 internal sealed record McpHostEnableRequest(string? ExpectedEpoch, bool Enabled);
 
+/// <summary>The request that makes the MCP server listen on the Tailscale network or not.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page was given.</param>
+/// <param name="Enabled">Whether the server listens on the tailnet when this computer is on one.</param>
+internal sealed record McpHostTailnetRequest(string? ExpectedEpoch, bool Enabled);
+
 /// <summary>What the MCP server of the application is doing.</summary>
 /// <param name="Status"><c>ok</c>, <c>unavailable</c> (this launch has no server) or <c>stale_epoch</c>.</param>
 /// <param name="State"><c>running</c>, <c>stopped</c> (turned off) or <c>failed</c> (turned on, and not listening).</param>
@@ -85,4 +104,8 @@ internal sealed record McpHostEnableRequest(string? ExpectedEpoch, bool Enabled)
 /// <param name="Token">The access token clients send as a bearer token, when the server asks for one.</param>
 /// <param name="Error">Why it is not listening, when it failed.</param>
 /// <param name="Tools">The names of the tools it offers while it runs.</param>
-internal sealed record McpHostResponse(string Status, string State, bool Enabled, string? Url, string? Token, string? Error, string[] Tools);
+/// <param name="Tailnet">
+/// Whether it listens on the Tailscale network: <c>off</c>, <c>on</c> or <c>unavailable</c> (turned on, and this
+/// computer was on no tailnet when it started); null when the start named the address.
+/// </param>
+internal sealed record McpHostResponse(string Status, string State, bool Enabled, string? Url, string? Token, string? Error, string[] Tools, string? Tailnet);

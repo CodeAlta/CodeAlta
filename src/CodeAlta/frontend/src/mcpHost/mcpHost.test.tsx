@@ -12,7 +12,7 @@ const render = (element: ReactElement) =>
 // The host is asked nothing while a view is drawn.
 const silent = () => new Promise<never>(() => { });
 const state = (change: Partial<McpHostState> = {}): McpHostState => ({ status: "ok", state: "running", enabled: true, url: "http://127.0.0.1:2582/mcp",
-  token: null, error: null, tools: ["take_snapshot", "click", "alta"], ...change });
+  token: null, error: null, tools: ["take_snapshot", "click", "alta"], tailnet: "off", ...change });
 
 test("a client is given the transport and the address of the server, and its token when it asks for one", () => {
   assert.deepEqual(JSON.parse(mcpClientConfiguration("codealta", "http://127.0.0.1:2582/mcp", null)),
@@ -25,14 +25,14 @@ test("a client is given the transport and the address of the server, and its tok
 });
 
 test("the page is drawn before the host answered, and says what it is for", () => {
-  const html = render(createElement(McpHostSettings, { epoch: "e", developer: false, api: { status: silent, setEnabled: never } }));
+  const html = render(createElement(McpHostSettings, { epoch: "e", developer: false, api: { status: silent, setEnabled: never, setTailnet: never } }));
   assert.match(html, /<h1>CodeAlta MCP server<\/h1>/);
   assert.match(html, /Other applications see and drive this window and run CodeAlta commands through this server\./);
   assert.match(html, /Loading…/);
 });
 
 test("a running server shows its address, the configuration of a client and its tools", () => {
-  const html = render(createElement(McpHostView, { state: state(), developer: false, busy: false, onEnable: never, copy: never }));
+  const html = render(createElement(McpHostView, { state: state(), developer: false, busy: false, onEnable: never, onTailnet: never, copy: never }));
   assert.match(html, /<input[^>]*type="checkbox"[^>]*checked=""/);
   assert.match(html, /Run the MCP server/);
   assert.match(html, /value="http:\/\/127\.0\.0\.1:2582\/mcp"/);
@@ -42,25 +42,48 @@ test("a running server shows its address, the configuration of a client and its 
   assert.match(html, /<span class="mcp-host-count">3<\/span>/);
   for (const tool of ["take_snapshot", "click", "alta"]) assert.ok(html.includes(`>${tool}<`), tool);
 
-  const developer = render(createElement(McpHostView, { state: state({ url: "http://127.0.0.1:2583/mcp" }), developer: true, busy: false, onEnable: never, copy: never }));
+  const developer = render(createElement(McpHostView, { state: state({ url: "http://127.0.0.1:2583/mcp" }), developer: true, busy: false, onEnable: never, onTailnet: never, copy: never }));
   assert.match(developer, /&quot;codealta-dev&quot;: \{/);
 });
 
 test("a server other computers reach shows the token its clients send", () => {
-  const html = render(createElement(McpHostView, { state: state({ url: "http://build-box:2582/mcp", token: "secret-token" }), developer: false, busy: false, onEnable: never, copy: never }));
+  const html = render(createElement(McpHostView, { state: state({ url: "http://build-box:2582/mcp", token: "secret-token" }), developer: false, busy: false, onEnable: never, onTailnet: never, copy: never }));
   assert.match(html, /Access token/);
   assert.match(html, /value="secret-token"/);
   assert.match(html, /&quot;Authorization&quot;: &quot;Bearer secret-token&quot;/);
 });
 
+test("the Tailscale switch shows where the server listens, and is not there when the start named the address", () => {
+  const switches = (html: string) => [...html.matchAll(/<input[^>]*type="checkbox"([^>]*)>/g)].map(match => match[1].includes('checked=""'));
+  const view = (change: Partial<McpHostState>) => render(createElement(McpHostView, { state: state(change), developer: false, busy: false, onEnable: never, onTailnet: never, copy: never }));
+  const off = view({});
+  assert.match(off, /Listen on the Tailscale network/);
+  assert.deepEqual(switches(off), [true, false]);
+
+  const on = view({ tailnet: "on", url: "http://build-box.tail1234.ts.net:2582/mcp", token: "secret-token" });
+  assert.deepEqual(switches(on), [true, true]);
+  assert.match(on, /value="http:\/\/build-box\.tail1234\.ts\.net:2582\/mcp"/);
+  assert.equal(on.includes("on no Tailscale network"), false);
+
+  // Turned on, on a computer that is on no tailnet: the server listens where it would otherwise, and the page says so.
+  const unavailable = view({ tailnet: "unavailable" });
+  assert.deepEqual(switches(unavailable), [true, true]);
+  assert.match(unavailable, /This computer is on no Tailscale network: only the applications of this computer reach the server\./);
+  assert.equal(view({ tailnet: "unavailable", state: "stopped", enabled: false, url: null, tools: [] }).includes("on no Tailscale network"), false);
+
+  const named = view({ tailnet: null });
+  assert.equal(named.includes("Tailscale"), false);
+  assert.deepEqual(switches(named), [true]);
+});
+
 test("a server that is off, or that could not listen, shows nothing to connect to", () => {
-  const off = render(createElement(McpHostView, { state: state({ state: "stopped", enabled: false, url: null, tools: [] }), developer: false, busy: false, onEnable: never, copy: never }));
+  const off = render(createElement(McpHostView, { state: state({ state: "stopped", enabled: false, url: null, tools: [] }), developer: false, busy: false, onEnable: never, onTailnet: never, copy: never }));
   assert.equal(/<input[^>]*type="checkbox"[^>]*checked=""/.test(off), false);
   assert.equal(off.includes("mcp-host-configuration"), false);
   assert.equal(off.includes("The MCP server is not listening."), false);
 
   const failed = render(createElement(McpHostView, { state: state({ state: "failed", url: null, tools: [], error: "Only one usage of each socket address is normally permitted." }),
-    developer: false, busy: false, onEnable: never, copy: never }));
+    developer: false, busy: false, onEnable: never, onTailnet: never, copy: never }));
   assert.match(failed, /The MCP server is not listening\./);
   assert.match(failed, /Only one usage of each socket address is normally permitted\./);
   assert.equal(failed.includes("mcp-host-configuration"), false);
