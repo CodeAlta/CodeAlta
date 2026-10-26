@@ -60,10 +60,26 @@ public sealed class AcpSandboxTests
         Assert.AreEqual("acp-my-agent", needs.OwnHome);
     }
 
+    [TestMethod]
+    public async Task TheClientOfAnAgentInTheSandbox_EndsItsProcessFirst_SinceAReadOfItsOutputMayNotStopOnCancellation()
+    {
+        var host = new FakeHost(new AcpFakeAgent()) { OutputIgnoresCancellation = true };
+        var settings = new AcpAgentSettings("my-agent", [], new Dictionary<string, string>(), null, null);
+        var request = new AcpConnectionRequest("my-agent", [], settings.Environment, Path.GetTempPath(), TimeSpan.FromSeconds(30)) { Host = host };
+        var client = await AcpProcessConnectionFactory.Instance.StartAsync(request, static _ => { }, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+
+        await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.IsTrue(host.Ended);
+    }
+
     // A host that runs the fake agent on pipes, as the sandbox runs a process, and records what it was asked to start.
     private sealed class FakeHost(AcpFakeAgent agent) : IAgentProcessHost
     {
         public string Key => "test";
+
+        // As the output of a container: a read ends with data or with the end of the process, not with its token.
+        public bool OutputIgnoresCancellation { get; init; }
 
         public AgentProcessLaunch? Launch { get; private set; }
 
@@ -78,7 +94,38 @@ public sealed class AcpSandboxTests
                 new AcpConnectionRequest(launch.FileName, launch.Arguments, new Dictionary<string, string>(), launch.WorkingDirectory, TimeSpan.FromSeconds(30)));
             agent.Connections.Enqueue(connection);
             connection.Start();
-            return Task.FromResult<IAgentHostedProcess>(new Process(this, toAgent.Writer.AsStream(), fromAgent.Reader.AsStream(), connection));
+            var output = fromAgent.Reader.AsStream();
+            return Task.FromResult<IAgentHostedProcess>(new Process(this, toAgent.Writer.AsStream(), OutputIgnoresCancellation ? new DeafStream(output) : output, connection));
+        }
+
+        private sealed class DeafStream(Stream inner) : Stream
+        {
+            public override bool CanRead => true;
+
+            public override bool CanSeek => false;
+
+            public override bool CanWrite => false;
+
+            public override long Length => throw new NotSupportedException();
+
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+            public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => inner.ReadAsync(buffer, CancellationToken.None);
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+                => inner.ReadAsync(buffer, offset, count, CancellationToken.None);
+
+            public override void Flush()
+            {
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
 
         private sealed class Process(FakeHost host, Stream input, Stream output, AcpFakeConnection connection) : IAgentHostedProcess

@@ -42,7 +42,7 @@ public interface ISandboxProcess : IAsyncDisposable
 
     /// <summary>Waits until the program ends.</summary>
     /// <param name="cancellationToken">Stops the wait, not the program.</param>
-    /// <returns>Its exit code.</returns>
+    /// <returns>Its exit code, or -1 when it is disposed before it ends.</returns>
     Task<int> WaitForExitAsync(CancellationToken cancellationToken);
 
     /// <summary>Ends the program and every process it started.</summary>

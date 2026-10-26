@@ -82,6 +82,9 @@ internal sealed partial class AcpAgentSession
 
         public HarnessToolEndpoint? Endpoint { get; set; }
 
+        /// <summary>Gets whether the agent runs in the sandbox of the session, without the sign-in of the user.</summary>
+        public bool InSandbox { get; init; }
+
         /// <summary>Gets or sets whether the session of the agent was started for this connection, and was given nothing yet.</summary>
         public bool NewSession { get; set; }
 
@@ -200,7 +203,7 @@ internal sealed partial class AcpAgentSession
 
         var capabilities = AcpAgentCapabilities.Read(JsonSerializer.SerializeToElement(client.InitializeResponse, AcpClient.CreateJsonSerializerOptions()));
         _options.Profile.Capabilities = capabilities;
-        connection = new Connection(client, capabilities, workingDirectory, launchKey);
+        connection = new Connection(client, capabilities, workingDirectory, launchKey) { InSandbox = request.ProcessHost is not null };
         _ = client.Completion.ContinueWith(
             static (_, state) =>
             {

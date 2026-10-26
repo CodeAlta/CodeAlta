@@ -530,6 +530,18 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task AgentThatIsNotSignedInInTheSandbox_SaysHowToSignItInThere()
+    {
+        var agent = new AcpFakeAgent { NewSessionError = -32000 };
+        await using var fixture = new Fixture(agent) { ProcessHost = new TestSandbox() };
+
+        var error = await Assert.ThrowsExactlyAsync<AgentProviderFailureException>(() => fixture.RunAsync([User("hello")]));
+        Assert.AreEqual(AgentFailureKind.Auth, error.Failure.Kind);
+        StringAssert.Contains(error.Message, "in the sandbox of this session");
+        StringAssert.Contains(error.Message, "a token or an API key in its Environment");
+    }
+
+    [TestMethod]
     public async Task Probe_ListsTheModels_AndWhatTheAgentCanDo_InASessionItCloses()
     {
         var agent = new AcpFakeAgent { McpHttp = false };

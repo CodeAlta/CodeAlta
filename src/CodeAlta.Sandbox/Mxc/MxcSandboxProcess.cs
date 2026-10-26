@@ -26,7 +26,17 @@ internal sealed class MxcSandboxProcess : ISandboxProcess
     public Stream StandardError { get; }
 
     public async Task<int> WaitForExitAsync(CancellationToken cancellationToken)
-        => (await _process.WaitAsync(cancellationToken).ConfigureAwait(false)).ExitCode;
+    {
+        try
+        {
+            return (await _process.WaitAsync(cancellationToken).ConfigureAwait(false)).ExitCode;
+        }
+        catch (ObjectDisposedException) when (Volatile.Read(ref _disposed) != 0)
+        {
+            // Ended by its owner, which does not read its code: a wait it did not observe must not fail later.
+            return -1;
+        }
+    }
 
     public void Kill()
     {

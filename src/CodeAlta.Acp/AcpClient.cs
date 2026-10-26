@@ -12,6 +12,8 @@ namespace CodeAlta.Acp;
 public sealed partial class AcpClient : IAsyncDisposable
 {
     private readonly AcpProcess? _process;
+    private static readonly TimeSpan HostedExitGrace = TimeSpan.FromSeconds(2);
+
     private AcpHostedProcess? _hosted;
     private readonly AcpJsonRpcTransport _transport;
     private readonly JsonSerializerOptions _jsonOptions;
@@ -315,15 +317,26 @@ public sealed partial class AcpClient : IAsyncDisposable
         }
 
         _disposed = true;
+        if (_hosted is not null)
+        {
+            // A read of the output of a process another component started may not stop when it is cancelled: the
+            // process ends first, which closes its output. It is told to end, as its input closes, and given a moment.
+            try
+            {
+                await _hosted.StandardInput.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+            {
+            }
+
+            await Task.WhenAny(_hosted.Exited, Task.Delay(HostedExitGrace)).ConfigureAwait(false);
+            await _hosted.End().ConfigureAwait(false);
+        }
+
         await _transport.DisposeAsync().ConfigureAwait(false);
         if (_process is not null)
         {
             await _process.DisposeAsync().ConfigureAwait(false);
-        }
-
-        if (_hosted is not null)
-        {
-            await _hosted.End().ConfigureAwait(false);
         }
 
         GC.KeepAlive(_jsonOptions);

@@ -677,7 +677,9 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
         => failure switch
         {
             AcpJsonRpcException { Code: AcpErrorCodes.AuthRequired } auth => new AgentProviderFailureException(
-                $"{_options.AgentName} is not signed in. Sign in from Settings > Providers, then send the message again. ({auth.Message})",
+                connection.InSandbox
+                    ? $"{_options.AgentName} is not signed in, in the sandbox of this session, where it has a home folder of its own. Give its provider a token or an API key in its Environment (Settings > Providers), then send the message again. ({auth.Message})"
+                    : $"{_options.AgentName} is not signed in. Sign in from Settings > Providers, then send the message again. ({auth.Message})",
                 new AgentFailureInfo(AgentFailureKind.Auth), auth),
             AcpJsonRpcException rpc => new AgentProviderFailureException($"{_options.AgentName}: {rpc.Message}", AgentFailureClassifier.Classify(rpc) ?? new AgentFailureInfo(AgentFailureKind.Other), rpc),
             AcpConnectionClosedException closed => Closed(connection, closed),
