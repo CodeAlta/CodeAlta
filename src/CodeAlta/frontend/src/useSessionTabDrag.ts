@@ -81,6 +81,18 @@ export function useSessionTabDrag(root: RefObject<HTMLDivElement | null>, model:
     });
     return drop;
   }
+  /**
+   * Keeps the press of a tab that the drag did not take from starting a move of the window. In a web view without
+   * `app-region` (WebKitGTK) the window is moved by the mouse press of a title-bar tab bar, which the desktop
+   * shell cancels: the compositor then keeps the release, and the close button and the selected tab never get
+   * their click. A press whose default is prevented has no mouse press, but its click still comes.
+   */
+  function keepTabPress(event: PointerEvent<HTMLDivElement>) {
+    if (event.defaultPrevented || event.button !== 0 || cssSupportsAppRegion()) return;
+    if (!(event.target as HTMLElement).closest('[data-neoastra-drag-region] .flexlayout__tab_button')) return;
+    event.preventDefault();
+    pressOutsidePopovers(event);
+  }
   function down(event: PointerEvent<HTMLDivElement>) {
     if (event.isPrimary && !gesture.current) { suppressClick.current = false; cancelledPointer.current = null; }
     if (gesture.current || !event.isPrimary || event.button !== 0 || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
@@ -97,9 +109,7 @@ export function useSessionTabDrag(root: RefObject<HTMLDivElement | null>, model:
     suppressClick.current = false;
     gesture.current = { pointerId: event.pointerId, node, header, x: event.clientX, y: event.clientY, dragging: false, current: captured };
     event.preventDefault(); event.stopPropagation();
-    // A press whose default is prevented has no mouse press: the popovers that close on a press outside them (a menu,
-    // the form of a review) are given one, or they stay open over the tab shown next and take its keyboard back.
-    event.currentTarget.ownerDocument.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, clientX: event.clientX, clientY: event.clientY }));
+    pressOutsidePopovers(event);
     header.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -169,5 +179,18 @@ export function useSessionTabDrag(root: RefObject<HTMLDivElement | null>, model:
     suppressClick.current = false;
     return suppressed;
   }
-  return { preview, down, move, up, end, keyDown, click };
+  return { preview, down, keepTabPress, move, up, end, keyDown, click };
+}
+
+/** Whether the web view moves the window by the CSS `app-region` of its title bar, as Chromium does. */
+function cssSupportsAppRegion() {
+  return typeof CSS !== "undefined" && CSS.supports("app-region", "drag");
+}
+
+/**
+ * A press whose default is prevented has no mouse press: the popovers that close on a press outside them (a menu,
+ * the form of a review) are given one, or they stay open over the tab shown next and take its keyboard back.
+ */
+function pressOutsidePopovers(event: PointerEvent<HTMLDivElement>) {
+  event.currentTarget.ownerDocument.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, clientX: event.clientX, clientY: event.clientY }));
 }
