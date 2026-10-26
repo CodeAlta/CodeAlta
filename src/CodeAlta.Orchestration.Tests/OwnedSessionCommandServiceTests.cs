@@ -231,6 +231,28 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task ASessionSandboxedByItsModel_KeepsTheSandbox_WhenASendAttachesItWithAnotherModel() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        f.Provider.ReleaseAbort.TrySetResult();
+        File.WriteAllText(Path.Combine(f.GlobalRoot, "config.toml"),
+            $"[providers.{f.Provider.Descriptor.ProviderId.Value}]\ntype = \"openai-chat\"\n\n[providers.{f.Provider.Descriptor.ProviderId.Value}.model_overrides.fixture-model]\nsandbox = \"strict\"\n");
+        Assert.AreEqual(new CodeAlta.Sandbox.SandboxChoice("strict", CodeAlta.Sandbox.SandboxScope.Model),
+            (await f.Observe(f.Host.RuntimeService.GetSessionSandboxAsync(f.SessionId))).Choice);
+
+        // The session asks for a model of its provider that nothing sandboxes, as `alta session queue --model` would.
+        var send = f.AdmitSend(new OwnedTextSendRequest("other-model-send", f.SessionId, "input")
+            { Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", "selected-model", AgentReasoningEffort.High) });
+        Assert.IsNotNull(send.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send.Receipt, "send with another model");
+        Assert.AreEqual("selected-model", f.Provider.Options!.Model);
+        Assert.AreEqual(new CodeAlta.Sandbox.SandboxChoice("strict", CodeAlta.Sandbox.SandboxScope.Session),
+            (await f.Observe(f.Host.RuntimeService.GetSessionSandboxAsync(f.SessionId))).Choice, "the sandbox of its model became its own");
+        f.Provider.ReleaseSend.TrySetResult();
+        await f.Observe(send.Receipt.Completion);
+    });
+
+    [TestMethod]
     public Task NamedSession_KeepsItsNameWhenASendAttachesItAgain() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;
@@ -2213,6 +2235,7 @@ public sealed class OwnedSessionCommandServiceTests
         private readonly string _root = Path.Combine(Path.GetTempPath(), "CodeAlta-owned-" + Guid.NewGuid().ToString("N"));
         internal string SessionId { get; } = Guid.CreateVersion7().ToString();
         internal string ProjectRoot => Path.Combine(_root, "project");
+        internal string GlobalRoot => Path.Combine(_root, "global");
         internal ControlledProvider Provider { get; } = new();
         internal CodeAltaHost Host => _host ?? throw new InvalidOperationException("Host setup has not completed.");
 

@@ -2160,6 +2160,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var permissionMode = NormalizeOptionalText(startNewSession ? session.PermissionMode : savedLocalState?.PermissionMode);
         // So is the sandbox chosen for the session; its scopes are read again at each command.
         var ownSandbox = NormalizeOptionalText(startNewSession ? session.Sandbox : savedLocalState?.Sandbox);
+        // A session does not leave its sandbox by changing model, as by changing provider: when its new model would not
+        // sandbox it, the profile it runs with now becomes its own choice.
+        string? keptSandbox = null;
+        if (!startNewSession && ownSandbox is null && !string.Equals(NormalizeOptionalText(session.ModelId), NormalizeOptionalText(options.Model), StringComparison.Ordinal)
+            && await KeptSandboxAsync(session, options.ProviderKey ?? options.ProviderId.Value, options.Model, cancellationToken).ConfigureAwait(false) is { } keptProfile)
+        {
+            ownSandbox = keptSandbox = keptProfile;
+        }
+
         var ownTitleMode = AgentSessionTitles.ParseMode(startNewSession ? session.TitleMode : savedLocalState?.TitleMode);
         var titleMode = ownTitleMode ?? _configStore.LoadGlobalSessionTitleMode();
         var sessionOptions = new AgentSessionResumeOptions
@@ -2266,7 +2275,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             // The modes a session is created with are saved with it: the next attachment reads them from there.
             await UpdateSessionLocalStateAsync(session, actorCancellationToken, startNewSession ? permissionMode : null,
                 startNewSession ? session.TitleMode : null, createdReviewBeforeCommit: startNewSession ? session.ReviewBeforeCommit : null,
-                createdSandbox: startNewSession ? ownSandbox : null).ConfigureAwait(false);
+                createdSandbox: startNewSession ? ownSandbox : keptSandbox).ConfigureAwait(false);
             return true;
         }, CancellationToken.None).ConfigureAwait(false);
         if (startNewSession)
