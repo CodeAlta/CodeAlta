@@ -46,7 +46,7 @@ OWNER = "xoofx"
 # The credential of gh, without touching the git configuration.
 GIT_HTTPS = ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
 # The projects whose packages a release publishes: the tool package, and one per runtime of <RuntimeIdentifiers>.
-PACKAGE_PROJECTS = ["src/CodeAlta/CodeAlta.csproj", "src/CodeAlta.Tui/CodeAlta.Tui.csproj"]
+PACKAGE_PROJECTS = ["src/CodeAlta/CodeAlta.csproj", "src/CodeAlta.Tui/CodeAlta.Tui.csproj", "src/CodeAlta.Cli/CodeAlta.Cli.csproj"]
 # The commit prefixes dotnet-releaser sorts the notes by, in the order of the notes.
 KINDS = [
     ("Breaking changes", r"^Breaking Change"),
