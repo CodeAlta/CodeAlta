@@ -22,6 +22,14 @@ internal static class SandboxOutsideCommands
         "UnauthorizedAccessException",
     ];
 
+    // What a program writes when the container keeps it from the network: a socket refused (Windows), no route or no
+    // name resolution (Linux, macOS).
+    private static readonly string[] NetworkMarkers =
+    [
+        "forbidden by its access permissions", "Network is unreachable", "ENETUNREACH", "Could not resolve host", "Temporary failure in name resolution",
+        "No such host is known", "Name or service not known", "nodename nor servname", "getaddrinfo", "EAI_AGAIN", "ENOTFOUND", "NU1301",
+    ];
+
     /// <summary>
     /// Adds a note after the output of a command, on a line of its own at the end of its text: the timelines show the
     /// first text of a result, and read the note there.
@@ -87,6 +95,10 @@ internal static class SandboxOutsideCommands
         if (refused.Length > 0)
             return $"[sandbox: {profile.Name}] The network of the sandbox refused {string.Join(", ", refused)}: it reaches only the hosts of its profile.{then}";
         var output = string.Concat(result.Items.OfType<AgentToolResultItem.Text>().Select(static item => item.Value)) + result.Error;
+        if (profile.Network != SandboxNetwork.On && NetworkMarkers.Any(marker => output.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+            return profile.Network == SandboxNetwork.Off
+                ? $"[sandbox: {profile.Name}] The sandbox of this session has no network: its profile reaches no host.{then}"
+                : $"[sandbox: {profile.Name}] The sandbox of this session reaches only the hosts of its profile, through its proxy (`HTTPS_PROXY`): a program that does not use the proxy reaches no host.{then}";
         if (windows)
         {
             // The Windows container refuses the named pipes of MSBuild's worker nodes (they admit the user alone, not

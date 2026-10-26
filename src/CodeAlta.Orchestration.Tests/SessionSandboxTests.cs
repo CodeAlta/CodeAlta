@@ -249,6 +249,12 @@ public sealed class SessionSandboxTests
         Assert.DoesNotContain("a.org", network, "only what this command was refused");
         Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(profile, new AgentToolResult(false, [new AgentToolResultItem.Text("1 test failed")], null), [], []),
             "a failure the sandbox did not cause gets no note");
+
+        var socket = new AgentToolResult(false, [new AgentToolResultItem.Text("error: NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.\n" +
+            "error:   An attempt was made to access a socket in a way forbidden by its access permissions. (api.nuget.org:443)")], null);
+        Assert.Contains("has no network", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(SandboxProfiles.Resolve("strict", []), socket, [], [])!);
+        Assert.Contains("through its proxy", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(profile, socket, [], [])!,
+            "a program that does not use the proxy of a profile with hosts");
     }
 
     [TestMethod]
