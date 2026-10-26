@@ -228,6 +228,7 @@ The `alta` commands depend on the host, the plugins turned on and the session. A
 | `notes` | Read, replace or clear the notes of the session. | “Keep a 5-item checklist visible in Notes while you work.” | `note` is an older name. |
 | `reminder` | Schedule a prompt for a session; list and delete reminders. | “Remind yourself in 5 minutes to check the child session result.” | Only while CodeAlta runs. |
 | `job` | Run a command in the background; list jobs, read their output, cancel them. | “Run the full tests as a background job and fix what fails.” | Runs with the rights of CodeAlta. Jobs end when CodeAlta exits. |
+| `workflow` | List the runs of [Code Mode](code-mode.md) scripts, show their steps and the sessions they started, read their result, cancel one. | “Show me where the review script of the other session is.” | A session cancels only its own runs and those of the sessions it started. |
 | `provider`, `model` | List providers, models and [model tiers](../model-tiers.md). | “List enabled providers that can run a high-reasoning model.” | Read-only; says nothing of billing. |
 | `skill` | List, show and activate skills. | “Activate the IL decompile skill before inspecting the assembly.” | `skills` and `skills_activate` are older names. |
 | `diff`, `editor` | Show you the changes of a project (`alta diff show`, `--file` to select one), or open a file at a line (`alta editor open --file <path> --line <n>`). | “Open the file you changed at the line of the fix.” | CodeAlta Desktop only. |

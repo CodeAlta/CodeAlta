@@ -157,6 +157,7 @@ internal sealed class CodeAltaFrontendComposition
         }
         if (codeModeRuns is not null)
         {
+            altaServices.Add(codeModeRuns);
             altaServices.Add(CodeAlta.LiveTool.Scripts.CodeModeSessionTools.FromSettings(codeModeRuns, catalogOptions, runtimeService.ScratchpadRoot, codeModeAgents));
         }
         if (pluginHostBridge?.Runtime is { } pluginRuntime)

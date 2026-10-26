@@ -120,6 +120,8 @@ internal static class DesktopAltaTools
             // The plugins as they are when a command runs; without an active plugin both add nothing.
             .Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(host.PluginRuntime))
             .Add(host.PluginRuntime)
+            // The runs of the scripts of Code Mode, for `alta workflow`.
+            .Add(host.CodeModeRuns)
             // The bridge of the sends of the host: a send through `alta session send` gives the plugins what a send of the window does.
             .AddPluginRuntimeHooks(host.Commands.Plugins ?? new CodeAlta.Orchestration.Runtime.Plugins.PluginOrchestrationBridge(host.PluginRuntime.Adapter, () => host.PluginRuntime.ActivePlugins));
         if (changes is not null) services.Add(changes);

@@ -184,6 +184,11 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         }
     }
 
+    /// <summary>Finds a run of any session, running or ended a short while ago.</summary>
+    /// <param name="runId">The id of the run.</param>
+    /// <returns>The run, or null.</returns>
+    public CodeModeRunHandle? FindAny(string runId) => _runs.TryGetValue(runId, out var run) ? run : null;
+
     /// <summary>Finds a run of a session, running or ended a short while ago.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="runId">The id of the run.</param>

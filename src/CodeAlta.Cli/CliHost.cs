@@ -387,6 +387,8 @@ internal sealed class CliHost : IAsyncDisposable
                 new CodeAlta.Catalog.Bookmarks.SessionJournalBookmarks(host.SessionViewCatalog.JournalStore.CreateSessionStore())))
             .Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(host.PluginRuntime))
             .Add(host.PluginRuntime)
+            // The runs of the scripts of Code Mode, for `alta workflow`.
+            .Add(host.CodeModeRuns)
             .AddPluginRuntimeHooks(host.Commands.Plugins ?? new PluginOrchestrationBridge(host.PluginRuntime.Adapter, () => host.PluginRuntime.ActivePlugins));
         var registry = new AltaCommandRegistry(listsSkills ? AltaCommandRegistryOptions.Cli : WithoutSkills(AltaCommandRegistryOptions.Cli));
         var dispatcher = new AltaCommandDispatcher(registry, services);

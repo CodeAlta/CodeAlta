@@ -240,6 +240,41 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task AltaWorkflow_ListsReadsAndCancelsRuns_AndASessionCancelsOnlyItsOwn()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var gate = new TaskCompletionSource();
+        var run = runs.TryStart("session-1", "Slow", 1000, "call-7", async (_, token) =>
+        {
+            await gate.Task.WaitAsync(token);
+            return new CodeModeRunResult(CodeModeRunStatus.Completed, TimeSpan.Zero) { ValueJson = "42" };
+        }, out _)!;
+        var registry = new AltaCommandRegistry();
+        var dispatcher = new AltaCommandDispatcher(registry, new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root.Path }).Add(registry).Add(runs));
+
+        var listed = await dispatcher.InvokeAsync(["workflow", "list", "--all"]);
+        var other = await dispatcher.InvokeAsync(["workflow", "cancel", run.Id], caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-2" });
+        var early = await dispatcher.InvokeAsync(["workflow", "result", run.Id]);
+        var cancelled = await dispatcher.InvokeAsync(["workflow", "cancel", run.Id], caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1" });
+        await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await dispatcher.InvokeAsync(["workflow", "result", run.Id]);
+        var missing = await dispatcher.InvokeAsync(["workflow", "show", "run-nope"]);
+
+        Assert.AreEqual(AltaExitCodes.Success, listed.ExitCode, listed.Transcript);
+        StringAssert.Contains(listed.Stdout, $"\"id\":\"{run.Id}\"");
+        StringAssert.Contains(listed.Stdout, "\"state\":\"running\"");
+        StringAssert.Contains(listed.Stdout, "\"callId\":\"call-7\"");
+        Assert.AreNotEqual(AltaExitCodes.Success, other.ExitCode, "a session does not cancel the run of another");
+        StringAssert.Contains(early.Transcript, "workflow.running");
+        Assert.AreEqual(AltaExitCodes.Success, cancelled.ExitCode, cancelled.Transcript);
+        StringAssert.Contains(cancelled.Stdout, "\"wasRunning\":true");
+        StringAssert.Contains(result.Stdout, "\"state\":\"cancelled\"");
+        StringAssert.Contains(result.Stdout, "Script stopped");
+        StringAssert.Contains(missing.Transcript, "workflow.notFound");
+    }
+
+    [TestMethod]
     public async Task ARunThatEndsInTheBackground_IsDeliveredToItsSession()
     {
         using var root = TestTempDirectory.Create();
