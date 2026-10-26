@@ -58,15 +58,18 @@ public sealed partial class SessionRuntimeService
     /// </summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The starter, or null; and why no command can start, when the sandbox cannot run.</returns>
-    public async Task<(ShellCommandStarter? Starter, string? Refusal)> GetJobStarterAsync(string sessionId, CancellationToken cancellationToken = default)
+    /// <returns>
+    /// The starter, or null; what gives the worker back when the starter starts no command (a job that is refused), to
+    /// be disposed then; and why no command can start, when the sandbox cannot run.
+    /// </returns>
+    public async Task<(ShellCommandStarter? Starter, IDisposable? Unused, string? Refusal)> GetJobStarterAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         var sandbox = await GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        if (!sandbox.IsSandboxed) return (null, null);
-        if (sandbox.Profile is not { } profile) return (null, SandboxProblem(sandbox));
+        if (!sandbox.IsSandboxed) return (null, null, null);
+        if (sandbox.Profile is not { } profile) return (null, null, SandboxProblem(sandbox));
         if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated)
-            return (null, "The session is not attached: its sandbox starts with its next turn.");
+            return (null, null, "The session is not attached: its sandbox starts with its next turn.");
         var start = SandboxStartOf(sessionId, entry.ProviderKey, profile, entry.WorktreeDirectory ?? entry.WorkingDirectory, entry.ProjectRoots, entry.ProcessEnvironment, commandGuard: false);
         SessionSandboxWorkers.Lease lease;
         try
@@ -75,7 +78,7 @@ public sealed partial class SessionRuntimeService
         }
         catch (SandboxUnavailableException unavailable)
         {
-            return (null, unavailable.Message);
+            return (null, null, unavailable.Message);
         }
 
         // One lease per starter: the first command takes it and keeps the worker until it ends.
@@ -87,7 +90,16 @@ public sealed partial class SessionRuntimeService
             var process = lease.Client.StartProcess(command, folder, onOutput);
             if (held is not null) process.Completion.ContinueWith(_ => held.Dispose(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             return new SandboxedShellCommand(process);
-        }, null);
+        }, new Unused(() =>
+        {
+            // A job that was refused before it started any command gives the worker back.
+            if (Interlocked.Exchange(ref taken, 1) == 0) lease.Dispose();
+        }), null);
+    }
+
+    private sealed class Unused(Action release) : IDisposable
+    {
+        public void Dispose() => release();
     }
 
     /// <summary>
@@ -310,18 +322,24 @@ public sealed partial class SessionRuntimeService
         // the user allows it, whatever the permission mode.
         private async Task<AgentToolResult> ShellCommandAsync(AgentToolDefinition tool, AgentBuiltInToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)
         {
-            if (!SandboxOutsideCommands.TryTake(invocation, out var inside, out var reason))
-                return await RunInWorkerAsync(tool, options, inside, cancellationToken).ConfigureAwait(false);
+            var taken = SandboxOutsideCommands.TryTake(invocation, out var inside, out var reason);
+            // The guard of the host checks the command here: the worker that would check it runs in the sandbox, and a
+            // worker started for a background command checks none.
+            if (options.CommandGuard is { } guard && CommandOf(inside) is { } guarded
+                && await guard(guarded, FolderOf(inside, options) ?? Environment.CurrentDirectory, cancellationToken).ConfigureAwait(false) is { } refusal)
+            {
+                return new AgentToolResult(false, [], refusal);
+            }
+
+            if (!taken) return await RunInWorkerAsync(tool, options, inside, cancellationToken).ConfigureAwait(false);
             var sandbox = await runtime.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
             // A session that is no longer sandboxed runs its commands here, as it asks for them.
             if (!sandbox.IsSandboxed) return await tool.Handler(inside, cancellationToken).ConfigureAwait(false);
             if (sandbox.Profile is not { } profile) return Refused(tool, SandboxProblem(sandbox));
             if (profile.Outside != SandboxOutside.Ask)
                 return Refused(tool, $"the sandbox of this session (profile '{profile.Name}') runs no command outside it. Ask the user to run it.");
-            var command = inside.Arguments.TryGetProperty("command", out var text) && text.ValueKind == System.Text.Json.JsonValueKind.String ? text.GetString() : null;
-            var folder = inside.Arguments.TryGetProperty("workdir", out var workdir) && workdir.ValueKind == System.Text.Json.JsonValueKind.String
-                ? Path.GetFullPath(Path.Combine(options.WorkingDirectory ?? Environment.CurrentDirectory, workdir.GetString()!))
-                : options.WorkingDirectory;
+            var command = CommandOf(inside);
+            var folder = FolderOf(inside, options);
             var request = new AgentCommandPermissionRequest(options.ProviderId, options.SessionId, DateTimeOffset.UtcNow, RunId: null, InteractionId: invocation.ToolCallId,
                 ApprovalId: null, Command: command, WorkingDirectory: folder, Actions: null, Reason: reason.Trim(), Network: null, ProposedExecPolicyAmendment: null,
                 ProposedNetworkPolicyAmendments: null) { OutsideSandbox = true };
@@ -352,6 +370,19 @@ public sealed partial class SessionRuntimeService
             => runtime.SandboxStartOf(sessionId, providerId, profile, options.WorkingDirectory ?? Environment.CurrentDirectory, projectRoots, options.Environment, options.CommandGuard is not null);
 
         private static AgentToolResult Refused(AgentToolDefinition tool, string reason) => new(false, [], $"{tool.Spec.Name} did not run: {reason}");
+
+        private static string? CommandOf(AgentToolInvocation invocation)
+            => invocation.Arguments.ValueKind == System.Text.Json.JsonValueKind.Object && invocation.Arguments.TryGetProperty("command", out var text)
+               && text.ValueKind == System.Text.Json.JsonValueKind.String
+                ? text.GetString()
+                : null;
+
+        // The folder of a command, as the shell tool resolves it.
+        private static string? FolderOf(AgentToolInvocation invocation, AgentBuiltInToolOptions options)
+            => invocation.Arguments.ValueKind == System.Text.Json.JsonValueKind.Object && invocation.Arguments.TryGetProperty("workdir", out var workdir)
+               && workdir.ValueKind == System.Text.Json.JsonValueKind.String
+                ? Path.GetFullPath(Path.Combine(options.WorkingDirectory ?? Environment.CurrentDirectory, workdir.GetString()!))
+                : options.WorkingDirectory;
 
         // The options of the tools of the session, with another client for the web or another answer to their permissions.
         private static AgentBuiltInToolOptions Copy(AgentBuiltInToolOptions options, HttpClient? http, AgentPermissionRequestHandler? permissions) => new()

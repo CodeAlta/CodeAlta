@@ -216,25 +216,36 @@ internal sealed partial class BuiltInAltaCommandContributor
             : SessionIdentity.Usual.Environment;
         // The job of a sandboxed session runs in its sandbox, as its commands do, or not at all.
         ShellCommandStarter? starter = null;
+        IDisposable? unused = null;
         if (runtime is not null)
         {
-            var (sandboxed, refusal) = await runtime.GetJobStarterAsync(sessionId, context.CancellationToken).ConfigureAwait(false);
+            var (sandboxed, release, refusal) = await runtime.GetJobStarterAsync(sessionId, context.CancellationToken).ConfigureAwait(false);
             if (refusal is not null) return PermissionDenied(context, "job.sandboxUnavailable", refusal);
-            starter = sandboxed;
+            (starter, unused) = (sandboxed, release);
         }
 
-        var started = jobs.Start(new SessionJobRequest
+        SessionJobStart started;
+        try
         {
-            SessionId = sessionId,
-            ProjectId = projectId,
-            Command = commandLine,
-            Folder = folder,
-            Environment = environment,
-            Title = NormalizeOptionalText(options.Title),
-            Notification = notification,
-            Timeout = timeout,
-            Starter = starter,
-        });
+            started = jobs.Start(new SessionJobRequest
+            {
+                SessionId = sessionId,
+                ProjectId = projectId,
+                Command = commandLine,
+                Folder = folder,
+                Environment = environment,
+                Title = NormalizeOptionalText(options.Title),
+                Notification = notification,
+                Timeout = timeout,
+                Starter = starter,
+            });
+        }
+        finally
+        {
+            // A job that started its command keeps the worker until it ends; one that did not gives it back.
+            unused?.Dispose();
+        }
+
         if (started.Job is not { } job)
         {
             return started.Status switch

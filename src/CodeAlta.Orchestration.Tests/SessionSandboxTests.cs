@@ -171,8 +171,9 @@ public sealed class SessionSandboxTests
         Assert.Contains("did not run", result.Error!);
         Assert.Contains("refused by the test", result.Error!);
 
-        var (starter, refusal) = await f.Runtime.GetJobStarterAsync("s");
+        var (starter, unused, refusal) = await f.Runtime.GetJobStarterAsync("s");
         Assert.IsNull(starter);
+        Assert.IsNull(unused);
         Assert.Contains("not attached", refusal!, "a background command waits for a session that runs");
     }
 
@@ -365,6 +366,25 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task TheGuardOfCommands_IsCheckedByCodeAlta_BeforeTheWorker()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        await f.CreateSessionAsync("s");
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        var tools = f.RoutedTools("s", f.Runtime.CreateSandboxToolRouter("s", "codex", [f.Project.ProjectPath]),
+            (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            (command, _, _) => ValueTask.FromResult(command.Contains("commit", StringComparison.Ordinal) ? "Review by the user comes first." : null));
+
+        // The worker is in the sandbox, and one a background command started checks no command: the guard is not its.
+        var refused = await tools.CallAsync("shell_command", new { command = "git commit -m change" });
+
+        Assert.IsFalse(refused.Success);
+        Assert.AreEqual("Review by the user comes first.", refused.Error);
+        Assert.IsEmpty(backend.Starts, "no worker was asked");
+    }
+
+    [TestMethod]
     public async Task WebGetOfASandboxWithoutNetwork_IsRefused_BeforeAnyRequest()
     {
         await using var f = await Fixture.CreateAsync(new InProcessBackend());
@@ -517,7 +537,8 @@ public sealed class SessionSandboxTests
             => RoutedTools(sessionId, Runtime.CreateSandboxToolRouter(sessionId, "codex", [Project.ProjectPath]),
                 (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)));
 
-        public RoutedToolSet RoutedTools(string sessionId, CodeAlta.Agent.Runtime.Tools.IAgentBuiltInToolRouter router, AgentPermissionRequestHandler permissions)
+        public RoutedToolSet RoutedTools(string sessionId, CodeAlta.Agent.Runtime.Tools.IAgentBuiltInToolRouter router, AgentPermissionRequestHandler permissions,
+            Func<string, string, CancellationToken, ValueTask<string?>>? guard = null)
         {
             var options = new CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolOptions
             {
@@ -525,6 +546,7 @@ public sealed class SessionSandboxTests
                 SessionId = sessionId,
                 WorkingDirectory = Project.ProjectPath,
                 OnPermissionRequest = permissions,
+                CommandGuard = guard is null ? null : (command, folder, token) => guard(command, folder, token),
             };
             return new RoutedToolSet(router.Route(options, CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolFactory.CreateDefaultTools(options)), sessionId, permissions);
         }
