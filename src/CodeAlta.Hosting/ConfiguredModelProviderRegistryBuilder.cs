@@ -748,6 +748,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             DisplayName = ResolveProviderDisplayName(definition),
             Command = NormalizeText(definition.Command),
             ConfigDirectory = NormalizeText(definition.ConfigDir),
+            EnvironmentVariables = definition.Env is { Count: > 0 } variables ? new Dictionary<string, string>(variables, StringComparer.Ordinal) : new Dictionary<string, string>(StringComparer.Ordinal),
             // The state root of the providers is the global root: the CLI CodeAlta pins is in its cache.
             PinnedCliRoot = new CatalogOptions { GlobalRoot = stateRootPath }.ClaudeCodeRoot,
             ExtraArguments = definition.Arguments is { Count: > 0 } arguments ? [.. arguments] : [],

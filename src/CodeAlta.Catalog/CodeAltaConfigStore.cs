@@ -2441,11 +2441,28 @@ public sealed partial class CodeAltaConfigStore
         definition.PermissionMode = NormalizeText(definition.PermissionMode);
         definition.AnthropicApiKey = NormalizeText(definition.AnthropicApiKey);
         definition.ConfigDir = NormalizeText(definition.ConfigDir);
+        definition.Env = NormalizeEnvironment(definition.Env);
         if (definition.Arguments is { Count: 0 })
         {
             definition.Arguments = null;
         }
     }
+
+    // The variables of a provider by their trimmed names; null when there are none.
+    private static Dictionary<string, string>? NormalizeEnvironment(Dictionary<string, string>? environment)
+    {
+        if (environment is null) return null;
+        var normalized = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (name, value) in environment)
+        {
+            if (!string.IsNullOrWhiteSpace(name)) normalized[name.Trim()] = value ?? string.Empty;
+        }
+
+        return normalized.Count == 0 ? null : normalized;
+    }
+
+    private static bool IsVariableName(string name)
+        => name.Length is > 0 and <= 256 && !char.IsAsciiDigit(name[0]) && name.All(static character => char.IsAsciiLetterOrDigit(character) || character == '_');
 
     private static void ValidateProviderFields(CodeAltaProviderDocument definition)
     {
@@ -2456,6 +2473,11 @@ public sealed partial class CodeAltaConfigStore
             RejectUnsupportedField(definition, "permission_mode", definition.PermissionMode);
             RejectUnsupportedField(definition, "anthropic_api_key", definition.AnthropicApiKey);
             RejectUnsupportedField(definition, "config_dir", definition.ConfigDir);
+            RejectUnsupportedField(definition, "env", definition.Env is { Count: > 0 } ? definition.Env : null);
+        }
+        else if (definition.Env?.Keys.FirstOrDefault(static name => !IsVariableName(name)) is { } variable)
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} env: '{variable}' is not the name of a variable (letters, digits and '_', not starting with a digit).");
         }
 
         if (!string.Equals(definition.ProviderType, AnthropicProviderType, StringComparison.Ordinal))
@@ -3137,6 +3159,7 @@ public sealed partial class CodeAltaConfigStore
                definition.RefusalFallback is not null ||
                !string.IsNullOrWhiteSpace(definition.PromptCacheTtl) ||
                !string.IsNullOrWhiteSpace(definition.ConfigDir) ||
+               definition.Env is { Count: > 0 } ||
                !string.IsNullOrWhiteSpace(definition.CodexHome) ||
                !string.IsNullOrWhiteSpace(definition.GitHubEnterpriseUrl) ||
                !string.IsNullOrWhiteSpace(definition.GitHubTokenEnv) ||
@@ -3246,6 +3269,7 @@ public sealed partial class CodeAltaConfigStore
             RefusalFallback = definition.RefusalFallback,
             PromptCacheTtl = definition.PromptCacheTtl,
             ConfigDir = definition.ConfigDir,
+            Env = definition.Env is null ? null : new Dictionary<string, string>(definition.Env, StringComparer.Ordinal),
             CodexHome = definition.CodexHome,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,
             GitHubTokenEnv = definition.GitHubTokenEnv,

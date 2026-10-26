@@ -249,9 +249,10 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.ApiKeyEnv = supportsApiKeyField && !UseDefaultApiKeyEnv ? NormalizeText(ApiKeyEnv) : null;
         definition.ApiUrl = UseDefaultApiUrl ? null : NormalizeText(ApiUrl);
         definition.GitHubEnterpriseUrl = ProviderType == "copilot" && !UseDefaultGitHubEnterpriseUrl ? NormalizeText(GitHubEnterpriseUrl) : null;
-        // The settings of a provider that runs a CLI: the arguments, anthropic_api_key and config_dir are edited in the TOML of the provider.
+        // The settings of a provider that runs a CLI: the arguments, anthropic_api_key, config_dir and env are edited in the TOML of the provider.
         var runsCli = ProviderType == "claude-code";
         definition.ConfigDir = runsCli ? definition.ConfigDir : null;
+        definition.Env = runsCli ? definition.Env : null;
         definition.CodexHome = ProviderType == "codex" ? definition.CodexHome : null;
         definition.Command = runsCli && !UseDefaultCommand ? NormalizeText(Command) : null;
         definition.PermissionMode = runsCli && !UseDefaultPermissionMode ? NormalizeText(PermissionMode) : null;
@@ -392,6 +393,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
             RefusalFallback = definition.RefusalFallback,
             PromptCacheTtl = definition.PromptCacheTtl,
             ConfigDir = definition.ConfigDir,
+            Env = definition.Env is null ? null : new Dictionary<string, string>(definition.Env, StringComparer.Ordinal),
             CodexHome = definition.CodexHome,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,
             GitHubTokenEnv = definition.GitHubTokenEnv,

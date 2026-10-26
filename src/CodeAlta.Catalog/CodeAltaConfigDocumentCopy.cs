@@ -132,6 +132,7 @@ internal static class CodeAltaConfigDocumentCopy
         RefusalFallback = provider.RefusalFallback,
         PromptCacheTtl = provider.PromptCacheTtl,
         ConfigDir = provider.ConfigDir,
+        Env = Copy(provider.Env, static value => value),
         CodexHome = provider.CodexHome,
         GitHubEnterpriseUrl = provider.GitHubEnterpriseUrl,
         GitHubTokenEnv = provider.GitHubTokenEnv,

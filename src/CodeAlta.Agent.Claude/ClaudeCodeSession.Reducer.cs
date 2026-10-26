@@ -801,12 +801,19 @@ internal sealed partial class ClaudeCodeSession
         => string.Equals(subtype, "error_during_execution", StringComparison.Ordinal) &&
            ClaudeCodeJson.GetString(result, "terminal_reason") is "aborted_streaming" or "aborted_tools";
 
+    private const string OAuthTokenVariable = "CLAUDE_CODE_OAUTH_TOKEN";
+
     // What a turn that failed for the sign-in says: how to sign in. A CLI in a sandbox of macOS cannot read its sign-in,
     // which is in the Keychain: signing in again would change nothing, it needs a token of its own.
+    // A token the provider gives is what the CLI signed in with, before its login: that token was refused.
     internal static string SignedOutMessage(ClaudeCodeModelProviderRuntimeOptions options, bool sandboxedOnMacOS, string detail)
-        => sandboxedOnMacOS
+        => options.EnvironmentVariables.TryGetValue(OAuthTokenVariable, out var token) && !string.IsNullOrWhiteSpace(token)
+            ? $"Claude Code refused the token of the provider ({OAuthTokenVariable} in its Environment, Settings > Providers): it may have expired or been revoked. " +
+              $"Make a new one with `claude setup-token` in a terminal and replace it, then send the message again. CodeAlta does not handle the credentials of Claude Code. ({detail})"
+            : sandboxedOnMacOS
             ? "Claude Code is not signed in in the sandbox of this session: on macOS its sign-in is in the Keychain, which the sandbox does not reach. " +
-              "Start CodeAlta with CLAUDE_CODE_OAUTH_TOKEN set to a token made with `claude setup-token` (or with an API key), or turn the sandbox off for this session, " +
+              "Make a token with `claude setup-token` in a terminal and give it to the provider as CLAUDE_CODE_OAUTH_TOKEN in its Environment (Settings > Providers), " +
+              "or turn the sandbox off for this session, " +
               $"then send the message again. CodeAlta does not handle the credentials of Claude Code. ({detail})"
             : $"Claude Code is not signed in. {options.SignInHint()}, then send the message again. CodeAlta does not handle the credentials of Claude Code. ({detail})";
 

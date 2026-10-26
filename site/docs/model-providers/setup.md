@@ -88,9 +88,12 @@ command = "~/.local/bin/claude"  # optional: a Claude Code of your own
 permission_mode = "default"      # optional: default, acceptEdits, plan, auto, dontAsk, bypassPermissions
 anthropic_api_key = "ignore"     # optional: use or ignore ANTHROPIC_API_KEY (default: your answer in Claude Code)
 args = ["--add-dir", "/specs"]   # optional: more arguments for the CLI
+
+[providers.claude-code.env]      # optional: variables the CLI starts with (Environment in the editor)
+CLAUDE_CODE_OAUTH_TOKEN = "..."  # a token of the account, from `claude setup-token`
 ```
 
-`config_dir` is a full path or starts with `~`; Claude Code gets it as `CLAUDE_CONFIG_DIR`. A `command` that is a name is looked for on `PATH`, then in the folders of the Claude Code installers. The provider takes no `api_key`, `api_key_env` or `api_url`.
+`config_dir` is a full path or starts with `~`; Claude Code gets it as `CLAUDE_CONFIG_DIR`. The variables of `env` (**Environment** in the provider editor, one `NAME=value` per line) are given to Claude Code over those CodeAlta inherits, also in a [sandbox](../sessions/sandbox.md#providers), where a token is what signs it in on macOS. A `command` that is a name is looked for on `PATH`, then in the folders of the Claude Code installers. The provider takes no `api_key`, `api_key_env` or `api_url`.
 
 ## Codex (ChatGPT)
 

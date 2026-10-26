@@ -572,6 +572,44 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task SaveProvider_WritesTheEnvironmentOfClaudeCode_AndADuplicateLeavesItBehind()
+    {
+        await using var fixture = new Fixture(ProvidersConfig);
+        var listed = fixture.Service.Providers(new(Epoch));
+        var edit = new GlobalConfigProviderEdit("claude", "claude-code", true, null, null, null, null, null, null, true);
+        GlobalConfigPluginMapEntry[] token = [new(" CLAUDE_CODE_OAUTH_TOKEN ", "sk-ant-oat01-test"), new("", "a line without a name is left out")];
+
+        foreach (var invalid in new[] { new GlobalConfigPluginMapEntry[] { new("NOT A NAME", "x") }, [new("1ST", "x")], [new("A", "1"), new("A", "2")] })
+        {
+            var refused = fixture.Service.SaveProvider(new(Epoch, listed.Revision, null, edit with { Environment = invalid }, false, false));
+            Assert.AreEqual("invalid", refused.Status, invalid[0].Name);
+        }
+
+        Assert.AreEqual(ProvidersConfig, File.ReadAllText(fixture.ConfigPath), "A refused edit must not write.");
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, null, edit with { Environment = token }, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        var after = fixture.Service.Providers(new(Epoch));
+        var variable = after.Providers.Single(static provider => provider.Key == "claude").Environment!.Single();
+        Assert.AreEqual(("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test"), (variable.Name, variable.Value));
+        Assert.IsNull(after.Providers.Single(static provider => provider.Key == "local").Environment);
+
+        // A copy is another account: the token of this one is not copied, as its folder is not.
+        var copied = fixture.Service.DuplicateProvider(new(Epoch, after.Revision, "claude"));
+        Assert.AreEqual("ok", copied.Status, copied.Message);
+        var withCopy = fixture.Service.Providers(new(Epoch));
+        Assert.IsNull(withCopy.Providers.Single(static provider => provider.Key != "claude" && provider.Type == "claude-code").Environment);
+
+        // An empty list removes the variables; another type keeps none.
+        var emptied = fixture.Service.SaveProvider(new(Epoch, withCopy.Revision, "claude", edit with { Environment = [] }, false, false));
+        Assert.AreEqual("ok", emptied.Status, emptied.Message);
+        Assert.IsNull(fixture.Service.Providers(new(Epoch)).Providers.Single(static provider => provider.Key == "claude").Environment);
+        var retyped = fixture.Service.SaveProvider(new(Epoch, emptied.Revision, "claude",
+            edit with { Type = "anthropic", ApiKeyEnv = "CODEALTA_ANTHROPIC_API_KEY", ClearApiKey = false, Environment = token }, false, false));
+        Assert.AreEqual("ok", retyped.Status, retyped.Message);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("CLAUDE_CODE_OAUTH_TOKEN", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task SaveProvider_KeepsTheSpacesOfTheProvider_AlsoUnderANewKey()
     {
         await using var fixture = new Fixture("""

@@ -382,6 +382,14 @@ public sealed class CodeAltaProviderDocument
     public string? ConfigDir { get; set; }
 
     /// <summary>
+    /// Gets or sets the variables a <c>claude-code</c> provider starts its CLI with, besides those CodeAlta inherits,
+    /// by name: a token of the account (<c>CLAUDE_CODE_OAUTH_TOKEN</c>) signs the CLI in where its login cannot be
+    /// read, as in a sandbox on macOS, where they are given with their values too.
+    /// </summary>
+    [JsonPropertyName("env")]
+    public Dictionary<string, string>? Env { get; set; }
+
+    /// <summary>
     /// Gets or sets the folder of the Codex CLI of a <c>codex</c> provider, given to it as <c>CODEX_HOME</c>: the
     /// account whose usage is read, and the installation id. A leading <c>~</c> is the home folder. When it is empty
     /// the CLI uses its own folder (<c>~/.codex</c>, or <c>CODEX_HOME</c> of the environment).

@@ -514,6 +514,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
             anthropic_api_key = " ignore "
             config_dir = " ~/.claude-business "
             models_include_regex = "sonnet|opus"
+            env = { CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-test", " SPACED " = "a=b" }
             """);
 
         var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
@@ -528,6 +529,8 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("acceptEdits", provider.PermissionMode);
         Assert.AreEqual("ignore", provider.AnthropicApiKey);
         Assert.AreEqual("~/.claude-business", provider.ConfigDir);
+        Assert.AreEqual("sk-ant-oat01-test", provider.Env?["CLAUDE_CODE_OAUTH_TOKEN"]);
+        Assert.AreEqual("a=b", provider.Env?["SPACED"], "a name is trimmed, a value kept as written");
         Assert.AreEqual("Claude Code", CodeAltaConfigStore.CreateProviderTypeDefaults("claude-code").DisplayName);
 
         // The settings of the CLI are written back, and the default display name is not.
@@ -541,6 +544,24 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.IsFalse(saved.Contains("display_name", StringComparison.Ordinal));
         var reloaded = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
         CollectionAssert.AreEqual(new[] { "--add-dir", "/data" }, reloaded.Arguments);
+        Assert.AreEqual("sk-ant-oat01-test", reloaded.Env?["CLAUDE_CODE_OAUTH_TOKEN"], "the variables are written back");
+        Assert.AreEqual("a=b", reloaded.Env?["SPACED"]);
+    }
+
+    [TestMethod]
+    public void LoadGlobalProviderDefinitions_RefusesAVariableOfClaudeCodeThatIsNotAName()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "config.toml"), """
+            [providers.claude]
+            type = "claude-code"
+            env = { "NOT A NAME" = "x" }
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var failure = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+
+        StringAssert.Contains(failure.InnerException?.Message, "'NOT A NAME' is not the name of a variable");
     }
 
     [TestMethod]
@@ -608,6 +629,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
     [DataRow("anthropic_api_key = \"use\"", "anthropic_api_key")]
     [DataRow("config_dir = \"~/.claude-work\"", "config_dir")]
     [DataRow("codex_home = \"~/.codex-work\"", "codex_home")]
+    [DataRow("env = { CLAUDE_CODE_OAUTH_TOKEN = \"x\" }", "env")]
     public void LoadGlobalProviderDefinitions_RejectsCliSettingsForApiProviders(string setting, string field)
     {
         using var temp = TempDirectory.Create();

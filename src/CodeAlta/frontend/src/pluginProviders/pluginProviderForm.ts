@@ -20,7 +20,7 @@ export function pluginFieldValues(provider: GlobalConfigProvider | null): Plugin
 
 function fieldText(value: GlobalConfigPluginSettingValue): string {
   if (value.list) return value.list.join("\n");
-  if (value.map) return value.map.map(entry => `${entry.name}=${entry.value}`).join("\n");
+  if (value.map) return environmentText(value.map);
   if (value.flag !== undefined && value.flag !== null) return value.flag ? "true" : "false";
   return value.text ?? "";
 }
@@ -31,10 +31,7 @@ export function pluginSettingValues(type: GlobalConfigPluginProviderType, values
     const text = values[setting.key] ?? "";
     switch (setting.kind) {
       case "list": return { key: setting.key, list: lines(text) };
-      case "map": return { key: setting.key, map: lines(text).map(line => {
-        const equals = line.indexOf("=");
-        return equals < 0 ? { name: line.trim(), value: "" } : { name: line.slice(0, equals).trim(), value: line.slice(equals + 1) };
-      }).filter(entry => entry.name.length > 0) };
+      case "map": return { key: setting.key, map: environmentEntries(text) };
       case "boolean": return { key: setting.key, flag: text === "" ? null : text === "true" };
       default: return { key: setting.key, text: text.trim() || null };
     }
@@ -45,7 +42,8 @@ export function pluginSettingValues(type: GlobalConfigPluginProviderType, values
 export function pluginFieldsProblem(type: GlobalConfigPluginProviderType, values: PluginFieldValues): "A line of the environment has no name before =." | null {
   for (const setting of type.settings) {
     if (setting.kind !== "map" || setting.readOnly) continue;
-    if (lines(values[setting.key] ?? "").some(line => line.trimStart().startsWith("="))) return "A line of the environment has no name before =.";
+    const problem = environmentProblem(values[setting.key] ?? "");
+    if (problem) return problem;
   }
   return null;
 }
@@ -55,6 +53,24 @@ export function samePluginFieldValues(left: PluginFieldValues, right: PluginFiel
   const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
   for (const key of keys) if ((left[key] ?? "") !== (right[key] ?? "")) return false;
   return true;
+}
+
+/** Names and values as the form edits them: one `NAME=value` per line. */
+export function environmentText(entries: readonly Readonly<{ name: string; value: string }>[] | null | undefined): string {
+  return (entries ?? []).map(entry => `${entry.name}=${entry.value}`).join("\n");
+}
+
+/** The names and values of the lines of the form: a line without `=` is a name with an empty value; blank lines are left out. */
+export function environmentEntries(text: string): { name: string; value: string }[] {
+  return lines(text).map(line => {
+    const equals = line.indexOf("=");
+    return equals < 0 ? { name: line.trim(), value: "" } : { name: line.slice(0, equals).trim(), value: line.slice(equals + 1) };
+  }).filter(entry => entry.name.length > 0);
+}
+
+/** The problem of the lines of an environment that prevents saving, or null. */
+export function environmentProblem(text: string): "A line of the environment has no name before =." | null {
+  return lines(text).some(line => line.trimStart().startsWith("=")) ? "A line of the environment has no name before =." : null;
 }
 
 function lines(text: string): string[] {

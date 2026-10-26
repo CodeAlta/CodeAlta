@@ -2,7 +2,7 @@ import type { GlobalConfigProvider, GlobalConfigProviderEdit } from "#neoastra";
 import { brandColor } from "./brands";
 import type { MessageKey } from "./localization";
 import { validConfigDir } from "./claudeCli/claudeCli";
-import { pluginFieldValues, samePluginFieldValues, type PluginFieldValues } from "./pluginProviders/pluginProviderForm";
+import { environmentEntries, environmentProblem, environmentText, pluginFieldValues, samePluginFieldValues, type PluginFieldValues } from "./pluginProviders/pluginProviderForm";
 
 /** Editable provider fields; empty strings mean "left to the provider's default". */
 export type ProviderForm = Readonly<{
@@ -16,6 +16,11 @@ export type ProviderForm = Readonly<{
   permissionMode: string;
   /** For a provider that runs Claude Code: the folder of its account (CLAUDE_CONFIG_DIR); blank for the folder of Claude Code. */
   configDir: string;
+  /**
+   * For a provider that runs Claude Code: the variables its CLI starts with, one `NAME=value` per line, such as a token
+   * of its account (CLAUDE_CODE_OAUTH_TOKEN), which a sandbox on macOS needs.
+   */
+  environment: string;
   /** The order of the models (`provider`, `name`, `name_version`); blank for the order of its type. */
   modelsOrder: string;
   /** For a provider whose type a plugin runs: the values of the settings of its type, by key. */
@@ -29,9 +34,9 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
       reasoningEffort: provider.reasoningEffort ?? "", apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
       clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "",
       anthropicApiKey: provider.anthropicApiKey ?? "", permissionMode: provider.permissionMode ?? "",
-      configDir: provider.configDir ?? "", modelsOrder: provider.modelsOrder ?? "", plugin: pluginFieldValues(provider) }
+      configDir: provider.configDir ?? "", environment: environmentText(provider.environment), modelsOrder: provider.modelsOrder ?? "", plugin: pluginFieldValues(provider) }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
-      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", modelsOrder: "", plugin: {} };
+      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", plugin: {} };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
@@ -48,6 +53,7 @@ export function validateProviderForm(form: ProviderForm, providers: readonly Pic
   if (form.makeDefault && !form.enabled) return "Only an enabled provider can be the default.";
   if (form.color.trim() && !brandColor(form.color)) return "A color is written as #rgb or #rrggbb.";
   if (runsOwnCli(form.type) && !validConfigDir(form.configDir)) return "A folder is a full path or starts with ~.";
+  if (runsOwnCli(form.type)) return environmentProblem(form.environment);
   return null;
 }
 
@@ -63,7 +69,9 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
     // Only a provider that runs its own CLI takes a permission mode: the configuration file refuses it elsewhere.
     permissionMode: cli ? optional(form.permissionMode) : null,
     // So is the folder of its account.
-    configDir: cli ? optional(form.configDir) : null, modelsOrder: optional(form.modelsOrder) };
+    configDir: cli ? optional(form.configDir) : null,
+    // And the variables its CLI starts with: an empty list removes them.
+    environment: cli ? environmentEntries(form.environment) : null, modelsOrder: optional(form.modelsOrder) };
 }
 
 /** The orders of the models of a provider, by their value in the configuration file. */
