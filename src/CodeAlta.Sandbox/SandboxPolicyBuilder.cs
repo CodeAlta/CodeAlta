@@ -135,6 +135,7 @@ public static class SandboxPolicyBuilder
             Environment = Environment(profile, host, sessionEnvironment, sandboxHome, caches, temp, userGitConfig, userPackages),
             Temp = temp,
             Home = sandboxHome,
+            DataRoot = Full(host.DataRoot),
             McpServers = profile.McpServers,
             Outside = profile.Outside,
         };
@@ -211,6 +212,10 @@ public static class SandboxPolicyBuilder
         environment["DOTNET_NOLOGO"] = "1";
         environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
+        // MSBuild and the compiler server of Roslyn put their pipes in `/tmp`, which a sandbox of macOS does not write:
+        // the compiler then waits for its server before it compiles in the build. (The worker nodes of MSBuild need
+        // `-m:1`, which the agent is told.)
+        if (OperatingSystem.IsMacOS()) environment["UseSharedCompilation"] = "false";
         if (File.Exists(userGitConfig)) environment["GIT_CONFIG_GLOBAL"] = userGitConfig;
         environment["CODEALTA_SANDBOX"] = profile.Name;
         return environment;

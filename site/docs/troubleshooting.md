@@ -157,6 +157,8 @@ A session whose [sandbox](sessions/sandbox.md) cannot run runs no command, and s
 - **Commands start in `C:\` instead of the project (Windows)**: a folder above the project holds tens of thousands of entries, as the temporary folder does, and the sandbox keeps such a folder out of reach. Move the project elsewhere.
 - **`dotnet build` fails without an error (Windows)**: MSBuild cannot start its worker nodes in the sandbox. Build with `-m:1`; the agent is told to.
 - **`dotnet test` stops after 90 seconds with a profile that reaches hosts (Windows)**: before Windows 11 build .9550, the processes of such a sandbox cannot connect to each other, as VSTest needs. Let the agent run the tests outside the sandbox, or use a profile without network once the packages are restored.
+- **`dotnet build` or `dotnet restore` waits for minutes (macOS)**: MSBuild waits for worker nodes that cannot start in the sandbox. Build with `-m:1`; the agent is told to.
+- **`dotnet test` stops at once with `Permission denied` (macOS)**: no process of a sandbox listens on a port there, as VSTest needs, and `dotnet test` does not run. A test project of Microsoft.Testing.Platform runs as a program: `dotnet build <tests> -m:1`, then `dotnet run --project <tests> --no-build`; otherwise let the agent run the tests outside the sandbox.
 
 ## A plugin is broken
 

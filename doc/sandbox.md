@@ -47,7 +47,14 @@ Bubblewrap on Linux. Invariants:
   sandboxed session, never commands without a sandbox.
 - **The parents of a grant.** Tools resolve a path one folder at a time from the volume root. A read-only grant
   cascades to everything below it, so each parent folder of a read-write grant is granted read-only with its other
-  entries denied, and the volume root, which does not cascade in the read-write list, is granted there.
+  entries denied, and the volume root, which does not cascade in the read-write list, is granted there. On macOS,
+  where every path can be looked up, nothing is granted: the other entries of the parents inside the home folder
+  are denied, so that a file a build looks for above the project (`.editorconfig`) is not there rather than there
+  and unreadable.
+- **What tools need beside `PATH` on macOS.** The folders a Homebrew prefix links its commands to (not its `var`),
+  the developer folder whose `xcrun` shims `/usr/bin/git` and `python3` load, and the Mach services of the names of
+  users and of the check of certificates (.NET's TLS). mxc's `keychainAccess` is never set: the keychains stay out of
+  reach. MSBuild and Roslyn put their pipes in `/tmp`, which the sandbox does not write, so a build needs one node.
 - **No telemetry.** No request enables it.
 - **The UI stays enabled** (a disabled one stops tools at start); the clipboard stays closed.
 

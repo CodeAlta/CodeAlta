@@ -23,7 +23,7 @@ public sealed class CliSandboxEscapeTests
     {
         var backend = new MxcSandboxBackend();
         if (backend.GetAvailability() is { IsAvailable: false } availability) Assert.Inconclusive(availability.Reason ?? "No sandbox on this computer.");
-        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The commands of this test are those of PowerShell.");
+        var windows = OperatingSystem.IsWindows();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var root = Directory.CreateDirectory(Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), "tests", "escape-" + Guid.NewGuid().ToString("N")[..8])).FullName;
         var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
@@ -44,7 +44,7 @@ public sealed class CliSandboxEscapeTests
             var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve(SandboxProfiles.Workspace, []), new SandboxSessionFolders { WorkingDirectory = project },
                 SandboxHostDiscovery.Current(Path.Combine(root, "data"), []), [], "escape");
             await using var proxy = SandboxNetworkProxy.Start(policy.Hosts, policy.LocalPorts, new HashSet<int> { reserved });
-            var executable = Path.Combine(AppContext.BaseDirectory, "altacli.exe");
+            var executable = Path.Combine(AppContext.BaseDirectory, windows ? "altacli.exe" : "altacli");
             await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{executable}\" {SandboxWorker.Option}", proxy.Endpoint,
                 new SandboxWorkerInit("session-1", "test", project, [project], null, home, false), CancellationToken.None).WaitAsync(Deadline);
             var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
@@ -55,35 +55,40 @@ public sealed class CliSandboxEscapeTests
 
             foreach (var secret in secrets)
             {
-                Assert.DoesNotContain("the-secret-of-the-user", await Run($"Get-Content -LiteralPath '{secret}'"), secret);
+                Assert.DoesNotContain("the-secret-of-the-user", await Run(windows ? $"Get-Content -LiteralPath '{secret}'" : $"cat '{secret}'"), secret);
                 Assert.DoesNotContain("the-secret-of-the-user", await Tool("read_file", new { path = secret }), secret);
             }
 
             if (linked)
             {
-                Assert.DoesNotContain("the-secret-of-the-user", await Run("Get-Content -LiteralPath link-to-secret"), "a link in the project");
+                Assert.DoesNotContain("the-secret-of-the-user", await Run(windows ? "Get-Content -LiteralPath link-to-secret" : "cat link-to-secret"), "a link in the project");
                 Assert.DoesNotContain("the-secret-of-the-user", await Tool("read_file", new { path = "link-to-secret" }), "a link in the project, read by a tool");
             }
 
             // What runs programs later stays as it is.
             foreach (var path in new[] { ".git/hooks/pre-commit", ".git/config", ".alta/plugins/x/plugin.cs", ".vscode/tasks.json" })
             {
-                await Run($"New-Item -ItemType Directory -Force (Split-Path '{path}') | Out-Null; Set-Content -LiteralPath '{path}' -Value evil");
+                await Run(windows ? $"New-Item -ItemType Directory -Force (Split-Path '{path}') | Out-Null; Set-Content -LiteralPath '{path}' -Value evil"
+                    : $"mkdir -p \"$(dirname '{path}')\"; echo evil > '{path}'");
                 var full = Path.Combine(project, path);
                 Assert.IsFalse(File.Exists(full) && File.ReadAllText(full).Contains("evil", StringComparison.Ordinal), path);
             }
 
-            // CodeAlta's own port, directly and through the proxy; a host the profile does not list.
-            Assert.Contains("refused-direct", await Run($"try {{ $c = [Net.Sockets.TcpClient]::new(); $c.Connect('127.0.0.1', {reserved}); 'connected-direct' }} catch {{ 'refused-direct' }}"));
-            Assert.Contains("403", await Run($"try {{ Invoke-WebRequest -Uri 'http://127.0.0.1:{reserved}/mcp' -UseBasicParsing -TimeoutSec 20 | Out-Null; 'reached' }} catch {{ $_.Exception.Response.StatusCode.value__ }}"));
-            // For HTTPS, the 403 of the proxy is the failure of the tunnel: the message names it.
-            var unlisted = await Run("try { Invoke-WebRequest -Uri 'https://example.com/' -Method Head -UseBasicParsing -TimeoutSec 20 | Out-Null; 'reached' } catch { $_.Exception.Message }");
-            Assert.DoesNotContain("reached", unlisted);
-            Assert.Contains("403", unlisted);
-            Assert.DoesNotContain("must-not-reach-the-sandbox", await Run("Get-ChildItem env: | Out-String -Width 400"));
+            Assert.DoesNotContain("must-not-reach-the-sandbox", await Run(windows ? "Get-ChildItem env: | Out-String -Width 400" : "env"));
+            if (windows)
+            {
+                // CodeAlta's own port, directly and through the proxy; a host the profile does not list. (On macOS and
+                // Linux, the test of the network below.)
+                Assert.Contains("refused-direct", await Run($"try {{ $c = [Net.Sockets.TcpClient]::new(); $c.Connect('127.0.0.1', {reserved}); 'connected-direct' }} catch {{ 'refused-direct' }}"));
+                Assert.Contains("403", await Run($"try {{ Invoke-WebRequest -Uri 'http://127.0.0.1:{reserved}/mcp' -UseBasicParsing -TimeoutSec 20 | Out-Null; 'reached' }} catch {{ $_.Exception.Response.StatusCode.value__ }}"));
+                // For HTTPS, the 403 of the proxy is the failure of the tunnel: the message names it.
+                var unlisted = await Run("try { Invoke-WebRequest -Uri 'https://example.com/' -Method Head -UseBasicParsing -TimeoutSec 20 | Out-Null; 'reached' } catch { $_.Exception.Message }");
+                Assert.DoesNotContain("reached", unlisted);
+                Assert.Contains("403", unlisted);
+            }
 
             // A process started in the background ends with the worker.
-            var started = await Run("(Start-Process pwsh -ArgumentList '-NoProfile','-Command','Start-Sleep 600' -PassThru).Id");
+            var started = await Run(windows ? "(Start-Process pwsh -ArgumentList '-NoProfile','-Command','Start-Sleep 600' -PassThru).Id" : "nohup sleep 600 >/dev/null 2>&1 & echo $!");
             var id = int.Parse(started.Split('\n').Select(static line => line.Trim()).First(static line => line.Length > 0 && line.All(char.IsAsciiDigit)), System.Globalization.CultureInfo.InvariantCulture);
             await worker.DisposeAsync();
             var watch = Stopwatch.StartNew();
@@ -182,7 +187,8 @@ public sealed class CliSandboxEscapeTests
             {
                 var command = OperatingSystem.IsWindows()
                     ? $"try {{ $c = [Net.Sockets.TcpClient]::new(); if ($c.ConnectAsync('{address}', {to}).Wait(10000)) {{ 'connected' }} else {{ 'refused' }} }} catch {{ 'refused' }}"
-                    : $"timeout 10 bash -c '(exec 3<>/dev/tcp/{address}/{to}) 2>/dev/null' && echo connected || echo refused";
+                    // macOS has no `timeout`: without it the connection is still tried, and the test waits for it.
+                    : $"$(command -v timeout >/dev/null && echo timeout 10) bash -c '(exec 3<>/dev/tcp/{address}/{to}) 2>/dev/null' && echo connected || echo refused";
                 return Text(await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WaitAsync(Deadline));
             }
 

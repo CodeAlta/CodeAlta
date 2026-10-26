@@ -79,6 +79,60 @@ public sealed class CliSandboxWorkerTests
         }
     }
 
+    [TestMethod]
+    public async Task TheDeveloperToolsOfThisComputer_RunInAContainer()
+    {
+        var backend = new MxcSandboxBackend();
+        if (backend.GetAvailability() is { IsAvailable: false } availability) Assert.Inconclusive(availability.Reason ?? "No sandbox on this computer.");
+        if (OperatingSystem.IsWindows()) Assert.Inconclusive("The commands of this test are those of a Unix shell.");
+        // The tools found on PATH here, among those that macOS links elsewhere: git and python3 are shims of the developer
+        // folder (Xcode), node of Homebrew lives in its Cellar.
+        var tools = new[] { "git --version", "python3 --version", "node --version" }
+            .Where(static command => OnPath(command.Split(' ')[0])).ToList();
+        if (tools.Count == 0) Assert.Inconclusive("None of git, python3 and node is on PATH.");
+        var root = Directory.CreateDirectory(Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), "tests", "tools-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+        // A file that builds look for in the folders above the project.
+        File.WriteAllText(Path.Combine(root, ".editorconfig"), "root = true");
+        try
+        {
+            var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve(SandboxProfiles.Strict, []), new SandboxSessionFolders { WorkingDirectory = project },
+                SandboxHostDiscovery.Current(Path.Combine(root, "data"), []), [], "tools");
+            await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{Path.Combine(AppContext.BaseDirectory, "altacli")}\" {SandboxWorker.Option}", null,
+                new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None)
+                .WaitAsync(Deadline);
+            var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
+            // Not there rather than there and unreadable, which fails a build (CS1504).
+            var above = await worker.InvokeAsync(Call("shell_command", new { command = "[ -e ../.editorconfig ] && echo visible || echo absent" }), host, CancellationToken.None).WaitAsync(Deadline);
+            Assert.Contains("absent", Text(above));
+            foreach (var command in tools)
+            {
+                var result = await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WaitAsync(Deadline);
+                Assert.IsTrue(result.Success, $"{command}: {Text(result)}");
+            }
+
+            if (tools.Contains("git --version"))
+            {
+                var commit = await worker.InvokeAsync(Call("shell_command", new { command = "git init -q && echo a > a.txt && git add a.txt && git -c user.name=t -c user.email=t@t commit -qm a && git log --oneline" }),
+                    host, CancellationToken.None).WaitAsync(Deadline);
+                Assert.IsTrue(commit.Success, Text(commit));
+            }
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    private static bool OnPath(string program)
+        => (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Any(folder => File.Exists(Path.Combine(folder, program)));
+
     private static AgentToolInvocation Call(string tool, object arguments)
         => new(new ModelProviderId("test"), "session-1", Guid.NewGuid().ToString("N"), tool, JsonSerializer.SerializeToElement(arguments));
 

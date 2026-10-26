@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { isSanitizerParseReport } from "../sanitizerParseReport";
 
 const edge = browserExecutable;
 
@@ -57,7 +58,9 @@ test("the Documentation tab shows the guide under the policy of the application:
       }
       if (["Page.windowOpen", "Page.frameAttached", "Runtime.exceptionThrown"].includes(message.method)) failures.push(JSON.stringify(message).slice(0, 600));
       if (message.method === "Page.frameNavigated" && message.params.frame.url !== page) failures.push(`navigated: ${message.params.frame.url}`);
-      if (message.method === "Log.entryAdded" && message.params.entry.source === "security") failures.push(String(message.params.entry.text));
+      // The report of the inert parse of the sanitizer is not a handler that ran (see isSanitizerParseReport).
+      if (message.method === "Log.entryAdded" && message.params.entry.source === "security"
+          && !isSanitizerParseReport(String(message.params.entry.text), message.params.entry.stackTrace?.callFrames)) failures.push(String(message.params.entry.text));
     });
     await command("Page.enable"); await command("Runtime.enable"); await command("Network.enable"); await command("Log.enable");
     await command("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });

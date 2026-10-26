@@ -120,7 +120,7 @@ public static class SandboxWorker
                 // The file tools keep the rules of a session without shell inside the sandbox too: what the container
                 // already refuses, and the settings of git, CodeAlta and the coding agents inside the working tree.
                 WriteGuard = new AgentWriteGuard(init.WritableRoots is { Count: > 0 } roots ? roots : [workingDirectory], [],
-                    init.Scratchpad is { } scratchpad ? [scratchpad] : [], init.Home),
+                    init.Scratchpad is { } scratchpad ? [scratchpad] : [], init.Home) { InSandbox = true },
             };
             return AgentBuiltInToolFactory.CreateDefaultTools(options)
                 .Where(static tool => Tools.Contains(tool.Spec.Name))

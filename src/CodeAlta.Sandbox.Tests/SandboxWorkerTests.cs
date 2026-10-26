@@ -39,6 +39,8 @@ public sealed class SandboxWorkerTests
 
         var guarded = await worker.Client.InvokeAsync(Call("write_file", new { path = ".git/hooks/pre-commit", content = "evil" }), allow, CancellationToken.None).WaitAsync(Deadline);
         Assert.IsFalse(guarded.Success, "the file tools of the worker keep the rules of a session without shell");
+        Assert.DoesNotContain("shell_command", Text(guarded), "a sandboxed session has its shell: the sandbox refuses");
+        Assert.Contains("sandbox", Text(guarded));
     }
 
     [TestMethod]

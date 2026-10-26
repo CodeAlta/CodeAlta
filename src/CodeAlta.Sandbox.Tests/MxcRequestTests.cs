@@ -81,6 +81,50 @@ public sealed class MxcRequestTests
         }
     }
 
+    [TestMethod]
+    public void WithoutGrantingTheParents_TheirOtherEntriesAreDenied_ButNotWhatLeadsToAGrantNorWhatIsOutsideTheHome()
+    {
+        using var temp = new TempTree();
+        var home = temp.Folder("home");
+        var project = temp.Folder("home/code/project");
+        var sibling = temp.Folder("home/code/other-project");
+        var editorConfig = Path.Combine(home, "code", ".editorconfig");
+        File.WriteAllText(editorConfig, "root = true");
+        var dataTemp = temp.Folder("home/Library/Caches/sandbox/sessions/s/temp");
+        var tools = temp.Folder("home/.dotnet/tools");
+        var dotnetSecrets = temp.Folder("home/.dotnet/secrets");
+        var outside = temp.Folder("outside-the-home");
+        var filesystem = new FilesystemPolicy();
+        foreach (var path in new[] { project, dataTemp }) filesystem.ReadwritePaths.Add(path);
+        filesystem.ReadonlyPaths.Add(tools);
+
+        MxcRequests.AddParentChain(filesystem, grantParents: false, unchained: Path.Combine(home, "Library", "Caches", "sandbox"), within: home);
+
+        CollectionAssert.Contains(filesystem.DeniedPaths, editorConfig, "a file a build looks for above the project is not there, rather than unreadable");
+        CollectionAssert.Contains(filesystem.DeniedPaths, sibling);
+        CollectionAssert.Contains(filesystem.DeniedPaths, dotnetSecrets, "beside a tool folder");
+        foreach (var kept in new[] { project, Path.Combine(home, "code"), Path.Combine(home, "Library"), Path.Combine(home, ".dotnet"), tools })
+            CollectionAssert.DoesNotContain(filesystem.DeniedPaths, kept, "it leads to a grant");
+        CollectionAssert.DoesNotContain(filesystem.DeniedPaths, outside, "the entries of folders outside the home are the system's");
+        Assert.IsFalse(filesystem.DeniedPaths.Any(path => SandboxPolicyBuilder.IsInside(Path.Combine(home, "Library"), path)), "the parents of the data folder are not chained");
+        Assert.AreEqual(2, filesystem.ReadwritePaths.Count, "no volume root is granted");
+        Assert.AreEqual(1, filesystem.ReadonlyPaths.Count, "nor a parent folder, which would open what it holds");
+    }
+
+    [TestMethod]
+    public void OnMacOS_TheSandboxReachesTheServicesThatCheckCertificates_NotTheKeychains()
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Inconclusive("Seatbelt is the container of macOS.");
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+
+        var seatbelt = (Containment.Seatbelt)MxcRequests.Create(Policy(temp, project, SandboxNetwork.Off), "sh", null).Containment!;
+
+        CollectionAssert.IsSubsetOf(new[] { "com.apple.SecurityServer", "com.apple.trustd.agent", "com.apple.system.opendirectoryd.libinfo" }, seatbelt.ExtraMachLookups,
+            "TLS of .NET and the names of users and groups");
+        Assert.IsFalse(seatbelt.KeychainAccess, "the keychains stay out of reach");
+    }
+
     private static SandboxPolicy Policy(TempTree temp, string project, SandboxNetwork network)
         => SandboxPolicyBuilder.Build(
             SandboxProfiles.Resolve("t", [new SandboxProfile { Name = "t", Network = network }]),

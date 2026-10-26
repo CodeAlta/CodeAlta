@@ -22,3 +22,7 @@ The spike of `.alta/plans/2026-10-25-sandboxing.md` (step 1, findings in the pla
 ## Where
 
 `src/CodeAlta.Sandbox` (backend and availability), the container tests, `site/docs/sessions/sandbox.md`.
+
+## macOS: done (2026-10-26)
+
+Verified on macOS 27.0.1 (Apple silicon) with the Seatbelt backend; the escape suite now runs on macOS and Linux (`CliSandboxEscapeTests`), with a test of the developer tools in a container (`CliSandboxWorkerTests`). What it found was fixed in the same change, and the user guide's platform list says what remains (`-m:1`, no `dotnet test`). See "How it is verified" in the plan. The Windows build .9550 part stays open.

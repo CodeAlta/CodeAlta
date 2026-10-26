@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
+import { isSanitizerParseReport } from "./sanitizerParseReport";
 
 const edge = browserExecutable;
 
@@ -36,7 +37,7 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       pending.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
-    const attempts: string[] = [], blocked: string[] = [], failures: string[] = [], baseDiagnostics: string[] = [];
+    const attempts: string[] = [], blocked: string[] = [], failures: string[] = [], baseDiagnostics: string[] = [], inertParseDiagnostics: string[] = [];
     socket.addEventListener("message", event => {
       const m = JSON.parse(String(event.data));
       if (pending.has(m.id)) { pending.get(m.id)!(m); pending.delete(m.id); }
@@ -55,7 +56,10 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       if (m.method === "Page.frameNavigated" && m.params.frame.url !== page) failures.push(JSON.stringify(m));
       if (m.method === "Log.entryAdded" && m.params.entry.source === "security") {
         const text = String(m.params.entry.text);
+        // The report of the inert parse of the sanitizer: nothing runs there (`executed` stays 0, no `on*` reaches the page).
+        const inertParse = isSanitizerParseReport(text, m.params.entry.stackTrace?.callFrames);
         if (text.includes("base-uri 'none'") && text.includes("https://remote.invalid/base/")) baseDiagnostics.push(text);
+        else if (inertParse) inertParseDiagnostics.push(text);
         else failures.push(text);
       }
     });
@@ -78,7 +82,10 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       assert.equal(s.location, page); assert.equal(s.base, page); assert.equal(s.frames, 0); assert.equal(s.executed, 0); assert.deepEqual(s.opens, []);
       assert.ok(s.parsedBases.every(base => base === page));
       assert.deepEqual(s.prohibited, []); assert.deepEqual(s.attributes, []);
-      assert.ok(s.policies.every(p => p.directive === "base-uri" && p.uri === "https://remote.invalid/base/"));
+      // Each violation is also a log entry: an inline handler is allowed only as the report of an inert parse (above).
+      const inline = s.policies.filter(p => p.directive === "script-src-attr" && p.uri === "inline");
+      assert.ok(inline.length <= inertParseDiagnostics.length, "an inline handler reported outside the inert parse of the sanitizer");
+      assert.ok(s.policies.every(p => p.directive === "base-uri" && p.uri === "https://remote.invalid/base/" || inline.includes(p)));
     };
     for (let i = 0; i < cases.length; i++) {
       assert.equal(await evaluate(`markdownFixture.run(${i})`), true, `useful HTML control: ${cases[i].id}`);
@@ -210,7 +217,7 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     }
     assert.deepEqual(attempts, [page, script]);
     assert.ok(baseDiagnostics.length > 0, "explicitly retain base-uri enforcement evidence");
-    console.log(`Markdown production boundary: ${cases.length} cases, 2 fulfilled assets, 0 unexpected requests; ${baseDiagnostics.length} allowed base-uri diagnostics; 600ms deferred windows. HTTPS is not app://codealta.`);
+    console.log(`Markdown production boundary: ${cases.length} cases, 2 fulfilled assets, 0 unexpected requests; ${baseDiagnostics.length} allowed base-uri diagnostics, ${inertParseDiagnostics.length} inert-parse handler diagnostics; 600ms deferred windows. HTTPS is not app://codealta.`);
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();
