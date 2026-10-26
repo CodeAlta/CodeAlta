@@ -20,6 +20,10 @@ Commands (each prints what it found and exits with 0 when all is well, 1 otherwi
                            puts the tour above the generated notes of the release, folded in "All changes",
                            then checks the links of the result
     site [--check FILE]    runs the site workflow of the website, waits for it, then checks the site links of FILE
+    close VERSION [--dry-run]
+                           comments on and closes each open issue of the milestone with the message of
+                           tmp/release-VERSION/comments/<issue>.md, then closes the milestone; refuses an
+                           empty message and checks each comment once posted
     nuget VERSION [--minutes N]
                            waits until every package of the release lists VERSION on nuget.org
 
@@ -337,7 +341,15 @@ def cmd_site(args: argparse.Namespace) -> int:
     if conclusion != "success":
         return 1
     if args.check:
-        return 1 if check_links(Path(args.check).read_text(encoding="utf-8"), only="codealta.github.io") else 0
+        # The CDN of GitHub Pages serves the new site a few minutes after the run (two for 2.1.0): a page the
+        # release adds answers 404 until then, so the check is tried again for up to ten minutes.
+        text = Path(args.check).read_text(encoding="utf-8")
+        for attempt in range(10):
+            if not check_links(text, only="codealta.github.io"):
+                return 0
+            print("  the CDN may still serve the old site: checking again in a minute")
+            time.sleep(60)
+        return 1
     return 0
 
 
@@ -378,6 +390,54 @@ def cmd_nuget(args: argparse.Namespace) -> int:
         time.sleep(60)
 
 
+FOOTER = "_This comment was written by [CodeAlta](https://codealta.github.io), an AI coding agent._"
+
+
+def comment_message(path: Path) -> str:
+    """The comment of an issue from its file, with the footer of CodeAlta; refuses a message that says nothing."""
+    if not path.is_file():
+        raise SystemExit(f"error: no message for this issue: write {path}")
+    body = path.read_text(encoding="utf-8").strip()
+    text = body.replace(FOOTER, "").strip()
+    # A comment says what was done, links the release and the docs, and thanks whoever reported it: a footer alone,
+    # or a line, is no message.
+    if len(text) < 80:
+        raise SystemExit(f"error: the message of {path} is empty or too short: nothing is posted")
+    return body if FOOTER in body else f"{body}\n\n{FOOTER}"
+
+
+def cmd_close(args: argparse.Namespace) -> int:
+    version = args.version
+    folder = ROOT / "tmp" / f"release-{version}" / "comments"
+    issues = gh_json("issue", "list", "--repo", REPO, "--milestone", version, "--state", "open", "--json", "number,title,author") or []
+    if not issues:
+        print(f"No open issue in milestone {version}.")
+    # Every message is read and checked before the first one is posted.
+    messages = {issue["number"]: comment_message(folder / f"{issue['number']}.md") for issue in issues}
+    for issue in issues:
+        number = issue["number"]
+        print(f"#{number} {issue['title']} (@{issue['author']['login']})")
+        if args.dry_run:
+            print("  " + messages[number].splitlines()[0][:160])
+            continue
+        message_file = folder / f".posted-{number}.md"
+        message_file.write_text(messages[number], encoding="utf-8")
+        run("gh", "issue", "comment", str(number), "--repo", REPO, "--body-file", str(message_file))
+        posted = gh_json("api", f"repos/{REPO}/issues/{number}/comments?per_page=100")[-1]
+        if posted["body"].strip() != messages[number].strip():
+            raise SystemExit(f"error: the comment of #{number} is not the message ({posted['html_url']}); the issue stays open")
+        run("gh", "issue", "close", str(number), "--repo", REPO, "--reason", "completed")
+        print(f"  commented and closed: {posted['html_url']}")
+    if args.dry_run:
+        return 0
+    milestones = gh_json("api", f"repos/{REPO}/milestones?state=open&per_page=100") or []
+    for milestone in milestones:
+        if milestone["title"] == version and milestone["open_issues"] == 0:
+            gh_json("api", "-X", "PATCH", f"repos/{REPO}/milestones/{milestone['number']}", "-f", "state=closed")
+            print(f"milestone {version} closed")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 2)[2])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -410,6 +470,10 @@ def main() -> int:
     site = commands.add_parser("site")
     site.add_argument("--check", help="Markdown file whose codealta.github.io links are checked after the deploy")
     site.set_defaults(func=cmd_site)
+    close = commands.add_parser("close")
+    close.add_argument("version")
+    close.add_argument("--dry-run", action="store_true", help="check the messages and show them, post nothing")
+    close.set_defaults(func=cmd_close)
     nuget = commands.add_parser("nuget")
     nuget.add_argument("version")
     nuget.add_argument("--minutes", type=int, default=90)

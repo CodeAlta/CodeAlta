@@ -34,6 +34,7 @@ python .alta/skills/codealta-release/scripts/release.py <command>
 | `ci [main\|X.Y.Z]` | 8, 10: waits for the ci run of the commit and says how it ended |
 | `tag X.Y.Z [--commit <sha>]` | 10: refuses without a green ci run, then tags and pushes |
 | `notes X.Y.Z --tour <file>` | 11: the tour above the generated notes, folded in **All changes** |
+| `close X.Y.Z [--dry-run]` | 9: comments on and closes the issues of the milestone from their message files |
 | `site --check <file>` | 11: deploys the website, then checks the site links of the tour |
 | `nuget X.Y.Z` | 12: waits until every package lists the version |
 
@@ -224,9 +225,18 @@ cd ../../../site && lunet build
 
 ## 9. Close the issues of the milestone
 
-Each issue of the milestone that the release solves gets a short comment (what was done, the commits, where it
-is documented) and is closed. Issues moved to a later milestone are told so in a comment. Close the milestone
-once it is empty.
+Each issue of the milestone that the release solves gets a comment and is closed:
+
+- Write each message in `tmp/release-X.Y.Z/comments/<issue>.md`: a few sentences for the person who opened the
+  issue, not a changelog. Say in which release it ships (a link to `releases/tag/X.Y.Z`), what it does for them
+  and how to use it, link the page of the guide, and thank the reporter by `@login` (not on the owner's own
+  issues). Commits are not needed: the release lists them.
+- `release.py close X.Y.Z --dry-run` checks the messages and shows them; `release.py close X.Y.Z` posts each one,
+  reads it back, closes the issue, and closes the milestone once it is empty. It refuses an issue without a
+  message, or a message that is only the footer: a comment is never posted without what it has to say.
+- Never post with a script that builds the bodies in code: for 2.1.0, a PowerShell `[ordered]` table indexed by
+  issue number read the entry at that position, and six issues got the footer alone (fixed by editing them).
+- Issues moved to a later milestone are told so in a comment.
 
 ## 10. Tag
 
