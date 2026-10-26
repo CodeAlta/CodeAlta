@@ -285,7 +285,7 @@ public sealed class MobilePlugin : PluginBase
         ArgumentNullException.ThrowIfNull(request);
         if (!IsPort(request.Port)) return Settings() with { Error = $"The port on this computer must be a number from {MinimumPort} to {MaximumPort}." };
         if (!IsPort(request.HttpsPort)) return Settings() with { Error = $"The port on the tailnet must be a number from {MinimumPort} to {MaximumPort}." };
-        var republish = false;
+        MobileSettingsView view;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -304,16 +304,18 @@ public sealed class MobilePlugin : PluginBase
             }
 
             _state = _state with { Tailscale = MobileTailscaleStatus.Pending };
-            republish = true;
+            // The answer is the state of the change itself, read before Tailscale is asked: a Tailscale that answers at once would
+            // otherwise give the outcome of the publication to some calls and not to others.
+            view = Settings();
         }
         finally
         {
             _gate.Release();
         }
 
-        if (republish) _ = Tasks.Run("mobile-publish", RepublishAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view on its new port." });
+        _ = Tasks.Run("mobile-publish", RepublishAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view on its new port." });
         await ChangedAsync().ConfigureAwait(false);
-        return Settings();
+        return view;
     }
 
     // Takes off what was published with the old ports, then publishes with the ports of now. Two changes in a row each run it: the second finds the

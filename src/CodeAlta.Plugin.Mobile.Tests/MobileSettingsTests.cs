@@ -85,6 +85,7 @@ public sealed class MobileSettingsTests
         Assert.AreEqual((newPort, 5443), (answer.Port, answer.HttpsPort));
         Assert.AreEqual("listening", answer.Server, "the server answers on its new port at once");
         Assert.IsNull(answer.Address, "the view is not served on the tailnet until Tailscale says so");
+        Assert.AreEqual("pending", answer.Tailscale.State, "the answer is the change itself, whatever Tailscale answers meanwhile");
         await WaitAsync(() => fixture.Plugin.Settings().Tailscale.State == "serving", "Tailscale serves the new ports");
         Assert.AreEqual("https://desk.tail1234.ts.net:5443", fixture.Plugin.Settings().Address);
 
