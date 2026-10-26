@@ -181,9 +181,20 @@ internal sealed partial class BuiltInAltaCommandContributor
         var project = reference is not null
             ? await ResolveProjectAsync(catalog, reference, context, includeArchived: false).ConfigureAwait(false)
             : await catalog.GetByPathAsync(ResolvePath(context, context.Cwd ?? Environment.CurrentDirectory), context.CancellationToken).ConfigureAwait(false);
-        return project is null || project.Archived
-            ? (null, NotFound(context, "project.notFound", reference is null ? "No catalog project matches the current directory. Use --project." : $"Project '{reference}' was not found."))
-            : (project, AltaExitCodes.Success);
+        if (project is null || project.Archived)
+        {
+            return (null, NotFound(context, "project.notFound", reference is null ? "No catalog project matches the current directory. Use --project." : $"Project '{reference}' was not found."));
+        }
+
+        // The files of the items are read and written by CodeAlta, outside the sandbox: a sandboxed session reaches
+        // those of its own project alone.
+        if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } sandbox
+            && !string.Equals(project.Id, NormalizeOptionalText(context.Caller.SourceProjectId), StringComparison.OrdinalIgnoreCase))
+        {
+            return (null, PermissionDenied(context, "sandbox.projectDenied", AltaSandboxGate.Refusal(sandbox, "reach the tasks and plans of another project")));
+        }
+
+        return (project, AltaExitCodes.Success);
     }
 
     private static async ValueTask<int> HandleWorkItemListAsync(AltaCommandContext context, string kind, string? projectRef, bool all, string? status)
@@ -209,6 +220,11 @@ internal sealed partial class BuiltInAltaCommandContributor
             if (NormalizeOptionalText(projectRef) is not null)
             {
                 return UsageError(context, "usage.scopeConflict", "Use either --project or --all, not both.", command);
+            }
+
+            if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } sandbox)
+            {
+                return PermissionDenied(context, "sandbox.projectDenied", AltaSandboxGate.Refusal(sandbox, "reach the tasks and plans of every project"));
             }
 
             if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))

@@ -201,6 +201,11 @@ public sealed class WorkItemService
 
         var today = DateOnly.FromDateTime(_time.GetLocalNow().DateTime);
         var directory = WorkItemFiles.TasksDirectory(project.ProjectPath);
+        if (WorkItemFiles.IsLinked(project.ProjectPath, directory))
+        {
+            throw new IOException($"The folder of the tasks, {directory}, or a folder above it in the project, is a link: no task is written through it.");
+        }
+
         Directory.CreateDirectory(directory);
         var stem = WorkItemFiles.NewId(today, title);
         var created = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -525,7 +530,10 @@ public sealed class WorkItemService
     }
 
     private static string? TaskPath(ProjectDescriptor project, string id)
-        => WorkItemFiles.IsValidId(id) ? Path.Combine(WorkItemFiles.TasksDirectory(project.ProjectPath), id + ".md") : null;
+        => WorkItemFiles.IsValidId(id) && Path.Combine(WorkItemFiles.TasksDirectory(project.ProjectPath), id + ".md") is var path
+           && !WorkItemFiles.IsLinked(project.ProjectPath, path)
+            ? path
+            : null;
 
     // A plan file is <folder>/.alta/plans/<id>.md: the folder is two levels above its own.
     private void Deleted(ProjectDescriptor project, string path)
@@ -548,12 +556,12 @@ public sealed class WorkItemService
             var local = Path.Combine(WorkItemFiles.PlansDirectory(workingDirectory), id + ".md");
             if (File.Exists(local))
             {
-                return local;
+                return WorkItemFiles.IsLinked(workingDirectory, local) ? null : local;
             }
         }
 
         var path = Path.Combine(WorkItemFiles.PlansDirectory(project.ProjectPath), id + ".md");
-        return File.Exists(path) ? path : null;
+        return File.Exists(path) && !WorkItemFiles.IsLinked(project.ProjectPath, path) ? path : null;
     }
 
     // The newest first: the names start with the day.
@@ -574,7 +582,9 @@ public sealed class WorkItemService
             return [];
         }
 
-        return files.Where(static path => WorkItemFiles.IsValidId(Path.GetFileNameWithoutExtension(path)))
+        // The folder is <project>/.alta/<tasks or plans>.
+        var project = Path.GetDirectoryName(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(directory))) ?? directory;
+        return files.Where(path => WorkItemFiles.IsValidId(Path.GetFileNameWithoutExtension(path)) && !WorkItemFiles.IsLinked(project, path))
             .OrderByDescending(static path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
             .Take(MaximumItems);
     }

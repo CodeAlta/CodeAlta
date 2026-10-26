@@ -331,6 +331,44 @@ public sealed class WorkItemTests
     }
 
     [TestMethod]
+    public async Task AnItemThatIsALink_IsNeitherReadNorWritten()
+    {
+        using var root = new TempRoot();
+        var (items, project) = await root.CreateAsync();
+        var outside = Directory.CreateDirectory(Path.Combine(root.Path, "outside")).FullName;
+        var secret = Path.Combine(outside, "id_ed25519");
+        File.WriteAllText(secret, "---\ntitle: the secret of the user\n---\nthe-secret-of-the-user\n");
+        var tasks = Directory.CreateDirectory(WorkItemFiles.TasksDirectory(project.ProjectPath)).FullName;
+        var plans = WorkItemFiles.PlansDirectory(project.ProjectPath);
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(tasks, "2026-10-26-leak.md"), secret);
+            Directory.CreateSymbolicLink(plans, outside);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Assert.Inconclusive("This computer does not let the test make links.");
+        }
+
+        File.WriteAllText(Path.Combine(outside, "2026-10-26-plan.md"), "---\ntitle: A plan\nstatus: approved\n---\n# A plan\n");
+        try
+        {
+            // A session wrote a link in the project: CodeAlta does not follow it, to read or to write.
+            Assert.IsNull(items.GetTask(project, "2026-10-26-leak"));
+            Assert.IsFalse(items.ListTasks(project).Any(static task => task.Id == "2026-10-26-leak"));
+            Assert.IsFalse(items.SetPlanStatus(project, "2026-10-26-plan", WorkPlanStatus.InProgress));
+            StringAssert.Contains(File.ReadAllText(Path.Combine(outside, "2026-10-26-plan.md")), "status: approved", "the file outside is as it was");
+            Assert.IsTrue(WorkItemFiles.IsLinked(project.ProjectPath, Path.Combine(plans, "2026-10-26-plan.md")));
+            Assert.IsFalse(WorkItemFiles.IsLinked(project.ProjectPath, Path.Combine(tasks, "2026-10-26-other.md")));
+        }
+        finally
+        {
+            File.Delete(Path.Combine(tasks, "2026-10-26-leak.md"));
+            Directory.Delete(plans);
+        }
+    }
+
+    [TestMethod]
     public void Settings_ReadWhatIsWritten_AndDefaultOtherwise()
     {
         Assert.AreEqual(WorkItemSettings.Default, WorkItemSettings.Read(null));

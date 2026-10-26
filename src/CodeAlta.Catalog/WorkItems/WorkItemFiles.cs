@@ -53,6 +53,37 @@ public static partial class WorkItemFiles
         return Path.Combine(projectPath, ".alta", "plans");
     }
 
+    /// <summary>
+    /// Gets whether the file of an item, or a folder between its project and it, is a link (a symbolic link or a
+    /// junction): such a file is neither read nor written. The files are written by sessions, sandboxed ones too, and
+    /// read and written by CodeAlta with the rights of the user: a link would lead it to a file outside the project.
+    /// </summary>
+    /// <param name="projectPath">The folder of the project, which may be a link itself.</param>
+    /// <param name="path">The file of the item, or its folder.</param>
+    /// <returns>True when a link is on the way, or when an entry on the way cannot be read.</returns>
+    /// <exception cref="ArgumentException">An argument is blank.</exception>
+    public static bool IsLinked(string projectPath, string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath));
+        for (var current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+             current.Length > root.Length && current.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+             current = Path.GetDirectoryName(current) ?? root)
+        {
+            try
+            {
+                if ((File.Exists(current) || Directory.Exists(current)) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return true;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Whether a text can be the id of an item: the name of a file, without a folder and without its extension.</summary>
     /// <param name="id">The text.</param>
     /// <returns>True for letters, digits, <c>.</c>, <c>_</c> and <c>-</c>, starting with a letter or a digit, up to 160 characters.</returns>

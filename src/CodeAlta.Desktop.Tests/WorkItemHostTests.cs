@@ -19,6 +19,19 @@ public sealed class WorkItemHostTests
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
     [TestMethod]
+    public async Task ASandboxedSession_ReachesTheTasksAndPlansOfItsOwnProjectAlone()
+    {
+        await using var fixture = await Fixture.CreateAsync(sandboxed: true);
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["task", "list"])).Code, "its own project");
+        foreach (var arguments in new[] { new[] { "task", "list", "--project", fixture.Other.Id }, ["plan", "list", "--all"], ["plan", "show", "x", "--project", fixture.Other.Id] })
+        {
+            var (code, records, text) = await fixture.Run(arguments);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, code, text);
+            Assert.AreEqual("sandbox.projectDenied", records.First(static record => record.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString(), text);
+        }
+    }
+
+    [TestMethod]
     public async Task ASession_ProposesATask_AndThePageShowsItToThatSession()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -311,12 +324,13 @@ public sealed class WorkItemHostTests
     {
         private readonly string _root;
 
-        private Fixture(string root, CatalogOptions options, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other)
+        private Fixture(string root, CatalogOptions options, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool sandboxed)
         {
             (_root, Project, Other) = (root, project, other);
             Items = new WorkItemService(new CodeAltaConfigStore(options), Path.Combine(root, "state"));
             Rpc = new WorkItemsService(Items, projects, Runner, Epoch);
             var services = new AltaServiceCollection().Add(projects).Add(Items);
+            if (sandboxed) services.Add(new AltaSandboxedSessions((id, _) => Task.FromResult(id == "session-of-the-user" ? new AltaSessionSandbox("strict", []) : null)));
             var registry = new AltaCommandRegistry();
             Alta = new AltaCommandDispatcher(registry, services);
             services.Add(registry).Add(Alta);
@@ -331,14 +345,14 @@ public sealed class WorkItemHostTests
         public AltaCommandDispatcher Alta { get; }
         public AltaCallerIdentity Session { get; }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool sandboxed = false)
         {
             var root = Directory.CreateTempSubdirectory("codealta-work-item-host-").FullName;
             var options = new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName };
             var projects = new ProjectCatalog(options);
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "app")).FullName);
             var other = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "other")).FullName);
-            return new Fixture(root, options, projects, project, other);
+            return new Fixture(root, options, projects, project, other, sandboxed);
         }
 
         public async Task<(int Code, List<JsonElement> Records, string Text)> Run(string[] arguments, string? stdin = null, AltaCallerIdentity? caller = null)
