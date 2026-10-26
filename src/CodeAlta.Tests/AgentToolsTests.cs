@@ -665,6 +665,27 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public void ShellStartInfo_TurnsColorsOff_WithoutTheVariableThatForcesThemOnInTheToolsOfMacOS()
+    {
+        using var temp = TestTempDirectory.Create();
+        var inherited = Environment.GetEnvironmentVariable("CLICOLOR_FORCE");
+        Environment.SetEnvironmentVariable("CLICOLOR_FORCE", "1");
+        try
+        {
+            var startInfo = AgentBuiltInToolFactory.CreateShellStartInfo("echo", temp.Path);
+
+            Assert.AreEqual("1", startInfo.Environment["NO_COLOR"]);
+            Assert.AreEqual("0", startInfo.Environment["CLICOLOR"]);
+            // The `ls` of macOS colors its output as soon as CLICOLOR_FORCE is set, whatever its value.
+            Assert.IsFalse(startInfo.Environment.ContainsKey("CLICOLOR_FORCE"), "nor inherited");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CLICOLOR_FORCE", inherited);
+        }
+    }
+
+    [TestMethod]
     public void ShellStartInfo_SetsNothingMoreWithoutAnEnvironment()
     {
         using var temp = TestTempDirectory.Create();

@@ -1626,7 +1626,8 @@ public static class AgentBuiltInToolFactory
         environment?.ApplyTo(startInfo.Environment);
         startInfo.Environment["NO_COLOR"] = "1";
         startInfo.Environment["CLICOLOR"] = "0";
-        startInfo.Environment["CLICOLOR_FORCE"] = "0";
+        // Unset rather than "0": the tools of macOS and BSD (`ls`) force colors whenever it is set.
+        startInfo.Environment.Remove("CLICOLOR_FORCE");
 
         return startInfo;
     }
