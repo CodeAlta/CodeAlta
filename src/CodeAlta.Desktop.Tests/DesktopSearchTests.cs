@@ -118,6 +118,30 @@ public sealed class DesktopSearchTests
     }
 
     [TestMethod]
+    public async Task APlanThatIsALink_IsNotIndexed_SinceSearchWouldGiveTheFileItNamesBackToTheProject()
+    {
+        using var temp = new TempFolder();
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var plans = Directory.CreateDirectory(Path.Combine(project, ".alta", "plans")).FullName;
+        var secret = Path.Combine(temp.Path, "secret.txt");
+        File.WriteAllText(secret, "a key of the user");
+        File.WriteAllText(Path.Combine(plans, "2026-10-26-real.md"), "# A real plan\n");
+        try
+        {
+            // A sandboxed session writes the plans of its project: a link there names a file outside it.
+            File.CreateSymbolicLink(Path.Combine(plans, "2026-10-26-leak.md"), secret);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Assert.Inconclusive("This computer does not let the test make links.");
+        }
+
+        var read = await DesktopSearchSources.PlansOf(new SearchProjectInfo("p1", "Project", project, false)).ReadAsync(null, CancellationToken.None);
+
+        CollectionAssert.AreEqual(new[] { "plan:p1/2026-10-26-real" }, read!.Documents.Select(static document => document.Ref).ToArray());
+    }
+
+    [TestMethod]
     public async Task SearchByMeaning_IsOfferedOnTheLandingCard_OnceThereIsEnoughToSearch_PutOff_AndItsDialogIsAskedOfTheWindow()
     {
         using var temp = new TempFolder();

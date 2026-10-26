@@ -6,6 +6,7 @@ using CodeAlta.Agent.Runtime.Tools;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Documentation;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Catalog.WorkItems;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
@@ -114,6 +115,9 @@ internal sealed class DesktopSearchSources
             [(Path.Combine(folder, "plans"), SearchKind.Plan, "plan"), (Path.Combine(folder, "tasks"), SearchKind.Task, "task")],
             (path, kind, text) =>
             {
+                // Sessions write these files, sandboxed ones too: a link would index a file outside the project, which
+                // `alta search show` would then give back to the project.
+                if (WorkItemFiles.IsLinked(project.Path, path)) return null;
                 var id = Path.GetFileNameWithoutExtension(path);
                 var (title, body) = SplitMarkdown(text);
                 var prefix = kind == SearchKind.Plan ? "plan" : "task";
