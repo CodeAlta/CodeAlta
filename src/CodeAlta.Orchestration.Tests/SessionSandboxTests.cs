@@ -324,6 +324,7 @@ public sealed class SessionSandboxTests
             new Dictionary<string, string?> { ["CLAUDE_CONFIG_DIR"] = account, ["CLAUDE_GONE"] = null })
         {
             ReadOnlyFolders = ["C:/tools"], ReadWriteFolders = [account], Hosts = ["api.anthropic.com"], PassedVariables = ["ANTHROPIC_MODEL"],
+            ProtectedPaths = [Path.Combine(account, "settings.json")],
         };
         await using (await host.StartAsync(launch, CancellationToken.None))
         {
@@ -333,6 +334,8 @@ public sealed class SessionSandboxTests
         Assert.AreEqual(SandboxNetwork.Hosts, policy.Network, "strict has no network: the agent gets the service of its vendor alone");
         CollectionAssert.AreEqual(new[] { "api.anthropic.com" }, policy.Hosts.ToArray());
         Assert.IsTrue(policy.ReadWrite.Any(folder => string.Equals(folder, Path.GetFullPath(account), StringComparison.OrdinalIgnoreCase)), "its account is written");
+        Assert.IsTrue(policy.Protected.Any(path => string.Equals(path, Path.GetFullPath(Path.Combine(account, "settings.json")), StringComparison.OrdinalIgnoreCase)),
+            "but not the settings that run hooks later");
         Assert.IsTrue(policy.ReadOnly.Any(static folder => folder.Replace('\\', '/').EndsWith("C:/tools", StringComparison.OrdinalIgnoreCase)));
         Assert.AreEqual(account, policy.Environment["CLAUDE_CONFIG_DIR"]);
         Assert.IsFalse(policy.Environment.ContainsKey("CLAUDE_GONE"));

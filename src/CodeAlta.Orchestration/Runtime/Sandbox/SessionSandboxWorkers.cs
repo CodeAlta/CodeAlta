@@ -110,7 +110,8 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
         var profile = AgentProfile(start.Profile, launch);
         var environment = launch.Environment.Where(static pair => pair.Value is not null).Select(static pair => new KeyValuePair<string, string>(pair.Key, pair.Value!))
             .Concat(start.Environment).DistinctBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase).ToArray();
-        var policy = SandboxPolicyBuilder.Build(profile, start.Folders, Host(), environment, start.SessionId + "-agent");
+        var policy = SandboxPolicyBuilder.Build(profile, start.Folders with { Protected = [.. start.Folders.Protected, .. launch.ProtectedPaths] }, Host(), environment,
+            start.SessionId + "-agent");
         SandboxNetworkProxy? proxy = null;
         try
         {

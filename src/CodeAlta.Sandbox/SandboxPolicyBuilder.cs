@@ -100,8 +100,8 @@ public static class SandboxPolicyBuilder
         var userPackages = Path.Combine(home, ".nuget", "packages");
         if (Directory.Exists(userPackages)) readOnly.Add(userPackages);
 
-        var protectedEntries = new List<string>();
-        var roots = readWrite.Take(1).Concat(folders.Writable.Select(Full)).Distinct(comparer).ToList();
+        var protectedEntries = folders.Protected.Select(Full).ToList();
+        var roots =readWrite.Take(1).Concat(folders.Writable.Select(Full)).Distinct(comparer).ToList();
         foreach (var root in roots)
         {
             protectedEntries.AddRange(ProtectedEntries.Select(entry => Path.Combine(root, entry)));

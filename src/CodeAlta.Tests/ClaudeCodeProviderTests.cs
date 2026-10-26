@@ -163,6 +163,8 @@ public sealed class ClaudeCodeProviderTests
 
         Assert.AreEqual(account, hosted.Environment["CLAUDE_CONFIG_DIR"], "the home of a sandbox is its own: the account folder is named");
         CollectionAssert.Contains(hosted.ReadWriteFolders.ToArray(), account);
+        foreach (var entry in new[] { "settings.json", "settings.local.json", "plugins", "hooks", "commands" })
+            CollectionAssert.Contains(hosted.ProtectedPaths.ToArray(), Path.Combine(account, entry), "what runs later, outside the sandbox too, is not written");
         CollectionAssert.Contains(hosted.Hosts.ToArray(), "api.anthropic.com");
         Assert.IsTrue(hosted.ReadOnlyFolders.Any(static folder => folder.Replace('\\', '/').EndsWith("/tools/claude", StringComparison.Ordinal)));
         Assert.IsFalse(hosted.PassedVariables.Contains("ANTHROPIC_API_KEY"), "a key the user chose not to use is not passed");

@@ -248,6 +248,12 @@ internal static class ClaudeCodeLauncher
     // The hosts of Anthropic the CLI reaches: the API, and the sign-in and refresh of a subscription.
     private static readonly string[] VendorHosts = ["api.anthropic.com", "console.anthropic.com", "platform.claude.com", "claude.ai", "*.claude.ai"];
 
+    // What the account folder holds that the CLI runs or follows later, outside the sandbox too: settings (hooks, the
+    // status line, a helper of the API key), instructions, commands, agents, skills, plugins and hook scripts. The
+    // sign-in, the transcripts and the state of the CLI stay writable.
+    private static readonly string[] ExecutableConfiguration =
+        ["settings.json", "settings.local.json", "CLAUDE.md", "commands", "agents", "skills", "plugins", "hooks", "output-styles"];
+
     /// <summary>
     /// Describes a CLI process for a host that starts it in a sandbox, whose home folder and environment are its own:
     /// the folder of the executable to read, the account folder to write (named explicitly, as the home of the sandbox
@@ -286,6 +292,7 @@ internal static class ClaudeCodeLauncher
         {
             ReadOnlyFolders = readOnly,
             ReadWriteFolders = [configRoot],
+            ProtectedPaths = [.. ExecutableConfiguration.Select(entry => Path.Combine(configRoot, entry))],
             Hosts = VendorHosts,
             PassedVariables = passed,
         };

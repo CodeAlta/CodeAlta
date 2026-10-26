@@ -20,6 +20,12 @@ public sealed record AgentProcessLaunch(
     /// <summary>Gets the folders the process writes besides the working directory: its account and its transcripts.</summary>
     public IReadOnlyList<string> ReadWriteFolders { get; init; } = [];
 
+    /// <summary>
+    /// Gets the files and folders inside <see cref="ReadWriteFolders"/> that stay read-only, and are not created when
+    /// missing: what configures what the agent runs later, outside the sandbox too (its settings, hooks and plugins).
+    /// </summary>
+    public IReadOnlyList<string> ProtectedPaths { get; init; } = [];
+
     /// <summary>Gets the hosts the process reaches: the service of its vendor.</summary>
     public IReadOnlyList<string> Hosts { get; init; } = [];
 
