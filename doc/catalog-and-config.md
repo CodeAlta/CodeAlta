@@ -27,7 +27,7 @@ per-project provider preferences.
 | `config.toml` | `CodeAltaConfigStore`: settings, providers, plugins, automations of the user. |
 | `mcp.json` | MCP plugin: server connections ([MCP](mcp.md)). |
 | `auth/` | Provider auth managers: subscription credentials, token caches. |
-| `projects/`, `spaces/` | `ProjectCatalog`, `SpaceCatalog`: one Markdown file per project or space. |
+| `projects/`, `spaces/`, `labels/` | `ProjectCatalog`, `SpaceCatalog`, `LabelCatalog`: one Markdown file per project, space or label. |
 | `prompts/`, `skills/`, `plugins/`, `plugin-data/` | Prompt resources, skills, source plugins, what plugins store with `Services.State`. |
 | `cache/` | Rebuildable data: model metadata, plugin builds, downloaded tools and models (`speech/`, `search/`, `runtime/`). |
 | `worktrees/`, `color-schemes/` | Session worktrees (by default), desktop color schemes. |
@@ -181,6 +181,23 @@ are stored, never a secret.
   servers, terminals). A profile separates accounts; it is not a sandbox.
 
 Which space a window shows, and its tabs, belong to the page's local storage, not the catalog.
+
+## Labels
+
+A label names a group of projects inside a space; labels nest. `LabelCatalog` (reached as `SpaceCatalog.Labels`) keeps
+one Markdown file per label under `labels/`, written as spaces are: the file name is the id, kept on rename and move;
+the front matter has `name`, `icon`, `color`, `order` among its siblings, `parent`, `favorite` and `space`. A project
+names its labels in its own file (`labels`), edited one line at a time as `spaces` is (`UpdateLabelsAsync`).
+
+- **Only a top-level label has a space**; the labels under it are in the same one. Why: a tree split across spaces
+  would show its branches in spaces where their parent is missing. A label without a space is in every space
+  (`SpaceScope.IsAvailable`).
+- **Reads never fail on the tree.** A parent that does not exist, that makes a loop, or that puts a label deeper than
+  `LabelDescriptor.MaximumDepth` is read as none; the labels are listed in the order of their tree.
+- **Deletes cascade without losing projects.** A deleted label leaves the project files and its sub-labels take its
+  place; a deleted space deletes its labels, which would otherwise name a missing space and show nowhere.
+- Every copy of a project goes through `ProjectDescriptor.Copy`, so that an editor that saves a whole project file
+  (CodeAlta TUI's details) keeps the lines it does not show.
 
 ## The application database
 

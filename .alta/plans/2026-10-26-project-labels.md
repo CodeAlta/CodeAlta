@@ -147,7 +147,7 @@ flowchart LR
 - [x] 7. **Rail rendering.** `ProjectRailRows` takes the groups; label headers, folding (`collapsedLabels` in `ProjectTree`), flat-mode badges, the *Group by labels* item in `windowPreferences`, and keyboard row navigation that includes the headers. Add SSR tests in `ProjectRailRows.test.ts`.
 - [x] 8. **Editing in the rail.** The header menu and its popovers, the project **Labels…** popover (a submenu does not exist in the row menu), a project dropped on a header, and header drag to reorder or nest (a new pointer hook beside `projectDrag.ts`). Add a browser test for the drags.
 - [x] 9. **Settings › Labels page**: the tree, drag and buttons, the form, the project picker. Add a browser test.
-- [ ] 10. **Docs.** A new `site/docs/labels.md` in `menu.yml` (left bar, Settings, agents), a link from `spaces.md`, and `labels/` in `doc/catalog-and-config.md` (files table and Projects section). Add `label` to the command table in `doc/live-tool.md`, and a line on labels to `readme.md`.
+- [x] 10. **Docs.** A new `site/docs/labels.md` in `menu.yml` (left bar, Settings, agents), a link from `spaces.md`, and `labels/` in `doc/catalog-and-config.md` (files table and Projects section). Add `label` to the command table in `doc/live-tool.md`, and a line on labels to `readme.md`.
 
 ## How it is verified
 

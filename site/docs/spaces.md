@@ -14,7 +14,7 @@ A space is also a setup: the providers, MCP servers, skills, agent prompts and p
 </figure>
 
 - The **Default** space always exists. Every project is in it, but it shows only the projects and chats that belong to no other space. To see everything there, turn on **Show what belongs to other spaces** in **Settings > Spaces**, or click **Show all** in the message shown the first time Default hides something.
-- You create the other spaces. A project can be in several spaces.
+- You create the other spaces. A project can be in several spaces. Inside a space, [labels](labels.md) group its projects.
 - A space has a name, an icon, a color and a line that says what it is for.
 - Every session belongs to the space you created it in. A chat is listed in its space only. A project session is listed in its space, also after its project moved to another space: the project is then shown in both.
 - A session from before spaces existed is listed in every space of its project, or in Default for a chat. **Move to space…** puts it in one space.

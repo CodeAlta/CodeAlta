@@ -9,6 +9,7 @@ doc:
   - {path: workspace/readme.md, title: "<i class='bi bi-display' aria-hidden='true'></i> Workspace", folder: true}
   - {path: sessions/readme.md, title: "<i class='bi bi-diagram-3' aria-hidden='true'></i> Sessions", folder: true}
   - {path: spaces.md, title: "<i class='bi bi-collection' aria-hidden='true'></i> Spaces"}
+  - {path: labels.md, title: "<i class='bi bi-tags' aria-hidden='true'></i> Labels"}
   - {path: worktrees.md, title: "<i class='bi bi-tree' aria-hidden='true'></i> Worktrees"}
   - {path: reviews.md, title: "<i class='bi bi-chat-square-quote' aria-hidden='true'></i> Reviews"}
   - {path: work-items.md, title: "<i class='bi bi-list-check' aria-hidden='true'></i> Work Items"}
