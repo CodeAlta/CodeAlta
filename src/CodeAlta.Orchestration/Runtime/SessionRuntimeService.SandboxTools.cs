@@ -309,15 +309,13 @@ public sealed partial class SessionRuntimeService
         private async Task<AgentToolResult> ShellCommandAsync(AgentToolDefinition tool, AgentBuiltInToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)
         {
             if (!SandboxOutsideCommands.TryTake(invocation, out var inside, out var reason))
-                return await RunInWorkerAsync(tool, options, invocation, cancellationToken).ConfigureAwait(false);
+                return await RunInWorkerAsync(tool, options, inside, cancellationToken).ConfigureAwait(false);
             var sandbox = await runtime.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
             // A session that is no longer sandboxed runs its commands here, as it asks for them.
             if (!sandbox.IsSandboxed) return await tool.Handler(inside, cancellationToken).ConfigureAwait(false);
             if (sandbox.Profile is not { } profile) return Refused(tool, SandboxProblem(sandbox));
             if (profile.Outside != SandboxOutside.Ask)
                 return Refused(tool, $"the sandbox of this session (profile '{profile.Name}') runs no command outside it. Ask the user to run it.");
-            if (string.IsNullOrWhiteSpace(reason))
-                return Refused(tool, "`outside_sandbox` says why the command needs to run outside the sandbox: the user reads it before allowing it.");
             var command = inside.Arguments.TryGetProperty("command", out var text) && text.ValueKind == System.Text.Json.JsonValueKind.String ? text.GetString() : null;
             var folder = inside.Arguments.TryGetProperty("workdir", out var workdir) && workdir.ValueKind == System.Text.Json.JsonValueKind.String
                 ? Path.GetFullPath(Path.Combine(options.WorkingDirectory ?? Environment.CurrentDirectory, workdir.GetString()!))

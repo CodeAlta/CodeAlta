@@ -114,7 +114,7 @@ A [fallback](../model-providers/readme.md) never moves a sandboxed session to a 
 
 ## Platforms
 
-- **Windows 11**: built in, nothing to install.
+- **Windows 11**: built in, nothing to install. MSBuild builds there with one node (`-m:1`). Before build .9550, the tests of VSTest do not run with a profile that reaches hosts, such as `workspace` (see [troubleshooting](../troubleshooting.md#a-sandboxed-session-runs-nothing)).
 - **macOS**: built in, on Apple silicon.
 - **Linux**: install `bubblewrap`, and `slirp4netns` for a network.
 

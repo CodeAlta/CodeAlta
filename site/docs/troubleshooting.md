@@ -154,6 +154,8 @@ A session whose [sandbox](sessions/sandbox.md) cannot run runs no command, and s
 - **The provider runs its own tools** (an ACP agent): choose another provider for the session, or turn its sandbox off.
 - **Claude Code is not signed in, in a sandbox on macOS**: its sign-in is in the Keychain, out of reach. Set `CLAUDE_CODE_OAUTH_TOKEN` with a token from `claude setup-token`, or use an API key.
 - **Commands start in `C:\` instead of the project (Windows)**: a folder above the project holds tens of thousands of entries, as the temporary folder does, and the sandbox keeps such a folder out of reach. Move the project elsewhere.
+- **`dotnet build` fails without an error (Windows)**: MSBuild cannot start its worker nodes in the sandbox. Build with `-m:1`; the agent is told to.
+- **`dotnet test` stops after 90 seconds with a profile that reaches hosts (Windows)**: before Windows 11 build .9550, the processes of such a sandbox cannot connect to each other, as VSTest needs. Let the agent run the tests outside the sandbox, or use a profile without network once the packages are restored.
 
 ## A plugin is broken
 

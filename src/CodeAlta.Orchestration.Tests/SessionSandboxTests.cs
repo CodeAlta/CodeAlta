@@ -199,7 +199,11 @@ public sealed class SessionSandboxTests
         Assert.AreEqual(0, backend.Starts.Count, "it ran here");
         Assert.HasCount(2, asked.Where(static request => request.OutsideSandbox), "the shell of the host does not ask it a second time");
 
-        Assert.IsFalse((await tools.CallAsync("shell_command", new { command = "echo out", outside_sandbox = " " })).Success, "a reason is given");
+        // A model whose functions have every parameter required sends an empty reason for a command that stays inside.
+        var inside = await tools.CallAsync("shell_command", new { command = "echo in", outside_sandbox = "" });
+        Assert.IsTrue(inside.Success, inside.Error);
+        Assert.HasCount(2, asked.Where(static request => request.OutsideSandbox), "nobody is asked for it");
+        Assert.HasCount(1, backend.Starts, "it runs in the sandbox");
         f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
         Assert.IsNull(await router.RefuseRunAsync(false, CancellationToken.None));
         tools = f.RoutedTools("s", router, tools.Permissions);
@@ -227,6 +231,9 @@ public sealed class SessionSandboxTests
         Assert.Contains("have no network", strict.Text);
         Assert.Contains("No command runs outside", strict.Text);
         Assert.AreNotEqual(workspace.Noted, strict.Noted, "another sandbox is told again");
+        var sandbox = await f.Runtime.GetSessionSandboxAsync("s");
+        Assert.Contains("`-m:1`", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(sandbox, null, windows: true).Text);
+        Assert.DoesNotContain("`-m:1`", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(sandbox, null, windows: false).Text);
     }
 
     [TestMethod]
@@ -242,6 +249,22 @@ public sealed class SessionSandboxTests
         Assert.DoesNotContain("a.org", network, "only what this command was refused");
         Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(profile, new AgentToolResult(false, [new AgentToolResultItem.Text("1 test failed")], null), [], []),
             "a failure the sandbox did not cause gets no note");
+    }
+
+    [TestMethod]
+    public void WhatTheWindowsContainerKeepsFromBuildsAndTests_IsToldAfterTheCommand()
+    {
+        var workspace = SandboxProfiles.Resolve("workspace", []);
+        var nodes = new AgentToolResult(false, [new AgentToolResultItem.Text("exit_code: 1\nstdout:\nBuild FAILED.\n    0 Warning(s)\n    0 Error(s)\n")], "shell_command exited with code 1.");
+        StringAssert.Contains(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, nodes, [], [], windows: true), "`-m:1`");
+        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, nodes, [], [], windows: false), "elsewhere the nodes start");
+        var errors = new AgentToolResult(false, [new AgentToolResultItem.Text("Build FAILED.\n    0 Warning(s)\n    3 Error(s)\n")], null);
+        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, errors, [], [], windows: true), "a build with errors failed by itself");
+
+        var vstest = new AgentToolResult(false, [new AgentToolResultItem.Text("vstest.console process failed to connect to testhost process after 90 seconds.\nTest Run Aborted.")], null);
+        StringAssert.Contains(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, vstest, [], [], windows: true), "`outside_sandbox`");
+        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(SandboxProfiles.Resolve("strict", []), vstest, [], [], windows: true),
+            "without network, the processes of the container connect to each other");
     }
 
     [TestMethod]
