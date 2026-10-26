@@ -91,6 +91,37 @@ public sealed class SandboxWorkerTests
     }
 
     [TestMethod]
+    public async Task AWorkerThatDoesNotStopACanceledCall_IsEnded_AndTheCallFails()
+    {
+        using var toWorker = new AnonymousPipeServerStream(PipeDirection.Out);
+        using var workerInput = new AnonymousPipeClientStream(PipeDirection.In, toWorker.ClientSafePipeHandle);
+        using var fromWorker = new AnonymousPipeServerStream(PipeDirection.Out);
+        using var hostInput = new AnonymousPipeClientStream(PipeDirection.In, fromWorker.ClientSafePipeHandle);
+        // A worker that is ready, then answers nothing.
+        var silent = Task.Run(async () =>
+        {
+            var channel = new SandboxWorkerChannel(workerInput, fromWorker);
+            while (await channel.ReadAsync() is { } message)
+            {
+                if (message.Type == SandboxWorkerMessageTypes.Init) await channel.WriteAsync(new SandboxWorkerMessage { Type = SandboxWorkerMessageTypes.Ready }, CancellationToken.None);
+            }
+        });
+        var client = await SandboxWorkerClient.ConnectAsync(hostInput, toWorker, new SandboxWorkerInit("session-1", "test", Path.GetTempPath(), [], null, null, false), CancellationToken.None)
+            .WaitAsync(Deadline);
+        client.CancelGrace = TimeSpan.FromMilliseconds(200);
+        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        var result = await client.InvokeAsync(Call("read_file", new { path = "x" }), Host((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce))),
+            cancel.Token).WaitAsync(Deadline);
+
+        Assert.IsFalse(result.Success);
+        Assert.IsTrue(client.HasEnded, "a worker that does not stop is ended: what it runs does not hold the session");
+        await client.DisposeAsync();
+        toWorker.Dispose();
+        await silent.WaitAsync(Deadline);
+    }
+
+    [TestMethod]
     public async Task BackgroundCommands_RunInTheWorker_AndCanBeEnded()
     {
         using var temp = new TempTree();

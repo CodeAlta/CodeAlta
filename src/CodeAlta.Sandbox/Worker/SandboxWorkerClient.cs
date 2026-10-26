@@ -55,6 +55,9 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
         _reading = Task.Run(ReadAsync);
     }
 
+    /// <summary>Gets or sets how long the worker has to stop a call it is told to cancel; past it, the worker is ended.</summary>
+    internal TimeSpan CancelGrace { get; set; } = TimeSpan.FromSeconds(30);
+
     /// <summary>Gets whether the worker is gone: its process ended, or it broke the protocol.</summary>
     public bool HasEnded => Volatile.Read(ref _ended) is not null;
 
@@ -115,6 +118,8 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
         var id = Interlocked.Increment(ref _nextId);
         var call = new Call(invocation, host);
         _calls[id] = call;
+        // The worker may have ended between the check and the registration, after End completed the calls it had.
+        if (Volatile.Read(ref _ended) is { } late) call.Result.TrySetResult(Failure(invocation.ToolName, late));
         try
         {
             await _channel.WriteAsync(new SandboxWorkerMessage
@@ -122,7 +127,23 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
                 Type = SandboxWorkerMessageTypes.Invoke, Id = id, Tool = invocation.ToolName, ToolCallId = invocation.ToolCallId, Arguments = invocation.Arguments,
             }, _closing.Token).ConfigureAwait(false);
             await using var cancel = cancellationToken.Register(() => _ = WriteQuietlyAsync(new SandboxWorkerMessage { Type = SandboxWorkerMessageTypes.Cancel, Id = id }));
-            return await call.Result.Task.ConfigureAwait(false);
+            try
+            {
+                return await call.Result.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Told to stop, the worker has a while to say so; one that does not answer is ended, with what it runs.
+                try
+                {
+                    return await call.Result.Task.WaitAsync(CancelGrace, _closing.Token).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    End("The worker of the sandbox did not stop a canceled call.");
+                    return Failure(invocation.ToolName, "it was canceled, and the worker of the sandbox did not stop it.");
+                }
+            }
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException)
         {
@@ -153,6 +174,14 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
         }
 
         _processes[id] = process;
+        // The worker may have ended between the check and the registration, after End completed the commands it had.
+        if (Volatile.Read(ref _ended) is { } late && _processes.TryRemove(id, out _))
+        {
+            onOutput($"The sandbox of the session ended: {late}{Environment.NewLine}");
+            process.Exit.TrySetResult(-1);
+            return process;
+        }
+
         _ = WriteQuietlyAsync(new SandboxWorkerMessage { Type = SandboxWorkerMessageTypes.Start, Id = id, Command = command, Folder = folder });
         return process;
     }
