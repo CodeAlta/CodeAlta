@@ -124,8 +124,7 @@ Agents ask before running commands or changing files, depending on the [permissi
 
 In CodeAlta TUI, **Auto approve commands**, in the Workspace Settings, is on by default; turn it off to answer each request with **Allow Once**, **Allow for Session** or **Deny**.
 
-> [!CAUTION]
-> An agent runs with your user privileges: a mode decides what you are asked, it is not a sandbox. Approved commands and file changes are not limited to the project folder.
+A mode decides what you are asked; an agent that is not sandboxed runs with your user privileges. **Settings > Sandbox** limits what it can read, write and reach whatever you approve: see [sandbox](../sessions/sandbox.md).
 
 ### Answer a request
 

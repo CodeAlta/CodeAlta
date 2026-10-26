@@ -145,6 +145,7 @@ A space can have its own provider, such as a Claude Code account for Business an
 
 - **New sessions** sets the agent prompt a new session of the space starts with, from the window, an agent, a work item, an automation or a question about the guide. A prompt you or the agent choose still wins.
 - **Model tiers** there uses the global tiers and fallback of **Settings > Models**, or tiers and a fallback of its own with **Customize** (see [Tiers of a space](model-tiers.md#tiers-of-a-space)).
+- **Sandbox** there runs the sessions of the space in a sandbox profile, or in none, unless their project, provider or model chooses otherwise. See [Sandbox](sessions/sandbox.md).
 - **Tools** turns off built-in tools, such as `shell_command`, for the sessions of the space. What **Settings > Permissions** turns off for every session is shown beside them. See [Tools turned off](workspace/settings.md#tools-turned-off).
 
 ## Identity
@@ -329,9 +330,10 @@ Libraries I maintain and the projects I contribute to.
 | `new_sessions.agent_prompt` | The agent prompt of **New sessions** |
 | `new_sessions.tiers` | Its own `complex`, `standard` and `quick` tiers, as in [Model tiers](model-tiers.md#in-the-file) |
 | `new_sessions.fallback` | Its fallback: `enabled`, and `on` with `quota` or `unavailable` to fall back on one failure only |
+| `new_sessions.sandbox` | The [sandbox](sessions/sandbox.md) of its sessions: a profile, or `off` |
 | `tools.disabled` | The tools of **Tools** |
 
-The spaces of a project are one line of its file, `~/.alta/projects/<name>.md`: `spaces: [work, open-source]`. A project only in Default has no `spaces` line, and an unknown id is ignored.
+The spaces of a project are one line of its file, `~/.alta/projects/<name>.md`: `spaces: [work, open-source]`. A project only in Default has no `spaces` line, and an unknown id is ignored. Its sandbox is another line, `sandbox: "strict"`.
 
 The spaces of providers, MCP servers, skills, agent prompts and plugins are in `~/.alta/config.toml`. A resource without a `spaces` list is in every space:
 

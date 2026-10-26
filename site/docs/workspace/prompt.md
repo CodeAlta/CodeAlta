@@ -64,6 +64,7 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
 - **Reasoning effort**: the efforts of the model. For Claude Code, Copilot and the Anthropic API, a model that lists none has none. With other providers, an effort the model does not list is marked **Unverified**.
 - **Model options**, for a model whose provider offers some, such as **Context** and **Fast** for Cursor's models: a list or a switch under the reasoning effort. An option belongs to the model: it applies to every session of the provider that uses this model.
 - **Review before commit**: **On**, **Off**, or **Default** (the setting of **Settings > Sessions**). See [Review before commit](../reviews.md#review-before-commit).
+- **Sandbox**: a profile, **Off**, or **Default** (what the settings choose for this provider, project or space). A small mark on the chip shows a sandboxed session. See [Sandbox](../sessions/sandbox.md).
 
 <figure class="alta-figure my-4" style="max-width: 24rem;">
   <img src="{{site.basepath}}/img/alta-desktop-model-search.webp" alt="The model list of the picker of CodeAlta Desktop filtered by a search box" loading="lazy">
@@ -72,7 +73,7 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
 
 The picker of a new session has the same rows, except the model options: the session starts with your choices, and the next new session of the project starts from them.
 
-Agents use the same choices: `alta session choices <session-id>` lists the models, efforts, agent prompts and permission modes of a session, and `alta session send` and `alta session queue` take `--model`, `--reasoning`, `--prompt-id` and `--permission-mode`.
+Agents use the same choices: `alta session choices <session-id>` lists the models, efforts, agent prompts, permission modes and sandboxes of a session, and `alta session send` and `alta session queue` take `--model`, `--reasoning`, `--prompt-id`, `--permission-mode` and `--sandbox`.
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-system-prompt-and-user-prompt.png" alt="CodeAlta timeline showing system prompt details and an agent prompt" loading="lazy">

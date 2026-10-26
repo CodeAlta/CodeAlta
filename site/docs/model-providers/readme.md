@@ -40,6 +40,7 @@ The provider editor can:
 - in CodeAlta Desktop, **Add provider** lists the built-in providers you do not have yet; **Custom provider…** adds an entry of your own, and **ACP registry…** adds a [coding agent](acp-agents.md);
 - in CodeAlta Desktop, **Duplicate** a provider to add another account of the same type;
 - in CodeAlta Desktop, set the **Icon** and **Icon color** of a provider, and its **Spaces** with the chip of its row (see [Providers of a space](../spaces.md#providers-of-a-space));
+- in CodeAlta Desktop, run the sessions of a provider, or of one of its models, in a **Sandbox**, for example a provider of local models you trust less (see [Sandbox](../sessions/sandbox.md));
 - store an API key, or name the environment variable that holds it;
 - check keys, endpoint URLs, missing credentials and settings that conflict;
 - start a browser or device sign-in, and show **Signed out** on a provider whose account is signed out, with how to sign in;

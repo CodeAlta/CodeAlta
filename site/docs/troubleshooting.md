@@ -144,6 +144,16 @@ When the desktop app cannot read a page of a session's history, the session file
 
 Open the context usage with `Ctrl+G Ctrl+U`. Press `Ctrl+F11` to compact an idle session. If compaction keeps missing its target, check the size of attached files and the [context limits of the model](model-providers/configuration.md#model-metadata-overrides).
 
+### A sandboxed session runs nothing
+
+A session whose [sandbox](sessions/sandbox.md) cannot run runs no command, and says why. **Settings > Sandbox > Check** shows the step that fails:
+
+- **Linux**: install `bubblewrap`, and `slirp4netns` for a profile with a network.
+- **The profile cannot be used**: a profile was removed or renamed while a provider, a space or a project still names it. Choose another one there.
+- **A host is refused**: the profile does not list it. Add it to the hosts of a profile of yours.
+- **The provider runs its own tools** (Claude Code, an ACP agent): choose another provider for the session, or turn its sandbox off.
+- **Commands start in `C:\` instead of the project (Windows)**: a folder above the project holds tens of thousands of entries, as the temporary folder does, and the sandbox keeps such a folder out of reach. Move the project elsewhere.
+
 ## A plugin is broken
 
 > [!WARNING]

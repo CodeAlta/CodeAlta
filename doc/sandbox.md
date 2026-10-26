@@ -50,3 +50,53 @@ Bubblewrap on Linux. Invariants:
   entries denied, and the volume root, which does not cascade in the read-write list, is granted there.
 - **No telemetry.** No request enables it.
 - **The UI stays enabled** (a disabled one stops tools at start); the clipboard stays closed.
+
+## The worker and the routing
+
+The worker is the executable of the frontend started with `--sandbox-worker` (`alta`, `altatui` or `altacli`): it
+speaks framed messages over its standard streams (`SandboxWorkerProtocol`) and runs the handlers of
+`AgentBuiltInToolFactory` unchanged, with the session's folder and guards. What a tool asks while it runs (a
+permission, the command guard, its progress) comes back to CodeAlta, which answers it as for a tool that runs here.
+
+- **Chosen at each call.** `AgentSession` gives its built-in tools to an `IAgentBuiltInToolRouter`. The router of the
+  runtime reads the sandbox of the session at each call: a session that becomes sandboxed during a turn runs its next
+  call in the worker. `webget` runs in CodeAlta, on an `HttpClient` that follows the network of the sandbox.
+- **One worker per session** (`SessionSandboxWorkers`), started on the first call, keyed by its policy: a profile that
+  changes starts another container. It stops when the session's attachment goes, unless a background command holds it,
+  and after ten idle minutes.
+- **A run that cannot be held is refused.** `RefuseRunAsync` refuses the run of a sandboxed session whose profile
+  cannot be used or whose sandbox is not available here, and the run of a provider that runs its own tools
+  (`IAgentProviderToolHost`): its tools would run outside. The fallback of a tier skips such providers.
+
+## The network
+
+`network = "off"` gives the container no network at all. `hosts` starts a `SandboxNetworkProxy` on loopback for the
+worker, the only address mxc lets the container reach, and sets it as the proxy of the container. The proxy tunnels
+CONNECT and forwards plain HTTP (certificate revocation checks need it) to the hosts of the profile only. It resolves
+names itself and refuses the addresses of this computer and of its networks, CodeAlta's own ports always, except the
+`local_ports` of the profile; a refusal is a 403 that names the host, and the last ones are kept for the note of a
+failed command. `on` reaches any host by the same proxy, with the same refusals.
+
+## What a sandboxed session does with CodeAlta
+
+`alta`, plugins and MCP servers run in CodeAlta with the rights of the user, outside the container. A sandboxed caller
+is therefore limited where they run:
+
+- **`alta` is an allow list** (`AltaSandboxGate`), checked once in `AltaCommandRegistry` after parsing: the commands of
+  plugins are refused unless listed. Sessions are reached only when the caller created them, directly or through its
+  children (`ResolveSessionInfoAsync`, `fork`, `--parent`); conversations found by `alta search` are filtered the same
+  way. An agent turns a sandbox on, never off, and a sandboxed agent chooses none: what it creates or forks has its
+  profile.
+- **Plugin tools** reach a sandboxed session only when marked `SafeInSandbox`; the tools a before-run hook adds only
+  when the hook says they follow the sandbox. The MCP plugin gives the tools of the servers the profile lists
+  (`SandboxMcpServers`) and refuses the others in its commands.
+- **The window** (`alta ui`, its tools) is refused.
+
+## The agent's side
+
+The agent learns what its sandbox allows from a host-context note of its run, told when it changes and after a
+compaction (`SandboxNoted`), never from the instructions, whose text the provider keeps in its cache. A command that
+failed because of the sandbox gets a note that says what blocked it. With a profile whose `outside = "ask"`,
+`shell_command` takes `outside_sandbox`: the command is asked as an `AgentCommandPermissionRequest` marked
+`OutsideSandbox`, which no permission mode answers for the user (`AlwaysAsks`) and a host without a user refuses, then
+runs in CodeAlta.

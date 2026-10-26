@@ -1,4 +1,5 @@
 doc:
   - {path: readme.md, title: "<i class='bi bi-diagram-3' aria-hidden='true'></i> Overview"}
   - {path: delegation.md, title: "Delegation"}
+  - {path: sandbox.md, title: "Sandbox"}
   - {path: claude-code.md, title: "Claude Code"}

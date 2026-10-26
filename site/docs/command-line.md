@@ -37,6 +37,8 @@ The run ends when the session and the sessions it started have nothing left to d
 
 Nobody is there to answer, so every tool runs without asking, and the agents are told so: they decide instead of asking. The commands of `alta` that need a user or a window (`ask`, `review`, `reminder`, the UI tools...) are not offered. Run `altacli` where an agent may change files: a checkout, a container, a throwaway folder.
 
+`--sandbox PROFILE` runs the tools of the sessions in a [sandbox](sessions/sandbox.md) (`workspace`, `strict` or a profile of yours), whatever the settings say; `--sandbox off` runs them without one. A command never runs outside the sandbox there: nobody is there to allow it.
+
 `--disable-tools PATTERN` turns tools off (`web` turns off every tool that reaches the web, `mcp__*` the tools of MCP servers); `--no-mcp`, `--no-plugins` and `--no-skills` start none of them. Only the [plugins](plugins/readme.md) made for the command line run there: Git, Jira, MCP and ACP among the built-in ones.
 
 ## Output and exit codes

@@ -338,19 +338,23 @@ Their native sandboxes are not the boundary. Claude Code's covers only its shell
 
 ### CodeAlta Desktop
 
-- [ ] 12. **Settings.**
+- [x] 12. **Settings.**
   - An RPC `sandboxSettings` (availability, check, profiles, where it applies) and the **Settings > Sandbox** page.
   - **Sandbox** in the provider editor (provider and models) and on the page of a space.
   - A **Sandbox…** popover in the project row actions.
 
   Browser tests.
-- [ ] 13. **The session side.**
+
+  **Done.** One service, `sandboxSettings`, also gives the sandbox of a session and of a draft, and streams **Check**; the project's file and a provider's `sandbox` (and `model_overrides`) are written alone (`ProjectCatalog.UpdateSandboxAsync`, `SaveGlobalProviderSandbox`). The check found that a folder of more than 20,000 entries above a project (the user's Temp) is kept out of reach, so PowerShell starts in `C:\` below it: the check works under the data folder of the sandbox, and the guide says it. Not done: choosing a sandbox for the first time does not run the check by itself.
+- [x] 13. **The session side.**
   - The **Sandbox** row of the Agent chip and of the new-session form, and the mark on the chip.
   - The timeline marks and blocked-path notes.
   - The request card.
 
   Browser tests. Look at both themes and at a 900×650 window in the developer instance.
-- [ ] 14. **Documentation.**
+
+  **Done.** The notes of the sandbox are the last line of the text of a result (the timelines show only the first text item); `ShellCommandResult.Parse` and `parseShellResult` read them apart. The project row was checked by its browser test only (the developer profile listed no project).
+- [x] 14. **Documentation.**
   - User guide: `site/docs/sessions/sandbox.md` (and its entry in the folder's `menu.yml`), with what it protects and what it does not, where to turn it on, profiles, platforms and setup. Link it from Tool permissions in `workspace/settings.md` (replacing its caution), from the Agent chip, the spaces page and provider configuration.
   - Architecture: `doc/sandbox.md` (boundary, worker, resolution, invariants) and "Tools and permissions" in `doc/runtime.md`.
   - The feature list of `readme.md`.
@@ -364,6 +368,12 @@ Their native sandboxes are not the boundary. Claude Code's covers only its shell
 
   Run the live tests (`ClaudeCodeLiveCliTests`).
 - [ ] 16. **ACP agents in the container**: their home folder and runtime (Node, the `npx` cache), and the harness MCP endpoint through the proxy.
+
+  **Design of 15–16** (from the map of the launches; nothing of it is written yet):
+  - A neutral `IAgentProcessHost` in `CodeAlta.Agent` (start an executable with arguments, folder, environment and what it needs: read-only and read-write folders, hosts), carried by `AgentTurnRequest`; the router of a sandboxed session gives it after `RefuseRunAsync`, which then allows `claude-code` and `acp`.
+  - Orchestration implements it with a container per session for the agent's process (`SessionSandboxProcesses`, beside the workers): the profile plus the folder of the executable read-only, the account folder read-write, the vendor's hosts (a profile without network gets only them), and `CLAUDE_CONFIG_DIR` set explicitly since the container's home is its own. The command line is quoted for `/bin/sh -c` on macOS and Linux and for CreateProcess on Windows.
+  - Claude Code: everything it calls back is in-band on stdio (SDK MCP server, hook callbacks, permission prompts), so no port is needed; the launch key gets the sandbox key, so a change of sandbox restarts the CLI with `--resume`.
+  - ACP: the harness MCP endpoint is a loopback HTTP port the container cannot reach reliably; a stdio bridge (`--sandbox-mcp-bridge`) in the container reaches it through the proxy, with its port among the local ports of the policy. Per-agent hints (folders, hosts) beside `AcpAgentQuirks`; other agents use the profile.
 
 ## How it is verified
 

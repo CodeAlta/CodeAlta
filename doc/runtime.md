@@ -189,6 +189,10 @@ registered through `AgentToolInvocation.RunTools` and offered on the next model 
   observers while the call runs, and the finished result is the persisted record.
 - **Child processes** (commands, jobs, the CLI of a provider) start with the environment of the session's identity and
   `CODEALTA_SESSION_ID`, `CODEALTA_MODEL`, `AI_AGENT=codealta` (`SessionProcessEnvironment`), fixed per attachment.
+- **Sandbox.** A sandboxed session runs its file tools, commands and jobs in a worker inside an OS container, chosen at
+  each call by the `IAgentBuiltInToolRouter` of its attachment, and what it does with `alta`, plugins and MCP servers is
+  limited to what keeps it there ([sandbox](sandbox.md)). The permissions above still apply inside the sandbox; the
+  sandbox is what holds when a permission was given to a prompt injected into the session.
 
 ## System prompt and instructions
 
