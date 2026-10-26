@@ -210,12 +210,18 @@ public sealed class AltaCommandRegistry
             }
 
             // A sandboxed session runs only the commands that keep it in its sandbox: they all run here, outside it.
-            if (!AltaSandboxGate.Allows(parseResult.ResolvedCommandPath)
-                && await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } sandbox)
+            if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } sandbox)
             {
-                var what = $"run `{parseResult.ResolvedCommandPath}`";
-                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "sandbox.refused", AltaExitCodes.PolicyDenied, AltaSandboxGate.Refusal(sandbox, what));
-                return CaptureResult(AltaExitCodes.PolicyDenied, context, stopwatch.Elapsed, isHelp: false, error: what);
+                if (!AltaSandboxGate.Allows(parseResult.ResolvedCommandPath))
+                {
+                    var what = $"run `{parseResult.ResolvedCommandPath}`";
+                    AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "sandbox.refused", AltaExitCodes.PolicyDenied, AltaSandboxGate.Refusal(sandbox, what));
+                    return CaptureResult(AltaExitCodes.PolicyDenied, context, stopwatch.Elapsed, isHelp: false, error: what);
+                }
+
+                // Its commands work in its own folder, never in one the call names: a folder its sandbox writes would
+                // have them read there what runs here (the MCP servers of a `.mcp.json`).
+                context = context with { Cwd = await AltaSandboxGate.FolderOfCallerAsync(context).ConfigureAwait(false) };
             }
 
             var runApp = CreateCommandApp(context);

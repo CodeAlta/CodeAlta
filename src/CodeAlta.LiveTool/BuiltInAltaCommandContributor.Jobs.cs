@@ -54,7 +54,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var command = Leaf("list", "List the jobs of a session: the ones that run, then the last ones that ended.");
         command.Add("session=", "Session whose jobs are listed. Defaults to the calling session.", value => sessionId = value);
         command.Add("all", "List the jobs of every session.", value => all = value is not null);
-        command.Add((_, _) => ValueTask.FromResult(HandleJobList(context, sessionId, all)));
+        command.Add(async (_, _) => await RefuseJobsToSandboxAsync(context, all, sessionId).ConfigureAwait(false) ?? HandleJobList(context, sessionId, all));
         AddHelpText(command, "`state` is `running`, `succeeded` (exit code 0), `failed`, `timed_out` or `cancelled`. A job that ended stays listed for a while, with what it wrote.");
         return command;
     }
@@ -64,7 +64,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? id = null;
         var command = Leaf("status", "Show one job: its state, its exit code, how long it has run and the last line it wrote.");
         command.Add("<job-id>", "Job id from `alta job start` or `alta job list`.", value => id = value);
-        command.Add((_, _) => ValueTask.FromResult(HandleJobStatus(context, id)));
+        command.Add(async (_, _) => await RefuseJobToSandboxAsync(context, id).ConfigureAwait(false) ?? HandleJobStatus(context, id));
         return command;
     }
 
@@ -75,7 +75,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var command = Leaf("output", "Read what a job wrote, standard output and standard error together: its last lines.");
         command.Add("<job-id>", "Job id from `alta job start` or `alta job list`.", value => id = value);
         command.Add("lines=", "Read this many of the last lines. Without it, as many as one call returns.", value => lines = value);
-        command.Add((_, _) => ValueTask.FromResult(HandleJobOutput(context, id, lines)));
+        command.Add(async (_, _) => await RefuseJobToSandboxAsync(context, id).ConfigureAwait(false) ?? HandleJobOutput(context, id, lines));
         AddHelpText(
             command,
             "It works while the job runs and after it ended. When more was written than one call returns, the last lines are kept and `truncated` is true.",
@@ -88,7 +88,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? id = null;
         var command = Leaf("cancel", "End the command of a job, and the processes it started.");
         command.Add("<job-id>", "Job id from `alta job start` or `alta job list`.", value => id = value);
-        command.Add(async (_, _) => await HandleJobCancelAsync(context, id).ConfigureAwait(false));
+        command.Add(async (_, _) => await RefuseJobToSandboxAsync(context, id).ConfigureAwait(false) ?? await HandleJobCancelAsync(context, id).ConfigureAwait(false));
         AddHelpText(command, "A job you cancel sends no prompt. What it wrote can still be read with `alta job output`.");
         return command;
     }
@@ -376,6 +376,25 @@ internal sealed partial class BuiltInAltaCommandContributor
         AltaJsonlWriter.WriteRecord(context.Stdout, record);
         return AltaExitCodes.Success;
     }
+
+    // The jobs of a session run on this computer, or in its own sandbox: a sandboxed session lists, reads and cancels
+    // those of itself and of the sessions of its sandbox alone. Null when allowed.
+    private static async Task<int?> RefuseJobsToSandboxAsync(AltaCommandContext context, bool all, string? sessionId)
+    {
+        if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is not { } sandbox) return null;
+        if (all) return PermissionDenied(context, "sandbox.notOwnSession", AltaSandboxGate.Refusal(sandbox, "list the jobs of every session"));
+        return NormalizeOptionalText(sessionId) is { } target && !IsCaller(context, target)
+               && await ResolveSessionInfoAsync(context, target).ConfigureAwait(false) is { ExitCode: not AltaExitCodes.Success } refused
+            ? refused.ExitCode
+            : null;
+    }
+
+    private static async Task<int?> RefuseJobToSandboxAsync(AltaCommandContext context, string? id)
+        => NormalizeOptionalText(id) is { } jobId && context.Services.Get<SessionRuntimeService>()?.Jobs.Get(jobId) is { } job && !IsCaller(context, job.SessionId)
+           && await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is not null
+           && await ResolveSessionInfoAsync(context, job.SessionId).ConfigureAwait(false) is { ExitCode: not AltaExitCodes.Success } refused
+            ? refused.ExitCode
+            : null;
 
     private static int JobNotFound(AltaCommandContext context, string id)
         => NotFound(context, "job.notFound", $"Job '{id}' was not found: it never was, or it ended long ago. List the jobs with `alta job list`.");

@@ -403,6 +403,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async ValueTask<int> HandleDiffShowAsync(AltaCommandContext context, string? projectRef, string? file)
     {
+        if (await RefuseOtherProjectToSandboxAsync(context, projectRef, "show the changes of another project").ConfigureAwait(false) is { } refused)
+        {
+            return refused;
+        }
+
         if (context.Services.Get<IAltaChangesView>() is not { } view)
         {
             AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "service.unavailable", AltaExitCodes.ServiceUnavailable,
@@ -514,6 +519,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async ValueTask<int> HandleEditorOpenAsync(AltaCommandContext context, string? projectRef, string? file, string? line, string? column)
     {
+        if (await RefuseOtherProjectToSandboxAsync(context, projectRef, "open the files of another project").ConfigureAwait(false) is { } refused)
+        {
+            return refused;
+        }
+
         if (context.Services.Get<IAltaEditorView>() is not { } view)
         {
             AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "service.unavailable", AltaExitCodes.ServiceUnavailable,
@@ -1247,7 +1257,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("session=", "Filter by target session id.", value => sessionId = value);
         command.Add("session-id=", "Alias for --session.", value => sessionId = value);
         command.Add("all", "Include completed reminders as well as active reminders.", value => includeCompleted = value is not null);
-        command.Add((_, _) => ValueTask.FromResult(HandleReminderList(context, sessionId, includeCompleted)));
+        command.Add(async (_, _) => await RefuseRemindersToSandboxAsync(context, sessionId, reminderId: null).ConfigureAwait(false)
+                                    ?? HandleReminderList(context, await OwnReminderScopeAsync(context, sessionId).ConfigureAwait(false), includeCompleted));
         return command;
     }
 
@@ -1256,7 +1267,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         string? reminderId = null;
         var command = Leaf("delete", "Delete a scheduled prompt reminder.");
         command.Add("<reminder-id>", "Reminder id returned by `alta reminder create` or `alta reminder list`.", value => reminderId = value);
-        command.Add((_, _) => ValueTask.FromResult(HandleReminderDelete(context, reminderId)));
+        command.Add(async (_, _) => await RefuseRemindersToSandboxAsync(context, sessionId: null, reminderId).ConfigureAwait(false) ?? HandleReminderDelete(context, reminderId));
         return command;
     }
 
@@ -1827,6 +1838,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         context.ClaimSessionWork(targetSessionId);
+        // The answer goes to the session the question is asked for: a sandboxed session asks for itself and the
+        // sessions of its sandbox alone.
+        if (!IsCaller(context, targetSessionId) && await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is not null
+            && await ResolveSessionInfoAsync(context, targetSessionId).ConfigureAwait(false) is { ExitCode: not AltaExitCodes.Success } refused)
+        {
+            return refused.ExitCode;
+        }
+
         if (!TryGetAskService(context, out var askService))
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -2732,6 +2751,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 return NotFound(context, "project.notFound", $"Project '{options.Project}' was not found.");
             }
 
+            // A session works in the folder of its project, which its sandbox writes: a sandboxed session creates sessions
+            // in its own project alone.
+            if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } sandbox
+                && !string.Equals(project.Id, NormalizeOptionalText(context.Caller.SourceProjectId), StringComparison.OrdinalIgnoreCase))
+            {
+                return PermissionDenied(context, "sandbox.projectDenied", AltaSandboxGate.Refusal(sandbox, $"create a session in the project '{project.Name}'"));
+            }
         }
 
         var space = await ResolveNewSessionSpaceAsync(context, options.Space, "alta session create").ConfigureAwait(false);
@@ -4093,6 +4119,26 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return AltaExitCodes.Success;
     }
 
+    // A sandboxed session lists and deletes the reminders of itself and of the sessions of its sandbox alone: those of
+    // the others say what they work on, and wake them. Null when allowed.
+    private static async Task<int?> RefuseRemindersToSandboxAsync(AltaCommandContext context, string? sessionId, string? reminderId)
+    {
+        if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is null) return null;
+        var target = NormalizeOptionalText(sessionId)
+                     ?? (NormalizeOptionalText(reminderId) is { } id && TryGetReminderService(context, out var reminders)
+                         ? reminders.List(null, includeCompleted: true).FirstOrDefault(reminder => string.Equals(reminder.ReminderId, id, StringComparison.Ordinal))?.TargetSessionId
+                         : null);
+        return target is not null && !IsCaller(context, target) && await ResolveSessionInfoAsync(context, target).ConfigureAwait(false) is { ExitCode: not AltaExitCodes.Success } refused
+            ? refused.ExitCode
+            : null;
+    }
+
+    // The reminders a list shows without a session: those of every session, or of the calling one when it is sandboxed.
+    private static async Task<string?> OwnReminderScopeAsync(AltaCommandContext context, string? sessionId)
+        => NormalizeOptionalText(sessionId) is null && await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is not null
+            ? context.Caller.SourceSessionId
+            : sessionId;
+
     private static int HandleReminderList(AltaCommandContext context, string? sessionId, bool includeCompleted)
     {
         if (!TryGetReminderService(context, out var reminderService))
@@ -4950,20 +4996,40 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     }
 
     // A sandboxed session reads, controls and hands prompts only to itself and to the sessions it created, directly or
-    // through them: they are sandboxed as it is. Any other would read or do for it what its sandbox keeps from it.
-    // Null when allowed.
+    // through them, while they run in its own sandbox: one created before it was sandboxed, or whose sandbox the user
+    // changed since, would read or do for it what its sandbox keeps from it. Null when allowed.
     private static async Task<int?> RefuseOtherSessionToSandboxAsync(AltaCommandContext context, SessionViewDescriptor target)
     {
         if (NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
             || IsCaller(context, target.SessionId)
-            || await AltaSandboxGate.OfAsync(context, callerId).ConfigureAwait(false) is not { } sandbox
-            || await IsOwnSessionAsync(context, target, callerId).ConfigureAwait(false))
+            || await AltaSandboxGate.OfAsync(context, callerId).ConfigureAwait(false) is not { } sandbox)
         {
             return null;
         }
 
-        return PermissionDenied(context, "sandbox.notOwnSession",
-            $"This session is sandboxed (profile '{sandbox.Profile}'): it reaches only itself and the sessions it created, and session '{target.SessionId}' is not one of them. Ask the user.");
+        if (!await IsOwnSessionAsync(context, target, callerId).ConfigureAwait(false))
+        {
+            return PermissionDenied(context, "sandbox.notOwnSession",
+                $"This session is sandboxed (profile '{sandbox.Profile}'): it reaches only itself and the sessions it created, and session '{target.SessionId}' is not one of them. Ask the user.");
+        }
+
+        return await AltaSandboxGate.OfAsync(context, target.SessionId).ConfigureAwait(false) is { } own && string.Equals(own.Profile, sandbox.Profile, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : PermissionDenied(context, "sandbox.notOwnSession",
+                $"This session is sandboxed (profile '{sandbox.Profile}'), and session '{target.SessionId}', which it created, does not run in that sandbox: it does not reach it. Ask the user.");
+    }
+
+    // A sandboxed session names its own project alone: the files of the others are what its sandbox keeps from it, and
+    // CodeAlta reads or shows them here, outside it. Null when allowed (no project named, or its own).
+    private static async Task<int?> RefuseOtherProjectToSandboxAsync(AltaCommandContext context, string? projectRef, string what)
+    {
+        if (NormalizeOptionalText(projectRef) is not { } reference || await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is not { } sandbox) return null;
+        var project = context.Services.Get<ProjectCatalog>() is { } catalog
+            ? await ResolveProjectAsync(catalog, reference, context, includeArchived: false).ConfigureAwait(false)
+            : null;
+        return project is not null && string.Equals(project.Id, NormalizeOptionalText(context.Caller.SourceProjectId), StringComparison.OrdinalIgnoreCase)
+            ? null
+            : PermissionDenied(context, "sandbox.projectDenied", AltaSandboxGate.Refusal(sandbox, what));
     }
 
     // Whether a session was created by another, or descends from it through its parents.
@@ -5560,6 +5626,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async Task<SkillQueryResult> BuildSkillQueryAsync(AltaCommandContext context, string? projectRef)
     {
+        if (await RefuseOtherProjectToSandboxAsync(context, projectRef, "read the skills of another project").ConfigureAwait(false) is { } refused)
+        {
+            return SkillQueryResult.Fail(refused);
+        }
+
         ProjectDescriptor? project = null;
         var sourceProjectId = context.Caller.SourceProjectId;
         if (!string.IsNullOrWhiteSpace(projectRef))
@@ -5606,6 +5677,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async Task<PromptQueryResult> BuildPromptQueryAsync(AltaCommandContext context, string? projectRef)
     {
+        if (await RefuseOtherProjectToSandboxAsync(context, projectRef, "read the prompts of another project or folder").ConfigureAwait(false) is { } refused)
+        {
+            return PromptQueryResult.Fail(refused);
+        }
+
         var projectRoot = await ResolvePromptProjectRootAsync(context, projectRef).ConfigureAwait(false);
         if (projectRoot.ExitCode != AltaExitCodes.Success)
         {

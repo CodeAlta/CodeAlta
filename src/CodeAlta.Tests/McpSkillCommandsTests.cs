@@ -229,13 +229,39 @@ public sealed partial class McpRuntimeServiceTests
         Assert.AreEqual(2, stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Count(static line => line.Contains("\"session_required\"", StringComparison.Ordinal)));
     }
 
-    private async Task<(int Exit, IReadOnlyList<JsonElement> Records, string Output)> RunSkillAsync(McpPlugin plugin, string projectPath, Func<AgentPermissionRequest, AgentPermissionDecision>? ask, params string[] args)
+    [TestMethod]
+    public async Task SkillCommands_ASandboxedSession_ListsTheSkillsOfTheServersOfItsProfileAlone()
+    {
+        using var project = TempDirectory.Create();
+        var log = Path.Combine(project.Path, "server.log");
+        WriteTinyServerConfig(project.Path, "tiny", log, extraEnv: Skills());
+        await using var plugin = new McpPlugin(createPresentation: null, _home.Path, new McpPluginOptions { LoadsSkills = true });
+
+        // The server would run outside the sandbox: a profile that does not list it does not start it.
+        var named = await RunSkillAsync(plugin, project.Path, ask: null, sandbox: [], "skill", "list", "--server", "tiny", "--refresh");
+        Assert.AreEqual(1, named.Exit, named.Output);
+        Assert.AreEqual("server_not_in_sandbox", named.Records.Single().GetProperty("code").GetString());
+        var every = await RunSkillAsync(plugin, project.Path, ask: null, sandbox: [], "skill", "list", "--refresh");
+        Assert.AreEqual(0, every.Exit, every.Output);
+        Assert.IsFalse(every.Records.Any(static record => record.GetProperty("type").GetString() == "alta.mcp.skill"));
+        Assert.IsFalse(File.Exists(log), "the server was not started");
+
+        var listed = await RunSkillAsync(plugin, project.Path, ask: null, sandbox: ["tiny"], "skill", "list", "--refresh");
+        Assert.IsTrue(listed.Records.Any(static record => record.GetProperty("type").GetString() == "alta.mcp.skill"), "a profile that lists it lists its skills");
+    }
+
+    private Task<(int Exit, IReadOnlyList<JsonElement> Records, string Output)> RunSkillAsync(McpPlugin plugin, string projectPath, Func<AgentPermissionRequest, AgentPermissionDecision>? ask, params string[] args)
+        => RunSkillAsync(plugin, projectPath, ask, sandbox: null, args);
+
+    private async Task<(int Exit, IReadOnlyList<JsonElement> Records, string Output)> RunSkillAsync(McpPlugin plugin, string projectPath, Func<AgentPermissionRequest, AgentPermissionDecision>? ask,
+        IReadOnlyList<string>? sandbox, params string[] args)
     {
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
         var stderr = new StringWriter(CultureInfo.InvariantCulture);
         var context = CreateAltaContext(stdout, stderr, projectPath, "one") with
         {
             RequestPermissionAsync = ask is null ? null : (request, _) => ValueTask.FromResult(ask(request)),
+            ResolveSourceSandboxMcpServersAsync = sandbox is null ? null : _ => ValueTask.FromResult<IReadOnlyList<string>?>(sandbox),
         };
         var app = new CommandApp("alta", "test") { plugin.GetAltaCommands().Single().CreateCommandNode(context) };
         var exit = await app.RunAsync(["mcp", .. args], new CommandRunConfig { Out = TextWriter.Null, Error = stderr });

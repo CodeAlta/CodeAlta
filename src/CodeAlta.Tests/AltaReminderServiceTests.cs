@@ -592,6 +592,8 @@ public sealed partial class AltaReminderServiceTests
         public object? GetService(Type serviceType)
         {
             if (serviceType == typeof(ISessionRetentionAdmission)) return null;
+            // The registry asks whether the session that calls is sandboxed: no session of the fixture is.
+            if (serviceType == typeof(AltaSandboxedSessions) || serviceType == typeof(CodeAlta.Orchestration.Runtime.SessionRuntimeService)) return null;
             if (serviceType != typeof(AltaCommandDispatcher))
             {
                 throw new InvalidOperationException($"Unexpected service resolution: {serviceType.Name}");

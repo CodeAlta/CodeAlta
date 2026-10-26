@@ -991,7 +991,7 @@ internal static class McpCommandFactory
     }
 
     // Refuses, for a sandboxed session, the servers its sandbox profile does not list.
-    private static async ValueTask<int?> RefuseOutsideSandboxAsync(PluginAltaCommandContext context, IEnumerable<string> keys)
+    internal static async ValueTask<int?> RefuseOutsideSandboxAsync(PluginAltaCommandContext context, IEnumerable<string> keys)
     {
         if (context.ResolveSourceSandboxMcpServersAsync is not { } sandboxOf || await sandboxOf(context.CancellationToken).ConfigureAwait(false) is not { } sandboxServers)
             return null;

@@ -6193,8 +6193,9 @@ public sealed partial class AltaLiveToolTests
         => new()
         {
             RuntimeKey = runtimeKey,
-            TypeName = "Sample.Plugin",
-            AssemblyName = "Sample.Plugin",
+            // The commands of `mcp` are taken from the MCP plugin alone.
+            TypeName = runtimeKey == "mcp" ? typeof(McpPlugin).FullName! : "Sample.Plugin",
+            AssemblyName = runtimeKey == "mcp" ? typeof(McpPlugin).Assembly.GetName().Name! : "Sample.Plugin",
             DisplayName = "Sample Plugin",
             Version = "1.0.0",
         };

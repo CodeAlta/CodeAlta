@@ -51,13 +51,26 @@ internal static class McpSkillCommands
         command.Add("refresh", "Ask the servers for their skills: they are started.", value => refresh = value is not null);
         command.Add(async (_, _) =>
         {
+            // A sandboxed session lists the skills of the servers of its profile alone: the others would start outside its sandbox.
+            var sandboxServers = context.ResolveSourceSandboxMcpServersAsync is { } sandboxOf ? await sandboxOf(context.CancellationToken).ConfigureAwait(false) : null;
+            if (server is not null && await McpCommandFactory.RefuseOutsideSandboxAsync(context, [server]).ConfigureAwait(false) is { } unlisted)
+            {
+                return unlisted;
+            }
+
             var request = await McpCommandFactory.CreateRuntimeRequestAsync(context, options).ConfigureAwait(false);
             var diagnostics = new List<McpRuntimeDiagnostic>();
             var listed = await UseAsync(context, options, request, async (runtime, found) =>
             {
-                var (lists, listDiagnostics) = await runtime.ListSkillsAsync(request, server, refresh, context.CancellationToken).ConfigureAwait(false);
-                foreach (var diagnostic in listDiagnostics) found.Add(diagnostic);
-                return new SkillLists(lists);
+                var all = new List<McpCachedSkillList>();
+                foreach (var searched in server is null && sandboxServers is not null ? sandboxServers.Select(static key => (string?)key) : [server])
+                {
+                    var (lists, listDiagnostics) = await runtime.ListSkillsAsync(request, searched, refresh, context.CancellationToken).ConfigureAwait(false);
+                    all.AddRange(lists);
+                    foreach (var diagnostic in listDiagnostics) found.Add(diagnostic);
+                }
+
+                return new SkillLists(all);
             }, diagnostics).ConfigureAwait(false);
             foreach (var diagnostic in diagnostics) McpCommandFactory.WriteRecord(context.Stdout, McpCommandFactory.CreateDiagnosticRecord(context, diagnostic));
             var policy = McpCommandFactory.LoadPolicy(context, options);

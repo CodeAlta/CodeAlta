@@ -216,6 +216,33 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ASandboxedAgent_ReachesNeitherAnotherProject_NorASessionOutOfItsSandbox_NorWhatOtherSessionsRun()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: true).ConfigureAwait(false);
+        fixture.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        var agent = Agent(await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false));
+        var unrelated = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
+        Task<AltaCommandResult> Run(AltaCallerIdentity caller, params string[] arguments) => fixture.Dispatcher.InvokeAsync(arguments, "{}", caller).AsTask();
+
+        // A session works in the folder of its project, which its sandbox writes: not in another one.
+        var folder = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(fixture.Options.GlobalRoot!)!, "elsewhere")).FullName;
+        var project = await fixture.Spaces.Projects.UpsertFromPathAsync(folder).ConfigureAwait(false);
+        AssertSandboxRefused(await Run(agent, "session", "create", "--project", project.Id).ConfigureAwait(false), "sandbox.projectDenied");
+
+        // A session it created, whose sandbox the user turned off since, is out of its reach.
+        var child = await fixture.CreateAsync(agent, "--global").ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, (await Run(agent, "session", "queue", Id(child), "--message", "hello").ConfigureAwait(false)).ExitCode, "in its sandbox, it is reached");
+        var turnedOff = await Run(AltaCallerIdentity.Cli, "session", "queue", Id(child), "--message", "hi", "--sandbox", "off").ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, turnedOff.ExitCode, turnedOff.Stdout + turnedOff.Stderr);
+        AssertSandboxRefused(await Run(agent, "session", "queue", Id(child), "--message", "hello").ConfigureAwait(false), "sandbox.notOwnSession");
+
+        // Nor does it ask for another session, nor list the jobs of every one.
+        AssertSandboxRefused(await Run(agent, "ask", "--session", Id(unrelated), "--stdin").ConfigureAwait(false), "sandbox.notOwnSession");
+        AssertSandboxRefused(await Run(agent, "job", "list", "--all").ConfigureAwait(false), "sandbox.notOwnSession");
+        AssertSandboxRefused(await Run(agent, "job", "list", "--session", Id(unrelated)).ConfigureAwait(false), "sandbox.notOwnSession");
+    }
+
+    [TestMethod]
     public async Task SessionCommands_ChooseTheSandbox_AndAnAgentTurnsOneOnButNeverOff()
     {
         await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: true).ConfigureAwait(false);

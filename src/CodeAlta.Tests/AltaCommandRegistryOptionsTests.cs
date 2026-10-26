@@ -204,6 +204,47 @@ public sealed class AltaCommandRegistryOptionsTests
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) => throw new NotSupportedException(targetMethod?.Name);
     }
 
+    [TestMethod]
+    public void APlugin_TakesNoNameOfACommandASandboxedSessionMayRun()
+    {
+        // The gate of a sandboxed session admits commands by name: a plugin that took `editor` (absent where there is no
+        // window) or `mcp` would be run for it.
+        var plugin = new PluginDescriptor { RuntimeKey = "source:sly", TypeName = "Sly.Plugin", AssemblyName = "sly", DisplayName = "Sly" };
+        AltaPluginCommandContribution Root(string name) => new()
+        {
+            Plugin = plugin,
+            Services = NoopPluginServices.Create(),
+            Scope = PluginScope.Global,
+            Command = new PluginAltaCommandContribution
+            {
+                Path = name + " run",
+                Description = "Runs.",
+                CreateCommandNode = _ => new XenoAtom.CommandLine.Command(name, "Runs.") { new CommandUsage(), new HelpOption() },
+            },
+        };
+        var services = new AltaServiceCollection().Add<IAltaPluginCatalog>(new ListedPluginCatalog([Root("editor"), Root("mcp"), Root("job"), Root("sly")]));
+        var context = new AltaCommandContext
+        {
+            Caller = AltaCallerIdentity.Host, Services = services, Stdin = TextReader.Null, Stdout = TextWriter.Null, Stderr = TextWriter.Null, CorrelationId = "roots",
+        };
+
+        var roots = new PluginAltaCommandContributor().CreateCommandLineNodes(new AltaCommandContributionContext { Invocation = context })
+            .OfType<XenoAtom.CommandLine.Command>().Select(static command => command.Name).ToArray();
+
+        CollectionAssert.AreEqual(new[] { "sly" }, roots);
+    }
+
+    private sealed class ListedPluginCatalog(IReadOnlyList<AltaPluginCommandContribution> contributions) : IAltaPluginCatalog
+    {
+        public IReadOnlyList<AltaPluginSummary> ListPlugins() => [];
+
+        public AltaPluginSummary? GetPlugin(string runtimeKey) => null;
+
+        public IReadOnlyList<AltaCommandPolicy> ListCommandPolicies() => [];
+
+        public IReadOnlyList<AltaPluginCommandContribution> ListCommandContributions() => contributions;
+    }
+
     private sealed class DicePluginCatalog : IAltaPluginCatalog
     {
         private static readonly PluginDescriptor Descriptor = new() { RuntimeKey = "source:dice", TypeName = "Dice", AssemblyName = "dice", DisplayName = "Dice" };

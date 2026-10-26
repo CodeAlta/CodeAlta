@@ -529,14 +529,17 @@ internal sealed partial class BuiltInAltaCommandContributor
         return null;
     }
 
-    // A sandboxed session finds the conversations of itself and of the sessions it created only: the others hold what
-    // its sandbox keeps from it. Null for a caller that is not sandboxed.
+    // A sandboxed session finds the conversations of itself and of the sessions it created only, and what belongs to its
+    // own project or to none (plans and tasks of the others, their files): the others hold what its sandbox keeps
+    // from it. Null for a caller that is not sandboxed.
     private static async Task<Func<SearchHit, Task<bool>>?> SandboxSearchFilterAsync(AltaCommandContext context)
     {
         if (NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
             || await AltaSandboxGate.OfAsync(context, callerId).ConfigureAwait(false) is null)
             return null;
-        return async hit => NormalizeOptionalText(hit.SessionId) is not { } sessionId || await DescendsFromAsync(context, sessionId, callerId).ConfigureAwait(false);
+        var ownProject = NormalizeOptionalText(context.Caller.SourceProjectId);
+        return async hit => (NormalizeOptionalText(hit.ProjectId) is not { } project || string.Equals(project, ownProject, StringComparison.OrdinalIgnoreCase))
+                            && (NormalizeOptionalText(hit.SessionId) is not { } sessionId || await DescendsFromAsync(context, sessionId, callerId).ConfigureAwait(false));
     }
 
     private static async Task<bool> IsVisibleAsync(SearchScope scope, SearchHit hit, Func<SearchHit, Task<bool>>? sandbox)
@@ -578,6 +581,12 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static async Task<int> HandleSearchReindexAsync(AltaCommandContext context, string? kindsText)
     {
         const string CommandPath = "alta search reindex";
+        // The index is the one of every session, and a reindex of the MCP servers starts them all, outside the sandbox.
+        if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } sandbox)
+        {
+            return PermissionDenied(context, "sandbox.refused", AltaSandboxGate.Refusal(sandbox, "rebuild the index of search"));
+        }
+
         if (!TryGetSearch(context, out _)) return AltaExitCodes.ServiceUnavailable;
         if (context.Services.Get<SearchIndexer>() is not { } indexer || context.Services.Get<SearchIndexStore>() is not { } store)
         {

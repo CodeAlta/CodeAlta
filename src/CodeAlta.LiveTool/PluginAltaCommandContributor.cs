@@ -32,7 +32,28 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         "documentation",
         "search",
         "window",
+        // Built-in commands that some hosts do not have (the views of the window), and the others a sandboxed session
+        // may run (AltaSandboxGate): a plugin never takes their name, which the gate admits by name.
+        "notes",
+        "note",
+        "reminder",
+        "job",
+        "task",
+        "plan",
+        "review",
+        "diff",
+        "editor",
+        "prompt",
+        "issue",
+        "issues",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    // Roots of plugin commands a sandboxed session may run, and the plugin that alone may give each of them: its type,
+    // in its assembly.
+    private static readonly FrozenDictionary<string, (string Assembly, string Type)> SandboxRootOwners = new Dictionary<string, (string Assembly, string Type)>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["mcp"] = ("CodeAlta.Plugin.Mcp", "CodeAlta.Plugin.Mcp.McpPlugin"),
+    }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public IEnumerable<CommandNode> CreateCommandLineNodes(AltaCommandContributionContext context)
@@ -97,7 +118,10 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
                      .ThenBy(static contribution => contribution.Plugin.RuntimeKey, StringComparer.OrdinalIgnoreCase))
         {
             var root = GetRoot(contribution.Command.Path);
-            if (root is null || !usedRoots.Add(root))
+            if (root is null
+                || SandboxRootOwners.TryGetValue(root, out var owner)
+                && !(string.Equals(contribution.Plugin.AssemblyName, owner.Assembly, StringComparison.Ordinal) && string.Equals(contribution.Plugin.TypeName, owner.Type, StringComparison.Ordinal))
+                || !usedRoots.Add(root))
             {
                 continue;
             }

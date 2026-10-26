@@ -40,6 +40,15 @@ internal static class AltaSandboxGate
     public static async Task<AltaSessionSandbox?> OfCallerAsync(AltaCommandContext context)
         => context.Caller.SourceSessionId?.Trim() is { Length: > 0 } callerId ? await OfAsync(context, callerId).ConfigureAwait(false) : null;
 
+    /// <summary>Gets the folder the calling session works in, as CodeAlta knows it: its worktree, else its working directory; null when unknown.</summary>
+    public static async Task<string?> FolderOfCallerAsync(AltaCommandContext context)
+    {
+        if (context.Caller.SourceSessionId?.Trim() is not { Length: > 0 } callerId || context.Services.Get<SessionRuntimeService>() is not { } runtime) return null;
+        // A session that calls runs: it is attached.
+        var session = await runtime.TryGetActiveSessionDescriptorAsync(callerId, context.CancellationToken).ConfigureAwait(false);
+        return session is null ? null : session.WorktreeDirectory ?? session.WorkingDirectory;
+    }
+
     /// <summary>Gets whether a sandboxed session may run a command.</summary>
     /// <param name="commandPath">The path of the command, as the parser resolves it (<c>alta session send</c>).</param>
     public static bool Allows(string commandPath)
