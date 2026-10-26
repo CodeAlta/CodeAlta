@@ -116,7 +116,7 @@ A [fallback](../model-providers/readme.md) never moves a sandboxed session to a 
 ## Platforms
 
 - **Windows 11**: built in, nothing to install. MSBuild builds there with one node (`-m:1`). Before build .9550, the tests of VSTest do not run with a profile that reaches hosts, such as `workspace` (see [troubleshooting](../troubleshooting.md#a-sandboxed-session-runs-nothing)).
-- **macOS**: built in, on Apple silicon.
+- **macOS**: built in, on Apple silicon. The commands of Xcode or of its Command Line Tools (`git`, `python3`) and of Homebrew run there. MSBuild builds with one node (`-m:1`), and `dotnet test` does not run: no process of a sandbox listens on a port. A test project of Microsoft.Testing.Platform runs as a program: `dotnet build <tests> -m:1`, then `dotnet run --project <tests> --no-build` (see [troubleshooting](../troubleshooting.md#a-sandboxed-session-runs-nothing)).
 - **Linux**: install `bubblewrap`, and `slirp4netns` for a network.
 
 On macOS and Linux, a sandbox with a network reaches it through a proxy of CodeAlta, which programs find in `HTTPS_PROXY`: a program that ignores that variable reaches no host.

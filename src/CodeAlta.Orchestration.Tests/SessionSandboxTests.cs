@@ -2,6 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Sandbox;
 using CodeAlta.Sandbox;
 
 namespace CodeAlta.Orchestration.Tests;
@@ -248,8 +249,11 @@ public sealed class SessionSandboxTests
         Assert.Contains("No command runs outside", strict.Text);
         Assert.AreNotEqual(workspace.Noted, strict.Noted, "another sandbox is told again");
         var sandbox = await f.Runtime.GetSessionSandboxAsync("s");
-        Assert.Contains("`-m:1`", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(sandbox, null, windows: true).Text);
-        Assert.DoesNotContain("`-m:1`", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(sandbox, null, windows: false).Text);
+        Assert.Contains("`-m:1`", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(sandbox, null, SandboxPlatform.Windows).Text);
+        Assert.DoesNotContain("`-m:1`", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(sandbox, null, SandboxPlatform.Linux).Text);
+        var macOS = CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.Note(sandbox, null, SandboxPlatform.MacOS).Text;
+        Assert.Contains("`-m:1`", macOS, "MSBuild waits for its nodes on macOS");
+        Assert.Contains("`dotnet run --project <tests> --no-build`", macOS, "no test host listens on macOS");
     }
 
     [TestMethod]
@@ -278,15 +282,32 @@ public sealed class SessionSandboxTests
     {
         var workspace = SandboxProfiles.Resolve("workspace", []);
         var nodes = new AgentToolResult(false, [new AgentToolResultItem.Text("exit_code: 1\nstdout:\nBuild FAILED.\n    0 Warning(s)\n    0 Error(s)\n")], "shell_command exited with code 1.");
-        StringAssert.Contains(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, nodes, [], [], windows: true), "`-m:1`");
-        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, nodes, [], [], windows: false), "elsewhere the nodes start");
+        StringAssert.Contains(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, nodes, [], [], SandboxPlatform.Windows), "`-m:1`");
+        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, nodes, [], [], SandboxPlatform.Linux), "elsewhere the nodes start");
         var errors = new AgentToolResult(false, [new AgentToolResultItem.Text("Build FAILED.\n    0 Warning(s)\n    3 Error(s)\n")], null);
-        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, errors, [], [], windows: true), "a build with errors failed by itself");
+        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, errors, [], [], SandboxPlatform.Windows), "a build with errors failed by itself");
 
         var vstest = new AgentToolResult(false, [new AgentToolResultItem.Text("vstest.console process failed to connect to testhost process after 90 seconds.\nTest Run Aborted.")], null);
-        StringAssert.Contains(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, vstest, [], [], windows: true), "`outside_sandbox`");
-        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(SandboxProfiles.Resolve("strict", []), vstest, [], [], windows: true),
+        StringAssert.Contains(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, vstest, [], [], SandboxPlatform.Windows), "`outside_sandbox`");
+        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(SandboxProfiles.Resolve("strict", []), vstest, [], [], SandboxPlatform.Windows),
             "without network, the processes of the container connect to each other");
+        Assert.IsNull(CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(workspace, vstest, [], [], SandboxPlatform.MacOS), "a time-out of VSTest is not the sandbox of macOS");
+    }
+
+    [TestMethod]
+    public void WhatTheSandboxOfMacOSKeepsFromTests_IsToldAfterTheCommand()
+    {
+        var strict = SandboxProfiles.Resolve("strict", []);
+        var vstest = new AgentToolResult(false, [new AgentToolResultItem.Text("A total of 1 test files matched the specified pattern.\nSystem.Net.Sockets.SocketException (13): Permission denied\n   at Microsoft.VisualStudio.TestPlatform.CommunicationUtilities.SocketServer.Start(String endPoint)\n\nTest Run Aborted.\n")], null);
+        var mtp = new AgentToolResult(false, [new AgentToolResultItem.Text("Process terminated.\nSystem.Net.Sockets.SocketException (13): Permission denied\n")], null);
+        foreach (var result in new[] { vstest, mtp })
+        {
+            var note = CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(strict, result, [], [], SandboxPlatform.MacOS);
+            StringAssert.Contains(note, "`dotnet run --project <tests> --no-build`");
+            StringAssert.Contains(note, "Ask the user to run it.", "strict runs nothing outside");
+            Assert.DoesNotContain("dotnet run", CodeAlta.Orchestration.Runtime.Sandbox.SandboxOutsideCommands.FailureNote(strict, result, [], [], SandboxPlatform.Linux) ?? string.Empty,
+                "the test hosts listen on Linux");
+        }
     }
 
     [TestMethod]

@@ -7,6 +7,26 @@ using CodeAlta.Sandbox;
 
 namespace CodeAlta.Orchestration.Runtime.Sandbox;
 
+/// <summary>The system whose container runs a sandbox: what tools cannot do there differs.</summary>
+internal enum SandboxPlatform
+{
+    /// <summary>Linux, with Bubblewrap.</summary>
+    Linux,
+
+    /// <summary>Windows, with its process container.</summary>
+    Windows,
+
+    /// <summary>macOS, with Seatbelt.</summary>
+    MacOS,
+}
+
+/// <summary>The platform of this process.</summary>
+internal static class SandboxPlatforms
+{
+    /// <summary>Gets the platform this process runs on.</summary>
+    public static SandboxPlatform Current => OperatingSystem.IsWindows() ? SandboxPlatform.Windows : OperatingSystem.IsMacOS() ? SandboxPlatform.MacOS : SandboxPlatform.Linux;
+}
+
 /// <summary>
 /// What a sandboxed session is told of its sandbox: the parameter of <c>shell_command</c> that asks to run a command
 /// outside it, the note after a command it blocked, and the note of a run that says what it allows.
@@ -84,10 +104,10 @@ internal static class SandboxOutsideCommands
     /// refused, or a file it could not reach. Null otherwise.
     /// </summary>
     public static string? FailureNote(ResolvedSandboxProfile profile, AgentToolResult result, IReadOnlyList<string> refusedBefore, IReadOnlyList<string> refusedAfter)
-        => FailureNote(profile, result, refusedBefore, refusedAfter, OperatingSystem.IsWindows());
+        => FailureNote(profile, result, refusedBefore, refusedAfter, SandboxPlatforms.Current);
 
     /// <summary>The note after a command that failed in the sandbox, for the given platform.</summary>
-    internal static string? FailureNote(ResolvedSandboxProfile profile, AgentToolResult result, IReadOnlyList<string> refusedBefore, IReadOnlyList<string> refusedAfter, bool windows)
+    internal static string? FailureNote(ResolvedSandboxProfile profile, AgentToolResult result, IReadOnlyList<string> refusedBefore, IReadOnlyList<string> refusedAfter, SandboxPlatform platform)
     {
         var then = profile.Outside == SandboxOutside.Ask ? " Ask the user, or run the command again with `outside_sandbox`." : " Ask the user to run it.";
         var refused = (refusedAfter.Count > refusedBefore.Count ? refusedAfter.Skip(refusedBefore.Count) : refusedAfter.Except(refusedBefore, StringComparer.OrdinalIgnoreCase))
@@ -99,7 +119,17 @@ internal static class SandboxOutsideCommands
             return profile.Network == SandboxNetwork.Off
                 ? $"[sandbox: {profile.Name}] The sandbox of this session has no network: its profile reaches no host.{then}"
                 : $"[sandbox: {profile.Name}] The sandbox of this session reaches only the hosts of its profile, through its proxy (`HTTPS_PROXY`): a program that does not use the proxy reaches no host.{then}";
-        if (windows)
+        if (platform == SandboxPlatform.MacOS)
+        {
+            // Seatbelt lets no process of the sandbox listen on a port, and `/tmp`, where the test hosts put their pipes,
+            // is not written: VSTest and Microsoft.Testing.Platform under `dotnet test` stop at their first socket.
+            if (output.Contains("SocketException (13)", StringComparison.Ordinal)
+                && (output.Contains("Test Run Aborted", StringComparison.Ordinal) || output.Contains("Process terminated.", StringComparison.Ordinal)))
+                return $"[sandbox: {profile.Name}] On macOS, the processes of a sandbox cannot listen on a port nor create sockets in `/tmp`, as `dotnet test` needs. " +
+                       $"A test project of Microsoft.Testing.Platform runs as a program: `dotnet build <tests> -m:1`, then `dotnet run --project <tests> --no-build`.{then}";
+        }
+
+        if (platform == SandboxPlatform.Windows)
         {
             // The Windows container refuses the named pipes of MSBuild's worker nodes (they admit the user alone, not
             // the container): the build fails without an error. One node, in the process of the build, works.
@@ -119,10 +149,10 @@ internal static class SandboxOutsideCommands
     /// <param name="sandbox">The sandbox of the session, as it applies now.</param>
     /// <param name="scratchpad">The scratchpad folder of the sandboxed session, or null.</param>
     /// <returns>The text of the note, and a short value that changes with it (<c>off</c> for a session that is not sandboxed).</returns>
-    public static (string Text, string Noted) Note(SessionSandbox sandbox, string? scratchpad) => Note(sandbox, scratchpad, OperatingSystem.IsWindows());
+    public static (string Text, string Noted) Note(SessionSandbox sandbox, string? scratchpad) => Note(sandbox, scratchpad, SandboxPlatforms.Current);
 
     /// <summary>What the agent is told of its sandbox on the given platform.</summary>
-    internal static (string Text, string Noted) Note(SessionSandbox sandbox, string? scratchpad, bool windows)
+    internal static (string Text, string Noted) Note(SessionSandbox sandbox, string? scratchpad, SandboxPlatform platform)
     {
         if (!sandbox.IsSandboxed) return ("<codealta-context>Sandbox: off. Commands and file tools run on this computer, as the permissions of the session allow.</codealta-context>", "off");
         string text;
@@ -142,7 +172,15 @@ internal static class SandboxOutsideCommands
             var outside = profile.Outside == SandboxOutside.Ask
                 ? $" A command that needs more can run outside with `{Parameter}: \"<why>\"` on `shell_command`: the user is asked each time."
                 : " No command runs outside it: ask the user for what needs more.";
-            text = $"<codealta-context>Sandbox: on, profile `{profile.Name}`. Commands and file tools run in a container: they write in the working directory, the folders of the project{(scratchpad is null ? string.Empty : $", the scratchpad folder `{scratchpad}` (use it instead of the scratchpad file named above)")} and temp; they read the system and the developer tools, not the home folder; they {network}. `.git/config`, git hooks and the configuration files of CodeAlta are read-only.{outside}{(windows ? " Give `dotnet build`, `dotnet test` and `msbuild` the option `-m:1`: MSBuild cannot start its worker nodes in this sandbox." : string.Empty)} `alta` reaches only this session and the sessions it creates.</codealta-context>";
+            var platformNote = platform switch
+            {
+                SandboxPlatform.Windows => " Give `dotnet build`, `dotnet test` and `msbuild` the option `-m:1`: MSBuild cannot start its worker nodes in this sandbox.",
+                // The worker nodes of MSBuild put their pipes in `/tmp`: without `-m:1`, the build waits for them for minutes.
+                SandboxPlatform.MacOS => " Give `dotnet restore`, `dotnet build` and `msbuild` the option `-m:1`, and run with `dotnet run --no-build` after such a build (`dotnet run` gives `-m:1` to the program): MSBuild cannot start its worker nodes in this sandbox, and waits for them for minutes." +
+                                         " No process of this sandbox listens on a port, so `dotnet test` does not run here: a test project of Microsoft.Testing.Platform runs as a program (`dotnet run --project <tests> --no-build`).",
+                _ => string.Empty,
+            };
+            text = $"<codealta-context>Sandbox: on, profile `{profile.Name}`. Commands and file tools run in a container: they write in the working directory, the folders of the project{(scratchpad is null ? string.Empty : $", the scratchpad folder `{scratchpad}` (use it instead of the scratchpad file named above)")} and temp; they read the system and the developer tools, not the home folder; they {network}. `.git/config`, git hooks and the configuration files of CodeAlta are read-only.{outside}{platformNote} `alta` reaches only this session and the sessions it creates.</codealta-context>";
         }
 
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)), 0, 4).ToLowerInvariant();
