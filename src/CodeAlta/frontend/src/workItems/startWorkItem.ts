@@ -1,6 +1,6 @@
 import type { MessageKey } from "../localization";
 import type { PluginComposerRequest } from "../pluginUi";
-import type { RunsWith } from "./runsWith";
+import type { SessionStartRequest } from "../sessionSettings/sessionSettings";
 import type { WorkItem, WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 import { awaitComposerAdmission } from "../pluginPromptAdmission";
@@ -26,9 +26,9 @@ export type WorkStartSession = Readonly<{ id: string; workingDirectory: string |
  * with what the user chose; without a choice, with what the session that shows the item runs with, then with
  * what the item was proposed with, then with the defaults.
  */
-export async function startWorkItem(host: WorkStartHost, item: WorkItem, start: WorkStart, session: WorkStartSession | null, runsWith: RunsWith | null = null): Promise<boolean> {
+export async function startWorkItem(host: WorkStartHost, item: WorkItem, start: WorkStart, session: WorkStartSession | null, request: SessionStartRequest | null = null): Promise<boolean> {
   if (start !== "here") {
-    const outcome = await host.hub.act(item, start === "worktree" ? "start_worktree" : "start_session", { sessionId: session?.id ?? null, runsWith });
+    const outcome = await host.hub.act(item, start === "worktree" ? "start_worktree" : "start_session", { sessionId: session?.id ?? null, start: request });
     // A session may exist although its prompt was refused: it is shown, with what went wrong.
     if (outcome.sessionId) host.openSession(outcome.sessionId, item.projectId);
     if (outcome.ok) return true;

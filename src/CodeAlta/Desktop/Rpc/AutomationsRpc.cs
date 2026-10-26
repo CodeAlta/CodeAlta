@@ -206,7 +206,7 @@ internal sealed class AutomationsService
             var runs = _automations.Runs(entry.Id, 1);
             return new AutomationItem(entry.Id, definition.Name, definition.Enabled, definition.Prompt, entry.ProjectId, project?.DisplayName,
                 entry.ProjectPath ?? definition.Project, entry.Source.ProjectId, entry.Source.FilePath, definition.Model.Provider, definition.Model.Model,
-                definition.Model.Effort?.ToString(), definition.Agent, definition.CatchUp, [.. definition.Triggers.Select(Trigger)], entry.Problem,
+                definition.Model.Effort?.ToString(), definition.Agent, definition.PermissionMode, definition.ReviewBeforeCommit, definition.Sandbox, definition.CatchUp, [.. definition.Triggers.Select(Trigger)], entry.Problem,
                 _automations.NextDue(entry.Id), _automations.IsRunning(entry.Id), runs.Count > 0 ? Run(runs[0]) : null,
                 _automations.Repository(entry.Id), definition.Enabled ? _automations.WatchProblem(entry.Id) : null, _automations.IsAllowed(entry));
         }).ToArray();
@@ -264,6 +264,9 @@ internal sealed class AutomationsService
             Prompt = input.Prompt,
             Model = new(provider, model, effort),
             Agent = Blank(input.Agent),
+            PermissionMode = Blank(input.PermissionMode),
+            ReviewBeforeCommit = input.ReviewBeforeCommit,
+            Sandbox = Blank(input.Sandbox),
             CatchUp = input.CatchUp,
             Triggers = triggers,
         };
@@ -333,6 +336,9 @@ internal sealed record AutomationTriggerItem(string Type, int Minute, int Every,
 /// <param name="ProjectFolder">The folder it runs in, or the folder it names when that is not a project.</param>
 /// <param name="StoreProjectId">The project whose configuration defines it; null for the configuration of the user.</param>
 /// <param name="File">The configuration file that defines it.</param>
+/// <param name="PermissionMode">The permission mode its sessions start in; null for the one of their provider.</param>
+/// <param name="ReviewBeforeCommit">Whether the user reviews the changes of its sessions before a commit; null follows the setting.</param>
+/// <param name="Sandbox">The sandbox its sessions run in, a profile or <c>off</c>; null for what the settings give.</param>
 /// <param name="Problem">Why it cannot run as defined.</param>
 /// <param name="NextRunAt">When a schedule of it is next due.</param>
 /// <param name="LastRun">Its latest run.</param>
@@ -342,7 +348,7 @@ internal sealed record AutomationTriggerItem(string Type, int Minute, int Every,
 /// Whether its triggers may start it: false for an automation kept with a project that the user has not allowed as it is now.
 /// </param>
 internal sealed record AutomationItem(string Id, string Name, bool Enabled, string Prompt, string? ProjectId, string? ProjectName, string? ProjectFolder,
-    string? StoreProjectId, string File, string? Provider, string? Model, string? Effort, string? Agent, bool CatchUp,
+    string? StoreProjectId, string File, string? Provider, string? Model, string? Effort, string? Agent, string? PermissionMode, bool? ReviewBeforeCommit, string? Sandbox, bool CatchUp,
     IReadOnlyList<AutomationTriggerItem> Triggers, string? Problem, DateTimeOffset? NextRunAt, bool Running, AutomationRunItem? LastRun,
     string? Repository, string? WatchProblem, bool Allowed);
 
@@ -367,8 +373,11 @@ internal sealed record AutomationUpcomingItem(string AutomationId, DateTimeOffse
 /// <summary>An automation as the page writes it.</summary>
 /// <param name="Id">The automation to replace; null for a new one.</param>
 /// <param name="ProjectId">The project it runs in; null for a chat.</param>
+/// <param name="PermissionMode">The permission mode its sessions start in; null for the one of their provider.</param>
+/// <param name="ReviewBeforeCommit">Whether the user reviews the changes of its sessions before a commit; null follows the setting.</param>
+/// <param name="Sandbox">The sandbox its sessions run in, a profile or <c>off</c>; null for what the settings give.</param>
 internal sealed record AutomationInput(string? Id, string Name, bool Enabled, string Prompt, string? ProjectId, string? Provider, string? Model,
-    string? Effort, string? Agent, bool CatchUp, IReadOnlyList<AutomationTriggerItem> Triggers);
+    string? Effort, string? Agent, string? PermissionMode, bool? ReviewBeforeCommit, string? Sandbox, bool CatchUp, IReadOnlyList<AutomationTriggerItem> Triggers);
 
 /// <param name="StoreProjectId">The project whose configuration holds it; null for the configuration of the user.</param>
 internal sealed record AutomationSaveRequest(string? ExpectedEpoch, AutomationInput Automation, string? StoreProjectId);

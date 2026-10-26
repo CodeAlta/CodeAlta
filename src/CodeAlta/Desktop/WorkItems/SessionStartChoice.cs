@@ -19,6 +19,38 @@ internal sealed record SessionStartModel(WorkItemSelection? Asked = null, WorkIt
     /// such as the review of the user; null for a prompt of the user.
     /// </summary>
     public string? Provenance { get; init; }
+
+    /// <summary>Gets the permission mode the session starts in, one its provider offers; null for the one of the provider.</summary>
+    public string? PermissionMode { get; init; }
+
+    /// <summary>Gets whether the user reviews the changes of the session before an agent commits them; null follows the setting.</summary>
+    public bool? ReviewBeforeCommit { get; init; }
+
+    /// <summary>Gets the sandbox the session runs in: a profile, or <c>off</c>; null for what the settings give.</summary>
+    public string? Sandbox { get; init; }
+}
+
+/// <summary>What the user chose for a new session besides its model, as the form of the Agent chip chooses it.</summary>
+/// <param name="AgentPromptId">The agent prompt it starts with; null for the one the work names, else the default one of its space.</param>
+/// <param name="PermissionMode">The permission mode it starts in; null for the one of its provider.</param>
+/// <param name="ReviewBeforeCommit">Whether the user reviews its changes before an agent commits them; null follows the setting.</param>
+/// <param name="Sandbox">The sandbox it runs in, a profile or <c>off</c>; null for what the settings give.</param>
+internal sealed record SessionStartSettings(string? AgentPromptId, string? PermissionMode, bool? ReviewBeforeCommit, string? Sandbox)
+{
+    /// <summary>The settings of a request, or null when it chooses none of them.</summary>
+    internal static SessionStartSettings? Of(string? agentPromptId, string? permissionMode, bool? reviewBeforeCommit, string? sandbox)
+    {
+        var agent = Blank(agentPromptId);
+        var mode = Blank(permissionMode);
+        var profile = Blank(sandbox);
+        return agent is null && mode is null && reviewBeforeCommit is null && profile is null ? null : new(agent, mode, reviewBeforeCommit, profile);
+
+        static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
+    /// <summary>The model of a start with these settings.</summary>
+    internal SessionStartModel Apply(SessionStartModel model)
+        => model with { AgentPromptId = AgentPromptId ?? model.AgentPromptId, PermissionMode = PermissionMode, ReviewBeforeCommit = ReviewBeforeCommit, Sandbox = Sandbox };
 }
 
 /// <summary>The provider, the model and the effort a new session starts with, or why none could be chosen.</summary>

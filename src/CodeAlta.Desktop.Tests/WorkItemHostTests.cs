@@ -196,6 +196,13 @@ public sealed class WorkItemHostTests
         Assert.AreEqual("invalid_request", (await Start("anthropic", null, "low")).Status);
         Assert.AreEqual("invalid_request", (await Start("anthro\npic")).Status);
         Assert.HasCount(3, fixture.Runner.Asked);
+        Assert.IsTrue(fixture.Runner.Settings.All(static settings => settings is null), "Nothing chosen besides the model: the defaults.");
+
+        // The permission mode, the review and the sandbox of the form of the Agent chip go with the start.
+        Assert.AreEqual("ok", (await fixture.Rpc.ActAsync(new(Epoch, fixture.Project.Id, "task", id, "start_session", AgentPromptId: "plan", PermissionMode: "acceptEdits",
+            ReviewBeforeCommit: true, Sandbox: "off"), default)).Status);
+        Assert.AreEqual(new SessionStartSettings("plan", "acceptEdits", true, "off"), fixture.Runner.Settings[^1]);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ActAsync(new(Epoch, fixture.Project.Id, "task", id, "start_session", Sandbox: "of\nf"), default)).Status);
     }
 
     [TestMethod]
@@ -206,12 +213,14 @@ public sealed class WorkItemHostTests
         var starter = new RecordingStarter();
         var runner = new WorkItemRunner(starter, fixture.Items);
 
-        Assert.AreEqual("new-session", (await runner.StartAsync(fixture.Project, "task", id, worktree: false, likeSessionId: "session-1", asked: null)).SessionId);
+        Assert.AreEqual("new-session", (await runner.StartAsync(fixture.Project, "task", id, worktree: false, likeSessionId: "session-1", asked: null, settings: null)).SessionId);
         Assert.AreEqual(("session-1", null, new WorkItemSelection("codex", "gpt-a", "high")), (starter.Like, starter.Model!.Asked, starter.Model.Recorded));
+        Assert.AreEqual((null, null, null), (starter.Model.PermissionMode, starter.Model.ReviewBeforeCommit, starter.Model.Sandbox));
         Assert.AreEqual("new-session", fixture.Items.GetLink(fixture.Project.Id, "task", id)!.Runner);
 
-        await runner.StartAsync(fixture.Project, "task", id, worktree: true, likeSessionId: null, asked: new("anthropic", "claude"));
+        await runner.StartAsync(fixture.Project, "task", id, worktree: true, likeSessionId: null, asked: new("anthropic", "claude"), settings: new("reviewer", "plan", false, "strict"));
         Assert.AreEqual((null, new WorkItemSelection("anthropic", "claude"), new WorkItemSelection("codex", "gpt-a", "high")), (starter.Like, starter.Model!.Asked, starter.Model.Recorded));
+        Assert.AreEqual(("reviewer", "plan", (bool?)false, "strict"), (starter.Model.AgentPromptId, starter.Model.PermissionMode, starter.Model.ReviewBeforeCommit, starter.Model.Sandbox));
     }
 
     private sealed class RecordingStarter : ISessionStarter
@@ -308,13 +317,17 @@ public sealed class WorkItemHostTests
 
         internal List<WorkItemSelection?> Asked { get; } = [];
 
+        internal List<SessionStartSettings?> Settings { get; } = [];
+
         internal (string Message, string Reason)? Problem { get; set; }
 
-        public Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId, WorkItemSelection? asked)
+        public Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId, WorkItemSelection? asked,
+            SessionStartSettings? settings)
         {
             if (Problem is { } problem) return Task.FromResult(new WorkItemStartResult(null, problem.Message, problem.Reason));
             Starts.Add((project.Id, kind, id, worktree, likeSessionId));
             Asked.Add(asked);
+            Settings.Add(settings);
             return Task.FromResult(new WorkItemStartResult("new-session", null));
         }
     }

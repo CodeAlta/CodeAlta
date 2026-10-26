@@ -139,6 +139,8 @@ An open item has two buttons:
 
 The session gets the item's title, link and description. For a pull request it is asked to review, not merge.
 
+**Runs with**, above the buttons, is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it takes the [default provider](model-providers/readme.md) and your settings; turn it off to choose the agent prompt, the model, the permission mode, review before commit and the sandbox.
+
 You can start several items at once: each shows **Starting…** while its worktree is made. A ready session opens if you are still on that item; otherwise a notification offers it with **Show**.
 
 **Open on GitHub** (or the service's name) opens the item in your browser; **Copy link** copies its address.

@@ -81,6 +81,10 @@ internal static class AutomationConfig
             return "The prompt of an automation is plain text.";
         if (definition.Project is { } project && (project.Length is 0 or > 4096 || project.Any(char.IsControl))) return "The project of an automation is the path of its folder.";
         if (definition.Agent is { } agent && (agent.Length is 0 or > 256 || agent.Any(char.IsControl))) return "The agent prompt of an automation is a name.";
+        if (definition.PermissionMode is { } mode && (mode.Length is 0 or > 64 || mode.Any(char.IsControl) || mode.Trim() != mode))
+            return "The permission mode of an automation is a name.";
+        if (definition.Sandbox is { } sandbox && (sandbox.Length is 0 or > 256 || sandbox.Any(char.IsControl) || sandbox.Trim() != sandbox))
+            return "The sandbox of an automation is the name of a profile, or off.";
         if (definition.Triggers.Count > AutomationDefinition.MaximumTriggers) return $"An automation has at most {AutomationDefinition.MaximumTriggers} triggers.";
         foreach (var trigger in definition.Triggers)
         {
@@ -219,7 +223,15 @@ internal static class AutomationConfig
         if (!TryText(table, "name", out var name, out problem) || !TryText(table, "prompt", out var prompt, out problem)
             || !TryText(table, "project", out var project, out problem) || !TryText(table, "model", out var model, out problem)
             || !TryText(table, "agent", out var agent, out problem) || !TryFlag(table, "enabled", true, out var enabled, out problem)
-            || !TryFlag(table, "catch_up", false, out var catchUp, out problem)) return false;
+            || !TryFlag(table, "catch_up", false, out var catchUp, out problem) || !TryText(table, "permission_mode", out var permissionMode, out problem)
+            || !TryText(table, "sandbox", out var sandbox, out problem)) return false;
+        bool? review = null;
+        if (table.ContainsKey("review_before_commit"))
+        {
+            if (!TryFlag(table, "review_before_commit", false, out var flag, out problem)) return false;
+            review = flag;
+        }
+
         if (!AutomationModelRef.TryParse(model, out var reference, out problem)) return false;
         var triggers = new List<AutomationTrigger>();
         if (table.TryGetValue("triggers", out var value))
@@ -257,6 +269,9 @@ internal static class AutomationConfig
             Project = source.IsGlobal ? Blank(project) : null,
             Model = reference,
             Agent = Blank(agent),
+            PermissionMode = Blank(permissionMode),
+            ReviewBeforeCommit = review,
+            Sandbox = Blank(sandbox),
             CatchUp = catchUp,
             Triggers = triggers,
         };
@@ -391,6 +406,9 @@ internal static class AutomationConfig
         if (definition.Project is { } project) builder.Append("project = ").Append(Quote(OperatingSystem.IsWindows() ? project.Replace('\\', '/') : project)).Append(newline);
         if (definition.Model.Format() is { } model) builder.Append("model = ").Append(Quote(model)).Append(newline);
         if (definition.Agent is { } agent) builder.Append("agent = ").Append(Quote(agent)).Append(newline);
+        if (definition.PermissionMode is { } mode) builder.Append("permission_mode = ").Append(Quote(mode)).Append(newline);
+        if (definition.ReviewBeforeCommit is { } review) builder.Append("review_before_commit = ").Append(review ? "true" : "false").Append(newline);
+        if (definition.Sandbox is { } sandbox) builder.Append("sandbox = ").Append(Quote(sandbox)).Append(newline);
         if (definition.CatchUp) builder.Append("catch_up = true").Append(newline);
         if (definition.Triggers.Count > 0)
         {

@@ -109,6 +109,9 @@ internal sealed class AutomationRunner : IAutomationRunner
             if (drafts is null) return Refuse("The application is closing.");
             var agent = definition.Agent ?? drafts.DefaultPromptId;
             if (!drafts.Prompts.Any(candidate => candidate.Id == agent)) return Refuse($"There is no agent prompt '{agent}' in the space '{spaceId}'.");
+            // The permission mode is one the provider offers a new session, checked before the session exists.
+            if (definition.PermissionMode is { } mode && !_host.Commands.GetNewSessionPermissionModes(provider.ProviderId.Value).Modes.Contains(mode, StringComparer.Ordinal))
+                return Refuse($"The provider '{provider.ProviderId.Value}' does not offer the permission mode '{mode}'.");
 
             cancellationToken.ThrowIfCancellationRequested();
             // The host keeps a bounded number of pending commands: a prompt that would be refused starts no session.
@@ -120,8 +123,15 @@ internal sealed class AutomationRunner : IAutomationRunner
                 SourceProjectId = project?.Id,
                 CorrelationId = runId,
                 CreatedAt = DateTimeOffset.UtcNow,
-            }, spaceId: spaceId).ConfigureAwait(false);
+            }, null, spaceId, definition.PermissionMode).ConfigureAwait(false);
             sessionId = session.SessionId;
+            // The review and the sandbox the automation chose, before anything is sent to the session.
+            if (definition.ReviewBeforeCommit is { } review
+                && (await _host.Commands.SetReviewBeforeCommitAsync(sessionId, review, cancellationToken).ConfigureAwait(false)).Status is var reviewed and not "ok")
+                return new(sessionId, $"The review before commit could not be chosen ({reviewed}).", null);
+            if (definition.Sandbox is { } sandbox
+                && (await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false)).Status is var sandboxed and not "ok")
+                return new(sessionId, $"The sandbox '{sandbox}' could not be chosen ({sandboxed}).", null);
 
             // The effort of a model that reports its efforts is completed by the host when the automation names none.
             var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, model.Id, definition.Model.Effort);

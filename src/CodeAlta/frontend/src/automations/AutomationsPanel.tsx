@@ -8,10 +8,11 @@ import { TriggerIcon } from "./TriggerIcon";
 import { sessionTime, timelineTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { AutomationEditor } from "./AutomationEditor";
-import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, runStatusLabel, runTone, runTriggerLabel, timelinePosition, timelineRows, triggerTone,
+import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, runStatusLabel, runTone, runTriggerLabel, runsWithFacts, timelinePosition, timelineRows, triggerTone,
   waitsToBeAllowed,
   type AutomationForm, type AutomationScope, type AutomationTemplate } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
+import type { RunProvider } from "../workItems/runsWith";
 
 const day = 24 * 60 * 60 * 1000;
 
@@ -170,6 +171,7 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
   }, [hub, stamp]);
   const next = item.nextRunAt ? timelineTime(item.nextRunAt, locale) : null;
   const waits = !item.problem && waitsToBeAllowed(item);
+  const runsWith = runsWithFacts(item, t);
   return <section className="automation-detail" aria-label={item.name}>
     <header>
       <span className="automation-card-glyph" data-file-tone={triggerTone(item.triggers[0]?.type)}><TriggerIcon type={item.triggers[0]?.type} size={20} /></span>
@@ -190,8 +192,8 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
       {item.triggers.length > 0 && <><dt>{t("Next run")}</dt>
         <dd>{waits ? t("Waits for you to allow it") : !item.enabled ? t("Disabled") : paused ? t("Paused") : next?.label ?? t("Waits for its event")}</dd></>}
       {item.repository && <><dt>{t("Repository")}</dt><dd>{item.repository}</dd></>}
-      {(item.provider || item.agent) && <><dt>{t("Model")}</dt>
-        <dd>{[item.provider, item.model, item.effort, item.agent ? t("agent {name}", { name: item.agent }) : null].filter(Boolean).join(" · ")}</dd></>}
+      {/* What its sessions run with besides the defaults, which an automation that came with a project shows before it is allowed. */}
+      {runsWith.length > 0 && <><dt>{t("Runs with")}</dt><dd>{runsWith.join(" · ")}</dd></>}
       <dt>{t("Stored in")}</dt><dd className="automation-file" title={item.file}>{item.file}</dd>
     </dl>
     <h4>{t("Prompt")}</h4>
@@ -228,7 +230,8 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
   sessions: readonly WorkspaceSession[];
   /** The project selected in the window, where a new automation runs unless the user says otherwise. */
   projectId: string | null;
-  providers: readonly Readonly<{ id: string }>[];
+  /** The enabled providers. */
+  providers: readonly RunProvider[];
   epoch: string | null | undefined;
   visible: boolean;
   /** The automation to show, asked from elsewhere in the window. */

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkItemRow, WorkItemsListResponse, WorkItemsProject, WorkItemsSettings } from "#neoastra";
+import { defaultSessionSettings, type SessionStartRequest } from "../sessionSettings/sessionSettings";
 import { startRefusal, startWorkItem, type WorkStartHost } from "./startWorkItem";
 import { defaultWorkSettings, workItems, type WorkItem } from "./workItems";
 import { createWorkItemsHub, readingBatches, type WorkItemsApi } from "./workItemsHub";
@@ -13,7 +14,7 @@ const settled = () => new Promise<void>(resolve => setImmediate(resolve));
 function host(found: Record<string, WorkItemRow[]>) {
   const asked: (readonly string[] | null)[] = [];
   const acted: string[] = [];
-  const ranWith: (string | null)[][] = [];
+  const ranWith: (string | boolean | null)[][] = [];
   let settings: WorkItemsSettings = defaultWorkSettings;
   let tell: (() => void) | null = null;
   const pending: (() => void)[] = [];
@@ -29,7 +30,8 @@ function host(found: Record<string, WorkItemRow[]>) {
     async read() { return { status: "ok", markdown: "Text.", truncated: false }; },
     async act(request) {
       acted.push(`${request.action}:${request.id}:${request.sessionId ?? ""}`);
-      if (request.action.startsWith("start_")) ranWith.push([request.providerId, request.modelId, request.reasoningEffort]);
+      if (request.action.startsWith("start_")) ranWith.push([request.providerId, request.modelId, request.reasoningEffort,
+        ...request.agentPromptId || request.permissionMode || request.reviewBeforeCommit !== null || request.sandbox ? [request.agentPromptId, request.permissionMode, request.reviewBeforeCommit, request.sandbox] : []]);
       if (request.action === "dismiss") found[request.projectId] = found[request.projectId].filter(item => item.id !== request.id);
       return request.action === "start_here" ? { status: "ok", sessionId: request.sessionId, message: null, reason: null, prompt: "Do it.", agentPromptId: request.kind === "plan" ? "default" : null }
         : request.action === "start_worktree" ? { status: "refused", sessionId: null, message: "git said no", reason: "worktree_not_repository", prompt: null, agentPromptId: null }
@@ -150,10 +152,14 @@ test("work starts in a new session, or through the composer of the session that 
   assert.deepEqual(server.ranWith.at(-1), [null, null, null], "nothing was chosen: the host takes what the session, then the item, then the defaults say");
 
   // What the user chose in the Work items tab goes with the start; an effort is of a model.
-  assert.equal(await startWorkItem(window(false), item, "session", null, { providerId: "codex", modelId: "gpt-a", reasoningEffort: "high" }), true);
+  const chosen = (change: Partial<SessionStartRequest>): SessionStartRequest => ({ ...defaultSessionSettings, ...change });
+  assert.equal(await startWorkItem(window(false), item, "session", null, chosen({ providerId: "codex", modelId: "gpt-a", reasoningEffort: "high" })), true);
   assert.deepEqual([server.acted.at(-1), server.ranWith.at(-1)], ["start_session:one:", ["codex", "gpt-a", "high"]]);
-  assert.equal(await startWorkItem(window(false), item, "session", null, { providerId: "codex", modelId: null, reasoningEffort: "high" }), true);
+  assert.equal(await startWorkItem(window(false), item, "session", null, chosen({ providerId: "codex", modelId: null, reasoningEffort: "high" })), true);
   assert.deepEqual(server.ranWith.at(-1), ["codex", null, null]);
+  // So do the agent prompt, the permission mode, the review and the sandbox of its form.
+  assert.equal(await startWorkItem(window(false), item, "session", null, chosen({ agentPromptId: "plan", permissionMode: "acceptEdits", reviewBeforeCommit: false, sandbox: "off" })), true);
+  assert.deepEqual(server.ranWith.at(-1), [null, null, null, "plan", "acceptEdits", false, "off"]);
   opened.splice(0, opened.length, "new");
 
   assert.equal(await startWorkItem(window(false), item, "here", { id: "s1", workingDirectory: "C:/app" }), true);

@@ -94,16 +94,16 @@ test("an item that can be started says what its session runs with, and which pro
   const view = (plan: WorkItemRow, more: object = { providers }) => render(createElement(WorkItemsPanel, { hub: hub(state({ projects: [{ projectId: "p", truncated: false, tasks: [], plans: [plan] }] })),
     projects: [project], sessions, runningSessions: new Set<string>(), projectId: "p", visible: false, onActivate: never, onStart: never, onOpenSession: never, onOpenFile: never, onOpenSettings: never, ...more }));
 
-  // Nothing is recorded with the item: the default provider, which is marked.
+  // The Agent chip of the composer says what the session runs with: with nothing recorded with the item, the defaults, the default provider.
+  const provider = (html: string) => /class="composer-selection-provider-name">([^<]*)</.exec(html)?.[1];
   const fresh = view(row("plan", "plan", "approved"));
   assert.match(fresh, /role="group" aria-label="Runs with"/);
-  assert.match(fresh, /<option value="codex" selected="">Codex \(default\)<\/option>/);
-  assert.match(fresh, /<option value="anthropic">Anthropic<\/option>/);
+  assert.match(fresh, /<button[^>]*class="[^"]*composer-selection[^"]*"[^>]*data-defaults="true"/, "the defaults until the user changes them");
+  assert.equal(provider(fresh), "Codex");
   // The session that proposed it ran with another provider: that one.
-  const proposed = view(row("plan", "plan", "approved", { runsWith: { providerId: "anthropic", modelId: "claude", reasoningEffort: "high" } }));
-  assert.match(proposed, /<option value="anthropic" selected="">Anthropic<\/option>/);
+  assert.equal(provider(view(row("plan", "plan", "approved", { runsWith: { providerId: "anthropic", modelId: "claude", reasoningEffort: "high" } }))), "Anthropic");
   // A provider that is no longer enabled is not offered: the default one.
-  assert.match(view(row("plan", "plan", "approved", { runsWith: { providerId: "gone", modelId: null, reasoningEffort: null } })), /<option value="codex" selected="">/);
+  assert.equal(provider(view(row("plan", "plan", "approved", { runsWith: { providerId: "gone", modelId: null, reasoningEffort: null } }))), "Codex");
   // What cannot be started has nothing to run with, and a window without providers shows no choice.
   assert.ok(!view(row("plan", "plan", "done")).includes("Runs with"));
   assert.ok(!view(row("plan", "plan", "approved"), {}).includes("Runs with"));

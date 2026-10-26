@@ -160,6 +160,27 @@ public sealed class AutomationConfigTests
     }
 
     [TestMethod]
+    public void TheSettingsOfItsSessions_AreReadWrittenAndAllowedAgain()
+    {
+        var plain = new AutomationDefinition(First, "Nightly") { Prompt = "Review." };
+        var definition = plain with { PermissionMode = "acceptEdits", ReviewBeforeCommit = false, Sandbox = "off" };
+        var written = AutomationConfig.Write(string.Empty, definition);
+        StringAssert.Contains(written, "permission_mode = \"acceptEdits\"\nreview_before_commit = false\nsandbox = \"off\"\n");
+        AssertSame(definition, AutomationConfig.Read(written, Global).Definitions.Single());
+        Assert.IsFalse(AutomationConfig.Write(string.Empty, plain).Contains("permission_mode", StringComparison.Ordinal), "Nothing is written for the defaults.");
+
+        // An automation kept with a project is allowed again when what its sessions may do changes; one without them keeps its fingerprint.
+        Assert.AreEqual(4, new[] { plain, definition, definition with { ReviewBeforeCommit = true }, definition with { Sandbox = "strict" } }
+            .Select(static candidate => candidate.Fingerprint()).Distinct().Count());
+        Assert.AreEqual(plain.Fingerprint(), (plain with { ReviewBeforeCommit = null }).Fingerprint());
+
+        Assert.IsNotNull(AutomationConfig.Validate(plain with { PermissionMode = "bad\nmode" }));
+        Assert.IsNotNull(AutomationConfig.Validate(plain with { Sandbox = " off" }));
+        var (_, faults) = AutomationConfig.Read($"[automations.{First}]\nname = \"n\"\nprompt = \"p\"\nreview_before_commit = \"yes\"\n", Global);
+        StringAssert.Contains(faults.Single().Message, "review_before_commit");
+    }
+
+    [TestMethod]
     public void Write_ReplacesOnlyTheTextOfItsAutomation()
     {
         var before = $"""

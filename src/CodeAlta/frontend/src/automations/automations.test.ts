@@ -2,16 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AutomationItem, AutomationRunItem, AutomationTriggerItem } from "#neoastra";
 import { locales, translate, type Locale, type MessageKey } from "../localization";
-import { automationTemplates, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, inputOf, isSchedule, maximumNameLength,
-  maximumPromptLength, needsProject, newTrigger, openableRun, runStatusLabel, runTone, runTriggerLabel, sessionOrigin, timelinePosition, timelineRows, triggerIcon, triggerLabel, triggerTone, triggerTypes,
-  type AutomationForm } from "./automations";
+import { defaultSessionSettings } from "../sessionSettings/sessionSettings";
+import { automationTemplates, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, formSettings, inputOf, isSchedule, maximumNameLength,
+  maximumPromptLength, needsProject, newTrigger, openableRun, runStatusLabel, runTone, runTriggerLabel, runsWithFacts, sessionOrigin, sessionSettingsOf, timelinePosition, timelineRows, triggerIcon, triggerLabel,
+  triggerTone, triggerTypes, type AutomationForm } from "./automations";
 
 const english = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate("en", key, parameters);
 const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): AutomationTriggerItem =>
   ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, ...change });
 const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: null, projectName: null, projectFolder: null, storeProjectId: null, file: "/home/config.toml",
-  provider: null, model: null, effort: null, agent: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, ...change,
+  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, ...change,
 });
 const run = (id: string, sessionId: string | null): AutomationRunItem =>
   ({ id, automationId: "a", name: "A", sessionId, projectId: null, startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status: "running", message: null });
@@ -90,9 +91,12 @@ test("a form says what it misses before it is sent", () => {
 
 test("what is sent for a form is trimmed, and names a model only with its provider", () => {
   const form: AutomationForm = { ...emptyForm("p"), id: "id", name: "  Nightly ", prompt: "Review.\n", provider: " codex ", model: " gpt ", effort: "High", agent: " reviewer ", catchUp: true,
+    permissionMode: " acceptEdits ", reviewBeforeCommit: false, sandbox: "off",
     storeInProject: true, triggers: [trigger("daily", { at: ["17:30", "09:00"], expression: "left over" }), trigger("cron", { expression: " 0 9 * * * " })] };
   assert.deepEqual(inputOf(form), { id: "id", name: "Nightly", enabled: true, prompt: "Review.\n", projectId: "p", provider: "codex", model: "gpt", effort: "High", agent: "reviewer", catchUp: true,
+    permissionMode: "acceptEdits", reviewBeforeCommit: false, sandbox: "off",
     triggers: [trigger("daily", { at: ["09:00", "17:30"] }), trigger("cron", { expression: "0 9 * * *" })] });
+  assert.deepEqual([inputOf(emptyForm(null)).permissionMode, inputOf(emptyForm(null)).reviewBeforeCommit, inputOf(emptyForm(null)).sandbox], [null, null, null], "The defaults are sent as nothing.");
   assert.deepEqual([inputOf({ ...form, provider: "" }).model, inputOf({ ...form, provider: "" }).effort, inputOf({ ...form, model: "" }).effort, inputOf({ ...form, agent: " " }).agent], [null, null, null, null]);
   assert.equal(inputOf({ ...form, triggers: [] }).catchUp, false, "An automation that is run by hand misses nothing.");
   assert.equal(inputOf({ ...form, triggers: [trigger("issue")] }).catchUp, true);
@@ -103,13 +107,31 @@ test("what is sent for a form is trimmed, and names a model only with its provid
 });
 
 test("the form of an automation holds what it is, and where it is written", () => {
-  const stored = item("a", { projectId: "p", storeProjectId: "p", provider: "codex", model: "gpt", effort: "Low", agent: "reviewer", catchUp: true, triggers: [trigger("issue")], enabled: false });
+  const stored = item("a", { projectId: "p", storeProjectId: "p", provider: "codex", model: "gpt", effort: "Low", agent: "reviewer", catchUp: true, triggers: [trigger("issue")], enabled: false,
+    permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict" });
   assert.deepEqual(formOf(stored), { id: "a", name: "Automation a", enabled: false, prompt: "Do the thing.", projectId: "p", storeInProject: true, provider: "codex", model: "gpt", effort: "Low",
-    agent: "reviewer", catchUp: true, triggers: [trigger("issue")] });
+    agent: "reviewer", catchUp: true, permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict", triggers: [trigger("issue")] });
   assert.deepEqual(formOf(item("b")), { ...emptyForm(null), id: "b", name: "Automation b", prompt: "Do the thing." });
   // What a form sends back is what it was read from.
   assert.deepEqual(inputOf(formOf(stored)), { id: "a", name: "Automation a", enabled: false, prompt: "Do the thing.", projectId: "p", provider: "codex", model: "gpt", effort: "Low", agent: "reviewer",
-    catchUp: true, triggers: [trigger("issue")] });
+    catchUp: true, permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict", triggers: [trigger("issue")] });
+});
+
+test("the Agent chip of an automation shows what it runs with, and what it chooses goes back to the form", () => {
+  const form = formOf(item("a", { provider: "codex", model: "gpt", effort: "low", agent: "reviewer", permissionMode: "plan", reviewBeforeCommit: false, sandbox: "off" }));
+  const settings = sessionSettingsOf(form);
+  assert.deepEqual(settings, { agentPromptId: "reviewer", providerId: "codex", modelId: "gpt", reasoningEffort: "low", permissionMode: "plan", reviewBeforeCommit: false, sandbox: "off" });
+  assert.deepEqual({ ...form, ...formSettings(settings) }, form, "the round trip changes nothing");
+  // The defaults are the empty fields of the form.
+  assert.deepEqual(sessionSettingsOf(emptyForm(null)), defaultSessionSettings);
+  assert.deepEqual(formSettings(defaultSessionSettings), { agent: "", provider: "", model: "", effort: "", permissionMode: "", reviewBeforeCommit: null, sandbox: "" });
+});
+
+test("the details say what the sessions run with besides the defaults, the permission mode and the sandbox included", () => {
+  assert.deepEqual(runsWithFacts(item("a", { provider: "codex", model: "gpt", agent: "plan", permissionMode: "acceptEdits", reviewBeforeCommit: false, sandbox: "off" }), english),
+    ["codex", "gpt", "agent plan", "Permissions: Accept edits", "Review before commit: Off", "Sandbox: Off"]);
+  assert.deepEqual(runsWithFacts(item("b", { permissionMode: "custom", sandbox: "strict" }), english), ["Permissions: custom", "Sandbox: strict"]);
+  assert.deepEqual(runsWithFacts(item("c"), english), [], "the defaults say nothing");
 });
 
 test("the list is narrowed by words and by where the automations run", () => {

@@ -5,7 +5,7 @@ import { createAutomationsHub, reconnectMilliseconds, refreshMilliseconds, type 
 
 const item = (id: string): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: null, projectName: null, projectFolder: null, storeProjectId: null, file: "/home/config.toml",
-  provider: null, model: null, effort: null, agent: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true,
+  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true,
 });
 const run = (status: string, sessionId: string | null = "s1"): AutomationRunItem =>
   ({ id: "r1", automationId: "a", name: "A", sessionId, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status, message: status === "failed" ? "No model." : null });
@@ -122,7 +122,7 @@ test("a host without automations, or of another epoch, shows none; a host that s
   state.fail = true;
   await hub.refresh();
   assert.equal(hub.getSnapshot().items.length, 1);
-  assert.deepEqual(await hub.save({ id: null, name: "n", enabled: true, prompt: "p", projectId: null, provider: null, model: null, effort: null, agent: null, catchUp: false, triggers: [] }, null), { ok: false, message: null });
+  assert.deepEqual(await hub.save({ id: null, name: "n", enabled: true, prompt: "p", projectId: null, provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [] }, null), { ok: false, message: null });
   assert.deepEqual(await hub.runs("a"), []);
   assert.deepEqual(await hub.run("a"), { ok: false });
   assert.equal(await hub.preview(trigger, new AbortController().signal), null);
@@ -133,7 +133,7 @@ test("a change is sent to the host and the list is read again before it answers"
   hub.connect("epoch-1");
   await settle();
   calls.length = 0;
-  const input = { id: null, name: "Nightly", enabled: true, prompt: "Review.", projectId: "p", provider: null, model: null, effort: null, agent: null, catchUp: false, triggers: [trigger] };
+  const input = { id: null, name: "Nightly", enabled: true, prompt: "Review.", projectId: "p", provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [trigger] };
 
   state.list = listed([item("a"), item("new")]);
   state.mutation = { status: "ok", id: "new", message: null };
@@ -160,7 +160,7 @@ test("a change that the host also announces returns once the newest list is show
   const { hub, state } = fixture();
   hub.connect("epoch-1");
   await settle();
-  const input = { id: null, name: "Nightly", enabled: true, prompt: "Review.", projectId: null, provider: null, model: null, effort: null, agent: null, catchUp: false, triggers: [] };
+  const input = { id: null, name: "Nightly", enabled: true, prompt: "Review.", projectId: null, provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [] };
   state.mutation = { status: "ok", id: "new", message: null };
   state.held = [];
   let done = false;

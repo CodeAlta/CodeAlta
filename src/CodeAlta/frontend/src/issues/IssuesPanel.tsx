@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
 import type { issues as issuesService, IssueFilterField, IssueFiltersResponse, IssueReadResponse, IssueRow, IssueSource, WorkspaceProject } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -10,7 +10,11 @@ import type { MessageKey } from "../localization";
 import { MarkdownContent } from "../MarkdownContent";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
+import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
+import { defaultSessionSettings, startRequest } from "../sessionSettings/sessionSettings";
+import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { WorkStartButtons } from "../workItems/WorkItemCards";
+import type { RunProvider } from "../workItems/runsWith";
 import { startRefusal } from "../workItems/startWorkItem";
 import type { WorkStart } from "../workItems/workItems";
 import { allPartsLabel, choosePick, filterValueText, forgetPick, issueFilterLabel, joinValues, listedFilters, pickKey, readPicks, splitValues, trackerText, writePicks, issueFilters, issueIcon, issueKey, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds,
@@ -18,6 +22,8 @@ import { allPartsLabel, choosePick, filterValueText, forgetPick, issueFilterLabe
 import { viewKey, viewSourceLabel, viewSources } from "./issueFilterSettings";
 import { IssueViewsWindow, type IssueViewsApi } from "./IssueViewsWindow";
 import { MultiChoice } from "./MultiChoice";
+
+const noProviders: readonly RunProvider[] = [];
 
 /** The part of the host the tab uses; a test gives its own. */
 export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink"> & Partial<Pick<typeof issuesService, "filters" | "fields" | "views" | "saveView" | "renameView" | "removeView" | "selectView">>;
@@ -43,8 +49,12 @@ const failedFilters: IssueFiltersResponse = { status: "failed", filters: [], sel
  * project of a project that names several) when the user chooses it; an item is read on the right, opened in a
  * window or on the web, and a session can be started on it.
  */
-export function IssuesPanel({ api, epoch, projects, projectId, visible, preferredStart, onActivate, onOpenSession, onStarted, onNotice }: {
+export function IssuesPanel({ api, epoch, projects, projectId, visible, preferredStart, onActivate, onOpenSession, onStarted, onNotice, providers = noProviders, sessionSettings = null }: {
   api: IssuesApi;
+  /** The enabled providers a new session can run with; none leaves out the Agent chip, and the host takes the defaults. */
+  providers?: readonly RunProvider[];
+  /** The catalogs of the form of the Agent chip of a new session of a project. */
+  sessionSettings?: ((projectId: string) => SessionSettingsApi | null) | null;
   /** The epoch of the host; null when the window has no host that knows trackers. */
   epoch: string | null | undefined;
   projects: readonly WorkspaceProject[];
@@ -89,6 +99,10 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   useEffect(() => { const timer = setTimeout(() => setQuery(typed.trim()), 350); return () => clearTimeout(timer); }, [typed]);
 
   const available = epoch !== null && epoch !== undefined;
+  // What a session started on an item runs with: the Agent chip of the composer, the defaults until the user changes them.
+  const [runSettings, setRunSettings] = useState(defaultSessionSettings);
+  const settingsApi = useMemo(() => project && sessionSettings ? sessionSettings(project.id) : null, [project, sessionSettings]);
+  const runChoices = useSessionSettingsChoices(settingsApi, providers, null, runSettings);
   useEffect(() => {
     if (!available || !visible || !project) return;
     const controller = new AbortController();
@@ -272,8 +286,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     startingNow.current.add(key);
     setStarting(value => new Set(value).add(key));
     try {
-      const reply = await api.start({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: item.kind, id: item.id, worktree: way === "worktree", sessionId: null },
-        { timeoutMilliseconds: 600_000 });
+      const reply = await api.start({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: item.kind, id: item.id, worktree: way === "worktree", sessionId: null,
+        ...startRequest(runSettings, runChoices.shown) }, { timeoutMilliseconds: 600_000 });
       if (reply.sessionId) {
         if (shownKey.current === key || !onStarted) { setExpanded(false); onOpenSession(reply.sessionId, wanted.projectId); }
         else onStarted(reply.sessionId, wanted.projectId, `${issueReference(item)} ${item.title}`);
@@ -291,7 +305,12 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const command = source ? signInCommand(source.service) : null;
   const read = detail?.key === currentKey ? detail : null;
   const body = current && <IssueBody item={read?.value?.item ?? current} read={read} service={source?.service ?? null} />;
-  const actions = current && <IssueActions item={current} service={source?.name ?? ""} preferredStart={preferredStart} starting={starting.has(startingKey(current) ?? "")} onStart={way => void start(current, way)}
+  const runsWith = runChoices.provider && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
+    <span className="work-runs-with-label">{t("Runs with")}</span>
+    <SessionSettingsChip id="issue" providers={providers} choices={runChoices} value={runSettings} onChange={setRunSettings} />
+  </div>;
+  const actions = current && <IssueActions item={current} service={source?.name ?? ""} preferredStart={preferredStart} starting={starting.has(startingKey(current) ?? "")} runsWith={runsWith}
+    onStart={way => void start(current, way)}
     onOpen={() => openLink(current.url)} onCopy={() => void navigator.clipboard?.writeText(current.url).catch(() => { })} />;
   return <div className="work-page issues-page" onPointerDown={onActivate}>
     <header className="work-header">
@@ -437,14 +456,19 @@ function IssueHeading({ item, service, busy, action }: { item: IssueRow; service
   </header>;
 }
 
-function IssueActions({ item, service, preferredStart, starting, onStart, onOpen, onCopy }: {
-  item: IssueRow; service: string; preferredStart: string; starting: boolean; onStart: (way: WorkStart) => void; onOpen: () => void; onCopy: () => void;
+function IssueActions({ item, service, preferredStart, starting, runsWith, onStart, onOpen, onCopy }: {
+  item: IssueRow; service: string; preferredStart: string; starting: boolean;
+  /** The Agent chip of the session started on the item. */
+  runsWith?: ReactNode;
+  onStart: (way: WorkStart) => void; onOpen: () => void; onCopy: () => void;
 }) {
   const { t } = useShellLanguage();
   const [copied, setCopied] = useState(false);
   useEffect(() => { if (!copied) return; const timer = setTimeout(() => setCopied(false), 1500); return () => clearTimeout(timer); }, [copied]);
+  const startable = item.state === "open" || item.state === "draft";
   return <>
-    {(item.state === "open" || item.state === "draft") && <WorkStartButtons preferred={preferredStart === "session" ? "session" : "worktree"} here={false} disabled={starting} onStart={onStart} />}
+    {startable && runsWith}
+    {startable && <WorkStartButtons preferred={preferredStart === "session" ? "session" : "worktree"} here={false} disabled={starting} onStart={onStart} />}
     <div className="work-detail-buttons">
       <Button size="small" icon={<AppIcon name="openExternal" size={14} />} onClick={onOpen}>{t("Open on {service}", { service })}</Button>
       <Button size="small" variant="minimal" icon={<AppIcon name={copied ? "check" : "copy"} size={14} />} onClick={() => { onCopy(); setCopied(true); }}>{t(copied ? "Copied" : "Copy link")}</Button>

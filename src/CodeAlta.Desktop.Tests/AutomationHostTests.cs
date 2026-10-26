@@ -33,12 +33,14 @@ public sealed class AutomationHostTests
         Assert.AreEqual(("ok", false, true, 0), (empty.Status, empty.Paused, empty.Scanned, empty.Items.Count));
 
         // In the configuration of the user, running in a project.
-        var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("  Morning brief  ") with { ProjectId = fixture.Project.Id, Provider = "codex", Model = "gpt", Effort = "High" }, null), default);
+        var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("  Morning brief  ") with { ProjectId = fixture.Project.Id, Provider = "codex", Model = "gpt", Effort = "High",
+            PermissionMode = " acceptEdits ", ReviewBeforeCommit = true, Sandbox = "off" }, null), default);
         Assert.AreEqual("ok", saved.Status, saved.Message);
         Assert.IsTrue(AutomationDefinition.IsId(saved.Id));
         var text = File.ReadAllText(fixture.GlobalPath);
         StringAssert.Contains(text, $"[automations.{saved.Id}]");
         StringAssert.Contains(text, "model = \"codex:gpt@high\"");
+        StringAssert.Contains(text, "permission_mode = \"acceptEdits\"");
         StringAssert.Contains(text, $"project = \"{fixture.Project.ProjectPath.Replace('\\', '/')}\"");
 
         var listed = await fixture.Rpc.ListAsync(new(Epoch), default);
@@ -46,6 +48,7 @@ public sealed class AutomationHostTests
         Assert.AreEqual((saved.Id, "Morning brief", true, "Do the thing.", fixture.Project.Id, fixture.Project.DisplayName, fixture.Project.ProjectPath),
             (item.Id, item.Name, item.Enabled, item.Prompt, item.ProjectId, item.ProjectName, item.ProjectFolder));
         Assert.AreEqual((null, fixture.GlobalPath, "codex", "gpt", "High", null, false), (item.StoreProjectId, item.File, item.Provider, item.Model, item.Effort, item.Agent, item.CatchUp));
+        Assert.AreEqual(("acceptEdits", (bool?)true, "off"), (item.PermissionMode, item.ReviewBeforeCommit, item.Sandbox));
         var trigger = item.Triggers.Single();
         Assert.AreEqual(("daily", "09:00,17:30", "opened", "trusted"), (trigger.Type, string.Join(',', trigger.At), trigger.Event, trigger.Authors));
         Assert.AreEqual(Noon.AddHours(5).AddMinutes(30), item.NextRunAt);
@@ -741,6 +744,7 @@ public sealed class AutomationHostTests
                          (Entry(new(Id, "x") { Model = new(provider.Descriptor.ProviderId.Value, "other-model", null) }), "The provider 'automation-fixture' does not offer the model 'other-model'."),
                          (Entry(new(Id, "x") { Model = new(provider.Descriptor.ProviderId.Value, "fixture-model", AgentReasoningEffort.XHigh) }), "The model 'fixture-model' has no reasoning effort 'xhigh'."),
                          (Entry(new(Id, "x") { Agent = "nobody" }), "There is no agent prompt 'nobody' in the space 'business'."),
+                         (Entry(new(Id, "x") { PermissionMode = "nowhere" }), "The provider 'automation-fixture' does not offer the permission mode 'nowhere'."),
                          (new(new(Id, "x"), source, "unknown-project", projectPath, null), "Its project is no longer one of the projects of CodeAlta."),
                      })
             {
@@ -751,8 +755,10 @@ public sealed class AutomationHostTests
             var workspace = new WorkspaceService(host, Epoch);
             Assert.AreEqual(0, (await workspace.SnapshotAsync(new(), default)).Sessions.Length, "A refused run leaves no session behind.");
 
-            var start = await runner.StartAsync(Entry(new(Id, "Nightly review") { Model = new(provider.Descriptor.ProviderId.Value, null, AgentReasoningEffort.Low) }), "run-1", "Review what changed.", null, default);
+            var start = await runner.StartAsync(Entry(new(Id, "Nightly review") { Model = new(provider.Descriptor.ProviderId.Value, null, AgentReasoningEffort.Low), ReviewBeforeCommit = true }),
+                "run-1", "Review what changed.", null, default);
             Assert.IsNull(start.Problem);
+            Assert.AreEqual((bool?)true, (await host.Commands.GetReviewBeforeCommitAsync(start.SessionId!)).Own, "The session is given the review the automation chose.");
             Assert.IsNotNull(start.Completion);
             var (sessionId, sent) = await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
             Assert.AreEqual(start.SessionId, sessionId);
@@ -954,7 +960,7 @@ public sealed class AutomationHostTests
     }
 
     private static AutomationInput Input(string name)
-        => new(null, name, true, "Do the thing.", null, null, null, null, null, false, [new("daily", 0, 1, ["17:30", "09:00"], [], null, "opened", "trusted", null, null)]);
+        => new(null, name, true, "Do the thing.", null, null, null, null, null, null, null, null, false, [new("daily", 0, 1, ["17:30", "09:00"], [], null, "opened", "trusted", null, null)]);
 
     private static (string Status, string? Message) Outcome(AutomationMutationResponse response) => (response.Status, response.Message);
 

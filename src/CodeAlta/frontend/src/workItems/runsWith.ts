@@ -56,22 +56,3 @@ export function useRunModels(providerId: string | null, load: RunModelsLoader | 
   const current = providerId !== null && state?.providerId === providerId;
   return { models: current ? state.models : [], loading: !!providerId && !!load && !current };
 }
-
-/**
- * What a start runs with, and the lists to choose from. The selection is null while the models of the provider
- * are being read: the host then decides, with what the item was proposed with.
- */
-export function useRunsWith(providers: readonly RunProvider[], recorded: RunsWith | null | undefined, load: RunModelsLoader | null | undefined) {
-  const [choice, setChoice] = useState<RunChoice>({});
-  const provider = runProvider(providers, recorded, choice);
-  const { models, loading } = useRunModels(provider?.id ?? null, load);
-  const { modelId, reasoningEffort } = runModel(provider, models, recorded, choice);
-  const selection: RunsWith | null = provider && !loading ? { providerId: provider.id, modelId, reasoningEffort: modelId ? reasoningEffort : null } : null;
-  return {
-    provider, models, loading, modelId, reasoningEffort, selection,
-    efforts: models.find(model => model.id === modelId)?.efforts ?? [],
-    chooseProvider: (providerId: string) => setChoice({ providerId }),
-    chooseModel: (model: string) => setChoice(current => ({ providerId: current.providerId, modelId: model })),
-    chooseEffort: (effort: string) => setChoice(current => ({ ...current, modelId: current.modelId ?? modelId ?? undefined, reasoningEffort: effort })),
-  };
-}

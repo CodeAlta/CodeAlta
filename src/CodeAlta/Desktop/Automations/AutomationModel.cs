@@ -241,6 +241,15 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// <summary>The agent prompt asked for; null for the default one.</summary>
     public string? Agent { get; init; }
 
+    /// <summary>The permission mode its sessions start in, one its provider offers; null for the one of the provider.</summary>
+    public string? PermissionMode { get; init; }
+
+    /// <summary>Whether the user reviews the changes of its sessions before an agent commits them; null follows the setting.</summary>
+    public bool? ReviewBeforeCommit { get; init; }
+
+    /// <summary>The sandbox its sessions run in: a profile, or <c>off</c>; null for what the settings give.</summary>
+    public string? Sandbox { get; init; }
+
     /// <summary>
     /// Whether what was missed while the application was not running is run when it starts: once for the times
     /// of a schedule, and for each issue or pull request an event trigger would have seen.
@@ -252,13 +261,16 @@ internal sealed record AutomationDefinition(string Id, string Name)
 
     /// <summary>
     /// A value that changes with what the automation runs and with when it runs: its name, prompt, model, agent
-    /// prompt, project and triggers, the command and the folder of a command trigger included. It does not change
-    /// with <see cref="Enabled"/>.
+    /// prompt, permission mode, review, sandbox, project and triggers, the command and the folder of a command
+    /// trigger included. It does not change with <see cref="Enabled"/>.
     /// </summary>
     internal string Fingerprint()
     {
         var text = string.Join('\n', Name, Model.Format() ?? string.Empty, Agent ?? string.Empty, CatchUp ? "1" : "0", Project ?? string.Empty,
             string.Join('|', Triggers.Select(static trigger => trigger.Key)), Prompt);
+        // An automation without them keeps the fingerprint it was allowed with.
+        if (PermissionMode is not null || ReviewBeforeCommit is not null || Sandbox is not null)
+            text += "\n" + string.Join('\n', PermissionMode ?? string.Empty, ReviewBeforeCommit switch { true => "1", false => "0", null => string.Empty }, Sandbox ?? string.Empty);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 

@@ -1,10 +1,12 @@
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Alert, Button, Callout, HTMLSelect, InputGroup, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
-import { useRunsWith, type RunModelsLoader, type RunProvider, type RunsWith } from "./runsWith";
+import type { RunProvider } from "./runsWith";
+import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
+import { defaultSessionSettings, startRequest, type SessionStartRequest } from "../sessionSettings/sessionSettings";
+import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { reviews as reviewsApi, type ReviewsOverviewProject, type WorkspaceProject, type WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
-import { ProviderIcon } from "../ProviderIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
@@ -26,7 +28,7 @@ export type WorkItemsFocus = Readonly<{ projectId: string | null; key?: string |
  * is done does not hide what is left. An item is read on the right, and decided there: started, kept for
  * later, marked done, or removed.
  */
-export function WorkItemsPanel({ hub, projects, sessions, runningSessions, projectId, visible, focus, onFocused, onActivate, onStart, onOpenSession, onOpenFile, onOpenSettings, providers = noProviders, loadModels = null, epoch = null }: {
+export function WorkItemsPanel({ hub, projects, sessions, runningSessions, projectId, visible, focus, onFocused, onActivate, onStart, onOpenSession, onOpenFile, onOpenSettings, providers = noProviders, sessionSettings = null, epoch = null }: {
   hub: WorkItemsHub;
   /** The owned host's epoch, for the review of a plan; null without one: the plan is shown without comments. */
   epoch?: string | null;
@@ -42,11 +44,11 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   onActivate: () => void;
   /** Starts the work of an item in a new session; resolves when the session exists or the start was refused. */
   /** `shown` says whether the user still looks at the item when its session exists: it is then opened, else offered. */
-  onStart: (item: WorkItem, start: WorkStart, runsWith: RunsWith | null, shown: () => boolean) => Promise<boolean>;
+  onStart: (item: WorkItem, start: WorkStart, request: SessionStartRequest | null, shown: () => boolean) => Promise<boolean>;
   /** The enabled providers a new session can run with; none when the window cannot start one. */
   providers?: readonly RunProvider[];
-  /** Lists the models of a provider. */
-  loadModels?: RunModelsLoader | null;
+  /** The catalogs of the form of the Agent chip of a new session of a project. */
+  sessionSettings?: ((projectId: string) => SessionSettingsApi | null) | null;
   onOpenSession: (sessionId: string, projectId: string) => void;
   /** Opens the file of an item in the code editor of its project. */
   onOpenFile: (projectId: string, file: string) => void;
@@ -100,8 +102,8 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   // still the one looked at.
   const shownKey = useRef<string | null>(null);
   shownKey.current = visible && current ? workItemKey(current) : null;
-  const start = (item: WorkItem, way: WorkStart, runsWith: RunsWith | null) => void during(item, async () => {
-    await onStart(item, way, runsWith, () => shownKey.current === workItemKey(item)); return true;
+  const start = (item: WorkItem, way: WorkStart, request: SessionStartRequest | null) => void during(item, async () => {
+    await onStart(item, way, request, () => shownKey.current === workItemKey(item)); return true;
   });
 
   if (!state.loaded) return <div className="work-page" onPointerDown={onActivate}><p className="work-empty"><ActivitySpinner size={16} /></p></div>;
@@ -167,9 +169,9 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                 reviewSessions={reviewSessions(sessions, current.projectId, current.review.checkout, current.runner)} fallback={<p className="work-empty">{t("The file cannot be read.")}</p>}
                 reload={reload} onForget={() => overview.refresh()} />
               : current ? <WorkItemDetail key={workItemKey(current)} hub={hub} item={current} busy={busy.has(workItemKey(current))} projectName={projectById.get(current.projectId)?.name ?? null}
-                providers={providers} loadModels={loadModels}
+                providers={providers} sessionSettings={sessionSettings}
                 runner={current.runner ? sessionById.get(current.runner) ?? null : null} runnerWorking={!!current.runner && runningSessions.has(current.runner)}
-                preferredStart={state.settings.start} onStart={(way, runsWith) => start(current, way, runsWith)} onAct={(action, value) => act(current, action, value)}
+                preferredStart={state.settings.start} onStart={(way, request) => start(current, way, request)} onAct={(action, value) => act(current, action, value)}
                 onRemove={() => setRemoving(current)} onOpenSession={() => current.runner && onOpenSession(current.runner, current.projectId)}
                 epoch={epoch} reload={reload} reviewSessions={reviewSessions(sessions, current.projectId, null, current.runner)} onOpenReviewSession={id => onOpenSession(id, current.projectId)}
                 onOpenFile={() => onOpenFile(current.projectId, current.file)} />
@@ -280,20 +282,22 @@ function ReviewItemDetail({ item, epoch, projectName, requester, onOpenSession, 
   </section>;
 }
 
-function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, loadModels, onStart, onAct, onRemove, onOpenSession, onOpenFile,
+function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, sessionSettings, onStart, onAct, onRemove, onOpenSession, onOpenFile,
   epoch, reload, reviewSessions: reviewTo, onOpenReviewSession }: {
   hub: WorkItemsHub; item: WorkItem; busy: boolean; projectName: string | null; reload: number;
   /** The host's epoch: a plan that is not done takes comments; null shows it without. */
   epoch: string | null; reviewSessions: ReturnType<typeof reviewSessions>; onOpenReviewSession: (sessionId: string) => void;
   runner: WorkspaceSession | null; runnerWorking: boolean; preferredStart: string;
-  providers: readonly RunProvider[]; loadModels: RunModelsLoader | null;
-  onStart: (start: WorkStart, runsWith: RunsWith | null) => void; onAct: (action: string, value?: string) => void; onRemove: () => void; onOpenSession: () => void; onOpenFile: () => void;
+  providers: readonly RunProvider[]; sessionSettings: ((projectId: string) => SessionSettingsApi | null) | null;
+  onStart: (start: WorkStart, request: SessionStartRequest | null) => void; onAct: (action: string, value?: string) => void; onRemove: () => void; onOpenSession: () => void; onOpenFile: () => void;
 }) {
   const { t } = useShellLanguage();
   const task = item.kind === "task";
   const startable = item.stage === "todo" || item.stage === "later";
   // What the new session runs with: what the item was proposed with, else the defaults, until the user changes it.
-  const run = useRunsWith(startable ? providers : noProviders, item.runsWith, startable ? loadModels : null);
+  const [settings, setSettings] = useState(defaultSessionSettings);
+  const settingsApi = useMemo(() => startable ? sessionSettings?.(item.projectId) ?? null : null, [startable, sessionSettings, item.projectId]);
+  const choices = useSessionSettingsChoices(settingsApi, startable ? providers : noProviders, item.runsWith, settings);
   // A plan that is not done is reviewed here, or in the editor's preview.
   const openReview = useContext(ReviewOpenerContext);
   const reviewable = !task && item.stage !== "closed" && !!epoch;
@@ -308,20 +312,11 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
         {runnerWorking ? <ActivitySpinner size={12} /> : <AppIcon name="chat" size={12} />}<span>{runner.title}</span><AppIcon name="chevronRight" size={12} /></button>}
     </header>
     <div className="work-detail-actions">
-      {startable && run.provider && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
-        <span className="work-runs-with-label"><ProviderIcon providerKey={run.provider.id} size={13} />{t("Runs with")}</span>
-        <HTMLSelect aria-label={t("Provider")} value={run.provider.id} disabled={busy} onChange={event => run.chooseProvider(event.target.value)}>
-          {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.isDefault ? t("{name} (default)", { name: provider.name }) : provider.name}</option>)}
-        </HTMLSelect>
-        <HTMLSelect aria-label={t("Model")} value={run.modelId ?? ""} disabled={busy || run.loading || run.models.length === 0} onChange={event => run.chooseModel(event.target.value)}>
-          {run.modelId === null && <option value="">{t(run.loading ? "Loading…" : "Host default")}</option>}
-          {run.models.map(model => <option key={model.id} value={model.id}>{model.name || model.id}</option>)}
-        </HTMLSelect>
-        {run.efforts.length > 0 && <HTMLSelect aria-label={t("Reasoning")} value={run.reasoningEffort ?? ""} disabled={busy} onChange={event => run.chooseEffort(event.target.value)}>
-          {run.efforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
-        </HTMLSelect>}
+      {startable && choices.provider && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
+        <span className="work-runs-with-label">{t("Runs with")}</span>
+        <SessionSettingsChip id={`work-${item.kind}-${item.id}`} providers={providers} choices={choices} value={settings} disabled={busy} onChange={setSettings} />
       </div>}
-      {startable && <WorkStartButtons preferred={preferredStart} here={false} disabled={busy} onStart={way => onStart(way, run.selection)} />}
+      {startable && <WorkStartButtons preferred={preferredStart} here={false} disabled={busy} onStart={way => onStart(way, startRequest(settings, choices.shown))} />}
       <div className="work-detail-buttons">
         {task && item.stage === "todo" && <Button size="small" disabled={busy} icon={<AppIcon name="later" size={14} />} onClick={() => onAct("later")}>{t("Later")}</Button>}
         {task && (item.stage === "later" || item.stage === "closed") && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} onClick={() => onAct("reopen")}>{t("Back to To do")}</Button>}

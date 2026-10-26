@@ -17,7 +17,8 @@ An automation is a prompt that CodeAlta Desktop sends by itself: at a time you c
 2. Click **New automation**, or start from a template such as **Issue triage** or **Pull request review**.
 3. Choose where it runs: in a project, or as a chat in no project.
 4. Add what starts it and write the prompt.
-5. Click **Save**, or **Save and run** to try it right away.
+5. Choose what its sessions run with in **Runs with** (see below).
+6. Click **Save**, or **Save and run** to try it right away.
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
   <img src="{{site.basepath}}/img/alta-desktop-automation-editor.webp" alt="The window that edits an automation: name, project, triggers, prompt, model and reasoning" loading="lazy">
@@ -25,6 +26,21 @@ An automation is a prompt that CodeAlta Desktop sends by itself: at a time you c
 </figure>
 
 The session starts with nothing but your prompt: say what to look at and what to report.
+
+## What its sessions run with
+
+**Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the prompt: click it for the same form, with the agent prompt, the provider, the model, the reasoning effort, the [permission mode](workspace/prompt.md#permission-modes), [review before commit](reviews.md#review-before-commit) and the [sandbox](sessions/sandbox.md).
+
+- **Use the defaults**, at the top of the form, is on for a new automation. The rows then show what a run takes, grayed: the [default provider](model-providers/readme.md), its model and effort, and the defaults of your settings. A provider marked **(first enabled)** means no default provider is set.
+- Turn it off to choose. What the defaults gave becomes your choice, and you change it from there.
+- A provider, model or permission mode that is no longer offered stops the run, which says why.
+
+```toml
+model = "codex:gpt-6.1-sol@high"
+permission_mode = "acceptEdits"
+review_before_commit = true
+sandbox = "off"
+```
 
 ## What starts an automation
 
@@ -82,7 +98,7 @@ triggers = [
 - Automations run while CodeAlta Desktop is open, also when it [stays in the notification area](desktop-and-tui.md#runs-in-the-background).
 - What was due while CodeAlta was closed is skipped. Turn on **Catch up on what was missed while CodeAlta was closed** in an automation to run it at the next start.
 - An automation is stored in **My configuration** (`~/.alta/config.toml`) or in **The project** (`.alta/config.toml` of its folder), which you can commit to share it with your team.
-- An automation that came with a project, written by someone else, waits until you read its prompt and click **Allow**. It asks again when its prompt or triggers change, including the command of a trigger.
+- An automation that came with a project, written by someone else, waits until you read its prompt and click **Allow**. It asks again when its prompt, triggers or what its sessions run with change, including the command of a trigger.
 - An agent can list, create and run automations. Ask in your own words, for example:
 
 ```text

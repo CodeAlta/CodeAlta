@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Desktop.WorkItems;
 using CodeAlta.Plugins.Abstractions;
 using NeoAstra.Rpc;
@@ -154,7 +155,11 @@ internal sealed partial class IssuesService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
         if (Kind(request.Kind) is not { } kind || !Name(request.Service) || !Name(request.Id)
-            || request.SessionId is not null && !GitIssuesService.Identity(request.SessionId)) return new("invalid_request");
+            || request.SessionId is not null && !GitIssuesService.Identity(request.SessionId)
+            || request.ProviderId is not null && !Name(request.ProviderId) || request.ModelId is not null && (request.ProviderId is null || !Name(request.ModelId))
+            || request.ReasoningEffort is not null && (request.ModelId is null || !Name(request.ReasoningEffort))
+            || request.PermissionMode is not null && !Name(request.PermissionMode) || request.Sandbox is not null && !Name(request.Sandbox)
+            || request.AgentPromptId is not null && !Name(request.AgentPromptId)) return new("invalid_request");
         if (_starter is null) return new("unavailable");
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
         if ((await TrackersAsync(project, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Service == request.Service) is not { } tracker)
@@ -164,8 +169,12 @@ internal sealed partial class IssuesService
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { detail = null; }
         if (detail is null || Row(detail.Item) is not { } row) return new("not_found");
 
+        // What the user chose in the form of the Agent chip, else what the session that shows the item runs with, else the defaults.
+        var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
+        var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox);
+        var model = asked is null && settings is null ? null : settings?.Apply(new SessionStartModel(asked)) ?? new SessionStartModel(asked);
         var started = await _starter.StartAsync(project, IssuePrompts.SessionTitle(row), _ => IssuePrompts.For(tracker.DisplayName, GitIssuesService.Clean(tracker.Location, MaximumTitle), row, detail.Body),
-            request.Worktree, request.SessionId, "issue", model: null).ConfigureAwait(false);
+            request.Worktree, request.SessionId, "issue", model).ConfigureAwait(false);
         return new(started.Problem is null ? "ok" : "refused", started.SessionId, started.Problem, started.Reason);
     }
 
@@ -403,7 +412,16 @@ internal sealed record IssueComment(string? Author, DateTimeOffset? CreatedAt, s
 /// <param name="Id">The item.</param>
 /// <param name="Worktree">Whether the session works in a new git worktree.</param>
 /// <param name="SessionId">A session whose provider and model the new one takes; null for the defaults.</param>
-internal sealed record IssueStartRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Id, bool Worktree, string? SessionId);
+/// <param name="ProviderId">The provider the user chose; null to take the one of <paramref name="SessionId"/>, then the default.</param>
+/// <param name="ModelId">The model the user chose, of that provider; null leaves it to the provider.</param>
+/// <param name="ReasoningEffort">The reasoning effort the user chose, for that model; null leaves it to the model.</param>
+/// <param name="AgentPromptId">The agent prompt the user chose; null for the default one of the space.</param>
+/// <param name="PermissionMode">The permission mode the user chose; null for the one of the provider.</param>
+/// <param name="ReviewBeforeCommit">Whether the user reviews the changes of the session before a commit; null follows the setting.</param>
+/// <param name="Sandbox">The sandbox of the session, a profile or <c>off</c>; null for what the settings give.</param>
+internal sealed record IssueStartRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Id, bool Worktree, string? SessionId,
+    string? ProviderId = null, string? ModelId = null, string? ReasoningEffort = null, string? AgentPromptId = null, string? PermissionMode = null,
+    bool? ReviewBeforeCommit = null, string? Sandbox = null);
 
 /// <summary>
 /// The start of a session. Status is <c>ok</c>, <c>refused</c> (with a message, and a reason code when the page

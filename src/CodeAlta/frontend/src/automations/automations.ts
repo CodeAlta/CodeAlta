@@ -3,6 +3,9 @@
 import type { AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem } from "#neoastra";
 import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
+import { permissionModeName } from "../permissionModes";
+import { notSandboxed } from "../sandbox/sandboxChoices";
+import type { SessionSettings } from "../sessionSettings/sessionSettings";
 
 export type Translate = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => string;
 export type TriggerType = "hourly" | "daily" | "weekly" | "cron" | "issue" | "pull_request" | "jira" | "command";
@@ -122,18 +125,48 @@ export type AutomationForm = Readonly<{
   /** Whether it is written in the configuration of its project rather than of the user. */
   storeInProject: boolean;
   provider: string; model: string; effort: string; agent: string; catchUp: boolean;
+  /** The permission mode, the review and the sandbox of its sessions; empty (null for the review) for the defaults. */
+  permissionMode: string; reviewBeforeCommit: boolean | null; sandbox: string;
   triggers: readonly AutomationTriggerItem[];
 }>;
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
-  return { id: null, name: "", enabled: true, prompt: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false, triggers: [] };
+  return { id: null, name: "", enabled: true, prompt: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
+    permissionMode: "", reviewBeforeCommit: null, sandbox: "", triggers: [] };
 }
 
 /** The form of an automation that exists. */
 export function formOf(item: AutomationItem): AutomationForm {
   return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, projectId: item.projectId, storeInProject: item.storeProjectId !== null,
-    provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp, triggers: item.triggers };
+    provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
+    permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", triggers: item.triggers };
+}
+
+/**
+ * What the sessions of an automation run with besides the defaults, one fact each, as its details list them: an
+ * automation that came with a project shows them before the user allows it.
+ */
+export function runsWithFacts(item: AutomationItem, t: Translate): readonly string[] {
+  const permission = item.permissionMode ? permissionModeName(item.permissionMode) : null;
+  return [item.provider, item.model, item.effort, item.agent ? t("agent {name}", { name: item.agent }) : null,
+    item.permissionMode ? `${t("Permissions")}: ${permission ? t(permission) : item.permissionMode}` : null,
+    item.reviewBeforeCommit !== null ? `${t("Review before commit")}: ${t(item.reviewBeforeCommit ? "On" : "Off")}` : null,
+    item.sandbox ? `${t("Sandbox")}: ${item.sandbox.toLowerCase() === notSandboxed ? t("Off") : item.sandbox}` : null]
+    .filter((fact): fact is string => !!fact);
+}
+
+/** What the form of the Agent chip of an automation shows of it. */
+export function sessionSettingsOf(form: AutomationForm): SessionSettings {
+  const blank = (text: string) => text.trim() || null;
+  return { agentPromptId: blank(form.agent), providerId: blank(form.provider), modelId: blank(form.model), reasoningEffort: blank(form.effort),
+    permissionMode: blank(form.permissionMode), reviewBeforeCommit: form.reviewBeforeCommit, sandbox: blank(form.sandbox) };
+}
+
+/** The change of the form for what the form of its Agent chip chose. */
+export function formSettings(settings: SessionSettings): Partial<AutomationForm> {
+  return { agent: settings.agentPromptId ?? "", provider: settings.providerId ?? "", model: settings.modelId ?? "", effort: settings.reasoningEffort ?? "",
+    permissionMode: settings.permissionMode ?? "", reviewBeforeCommit: settings.reviewBeforeCommit, sandbox: settings.sandbox ?? "" };
 }
 
 /** What the form misses to be saved, as a message of the page; null when nothing. */
@@ -158,6 +191,7 @@ export function inputOf(form: AutomationForm): AutomationInput {
   const model = provider ? form.model.trim() : "";
   return { id: form.id, name: form.name.trim(), enabled: form.enabled, prompt: form.prompt, projectId: form.projectId,
     provider: provider || null, model: model || null, effort: model && form.effort ? form.effort : null, agent: form.agent.trim() || null,
+    permissionMode: form.permissionMode.trim() || null, reviewBeforeCommit: form.reviewBeforeCommit, sandbox: form.sandbox.trim() || null,
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,
     triggers: form.triggers.map(trigger => ({ ...trigger, at: [...trigger.at].sort(), expression: trigger.type === "cron" ? (trigger.expression ?? "").trim() : null,

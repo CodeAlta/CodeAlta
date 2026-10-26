@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TriggerIcon } from "./TriggerIcon";
 import { Button, ButtonGroup, Callout, FormGroup, HTMLSelect, InputGroup, Menu, MenuItem, NumericInput, PopoverNext, SegmentedControl, Switch, TextArea } from "@blueprintjs/core";
-import { modelCatalog, workspace, type AutomationTriggerItem, type ModelCatalogModel, type SessionPromptChoice, type WorkspaceProject } from "#neoastra";
+import type { AutomationTriggerItem, WorkspaceProject } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
+import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
+import { sessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { useShellLanguage } from "../shellLanguage";
-import { dayName, formProblem, inputOf, isSchedule as schedule, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
-  newTrigger, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
+import type { RunProvider } from "../workItems/runsWith";
+import { dayName, formProblem, formSettings, inputOf, isSchedule as schedule, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
+  newTrigger, sessionSettingsOf, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
 
 const hours = [1, 2, 3, 4, 6, 8, 12];
@@ -99,15 +102,15 @@ export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove }:
 }
 
 /**
- * The window that writes an automation: its name, where it runs, what starts it, the prompt it sends and the
- * model it asks for. Saving writes its configuration file; nothing runs before that.
+ * The window that writes an automation: its name, where it runs, what starts it, the prompt it sends and what its
+ * sessions run with (the Agent chip of the composer). Saving writes its configuration file; nothing runs before that.
  */
 export function AutomationEditor({ hub, initial, projects, providers, epoch, onClose, onSaved }: {
   hub: AutomationsHub; initial: AutomationForm;
   /** The projects an automation can run in. */
   projects: readonly WorkspaceProject[];
   /** The enabled providers, the default one first. */
-  providers: readonly Readonly<{ id: string }>[];
+  providers: readonly RunProvider[];
   epoch: string | null | undefined;
   onClose: () => void;
   /** Called once the automation is written, with whether it is to run now. */
@@ -117,31 +120,14 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   const [form, setForm] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const [models, setModels] = useState<readonly ModelCatalogModel[]>([]);
-  const [prompts, setPrompts] = useState<readonly SessionPromptChoice[]>([]);
   const name = useRef<HTMLInputElement>(null);
   const edit = (change: Partial<AutomationForm>) => { setForm(current => ({ ...current, ...change })); setProblem(null); };
   const project = projects.find(candidate => candidate.id === form.projectId);
+  // An automation runs in the space of its project when it is in one, else in the default space: the host reads its catalogs there.
+  const api = useMemo(() => epoch ? sessionSettingsApi(epoch, project?.id ?? null, project?.path ?? null, null) : null, [epoch, project?.id, project?.path]);
+  const settings = sessionSettingsOf(form);
+  const choices = useSessionSettingsChoices(api, providers, null, settings);
 
-  useEffect(() => {
-    setModels([]);
-    if (!epoch || !form.provider) return;
-    const abort = new AbortController();
-    void modelCatalog.models({ expectedEpoch: epoch, providerId: form.provider }, { signal: abort.signal, timeoutMilliseconds: 15000 })
-      .then(reply => { if (!abort.signal.aborted && reply.status === "ok") setModels(reply.models); }).catch(() => { /* The model stays a free choice of the host. */ });
-    return () => abort.abort();
-  }, [epoch, form.provider]);
-  useEffect(() => {
-    setPrompts([]);
-    if (!epoch) return;
-    const abort = new AbortController();
-    // An automation runs in the space of its project when it is in one, else in the default space: the host reads its prompts there.
-    void workspace.draftPrompts({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, spaceId: null }, { signal: abort.signal, timeoutMilliseconds: 15000 })
-      .then(reply => { if (!abort.signal.aborted && reply.status === "ok") setPrompts(reply.prompts); }).catch(() => { /* Only the default prompt is offered. */ });
-    return () => abort.abort();
-  }, [epoch, project?.id, project?.path]);
-
-  const efforts = models.find(model => model.id === form.model)?.efforts ?? [];
   async function save(run: boolean) {
     const missing = formProblem(form);
     if (missing) { setProblem(t(missing)); return; }
@@ -199,36 +185,10 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
           <TextArea id="automation-prompt" fill value={form.prompt} disabled={busy} maxLength={maximumPromptLength} spellCheck
             placeholder={t("What the session does each time, written for a session that starts with nothing else.")} onChange={event => edit({ prompt: event.target.value })} />
         </FormGroup>
-        <div className="automation-editor-row" data-columns="4">
-          <FormGroup label={t("Provider")} labelFor="automation-provider">
-            <HTMLSelect id="automation-provider" fill value={form.provider} disabled={busy} onChange={event => edit({ provider: event.target.value, model: "", effort: "" })}>
-              <option value="">{t("Default provider")}</option>
-              {form.provider && !providers.some(provider => provider.id === form.provider) && <option value={form.provider}>{form.provider}</option>}
-              {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.id}</option>)}
-            </HTMLSelect>
-          </FormGroup>
-          <FormGroup label={t("Model")} labelFor="automation-model">
-            <HTMLSelect id="automation-model" fill value={form.model} disabled={busy || !form.provider} onChange={event => edit({ model: event.target.value, effort: "" })}>
-              <option value="">{t("First model listed")}</option>
-              {form.model && !models.some(model => model.id === form.model) && <option value={form.model}>{form.model}</option>}
-              {models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-            </HTMLSelect>
-          </FormGroup>
-          <FormGroup label={t("Reasoning")} labelFor="automation-effort">
-            <HTMLSelect id="automation-effort" fill value={form.effort} disabled={busy || !form.model} onChange={event => edit({ effort: event.target.value })}>
-              <option value="">{t("High when supported")}</option>
-              {form.effort && !efforts.includes(form.effort) && <option value={form.effort}>{form.effort}</option>}
-              {efforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
-            </HTMLSelect>
-          </FormGroup>
-          <FormGroup label={t("Agent prompt")} labelFor="automation-agent">
-            <HTMLSelect id="automation-agent" fill value={form.agent || "default"} disabled={busy} onChange={event => edit({ agent: event.target.value === "default" ? "" : event.target.value })}>
-              {!prompts.some(prompt => prompt.id === "default") && <option value="default">{t("Default")}</option>}
-              {form.agent && !prompts.some(prompt => prompt.id === form.agent) && <option value={form.agent}>{form.agent}</option>}
-              {prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.name}</option>)}
-            </HTMLSelect>
-          </FormGroup>
-        </div>
+        {/* What its sessions run with: the Agent chip of the composer, and its form. */}
+        <FormGroup label={t("Runs with")} className="automation-runs-with">
+          <SessionSettingsChip id="automation" providers={providers} choices={choices} value={settings} disabled={busy} onChange={next => edit(formSettings(next))} />
+        </FormGroup>
         <div className="automation-editor-switches">
           <Switch checked={form.enabled} disabled={busy} label={t("Enabled")} onChange={event => edit({ enabled: event.currentTarget.checked })} />
           {form.triggers.length > 0 && <Switch checked={form.catchUp} disabled={busy} label={t("Catch up on what was missed while CodeAlta was closed")}
