@@ -75,12 +75,8 @@ public sealed class IndexedPromptReferencesTests
             try { await first; } catch (OperationCanceledException) { }
             traversal.Release.Set();
 
-            var result = await references.SearchAsync(root, "one", CancellationToken.None);
-            for (var attempt = 0; attempt < 20 && result.Status == "indexing"; attempt++)
-            {
-                await Task.Delay(25);
-                result = await references.SearchAsync(root, "one", CancellationToken.None);
-            }
+            // Under the load of a full test run the index takes more than a few attempts to settle.
+            var result = await Settled(references, root, "one");
             Assert.AreEqual("ok", result.Status, "the index outlives the request that started it");
             Assert.AreEqual("one.txt", result.Items[0].Path);
         }
