@@ -79,6 +79,12 @@ public sealed class CatalogOptions
     public string SpacesRoot => Path.Combine(GlobalRoot, "spaces");
 
     /// <summary>
+    /// Gets the folder of the labels under the global catalog: one Markdown file for each label. The labels of a
+    /// project are named by the project file, not by this folder.
+    /// </summary>
+    public string LabelsRoot => Path.Combine(GlobalRoot, "labels");
+
+    /// <summary>
     /// Gets the machine configuration root path under the global catalog.
     /// </summary>
     public string MachinesRoot => Path.Combine(GlobalRoot, "machines");

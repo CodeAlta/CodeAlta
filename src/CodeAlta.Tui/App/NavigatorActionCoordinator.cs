@@ -301,24 +301,7 @@ internal sealed class NavigatorActionCoordinator : IProjectDetailsDialogService
     private static ProjectDescriptor CloneProject(ProjectDescriptor project)
     {
         ArgumentNullException.ThrowIfNull(project);
-
-        return new ProjectDescriptor
-        {
-            Id = project.Id,
-            Slug = project.Slug,
-            Name = project.Name,
-            DisplayName = project.DisplayName,
-            ProjectPath = project.ProjectPath,
-            DefaultBranch = project.DefaultBranch,
-            Description = project.Description,
-            Tags = [.. project.Tags],
-            Spaces = [.. project.Spaces],
-            Checkout = project.Checkout,
-            SourcePath = project.SourcePath,
-            Archived = project.Archived,
-            Sandbox = project.Sandbox,
-            MarkdownBody = project.MarkdownBody,
-        };
+        return project.Copy();
     }
 
     private static ProjectDescriptor CreateGlobalDialogProject()

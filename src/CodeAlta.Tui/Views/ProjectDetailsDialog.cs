@@ -214,29 +214,5 @@ internal sealed class ProjectDetailsDialog
         return null;
     }
 
-    private static ProjectDescriptor CloneProject(ProjectDescriptor project)
-    {
-        return new ProjectDescriptor
-        {
-            Id = project.Id,
-            Slug = project.Slug,
-            Name = project.Name,
-            DisplayName = project.DisplayName,
-            ProjectPath = project.ProjectPath,
-            DefaultBranch = project.DefaultBranch,
-            Description = project.Description,
-            Tags = [.. project.Tags],
-            Spaces = [.. project.Spaces],
-            Archived = project.Archived,
-            Sandbox = project.Sandbox,
-            Checkout = new CheckoutRule
-            {
-                PathTemplate = project.Checkout.PathTemplate,
-                Depth = project.Checkout.Depth,
-                Submodules = project.Checkout.Submodules,
-            },
-            SourcePath = project.SourcePath,
-            MarkdownBody = project.MarkdownBody,
-        };
-    }
+    private static ProjectDescriptor CloneProject(ProjectDescriptor project) => project.Copy();
 }

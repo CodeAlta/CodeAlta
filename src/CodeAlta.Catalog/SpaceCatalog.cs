@@ -70,10 +70,14 @@ public sealed class SpaceCatalog
         _projects = projects;
         _options = projects.Options;
         _serializer = serializer ?? new CatalogYamlSerializer();
+        Labels = new LabelCatalog(this, _serializer);
     }
 
     /// <summary>Gets the project catalog the spaces group.</summary>
     public ProjectCatalog Projects => _projects;
+
+    /// <summary>Gets the labels of the projects, which a top-level label can keep to one space.</summary>
+    public LabelCatalog Labels { get; }
 
     /// <summary>
     /// Gets whether the spaces are read-only, as the project catalog they group is (<see cref="ProjectCatalog.IsReadOnly"/>),
@@ -288,8 +292,8 @@ public sealed class SpaceCatalog
     }
 
     /// <summary>
-    /// Deletes a space: its file, then its name in the file of each of its projects. The projects, their
-    /// folders and their sessions stay, and are still in the default space.
+    /// Deletes a space: its file, then its name in the file of each of its projects, then its labels. The projects,
+    /// their folders and their sessions stay, and are still in the default space.
     /// </summary>
     /// <param name="id">The identifier of the space.</param>
     /// <param name="cancellationToken">Cancels before the file is deleted.</param>
@@ -313,6 +317,9 @@ public sealed class SpaceCatalog
                 if (!project.Spaces.Contains(id, StringComparer.Ordinal)) continue;
                 await _projects.UpdateSpacesAsync(project.Id, current => current.Where(value => value != id), CancellationToken.None).ConfigureAwait(false);
             }
+
+            // Its labels were made for it: kept, they would name a space that no longer exists and show nowhere.
+            await Labels.DeleteOfSpaceAsync(id).ConfigureAwait(false);
 
             space.SourcePath = null;
             return new(SpaceChangeStatus.Ok, space);

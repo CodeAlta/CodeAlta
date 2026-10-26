@@ -52,9 +52,49 @@ public sealed class CatalogYamlSerializer
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<string>? Spaces { get; set; }
 
+        // Left out of a file whose project has no label.
+        [JsonPropertyName("labels")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? Labels { get; set; }
+
         [JsonPropertyName("sandbox")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Sandbox { get; set; }
+    }
+
+    private sealed class LabelFrontMatter
+    {
+        [JsonPropertyName("id")]
+        public string? Id { get; set; }
+
+        [JsonPropertyName("kind")]
+        public string? Kind { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("icon")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Icon { get; set; }
+
+        [JsonPropertyName("color")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Color { get; set; }
+
+        [JsonPropertyName("order")]
+        public int? Order { get; set; }
+
+        [JsonPropertyName("parent")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Parent { get; set; }
+
+        [JsonPropertyName("favorite")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Favorite { get; set; }
+
+        [JsonPropertyName("space")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Space { get; set; }
     }
 
     private sealed class SpaceFrontMatter
@@ -248,6 +288,7 @@ public sealed class CatalogYamlSerializer
         var descriptor = YamlSerializer.Deserialize<ProjectDescriptor>(yaml) ?? new ProjectDescriptor();
         descriptor.Tags ??= [];
         descriptor.Spaces ??= [];
+        descriptor.Labels ??= [];
         return descriptor;
     }
 
@@ -307,6 +348,7 @@ public sealed class CatalogYamlSerializer
             DefaultBranch = frontMatter.DefaultBranch ?? "main",
             Tags = frontMatter.Tags ?? [],
             Spaces = SpaceDescriptor.NormalizeIds(frontMatter.Spaces),
+            Labels = LabelDescriptor.NormalizeIds(frontMatter.Labels),
             Archived = frontMatter.Archived ?? false,
             Sandbox = SpaceNewSessions.IsSandboxName(frontMatter.Sandbox?.Trim()) ? frontMatter.Sandbox!.Trim() : null,
             Checkout = new CheckoutRule
@@ -341,6 +383,7 @@ public sealed class CatalogYamlSerializer
                 ? null
                 : new CheckoutFrontMatter { PathTemplate = descriptor.Checkout.PathTemplate },
             Spaces = SpaceDescriptor.NormalizeIds(descriptor.Spaces) is { Count: > 0 } spaces ? spaces : null,
+            Labels = LabelDescriptor.NormalizeIds(descriptor.Labels) is { Count: > 0 } labels ? labels : null,
             Sandbox = SpaceNewSessions.IsSandboxName(descriptor.Sandbox?.Trim()) ? descriptor.Sandbox!.Trim() : null,
         };
 
@@ -480,6 +523,60 @@ public sealed class CatalogYamlSerializer
             Order = descriptor.Order,
         };
         WriteSpaceSettings(frontMatter, descriptor.Settings);
+        var yaml = YamlSerializer.Serialize(frontMatter).Trim();
+        var description = descriptor.Description?.Trim();
+        return string.IsNullOrEmpty(description) ? $"---\n{yaml}\n---\n" : $"---\n{yaml}\n---\n\n{description}\n";
+    }
+
+    /// <summary>
+    /// Deserializes a label from the Markdown file that describes it: its front matter, and its body, which is the
+    /// description of the label.
+    /// </summary>
+    /// <param name="markdown">The markdown content.</param>
+    /// <returns>The label, not yet validated.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="markdown"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidDataException">Thrown when the text has no front matter.</exception>
+    public LabelDescriptor DeserializeLabelMarkdown(string markdown)
+    {
+        ArgumentNullException.ThrowIfNull(markdown);
+        var document = ParseFrontMatter(markdown);
+        var frontMatter = YamlSerializer.Deserialize<LabelFrontMatter>(document.FrontMatter) ?? new LabelFrontMatter();
+        var description = document.Body.Trim();
+        static string? Text(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        return new LabelDescriptor
+        {
+            Id = frontMatter.Id ?? string.Empty,
+            Name = frontMatter.Name?.Trim() ?? string.Empty,
+            Icon = Text(frontMatter.Icon)?.ToLowerInvariant(),
+            Color = Text(frontMatter.Color),
+            Order = frontMatter.Order ?? 0,
+            Parent = Text(frontMatter.Parent),
+            Favorite = frontMatter.Favorite ?? false,
+            Space = Text(frontMatter.Space),
+            Description = description.Length == 0 ? null : description,
+        };
+    }
+
+    /// <summary>Serializes a label to the Markdown file that describes it.</summary>
+    /// <param name="descriptor">The label.</param>
+    /// <returns>Markdown text.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="descriptor"/> is <see langword="null"/>.</exception>
+    public string SerializeLabelMarkdown(LabelDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        var frontMatter = new LabelFrontMatter
+        {
+            Id = descriptor.Id,
+            Kind = "label",
+            Name = descriptor.Name,
+            Icon = descriptor.Icon,
+            Color = descriptor.Color,
+            Order = descriptor.Order,
+            Parent = descriptor.Parent,
+            Favorite = descriptor.Favorite ? true : null,
+            // A sub-label is in the space of its top-level label: its own file names none.
+            Space = descriptor.Parent is null ? descriptor.Space : null,
+        };
         var yaml = YamlSerializer.Serialize(frontMatter).Trim();
         var description = descriptor.Description?.Trim();
         return string.IsNullOrEmpty(description) ? $"---\n{yaml}\n---\n" : $"---\n{yaml}\n---\n\n{description}\n";

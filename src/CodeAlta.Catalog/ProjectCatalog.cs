@@ -522,28 +522,7 @@ public sealed partial class ProjectCatalog
     /// <summary>Copies a project descriptor, with its lists and its checkout rule.</summary>
     /// <param name="descriptor">The descriptor.</param>
     /// <returns>An equal descriptor that shares nothing that can be changed with <paramref name="descriptor"/>.</returns>
-    internal static ProjectDescriptor Copy(ProjectDescriptor descriptor) => new()
-    {
-        Id = descriptor.Id,
-        Slug = descriptor.Slug,
-        Name = descriptor.Name,
-        DisplayName = descriptor.DisplayName,
-        ProjectPath = descriptor.ProjectPath,
-        DefaultBranch = descriptor.DefaultBranch,
-        Description = descriptor.Description,
-        Tags = [.. descriptor.Tags],
-        Spaces = [.. descriptor.Spaces],
-        Archived = descriptor.Archived,
-        Sandbox = descriptor.Sandbox,
-        Checkout = new CheckoutRule
-        {
-            PathTemplate = descriptor.Checkout.PathTemplate,
-            Depth = descriptor.Checkout.Depth,
-            Submodules = descriptor.Checkout.Submodules,
-        },
-        SourcePath = descriptor.SourcePath,
-        MarkdownBody = descriptor.MarkdownBody,
-    };
+    internal static ProjectDescriptor Copy(ProjectDescriptor descriptor) => descriptor.Copy();
 
     // A save of a project file by a conditional edit (rename, archive, spaces), after which the files are read again.
     private async Task<TextFileSaveResult> SaveSourceAsync(TextFileSaveRequest request, CancellationToken cancellationToken)

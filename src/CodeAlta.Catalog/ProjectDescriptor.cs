@@ -63,6 +63,13 @@ public sealed class ProjectDescriptor
     public List<string> Spaces { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets the identifiers of the labels of the project, in the order they were given. An identifier no label
+    /// has is kept and means nothing.
+    /// </summary>
+    [JsonPropertyName("labels")]
+    public List<string> Labels { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets a value indicating whether the project is archived.
     /// </summary>
     [JsonPropertyName("archived")]
@@ -96,6 +103,35 @@ public sealed class ProjectDescriptor
     /// </summary>
     /// <exception cref="FormatException">Thrown when the identifier is invalid.</exception>
     public ProjectId ProjectId => ProjectId.Parse(Id);
+
+    /// <summary>
+    /// Copies the descriptor, with its lists and its checkout rule: what a caller changes and saves again then keeps
+    /// every value it did not change.
+    /// </summary>
+    /// <returns>An equal descriptor that shares nothing that can be changed with this one.</returns>
+    public ProjectDescriptor Copy() => new()
+    {
+        Id = Id,
+        Slug = Slug,
+        Name = Name,
+        DisplayName = DisplayName,
+        ProjectPath = ProjectPath,
+        DefaultBranch = DefaultBranch,
+        Description = Description,
+        Tags = [.. Tags],
+        Spaces = [.. Spaces],
+        Labels = [.. Labels],
+        Archived = Archived,
+        Sandbox = Sandbox,
+        Checkout = new CheckoutRule
+        {
+            PathTemplate = Checkout.PathTemplate,
+            Depth = Checkout.Depth,
+            Submodules = Checkout.Submodules,
+        },
+        SourcePath = SourcePath,
+        MarkdownBody = MarkdownBody,
+    };
 
     /// <summary>
     /// Validates the descriptor.

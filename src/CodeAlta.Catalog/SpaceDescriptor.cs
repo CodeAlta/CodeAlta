@@ -135,7 +135,10 @@ public sealed class SpaceDescriptor
     /// </summary>
     /// <param name="name">The name of the space.</param>
     /// <returns>An identifier, which may already be taken.</returns>
-    public static string IdFromName(string? name)
+    public static string IdFromName(string? name) => IdFromName(name, "space");
+
+    // The identifier worked out from a name, or the fallback when nothing usable is left.
+    internal static string IdFromName(string? name, string fallback)
     {
         var builder = new System.Text.StringBuilder();
         var hyphen = false;
@@ -155,7 +158,7 @@ public sealed class SpaceDescriptor
 
         if (builder.Length > 64) builder.Length = 64;
         var id = builder.ToString().TrimEnd('-');
-        return IsValidId(id) ? id : "space";
+        return IsValidId(id) ? id : fallback;
     }
 
     /// <summary>
