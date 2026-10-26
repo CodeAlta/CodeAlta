@@ -14,6 +14,7 @@ namespace CodeAlta.Sandbox.Mxc;
 public sealed class MxcSandboxBackend : ISandboxBackend
 {
     private readonly Lazy<SandboxAvailability> _availability = new(Discover);
+    private readonly ProcessLifetimeThread _linuxSpawner = new("CodeAlta sandbox start");
 
     /// <inheritdoc />
     public SandboxAvailability GetAvailability() => _availability.Value;
@@ -29,7 +30,7 @@ public sealed class MxcSandboxBackend : ISandboxBackend
         return StartCoreAsync(policy, commandLine, proxyEndpoint, cancellationToken);
     }
 
-    private static async Task<ISandboxProcess> StartCoreAsync(SandboxPolicy policy, string commandLine, string? proxyEndpoint, CancellationToken cancellationToken)
+    private async Task<ISandboxProcess> StartCoreAsync(SandboxPolicy policy, string commandLine, string? proxyEndpoint, CancellationToken cancellationToken)
     {
         MxcRequests.Prepare(policy);
         var request = MxcRequests.Create(policy, commandLine, proxyEndpoint);
@@ -52,7 +53,10 @@ public sealed class MxcSandboxBackend : ISandboxBackend
 
         try
         {
-            var process = await MxcContainer.SpawnAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
+            // On Linux, the sandbox dies with the thread that starts it: never a thread of the pool (see ProcessLifetimeThread).
+            var process = OperatingSystem.IsLinux()
+                ? await _linuxSpawner.RunAsync(() => MxcContainer.Spawn(request), static late => late.Dispose(), cancellationToken).ConfigureAwait(false)
+                : await MxcContainer.SpawnAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
             return new MxcSandboxProcess(process);
         }
         catch (MxcException exception)
