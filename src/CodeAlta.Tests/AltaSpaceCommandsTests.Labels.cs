@@ -97,6 +97,25 @@ public sealed partial class AltaSpaceCommandsTests
     }
 
     [TestMethod]
+    public async Task Label_FavoriteTakesTrueOrFalse_AndRefusesAnyOtherValue()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        bool Favorite(string type, AltaCommandResult result) => fixture.Single(result, type).GetProperty("favorite").GetBoolean();
+
+        Assert.IsFalse(Favorite("alta.label.created", await fixture.OkAsync("label", "create", "Infra", "--favorite=false")));
+        Assert.IsTrue(Favorite("alta.label.updated", await fixture.OkAsync("label", "set", "infra", "--favorite")));
+        // An agent writes the value: `false` takes the favorite off, as --no-favorite does, and never the reverse.
+        Assert.IsFalse(Favorite("alta.label.updated", await fixture.OkAsync("label", "set", "infra", "--favorite=false")));
+        Assert.IsTrue(Favorite("alta.label.updated", await fixture.OkAsync("label", "set", "infra", "--favorite=True")));
+        Assert.IsTrue(Favorite("alta.label.created", await fixture.OkAsync("label", "create", "Ops", "--favorite=true")));
+
+        await fixture.FailsAsync(AltaExitCodes.Usage, "usage.invalidFavorite", "label", "set", "infra", "--favorite=no");
+        await fixture.FailsAsync(AltaExitCodes.Usage, "usage.invalidFavorite", "label", "create", "Tools", "--favorite=yes");
+        Assert.IsTrue(Favorite("alta.label.detail", await fixture.OkAsync("label", "show", "infra")), "A refused value changes nothing.");
+        Assert.AreEqual(2, Records(await fixture.OkAsync("label", "list")).Count(static line => Type(line) == "alta.label.item"));
+    }
+
+    [TestMethod]
     public async Task Label_ASessionSeesAndChangesTheLabelsOfItsOwnSpace()
     {
         using var fixture = await Fixture.CreateAsync();

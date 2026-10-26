@@ -109,8 +109,18 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("icon=", "Name of the icon of the label, as the CodeAlta window lists them.", value => options.Icon = value);
         command.Add("color=", "Color of the badge of the label, `#rgb` or `#rrggbb`.", value => options.Color = value);
         command.Add("space=", "Space of a top-level label: id, start of id, or name; empty for every space.", value => options.Space = value);
-        command.Add("favorite", "Keep the label on top of the others.", value => { if (value is not null) options.Favorite = true; });
+        // A plain flag would drop the value of `--favorite=false` and make the label a favorite: the value is read instead.
+        command.Add("favorite:", "Keep the label on top of the others; `--favorite=false` takes it off, as --no-favorite does.", value =>
+        {
+            options.InvalidFavorite = null;
+            if (value is null) options.Favorite = true;
+            else if (bool.TryParse(value.Trim(), out var favorite)) options.Favorite = favorite;
+            else options.InvalidFavorite = value;
+        });
     }
+
+    private static int InvalidFavoriteError(AltaCommandContext context, string commandPath) =>
+        UsageError(context, "usage.invalidFavorite", "--favorite takes no value, `true` or `false`; --no-favorite takes the favorite off.", commandPath);
 
     private static Command CreateLabelMoveCommand(AltaCommandContext context)
     {
@@ -379,6 +389,11 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.missingName", "A label needs a name: `alta label create <name>`.", CommandPath);
         }
 
+        if (options.InvalidFavorite is not null)
+        {
+            return InvalidFavoriteError(context, CommandPath);
+        }
+
         var (description, descriptionExit) = await ReadLabelDescriptionAsync(context, options, CommandPath).ConfigureAwait(false);
         if (descriptionExit != AltaExitCodes.Success)
         {
@@ -419,6 +434,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (!context.TryGetRequired<SpaceCatalog>(nameof(SpaceCatalog), out var spaces))
         {
             return AltaExitCodes.ServiceUnavailable;
+        }
+
+        if (options.InvalidFavorite is not null)
+        {
+            return InvalidFavoriteError(context, CommandPath);
         }
 
         var (visible, own) = await VisibleLabelsAsync(context, spaces).ConfigureAwait(false);
@@ -641,5 +661,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         public string? Space { get; set; }
 
         public bool? Favorite { get; set; }
+
+        /// <summary>The value given to --favorite when it is neither `true` nor `false`.</summary>
+        public string? InvalidFavorite { get; set; }
     }
 }
