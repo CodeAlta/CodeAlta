@@ -259,6 +259,7 @@ public sealed class CodeModeToolTests
         var cancelled = await dispatcher.InvokeAsync(["workflow", "cancel", run.Id], caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1" });
         await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
         var result = await dispatcher.InvokeAsync(["workflow", "result", run.Id]);
+        var shown = await dispatcher.InvokeAsync(["workflow", "show", run.Id, "--profile"]);
         var missing = await dispatcher.InvokeAsync(["workflow", "show", "run-nope"]);
 
         Assert.AreEqual(AltaExitCodes.Success, listed.ExitCode, listed.Transcript);
@@ -272,6 +273,8 @@ public sealed class CodeModeToolTests
         StringAssert.Contains(result.Stdout, "\"state\":\"cancelled\"");
         StringAssert.Contains(result.Stdout, "Script stopped");
         StringAssert.Contains(missing.Transcript, "workflow.notFound");
+        Assert.AreEqual(AltaExitCodes.Success, shown.ExitCode, shown.Transcript);
+        StringAssert.Contains(shown.Stdout, "\"profile\":{\"durationMs\"");
     }
 
     [TestMethod]

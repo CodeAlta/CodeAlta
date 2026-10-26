@@ -39,9 +39,11 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateWorkflowShowCommand(AltaCommandContext context)
     {
         string? id = null;
+        var profile = false;
         var command = Leaf("show", "Show one run: its state, its calls, and its steps and the sessions it started, from the journal of its session.");
         command.Add("<run-id>", "Run id, such as run-7f3c2a, from `exec`, `wait` or `alta workflow list`.", value => id = value);
-        command.Add(async (_, _) => await HandleWorkflowShowAsync(context, id).ConfigureAwait(false));
+        command.Add("profile", "Add where the time of a run that ended went: each step, each function (calls, total, slowest, time queued) and the script's own time.", value => profile = value is not null);
+        command.Add(async (_, _) => await HandleWorkflowShowAsync(context, id, profile).ConfigureAwait(false));
         return command;
     }
 
@@ -83,7 +85,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    private static async ValueTask<int> HandleWorkflowShowAsync(AltaCommandContext context, string? id)
+    private static async ValueTask<int> HandleWorkflowShowAsync(AltaCommandContext context, string? id, bool profile)
     {
         if (context.Services.Get<CodeModeRunRegistry>() is not { } runs) return WorkflowsUnavailable(context);
         if (NormalizeOptionalText(id) is not { } runId) return UsageError(context, "usage.missingRun", "A run id is required.", "alta workflow show");
@@ -121,6 +123,11 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         record["steps"] = steps;
         record["sessions"] = sessions;
+        if (profile && !run.Running && run.Completion.IsCompletedSuccessfully)
+        {
+            record["profile"] = Profile(run.Completion.Result);
+        }
+
         AltaJsonlWriter.WriteRecord(context.Stdout, record);
         return AltaExitCodes.Success;
     }
@@ -163,6 +170,33 @@ internal sealed partial class BuiltInAltaCommandContributor
         AltaJsonlWriter.WriteRecord(context.Stdout, record);
         return AltaExitCodes.Success;
     }
+
+    // Where the time of a run went: its own time, its steps, and its functions from the slowest in total.
+    private static Dictionary<string, object?> Profile(CodeModeRunResult result)
+        => new(StringComparer.Ordinal)
+        {
+            ["durationMs"] = (long)result.Duration.TotalMilliseconds,
+            ["scriptMs"] = (long)result.ScriptTime.TotalMilliseconds,
+            ["maxCallsAtOnce"] = result.MaxCallsAtOnce,
+            ["steps"] = result.Steps.Select(static step => new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["stepId"] = step.StepId,
+                ["startedAtMs"] = (long)step.StartedAt.TotalMilliseconds,
+                ["durationMs"] = (long)step.Duration.TotalMilliseconds,
+                ["succeeded"] = step.Succeeded,
+            }).ToArray(),
+            ["functions"] = result.Calls.GroupBy(static call => call.Path)
+                .Select(static group => new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["path"] = group.Key,
+                    ["calls"] = group.Count(),
+                    ["failed"] = group.Count(static call => call.Status == CodeModeCallStatus.Failed),
+                    ["totalMs"] = (long)group.Sum(static call => call.Duration.TotalMilliseconds),
+                    ["slowestMs"] = (long)group.Max(static call => call.Duration.TotalMilliseconds),
+                    ["queuedMs"] = (long)group.Sum(static call => call.Queued.TotalMilliseconds),
+                })
+                .OrderByDescending(static function => (long)function["totalMs"]!).ToArray(),
+        };
 
     // Whether a session is the caller, or below it in the sessions it started.
     private static async Task<bool> IsAtOrBelowAsync(AltaCommandContext context, string sessionId, string callerId)
