@@ -104,6 +104,50 @@ public sealed class CliSandboxEscapeTests
         }
     }
 
+    [TestMethod]
+    public async Task TheNetworkOfAProfileWithHosts_GoesThroughTheProxyAlone_OnMacOSAndLinux()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Inconclusive("The test above covers Windows.");
+        var backend = new MxcSandboxBackend();
+        if (backend.GetAvailability() is { } availability && (!availability.IsAvailable || !availability.Networks.Contains(SandboxNetwork.Hosts)))
+            Assert.Inconclusive(availability.Reason ?? "No sandbox with hosts on this computer.");
+        var root = Directory.CreateDirectory(Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), "tests", "network-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+        using var codealta = new TcpListener(IPAddress.Loopback, 0);
+        codealta.Start();
+        var reserved = ((IPEndPoint)codealta.LocalEndpoint).Port;
+        try
+        {
+            var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve(SandboxProfiles.Workspace, []), new SandboxSessionFolders { WorkingDirectory = project },
+                SandboxHostDiscovery.Current(Path.Combine(root, "data"), []), [], "network");
+            await using var proxy = SandboxNetworkProxy.Start(policy.Hosts, policy.LocalPorts, new HashSet<int> { reserved });
+            await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{Path.Combine(AppContext.BaseDirectory, "altacli")}\" {SandboxWorker.Option}", proxy.Endpoint,
+                new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None).WaitAsync(Deadline);
+            var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
+            async Task<string> Bash(string script)
+                => Text(await worker.InvokeAsync(Call("shell_command", new { command = $"bash -c '{script}'" }), host, CancellationToken.None).WaitAsync(Deadline));
+            // The status line of the proxy for a tunnel to a target, through the proxy the container is given.
+            string Connect(string target)
+                => $"p=${{HTTPS_PROXY:-$HTTP_PROXY}}; p=${{p#http://}}; p=${{p%/}}; exec 3<>/dev/tcp/${{p%:*}}/${{p##*:}} && printf \"CONNECT {target} HTTP/1.1\\r\\nHost: {target}\\r\\n\\r\\n\" >&3 && head -c 12 <&3";
+
+            Assert.Contains("refused-direct", await Bash($"(exec 3<>/dev/tcp/127.0.0.1/{reserved}) 2>/dev/null && echo connected-direct || echo refused-direct"),
+                "a port of this computer, directly");
+            Assert.Contains("403", await Bash(Connect($"127.0.0.1:{reserved}")), "a port of this computer, through the proxy");
+            Assert.Contains("403", await Bash(Connect("example.com:443")), "a host the profile does not list");
+            Assert.Contains("200", await Bash(Connect("api.nuget.org:443")), "a host of the profile");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
     private static bool TryLink(string link, string target)
     {
         try

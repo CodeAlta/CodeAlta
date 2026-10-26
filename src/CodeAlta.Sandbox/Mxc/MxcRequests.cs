@@ -94,9 +94,29 @@ internal static class MxcRequests
         }
     }
 
-    private static NetworkPolicy Network(SandboxPolicy policy, string? proxyEndpoint) => policy.Network switch
+    private static NetworkPolicy Network(SandboxPolicy policy, string? proxyEndpoint) => OperatingSystem.IsWindows() ? WindowsNetwork(policy, proxyEndpoint) : policy.Network switch
     {
-        // Through the proxy alone: mxc lets the container reach that loopback port and nothing else.
+        // Nothing comes in, and the loopback of this computer stays closed: Seatbelt opens every port of this computer
+        // for an allowed host loopback (only the port of the proxy is opened then), and Bubblewrap refuses ingress.
+        SandboxNetwork.Hosts => new NetworkPolicy
+        {
+            Egress = new NetworkEgressPolicy { Default = NetworkAction.Deny },
+            Ingress = new NetworkIngressPolicy { Default = NetworkAction.Deny, HostLoopback = NetworkAction.Deny },
+            RuntimeConfig = new NetworkRuntimeConfig { NetworkProxy = proxyEndpoint },
+        },
+        SandboxNetwork.On => new NetworkPolicy
+        {
+            Egress = new NetworkEgressPolicy { Default = NetworkAction.Allow },
+            Ingress = new NetworkIngressPolicy { Default = NetworkAction.Deny, HostLoopback = NetworkAction.Deny },
+        },
+        // The container has a network namespace of its own, with its own loopback.
+        _ => new NetworkPolicy { Egress = new NetworkEgressPolicy { Default = NetworkAction.Deny } },
+    };
+
+    private static NetworkPolicy WindowsNetwork(SandboxPolicy policy, string? proxyEndpoint) => policy.Network switch
+    {
+        // Through the proxy alone: the process container lets the container reach that loopback port and nothing else
+        // (its proxy without a peer identity needs host loopback and ingress allowed).
         SandboxNetwork.Hosts => new NetworkPolicy
         {
             Egress = new NetworkEgressPolicy { Default = NetworkAction.Deny },
@@ -108,16 +128,13 @@ internal static class MxcRequests
             Egress = new NetworkEgressPolicy { Default = NetworkAction.Allow },
             Ingress = new NetworkIngressPolicy { Default = NetworkAction.Allow, HostLoopback = NetworkAction.Deny },
         },
-        // No network; on Windows the loopback of the container is allowed, so that its own programs talk to each
-        // other (a test host and its runner), while the services of the host stay out of reach. Elsewhere the
-        // container has a network namespace of its own, with its own loopback.
-        _ => OperatingSystem.IsWindows()
-            ? new NetworkPolicy
-            {
-                Egress = new NetworkEgressPolicy { Default = NetworkAction.Deny, Allow = [new NetworkRulePolicy { To = [new NetworkPeerPolicy("127.0.0.0/8")] }] },
-                Ingress = new NetworkIngressPolicy { Default = NetworkAction.Allow, HostLoopback = NetworkAction.Deny },
-            }
-            : new NetworkPolicy { Egress = new NetworkEgressPolicy { Default = NetworkAction.Deny } },
+        // No network; the loopback of the container is allowed, so that its own programs talk to each other (a test
+        // host and its runner), while the services of the host stay out of reach.
+        _ => new NetworkPolicy
+        {
+            Egress = new NetworkEgressPolicy { Default = NetworkAction.Deny, Allow = [new NetworkRulePolicy { To = [new NetworkPeerPolicy("127.0.0.0/8")] }] },
+            Ingress = new NetworkIngressPolicy { Default = NetworkAction.Allow, HostLoopback = NetworkAction.Deny },
+        },
     };
 
     /// <summary>
