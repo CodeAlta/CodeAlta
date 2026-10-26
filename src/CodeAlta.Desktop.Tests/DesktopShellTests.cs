@@ -490,6 +490,8 @@ public sealed class DesktopShellTests
         StringAssert.Contains(entry, "Exec=\"/home/me/.dotnet/tools/alta\"\n");
         StringAssert.Contains(entry, "Icon=/home/me/.local/share/CodeAlta/desktop/integration/alta.png\n");
         StringAssert.Contains(entry, "Terminal=false\n");
+        // The window's identifier is the entry's file name: the dock finds the icon by it.
+        StringAssert.Contains(entry, "StartupWMClass=" + DesktopIntegration.LinuxApplicationId + "\n");
         Assert.IsFalse(DesktopIntegration.LinuxDesktopEntry("/home/me/.dotnet/tools/alta", null).Contains("Icon=", StringComparison.Ordinal));
         // Characters the entry's syntax reserves are escaped.
         Assert.AreEqual("\"/home/a b/50%%/\\$x/alta\"", DesktopIntegration.DesktopEntryArgument("/home/a b/50%/$x/alta"));
