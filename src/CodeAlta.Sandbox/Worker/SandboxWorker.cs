@@ -30,7 +30,9 @@ public static class SandboxWorker
     /// <returns>The exit code of the process.</returns>
     public static async Task<int> RunAsync()
     {
-        await RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(), CancellationToken.None).ConfigureAwait(false);
+        // The commands of the session inherit the null device, never the streams of the protocol.
+        var (input, output) = SandboxWorkerStandardStreams.Take();
+        await RunAsync(input, output, CancellationToken.None).ConfigureAwait(false);
         return 0;
     }
 

@@ -55,6 +55,10 @@ public sealed class CliSandboxWorkerTests
             var where = OperatingSystem.IsWindows() ? "'shell: ' + (Get-Location).Path" : "echo \"shell: $(pwd)\"";
             var located = await worker.InvokeAsync(Call("shell_command", new { command = where }), host, CancellationToken.None).WaitAsync(Deadline);
             Assert.Contains("shell: " + project, Text(located), StringComparison.OrdinalIgnoreCase);
+            // The input of a command is the null device, never the protocol of the worker: reading it ends at once.
+            var drain = OperatingSystem.IsWindows() ? "[Console]::In.ReadToEnd().Length; 'input-ended'" : "cat > /dev/null; echo input-ended";
+            var input = await worker.InvokeAsync(Call("shell_command", new { command = drain }), host, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Contains("input-ended", Text(input));
             var output = new System.Text.StringBuilder();
             var job = worker.StartProcess(where, project, text => { lock (output) output.Append(text); });
             Assert.AreEqual(0, await job.Completion.WaitAsync(Deadline));
