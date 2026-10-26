@@ -186,6 +186,8 @@ public sealed class SandboxPolicyBuilderTests
         Assert.AreEqual("/bin", policy.Environment["PATH"]);
         // MSBuild and Roslyn put their pipes in `/tmp`, which Seatbelt does not let the sandbox write.
         Assert.AreEqual(OperatingSystem.IsMacOS(), policy.Environment.TryGetValue("UseSharedCompilation", out var shared) && shared == "false");
+        // Claude Code puts its temporary folder in `/tmp` unless told otherwise, and does not start there on macOS.
+        Assert.AreEqual(OperatingSystem.IsMacOS(), policy.Environment.TryGetValue("CLAUDE_CODE_TMPDIR", out var claudeTemp) && claudeTemp == policy.Temp);
     }
 
     [TestMethod]

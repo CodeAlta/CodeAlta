@@ -336,7 +336,8 @@ internal sealed partial class GlobalConfigService
                             Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
                         { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
-                          ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command), ModelsOrder = ConfiguredModelsOrder(definition?.ModelsOrder, definition?.SortModels) };
+                          ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command), ModelsOrder = ConfiguredModelsOrder(definition?.ModelsOrder, definition?.SortModels),
+                          Environment = definition?.Env is { Count: > 0 } variables ? [.. variables.Take(MaximumEnvironmentVariables).Select(static pair => new GlobalConfigPluginMapEntry(Bound(pair.Key)!, Bound(pair.Value)!))] : null };
                     }).Concat(ListPluginProviders(document)).ToArray();
                 var pluginTypes = DescribePluginTypes();
                 // The providers CodeAlta knows how to configure that this configuration does not have yet.
@@ -435,6 +436,8 @@ internal sealed partial class GlobalConfigService
             return new("invalid", null, $"A permission mode is one of: {string.Join(", ", PermissionModes)}.", null, null, 0);
         if (!TryReadModelsOrder(edit.ModelsOrder, out var modelsOrder))
             return new("invalid", null, $"An order of the models is one of: {string.Join(", ", ModelOrdering.Values)}.", null, null, 0);
+        if (!TryReadEnvironment(edit.Environment, out var environment, out var environmentProblem))
+            return new("invalid", null, environmentProblem, null, null, 0);
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
         {
             var original = request.OriginalKey?.Trim();
@@ -458,6 +461,8 @@ internal sealed partial class GlobalConfigService
             definition.AnthropicApiKey = definition.ProviderType == "claude-code" ? anthropicApiKey : null;
             // So is its configuration folder: the account it runs with.
             definition.ConfigDir = definition.ProviderType == "claude-code" ? Optional(edit.ConfigDir) : null;
+            // And the variables it starts with: a token of the account, which a sandbox on macOS needs.
+            definition.Env = definition.ProviderType == "claude-code" ? environment : null;
             // The settings of the TOML that only the anthropic type reads are kept for it, and left behind otherwise.
             definition.RefusalFallback = definition.ProviderType == "anthropic" ? definition.RefusalFallback : null;
             definition.PromptCacheTtl = definition.ProviderType == "anthropic" ? definition.PromptCacheTtl : null;
@@ -532,6 +537,8 @@ internal sealed partial class GlobalConfigService
             if (space > 0 && name.AsSpan(space + 1).IndexOfAnyExceptInRange('0', '9') < 0) name = name[..space];
             copy.DisplayName = $"{name} {number}";
             copy.ConfigDir = null;
+            // A token of the variables belongs to the account of the source, as its folder does.
+            copy.Env = null;
             copy.CodexHome = null;
             definitions.Add(copy);
             store.SaveGlobalProviderDefinitions(definitions);
@@ -729,6 +736,42 @@ internal sealed partial class GlobalConfigService
     }
 
     private static bool TakesPermissionMode(string? type) => ConfiguredModelProviderRegistryBuilder.GetPermissionModes(type).Count > 0;
+
+    private const int MaximumEnvironmentVariables = 64;
+
+    // The variables of the form: names of variables, each once, with values of a bounded length; null for none.
+    private static bool TryReadEnvironment(IReadOnlyList<GlobalConfigPluginMapEntry>? entries, out Dictionary<string, string>? environment, out string problem)
+    {
+        environment = null;
+        problem = string.Empty;
+        if (entries is null) return true;
+        var read = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            var name = entry.Name?.Trim() ?? string.Empty;
+            if (name.Length == 0) continue;
+            if (name.Length > 256 || char.IsAsciiDigit(name[0]) || !name.All(static character => char.IsAsciiLetterOrDigit(character) || character == '_'))
+            {
+                problem = $"'{(name.Length > 64 ? name[..64] + "…" : name)}' is not the name of a variable: letters, digits and '_', not starting with a digit.";
+                return false;
+            }
+
+            if (!read.TryAdd(name, entry.Value ?? string.Empty))
+            {
+                problem = $"The variable {name} is given twice.";
+                return false;
+            }
+
+            if (read[name].Length > 8192 || read.Count > MaximumEnvironmentVariables)
+            {
+                problem = "The environment of a provider has at most 64 variables, of at most 8192 characters each.";
+                return false;
+            }
+        }
+
+        environment = read.Count == 0 ? null : read;
+        return true;
+    }
 
     /// <summary>
     /// Re-registers the enabled provider definitions and unregisters providers that are no longer
@@ -969,6 +1012,11 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     /// </summary>
     public string? ModelsOrder { get; init; }
 
+    /// <summary>
+    /// The variables a <c>claude-code</c> provider starts its CLI with (<c>env</c>), as the file writes them; null for none.
+    /// </summary>
+    public IReadOnlyList<GlobalConfigPluginMapEntry>? Environment { get; init; }
+
     /// <summary>The settings of a provider whose type a plugin contributes; absent for a built-in type.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public GlobalConfigPluginProviderValues? Plugin { get; init; }
@@ -1004,6 +1052,12 @@ internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool 
 
     /// <summary>The order of the models (<c>provider</c>, <c>name</c>, <c>name_version</c>); blank for the order of its type.</summary>
     public string? ModelsOrder { get; init; }
+
+    /// <summary>
+    /// The variables a <c>claude-code</c> provider starts its CLI with (<c>env</c>); empty or null for none. Kept for
+    /// <c>claude-code</c> only.
+    /// </summary>
+    public IReadOnlyList<GlobalConfigPluginMapEntry>? Environment { get; init; }
 }
 internal sealed record GlobalConfigSaveProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? OriginalKey,
     GlobalConfigProviderEdit? Provider, bool MakeDefault, bool ApplyProviders);

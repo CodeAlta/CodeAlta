@@ -1,9 +1,10 @@
 """CodeAlta CLI (``altacli run``) under the locked protocol of SWE-bench Pro v2.
 
 Modelled on ``v2/tooling/locked_codex.py`` and ``locked_claude_code.py``:
-  * install(): uploads a self-contained linux-x64 ``altacli`` tarball (``build-altacli.ps1`` / ``build-altacli.sh``)
-    and extracts it to /opt/codealta; ``altacli_url`` + ``altacli_sha256`` fetch a pinned tarball in the sandbox
-    instead, with the upload as the fallback. The setup phase has network; the agent phase does not need it.
+  * install(): uploads a self-contained x64 ``altacli`` tarball (``build-altacli.ps1`` / ``build-altacli.sh``)
+    containing glibc and musl builds, selects the one of the sandbox, and extracts it to /opt/codealta;
+    ``altacli_url`` + ``altacli_sha256`` fetch a pinned tarball in the sandbox instead, with the upload as the
+    fallback. The setup phase has network; the agent phase does not need it.
   * run(): one ``altacli run --format jsonl`` in a fresh, ephemeral profile (no user configuration, no plugin, no MCP
     server, no web tool, no models.dev refresh), inside an in-sandbox ``timeout`` (budget - 60 s) so the process
     always ends; ``altacli --timeout`` (budget - 90 s) ends it first, cleanly, with its result line.
@@ -33,6 +34,7 @@ from harbor.models.agent.context import AgentContext
 _HERE = Path(__file__).resolve().parent
 _DEFAULT_TARBALL = _HERE / "dist" / "altacli-linux-x64.tar.gz"
 _INSTALL_DIR = "/opt/codealta"
+_PACKAGE_DIR = f"{_INSTALL_DIR}/package"
 _ALTACLI = f"{_INSTALL_DIR}/altacli"
 _RUN_DIR = "/tmp/codealta-run"
 _PROFILE_DIR = "/tmp/codealta-profile"
@@ -50,6 +52,11 @@ _PROVIDERS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "gemini": ("google-genai", ("GEMINI_API_KEY", "GOOGLE_API_KEY"), "generativelanguage.googleapis.com"),
 }
 _EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+_RUNTIMES = ("linux-x64", "linux-musl-x64")
+_RUNTIME_PROBE = (
+    "if [ -e /lib/ld-musl-x86_64.so.1 ]; then echo linux-musl-x64; "
+    "else echo linux-x64; fi"
+)
 
 # The repository: /app, or /testbed for a few tasks.
 _FIND_REPO = (
@@ -88,11 +95,35 @@ def _toml_string(value: str) -> str:
     return json.dumps(value)
 
 
+def _runtime_from_probe(output: str | None) -> str:
+    for line in reversed((output or "").splitlines()):
+        runtime = line.strip()
+        if runtime in _RUNTIMES:
+            return runtime
+    raise RuntimeError(f"unsupported libc runtime reported by sandbox: {(output or '').strip() or '<empty>'}")
+
+
+def _activation_command(runtime: str) -> str:
+    if runtime not in _RUNTIMES:
+        raise ValueError(f"unsupported runtime: {runtime}")
+    selected = f"{_PACKAGE_DIR}/{runtime}"
+    return (
+        f"set -e; selected={shlex.quote(selected)}; "
+        f"if [ ! -f \"$selected/altacli\" ]; then selected={shlex.quote(_PACKAGE_DIR)}; fi; "
+        "if [ ! -f \"$selected/altacli\" ]; then "
+        f"echo 'altacli package has neither {runtime}/altacli nor a legacy flat altacli' >&2; exit 3; fi; "
+        "chmod 755 \"$selected/altacli\"; "
+        "chmod 755 \"$selected/createdump\" 2>/dev/null || true; "
+        f"printf '%s\\n' '#!/bin/sh' \"exec \\\"$selected/altacli\\\" \\\"\\$@\\\"\" > {_ALTACLI}; "
+        f"chmod 755 {_ALTACLI}; {_ALTACLI} --version"
+    )
+
+
 class LockedCodeAlta(BaseInstalledAgent):
     """``altacli run`` in the sandbox, with patch capture for fresh-sandbox re-grading.
 
     Agent kwargs (``--ak key=value``), all optional:
-      altacli_tarball   host path of the linux-x64 tarball (default: dist/altacli-linux-x64.tar.gz beside this file)
+      altacli_tarball   host path of the glibc+musl x64 tarball (default: dist/altacli-linux-x64.tar.gz beside this file)
       altacli_url       URL of a pinned tarball fetched in the sandbox (needs altacli_sha256); upload on failure
       altacli_sha256    sha256 of that tarball
       reasoning_effort  none, minimal, low, medium, high, xhigh or max (-m provider:model@effort)
@@ -176,17 +207,25 @@ class LockedCodeAlta(BaseInstalledAgent):
                     "(or build-altacli.sh), or pass --ak altacli_tarball=<path>.")
             await environment.upload_file(self._tarball, "/tmp/altacli.tar.gz")
 
-        # A tarball made on Windows has no executable bits: set them on the two native executables.
+        # A tarball made on Windows has no executable bits. Extract first, then select and activate the libc build.
         extract = (
-            f"set -e; rm -rf {_INSTALL_DIR} && mkdir -p {_INSTALL_DIR} "
-            f"&& tar -xzf /tmp/altacli.tar.gz -C {_INSTALL_DIR} --no-same-owner && rm -f /tmp/altacli.tar.gz "
-            f"&& chmod -R a+rX {_INSTALL_DIR} && chmod 755 {_ALTACLI} && {{ chmod 755 {_INSTALL_DIR}/createdump 2>/dev/null || true; }} "
-            f"&& {_ALTACLI} --version"
+            f"set -e; rm -rf {_INSTALL_DIR} && mkdir -p {_PACKAGE_DIR} "
+            f"&& tar -xzf /tmp/altacli.tar.gz -C {_PACKAGE_DIR} --no-same-owner && rm -f /tmp/altacli.tar.gz "
+            f"&& chmod -R a+rX {_PACKAGE_DIR}"
         )
         r = await environment.exec(command=extract, user="root", timeout_sec=300)
         if r.return_code != 0:
-            raise RuntimeError(f"altacli install failed (rc={r.return_code}): {(r.stderr or r.stdout or '')[-500:]}")
-        self.logger.info(f"altacli installed: {(r.stdout or '').strip()}")
+            raise RuntimeError(f"altacli extraction failed (rc={r.return_code}): {(r.stderr or r.stdout or '')[-500:]}")
+
+        probe = await environment.exec(command=_RUNTIME_PROBE, user="root", timeout_sec=60)
+        if probe.return_code != 0:
+            raise RuntimeError(f"altacli libc probe failed (rc={probe.return_code}): {(probe.stderr or probe.stdout or '')[-500:]}")
+        runtime = _runtime_from_probe(probe.stdout)
+
+        r = await environment.exec(command=_activation_command(runtime), user="root", timeout_sec=300)
+        if r.return_code != 0:
+            raise RuntimeError(f"altacli activation failed (rc={r.return_code}): {(r.stderr or r.stdout or '')[-500:]}")
+        self.logger.info(f"altacli installed ({runtime}): {(r.stdout or '').strip()}")
         await self._ensure_tls(environment)
 
     async def _ensure_tls(self, environment: BaseEnvironment) -> None:

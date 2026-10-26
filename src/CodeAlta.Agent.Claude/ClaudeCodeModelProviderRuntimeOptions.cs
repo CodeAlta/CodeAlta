@@ -47,6 +47,14 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     public string? ConfigDirectory { get; init; }
 
     /// <summary>
+    /// Gets or initializes the variables the CLI is started with besides those CodeAlta inherits (<c>env</c> of the
+    /// provider): a token of the account (<c>CLAUDE_CODE_OAUTH_TOKEN</c>) signs it in where its login cannot be read, as
+    /// in a sandbox on macOS. A sandbox gives them to the CLI with their values. What CodeAlta sets for the CLI itself
+    /// (<c>CLAUDE_CONFIG_DIR</c> of <see cref="ConfigDirectory"/>, its own flags) is not replaced.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> EnvironmentVariables { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>
     /// Gets or initializes the folder of Claude Code in the cache of CodeAlta, where the version CodeAlta pins
     /// (<see cref="ClaudeCodePinnedCli"/>) is downloaded; null to not look there. When <see cref="Command"/> is empty,
     /// that version is run before a Claude Code the user installed.
@@ -256,12 +264,14 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
             : "Run `claude` in a terminal and sign in with /login";
 
     /// <summary>
-    /// Reads the environment the CLI is started with: the one CodeAlta inherits, with <c>CLAUDE_CONFIG_DIR</c> set to
-    /// the folder of the provider when it has one.
+    /// Reads the environment the CLI is started with: the one CodeAlta inherits, with the variables of the provider
+    /// (<see cref="EnvironmentVariables"/>), and <c>CLAUDE_CONFIG_DIR</c> set to the folder of the provider when it has one.
     /// </summary>
     internal Func<string, string?> ReadEnvironment()
     {
-        var inherited = GetEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        var system = GetEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        var variables = EnvironmentVariables;
+        Func<string, string?> inherited = variables.Count == 0 ? system : name => variables.TryGetValue(name, out var value) ? value : system(name);
         return ResolveConfigDirectory() is { } folder
             ? name => string.Equals(name, ClaudeCodeProjectFolders.ConfigDirectoryVariable, StringComparison.Ordinal) ? folder : inherited(name)
             : inherited;

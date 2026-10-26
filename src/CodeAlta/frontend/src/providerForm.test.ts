@@ -7,15 +7,15 @@ const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
   reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", effectiveApiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, hasApiKey: true,
   defaults: { displayName: "local", model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null,
-  permissionMode: null, configDir: null, command: null, modelsOrder: null };
+  permissionMode: null, configDir: null, command: null, environment: null, modelsOrder: null };
 
 test("a form starts from the written values, never from the stored secret", () => {
   const form = providerForm(local, "local", types);
   assert.deepEqual(form, { key: "local", type: "openai-chat", enabled: true, displayName: "Local", model: "model-a", reasoningEffort: "",
-    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", modelsOrder: "", plugin: {} });
+    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", plugin: {} });
   assert.equal(providerForm(local, "other", types).makeDefault, false);
   assert.deepEqual(providerForm(null, "local", types), { key: "", type: "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "",
-    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", modelsOrder: "", plugin: {} });
+    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", plugin: {} });
   assert.equal(providerFormDirty(form, form), false);
   assert.equal(providerFormDirty({ ...form, model: "model-b" }, form), true);
 });
@@ -39,13 +39,27 @@ test("the wire edit sends blank fields as null and keeps an untouched secret", (
   const form = providerForm(local, "local", types);
   assert.deepEqual(providerEdit({ ...form, key: " Local ", model: "  " }), { key: "local", type: "openai-chat", enabled: true, displayName: "Local",
     model: null, reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, apiKey: null, clearApiKey: false, icon: null, color: null, anthropicApiKey: null,
-    permissionMode: null, configDir: null, modelsOrder: null });
+    permissionMode: null, configDir: null, environment: null, modelsOrder: null });
   assert.equal(providerEdit({ ...form, apiKey: "new-secret" }).apiKey, "new-secret");
   const cleared = providerEdit({ ...form, apiKey: "ignored", clearApiKey: true });
   assert.equal(cleared.apiKey, null);
   assert.equal(cleared.clearApiKey, true);
   assert.equal(usesAccountSignIn("codex"), true);
   assert.equal(usesAccountSignIn("openai-chat"), false);
+});
+
+test("the environment of Claude Code is NAME=value lines, sent for it alone", () => {
+  const claude: GlobalConfigProvider = { ...local, key: "claude", type: "claude-code", apiUrl: null, effectiveApiUrl: null, hasApiKey: false,
+    environment: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", value: "sk-ant-oat01-a=b" }, { name: "FLAG", value: "" }] };
+  const form = providerForm(claude, null, types);
+  assert.equal(form.environment, "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-a=b\nFLAG=");
+  // A value keeps what follows its first `=`; a name alone has an empty value; blank lines are left out.
+  assert.deepEqual(providerEdit({ ...form, environment: " A = x=y \n\nB\n" }).environment, [{ name: "A", value: " x=y" }, { name: "B", value: "" }]);
+  assert.deepEqual(providerEdit({ ...form, environment: "" }).environment, [], "an empty field removes the variables");
+  assert.equal(providerEdit({ ...form, type: "openai-chat" }).environment, null, "another type takes none");
+  assert.equal(validateProviderForm({ ...form, environment: "=token" }, [], "claude"), "A line of the environment has no name before =.");
+  assert.equal(validateProviderForm(form, [], "claude"), null);
+  assert.equal(providerFormDirty({ ...form, environment: "A=1" }, form), true);
 });
 
 test("the icon and its color are written as chosen, and left out when they follow the provider", () => {

@@ -4,13 +4,13 @@
 
 ## Build
 
-The sandbox images have no .NET: publish a self-contained `linux-x64` `altacli` and pack it.
+The sandbox images have no .NET: publish self-contained glibc and musl x64 builds of `altacli` and pack them together.
 
 ```powershell
 benchmarks/harbor/build-altacli.ps1        # or: sh benchmarks/harbor/build-altacli.sh
 ```
 
-This writes `benchmarks/harbor/dist/altacli-linux-x64.tar.gz` (about 55 MB) and its `.sha256`. The publish sets `InvariantGlobalization`, because some images lack libicu. It also replaces the native SQLite of the package (SQLitePCLRaw 2.1.13, which needs glibc 2.34) with the one of SQLitePCLRaw 2.1.11 (SQLite 3.49.1, glibc 2.28), downloaded from nuget.org and checked by its sha256: many task images are Debian 11 (glibc 2.31). The adapter uploads the tarball by default; `--ak altacli_tarball=<path>` uses another one, and `--ak altacli_url=<url> --ak altacli_sha256=<sha>` downloads a pinned tarball in the sandbox, with the upload as the fallback.
+This writes `benchmarks/harbor/dist/altacli-linux-x64.tar.gz` (about 115 MB) and its `.sha256`. The tarball contains self-contained `linux-x64` (glibc) and `linux-musl-x64` builds; the adapter selects musl when the sandbox has `/lib/ld-musl-x86_64.so.1`, glibc otherwise. The publish sets `InvariantGlobalization`, because some images lack libicu. It replaces both native SQLite libraries of the package with those of SQLitePCLRaw 2.1.11 (SQLite 3.49.1), downloaded from nuget.org and checked by sha256: its glibc build needs glibc 2.28, unlike 2.1.13, which needs 2.34. The adapter uploads the tarball by default; `--ak altacli_tarball=<path>` uses another one, and `--ak altacli_url=<url> --ak altacli_sha256=<sha>` downloads a pinned tarball in the sandbox, with the upload as the fallback. A legacy flat tarball still works on a compatible libc.
 
 ## Run
 
@@ -93,5 +93,5 @@ CodeAlta's agents may commit their work, on a branch of their own. Before the ca
 - A run killed by the in-sandbox `timeout` (it did not stop at `--timeout`) has no result line: no tokens, no cost.
 - The session journal is not kept (`--ephemeral`); `altacli.jsonl` is the trace.
 - `altacli` needs libssl and CA certificates: the adapter installs them during setup when an image lacks them.
-- Only `linux-x64` images with glibc 2.28 or later (all SWE-bench Pro v2 images are `linux/amd64`); a musl image would need a `linux-musl-x64` build.
+- Only `linux/amd64` images: glibc 2.28 or later and x64 musl are supported by the dual package.
 - Exit codes 1, 2, 5 and 6 of `altacli` are reported to Harbor as agent errors (classified as rate limit, authentication... for `--retry-include`); the patch is still captured and graded.

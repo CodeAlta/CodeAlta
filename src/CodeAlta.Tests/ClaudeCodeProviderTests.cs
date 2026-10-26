@@ -153,6 +153,28 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [TestMethod]
+    public void Launcher_GivesTheCliTheVariablesOfItsProvider_AlsoInTheSandboxWithTheirValues()
+    {
+        var account = Path.Combine(Path.GetTempPath(), "claude-account");
+        var options = new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude-code",
+            ConfigDirectory = account,
+            EnvironmentVariables = new Dictionary<string, string> { ["CLAUDE_CODE_OAUTH_TOKEN"] = "sk-ant-oat01-test", ["CLAUDE_CONFIG_DIR"] = "/elsewhere" },
+        };
+
+        var launch = ClaudeCodeLauncher.Create("/tools/claude/claude", options, new ClaudeCodeLaunchKey("/work", null, null), null, null, withTools: true);
+        var hosted = ClaudeCodeLauncher.ForHost(launch, "/tools/claude/claude", options, withoutApiKey: false);
+
+        Assert.AreEqual("sk-ant-oat01-test", launch.Environment["CLAUDE_CODE_OAUTH_TOKEN"]);
+        Assert.AreEqual(account, launch.Environment["CLAUDE_CONFIG_DIR"], "the account folder of the provider is not replaced");
+        Assert.AreEqual("sk-ant-oat01-test", options.ReadEnvironment()("CLAUDE_CODE_OAUTH_TOKEN"), "what CodeAlta reads of the CLI is what it starts with");
+        // A sandbox drops a variable named like a secret unless it is passed by name: the token is, with its value.
+        CollectionAssert.Contains(hosted.PassedVariables.ToArray(), "CLAUDE_CODE_OAUTH_TOKEN");
+        Assert.AreEqual("sk-ant-oat01-test", hosted.Environment["CLAUDE_CODE_OAUTH_TOKEN"]);
+    }
+
+    [TestMethod]
     public void Launcher_DescribesTheCliForTheSandbox_WithItsAccount_AndOnWindowsWithoutItsShellTools()
     {
         var account = Path.Combine(Path.GetTempPath(), "claude-account");

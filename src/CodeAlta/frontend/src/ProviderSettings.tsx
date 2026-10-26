@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
+import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, TextArea, type Intent } from "@blueprintjs/core";
 import { globalConfig, modelCatalog, providerLogin, providerUsage, sandboxSettings, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogCapability, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
 import { ProviderAccount } from "./ProviderAccount";
@@ -392,6 +392,10 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
               helperText={t("The folder of the Claude account of this provider (CLAUDE_CONFIG_DIR). A new folder starts without settings, memory or MCP servers.")}>
               <InputGroup id="provider-config-dir" value={form.configDir} disabled={busy} spellCheck={false} placeholder={t("~/.claude, the folder of Claude Code")}
                 onChange={event => edit({ configDir: event.target.value })} /></FormGroup>}
+            {runsOwnCli(form.type) && <FormGroup label={t("Environment")} labelFor="provider-environment"
+              helperText={t("Variables the CLI of this provider starts with, NAME=value, one per line. In a sandbox on macOS, a token of its account (CLAUDE_CODE_OAUTH_TOKEN, made with claude setup-token) signs it in.")}>
+              <TextArea id="provider-environment" fill rows={Math.min(6, Math.max(2, form.environment.split("\n").length))} value={form.environment} disabled={busy} spellCheck={false}
+                placeholder="CLAUDE_CODE_OAUTH_TOKEN=…" onChange={event => edit({ environment: event.target.value })} /></FormGroup>}
             {runsOwnCli(form.type) && <FormGroup label="ANTHROPIC_API_KEY" labelFor="provider-anthropic-key"
               helperText={t("When this variable is set. Without an answer saved by Claude Code, sessions do not start.")}>
               <HTMLSelect id="provider-anthropic-key" fill value={form.anthropicApiKey} disabled={busy} onChange={event => edit({ anthropicApiKey: event.target.value })}>

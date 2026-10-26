@@ -64,6 +64,7 @@ public static class ConfiguredProviderUsage
                         ProviderKey = definition.ProviderKey,
                         Command = Text(definition.Command),
                         ConfigDirectory = Text(definition.ConfigDir),
+                        EnvironmentVariables = definition.Env is { Count: > 0 } variables ? new Dictionary<string, string>(variables, StringComparer.Ordinal) : new Dictionary<string, string>(StringComparer.Ordinal),
                         PinnedCliRoot = new CatalogOptions { GlobalRoot = stateRootPath }.ClaudeCodeRoot,
                         ExtraArguments = definition.Arguments is { Count: > 0 } arguments ? [.. arguments] : [],
                         ApiKeyPolicy = ClaudeCodeModelProviderRuntimeOptions.ParseApiKeyPolicy(definition.AnthropicApiKey),

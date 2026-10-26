@@ -226,6 +226,12 @@ internal static class ClaudeCodeLauncher
             environment[ClaudeCodeApiKey.Variable] = null;
         }
 
+        // The variables the user gave the provider (a token of its account), over those inherited.
+        foreach (var (name, value) in options.EnvironmentVariables)
+        {
+            environment[name] = value;
+        }
+
         // The account of the provider: its login, settings, memory and transcripts are in that folder.
         if (options.ResolveConfigDirectory() is { } configDirectory)
         {
@@ -283,9 +289,13 @@ internal static class ClaudeCodeLauncher
         }
         // The variables that choose the account, the endpoint and the model of the CLI, which the sandbox would not pass
         // otherwise; those the launch sets or removes stay as it says.
+        // The variables of the provider pass too, with the values the launch gives them: a sandbox would drop those named
+        // like a secret (CLAUDE_CODE_OAUTH_TOKEN) otherwise.
         var passed = System.Environment.GetEnvironmentVariables().Keys.OfType<string>()
             .Where(static name => name.StartsWith("ANTHROPIC_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("CLAUDE_CODE_", StringComparison.OrdinalIgnoreCase))
             .Where(name => !environment.ContainsKey(name) && !(withoutApiKey && string.Equals(name, ClaudeCodeApiKey.Variable, StringComparison.OrdinalIgnoreCase)))
+            .Concat(options.EnvironmentVariables.Keys.Where(name => environment.TryGetValue(name, out var value) && value is not null))
+            .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
         return new AgentProcessLaunch(launch.FileName, arguments, launch.WorkingDirectory, environment)

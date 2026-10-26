@@ -1083,6 +1083,34 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public void SignedOutCli_InTheSandboxOfMacOS_IsToldThatItNeedsATokenOfItsOwn()
+    {
+        var options = new ClaudeCodeFakeCli().CreateOptions();
+
+        var sandboxed = ClaudeCodeSession.SignedOutMessage(options, sandboxedOnMacOS: true, "Not logged in · Please run /login");
+        var plain = ClaudeCodeSession.SignedOutMessage(options, sandboxedOnMacOS: false, "Not logged in · Please run /login");
+
+        // Signing in again changes nothing there: the Keychain, where the sign-in is, is out of reach of the sandbox.
+        StringAssert.Contains(sandboxed, "Keychain");
+        StringAssert.Contains(sandboxed, "CLAUDE_CODE_OAUTH_TOKEN");
+        StringAssert.Contains(sandboxed, "`claude setup-token`");
+        StringAssert.Contains(sandboxed, "Environment (Settings > Providers)", "where the token goes");
+        Assert.IsFalse(sandboxed.Contains("/login,", StringComparison.Ordinal) || sandboxed.Contains("sign in with /login", StringComparison.Ordinal), sandboxed);
+        StringAssert.Contains(plain, "sign in with /login");
+        Assert.IsFalse(plain.Contains("Keychain", StringComparison.Ordinal), plain);
+
+        // With a token of its own, the CLI used it: that token was refused, in a sandbox or not.
+        var withToken = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", EnvironmentVariables = new Dictionary<string, string> { ["CLAUDE_CODE_OAUTH_TOKEN"] = "sk-ant-oat01-old" } };
+        foreach (var sandbox in new[] { true, false })
+        {
+            var refused = ClaudeCodeSession.SignedOutMessage(withToken, sandbox, "Failed to authenticate. API Error: 401 OAuth access token is invalid.");
+            StringAssert.Contains(refused, "refused the token of the provider");
+            StringAssert.Contains(refused, "`claude setup-token`");
+            Assert.IsFalse(refused.Contains("sign in with /login", StringComparison.Ordinal) || refused.Contains("Keychain", StringComparison.Ordinal), refused);
+        }
+    }
+
+    [TestMethod]
     public async Task SignedOutCli_FailsTheTurnWithTheWayToSignIn()
     {
         using var directory = TestTempDirectory.Create();
