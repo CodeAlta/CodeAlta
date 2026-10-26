@@ -97,6 +97,44 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Starts the process of an agent that runs its own tools (the CLI of Claude Code) in a container of its own, with
+    /// the profile of the session and what the process needs: the folder of its executable, its account folder, the
+    /// hosts of its vendor and the variables that configure it. A profile without network gets the hosts of the vendor
+    /// alone: the agent does not work without its service. The process and its proxy end together.
+    /// </summary>
+    /// <exception cref="SandboxUnavailableException">The sandbox did not start.</exception>
+    public async Task<CodeAlta.Agent.Runtime.IAgentHostedProcess> StartAgentProcessAsync(SessionSandboxStart start, CodeAlta.Agent.Runtime.AgentProcessLaunch launch,
+        CancellationToken cancellationToken)
+    {
+        var profile = AgentProfile(start.Profile, launch);
+        var environment = launch.Environment.Where(static pair => pair.Value is not null).Select(static pair => new KeyValuePair<string, string>(pair.Key, pair.Value!))
+            .Concat(start.Environment).DistinctBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase).ToArray();
+        var policy = SandboxPolicyBuilder.Build(profile, start.Folders, Host(), environment, start.SessionId + "-agent");
+        SandboxNetworkProxy? proxy = null;
+        try
+        {
+            if (policy.Network == SandboxNetwork.Hosts) proxy = SandboxNetworkProxy.Start(policy.Hosts, policy.LocalPorts, _reservedPorts);
+            var process = await _backend.StartAsync(policy, SandboxCommandLine.Create(launch.FileName, launch.Arguments), proxy?.Endpoint, cancellationToken).ConfigureAwait(false);
+            return new AgentProcess(process, proxy);
+        }
+        catch
+        {
+            if (proxy is not null) await proxy.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>The profile the process of an agent runs with: the profile of the session and what the process needs.</summary>
+    internal static ResolvedSandboxProfile AgentProfile(ResolvedSandboxProfile profile, CodeAlta.Agent.Runtime.AgentProcessLaunch launch) => profile with
+    {
+        Network = profile.Network == SandboxNetwork.Off ? SandboxNetwork.Hosts : profile.Network,
+        Hosts = profile.Network == SandboxNetwork.Off ? [.. launch.Hosts] : [.. profile.Hosts.Union(launch.Hosts, StringComparer.OrdinalIgnoreCase)],
+        Write = [.. profile.Write, .. launch.ReadWriteFolders],
+        Read = [.. profile.Read, .. launch.ReadOnlyFolders],
+        Env = [.. profile.Env.Union(launch.PassedVariables, StringComparer.OrdinalIgnoreCase)],
+    };
+
     /// <summary>Gets the hosts the proxy of a session refused last, for the note of a failed command.</summary>
     public IReadOnlyList<string> RecentRefusals(string sessionId)
         => _slots.TryGetValue(sessionId, out var slot) && slot.Current?.Proxy is { } proxy ? proxy.RecentRefusals : [];
@@ -243,6 +281,32 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
         {
             await Client.DisposeAsync().ConfigureAwait(false);
             if (Proxy is not null) await Proxy.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    // The process of an agent in its container, and the proxy of its network.
+    private sealed class AgentProcess(ISandboxProcess process, SandboxNetworkProxy? proxy) : CodeAlta.Agent.Runtime.IAgentHostedProcess
+    {
+        private readonly Lazy<Task<int>> _exited = new(() => process.WaitForExitAsync(CancellationToken.None));
+        private int _disposed;
+
+        public int Id => process.Id;
+
+        public Stream StandardInput => process.StandardInput;
+
+        public Stream StandardOutput => process.StandardOutput;
+
+        public Stream StandardError => process.StandardError;
+
+        public Task<int> Exited => _exited.Value;
+
+        public void Kill() => process.Kill();
+
+        public async ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            await process.DisposeAsync().ConfigureAwait(false);
+            if (proxy is not null) await proxy.DisposeAsync().ConfigureAwait(false);
         }
     }
 

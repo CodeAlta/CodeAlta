@@ -21,4 +21,10 @@ public interface IAgentBuiltInToolRouter
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The reason, for the user and the agent; null when the run can start.</returns>
     ValueTask<string?> RefuseRunAsync(bool providerRunsItsOwnTools, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets what starts the process of a provider that runs its own tools for the run <see cref="RefuseRunAsync"/>
+    /// admitted, or null to start it as a child of this process.
+    /// </summary>
+    Runtime.IAgentProcessHost? ProcessHost { get; }
 }

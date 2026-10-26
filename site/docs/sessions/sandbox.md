@@ -104,7 +104,13 @@ An agent can turn a sandbox on for a session it creates, never turn one off.
 
 ## Providers
 
-A sandboxed session runs on the providers whose model CodeAlta drives with its own tools: the API providers, Codex, GitHub Copilot. Claude Code and the ACP agents run their tools in their own process: a session that must be sandboxed does not run on them, and the composer says so. A [fallback](../model-providers/readme.md) never moves a sandboxed session to such a provider.
+A sandboxed session runs on the providers whose model CodeAlta drives with its own tools (the API providers, Codex, GitHub Copilot) and on [Claude Code](claude-code.md):
+
+- **Claude Code** runs in the sandbox of the session. It writes in its account folder (its sign-in and its transcripts), so the agent can read its own sign-in, never the ones of CodeAlta. It reaches the hosts of Anthropic, even with a profile without network. On Windows its commands run with the shell of CodeAlta, in the same sandbox.
+- **On macOS**, Claude Code keeps its sign-in in the Keychain, outside the sandbox: give it a token of its own (`claude setup-token`, then `CLAUDE_CODE_OAUTH_TOKEN`) or an API key.
+- **The ACP agents** run their tools in their own process, which the sandbox does not start yet: a sandboxed session does not run on them, and says why.
+
+A [fallback](../model-providers/readme.md) never moves a sandboxed session to a provider it cannot run on.
 
 ## Platforms
 

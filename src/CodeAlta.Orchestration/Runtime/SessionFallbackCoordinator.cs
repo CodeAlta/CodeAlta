@@ -153,7 +153,7 @@ internal sealed class SessionFallbackCoordinator
             if (!notice.Scope.IsProviderAvailable(candidate.Target.ProviderKey)) continue;
             if (!IsUsable(candidate.Target, states)) continue;
             // A sandboxed session goes on only where its sandbox holds its tools.
-            if (notice.Sandboxed && !SandboxedProviders.RunsCodeAltaTools(_commands.SelectionProvider?.Invoke(new ModelProviderId(candidate.Target.ProviderKey))?.ProviderType)) continue;
+            if (notice.Sandboxed && !SandboxedProviders.RunsInSandbox(_commands.SelectionProvider?.Invoke(new ModelProviderId(candidate.Target.ProviderKey))?.ProviderType)) continue;
             return candidate;
         }
 

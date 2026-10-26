@@ -74,6 +74,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? _writeGuard;
     // Checks each shell command before it runs, in every permission mode (a hook runs before the permissions of the CLI).
     private CodeAlta.Agent.Runtime.Tools.AgentCommandGuard? _commandGuard;
+    // Where the next process of the session starts: the sandbox of the session, or null for a child of this process.
+    private IAgentProcessHost? _processHost;
     private string? _cliPermissionMode;
     private string? _settingsPermissionMode;
     // A switch was given up before its answer: the CLI may be in the mode asked for, or still in the other one.
@@ -203,7 +205,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _conversationCount = request.Conversation.Count + earlierUsers + earlierAssistants;
             var newUserMessages = BindConversation(request);
             // Before the process starts: the tools the CLI lists when it connects are the ones of this request.
-            var toolsChanged = SetExposedTools(request.Tools);
+            var toolsChanged = SetExposedTools(request.Tools, ClaudeCodeLauncher.CommandsThroughCodeAlta(request.ProcessHost));
             bool showsOwnTurn, starts, hasOwnTurn;
             lock (_gate)
             {
@@ -501,13 +503,16 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             effort,
             request.Environment is { IsEmpty: false } environment ? environment : null,
             request.DisabledTools?.Contains(ShellCommandTool) == true,
-            ClaudeCodeLaunchKey.WebToolsOf(request.DisabledTools));
+            ClaudeCodeLaunchKey.WebToolsOf(request.DisabledTools),
+            // A process started in another sandbox, or out of one, is another process: it resumes the conversation.
+            request.ProcessHost?.Key);
         var permissionMode = ClaudeCodeLauncher.PermissionMode(NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode), key.WithoutShell);
         lock (_gate)
         {
             _permissionMode = permissionMode;
             _writeGuard = key.WithoutShell ? request.WriteGuard : null;
             _commandGuard = request.CommandGuard;
+            _processHost = request.ProcessHost;
         }
 
         if (_connection is { IsClosed: false } connection && key == _launchKey &&
@@ -750,7 +755,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             hasGateway = _exposedTools.ContainsKey(ClaudeCodePrompts.GatewayTool);
         }
 
-        return ClaudeCodePrompts.CreateAppendSystemPrompt(request.DeveloperInstructions, hasGateway, request.DisabledTools?.Contains(ShellCommandTool) != true);
+        return ClaudeCodePrompts.CreateAppendSystemPrompt(request.DeveloperInstructions, hasGateway, request.DisabledTools?.Contains(ShellCommandTool) != true,
+            ClaudeCodeLauncher.CommandsThroughCodeAlta(request.ProcessHost));
     }
 
     // Returns what the conversation has to be told of its instructions before the prompt that starts, if anything:
@@ -820,10 +826,12 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     {
         bool hasGateway;
         string? permissionMode;
+        IAgentProcessHost? processHost;
         lock (_gate)
         {
             hasGateway = _exposedTools.ContainsKey(ClaudeCodePrompts.GatewayTool);
             permissionMode = _permissionMode;
+            processHost = _processHost;
         }
 
         var branches = _branchPending && resumeSessionId is not null;
@@ -831,7 +839,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             forkSession: branches && _branchFork, resumeAt: branches ? _branchAt : null);
         var channel = Channel.CreateUnbounded<TurnEvent>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var generation = Interlocked.Increment(ref _generation);
-        var transport = _transportFactory.Start(launch);
+        var transport = processHost is null
+            ? _transportFactory.Start(launch)
+            : await ClaudeCodeHostedTransport.StartAsync(processHost, ClaudeCodeLauncher.ForHost(launch, executable, _options, _withoutApiKey), cancellationToken).ConfigureAwait(false);
         var connection = new ClaudeCodeConnection(transport, new ConnectionHandler(this, generation, channel.Writer));
         // The entry this process writes in the registry of live sessions is CodeAlta's own, until it is closed.
         var ownProcess = _ownProcesses.Track(transport.ProcessId);
@@ -1253,13 +1263,14 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     }
 
     // Returns whether the CLI listed other tools than these: it then has to be told to list them again.
-    private bool SetExposedTools(IReadOnlyList<AgentToolDefinition> tools)
+    private bool SetExposedTools(IReadOnlyList<AgentToolDefinition> tools, bool commandsThroughCodeAlta = false)
     {
         var exposed = new Dictionary<string, AgentToolDefinition>(StringComparer.Ordinal);
         var signature = new System.Text.StringBuilder();
         foreach (var (name, definition) in AgentToolBridge.CreateDefinitionMap(tools))
         {
-            if (ClaudeCodePrompts.ReplacedTools.Contains(name))
+            // The commands of a CLI whose own shell cannot run where it is run with the shell of CodeAlta.
+            if (ClaudeCodePrompts.ReplacedTools.Contains(name) && !(commandsThroughCodeAlta && name == ShellCommandTool))
             {
                 continue;
             }

@@ -37,6 +37,17 @@ internal static class ClaudeCodePrompts
     /// <param name="hasGateway">Whether the session has the <c>alta</c> live tool.</param>
     /// <param name="hasShell">Whether the session runs commands; false when it does without <c>shell_command</c>.</param>
     public static string CreateAppendSystemPrompt(string? developerInstructions, bool hasGateway, bool hasShell)
+        => CreateAppendSystemPrompt(developerInstructions, hasGateway, hasShell, shellOfCodeAlta: false);
+
+    /// <summary>
+    /// Writes what the CLI appends to its own system prompt, for a session that may do without the shell, or whose
+    /// commands run with the <c>shell_command</c> of CodeAlta instead of its own shell tools (a sandbox on Windows).
+    /// </summary>
+    /// <param name="developerInstructions">The instructions CodeAlta composed for the session.</param>
+    /// <param name="hasGateway">Whether the session has the <c>alta</c> live tool.</param>
+    /// <param name="hasShell">Whether the session runs commands; false when it does without <c>shell_command</c>.</param>
+    /// <param name="shellOfCodeAlta">Whether its commands run with the <c>shell_command</c> of CodeAlta.</param>
+    public static string CreateAppendSystemPrompt(string? developerInstructions, bool hasGateway, bool hasShell, bool shellOfCodeAlta)
     {
         const string Prefix = ClaudeCodeLauncher.McpToolPrefix;
         var builder = new StringBuilder();
@@ -53,7 +64,16 @@ internal static class ClaudeCodePrompts
         }
 
         builder.AppendLine(" A tool that joins while a turn runs may not be in your tool list yet: your tool search loads it by that name.");
-        builder.AppendLine("- CodeAlta's own file, search, web, shell and question tools (`read_file`, `view_image`, `list_dir`, `grep`, `webget`, `shell_command`, `write_file`, `replace_in_file`, `delete_file_or_dir`, `rename_file_or_dir`, `apply_patch`, `request_user_input`) are not part of this session. Where the instructions mention them, do the same work with your own tools.");
+        if (hasShell && shellOfCodeAlta)
+        {
+            builder.AppendLine("- CodeAlta's own file, search, web and question tools (`read_file`, `view_image`, `list_dir`, `grep`, `webget`, `write_file`, `replace_in_file`, `delete_file_or_dir`, `rename_file_or_dir`, `apply_patch`, `request_user_input`) are not part of this session. Where the instructions mention them, do the same work with your own tools.");
+            builder.AppendLine($"- Commands: your own shell tools are not part of this session, which runs in a sandbox. Run every command, PowerShell on Windows, with `{Prefix}shell_command`, as the instructions describe `shell_command`.");
+        }
+        else
+        {
+            builder.AppendLine("- CodeAlta's own file, search, web, shell and question tools (`read_file`, `view_image`, `list_dir`, `grep`, `webget`, `shell_command`, `write_file`, `replace_in_file`, `delete_file_or_dir`, `rename_file_or_dir`, `apply_patch`, `request_user_input`) are not part of this session. Where the instructions mention them, do the same work with your own tools.");
+        }
+
         if (!hasShell)
         {
             builder.AppendLine("- Shell commands are turned off for this session: run none, not even in the background. Do the work with the other tools, or ask the user to run a command.");

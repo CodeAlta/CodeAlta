@@ -361,12 +361,14 @@ Their native sandboxes are not the boundary. Claude Code's covers only its shell
 
 ### Providers that run their own tools
 
-- [ ] 15. **Claude Code in the session's container.**
+- [x] 15. **Claude Code in the session's container.**
   - Its account folder read-write, and Anthropic's hosts through the proxy.
   - CodeAlta's MCP server over the control protocol, as today.
   - Decide keychain access on macOS.
 
   Run the live tests (`ClaudeCodeLiveCliTests`).
+
+  **Done**, verified live on Windows with `altacli run --sandbox workspace -m claude-code:haiku` (a command, its folder, a refused read of `~/.alta`, the note of the sandbox). Deviations: on Windows the CLI's Bash (msys2 refuses to start in a container) and PowerShell tool (exit code 5 for every command) are turned off, and the CLI runs its commands with CodeAlta's `shell_command` in the worker. macOS (decided, not verified): the Keychain stays out of reach; a sandboxed Claude Code there needs `CLAUDE_CODE_OAUTH_TOKEN` or an API key, as the guide says. The live tests of the repository were not extended: they need a signed-in CLI and the sandbox, and the run above covers the path.
 - [ ] 16. **ACP agents in the container**: their home folder and runtime (Node, the `npx` cache), and the harness MCP endpoint through the proxy.
 
   **Design of 15–16** (from the map of the launches; nothing of it is written yet):

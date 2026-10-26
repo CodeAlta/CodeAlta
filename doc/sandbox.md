@@ -66,7 +66,14 @@ permission, the command guard, its progress) comes back to CodeAlta, which answe
   and after ten idle minutes.
 - **A run that cannot be held is refused.** `RefuseRunAsync` refuses the run of a sandboxed session whose profile
   cannot be used or whose sandbox is not available here, and the run of a provider that runs its own tools
-  (`IAgentProviderToolHost`): its tools would run outside. The fallback of a tier skips such providers.
+  (`IAgentProviderToolHost`) unless the sandbox starts its process. The fallback of a tier skips the others.
+- **The process of an agent.** Claude Code runs its tools in its CLI: the router gives the turn an
+  `IAgentProcessHost`, and the CLI starts in a container of its own with the profile of the session, its account folder
+  read-write, the folder of its executable read-only and the hosts of Anthropic. Everything it calls back is in-band
+  on its standard streams, so it needs no port of CodeAlta. The key of the host is part of its launch key: another
+  sandbox starts another process, which resumes the conversation. On Windows the shells of the CLI do not run in a
+  container (msys2 needs a named object it refuses), so they are turned off and the CLI is offered `shell_command`,
+  which runs in the worker of the session.
 
 ## The network
 

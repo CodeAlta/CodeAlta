@@ -192,13 +192,21 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
             var target = upstream.GetStream();
             if (forward is null) await stream.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), _closing.Token).ConfigureAwait(false);
             else await target.WriteAsync(forward, _closing.Token).ConfigureAwait(false);
-            await Task.WhenAny(stream.CopyToAsync(target, _closing.Token), target.CopyToAsync(stream, _closing.Token)).ConfigureAwait(false);
+            // The connection ends with either direction; the other one then fails, and its failure is expected.
+            var upload = stream.CopyToAsync(target, _closing.Token);
+            var download = target.CopyToAsync(stream, _closing.Token);
+            await Task.WhenAny(upload, download).ConfigureAwait(false);
+            Observe(upload);
+            Observe(download);
         }
         catch (Exception exception) when (exception is IOException or SocketException or OperationCanceledException or ObjectDisposedException)
         {
             // The connection ends with either side.
         }
     }
+
+    private static void Observe(Task task)
+        => task.ContinueWith(static ended => _ = ended.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
     private void Refused(string target)
     {

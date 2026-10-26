@@ -153,6 +153,39 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [TestMethod]
+    public void Launcher_DescribesTheCliForTheSandbox_WithItsAccount_AndOnWindowsWithoutItsShellTools()
+    {
+        var account = Path.Combine(Path.GetTempPath(), "claude-account");
+        var options = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", ConfigDirectory = account };
+        var launch = ClaudeCodeLauncher.Create("/tools/claude/claude", options, new ClaudeCodeLaunchKey("/work", null, null, WithoutWebTools: "WebFetch"), null, null, withTools: true);
+
+        var hosted = ClaudeCodeLauncher.ForHost(launch, "/tools/claude/claude", options, withoutApiKey: true);
+
+        Assert.AreEqual(account, hosted.Environment["CLAUDE_CONFIG_DIR"], "the home of a sandbox is its own: the account folder is named");
+        CollectionAssert.Contains(hosted.ReadWriteFolders.ToArray(), account);
+        CollectionAssert.Contains(hosted.Hosts.ToArray(), "api.anthropic.com");
+        Assert.IsTrue(hosted.ReadOnlyFolders.Any(static folder => folder.Replace('\\', '/').EndsWith("/tools/claude", StringComparison.Ordinal)));
+        Assert.IsFalse(hosted.PassedVariables.Contains("ANTHROPIC_API_KEY"), "a key the user chose not to use is not passed");
+        var disallowed = hosted.Arguments.Single(static argument => argument.StartsWith("--disallowedTools=", StringComparison.Ordinal));
+        StringAssert.Contains(disallowed, "WebFetch");
+        Assert.AreEqual(OperatingSystem.IsWindows(), disallowed.Contains("Bash", StringComparison.Ordinal) && disallowed.Contains("PowerShell", StringComparison.Ordinal),
+            "on Windows its commands run with the shell of CodeAlta");
+        Assert.AreEqual(OperatingSystem.IsWindows(), ClaudeCodeLauncher.CommandsThroughCodeAlta(new NoHost()));
+        Assert.IsFalse(ClaudeCodeLauncher.CommandsThroughCodeAlta(null));
+
+        var prompt = ClaudeCodePrompts.CreateAppendSystemPrompt(null, hasGateway: true, hasShell: true, shellOfCodeAlta: true);
+        StringAssert.Contains(prompt, "mcp__codealta__shell_command");
+        Assert.DoesNotContain("`webget`, `shell_command`", prompt, "the shell of CodeAlta is part of the session then");
+    }
+
+    private sealed class NoHost : IAgentProcessHost
+    {
+        public string Key => "none";
+
+        public Task<IAgentHostedProcess> StartAsync(AgentProcessLaunch launch, CancellationToken cancellationToken) => throw new InvalidOperationException();
+    }
+
+    [TestMethod]
     public void Launcher_NeverAsksTheCliForPromptSuggestions()
     {
         // The model suggests the next prompt with its answer, as CodeAlta asks it: a suggestion of the CLI would be a

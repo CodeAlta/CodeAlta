@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Tools;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Jobs;
@@ -184,6 +185,35 @@ public sealed partial class SessionRuntimeService
         if (workers is not null) await workers.DisposeAsync().ConfigureAwait(false);
     }
 
+    // The type of a provider, as its descriptor says; null for a provider that is not registered.
+    internal string? ProviderTypeOf(string providerKey)
+        => _agentHub.SelectionProviders.FirstOrDefault(provider => string.Equals(provider.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase))?.ProviderType;
+
+    // Starts the process of an agent that runs its own tools in the sandbox of its session.
+    private sealed class AgentProcessHost(SessionRuntimeService runtime, string sessionId, string providerId, ResolvedSandboxProfile profile, IReadOnlyList<string> projectRoots)
+        : IAgentProcessHost
+    {
+        // What the container of the process is made of: another profile is another process.
+        public string Key { get; } = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join('\u001F',
+            [profile.Name, profile.Network.ToString(), profile.Outside.ToString(), .. profile.Hosts, "|", .. profile.Write, "|", .. profile.Read, "|", .. profile.Deny, "|",
+             .. profile.LocalPorts.Select(static port => port.ToString(System.Globalization.CultureInfo.InvariantCulture)), "|", .. profile.Env, "|", .. profile.McpServers]))), 0, 8);
+
+        public async Task<IAgentHostedProcess> StartAsync(AgentProcessLaunch launch, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(launch);
+            var folder = launch.WorkingDirectory ?? projectRoots.FirstOrDefault(static root => !string.IsNullOrWhiteSpace(root)) ?? Environment.CurrentDirectory;
+            var start = runtime.SandboxStartOf(sessionId, providerId, profile, folder, projectRoots, environment: null, commandGuard: false);
+            try
+            {
+                return await runtime.SandboxWorkers.StartAgentProcessAsync(start, launch, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SandboxUnavailableException unavailable)
+            {
+                throw new InvalidOperationException($"The sandbox of this session (profile '{profile.Name}') did not start the agent: {unavailable.Message}", unavailable);
+            }
+        }
+    }
+
     // A background command of the job service, run by the worker of the session.
     private sealed class SandboxedShellCommand(SandboxedProcess process) : IShellCommandProcess
     {
@@ -211,6 +241,11 @@ public sealed partial class SessionRuntimeService
         // The profile of the session when its run started, for the parameters its tools get in that run.
         private ResolvedSandboxProfile? _runProfile;
 
+        // What starts the process of a provider that runs its own tools, for the run admitted last.
+        private IAgentProcessHost? _processHost;
+
+        public IAgentProcessHost? ProcessHost => Volatile.Read(ref _processHost);
+
         public IReadOnlyList<AgentToolDefinition> Route(AgentBuiltInToolOptions options, IReadOnlyList<AgentToolDefinition> tools)
         {
             var profile = Volatile.Read(ref _runProfile);
@@ -231,12 +266,19 @@ public sealed partial class SessionRuntimeService
         {
             var sandbox = await runtime.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
             Volatile.Write(ref _runProfile, sandbox.IsSandboxed ? sandbox.Profile : null);
+            Volatile.Write(ref _processHost, null);
             if (!sandbox.IsSandboxed) return null;
             if (sandbox.Profile is not { } profile) return SandboxProblem(sandbox);
-            if (providerRunsItsOwnTools)
-                return $"This session is sandboxed (profile '{profile.Name}'), and its provider runs its own tools, which do not run in a sandbox yet. " +
-                       "Choose a provider whose model CodeAlta drives, or turn the sandbox off for this session.";
-            return runtime.GetSandboxAvailability().Refusal(profile.Network);
+            if (!providerRunsItsOwnTools) return runtime.GetSandboxAvailability().Refusal(profile.Network);
+            // A provider that runs its own tools runs them in its own process: that process starts in the sandbox, or
+            // the run does not start.
+            if (!SandboxedProviders.StartsInSandbox(runtime.ProviderTypeOf(providerId)))
+                return $"This session is sandboxed (profile '{profile.Name}'), and its provider runs its own tools in a process the sandbox cannot start. " +
+                       "Choose another provider, or turn the sandbox off for this session.";
+            // The agent reaches the service of its vendor even with a profile without network.
+            if (runtime.GetSandboxAvailability().Refusal(profile.Network == SandboxNetwork.Off ? SandboxNetwork.Hosts : profile.Network) is { } refusal) return refusal;
+            Volatile.Write(ref _processHost, new AgentProcessHost(runtime, sessionId, providerId, profile, projectRoots));
+            return null;
         }
 
         private async Task<AgentToolResult> RunInWorkerAsync(AgentToolDefinition tool, AgentBuiltInToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)

@@ -1,4 +1,5 @@
 using System.Reflection;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent.Claude;
 
@@ -11,7 +12,7 @@ namespace CodeAlta.Agent.Claude;
 /// <see cref="AgentToolPatterns.WebSearchToolName"/> or <see cref="AgentToolPatterns.WebFetchToolName"/>.
 /// </summary>
 internal sealed record ClaudeCodeLaunchKey(string? WorkingDirectory, string? Model, string? Effort,
-    AgentProcessEnvironment? Environment = null, bool WithoutShell = false, string? WithoutWebTools = null)
+    AgentProcessEnvironment? Environment = null, bool WithoutShell = false, string? WithoutWebTools = null, string? ProcessHost = null)
 {
     /// <summary>Gets the web tools of the CLI a session does without, separated by commas, or null for none.</summary>
     /// <param name="disabledTools">The tools the session does without.</param>
@@ -243,6 +244,71 @@ internal static class ClaudeCodeLauncher
 
     /// <summary>The variable that makes the CLI write a result naming why it refused to start.</summary>
     public const string StartupFailureResultsVariable = "CLAUDE_CODE_STARTUP_FAILURE_RESULTS";
+
+    // The hosts of Anthropic the CLI reaches: the API, and the sign-in and refresh of a subscription.
+    private static readonly string[] VendorHosts = ["api.anthropic.com", "console.anthropic.com", "platform.claude.com", "claude.ai", "*.claude.ai"];
+
+    /// <summary>
+    /// Describes a CLI process for a host that starts it in a sandbox, whose home folder and environment are its own:
+    /// the folder of the executable to read, the account folder to write (named explicitly, as the home of the sandbox
+    /// has none), the hosts of Anthropic, and the variables of this process that configure the CLI.
+    /// </summary>
+    public static AgentProcessLaunch ForHost(ClaudeCodeLaunch launch, string executable, ClaudeCodeModelProviderRuntimeOptions options, bool withoutApiKey)
+    {
+        var environment = new Dictionary<string, string?>(launch.Environment, StringComparer.Ordinal);
+        var configRoot = options.ResolveConfigRoot();
+        environment[ClaudeCodeProjectFolders.ConfigDirectoryVariable] = configRoot;
+        // No update, telemetry or error report: none of them is a host of the sandbox, and an update cannot be written.
+        environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1";
+        environment["DISABLE_AUTOUPDATER"] = "1";
+        var readOnly = new List<string>();
+        AddFolderOf(readOnly, executable);
+        var arguments = launch.Arguments.ToList();
+        if (OperatingSystem.IsWindows())
+        {
+            // The shell tools of the CLI do not run in the container of Windows: the bash of Git for Windows (msys2)
+            // creates a named object it refuses, and its PowerShell tool reports a failure for every command. The
+            // commands run with the shell_command of CodeAlta, in the worker of the session (CommandsThroughCodeAlta).
+            var disallowed = arguments.FindIndex(static argument => argument.StartsWith("--disallowedTools=", StringComparison.Ordinal));
+            var tools = disallowed < 0 ? [] : arguments[disallowed].Split('=', 2)[1].Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+            tools.AddRange(ShellTools.Split(',').Where(tool => !tools.Contains(tool, StringComparer.Ordinal)));
+            if (disallowed < 0) arguments.Add($"--disallowedTools={string.Join(',', tools)}");
+            else arguments[disallowed] = $"--disallowedTools={string.Join(',', tools)}";
+        }
+        // The variables that choose the account, the endpoint and the model of the CLI, which the sandbox would not pass
+        // otherwise; those the launch sets or removes stay as it says.
+        var passed = System.Environment.GetEnvironmentVariables().Keys.OfType<string>()
+            .Where(static name => name.StartsWith("ANTHROPIC_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("CLAUDE_CODE_", StringComparison.OrdinalIgnoreCase))
+            .Where(name => !environment.ContainsKey(name) && !(withoutApiKey && string.Equals(name, ClaudeCodeApiKey.Variable, StringComparison.OrdinalIgnoreCase)))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        return new AgentProcessLaunch(launch.FileName, arguments, launch.WorkingDirectory, environment)
+        {
+            ReadOnlyFolders = readOnly,
+            ReadWriteFolders = [configRoot],
+            Hosts = VendorHosts,
+            PassedVariables = passed,
+        };
+
+        static void AddFolderOf(List<string> folders, string file)
+        {
+            if (Path.GetDirectoryName(Path.GetFullPath(file)) is { } folder) folders.Add(folder);
+            // A CLI installed by a package manager is often a link to the folder of its version.
+            try
+            {
+                if (File.ResolveLinkTarget(file, returnFinalTarget: true) is { } target && Path.GetDirectoryName(target.FullName) is { } real) folders.Add(real);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets whether the commands of a CLI started by a host run with the <c>shell_command</c> of CodeAlta instead of its
+    /// own shell tools: in the sandbox of Windows, where those do not run.
+    /// </summary>
+    public static bool CommandsThroughCodeAlta(IAgentProcessHost? host) => host is not null && OperatingSystem.IsWindows();
 
     /// <summary>Maps the reasoning effort of CodeAlta to the effort level of the CLI.</summary>
     public static string? ToEffort(AgentReasoningEffort? effort)

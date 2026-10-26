@@ -275,6 +275,49 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task ClaudeCode_StartsItsProcessInTheSandbox_WithItsAccountAndTheHostsOfAnthropicOnly()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend, registry =>
+            registry.RegisterOrReplace(new ModelProviderDescriptor(new ModelProviderId("claude"), "Claude", "claude-code"), () => throw new InvalidOperationException("Not started.")));
+        await f.CreateSessionAsync("s");
+        f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
+
+        var other = f.Runtime.CreateSandboxToolRouter("s", "codex", [f.Project.ProjectPath]);
+        Assert.Contains("cannot start", (await other.RefuseRunAsync(providerRunsItsOwnTools: true, CancellationToken.None))!, "a provider whose process the sandbox cannot start");
+        Assert.IsNull(other.ProcessHost);
+
+        var router = f.Runtime.CreateSandboxToolRouter("s", "claude", [f.Project.ProjectPath]);
+        Assert.IsNull(await router.RefuseRunAsync(providerRunsItsOwnTools: true, CancellationToken.None));
+        var host = router.ProcessHost!;
+        var account = Path.Combine(f.Project.ProjectPath, "..", "claude-account");
+        var launch = new CodeAlta.Agent.Runtime.AgentProcessLaunch("C:/tools/claude.exe", ["-p", "{\"a\":1}"], f.Project.ProjectPath,
+            new Dictionary<string, string?> { ["CLAUDE_CONFIG_DIR"] = account, ["CLAUDE_GONE"] = null })
+        {
+            ReadOnlyFolders = ["C:/tools"], ReadWriteFolders = [account], Hosts = ["api.anthropic.com"], PassedVariables = ["ANTHROPIC_MODEL"],
+        };
+        await using (await host.StartAsync(launch, CancellationToken.None))
+        {
+        }
+
+        var policy = backend.Starts.Single();
+        Assert.AreEqual(SandboxNetwork.Hosts, policy.Network, "strict has no network: the agent gets the service of its vendor alone");
+        CollectionAssert.AreEqual(new[] { "api.anthropic.com" }, policy.Hosts.ToArray());
+        Assert.IsTrue(policy.ReadWrite.Any(folder => string.Equals(folder, Path.GetFullPath(account), StringComparison.OrdinalIgnoreCase)), "its account is written");
+        Assert.IsTrue(policy.ReadOnly.Any(static folder => folder.Replace('\\', '/').EndsWith("C:/tools", StringComparison.OrdinalIgnoreCase)));
+        Assert.AreEqual(account, policy.Environment["CLAUDE_CONFIG_DIR"]);
+        Assert.IsFalse(policy.Environment.ContainsKey("CLAUDE_GONE"));
+
+        // Another sandbox is another process: the key changes with the profile.
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        Assert.IsNull(await router.RefuseRunAsync(providerRunsItsOwnTools: true, CancellationToken.None));
+        Assert.AreNotEqual(host.Key, router.ProcessHost!.Key);
+        f.WriteConfig("");
+        Assert.IsNull(await router.RefuseRunAsync(providerRunsItsOwnTools: true, CancellationToken.None));
+        Assert.IsNull(router.ProcessHost, "out of the sandbox, the process is a child of CodeAlta again");
+    }
+
+    [TestMethod]
     public async Task WebGetOfASandboxWithoutNetwork_IsRefused_BeforeAnyRequest()
     {
         await using var f = await Fixture.CreateAsync(new InProcessBackend());
@@ -403,10 +446,12 @@ public sealed class SessionSandboxTests
 
         public CatalogOptions Options { get; }
 
-        public static async Task<Fixture> CreateAsync(ISandboxBackend? backend = null)
+        public static async Task<Fixture> CreateAsync(ISandboxBackend? backend = null, Action<ModelProviderRegistry>? providers = null)
         {
             var temp = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-sandbox-" + Guid.NewGuid().ToString("N"))).FullName;
-            var hub = new AgentHub(new ModelProviderRegistry(), temp);
+            var registry = new ModelProviderRegistry();
+            providers?.Invoke(registry);
+            var hub = new AgentHub(registry, temp);
             var options = new CatalogOptions { GlobalRoot = Path.Combine(temp, "alta") };
             var sessionViewCatalog = new SessionViewCatalog(options);
             var projects = new ProjectCatalog(options);

@@ -1842,6 +1842,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DisabledTools = _options.DisabledBuiltInTools,
             WriteGuard = _options.WriteGuard,
             CommandGuard = _options.CommandGuard,
+            // A provider that runs its own tools starts its process where the router of the session says: its sandbox.
+            ProcessHost = _options.BuiltInToolRouter?.ProcessHost,
             Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo, _pdfInputs).ToArray(),
             EarlierConversation = _earlierConversation,
             Tools = tools,

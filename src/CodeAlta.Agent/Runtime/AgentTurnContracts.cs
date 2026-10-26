@@ -369,6 +369,12 @@ public sealed record AgentTurnRequest
     public string? ModelId { get; init; }
 
     /// <summary>
+    /// Gets or initializes what starts the process of a provider that runs its own tools, for this run: the sandbox of
+    /// the session; null to start it as a child of this process.
+    /// </summary>
+    public IAgentProcessHost? ProcessHost { get; init; }
+
+    /// <summary>
     /// Gets or initializes the resolved model metadata when available.
     /// </summary>
     public AgentModelInfo? ModelInfo { get; init; }

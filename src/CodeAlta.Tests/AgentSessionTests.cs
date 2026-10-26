@@ -95,6 +95,8 @@ public sealed class AgentSessionTests
 
         public bool LastProviderRunsItsOwnTools { get; private set; }
 
+        public IAgentProcessHost? ProcessHost => null;
+
         public IReadOnlyList<AgentToolDefinition> Route(AgentBuiltInToolOptions options, IReadOnlyList<AgentToolDefinition> tools)
         {
             WorkingDirectory = options.WorkingDirectory;
