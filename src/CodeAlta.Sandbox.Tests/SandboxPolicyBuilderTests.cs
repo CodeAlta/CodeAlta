@@ -205,7 +205,9 @@ public sealed class SandboxPolicyBuilderTests
     [TestMethod]
     public void TheDeveloperFolderOfXcode_GrantsItsBundle_AndTheCommandLineToolsTheirFolder()
     {
-        Assert.AreEqual("/Applications/Xcode-beta.app", SandboxHostDiscovery.DeveloperGrant("/Applications/Xcode-beta.app/Contents/Developer/"));
+        // The paths of macOS, with the separator of the system the test runs on: Path reads `/` as `\` on Windows.
+        var s = Path.DirectorySeparatorChar;
+        Assert.AreEqual($"{s}Applications{s}Xcode-beta.app", SandboxHostDiscovery.DeveloperGrant($"{s}Applications{s}Xcode-beta.app{s}Contents{s}Developer{s}"));
         Assert.AreEqual("/Library/Developer/CommandLineTools", SandboxHostDiscovery.DeveloperGrant("/Library/Developer/CommandLineTools"));
         if (OperatingSystem.IsMacOS() && SandboxHostDiscovery.DeveloperFolder() is { } developer)
             CollectionAssert.Contains(SandboxHostDiscovery.Current(Path.GetTempPath(), []).ToolFolders.ToList(), SandboxHostDiscovery.DeveloperGrant(developer));
