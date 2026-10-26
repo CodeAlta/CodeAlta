@@ -86,6 +86,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("session join"),
         Mutating("session message"),
         Mutating("session request"),
+        Read("sandbox list"),
+        Read("sandbox show"),
+        Read("sandbox status"),
         Mutating("reminder create"),
         Read("reminder list"),
         Mutating("reminder delete"),
@@ -135,6 +138,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         yield return CreateSessionCommand(context.Invocation);
+        yield return CreateSandboxCommand(context.Invocation);
         yield return CreateReminderCommand(context.Invocation);
         yield return CreateJobCommand(context.Invocation);
         yield return CreateSkillCommand(context.Invocation);
@@ -964,7 +968,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("no-worktree", "Work in the project folder, also when the calling session works in a worktree.", value => options.NoWorktree = value is not null);
         command.Add("space=", "The space the session belongs to: id, start of id, or name. A session creates sessions only in its own space.", value => options.Space = value);
         command.Add("permission-mode=", "The permission mode the session starts in, one its provider offers (default, acceptEdits, bypassPermissions; Claude Code also auto, dontAsk).", value => options.PermissionMode = value);
-        command.Add("sandbox=", "The sandbox the session runs in: a profile (workspace, strict, or one of the user's), or `off`. Without it, the settings of the user decide. An agent turns a sandbox on, never off.", value => options.Sandbox = value);
+        command.Add("sandbox=", "The sandbox the session runs in: a profile (workspace, strict, or one of the user's; `alta sandbox list` says what each allows), or `off`. Without it, the settings of the user decide. An agent turns a sandbox on, never off.", value => options.Sandbox = value);
         command.Add(async (_, _) => await HandleSessionCreateAsync(context, options).ConfigureAwait(false));
         AddHelpText(
             command,
@@ -1017,7 +1021,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("model=", "Model of the provider of the session for this turn and the next ones, as listed by `alta session choices`.", value => options.Model = NormalizeOptionalText(value));
         command.Add("reasoning=", "Reasoning effort of the model: minimal, low, medium, high, xhigh, max, or none.", value => options.Reasoning = ParseReasoningOption(value));
         command.Add("permission-mode=", "Permission mode of the session, one of `alta session choices`, or `provider` for the one its provider is configured with.", value => options.PermissionMode = NormalizeOptionalText(value));
-        command.Add("sandbox=", "Sandbox of the session from this prompt on: a profile of `alta session choices`, `off`, or `scope` for what the settings of the user decide. An agent turns a sandbox on, never off.", value => options.Sandbox = NormalizeOptionalText(value));
+        command.Add("sandbox=", "Sandbox of the session from this prompt on: a profile of `alta session choices` (`alta sandbox show <profile>` says what it allows), `off`, or `scope` for what the settings of the user decide. An agent turns a sandbox on, never off.", value => options.Sandbox = NormalizeOptionalText(value));
     }
 
     private static Command CreateSessionChoicesCommand(AltaCommandContext context)
@@ -1032,6 +1036,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "the agent prompts of its space and the permission modes of its provider (none when it has none).",
             "`current` is what its next turn runs with; a `permissionMode` of null is the mode its provider is configured with (`defaultPermissionMode`).",
             "`alta session send` and `alta session queue` take them with `--model`, `--reasoning`, `--prompt-id` and `--permission-mode`.",
+            "`sandbox` is its sandbox and the profiles it can take with `--sandbox`: `alta sandbox show <profile>` says what each allows.",
             "Example: `alta session choices <session-id>`.");
         return command;
     }

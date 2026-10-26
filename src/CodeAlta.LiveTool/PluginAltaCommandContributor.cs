@@ -20,6 +20,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         "project",
         "space",
         "session",
+        "sandbox",
         "skill",
         "skills",
         "skills_activate",

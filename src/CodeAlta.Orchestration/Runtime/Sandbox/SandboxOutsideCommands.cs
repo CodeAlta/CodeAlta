@@ -180,7 +180,7 @@ internal static class SandboxOutsideCommands
                                          " No process of this sandbox listens on a port, so `dotnet test` does not run here: a test project of Microsoft.Testing.Platform runs as a program (`dotnet run --project <tests> --no-build`).",
                 _ => string.Empty,
             };
-            text = $"<codealta-context>Sandbox: on, profile `{profile.Name}`. Commands and file tools run in a container: they write in the working directory, the folders of the project{(scratchpad is null ? string.Empty : $", the scratchpad folder `{scratchpad}` (use it instead of the scratchpad file named above)")} and temp; they read the system and the developer tools, not the home folder; they {network}. `.git/config`, git hooks and the configuration files of CodeAlta are read-only.{outside}{platformNote} `alta` reaches only this session and the sessions it creates.</codealta-context>";
+            text = $"<codealta-context>Sandbox: on, profile `{profile.Name}`. Commands and file tools run in a container: they write in the working directory, the folders of the project{(scratchpad is null ? string.Empty : $", the scratchpad folder `{scratchpad}` (use it instead of the scratchpad file named above)")} and temp; they read the system and the developer tools, not the home folder; they {network}. `.git/config`, git hooks and the configuration files of CodeAlta are read-only.{outside}{platformNote} `alta` reaches only this session and the sessions it creates; `alta sandbox show` says what its profile allows, `alta sandbox status` the hosts it refused last.</codealta-context>";
         }
 
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)), 0, 4).ToLowerInvariant();

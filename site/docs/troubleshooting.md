@@ -150,7 +150,7 @@ A session whose [sandbox](sessions/sandbox.md) cannot run runs no command, and s
 
 - **Linux**: install `bubblewrap`, and `slirp4netns` for a profile with a network.
 - **The profile cannot be used**: a profile was removed or renamed while a provider, a space or a project still names it. Choose another one there.
-- **A host is refused**: the profile does not list it. Add it to the hosts of a profile of yours.
+- **A host is refused**: the profile does not list it. `alta sandbox status --session <id>` names the hosts refused last; add them to the hosts of a profile of yours.
 - **The provider runs its own tools** and the sandbox cannot start it: choose another provider for the session, or turn its sandbox off.
 - **An ACP agent is not signed in, in a sandbox**: it has a home folder of its own there, without your sign-in. Give its provider a token or an API key in its **Environment** (Settings > Providers). An agent that reaches no host of its service needs them in **Hosts in a sandbox**.
 - **Claude Code is not signed in, in a sandbox on macOS**: its sign-in is in the Keychain, out of reach. Set `CLAUDE_CODE_OAUTH_TOKEN` with a token from `claude setup-token`, or use an API key.

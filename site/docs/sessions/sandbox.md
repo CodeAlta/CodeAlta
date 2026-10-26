@@ -131,4 +131,12 @@ alta session send <session-id> --sandbox workspace --stdin
 altacli run --sandbox workspace "Fix the failing test"
 ```
 
-`alta session choices`, `info`, `status` and `list` show the sandbox of a session. See [command line](../command-line.md) for `altacli`.
+`alta session choices`, `info`, `status` and `list` show the sandbox of a session. `alta sandbox` tells what the profiles allow, for you and for your agents:
+
+```text
+alta sandbox list                     the profiles, their network and folders
+alta sandbox show workspace           what a profile allows: hosts, folders, ports, variables, MCP servers
+alta sandbox status --session <id>    the sandbox of a session, whether it runs here, the hosts it refused last
+```
+
+A sandboxed agent reads its own profile and the sandbox of its own sessions only. See [command line](../command-line.md) for `altacli`.

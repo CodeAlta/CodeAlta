@@ -278,6 +278,67 @@ public sealed partial class AltaLiveToolTests
         AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(["session", "create", "--global", "--sandbox", "strict"], caller: Agent(strict)).ConfigureAwait(false), "sandbox.choiceDenied");
     }
 
+    [TestMethod]
+    public async Task SandboxCommands_SayWhatEachProfileAllows_AndASandboxedAgentReadsItsOwnAlone()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: true).ConfigureAwait(false);
+        fixture.WriteConfig("""
+            [sandbox]
+            all_sessions = "workspace"
+
+            [sandbox.profiles.company]
+            extends = "workspace"
+            hosts = ["pkgs.dev.azure.com"]
+            env = ["FEED_TOKEN"]
+            mcp_servers = ["docs"]
+
+            [sandbox.profiles.broken]
+            extends = "nowhere"
+            """);
+        async Task<JsonElement[]> Records(AltaCallerIdentity caller, params string[] arguments)
+        {
+            var result = await fixture.Dispatcher.InvokeAsync(arguments, caller: caller).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stdout + result.Stderr);
+            return [.. ReadJsonLines(result.Stdout).Where(static line => line.GetProperty("type").GetString()!.StartsWith("alta.sandbox.", StringComparison.Ordinal))];
+        }
+
+        // The user sees every profile, with what it allows and what is wrong with it.
+        var listed = await Records(AltaCallerIdentity.Cli, "sandbox", "list").ConfigureAwait(false);
+        var profiles = listed.Where(static record => record.GetProperty("type").GetString() == "alta.sandbox.profile").ToDictionary(static record => record.GetProperty("name").GetString()!);
+        CollectionAssert.AreEquivalent(new[] { "workspace", "strict", "company", "broken" }, profiles.Keys.ToArray());
+        Assert.AreEqual(("hosts", "ask", true), (profiles["workspace"].GetProperty("network").GetString(), profiles["workspace"].GetProperty("outside").GetString(), profiles["workspace"].GetProperty("builtIn").GetBoolean()));
+        Assert.AreEqual(("off", "never"), (profiles["strict"].GetProperty("network").GetString(), profiles["strict"].GetProperty("outside").GetString()));
+        Assert.AreEqual("workspace", profiles["company"].GetProperty("extends").GetString());
+        StringAssert.Contains(profiles["broken"].GetProperty("problem").GetString(), "nowhere");
+        Assert.AreEqual("workspace", listed.Single(static record => record.GetProperty("type").GetString() == "alta.sandbox.summary").GetProperty("allSessions").GetString());
+
+        var company = (await Records(AltaCallerIdentity.Cli, "sandbox", "show", "company").ConfigureAwait(false)).Single();
+        var hosts = company.GetProperty("hosts").EnumerateArray().Select(static host => host.GetString()).ToArray();
+        CollectionAssert.Contains(hosts, "nuget.org", "what it takes from the profile it extends");
+        CollectionAssert.Contains(hosts, "pkgs.dev.azure.com");
+        Assert.AreEqual("FEED_TOKEN", company.GetProperty("env")[0].GetString(), "the names of the variables, never their values");
+        Assert.AreEqual("docs", company.GetProperty("mcpServers")[0].GetString());
+        Assert.AreEqual(0, (await Records(AltaCallerIdentity.Cli, "sandbox", "show", "strict").ConfigureAwait(false)).Single().GetProperty("hosts").GetArrayLength());
+        AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(["sandbox", "show", "nowhere"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false), "sandbox.profileNotFound",
+            AltaExitCodes.NotFound);
+        AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(["sandbox", "show"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false), "usage.missingProfile", AltaExitCodes.Usage);
+        var computer = (await Records(AltaCallerIdentity.Cli, "sandbox", "status").ConfigureAwait(false)).Single();
+        Assert.IsTrue(computer.TryGetProperty("available", out _) && !computer.TryGetProperty("sessionId", out _), "without a session: whether a sandbox runs here");
+
+        // A sandboxed agent reads the profile it runs with, and the sandbox of the sessions it reaches.
+        var agent = Agent(await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false));
+        var unrelated = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
+        var own = (await Records(agent, "sandbox", "list").ConfigureAwait(false)).Where(static record => record.GetProperty("type").GetString() == "alta.sandbox.profile").ToArray();
+        Assert.AreEqual(("workspace", true), (own.Single().GetProperty("name").GetString(), own.Single().GetProperty("current").GetBoolean()), "its own profile alone");
+        Assert.AreEqual("workspace", (await Records(agent, "sandbox", "show").ConfigureAwait(false)).Single().GetProperty("name").GetString());
+        AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(["sandbox", "show", "company"], caller: agent).ConfigureAwait(false), "sandbox.profileDenied");
+        var status = (await Records(agent, "sandbox", "status").ConfigureAwait(false)).Single();
+        Assert.AreEqual((agent.SourceSessionId, true, "workspace", "all_sessions"),
+            (status.GetProperty("sessionId").GetString(), status.GetProperty("sandboxed").GetBoolean(), status.GetProperty("profile").GetString(), status.GetProperty("source").GetString()));
+        Assert.AreEqual(0, status.GetProperty("refusedHosts").GetArrayLength());
+        AssertSandboxRefused(await fixture.Dispatcher.InvokeAsync(["sandbox", "status", "--session", Id(unrelated)], caller: agent).ConfigureAwait(false), "sandbox.notOwnSession");
+    }
+
     private static void AssertSandboxRefused(AltaCommandResult result, string code, int exitCode)
     {
         Assert.AreEqual(exitCode, result.ExitCode, result.Stdout + result.Stderr);

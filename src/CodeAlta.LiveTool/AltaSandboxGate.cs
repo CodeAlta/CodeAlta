@@ -16,7 +16,7 @@ internal static class AltaSandboxGate
     private static readonly FrozenSet<string> Allowed = new[]
     {
         "version", "ask", "notes", "note", "skill", "skills", "skills_activate", "tool", "provider", "model", "documentation",
-        "task", "plan", "review", "reminder", "job", "diff", "editor", "search",
+        "task", "plan", "review", "reminder", "job", "diff", "editor", "search", "sandbox list", "sandbox show", "sandbox status",
         "prompt list", "prompt show", "plugin list", "plugin status", "plugin api",
         "project list", "project show", "project resolve", "project current", "space list", "space show", "space current",
         "issue trackers", "issue list", "issue filters", "issue views", "issue show",

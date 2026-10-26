@@ -52,6 +52,17 @@ public sealed partial class SessionRuntimeService
     /// <returns>The availability.</returns>
     public SandboxAvailability GetSandboxAvailability() => SandboxWorkers.Backend.GetAvailability();
 
+    /// <summary>Gets the hosts the proxy of a sandboxed session refused last, the newest last; none while its worker does not run.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>The hosts and ports, such as <c>example.com:443</c>.</returns>
+    public IReadOnlyList<string> GetSandboxRefusals(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        SessionSandboxWorkers? workers;
+        lock (_sandboxGate) workers = _sandboxWorkers;
+        return workers?.RecentRefusals(sessionId) ?? [];
+    }
+
     /// <summary>
     /// Gets what starts the background commands of a session: for a sandboxed session, its worker; null for a
     /// session that is not sandboxed, whose commands start in the shell of the host.

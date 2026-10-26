@@ -19,7 +19,7 @@ public sealed class AltaCommandRegistryOptionsTests
         ["ask", "review", "reminder", "window", "appearance", "canvas", "landing", "terminal", "automation", "diff", "editor", "documentation", "search"];
 
     private static readonly string[] Allowed =
-        ["version", "project", "space", "session", "job", "skill", "skills", "skills_activate", "tool", "provider", "model", "prompt", "plugin", "task", "plan", "issue", "issues", "notes", "note"];
+        ["version", "project", "space", "session", "sandbox", "job", "skill", "skills", "skills_activate", "tool", "provider", "model", "prompt", "plugin", "task", "plan", "issue", "issues", "notes", "note"];
 
     [TestMethod]
     public void CliAllowList_NamesTheHeadlessRootsOnly()

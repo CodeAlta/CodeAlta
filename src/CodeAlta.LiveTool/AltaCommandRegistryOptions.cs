@@ -21,6 +21,7 @@ public sealed record AltaCommandRegistryOptions
         "project",
         "space",
         "session",
+        "sandbox",
         "job",
         "skill",
         "skills",
