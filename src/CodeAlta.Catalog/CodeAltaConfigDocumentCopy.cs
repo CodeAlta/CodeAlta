@@ -84,6 +84,7 @@ internal static class CodeAltaConfigDocumentCopy
                 }
                 : null,
             Tools = document.Tools is { } tools ? new CodeAltaToolSettingsDocument { Disabled = Copy(tools.Disabled) } : null,
+            CodeMode = document.CodeMode is { } codeMode ? new CodeAltaCodeModeSettingsDocument { Mode = codeMode.Mode } : null,
             Sandbox = document.Sandbox is { } sandbox
                 ? new CodeAltaSandboxSettingsDocument
                 {

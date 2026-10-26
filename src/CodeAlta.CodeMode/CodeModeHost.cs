@@ -14,7 +14,24 @@ public sealed record CodeModeRunOptions
 
     /// <summary>Gets the source of <c>Math.random()</c>, or null for a random generator of the run.</summary>
     public Func<double>? Random { get; init; }
+
+    /// <summary>
+    /// Gets what finds the script of <c>workflow(name | { scriptPath }, args)</c>, or null when a run cannot start another
+    /// script. It returns the prepared source; an exception becomes an error the script can catch.
+    /// </summary>
+    public Func<CodeModeScriptReference, CancellationToken, ValueTask<CodeModeSource>>? ResolveScript { get; init; }
+
+    /// <summary>Gets how deep scripts may start scripts: a nested run of this depth cannot start another one.</summary>
+    public int MaxWorkflowDepth { get; init; } = 3;
+
+    /// <summary>Gets the depth of this run: 0 for the script <c>exec</c> runs.</summary>
+    internal int Depth { get; init; }
 }
+
+/// <summary>The script that <c>workflow()</c> names: a script of the library by its name, or a file by its path.</summary>
+/// <param name="Name">The name of a library script, or null.</param>
+/// <param name="ScriptPath">The path of a script file, or null.</param>
+public sealed record CodeModeScriptReference(string? Name, string? ScriptPath);
 
 /// <summary>
 /// Runs the scripts of one session: it holds the API of the session's tools and the cache of prepared scripts, and

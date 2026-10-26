@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="..\CodeAlta.CodeMode\CodeAlta.CodeMode.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugins\CodeAlta.Plugins.csproj" />
     <ProjectReference Include="..\CodeAlta.Sandbox\CodeAlta.Sandbox.csproj" />
   </ItemGroup>

@@ -27,6 +27,9 @@ internal sealed class StreamingWorkload
     public int ToolOutputLines { get; init; } = 50;
     // Deltas a session streams each second; 0 streams as fast as the runtime takes them.
     public int DeltasPerSecond { get; init; }
+    // Code Mode: the steps that call a tool run a script instead, which calls the tool this many times at once, and goes
+    // on in the background so that the scripts of a session run at the same time; 0 calls the tool directly.
+    public int ScriptCalls { get; init; }
 
     public long DeltasStreamed;
     public long ToolCalls;
@@ -51,7 +54,7 @@ internal sealed class StreamingWorkload
     {
         using var schema = JsonDocument.Parse("""{"type":"object","properties":{"step":{"type":"integer"}},"additionalProperties":false}""");
         return new AgentToolDefinition(
-            new AgentToolSpec(ToolName, "Benchmark tool that streams lines of output.", schema.RootElement.Clone()),
+            new AgentToolSpec(ToolName, "Benchmark tool that streams lines of output.", schema.RootElement.Clone()) { RunsInParallel = true },
             async (invocation, cancellationToken) =>
             {
                 Interlocked.Increment(ref ToolCalls);
@@ -98,8 +101,10 @@ internal sealed class StreamingWorkload
         var final = step >= StepsPerTurn - 1;
         if (!final)
         {
-            using var arguments = JsonDocument.Parse($$"""{"step":{{step}}}""");
-            parts.Add(new AgentMessagePart.ToolCall("call-" + Guid.CreateVersion7().ToString("N"), ToolName, arguments.RootElement.Clone()));
+            using var arguments = ScriptCalls > 0
+                ? JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, string> { ["code"] = Script(step) }))
+                : JsonDocument.Parse($$"""{"step":{{step}}}""");
+            parts.Add(new AgentMessagePart.ToolCall("call-" + Guid.CreateVersion7().ToString("N"), ScriptCalls > 0 ? "exec" : ToolName, arguments.RootElement.Clone()));
             ids.Add(null);
         }
 
@@ -111,6 +116,16 @@ internal sealed class StreamingWorkload
         if (final) SignalFinalStep(request.SessionId);
         return response;
     }
+
+    // A script that leaves its turn at once and calls the tool in parallel, with a little work of its own on the results.
+    private string Script(int step)
+        => $$"""
+            // @exec: {"title": "bench {{step}}", "yield_ms": 1}
+            const results = await Promise.all(Array.from({ length: {{ScriptCalls}} }, (_, i) => tools.{{ToolName}}({ step: i })));
+            let lines = 0;
+            for (const text of results) lines += text.split("\n").filter(line => line.length > 0).length;
+            return { calls: results.length, lines };
+            """;
 
     private string NextDelta(Random random, int index, int length)
     {

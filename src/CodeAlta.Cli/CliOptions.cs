@@ -37,6 +37,9 @@ internal class CliCommonOptions
 
     public bool NoSkills { get; set; }
 
+    // --code-mode: the exec and wait tools of Code Mode, whatever [code_mode] of the configuration says.
+    public bool CodeMode { get; set; }
+
     // The sandbox profile of the sessions of run and acp, or `off`; null for what the settings decide.
     public string? Sandbox { get; set; }
 

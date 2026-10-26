@@ -61,8 +61,15 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly Lock _historyGate = new();
     // The details last given to the deltas of an attempt, made once rather than for each delta.
     private StreamingDeltaDetails? _streamingDeltaDetails;
-    // Under _historyGate: how many deltas _history holds.
+    // Under _historyGate: how many deltas _history holds, and how many of them each content has, so that a completed
+    // content without deltas (a call of a script, a tool that streamed nothing) does not scan the history.
     private int _historyDeltaCount;
+    private readonly Dictionary<string, int> _historyDeltasByContent = new(StringComparer.Ordinal);
+    // The records of the calls of scripts not yet in the journal: shown at once, written together (WriteNestedRecordsAsync).
+    private readonly Lock _nestedRecordsGate = new();
+    private List<AgentEvent>? _nestedRecords;
+    // One write of nested records at a time, so that they reach the journal in their order.
+    private readonly SemaphoreSlim _nestedRecordsWrite = new(1, 1);
     private readonly IDisposable? _backgroundTasksRegistration;
     private readonly IDisposable? _remoteControlRegistration;
     private readonly SemaphoreSlim _stateGate = new(initialCount: 1, maxCount: 1);
@@ -191,6 +198,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _state = RebuildLoadedToolsState(RebuildLoadedSkillsState(state, history), history);
         _history = [.. history];
         _historyDeltaCount = _history.Count(static @event => @event is AgentContentDeltaEvent);
+        foreach (var delta in _history.OfType<AgentContentDeltaEvent>())
+        {
+            _historyDeltasByContent[delta.ContentId] = _historyDeltasByContent.GetValueOrDefault(delta.ContentId) + 1;
+        }
         _conversation = ReplayConversation(history, _state);
         if (earlierHistory is { ConversationIncluded: false })
         {
@@ -1065,6 +1076,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             result = CreateToolExecutionFailureResult(toolCall.Name, ex);
         }
 
+        // The calls its script made are in the journal before the call itself ends there.
+        await WriteNestedRecordsAsync().ConfigureAwait(false);
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -1219,8 +1232,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentRunId? runId = ended ? null : run.RunId;
         var toolCall = new AgentMessagePart.ToolCall(callId, definition.Spec.Name, call.Arguments);
         var name = call.DisplayName ?? definition.Spec.Name;
-        await AppendEventsAsync([new AgentActivityEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentActivityKind.ToolCall,
-            AgentActivityPhase.Started, callId, parent.CallId, name, null, NestedDetails(CreateToolCallDetails(toolCall, _summary.ExecutionDirectory), call))], cancellationToken).ConfigureAwait(false);
+        AppendNestedRecords([new AgentActivityEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentActivityKind.ToolCall,
+            AgentActivityPhase.Started, callId, parent.CallId, name, null, NestedDetails(CreateToolCallDetails(toolCall, _summary.ExecutionDirectory), call))]);
 
         var tracked = ended ? [] : GetTrackedFileMutationPaths(toolCall, _summary.ExecutionDirectory);
         AgentTurnFileChangeTracker? callChanges = null;
@@ -1263,7 +1276,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             // The script stopped waiting: the record of the call still ends, so it is never shown running.
             var cancelled = new AgentToolResult(false, [new AgentToolResultItem.Text("The call was cancelled.")], "The call was cancelled.");
-            await AppendNestedEndAsync(runId, parent, toolCall, name, call, cancelled, null, outputContentId, CancellationToken.None).ConfigureAwait(false);
+            AppendNestedEnd(runId, parent, toolCall, name, call, cancelled, null, outputContentId);
             throw;
         }
         catch (Exception ex)
@@ -1288,11 +1301,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             diff = callChanges.CreateUnifiedDiff();
         }
 
-        await AppendNestedEndAsync(runId, parent, toolCall, name, call, result, diff, outputContentId, CancellationToken.None).ConfigureAwait(false);
+        AppendNestedEnd(runId, parent, toolCall, name, call, result, diff, outputContentId);
         return result;
     }
 
-    private Task AppendNestedEndAsync(
+    private void AppendNestedEnd(
         AgentRunId? runId,
         AgentMessagePart.ToolCall parent,
         AgentMessagePart.ToolCall toolCall,
@@ -1300,8 +1313,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentNestedToolCall call,
         AgentToolResult result,
         string? diff,
-        string outputContentId,
-        CancellationToken cancellationToken)
+        string outputContentId)
     {
         var recorded = BoundNestedResult(result with { Structured = null, App = null });
         var details = NestedDetails(CreateToolResultDetails(toolCall, recorded, _summary.ExecutionDirectory, diff), call);
@@ -1309,7 +1321,74 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             result.Success ? AgentActivityPhase.Completed : AgentActivityPhase.Failed, toolCall.CallId, parent.CallId, name, result.Error, details);
         var output = new AgentContentCompletedEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentContentKind.ToolOutput,
             outputContentId, toolCall.CallId, RenderToolResult(recorded), details);
-        return AppendEventsAsync([completed, output], cancellationToken);
+        AppendNestedRecords([completed, output]);
+    }
+
+    // The delay after which the records of the calls of scripts are written: a script can make many calls a second, and
+    // each write of the journal also updates the session's row of the cache.
+    private static readonly TimeSpan NestedRecordsDelay = TimeSpan.FromMilliseconds(200);
+
+    // Shows records of calls of scripts at once and writes them to the journal a little later, together with those that
+    // follow: one write for many calls instead of one for each start and each end.
+    private void AppendNestedRecords(IReadOnlyList<AgentEvent> events)
+    {
+        AddToHistory(events);
+        bool first;
+        lock (_nestedRecordsGate)
+        {
+            first = _nestedRecords is null;
+            (_nestedRecords ??= []).AddRange(events);
+        }
+
+        if (first)
+        {
+            _ = WriteNestedRecordsLaterAsync();
+        }
+
+        foreach (var @event in events)
+        {
+            Publish(@event);
+        }
+    }
+
+    private async Task WriteNestedRecordsLaterAsync()
+    {
+        await Task.Delay(NestedRecordsDelay).ConfigureAwait(false);
+        await WriteNestedRecordsAsync().ConfigureAwait(false);
+    }
+
+    // Writes the records of calls of scripts that wait. A journal that cannot be written loses them, as a session closing
+    // under a script that goes on would: the call of the model that ran the script keeps its own record.
+    private async Task WriteNestedRecordsAsync()
+    {
+        await _nestedRecordsWrite.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            List<AgentEvent>? records;
+            lock (_nestedRecordsGate)
+            {
+                records = _nestedRecords;
+                _nestedRecords = null;
+            }
+
+            if (records is null)
+            {
+                return;
+            }
+
+            await _store.AppendEventsAsync(_protocolFamily, _providerKey, SessionId, records, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException or InvalidOperationException)
+        {
+            if (LogManager.IsInitialized)
+            {
+                Logger.Warn($"The records of the calls of a script were not written session={SessionId}: {exception.Message}");
+            }
+        }
+        finally
+        {
+            _nestedRecordsWrite.Release();
+        }
     }
 
     // The record of a nested call keeps at most NestedRecordCharacters of its text, and says what it left out.
@@ -1686,6 +1765,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             throw new AgentDependencyRetentionException(SessionId, "provider session cleanup", failures, this);
         }
         _pendingSteerInputs.Clear();
+        await WriteNestedRecordsAsync().ConfigureAwait(false);
         _stateGate.Dispose();
         _summaryGate.Dispose();
         lock (_publication)
@@ -3082,16 +3162,22 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             foreach (var @event in events)
             {
-                if (@event is AgentContentCompletedEvent completed && _historyDeltaCount > 0)
+                if (@event is AgentContentCompletedEvent completed && _historyDeltasByContent.TryGetValue(completed.ContentId, out var pending))
                 {
-                    _historyDeltaCount -= _history.RemoveAll(item => item is AgentContentDeltaEvent delta &&
+                    var removed = _history.RemoveAll(item => item is AgentContentDeltaEvent delta &&
                         delta.Kind == completed.Kind &&
                         string.Equals(delta.ContentId, completed.ContentId, StringComparison.Ordinal) &&
                         delta.RunId == completed.RunId);
+                    _historyDeltaCount -= removed;
+                    // Deltas of another run or kind under the same content, or already removed with a discarded draft,
+                    // keep the entry: it only costs a scan.
+                    if (pending - removed > 0) _historyDeltasByContent[completed.ContentId] = pending - removed;
+                    else _historyDeltasByContent.Remove(completed.ContentId);
                 }
-                else if (@event is AgentContentDeltaEvent)
+                else if (@event is AgentContentDeltaEvent added)
                 {
                     _historyDeltaCount++;
+                    _historyDeltasByContent[added.ContentId] = _historyDeltasByContent.GetValueOrDefault(added.ContentId) + 1;
                 }
 
                 _history.Add(@event);

@@ -95,6 +95,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
         };
         Commands.Fallback.ProviderStates = () => modelProviderInitializationService.CurrentStates;
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
+        // A script that went on in the background gives its result to its session as a prompt.
+        CodeModeRuns = new Runtime.Scripts.CodeModeRunRegistry(
+            (sessionId, prompt, token) => runtimeService.DeliverHostPromptAsync(sessionId, prompt, AgentPromptProvenance.Workflow, token));
         ExternalSessions = followExternalSessions
             ? new ExternalSessionFollower(catalogOptions, sessionViewCatalog.JournalStore.CreateSessionStore(), agentSessionCatalog, runtimeService)
             : null;
@@ -231,6 +234,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     /// <summary>Gets host-owned admission and drainage for up to eight actual cached workspace reads.</summary>
     public OwnedSessionWorkspace WorkspaceReads { get; }
+
+    /// <summary>Gets the runs of the Code Mode scripts of the sessions.</summary>
+    public Runtime.Scripts.CodeModeRunRegistry CodeModeRuns { get; }
 
     /// <summary>
     /// Gets what lists the sessions another process writes into the sessions folder of the host and follows those it holds
@@ -740,6 +746,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     private async ValueTask DisposeCommandsAndRuntimeAsync()
     {
+        // The scripts stop first: their calls run on the sessions that close next.
+        await CodeModeRuns.DisposeAsync().ConfigureAwait(false);
         // Nothing is listed or followed any more while the sessions close.
         if (ExternalSessions is { } follower) await follower.DisposeAsync().ConfigureAwait(false);
         BeginShutdownControls();

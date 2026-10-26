@@ -619,6 +619,38 @@ public sealed partial class CodeAltaConfigStore
         Save(_options.ConfigPath, document);
     }
 
+    /// <summary>The modes of Code Mode: <c>off</c>, and <c>on</c> for its tools beside the others.</summary>
+    public static IReadOnlyList<string> CodeModeModes { get; } = ["off", "on"];
+
+    /// <summary>Reads whether sessions get the tools of Code Mode (<c>[code_mode] mode</c>), from the user's file only.</summary>
+    /// <returns><c>off</c> when the file sets none, or sets a mode this version does not know.</returns>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read.</exception>
+    public string LoadCodeModeMode()
+    {
+        var mode = ReadSharedGlobalDocument().CodeMode?.Mode?.Trim().ToLowerInvariant();
+        return mode is not null && CodeModeModes.Contains(mode) ? mode : "off";
+    }
+
+    /// <summary>Saves whether sessions get the tools of Code Mode; <c>off</c> removes the setting.</summary>
+    /// <param name="mode">The mode, one of <see cref="CodeModeModes"/>.</param>
+    /// <exception cref="ArgumentException"><paramref name="mode"/> is not a mode.</exception>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public void SaveCodeModeMode(string mode)
+    {
+        ArgumentNullException.ThrowIfNull(mode);
+        var normalized = mode.Trim().ToLowerInvariant();
+        if (!CodeModeModes.Contains(normalized)) throw new ArgumentException($"'{mode}' is not a mode of Code Mode: {string.Join(", ", CodeModeModes)}.", nameof(mode));
+        ThrowIfReadOnly();
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        NormalizeDocument(document);
+        document.CodeMode = normalized == "off" ? null : new CodeAltaCodeModeSettingsDocument { Mode = normalized };
+        Save(_options.ConfigPath, document);
+    }
+
     /// <summary>
     /// Reads the sandbox settings (<c>[sandbox]</c>), from the user's file only: the same table in a project's file is
     /// never read, since a repository would loosen its own sandbox (<see cref="ProjectSetsSandbox"/> tells it is there).

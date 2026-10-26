@@ -94,6 +94,12 @@ public sealed record AgentToolSpec
     public JsonElement? OutputSchema { get; init; }
 
     /// <summary>
+    /// Gets the name of the tool in the scripts of Code Mode, within its <see cref="Group"/> (the MCP tool's own name, where
+    /// <see cref="Name"/> is an alias), or null to use <see cref="Name"/>.
+    /// </summary>
+    public string? ScriptName { get; init; }
+
+    /// <summary>
     /// Deconstructs this tool specification into its components.
     /// </summary>
     /// <param name="name">The tool name.</param>

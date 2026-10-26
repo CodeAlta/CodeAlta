@@ -183,7 +183,7 @@ public static class AgentBuiltInToolFactory
                 new AgentToolSpec(
                     "read_file",
                     $"Read a local text file by line number. Offsets are 1-based; use a negative offset to count from the end (-1 is the last line). Offsets past EOF return an empty text result, and oversized negative offsets clamp to line 1. Omitting limit returns up to {options.DefaultReadFileLineLimit} lines by default.",
-                    CreateReadFileSchema(options)) { RunsInParallel = true },
+                    CreateReadFileSchema(options)) { RunsInParallel = true, OutputSchema = ReadFileOutputSchema },
                 (invocation, cancellationToken) => ReadFileAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
@@ -290,7 +290,9 @@ public static class AgentBuiltInToolFactory
         var startLine = offset >= 1 ? offset : GetStartLineFromEnd(resolvedPath, offset, cancellationToken);
 
         var lines = new List<string>(limit);
+        var raw = new StringBuilder();
         var lineNumber = 0;
+        var more = false;
         foreach (var line in File.ReadLines(resolvedPath))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -300,17 +302,60 @@ public static class AgentBuiltInToolFactory
                 continue;
             }
 
-            lines.Add($"{lineNumber,5}: {line}");
             if (lines.Count >= limit)
             {
+                more = true;
                 break;
             }
+
+            lines.Add($"{lineNumber,5}: {line}");
+            if (raw.Length > 0)
+            {
+                raw.Append('\n');
+            }
+
+            raw.Append(line);
         }
 
         return Task.FromResult(new AgentToolResult(
             true,
-            [new AgentToolResultItem.Text(string.Join(Environment.NewLine, lines))]));
+            [new AgentToolResultItem.Text(string.Join(Environment.NewLine, lines))])
+        {
+            Structured = CreateReadFileValue(resolvedPath, startLine, startLine + lines.Count - 1, raw.ToString(), more),
+        });
     }
+
+    // What a script of Code Mode receives for a read: the text of the lines read as it is, without their numbers.
+    private static JsonElement CreateReadFileValue(string path, int startLine, int endLine, string content, bool more)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("path", path);
+            writer.WriteNumber("startLine", startLine);
+            writer.WriteNumber("endLine", Math.Max(startLine - 1, endLine));
+            writer.WriteString("content", content);
+            writer.WriteBoolean("more", more);
+            writer.WriteEndObject();
+        }
+
+        return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
+    }
+
+    private static readonly JsonElement ReadFileOutputSchema = JsonDocument.Parse("""
+        {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "The full path of the file." },
+            "startLine": { "type": "integer" },
+            "endLine": { "type": "integer" },
+            "content": { "type": "string", "description": "The lines read, as they are in the file, joined by new lines." },
+            "more": { "type": "boolean", "description": "Whether the file has lines after endLine: read them with offset." }
+          },
+          "required": ["path", "startLine", "endLine", "content", "more"]
+        }
+        """).RootElement.Clone();
 
     private static async Task<AgentToolResult> ViewImageAsync(
         AgentBuiltInToolOptions options,

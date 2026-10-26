@@ -23,6 +23,10 @@ namespace CodeAlta.CodeMode;
 internal sealed partial class CodeModeRun
 {
     private const string PreludeName = "codemode-prelude.js";
+    private const string WorkflowPath = "codemode.workflow";
+
+    // The function behind workflow(): not part of the API, so no namespace shows it.
+    private static readonly CodeModeFunction WorkflowFunction = new(WorkflowPath) { Parallel = true };
 
     private readonly CodeModeApi _api;
     private readonly CodeModeScriptCache _cache;
@@ -192,7 +196,7 @@ internal sealed partial class CodeModeRun
     {
         Interlocked.Increment(ref _inFlight);
         var queuedAt = _clock.Elapsed;
-        var function = _api.Find(call.Path);
+        var function = call.Path == WorkflowPath ? WorkflowFunction : _api.Find(call.Path);
         if (function is null)
         {
             return Finish(call, queuedAt, queuedAt, CodeModeCallStatus.Failed, CodeModeCallResult.Failure(new("TypeError", $"`{call.Path}` is not a function of this session.")));
@@ -227,7 +231,9 @@ internal sealed partial class CodeModeRun
                     startedAt = _clock.Elapsed;
                     try
                     {
-                        var result = await Task.Run(() => _handler.InvokeAsync(call, cancellation.Token).AsTask(), cancellation.Token).ConfigureAwait(false);
+                        var result = call.Path == WorkflowPath
+                            ? await RunWorkflowAsync(call, cancellation.Token).ConfigureAwait(false)
+                            : await Task.Run(() => _handler.InvokeAsync(call, cancellation.Token).AsTask(), cancellation.Token).ConfigureAwait(false);
                         return Finish(call, queuedAt, startedAt, result.Succeeded ? CodeModeCallStatus.Succeeded : CodeModeCallStatus.Failed, result);
                     }
                     finally
@@ -340,11 +346,76 @@ internal sealed partial class CodeModeRun
         }
     }
 
+    // workflow(name | { scriptPath }, args): the script runs in an engine of its own, with the same functions and the
+    // same handler, its calls followed by the same observer; its output joins this run's, and its value or its error
+    // is the value or the error of the call.
+    private async Task<CodeModeCallResult> RunWorkflowAsync(CodeModeCall call, CancellationToken cancellationToken)
+    {
+        if (_options.ResolveScript is not { } resolve)
+        {
+            return CodeModeCallResult.Failure(new CodeModeCallError("TypeError", "workflow() is not available in this run."));
+        }
+
+        if (_options.Depth + 1 > _options.MaxWorkflowDepth)
+        {
+            return CodeModeCallResult.Failure(new CodeModeCallError("RangeError", $"Scripts may start scripts {_options.MaxWorkflowDepth} levels deep at most.") { Code = "codemode.workflowDepth" });
+        }
+
+        string? name;
+        string? scriptPath;
+        string argumentsJson;
+        using (var document = JsonDocument.Parse(call.ArgumentsJson))
+        {
+            var root = document.RootElement;
+            name = root.TryGetProperty("name", out var nameElement) && nameElement.ValueKind == JsonValueKind.String ? nameElement.GetString() : null;
+            scriptPath = root.TryGetProperty("scriptPath", out var pathElement) && pathElement.ValueKind == JsonValueKind.String ? pathElement.GetString() : null;
+            argumentsJson = root.TryGetProperty("args", out var argumentsElement) && argumentsElement.ValueKind == JsonValueKind.Object ? argumentsElement.GetRawText() : "{}";
+        }
+
+        CodeModeSource source;
+        try
+        {
+            source = await resolve(new CodeModeScriptReference(name, scriptPath), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return CodeModeCallResult.Failure(new CodeModeCallError("ToolError", ex.Message) { Code = "codemode.workflowNotFound" });
+        }
+
+        if (source.Error is { } error)
+        {
+            var where = error.Location is { } location ? $" (line {location.Line})" : string.Empty;
+            return CodeModeCallResult.Failure(new CodeModeCallError(error.Name, $"{source.Name}{where}: {error.Message}") { Code = "codemode.workflowFailed" });
+        }
+
+        var nested = new CodeModeRun(_api, _cache, source, _handler, _options with { ArgumentsJson = argumentsJson, Depth = _options.Depth + 1 }, _observer);
+        var result = await nested.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var entry in result.Output)
+        {
+            AppendOutput(entry.Kind, entry.Text, entry.StepId);
+        }
+
+        if (result.Status == CodeModeRunStatus.Completed)
+        {
+            return CodeModeCallResult.Success(result.ValueJson);
+        }
+
+        var failure = result.Error!;
+        var line = failure.Location is { } at ? $" (line {at.Line})" : string.Empty;
+        return CodeModeCallResult.Failure(new CodeModeCallError(failure.Name, $"{source.Name}{line}: {failure.Message}") { Code = "codemode.workflowFailed" });
+    }
+
     private JsValue Output(JsValue self, JsValue[] arguments)
     {
         Touch();
         var kind = arguments.Length > 0 && arguments[0].IsNumber() ? (CodeModeOutputKind)(int)arguments[0].AsNumber() : CodeModeOutputKind.Log;
         var text = arguments.Length > 1 ? arguments[1].ToString() : string.Empty;
+        AppendOutput(kind, text, _tracker.Current);
+        return JsValue.Undefined;
+    }
+
+    private void AppendOutput(CodeModeOutputKind kind, string text, string? stepId)
+    {
         CodeModeOutputEntry? entry = null;
         lock (_gate)
         {
@@ -362,7 +433,7 @@ internal sealed partial class CodeModeRun
                 }
 
                 _outputCharacters += text.Length;
-                entry = new CodeModeOutputEntry(kind, text, _tracker.Current);
+                entry = new CodeModeOutputEntry(kind, text, stepId);
                 _output.Add(entry);
             }
         }
@@ -371,8 +442,6 @@ internal sealed partial class CodeModeRun
         {
             _observer?.Output(entry);
         }
-
-        return JsValue.Undefined;
     }
 
     private JsValue StepBegin(JsValue self, JsValue[] arguments)

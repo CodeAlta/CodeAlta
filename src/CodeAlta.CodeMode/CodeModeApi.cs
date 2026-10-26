@@ -15,7 +15,7 @@ public sealed class CodeModeApi
     /// <summary>The global names of the helpers, which no namespace of an API may take.</summary>
     public static IReadOnlySet<string> ReservedNames { get; } = new[]
     {
-        "args", "console", "log", "text", "step", "meta", "codemode", "workflow", "agent", "session", "parallel",
+        "args", "console", "log", "text", "step", "meta", "workflow", "agent", "session", "parallel",
         "pipeline", "phase", "budget", "store", "load", "exit", "globalThis", "Math", "JSON", "Promise",
     }.ToFrozenSet(StringComparer.Ordinal);
 
@@ -138,6 +138,13 @@ public sealed class CodeModeApi
               let result;
               try { result = stepRun(id, body); } catch (e) { stepEnd(handle, false, message(e)); throw e; }
               return Promise.resolve(result).then((v) => { stepEnd(handle, true, null); return v; }, (e) => { stepEnd(handle, false, message(e)); throw e; });
+            });
+            global("workflow", function (reference, workflowArgs) {
+              const target = typeof reference === "string" ? { name: reference } : reference;
+              if (target === null || typeof target !== "object" || (typeof target.name !== "string" && typeof target.scriptPath !== "string")) {
+                return Promise.reject(new TypeError("workflow(name | { scriptPath }, args): name a script of the library, or the path of a script file."));
+              }
+              return host("codemode.workflow", stringify({ name: target.name, scriptPath: target.scriptPath, args: workflowArgs === undefined ? {} : workflowArgs })).then(unwrap);
             });
             global("args", freeze(argsJson === undefined ? {} : parse(argsJson)));
             define(Math, "random", { value: random, writable: false, enumerable: false, configurable: false });

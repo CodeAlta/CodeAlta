@@ -110,6 +110,9 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 
     public PluginHostBridge PluginHostBridge { get; }
 
+    /// <summary>Gets the runs of the Code Mode scripts of the sessions.</summary>
+    public CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry CodeModeRuns => _host.CodeModeRuns;
+
     /// <summary>Gets what lists the sessions another process writes and follows those it holds.</summary>
     public ExternalSessionFollower? ExternalSessions => _host.ExternalSessions;
 

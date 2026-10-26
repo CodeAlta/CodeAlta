@@ -347,6 +347,55 @@ public sealed class CodeModeRunTests
     }
 
     [TestMethod]
+    public async Task Workflow_RunsAnotherScriptWithItsArguments_AndGivesItsValueOrItsError()
+    {
+        var scripts = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["double.js"] = "log('doubling');\nreturn { n: args.n * 2, echoed: (await tools.echo({ v: 1 })).v };",
+            ["broken.js"] = "const x = {};\nreturn x.a.b;",
+        };
+        var options = new CodeModeRunOptions
+        {
+            ResolveScript = (reference, _) => scripts.TryGetValue(reference.ScriptPath ?? string.Empty, out var code)
+                ? ValueTask.FromResult(CodeModeSource.Prepare(code, reference.ScriptPath!))
+                : throw new FileNotFoundException($"No script {reference.ScriptPath}."),
+        };
+
+        var result = await RunAsync("""
+            const doubled = await workflow({ scriptPath: "double.js" }, { n: 21 });
+            let failure = null, missing = null;
+            try { await workflow({ scriptPath: "broken.js" }); } catch (e) { failure = e.message; }
+            try { await workflow({ scriptPath: "nope.js" }); } catch (e) { missing = e.code; }
+            return { doubled, failure, missing };
+            """, options: options);
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        using var value = JsonDocument.Parse(result.ValueJson!);
+        Assert.AreEqual(42, value.RootElement.GetProperty("doubled").GetProperty("n").GetInt32());
+        Assert.AreEqual(1, value.RootElement.GetProperty("doubled").GetProperty("echoed").GetInt32());
+        StringAssert.StartsWith(value.RootElement.GetProperty("failure").GetString(), "broken.js (line 2):");
+        Assert.AreEqual("codemode.workflowNotFound", value.RootElement.GetProperty("missing").GetString());
+        Assert.IsTrue(result.Output.Any(static entry => entry.Text == "doubling"), "the output of the nested script joins the run's");
+    }
+
+    [TestMethod]
+    public async Task Workflow_IsBoundedInDepth_AndAbsentWithoutAResolver()
+    {
+        var options = new CodeModeRunOptions
+        {
+            MaxWorkflowDepth = 2,
+            ResolveScript = (_, _) => ValueTask.FromResult(CodeModeSource.Prepare("return await workflow({ scriptPath: 'self.js' });", "self.js")),
+        };
+
+        var deep = await RunAsync("return await workflow({ scriptPath: 'self.js' });", options: options);
+        var absent = await RunAsync("try { await workflow({ scriptPath: 'x.js' }); } catch (e) { return e.message; }");
+
+        Assert.AreEqual(CodeModeRunStatus.Failed, deep.Status);
+        StringAssert.Contains(deep.Error!.Message, "2 levels deep at most");
+        StringAssert.Contains(absent.ValueJson, "not available");
+    }
+
+    [TestMethod]
     public async Task RunsOfManySessions_RunAtTheSameTime()
     {
         var cache = new CodeModeScriptCache();

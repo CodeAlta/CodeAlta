@@ -5257,24 +5257,22 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         var dispatcher = context.Services.Get<AltaCommandDispatcher>()
             ?? new AltaCommandDispatcher(new AltaCommandRegistry(), context.Services);
-        return
-        [
-            AltaSessionToolFactory.Create(
-                dispatcher,
-                new AltaSessionToolOptions
-                {
-                    SourceSessionIdProvider = sourceSessionIdProvider,
-                    SourceProjectId = sourceProjectId,
-                    WorkingDirectory = workingDirectory,
-                    // The tool outlives a worktree that is removed: its commands then start from the folder of the project.
-                    WorkingDirectoryProvider = workingDirectory is null || projectDirectory is null || string.Equals(workingDirectory, projectDirectory, StringComparison.Ordinal)
-                        ? null
-                        : () => Directory.Exists(workingDirectory) ? workingDirectory : projectDirectory,
-                    DefaultMaxOutputRecords = 200,
-                    DefaultMaxOutputBytes = 64 * 1024,
-                    DefaultTimeout = TimeSpan.FromSeconds(120),
-                }),
-        ];
+        var caller = new AltaSessionToolOptions
+        {
+            SourceSessionIdProvider = sourceSessionIdProvider,
+            SourceProjectId = sourceProjectId,
+            WorkingDirectory = workingDirectory,
+            // The tool outlives a worktree that is removed: its commands then start from the folder of the project.
+            WorkingDirectoryProvider = workingDirectory is null || projectDirectory is null || string.Equals(workingDirectory, projectDirectory, StringComparison.Ordinal)
+                ? null
+                : () => Directory.Exists(workingDirectory) ? workingDirectory : projectDirectory,
+            DefaultMaxOutputRecords = 200,
+            DefaultMaxOutputBytes = 64 * 1024,
+            DefaultTimeout = TimeSpan.FromSeconds(120),
+        };
+        IReadOnlyList<AgentToolDefinition> tools = [AltaSessionToolFactory.Create(dispatcher, caller)];
+        // A session that an alta command creates gets the tools of Code Mode as the sessions of the window do.
+        return context.Services.Get<Scripts.CodeModeSessionTools>()?.Create(dispatcher, caller, tools) ?? tools;
     }
 
     private static Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath = "alta model resolve")

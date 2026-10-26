@@ -153,6 +153,49 @@ public sealed partial class AgentSessionTests
         Assert.AreEqual(1, router.ReadCalls, "the routed handler ran the nested read");
     }
 
+    [TestMethod]
+    public async Task NestedCalls_ReachTheJournalTogether_BeforeTheirToolCallEndsThere()
+    {
+        using var temp = TestTempDirectory.Create();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "a.txt"), "line");
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-nested-journal") with { WorkingDirectory = workspace };
+        var state = CreateState(summary.SessionId);
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(state);
+        var script = ScriptTool(async (tools, cancellationToken) =>
+        {
+            await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => tools.InvokeAsync(new AgentNestedToolCall("read_file", Json("""{"path":"a.txt"}""")), cancellationToken)));
+            return new AgentToolResult(true, [new AgentToolResultItem.Text("done")]);
+        });
+
+        await using (var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor(CallScript(),
+                static (_, _, _) => Task.FromResult(new AgentTurnResponse { AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]) })),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = workspace,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            }))
+        {
+            await session.SendAsync(new() { Input = AgentInput.Text("Work"), AdditionalTools = [script] });
+        }
+
+        // Shown at once, written a little later and together: every start and end is in the journal, before the end of
+        // the call of the model that ran the script.
+        var journal = (await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId)).OfType<AgentActivityEvent>().ToList();
+        var nested = journal.Where(static e => e.ParentActivityId == "call-1").ToList();
+        Assert.AreEqual(20, nested.Count(static e => e.Phase == AgentActivityPhase.Started));
+        Assert.AreEqual(20, nested.Count(static e => e.Phase == AgentActivityPhase.Completed));
+        var parentEnd = journal.FindIndex(static e => e is { ActivityId: "call-1", Phase: AgentActivityPhase.Completed });
+        Assert.IsGreaterThan(journal.IndexOf(nested[^1]), parentEnd);
+    }
+
     private sealed class CountingRouter : IAgentBuiltInToolRouter
     {
         private int _readCalls;

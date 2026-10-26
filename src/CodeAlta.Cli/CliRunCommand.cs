@@ -52,6 +52,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
                 StartPlugins = !options.NoPlugins,
                 StartMcp = !options.NoMcp,
                 ListsSkills = !options.NoSkills,
+                CodeMode = options.CodeMode,
                 Offline = options.Offline,
                 ChecksRequired = true,
             }, environment, processToken).ConfigureAwait(false);
