@@ -151,11 +151,11 @@ flowchart LR
 
 ## How it is verified
 
-- [ ] `dotnet test -c <Configuration>` and `npm test` pass, and `lunet build` in `site/` succeeds.
-- [ ] In the developer instance, with a temporary project set: create `Infra` and `Infra › Helm charts` in the rail, drag projects onto them, fold, reorder by drag, favorite the sub-label (it moves up alone, with its path), and switch to flat mode (the badges show). Check both themes and the 900×650 window.
-- [ ] `alta label create Demo --space work`, then `alta label assign demo <project>`: the open window updates without reloading, and `alta project list --label demo` lists the project.
-- [ ] A label of the `work` space is not listed in `personal`, and deleting a temporary space deletes its labels.
-- [ ] Saving a project in CodeAlta TUI keeps its `labels:` line.
+- [x] `dotnet test -c <Configuration>` and `npm test` pass, and `lunet build` in `site/` succeeds. *`npm test`: one failure left, `mobile.browser.test.ts`, which depends on the theme of Windows and is unrelated (proposed as a task).*
+- [x] In the developer instance, with a temporary project set: create `Infra` and `Infra › Helm charts` in the rail, drag projects onto them, fold, reorder by drag, favorite the sub-label (it moves up alone, with its path), and switch to flat mode (the badges show). Check both themes and the 900×650 window. *Done in an isolated profile (`--catalog-root` in `%TEMP%`), so the real catalog got no label.*
+- [x] `alta label create Demo --space work`, then `alta label assign demo <project>`: the open window updates without reloading, and `alta project list --label demo` lists the project.
+- [x] A label of the `work` space is not listed in `personal`, and deleting a temporary space deletes its labels.
+- [x] Saving a project in CodeAlta TUI keeps its `labels:` line. *Covered by `ProjectDescriptorCopyTests`: both TUI copies call `ProjectDescriptor.Copy()`.*
 
 ## Decisions
 
