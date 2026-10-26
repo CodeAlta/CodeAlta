@@ -379,6 +379,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       // A press on a tab is the dock's, which may drag it: no mouse press follows for an open menu to close on.
       if (menu && !(event.target as HTMLElement).closest(".session-tab-popup")) setMenu(null);
       drag.down(event);
+      drag.keepTabPress(event);
     }} onPointerMoveCapture={drag.move} onPointerUpCapture={event => {
       // A click on a session tab (or the New session tab) hands the keyboard to that session's prompt.
       const clicked = drag.up(event);
