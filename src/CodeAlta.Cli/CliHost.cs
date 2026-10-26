@@ -177,6 +177,7 @@ internal sealed class CliHost : IAsyncDisposable
             host.Commands.SessionTools = CreateSessionTools(alta, codeMode is "on" or "only" ? new CodeModeSessionTools(new CodeModeToolOptions
             {
                 Runs = host.CodeModeRuns,
+                Agents = new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents),
                 Cache = new CodeAlta.CodeMode.CodeModeScriptCache(),
                 SourceFolder = sessionId => Path.Combine(storage.GlobalRoot, "scratchpad", "codemode", sessionId),
             }, () => codeMode) : null);

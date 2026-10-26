@@ -18,6 +18,7 @@ namespace CodeAlta.Agent;
 [JsonDerivedType(typeof(AgentSystemPromptEvent), "system_prompt")]
 [JsonDerivedType(typeof(AgentSessionUpdateEvent), "sessionUpdate")]
 [JsonDerivedType(typeof(AgentNotesEvent), "notes")]
+[JsonDerivedType(typeof(AgentWorkflowEvent), "workflow")]
 [JsonDerivedType(typeof(AgentPlanSnapshotEvent), "planSnapshot")]
 [JsonDerivedType(typeof(AgentInteractionEvent), "interaction")]
 [JsonDerivedType(typeof(AgentErrorEvent), "error")]
@@ -596,6 +597,78 @@ public sealed record AgentNotesEvent(
     AgentNotesUpdateKind Kind,
     string Markdown)
     : AgentEvent(ProviderId, SessionId, Timestamp, RunId);
+
+/// <summary>What a record of a run of a script of Code Mode says.</summary>
+public enum AgentWorkflowEventKind
+{
+    /// <summary>The run started: its title, and the tool call that runs it.</summary>
+    RunStarted,
+
+    /// <summary>A step of the script started.</summary>
+    StepStarted,
+
+    /// <summary>A step of the script ended: its status and its duration.</summary>
+    StepEnded,
+
+    /// <summary>The script started a session of its own (<c>agent()</c>): its id, its step.</summary>
+    SessionStarted,
+
+    /// <summary>A session the script started ended: its status, its duration and its tokens.</summary>
+    SessionEnded,
+
+    /// <summary>The run ended: its status, its duration and its calls.</summary>
+    RunEnded,
+}
+
+/// <summary>
+/// A record of a run of a script of Code Mode, in the journal of the session that runs it. Its <see cref="AgentEvent.RunId"/>
+/// is always null: a run goes on after the turn that started it, and its records belong to no turn.
+/// </summary>
+/// <param name="ProviderId">The model provider identifier.</param>
+/// <param name="SessionId">The session that runs the script.</param>
+/// <param name="Timestamp">When it happened.</param>
+/// <param name="RunId">Always null.</param>
+/// <param name="Kind">What happened.</param>
+/// <param name="WorkflowRunId">The run of the script, such as <c>run-7f3c2a</c>.</param>
+public sealed record AgentWorkflowEvent(
+    ModelProviderId ProviderId,
+    string SessionId,
+    DateTimeOffset Timestamp,
+    AgentRunId? RunId,
+    AgentWorkflowEventKind Kind,
+    string WorkflowRunId)
+    : AgentEvent(ProviderId, SessionId, Timestamp, RunId)
+{
+    /// <summary>Gets the tool call that runs the script (<c>exec</c>), when known.</summary>
+    public string? CallId { get; init; }
+
+    /// <summary>Gets the title of the run, or the title of the session it started.</summary>
+    public string? Title { get; init; }
+
+    /// <summary>Gets the step, for the records of a step or of a session.</summary>
+    public string? StepId { get; init; }
+
+    /// <summary>Gets the session the script started, for the records of a session.</summary>
+    public string? ChildSessionId { get; init; }
+
+    /// <summary>Gets how it ended (<c>completed</c>, <c>failed</c>, <c>cancelled</c>...), for the records of an end.</summary>
+    public string? Status { get; init; }
+
+    /// <summary>Gets what went wrong, for a failed end.</summary>
+    public string? Message { get; init; }
+
+    /// <summary>Gets the duration in milliseconds, for the records of an end.</summary>
+    public long? DurationMs { get; init; }
+
+    /// <summary>Gets the calls the run made, for its end.</summary>
+    public int? Calls { get; init; }
+
+    /// <summary>Gets the input tokens of a session the script started, for its end.</summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>Gets the output tokens of a session the script started, for its end.</summary>
+    public long? OutputTokens { get; init; }
+}
 
 /// <summary>
 /// Structured plan snapshot event.

@@ -48,12 +48,12 @@ public sealed class CodeModeToolTests
 
         var result = await InvokeAsync(exec, """
             const found = await codemode.help({ path: "tools" });
-            return [found.includes("tools.read_file"), found.includes("tools.exec"), found.includes("tools.alta"), typeof tools.exec];
+            return [found.includes("tools.read_file"), found.includes("tools.exec"), found.includes("tools.alta"), await tools.exec({ code: "1" }).then(() => "called", e => e.name)];
             """, new FakeTools());
 
         Assert.IsTrue(result.Success, Text(result));
         using var value = ValueOf(result);
-        CollectionAssert.AreEqual(new object[] { true, false, false, "undefined" },
+        CollectionAssert.AreEqual(new object[] { true, false, false, "TypeError" },
             value.RootElement.EnumerateArray().Select(static item => item.ValueKind == JsonValueKind.String ? (object)item.GetString()! : item.GetBoolean()).ToArray());
     }
 
@@ -74,6 +74,77 @@ public sealed class CodeModeToolTests
         using var value = ValueOf(result);
         Assert.AreEqual("mcp.github.list_issues", value.RootElement.GetProperty("path").GetString());
         StringAssert.Contains(value.RootElement.GetProperty("declaration").GetString(), "list_issues(");
+    }
+
+    [TestMethod]
+    public async Task Discovery_SaysWhyNothingMatched_AndDescribesACommandWithTheTypesItUses()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var (exec, _) = Create(root.Path, runs);
+
+        var result = await InvokeAsync(exec, """
+            return { none: await codemode.search({ query: "zzqx" }), declaration: await codemode.describe({ path: "alta.prompt.show" }) };
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        using var value = ValueOf(result);
+        StringAssert.Contains(value.RootElement.GetProperty("none").GetString(), "alta.mcp.activate");
+        var declaration = value.RootElement.GetProperty("declaration").GetString()!;
+        StringAssert.Contains(declaration, "show(");
+        Assert.IsFalse(declaration.Contains("interface UsageTotals", StringComparison.Ordinal), "a type the command does not use is left out");
+    }
+
+    [TestMethod]
+    public void ReferencedTypes_FollowWhatTheTypesUse()
+    {
+        const string types = "/** A. */\ninterface A { b: B; }\n\ninterface B { n: number; }\n\ntype C = \"x\";";
+
+        var text = CodeModeDiscovery.ReferencedTypes("declare function f(): Promise<A>;", types);
+
+        StringAssert.Contains(text, "interface A");
+        StringAssert.Contains(text, "interface B");
+        Assert.IsFalse(text.Contains("type C", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task Agent_StartsASessionPerCall_AndResolvesWithItsAnswer()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var agents = new FakeAgents();
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = agents }).Single(static tool => tool.Spec.Name == "exec");
+
+        var result = await InvokeAsync(exec, """
+            const answers = await step("review", () => Promise.all([agent("Review A.", { tier: "quick" }), agent("Review B.", { title: "B" })]));
+            try { await agent("fail"); } catch (e) { answers.push(`${e.name}:${e.code}`); }
+            return answers;
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        using var value = ValueOf(result);
+        CollectionAssert.AreEqual(new[] { "answer to Review A.", "answer to Review B.", "AgentError:failed" },
+            value.RootElement.EnumerateArray().Select(static item => item.GetString()).ToArray());
+        var first = agents.Requests.Single(static request => request.Prompt == "Review A.");
+        Assert.AreEqual("quick", first.Tier);
+        Assert.AreEqual("review", first.StepId, "a session belongs to the step that started it");
+        StringAssert.StartsWith(first.RunId, "run-");
+        Assert.IsTrue(agents.Requests.All(static request => request.Parent == "session-1"));
+    }
+
+    private sealed class FakeAgents : ICodeModeAgents
+    {
+        public System.Collections.Concurrent.ConcurrentBag<(string Parent, string Prompt, string? Tier, string? StepId, string RunId)> Requests { get; } = [];
+
+        public Task<CodeModeAgentResult> RunAsync(string parentSessionId, CodeModeAgentRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Add((parentSessionId, request.Prompt, request.Tier, request.StepId, request.RunId));
+            return Task.FromResult(request.Prompt == "fail"
+                ? new CodeModeAgentResult("child-x", false, "failed", null, "it broke", Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero)
+                : new CodeModeAgentResult("child-" + request.Prompt, true, "completed", "answer to " + request.Prompt, null, Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero));
+        }
     }
 
     [TestMethod]
@@ -108,6 +179,9 @@ public sealed class CodeModeToolTests
             """, invoker);
         StringAssert.StartsWith(Text(started), "Script running as run-");
         var runId = runs.List("session-1").Single().Id;
+        // A script in the background is a background task of its session, found by the call that runs it.
+        var task = runs.ListTasks("session-1").Single();
+        Assert.AreEqual(("workflow", "slow", "call-1", (AgentBackgroundTaskOutcome?)null), (task.Kind, task.Description, task.ToolCallId, task.Outcome));
 
         // The run ends while wait waits for it: the result is the wait's, not a prompt.
         var waiting = InvokeAsync(wait, $$"""{"run":"{{runId}}","yield_ms":10000}""");

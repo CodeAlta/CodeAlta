@@ -54,7 +54,8 @@ public sealed class ToolScriptBinding : ICodeModeCallHandler
                 Description = spec.Description,
                 InputSchemaJson = spec.InputSchema.ValueKind == JsonValueKind.Object ? spec.InputSchema.GetRawText() : null,
                 OutputSchemaJson = spec.OutputSchema?.GetRawText(),
-                ResultType = spec.OutputSchema is null ? "string" : null,
+                // A tool of an MCP server without a schema gives its structured content when it has one, else its text.
+                ResultType = spec.OutputSchema is not null ? null : spec.Group is { Length: > 0 } ? "unknown" : "string",
                 Parallel = spec.RunsInParallel,
             });
         }

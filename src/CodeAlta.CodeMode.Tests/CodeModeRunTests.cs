@@ -47,6 +47,28 @@ public sealed class CodeModeRunTests
     }
 
     [TestMethod]
+    public async Task AGuessedFunction_FailsWithWhatItsNamespaceHas()
+    {
+        var result = await RunAsync("""
+            const errors = [];
+            for (const call of [() => tools.read_file({ path: "a" }), () => mcp.tiny.echo({}), () => alta.sesion.list({})]) {
+              try { await call(); } catch (e) { errors.push(`${e.name}: ${e.message}`); }
+            }
+            return { errors, mcp: typeof mcp, echo: await tools.echo({ text: "still works" }) };
+            """);
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        using var value = JsonDocument.Parse(result.ValueJson!);
+        var errors = value.RootElement.GetProperty("errors").EnumerateArray().Select(static error => error.GetString()!).ToArray();
+        StringAssert.StartsWith(errors[0], "TypeError: tools.read_file is not a function of this script. tools has: echo, slow, fail, write.");
+        StringAssert.Contains(errors[1], "mcp.tiny.echo is not a function", "mcp exists even without an MCP tool");
+        StringAssert.Contains(errors[1], "from the next exec");
+        StringAssert.Contains(errors[2], "alta has: session");
+        Assert.AreEqual("object", value.RootElement.GetProperty("mcp").GetString());
+        Assert.AreEqual("still works", value.RootElement.GetProperty("echo").GetProperty("text").GetString());
+    }
+
+    [TestMethod]
     public async Task FinalExpression_IsReturned()
     {
         var result = await RunAsync("const items = [1, 2, 3];\nitems.map(x => x * 2)");
@@ -210,6 +232,11 @@ public sealed class CodeModeRunTests
 
         Assert.AreEqual(CodeModeErrorKind.CpuTime, busy.Error?.Kind);
         Assert.AreEqual(CodeModeRunStatus.Completed, waiting.Status, waiting.Error?.Message);
+
+        // Work right after a long await is a new slice: the wait never counts, whatever statement the clock is read at.
+        var resumed = await RunAsync("await tools.slow(); let s = 0; for (let i = 0; i < 200000; i++) s += i % 7; await tools.slow(); return s;",
+            Handler(slowMilliseconds: 400), new() { Limits = limits });
+        Assert.AreEqual(CodeModeRunStatus.Completed, resumed.Status, resumed.Error?.Message);
     }
 
     [TestMethod]

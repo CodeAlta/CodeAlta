@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
+using CodeAlta.Agent;
 using CodeAlta.CodeMode;
 
 namespace CodeAlta.Orchestration.Runtime.Scripts;
@@ -20,10 +21,20 @@ public sealed record CodeModeRunInfo(string Id, string SessionId, string? Title,
 /// background, and its result comes back to its session as a prompt (provenance <c>workflow</c>) unless a <c>wait</c>
 /// collected it first. The limits count runs: a run over a limit is refused with the limit's name, never queued.
 /// </summary>
-public sealed class CodeModeRunRegistry : IAsyncDisposable
+public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
 {
     private readonly ConcurrentDictionary<string, CodeModeRunHandle> _runs = new(StringComparer.Ordinal);
     private readonly Func<string, string, CancellationToken, Task>? _deliver;
+    private readonly Func<string, IDisposable?>? _hold;
+
+    /// <summary>Occurs when a run ended and its result was given, with the id of the run.</summary>
+    public event Action<string>? RunEnded;
+
+    /// <summary>
+    /// Gets or sets what writes the records of a run in the journal of its session (<see cref="AgentWorkflowEvent"/>): the
+    /// session, the record. Null writes none. The records of a run are written in their order, before its result is given.
+    /// </summary>
+    public Func<string, AgentWorkflowEvent, Task>? Journal { get; set; }
     private readonly int _maxPerSession;
     private readonly int _maxPerHost;
     private readonly Lock _gate = new();
@@ -34,12 +45,49 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable
     /// <param name="maxPerSession">The most runs of one session at the same time.</param>
     /// <param name="maxPerHost">The most runs of the host at the same time.</param>
     public CodeModeRunRegistry(Func<string, string, CancellationToken, Task>? deliver, int maxPerSession = 4, int maxPerHost = 32)
+        : this(deliver, hold: null, maxPerSession, maxPerHost)
+    {
+    }
+
+    /// <summary>Creates the registry of a host whose sessions a run holds while it runs.</summary>
+    /// <param name="deliver">Delivers the result of a run that went on in the background to its session: the session, the prompt. Null for a host without sessions to deliver to.</param>
+    /// <param name="hold">Holds the session of a run until its result is given (<see cref="SessionRuntimeService.TryHoldForScript"/>): the session is not settled meanwhile. Null when nothing holds; a null hold refuses the run.</param>
+    /// <param name="maxPerSession">The most runs of one session at the same time.</param>
+    /// <param name="maxPerHost">The most runs of the host at the same time.</param>
+    public CodeModeRunRegistry(Func<string, string, CancellationToken, Task>? deliver, Func<string, IDisposable?>? hold, int maxPerSession = 4, int maxPerHost = 32)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPerSession);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPerHost);
         _deliver = deliver;
+        _hold = hold;
         _maxPerSession = maxPerSession;
         _maxPerHost = maxPerHost;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<string> ListSessionsWithRunningScripts()
+        => [.. _runs.Values.Where(static run => run.Running).Select(static run => run.SessionId).Distinct(StringComparer.OrdinalIgnoreCase)];
+
+    /// <inheritdoc />
+    public IReadOnlyList<SessionRuntimeBackgroundTask> ListTasks(string sessionId)
+        // A script its turn waits for is part of the turn: only one that went on in the background is a background task.
+        => [.. _runs.Values.Where(run => run.Backgrounded && string.Equals(run.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(static run => run.Running).ThenByDescending(static run => run.StartedAt).Take(8)
+            .Select(static run => new SessionRuntimeBackgroundTask(run.Id, "workflow", run.Title ?? "Script", run.CallId, run.StartedAt, run.Outcome)
+            {
+                EndedAt = run.EndedAt,
+            })];
+
+    /// <inheritdoc />
+    public Task StopAsync(string sessionId)
+    {
+        var runs = _runs.Values.Where(run => run.Running && string.Equals(run.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)).ToArray();
+        foreach (var run in runs)
+        {
+            run.Stop();
+        }
+
+        return Task.WhenAll(runs.Select(static run => run.Completion.ContinueWith(static _ => { }, TaskScheduler.Default)));
     }
 
     /// <summary>Lists the runs of a session, or of the host.</summary>
@@ -59,6 +107,23 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable
         string sessionId,
         string? title,
         int maxOutputTokens,
+        Func<ICodeModeRunObserver, CancellationToken, Task<CodeModeRunResult>> run,
+        out string? refusal)
+        => TryStart(sessionId, title, maxOutputTokens, callId: null, run, out refusal);
+
+    /// <summary>Starts a run of a tool call, unless a limit refuses it.</summary>
+    /// <param name="sessionId">The session that runs it.</param>
+    /// <param name="title">Its title, or null.</param>
+    /// <param name="maxOutputTokens">The output budget of its result.</param>
+    /// <param name="callId">The tool call that runs it (<c>exec</c>), or null.</param>
+    /// <param name="run">Runs the script, with the observer of the run and its token.</param>
+    /// <param name="refusal">Why it was refused.</param>
+    /// <returns>The run, or null when <paramref name="refusal"/> is set.</returns>
+    public CodeModeRunHandle? TryStart(
+        string sessionId,
+        string? title,
+        int maxOutputTokens,
+        string? callId,
         Func<ICodeModeRunObserver, CancellationToken, Task<CodeModeRunResult>> run,
         out string? refusal)
     {
@@ -84,13 +149,39 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable
                 return null;
             }
 
-            handle = new CodeModeRunHandle(NewId(), sessionId, title, maxOutputTokens);
+            handle = new CodeModeRunHandle(NewId(), sessionId, title, maxOutputTokens) { CallId = callId, Journal = Journal };
+            if (_hold is not null)
+            {
+                // The session is held until the result is given: a headless run waits for it, and the session is not retired.
+                if (_hold(sessionId) is not { } held)
+                {
+                    refusal = "This session is closing: no script starts.";
+                    return null;
+                }
+
+                handle.Hold = held;
+            }
+
             _runs[handle.Id] = handle;
         }
 
+        handle.Record(AgentWorkflowEventKind.RunStarted, record => record with { Title = title });
         handle.Start(run, OnEndedAsync);
         refusal = null;
         return handle;
+    }
+
+    /// <summary>Writes a record of a run in the journal of its session, after its other records.</summary>
+    /// <param name="runId">The run.</param>
+    /// <param name="kind">What happened.</param>
+    /// <param name="fill">Fills the record.</param>
+    public void Record(string runId, AgentWorkflowEventKind kind, Func<AgentWorkflowEvent, AgentWorkflowEvent> fill)
+    {
+        ArgumentNullException.ThrowIfNull(fill);
+        if (_runs.TryGetValue(runId, out var run))
+        {
+            run.Record(kind, fill);
+        }
     }
 
     /// <summary>Finds a run of a session, running or ended a short while ago.</summary>
@@ -139,11 +230,32 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable
         return run.TryCollect() ? (true, await run.Completion.ConfigureAwait(false)) : (true, null);
     }
 
-    // A run that ended in the background: its result goes to its session, unless a wait takes it.
-    private Task OnEndedAsync(CodeModeRunHandle run, CodeModeRunResult result)
+    // A run that ended in the background: its result goes to its session, unless a wait takes it. The session is held until
+    // then: what waits for it to settle sees the result arrive before it settles.
+    private async Task OnEndedAsync(CodeModeRunHandle run, CodeModeRunResult result)
     {
         ForgetLater(run);
-        return run.Backgrounded && run.Waiters == 0 ? DeliverAsync(run, result) : Task.CompletedTask;
+        try
+        {
+            run.Record(AgentWorkflowEventKind.RunEnded, record => record with
+            {
+                Status = result.Status.ToString().ToLowerInvariant(),
+                Message = result.Error is { } error ? $"{error.Name}: {error.Message}" : null,
+                DurationMs = (long)result.Duration.TotalMilliseconds,
+                Calls = result.Calls.Count,
+            });
+            // What reads the journal after the result sees the whole run.
+            await run.JournalWritten.ConfigureAwait(false);
+            if (run.Backgrounded && run.Waiters == 0)
+            {
+                await DeliverAsync(run, result).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            run.Hold?.Dispose();
+            RunEnded?.Invoke(run.Id);
+        }
     }
 
     private async Task DeliverAsync(CodeModeRunHandle run, CodeModeRunResult result)
@@ -239,6 +351,66 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
 
     internal int Waiters => Volatile.Read(ref _waiters);
 
+    // The most records of steps a run writes: a step in a loop of a thousand items writes the first ones.
+    private const int MaxStepRecords = 200;
+    private readonly Lock _journalGate = new();
+    private Task _journal = Task.CompletedTask;
+    private int _stepRecords;
+
+    /// <summary>Gets the tool call that runs the script, or null.</summary>
+    public string? CallId { get; init; }
+
+    /// <summary>Gets when the run started.</summary>
+    public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Gets when the run ended, or null while it runs.</summary>
+    public DateTimeOffset? EndedAt => Completion.IsCompletedSuccessfully ? StartedAt + Completion.Result.Duration : null;
+
+    /// <summary>Gets how the run ended, or null while it runs.</summary>
+    public AgentBackgroundTaskOutcome? Outcome => !Completion.IsCompletedSuccessfully ? null : Completion.Result.Status switch
+    {
+        CodeModeRunStatus.Completed => AgentBackgroundTaskOutcome.Completed,
+        CodeModeRunStatus.Cancelled => AgentBackgroundTaskOutcome.Stopped,
+        _ => AgentBackgroundTaskOutcome.Failed,
+    };
+
+    internal Func<string, AgentWorkflowEvent, Task>? Journal { get; init; }
+
+    // The records written so far: a task that completes when the last one is in the journal.
+    internal Task JournalWritten { get { lock (_journalGate) return _journal; } }
+
+    // Writes a record after the others; a record that cannot be written is lost, never the run.
+    internal void Record(AgentWorkflowEventKind kind, Func<AgentWorkflowEvent, AgentWorkflowEvent> fill)
+    {
+        if (Journal is not { } journal)
+        {
+            return;
+        }
+
+        if (kind is AgentWorkflowEventKind.StepStarted or AgentWorkflowEventKind.StepEnded && Interlocked.Increment(ref _stepRecords) > MaxStepRecords)
+        {
+            return;
+        }
+
+        var record = fill(new AgentWorkflowEvent(new ModelProviderId("codealta"), SessionId, DateTimeOffset.UtcNow, null, kind, Id) { CallId = CallId });
+        lock (_journalGate)
+        {
+            _journal = _journal.ContinueWith(async _ =>
+            {
+                try
+                {
+                    await journal(SessionId, record).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
+                {
+                }
+            }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+        }
+    }
+
+    // The hold of the session of the run, released once its result is given.
+    internal IDisposable? Hold { get; set; }
+
     internal void AddWaiter(int delta) => Interlocked.Add(ref _waiters, delta);
 
     internal void Start(Func<ICodeModeRunObserver, CancellationToken, Task<CodeModeRunResult>> run, Func<CodeModeRunHandle, CodeModeRunResult, Task> ended)
@@ -280,6 +452,17 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     public CodeModeRunInfo Info() => new(Id, SessionId, Title, _clock.Elapsed, Calls, Running);
 
     void ICodeModeRunObserver.CallStarted(CodeModeCall call) => Interlocked.Increment(ref _calls);
+
+    void ICodeModeRunObserver.StepStarted(string stepId) => Record(AgentWorkflowEventKind.StepStarted, record => record with { StepId = stepId });
+
+    void ICodeModeRunObserver.StepEnded(CodeModeStepRecord record)
+        => Record(AgentWorkflowEventKind.StepEnded, written => written with
+        {
+            StepId = record.StepId,
+            Status = record.Succeeded ? "completed" : "failed",
+            Message = record.ErrorMessage,
+            DurationMs = (long)record.Duration.TotalMilliseconds,
+        });
 
     void ICodeModeRunObserver.Output(CodeModeOutputEntry entry)
     {

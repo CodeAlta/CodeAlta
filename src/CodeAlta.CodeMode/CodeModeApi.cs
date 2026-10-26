@@ -146,7 +146,25 @@ public sealed class CodeModeApi
               }
               return host("codemode.workflow", stringify({ name: target.name, scriptPath: target.scriptPath, args: workflowArgs === undefined ? {} : workflowArgs })).then(unwrap);
             });
+            // A session of its own for a part of the work: resolves with its final answer (codemode.agent, given by the host).
+            global("agent", function (prompt, options) {
+              if (typeof prompt !== "string" || prompt.length === 0) return Promise.reject(new TypeError("agent(prompt, options): the prompt is a non-empty string."));
+              if (options !== undefined && (options === null || typeof options !== "object" || Array.isArray(options))) {
+                return Promise.reject(new TypeError('agent(prompt, options): options is an object, such as { tier: "quick" }.'));
+              }
+              return host("codemode.agent", stringify(Object.assign({}, options, { prompt }))).then(unwrap).then((reply) => reply.answer);
+            });
             global("args", freeze(argsJson === undefined ? {} : parse(argsJson)));
+            // A name a namespace does not have is a function that fails when called and says what the namespace has, so a
+            // guess fails with the fix instead of "is not a function".
+            const missing = (path, known) => new Proxy(function () {}, {
+              apply: () => Promise.reject(new TypeError(`${path} is not a function of this script. ${known}`)),
+              get: (t, p) => typeof p === "string" && p !== "then" ? missing(`${path}.${p}`, known) : undefined,
+            });
+            const guard = (path, target) => new Proxy(target, {
+              get: (t, p, r) => typeof p !== "string" || p in t || p === "then" || p === "toJSON" ? Reflect.get(t, p, r)
+                : missing(`${path}.${p}`, `${path} has: ${Object.keys(t).join(", ") || "nothing"}. codemode.search({ query }) finds a function; an MCP server activated during this script is in mcp from the next exec.`),
+            });
             define(Math, "random", { value: random, writable: false, enumerable: false, configurable: false });
 
             """);
@@ -166,8 +184,17 @@ public sealed class CodeModeApi
         foreach (var (name, node) in root.Children)
         {
             builder.Append("global(").Append(Quote(name)).Append(", ");
-            AppendNode(builder, node);
+            AppendNode(builder, node, name);
             builder.Append(");\n");
+        }
+
+        // The namespaces of tools exist even without a function, so that a guess says what to do instead of failing on a name.
+        foreach (var name in (ReadOnlySpan<string>)["tools", "mcp"])
+        {
+            if (!root.Children.Exists(child => child.Name == name))
+            {
+                builder.Append("global(").Append(Quote(name)).Append(", guard(").Append(Quote(name)).Append(", freeze({})));\n");
+            }
         }
 
         builder.Append("})();\n");
@@ -175,8 +202,8 @@ public sealed class CodeModeApi
     }
 
     // A path that is both a function and a namespace (`alta.search` and `alta.search.show`) is a function that carries
-    // its members.
-    private static void AppendNode(StringBuilder builder, PathNode node)
+    // its members. A namespace answers a name it does not have with a function that says what it has.
+    private static void AppendNode(StringBuilder builder, PathNode node, string path)
     {
         if (node.Children.Count == 0)
         {
@@ -184,7 +211,7 @@ public sealed class CodeModeApi
             return;
         }
 
-        builder.Append("freeze(Object.assign(").Append(node.Function is null ? "{}" : "fn(" + Quote(node.Function) + ")").Append(", {");
+        builder.Append("guard(").Append(Quote(path)).Append(", freeze(Object.assign(").Append(node.Function is null ? "{}" : "fn(" + Quote(node.Function) + ")").Append(", {");
         var first = true;
         foreach (var (name, child) in node.Children)
         {
@@ -195,10 +222,10 @@ public sealed class CodeModeApi
 
             first = false;
             builder.Append(Quote(name)).Append(": ");
-            AppendNode(builder, child);
+            AppendNode(builder, child, path + "." + name);
         }
 
-        builder.Append("}))");
+        builder.Append("})))");
     }
 
     private sealed class PathNode

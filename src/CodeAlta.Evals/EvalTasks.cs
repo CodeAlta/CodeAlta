@@ -46,7 +46,8 @@ internal static class EvalTasks
                 [".alta/mcp.json"] = JsonSerializer.Serialize(new { mcpServers = new { tiny = new { command = "dotnet", args = new[] { context.TinyMcpServer } } } }),
                 ["readme.md"] = "# Fixture\nA project with an MCP server.\n",
             },
-            outcome => LastLine(outcome)?.Contains("echo:codemode-4711", StringComparison.Ordinal) == true),
+            // The tool answers `echo:<text>` as text and `{ echoed: <text> }` as structured content: either is right.
+            outcome => LastLine(outcome)?.Contains("codemode-4711", StringComparison.Ordinal) == true),
 
         // Recovering from a failing call: some files are missing.
         new("recover-missing", "recovering from a failing call",

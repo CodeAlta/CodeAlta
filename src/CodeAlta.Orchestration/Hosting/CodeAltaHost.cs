@@ -97,7 +97,13 @@ public sealed class CodeAltaHost : IAsyncDisposable
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
         // A script that went on in the background gives its result to its session as a prompt.
         CodeModeRuns = new Runtime.Scripts.CodeModeRunRegistry(
-            (sessionId, prompt, token) => runtimeService.DeliverHostPromptAsync(sessionId, prompt, AgentPromptProvenance.Workflow, token));
+            (sessionId, prompt, token) => runtimeService.DeliverHostPromptAsync(sessionId, prompt, AgentPromptProvenance.Workflow, token),
+            runtimeService.TryHoldForScript);
+        runtimeService.ScriptRuns = CodeModeRuns;
+        CodeModeRuns.Journal = (sessionId, record) => runtimeService.AppendScriptRecordAsync(sessionId, record);
+        // The sessions scripts start go through a headless driver of the host, made when a script first asks for one.
+        _codeModeAgents = new Lazy<CodeModeAgents>(() => new CodeModeAgents(this), LazyThreadSafetyMode.ExecutionAndPublication);
+        CodeModeRuns.RunEnded += runId => { if (_codeModeAgents.IsValueCreated) _codeModeAgents.Value.ForgetRun(runId); };
         ExternalSessions = followExternalSessions
             ? new ExternalSessionFollower(catalogOptions, sessionViewCatalog.JournalStore.CreateSessionStore(), agentSessionCatalog, runtimeService)
             : null;
@@ -237,6 +243,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     /// <summary>Gets the runs of the Code Mode scripts of the sessions.</summary>
     public Runtime.Scripts.CodeModeRunRegistry CodeModeRuns { get; }
+
+    private readonly Lazy<CodeModeAgents> _codeModeAgents;
+
+    /// <summary>Gets the sessions the scripts of Code Mode start (<c>agent()</c>).</summary>
+    public Runtime.Scripts.ICodeModeAgents CodeModeAgents => _codeModeAgents.Value;
 
     /// <summary>
     /// Gets what lists the sessions another process writes into the sessions folder of the host and follows those it holds
@@ -748,6 +759,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
     {
         // The scripts stop first: their calls run on the sessions that close next.
         await CodeModeRuns.DisposeAsync().ConfigureAwait(false);
+        if (_codeModeAgents.IsValueCreated) await _codeModeAgents.Value.DisposeAsync().ConfigureAwait(false);
         // Nothing is listed or followed any more while the sessions close.
         if (ExternalSessions is { } follower) await follower.DisposeAsync().ConfigureAwait(false);
         BeginShutdownControls();

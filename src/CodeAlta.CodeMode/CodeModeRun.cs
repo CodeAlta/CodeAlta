@@ -57,6 +57,7 @@ internal sealed partial class CodeModeRun
     private int _maxRunning;
     private long _lastActivity;
     private long _lastCheck;
+    private long _sliceStart;
     private long _scriptTicks;
     private volatile bool _ended;
     private Engine? _engine;
@@ -143,7 +144,8 @@ internal sealed partial class CodeModeRun
         {
             options.Strict();
             options.DisableStringCompilation();
-            options.TimeoutInterval(_limits.CpuTimePerSlice);
+            // The CPU time of a slice is measured by the activity constraint (CheckActivity): Jint's own timer is not
+            // reset when the script resumes after an await, so it would count awaited time.
             options.MaxStatements(_limits.MaxStatements);
             options.LimitMemory(_limits.MemoryBytes);
             options.LimitRecursion(_limits.MaxRecursionDepth);
@@ -681,7 +683,8 @@ internal sealed partial class CodeModeRun
     private void Touch() => Interlocked.Exchange(ref _lastActivity, Stopwatch.GetTimestamp());
 
     // Called on the engine's thread while JavaScript runs: the run is busy, and the time between two close checks
-    // is the script's own time.
+    // is the script's own time. A longer gap is time the script waited (an await): it starts a new slice, and a slice
+    // longer than the limit is a busy loop.
     private void CheckActivity()
     {
         var now = Stopwatch.GetTimestamp();
@@ -691,8 +694,16 @@ internal sealed partial class CodeModeRun
         {
             Interlocked.Add(ref _scriptTicks, now - previous);
         }
+        else
+        {
+            _sliceStart = now;
+        }
 
         Interlocked.Exchange(ref _lastActivity, now);
+        if (Stopwatch.GetElapsedTime(_sliceStart, now) > _limits.CpuTimePerSlice)
+        {
+            throw new TimeoutException();
+        }
     }
 
     [GeneratedRegex(@":(?<line>\d+):(?<column>\d+)\)?\s*$")]

@@ -8,6 +8,12 @@ public sealed record AltaActorProvenance
     /// <summary>The <see cref="Kind"/> of an automation: a session it starts names it in <see cref="AutomationId"/>.</summary>
     public const string AutomationKind = "automation";
 
+    /// <summary>
+    /// The <see cref="Kind"/> of a script of Code Mode: a session its <c>agent()</c> creates names it, and the answer of that
+    /// session goes to the script, never to the session that runs the script.
+    /// </summary>
+    public const string WorkflowKind = "workflow";
+
     /// <summary>Gets the actor kind, such as <c>user</c>, <c>agent</c>, <c>host</c>, <c>plugin</c>, or <c>automation</c>.</summary>
     public required string Kind { get; init; }
 

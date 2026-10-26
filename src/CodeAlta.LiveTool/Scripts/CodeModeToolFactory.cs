@@ -26,6 +26,9 @@ public sealed record CodeModeToolOptions
 
     /// <summary>Gets whether <c>exec</c> takes over the other tools (the <c>only</c> mode): the model calls them through scripts.</summary>
     public bool TakesOver { get; init; }
+
+    /// <summary>Gets the sessions scripts start with <c>agent()</c>, or null for a host whose scripts start none.</summary>
+    public ICodeModeAgents? Agents { get; init; }
 }
 
 /// <summary>
@@ -48,11 +51,12 @@ public static class CodeModeToolFactory
 
         The script is the body of an async function: use `await` and `return`. It is plain JavaScript in strict mode: no TypeScript syntax, no `import`. It has no file, network or timer access of its own: every effect is a call of a function below, with this session's permissions.
 
-        Functions (each takes one object and returns a promise):
-        - `tools.<name>(args)`: the tools of this session, such as `tools.read_file({ path })`, `tools.grep({ pattern, path })`, `tools.shell_command({ command })` (resolves to `{ exitCode, stdout, stderr }`, also when the exit code is not 0).
-        - `alta.<group>.<command>(args)`: the commands of `alta`, such as `alta.session.list({ limit: 20 })`. Positional arguments and options go by name in camelCase, and `stdin` holds what `--stdin` reads. Resolves to the record the command writes, or to the list of its records; a failure throws an `AltaError` with a `code`.
-        - `mcp.<server>.<tool>(args)`: the tools of the MCP servers this session uses.
-        - `codemode.help({ path })`, `codemode.search({ query })`, `codemode.describe({ path })`: find functions and read their TypeScript declarations. Never guess a function or a field of a result: describe it first.
+        Functions (each takes one object and returns a promise of a value, not of text):
+        - `tools.<name>(args)`: the tools of this session, such as `tools.read_file({ path })` (resolves to `{ content, startLine, endLine, more }`), `tools.grep({ pattern, path })`, `tools.shell_command({ command })` (resolves to `{ exitCode, stdout, stderr }`, also when the exit code is not 0).
+        - `alta.<group>.<command>(args)`: the commands of `alta` as functions, not a shell, such as `alta.session.list({ limit: 20 })`. Positional arguments and options go by name in camelCase, and `stdin` holds what `--stdin` reads. Resolves to the record the command writes, or to the list of its records; a failure throws an `AltaError` with a `code`.
+        - `mcp.<server>.<tool>(args)`: the tools of the MCP servers active in this session. A server that `alta.mcp.activate({ id: ["<server>"] })` activates is in `mcp` from the next `exec`, not in the script that activates it.
+        - `codemode.help({ path })`, `codemode.search({ query })`, `codemode.describe({ path })`: find functions and read their TypeScript declarations, results included. Never guess a function or a field of a result: describe it first.
+        - `agent(prompt, { tier, model, title })` starts a session of its own for a part of the work and resolves with its final answer; several run at once under `Promise.all`.
         - `step(id, fn)` groups the calls of one part of the work; `log(...)`, `console.log(...)` and `text(...)` write output; `args` holds the arguments of the run.
 
         Calls run at the same time under `Promise.all`; tools that change files run one at a time. Await every call whose result matters: calls still pending when the script returns are cancelled. A failed call throws an error you can catch, and the calls made before a failure are not undone.
@@ -139,16 +143,20 @@ public static class CodeModeToolFactory
         var alta = new AltaScriptBinding(dispatcher.Describe(identity, cwd));
         var tools = invocation.Tools is { } invoker ? new ToolScriptBinding(invoker, ["alta", ExecToolName, WaitToolName]) : null;
         CodeModeApi? api = null;
-        api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions]);
+        api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions,
+            .. options.Agents is null ? [] : (CodeModeFunction[])[CodeModeAgentBinding.Function]]);
         var discovery = new CodeModeDiscovery(() => api);
         var limits = source.Options.TimeoutMilliseconds is { } timeout ? options.Limits with { Timeout = TimeSpan.FromMilliseconds(timeout) } : options.Limits;
         var maxOutputTokens = source.Options.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens;
         var host = new CodeModeHost(api, options.Cache);
 
-        var run = options.Runs.TryStart(sessionId, source.Options.Title, maxOutputTokens, (observer, runCancellation) =>
+        var run = options.Runs.TryStart(sessionId, source.Options.Title, maxOutputTokens, invocation.ToolCallId, (observer, runCancellation) =>
             {
+                // The observer of a run is its handle: the sessions it starts know its id.
+                var agents = options.Agents is { } sessions ? new CodeModeAgentBinding(sessions, sessionId, () => ((CodeModeRunHandle)observer).Id) : null;
                 var handler = new CodeModeCallRouter(
                 [
+                    .. agents is null ? [] : (ReadOnlySpan<(string, ICodeModeCallHandler)>)[(CodeModeAgentBinding.Path, agents)],
                     (AltaScriptBinding.Namespace, new AltaScriptCallHandler(dispatcher, alta, identity, cwd)),
                     (ToolScriptBinding.ToolsNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),
                     (ToolScriptBinding.McpNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),

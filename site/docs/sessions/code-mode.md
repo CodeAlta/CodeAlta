@@ -37,6 +37,7 @@ A script is the body of an async function: it uses `await` and `return`, in plai
 | `mcp.<server>.<tool>(args)` | The tools of the [MCP servers](../plugins/mcp.md) of the session |
 | `alta.<group>.<command>(args)` | The [`alta` commands](delegation.md#what-agents-can-use), such as `alta.session.list({ limit: 20 })` |
 | `codemode.help()`, `codemode.search({ query })`, `codemode.describe({ path })` | Find functions and read their TypeScript declarations |
+| `agent(prompt, { tier, model, title })` | Start a session of its own for a part of the work, and get its final answer. It is a sub-agent of the session, which you can open; 8 run at once, 50 per script |
 | `workflow({ scriptPath }, args)` | Run a script file, read with the session's own `read_file` |
 
 A call has the permissions of the session: a tool turned off is missing, a command that needs your approval asks, and a [sandboxed session](sandbox.md) runs its calls in its sandbox. Commands that wait for your answer, such as `alta ask`, are not available to scripts.

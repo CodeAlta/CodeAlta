@@ -6137,7 +6137,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public IReadOnlyList<ParentNotificationWork> TakeParentNotifications(AgentEvent? @event)
         {
-            if (string.IsNullOrWhiteSpace(ParentSessionId) || @event is null)
+            // A session a script created answers the script, which waits for its outcome: its parent is told nothing.
+            if (string.IsNullOrWhiteSpace(ParentSessionId) || @event is null
+                || string.Equals(CreatedBy?.Kind, AltaActorProvenance.WorkflowKind, StringComparison.Ordinal))
             {
                 return [];
             }

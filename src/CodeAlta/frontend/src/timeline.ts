@@ -200,7 +200,8 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
   for (const entry of entries) {
     // Raw provider records are persistence/runtime plumbing duplicated by typed content and
     // activity events. The TUI intentionally keeps them out of its visual timeline too.
-    if (entry.eventType === "raw" || entry.eventType === "notes") continue;
+    // The records of a run of a script describe the card of its exec call, not rows of their own.
+    if (entry.eventType === "raw" || entry.eventType === "notes" || entry.eventType === "workflow") continue;
     // These update the TUI's status/usage surfaces, not its conversation timeline.
     if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "providerfallback", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")) continue;
     if ((entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") &&

@@ -43,6 +43,7 @@ public static class SessionPromptProvenance
         "agent" => AgentPromptProvenance.AgentSession,
         "reminder" => AgentPromptProvenance.Reminder,
         AltaActorProvenance.AutomationKind => AgentPromptProvenance.Automation,
+        AltaActorProvenance.WorkflowKind => AgentPromptProvenance.Workflow,
         "plugin" => AgentPromptProvenance.Plugin,
         _ => null,
     };

@@ -132,6 +132,7 @@ public sealed partial class SessionRuntimeService
     public int CountSessionsAtWork()
     {
         var working = new HashSet<string>(Jobs.ListSessionsWithRunningJobs(), StringComparer.OrdinalIgnoreCase);
+        if (ScriptRuns is { } scripts) working.UnionWith(scripts.ListSessionsWithRunningScripts());
         foreach (var entry in _entries.Values)
         {
             if (!entry.IsTerminated && entry.HasActiveRun) working.Add(entry.SessionId);
@@ -150,7 +151,8 @@ public sealed partial class SessionRuntimeService
     // The background tasks of a session with its jobs: what goes on first, then what ended.
     private IReadOnlyList<SessionRuntimeBackgroundTask> WithJobTasks(IReadOnlyList<SessionRuntimeBackgroundTask> tasks, string sessionId)
     {
-        var jobs = JobTasks(sessionId);
+        // The scripts of the session are background work as its jobs are.
+        IReadOnlyList<SessionRuntimeBackgroundTask> jobs = ScriptRuns?.ListTasks(sessionId) is { Count: > 0 } scripts ? [.. JobTasks(sessionId), .. scripts] : JobTasks(sessionId);
         return jobs.Count == 0 ? tasks
             : [.. tasks.Where(static task => task.Outcome is null), .. jobs.Where(static task => task.Outcome is null),
                 .. jobs.Where(static task => task.Outcome is not null), .. tasks.Where(static task => task.Outcome is not null)];

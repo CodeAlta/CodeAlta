@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using CodeAlta.CodeMode;
 
 namespace CodeAlta.LiveTool.Scripts;
@@ -10,7 +11,7 @@ namespace CodeAlta.LiveTool.Scripts;
 /// finds functions by what they do, <c>codemode.describe()</c> gives their TypeScript declarations. The answers come
 /// in the script, after the cached part of the prompt, so the model learns the API without a longer prompt.
 /// </summary>
-public sealed class CodeModeDiscovery : ICodeModeCallHandler
+public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
 {
     /// <summary>The namespace of discovery in scripts.</summary>
     public const string Namespace = "codemode";
@@ -39,7 +40,8 @@ public sealed class CodeModeDiscovery : ICodeModeCallHandler
         {
             Description = "Finds functions by what they do. Read the declaration of a result with describe before calling it.",
             InputSchemaJson = """{"type":"object","properties":{"query":{"type":"string","description":"What you want to do, in a few words."},"limit":{"type":"integer","minimum":1,"description":"The most results, 10 by default."}},"required":["query"]}""",
-            ResultType = "{ path: string; description: string }[]",
+            // A string says why nothing matched.
+            ResultType = "{ path: string; description: string }[] | string",
         },
         new($"{Namespace}.describe")
         {
@@ -126,7 +128,14 @@ public sealed class CodeModeDiscovery : ICodeModeCallHandler
             .Where(static hit => hit.Score > 0)
             .OrderByDescending(static hit => hit.Score)
             .ThenBy(static hit => hit.Function.Path.Length)
-            .Take(Math.Clamp(limit, 1, 50));
+            .Take(Math.Clamp(limit, 1, 50))
+            .ToArray();
+        if (hits.Length == 0)
+        {
+            // Nothing found is not "nothing exists": the tools of an MCP server that is not active are not functions yet.
+            return CodeModeCallResult.Text($"No function matches `{query}`. Only the tools of active MCP servers are functions: alta.mcp.list({{}}) lists the servers, and alta.mcp.activate({{ id: [\"<server>\"] }}) makes the tools of one functions of the next exec. codemode.help() lists the namespaces.");
+        }
+
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
@@ -184,11 +193,62 @@ public sealed class CodeModeDiscovery : ICodeModeCallHandler
             : CodeModeDeclarations.Render(functions.Take(100));
         if (trimmed.StartsWith(AltaScriptBinding.Namespace + ".", StringComparison.Ordinal) || trimmed == AltaScriptBinding.Namespace)
         {
-            declarations += "\n" + AltaScriptBinding.Types;
+            declarations += ReferencedTypes(declarations, AltaScriptBinding.Types);
         }
 
         return CodeModeCallResult.Text(declarations);
     }
+
+    /// <summary>
+    /// Keeps of shared type declarations those a declaration uses, and those they use in turn: the declaration of one
+    /// command does not bury its line under every type of every command.
+    /// </summary>
+    /// <param name="declarations">The declarations that use the types.</param>
+    /// <param name="types">The shared types, one declaration (with its comment) per block, blocks separated by a blank line.</param>
+    /// <returns>The types used, each on lines of its own, or an empty string.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static string ReferencedTypes(string declarations, string types)
+    {
+        ArgumentNullException.ThrowIfNull(declarations);
+        ArgumentNullException.ThrowIfNull(types);
+        var blocks = new List<(string Name, string Text)>();
+        foreach (var block in types.Replace("\r\n", "\n", StringComparison.Ordinal).Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var match = DeclaredName().Match(block);
+            if (match.Success)
+            {
+                blocks.Add((match.Groups[1].Value, block));
+            }
+        }
+
+        var included = new HashSet<string>(StringComparer.Ordinal);
+        var text = new StringBuilder();
+        var pending = new Queue<string>([declarations]);
+        while (pending.TryDequeue(out var source))
+        {
+            foreach (var (name, block) in blocks)
+            {
+                if (!included.Contains(name) && Regex.IsMatch(source, $@"\b{name}\b"))
+                {
+                    included.Add(name);
+                    pending.Enqueue(block);
+                }
+            }
+        }
+
+        foreach (var (name, block) in blocks)
+        {
+            if (included.Contains(name))
+            {
+                text.Append('\n').Append(block).Append('\n');
+            }
+        }
+
+        return text.ToString();
+    }
+
+    [GeneratedRegex(@"(?:interface|type)\s+(\w+)")]
+    private static partial Regex DeclaredName();
 
     private static string? String(JsonElement arguments, string name)
         => arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
@@ -234,7 +294,7 @@ public sealed class CodeModeCallRouter : ICodeModeCallHandler
     private readonly IReadOnlyList<(string Namespace, ICodeModeCallHandler Handler)> _handlers;
 
     /// <summary>Creates a router.</summary>
-    /// <param name="handlers">The handlers, by the first segment of the paths they run.</param>
+    /// <param name="handlers">The handlers, by the path they run or by the first segment of the paths they run.</param>
     /// <exception cref="ArgumentNullException"><paramref name="handlers"/> is null.</exception>
     public CodeModeCallRouter(IReadOnlyList<(string Namespace, ICodeModeCallHandler Handler)> handlers)
     {
@@ -246,6 +306,15 @@ public sealed class CodeModeCallRouter : ICodeModeCallHandler
     public ValueTask<CodeModeCallResult> InvokeAsync(CodeModeCall call, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(call);
+        // A handler of the exact path first (codemode.agent), then the handler of its namespace.
+        foreach (var (name, handler) in _handlers)
+        {
+            if (name == call.Path)
+            {
+                return handler.InvokeAsync(call, cancellationToken);
+            }
+        }
+
         var root = call.Path.Split('.', 2)[0];
         foreach (var (name, handler) in _handlers)
         {

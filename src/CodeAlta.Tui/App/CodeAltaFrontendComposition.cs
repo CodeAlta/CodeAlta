@@ -69,7 +69,8 @@ internal sealed class CodeAltaFrontendComposition
         PluginHostBridge? pluginHostBridge = null,
         IModelProviderRegistry? modelProviderRegistry = null,
         IModelProviderInitializationService? modelProviderInitializationService = null,
-        CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry? codeModeRuns = null)
+        CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry? codeModeRuns = null,
+        CodeAlta.Orchestration.Runtime.Scripts.ICodeModeAgents? codeModeAgents = null)
     {
         ArgumentNullException.ThrowIfNull(projectCatalog);
         ArgumentNullException.ThrowIfNull(sessionCatalog);
@@ -156,7 +157,7 @@ internal sealed class CodeAltaFrontendComposition
         }
         if (codeModeRuns is not null)
         {
-            altaServices.Add(CodeAlta.LiveTool.Scripts.CodeModeSessionTools.FromSettings(codeModeRuns, catalogOptions, runtimeService.ScratchpadRoot));
+            altaServices.Add(CodeAlta.LiveTool.Scripts.CodeModeSessionTools.FromSettings(codeModeRuns, catalogOptions, runtimeService.ScratchpadRoot, codeModeAgents));
         }
         if (pluginHostBridge?.Runtime is { } pluginRuntime)
         {

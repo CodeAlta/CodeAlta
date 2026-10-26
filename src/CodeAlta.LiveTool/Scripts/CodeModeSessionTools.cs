@@ -29,12 +29,26 @@ public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<strin
     /// <returns>The tools.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="runs"/> or <paramref name="catalog"/> is null.</exception>
     public static CodeModeSessionTools FromSettings(CodeModeRunRegistry runs, CatalogOptions catalog, string? scratchpadRoot)
+        => FromSettings(runs, catalog, scratchpadRoot, agents: null);
+
+    /// <summary>
+    /// Creates the Code Mode tools of a host that follows the user's file, as
+    /// <see cref="FromSettings(CodeModeRunRegistry, CatalogOptions, string?)"/> does, whose scripts start sessions.
+    /// </summary>
+    /// <param name="runs">The runs of the host.</param>
+    /// <param name="catalog">The roots of the host, whose configuration file says the mode.</param>
+    /// <param name="scratchpadRoot">The scratchpad of the host, where the source of each run is kept; null keeps none.</param>
+    /// <param name="agents">The sessions scripts start with <c>agent()</c>, or null.</param>
+    /// <returns>The tools.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="runs"/> or <paramref name="catalog"/> is null.</exception>
+    public static CodeModeSessionTools FromSettings(CodeModeRunRegistry runs, CatalogOptions catalog, string? scratchpadRoot, ICodeModeAgents? agents)
     {
         ArgumentNullException.ThrowIfNull(runs);
         ArgumentNullException.ThrowIfNull(catalog);
         var store = new CodeAltaConfigStore(catalog);
         var options = new CodeModeToolOptions
         {
+            Agents = agents,
             Runs = runs,
             Cache = new CodeModeScriptCache(),
             SourceFolder = scratchpadRoot is { Length: > 0 } scratchpad ? sessionId => Path.Combine(scratchpad, "codemode", sessionId) : null,

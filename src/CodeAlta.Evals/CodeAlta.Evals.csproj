@@ -7,8 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Run as processes: altacli is what is measured, the tiny MCP server what its sessions call. -->
-    <ProjectReference Include="..\CodeAlta.Cli\CodeAlta.Cli.csproj" ReferenceOutputAssembly="false" />
+    <!-- Run as a process: the tiny MCP server is what the sessions call. altacli, what is measured, is the one the solution
+         builds (only its tests reference the command line application). -->
     <ProjectReference Include="..\CodeAlta.Tests.TinyMcpServer\CodeAlta.Tests.TinyMcpServer.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 

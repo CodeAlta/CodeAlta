@@ -401,6 +401,29 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
     public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title,
         AltaActorProvenance? createdBy, string? worktreeDirectory, string? spaceId, string? permissionMode, string? sessionId)
+        => CreateDraftSessionAsync(project, provider, title, createdBy, worktreeDirectory, spaceId, permissionMode, sessionId, parentSessionId: null);
+
+    /// <summary>
+    /// Creates a draft as <see cref="CreateDraftSessionAsync(ProjectDescriptor?, ModelProviderDescriptor, string?, AltaActorProvenance?, string?, string?, string?, string?)"/>
+    /// does, as the child of another session: it is in the tree of that session (aborts, retention, the list of its
+    /// sub-agents).
+    /// </summary>
+    /// <param name="project">The project, or null for a chat.</param>
+    /// <param name="provider">The enabled provider.</param>
+    /// <param name="title">The title, or null.</param>
+    /// <param name="createdBy">Who creates it.</param>
+    /// <param name="worktreeDirectory">The worktree of a project session, or null.</param>
+    /// <param name="spaceId">The space, or null for the one of the project.</param>
+    /// <param name="permissionMode">The permission mode, or null for the default.</param>
+    /// <param name="sessionId">The identifier, or null for a new one.</param>
+    /// <param name="parentSessionId">The parent, or null.</param>
+    /// <returns>The session.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is null.</exception>
+    /// <exception cref="ArgumentException">The provider is disabled, the worktree is not one of a project, or the mode is not offered.</exception>
+    /// <exception cref="SessionIdConflictException">A session with that identifier exists or is being created.</exception>
+    /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
+    public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title,
+        AltaActorProvenance? createdBy, string? worktreeDirectory, string? spaceId, string? permissionMode, string? sessionId, string? parentSessionId)
     {
         ArgumentNullException.ThrowIfNull(provider);
         if (!provider.IsEnabled) throw new ArgumentException("An enabled provider is required.", nameof(provider));
@@ -417,8 +440,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         return Plugins is null ? Create(options) : CreateWithPluginsAsync(Plugins, options);
 
         Task<SessionViewDescriptor> Create(SessionExecutionOptions options)
-            => project is null ? _runtime.CreateGlobalSessionAsync(options, title, null, createdBy, spaceId, sessionId, CancellationToken.None)
-                : _runtime.CreateProjectSessionAsync(project, options, title, null, createdBy, worktreeDirectory, spaceId, sessionId, CancellationToken.None);
+            => project is null ? _runtime.CreateGlobalSessionAsync(options, title, parentSessionId, createdBy, spaceId, sessionId, CancellationToken.None)
+                : _runtime.CreateProjectSessionAsync(project, options, title, parentSessionId, createdBy, worktreeDirectory, spaceId, sessionId, CancellationToken.None);
 
         // With what plugins give every run of this scope, so the first send keeps this attachment.
         async Task<SessionViewDescriptor> CreateWithPluginsAsync(PluginOrchestrationBridge plugins, SessionExecutionOptions options)
