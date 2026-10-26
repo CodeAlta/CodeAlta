@@ -32,7 +32,8 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 | `models_dev_provider_id` | The models.dev provider that describes the models. |
 | `single_model_id` | The one model of an endpoint that lists none. |
 | `models_include_regex` | A .NET regular expression: only the model ids it matches are shown, such as `^gemini-.*-pro`. |
-| `sort_models` | `true` sorts the models by name; by default they keep the provider's order. |
+| `models_order` | The order of the models: `provider`, `name`, or `name_version` (by name, the newest version first). Missing means `provider`, except for ACP agents. |
+| `sort_models` | Older form of `models_order`: `true` is `name`, `false` is `provider`. `models_order` takes precedence. |
 | `profile` | [Compatibility profile](#compatibility-profile). |
 | `compaction` | [Compaction settings](#compaction-settings). |
 | `model_overrides` | [Model metadata overrides](#model-metadata-overrides). |
@@ -243,7 +244,7 @@ supports_tool_call = true
 - `models_dev_provider_id` names the models.dev provider that describes the models; without it, CodeAlta finds one (see [Models and reasoning](readme.md#models-and-reasoning)).
 - `models_include_regex` keeps only the models whose id it matches, such as `gpt-5|claude`.
 - `single_model_id` gives the one model of an endpoint that lists none.
-- `sort_models = true` sorts them by name.
+- `models_order` lists them in the provider's order (`provider`), by name (`name`), or by name with the highest version first among the names that differ only by their numbers (`name_version`): `Claude Fable 5.1` before `Claude Fable 5`, `Gemini 4 Argon` before `Gemini 3.8 Flash`. The models of an [ACP agent](acp-agents.md) are in the `name_version` order unless you choose another one.
 
 ## Compaction settings
 

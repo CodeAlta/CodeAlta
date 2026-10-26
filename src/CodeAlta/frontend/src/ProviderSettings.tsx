@@ -13,7 +13,7 @@ import { providerBrand } from "./brands";
 import { Logo, ProviderIcon } from "./ProviderIcon";
 import { ProviderColorInput, ProviderIconPicker } from "./ProviderIconFields";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
-import { isSignedOut, providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { SettingsFileLocations } from "./SettingsFileLocation";
@@ -218,7 +218,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
       void settle(() => plugins.savePluginProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null, key, type: form.type,
         enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model), reasoningEffort: optional(form.reasoningEffort),
         values: pluginSettingValues(formPlugin, form.plugin), makeDefault: form.makeDefault, icon: optional(form.icon)?.toLowerCase() ?? null,
-        color: optional(form.color), permissionMode: optional(form.permissionMode) }, { timeoutMilliseconds: 60000 }), key, renamed(key));
+        color: optional(form.color), permissionMode: optional(form.permissionMode), modelsOrder: optional(form.modelsOrder) }, { timeoutMilliseconds: 60000 }), key, renamed(key));
       return;
     }
     const wire = providerEdit(form);
@@ -382,6 +382,12 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             {sandbox && original && <FormGroup label={t("Sandbox")} labelFor="provider-sandbox" className="provider-settings-wide">
               <ProviderSandboxField key={original.key} epoch={epoch} providerKey={original.key} providerName={original.effectiveName} disabled={busy}
                 api={sandbox} readModels={readModels} /></FormGroup>}
+            {/* Blank is the order of the type: the agents of a plugin may sort their models by default. */}
+            <FormGroup label={t("Model order")} labelFor="provider-models-order">
+              <HTMLSelect id="provider-models-order" fill value={form.modelsOrder} disabled={busy} onChange={event => edit({ modelsOrder: event.target.value })}>
+                <option value="">{t("Default ({value})", { value: modelsOrderLabel(formPlugin?.modelsOrder ?? "provider", t) })}</option>
+                {[...new Set([...modelsOrders, ...(form.modelsOrder ? [form.modelsOrder] : [])])].map(order => <option key={order} value={order}>{modelsOrderLabel(order, t)}</option>)}
+              </HTMLSelect></FormGroup>
             {runsOwnCli(form.type) && <FormGroup label={t("Account folder")} labelFor="provider-config-dir"
               helperText={t("The folder of the Claude account of this provider (CLAUDE_CONFIG_DIR). A new folder starts without settings, memory or MCP servers.")}>
               <InputGroup id="provider-config-dir" value={form.configDir} disabled={busy} spellCheck={false} placeholder={t("~/.claude, the folder of Claude Code")}

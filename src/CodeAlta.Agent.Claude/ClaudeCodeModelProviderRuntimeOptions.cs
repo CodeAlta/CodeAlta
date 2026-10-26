@@ -114,10 +114,19 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// </summary>
     public bool IsEnabled { get; init; } = true;
 
+    /// <summary>Gets or initializes the order the models are listed in; the order of the CLI by default.</summary>
+    public ModelOrder ModelOrder { get; init; }
+
     /// <summary>
-    /// Gets or initializes a value indicating whether the models are sorted by name in selectors.
+    /// Gets or initializes a value indicating whether the models are sorted by name in selectors; true sets
+    /// <see cref="ModelOrder"/> to <see cref="Agent.ModelOrder.Name"/>.
     /// </summary>
-    public bool SortModels { get; init; }
+    [Obsolete("Use ModelOrder.", error: false)]
+    public bool SortModels
+    {
+        get => ModelOrder != ModelOrder.Provider;
+        init => ModelOrder = value ? ModelOrder.Name : ModelOrder.Provider;
+    }
 
     /// <summary>
     /// Gets or initializes the name CodeAlta gives itself to the CLI (<c>name/version</c>).

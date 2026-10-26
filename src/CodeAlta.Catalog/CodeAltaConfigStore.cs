@@ -2081,6 +2081,7 @@ public sealed partial class CodeAltaConfigStore
         definition.ModelsDevProviderId = NormalizeProviderKey(definition.ModelsDevProviderId);
         definition.SingleModelId = NormalizeModel(definition.SingleModelId);
         definition.ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex);
+        definition.ModelsOrder = NormalizeText(definition.ModelsOrder)?.ToLowerInvariant();
         definition.ExtraBody = NormalizeExtraBody(definition.ExtraBody);
         definition.Request = NormalizeRequest(definition.Request);
         definition.Profile = NormalizeProfile(definition.Profile);
@@ -2493,6 +2494,11 @@ public sealed partial class CodeAltaConfigStore
         }
 
         ValidateModelsIncludeRegex(definition);
+        if (definition.ModelsOrder is not null && !ModelOrdering.TryParse(definition.ModelsOrder, out _))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} models_order must be one of: {string.Join(", ", ModelOrdering.Values)}.");
+        }
+
         ValidateFolderField(definition, "config_dir", definition.ConfigDir);
         ValidateFolderField(definition, "codex_home", definition.CodexHome);
 
@@ -3159,6 +3165,7 @@ public sealed partial class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.SingleModelId) ||
                !string.IsNullOrWhiteSpace(definition.ModelsIncludeRegex) ||
                definition.SortModels is not null ||
+               !string.IsNullOrWhiteSpace(definition.ModelsOrder) ||
                definition.ExtraBody is { Count: > 0 } ||
                definition.Request is not null ||
                definition.Profile is not null ||
@@ -3267,6 +3274,7 @@ public sealed partial class CodeAltaConfigStore
             SingleModelId = definition.SingleModelId,
             ModelsIncludeRegex = definition.ModelsIncludeRegex,
             SortModels = definition.SortModels,
+            ModelsOrder = definition.ModelsOrder,
             ExtraBody = CloneExtraBody(definition.ExtraBody),
             Request = CloneRequest(definition.Request),
             Profile = CloneProfile(definition.Profile),

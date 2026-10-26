@@ -336,7 +336,7 @@ internal sealed partial class GlobalConfigService
                             Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
                         { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
-                          ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command) };
+                          ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command), ModelsOrder = ConfiguredModelsOrder(definition?.ModelsOrder, definition?.SortModels) };
                     }).Concat(ListPluginProviders(document)).ToArray();
                 var pluginTypes = DescribePluginTypes();
                 // The providers CodeAlta knows how to configure that this configuration does not have yet.
@@ -433,6 +433,8 @@ internal sealed partial class GlobalConfigService
         var permissionMode = Optional(edit.PermissionMode);
         if (permissionMode is not null && !PermissionModes.Contains(permissionMode, StringComparer.Ordinal))
             return new("invalid", null, $"A permission mode is one of: {string.Join(", ", PermissionModes)}.", null, null, 0);
+        if (!TryReadModelsOrder(edit.ModelsOrder, out var modelsOrder))
+            return new("invalid", null, $"An order of the models is one of: {string.Join(", ", ModelOrdering.Values)}.", null, null, 0);
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
         {
             var original = request.OriginalKey?.Trim();
@@ -462,6 +464,9 @@ internal sealed partial class GlobalConfigService
             // Only a provider that runs the CLI takes a permission mode; the store refuses the field for any
             // other type, so a type changed away from it leaves the mode behind.
             definition.PermissionMode = TakesPermissionMode(definition.ProviderType) ? permissionMode : null;
+            // The older sort_models gives way to the order the form names.
+            definition.ModelsOrder = modelsOrder;
+            definition.SortModels = null;
             // A null key keeps the stored secret; the form never receives it back.
             if (edit.ClearApiKey) definition.ApiKey = null;
             else if (!string.IsNullOrEmpty(edit.ApiKey)) definition.ApiKey = edit.ApiKey;
@@ -706,6 +711,23 @@ internal sealed partial class GlobalConfigService
     private static IReadOnlyList<string> PermissionModes => ConfiguredModelProviderRegistryBuilder.GetPermissionModes("claude-code");
 
     /// <summary>Provider types that take a permission mode: the ones that run the Claude Code CLI.</summary>
+    // The order the file names, as the form shows it; a value of a newer version is shown as it is.
+    private static string? ConfiguredModelsOrder(string? modelsOrder, bool? sortModels)
+        => ModelOrdering.TryParse(modelsOrder, out var order) ? ModelOrdering.Format(order)
+            : !string.IsNullOrWhiteSpace(modelsOrder) ? Bound(modelsOrder.Trim())
+            : sortModels is { } sort ? ModelOrdering.Format(sort ? ModelOrder.Name : ModelOrder.Provider)
+            : null;
+
+    // An order of the form: blank for the order of the type, else one this version knows.
+    private static bool TryReadModelsOrder(string? value, out string? modelsOrder)
+    {
+        modelsOrder = null;
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        if (!ModelOrdering.TryParse(value, out var order)) return false;
+        modelsOrder = ModelOrdering.Format(order);
+        return true;
+    }
+
     private static bool TakesPermissionMode(string? type) => ConfiguredModelProviderRegistryBuilder.GetPermissionModes(type).Count > 0;
 
     /// <summary>
@@ -941,6 +963,12 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     /// <summary>The executable a provider that runs a CLI names (<c>command</c>), as the file writes it; null when CodeAlta finds it.</summary>
     public string? Command { get; init; }
 
+    /// <summary>
+    /// The order of its models the file names: <c>models_order</c>, else the older <c>sort_models</c> read as <c>name</c> or
+    /// <c>provider</c>; null for the order of its type.
+    /// </summary>
+    public string? ModelsOrder { get; init; }
+
     /// <summary>The settings of a provider whose type a plugin contributes; absent for a built-in type.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public GlobalConfigPluginProviderValues? Plugin { get; init; }
@@ -973,6 +1001,9 @@ internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool 
     /// the folder of Claude Code itself. Kept for <c>claude-code</c> only.
     /// </summary>
     public string? ConfigDir { get; init; }
+
+    /// <summary>The order of the models (<c>provider</c>, <c>name</c>, <c>name_version</c>); blank for the order of its type.</summary>
+    public string? ModelsOrder { get; init; }
 }
 internal sealed record GlobalConfigSaveProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? OriginalKey,
     GlobalConfigProviderEdit? Provider, bool MakeDefault, bool ApplyProviders);

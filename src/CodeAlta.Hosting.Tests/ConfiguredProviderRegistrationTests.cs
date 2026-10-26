@@ -68,7 +68,7 @@ public sealed class ConfiguredProviderRegistrationTests
         Assert.AreEqual(AgentReasoningEffort.XHigh, descriptor.DefaultReasoningEffort);
         Assert.IsTrue(descriptor.IsEnabled);
         Assert.IsTrue(descriptor.IsDefault);
-        Assert.IsTrue(descriptor.SortModels);
+        Assert.AreEqual(ModelOrder.Name, descriptor.ModelOrder);
         Assert.IsNotNull(factory); // Deliberately never invoke a concrete provider factory.
         Assert.IsFalse(Directory.Exists(stateRoot));
     }
@@ -181,7 +181,7 @@ public sealed class ConfiguredProviderRegistrationTests
         Assert.AreEqual("fixture", descriptor.DisplayName);
         Assert.AreEqual("fallback-model", descriptor.DefaultModelId);
         Assert.IsFalse(descriptor.IsEnabled);
-        Assert.IsFalse(descriptor.SortModels);
+        Assert.AreEqual(ModelOrder.Provider, descriptor.ModelOrder);
         Assert.IsNull(descriptor.DefaultReasoningEffort);
     }
 

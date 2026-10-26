@@ -389,6 +389,13 @@ public sealed record PluginModelProviderContribution
     /// <summary>Gets the short tag shown with a provider of this type in Settings, such as <c>ACP</c>, or <see langword="null" />.</summary>
     public string? Tag { get; init; }
 
+    /// <summary>
+    /// Gets the order the models of a provider of this type are listed in when its <c>models_order</c> setting does not
+    /// say: <see cref="ModelOrder.NameVersion"/> for agents whose own order means nothing. The order of the provider by
+    /// default.
+    /// </summary>
+    public ModelOrder ModelOrder { get; init; }
+
     /// <summary>Creates the runtime of a provider.</summary>
     public required Func<PluginModelProviderContext, IAgentModelProviderRuntime> CreateRuntime { get; init; }
 

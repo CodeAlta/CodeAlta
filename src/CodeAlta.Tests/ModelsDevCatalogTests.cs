@@ -309,7 +309,7 @@ public sealed class ModelsDevCatalogTests
             out var descriptor,
             out var createRuntime));
 
-        Assert.IsTrue(descriptor.SortModels);
+        Assert.AreEqual(ModelOrder.Name, descriptor.ModelOrder);
         await using var runtime = createRuntime();
         var agentRuntime = Assert.IsInstanceOfType<IAgentModelProviderRuntime>(runtime);
         var model = (await agentRuntime.ModelCatalog!.ListModelsAsync(agentRuntime.RuntimeDescriptor).ConfigureAwait(false)).Single();

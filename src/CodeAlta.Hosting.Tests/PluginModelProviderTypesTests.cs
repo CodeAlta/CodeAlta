@@ -77,6 +77,58 @@ type = "future-provider"
     }
 
     [TestMethod]
+    [DataRow(ModelOrder.Provider)]
+    [DataRow(ModelOrder.NameVersion)]
+    public async Task RegisterOrReplace_OrdersTheModelsAsTheTypeSays_UnlessTheProviderSaysOtherwise(ModelOrder typeOrder)
+    {
+        using var root = new TempRoot("""
+[providers.unset]
+type = "fake-agent"
+command = "agent"
+
+[providers.by-name]
+type = "fake-agent"
+command = "agent"
+models_order = "Name"
+
+[providers.unsorted]
+type = "fake-agent"
+command = "agent"
+sort_models = false
+
+[providers.sorted]
+type = "fake-agent"
+command = "agent"
+sort_models = true
+
+[providers.both]
+type = "fake-agent"
+command = "agent"
+sort_models = false
+models_order = "name_version"
+
+[providers.future]
+type = "fake-agent"
+command = "agent"
+models_order = "release_date"
+""");
+        await using var endpoints = new LoopbackHarnessToolEndpoints();
+        var types = new PluginModelProviderTypes(endpoints);
+        var contribution = CreateContribution(static context => new FakeRuntime(context.Descriptor)) with { ModelOrder = typeOrder };
+        types.Attach(() => [contribution]);
+
+        var registered = types.RegisterOrReplace(new ModelProviderRegistry(), root.Store, root.Path, includeDisabled: false)
+            .ToDictionary(static descriptor => descriptor.ProviderId.Value, static descriptor => descriptor.ModelOrder);
+
+        Assert.AreEqual(typeOrder, registered["unset"]);
+        Assert.AreEqual(ModelOrder.Name, registered["by-name"]);
+        Assert.AreEqual(ModelOrder.Provider, registered["unsorted"]);
+        Assert.AreEqual(ModelOrder.Name, registered["sorted"], "sort_models = true sorts by name, as it always did.");
+        Assert.AreEqual(ModelOrder.NameVersion, registered["both"], "models_order comes first.");
+        Assert.AreEqual(typeOrder, registered["future"], "An order this version does not know is left to the type.");
+    }
+
+    [TestMethod]
     public async Task Builder_RegistersPluginProvidersAfterTheBuiltInOnes_AndNothingWithoutThePlugin()
     {
         using var root = new TempRoot(Config);

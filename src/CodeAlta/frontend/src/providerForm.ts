@@ -16,6 +16,8 @@ export type ProviderForm = Readonly<{
   permissionMode: string;
   /** For a provider that runs Claude Code: the folder of its account (CLAUDE_CONFIG_DIR); blank for the folder of Claude Code. */
   configDir: string;
+  /** The order of the models (`provider`, `name`, `name_version`); blank for the order of its type. */
+  modelsOrder: string;
   /** For a provider whose type a plugin runs: the values of the settings of its type, by key. */
   plugin: PluginFieldValues;
 }>;
@@ -27,9 +29,9 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
       reasoningEffort: provider.reasoningEffort ?? "", apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
       clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "",
       anthropicApiKey: provider.anthropicApiKey ?? "", permissionMode: provider.permissionMode ?? "",
-      configDir: provider.configDir ?? "", plugin: pluginFieldValues(provider) }
+      configDir: provider.configDir ?? "", modelsOrder: provider.modelsOrder ?? "", plugin: pluginFieldValues(provider) }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
-      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", plugin: {} };
+      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", modelsOrder: "", plugin: {} };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
@@ -61,7 +63,17 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
     // Only a provider that runs its own CLI takes a permission mode: the configuration file refuses it elsewhere.
     permissionMode: cli ? optional(form.permissionMode) : null,
     // So is the folder of its account.
-    configDir: cli ? optional(form.configDir) : null };
+    configDir: cli ? optional(form.configDir) : null, modelsOrder: optional(form.modelsOrder) };
+}
+
+/** The orders of the models of a provider, by their value in the configuration file. */
+export const modelsOrders = ["provider", "name", "name_version"] as const;
+const modelsOrderLabels: Readonly<Record<string, MessageKey>> = { provider: "Provider order", name: "By name", name_version: "By name, newest first" };
+
+/** The name of an order of the models; a value of a newer version of CodeAlta is shown as it is. */
+export function modelsOrderLabel(order: string, t: (key: MessageKey) => string): string {
+  const key = modelsOrderLabels[order];
+  return key ? t(key) : order;
 }
 
 /** Provider types that sign in through their own account flow instead of an API key. */

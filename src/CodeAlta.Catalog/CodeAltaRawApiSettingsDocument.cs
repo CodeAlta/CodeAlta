@@ -549,10 +549,18 @@ public sealed class CodeAltaProviderDocument
     public string? ModelsIncludeRegex { get; set; }
 
     /// <summary>
-    /// Gets or sets whether discovered models are sorted alphabetically for presentation.
+    /// Gets or sets whether discovered models are sorted alphabetically for presentation; <see cref="ModelsOrder"/>
+    /// takes precedence over it.
     /// </summary>
     [JsonPropertyName("sort_models")]
     public bool? SortModels { get; set; }
+
+    /// <summary>
+    /// Gets or sets the order discovered models are listed in: <c>provider</c>, <c>name</c> or <c>name_version</c>;
+    /// null leaves it to <see cref="SortModels"/>, then to the order of the provider.
+    /// </summary>
+    [JsonPropertyName("models_order")]
+    public string? ModelsOrder { get; set; }
 
     /// <summary>
     /// Gets or sets provider-specific OpenAI-compatible request-body fields that should be added to outgoing requests.

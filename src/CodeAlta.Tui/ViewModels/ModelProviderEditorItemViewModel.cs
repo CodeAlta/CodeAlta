@@ -1,3 +1,4 @@
+using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using XenoAtom.Terminal.UI;
 
@@ -49,7 +50,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
         UseDefaultSingleModelId = source.SingleModelId is null;
         ModelsIncludeRegex = source.ModelsIncludeRegex;
         UseDefaultModelsIncludeRegex = source.ModelsIncludeRegex is null;
-        SortModels = source.SortModels == true;
+        SortModels = ModelOrdering.Resolve(source.ModelsOrder, source.SortModels, ModelOrder.Provider) != ModelOrder.Provider;
         AuthSource = source.AuthSource ?? ResolveDefaultAuthSource(ProviderType);
         UseDefaultAuthSource = source.AuthSource is null;
         AccountId = source.AccountId;
@@ -266,7 +267,17 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.ModelsDevProviderId = UseDefaultModelsDevProviderId ? null : NormalizeText(ModelsDevProviderId);
         definition.SingleModelId = UseDefaultSingleModelId ? null : NormalizeText(SingleModelId);
         definition.ModelsIncludeRegex = UseDefaultModelsIncludeRegex ? null : NormalizeText(ModelsIncludeRegex);
-        definition.SortModels = SortModels ? true : null;
+        // The checkbox writes sort_models; another order the file names (models_order) stays while it is checked.
+        if (!SortModels)
+        {
+            definition.SortModels = null;
+            definition.ModelsOrder = null;
+        }
+        else if (!ModelOrdering.TryParse(definition.ModelsOrder, out var order) || order == ModelOrder.Provider)
+        {
+            definition.SortModels = true;
+            definition.ModelsOrder = null;
+        }
         var usesAuthSourceField = ProviderType is "codex" or "copilot" or "xai";
         var usesModelDiscoveryField = ProviderType is "codex" or "copilot" or "xai";
         definition.AuthSource = usesAuthSourceField && !UseDefaultAuthSource ? NormalizeText(AuthSource) : null;
@@ -396,6 +407,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
             SingleModelId = definition.SingleModelId,
             ModelsIncludeRegex = definition.ModelsIncludeRegex,
             SortModels = definition.SortModels,
+            ModelsOrder = definition.ModelsOrder,
             ExtraBody = definition.ExtraBody,
             Profile = definition.Profile,
             Compaction = definition.Compaction,

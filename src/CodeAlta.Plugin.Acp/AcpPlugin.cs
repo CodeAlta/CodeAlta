@@ -60,6 +60,8 @@ public sealed class AcpPlugin : PluginBase
             ProviderType = AcpAgentSettings.ProviderType,
             DisplayName = "ACP agent",
             Tag = "ACP",
+            // An agent lists the models of several vendors in no useful order (#220).
+            ModelOrder = ModelOrder.NameVersion,
             PermissionModes = AcpAgentSession.PermissionModes,
             Settings =
             [

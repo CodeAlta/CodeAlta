@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
+using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Hosting;
 using CodeAlta.Plugins.Abstractions;
@@ -16,6 +17,9 @@ internal sealed partial class GlobalConfigService
 {
     private const int MaximumPluginValueLength = 4096;
     private const int MaximumCatalogEntries = 200;
+    // The settings every provider type has that order the models of a provider (see PluginModelProviderTypes).
+    private const string ModelsOrderKey = "models_order";
+    private const string SortModelsKey = "sort_models";
 
     /// <summary>Gets the provider types of the running plugins, or <see langword="null"/> for a host without plugins.</summary>
     internal PluginModelProviderTypes? PluginProviderTypes { get; init; }
@@ -86,7 +90,7 @@ internal sealed partial class GlobalConfigService
                 Bound(type.ProviderType)!, Bound(type.DisplayName)!, Bound(type.Tag),
                 [.. type.Settings.Take(32).Select(static setting => new GlobalConfigPluginProviderSetting(
                     Bound(setting.Key)!, Bound(setting.Label)!, setting.Kind.ToString().ToLowerInvariant(), Bound(setting.Description), Bound(setting.Placeholder), setting.Advanced, setting.ReadOnly))],
-                type.PermissionModes.Take(16).ToArray(), type.Catalog is not null, Bound(type.Catalog?.Title), type.Account is not null))];
+                type.PermissionModes.Take(16).ToArray(), type.Catalog is not null, Bound(type.Catalog?.Title), type.Account is not null) { ModelsOrder = ModelOrdering.Format(type.ModelOrder) })];
 
     // The providers of the configuration whose type a running plugin contributes, as the list of the page shows them.
     private IReadOnlyList<GlobalConfigProvider> ListPluginProviders(CodeAltaConfigDocument document)
@@ -114,6 +118,7 @@ internal sealed partial class GlobalConfigService
                     Icon = Bound(settings.GetString("icon")),
                     Color = Bound(settings.GetString("color")),
                     PermissionMode = Bound(settings.PermissionMode),
+                    ModelsOrder = ConfiguredModelsOrder(settings.GetString(ModelsOrderKey), settings.GetBoolean(SortModelsKey)),
                     Plugin = new GlobalConfigPluginProviderValues(
                         Bound(contribution.Tag),
                         [.. contribution.Settings.Select(setting => ToValue(setting, settings))],
@@ -184,6 +189,8 @@ internal sealed partial class GlobalConfigService
             return new("invalid", null, $"A permission mode is one of: {string.Join(", ", contribution.PermissionModes)}.", null, null, 0);
         if (new[] { request.DisplayName, request.Model, request.ReasoningEffort }.Any(static value => value?.Length > 2048))
             return new("invalid", null, "A provider field is too long.", null, null, 0);
+        if (!TryReadModelsOrder(request.ModelsOrder, out var modelsOrder))
+            return new("invalid", null, $"An order of the models is one of: {string.Join(", ", ModelOrdering.Values)}.", null, null, 0);
 
         return MutateExternal(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, store =>
         {
@@ -202,6 +209,9 @@ internal sealed partial class GlobalConfigService
             Set(values, "model", Optional(request.Model));
             Set(values, "reasoning_effort", Optional(request.ReasoningEffort));
             Set(values, "permission_mode", permissionMode);
+            // The older sort_models gives way to the order the form names.
+            Set(values, ModelsOrderKey, modelsOrder);
+            values.Remove(SortModelsKey);
             foreach (var setting in contribution.Settings.Where(static setting => !setting.ReadOnly))
             {
                 var value = request.Values?.FirstOrDefault(value => string.Equals(value.Key, setting.Key, StringComparison.Ordinal));
@@ -547,7 +557,11 @@ internal sealed partial class GlobalConfigService
 /// <param name="CatalogTitle">The title of that catalog, or null.</param>
 /// <param name="HasAccount">Whether its providers sign in.</param>
 internal sealed record GlobalConfigPluginProviderType(string Type, string Name, string? Tag, IReadOnlyList<GlobalConfigPluginProviderSetting> Settings,
-    IReadOnlyList<string> PermissionModes, bool HasCatalog, string? CatalogTitle, bool HasAccount);
+    IReadOnlyList<string> PermissionModes, bool HasCatalog, string? CatalogTitle, bool HasAccount)
+{
+    /// <summary>The order of the models of its providers when the file does not name one: <c>provider</c>, <c>name</c> or <c>name_version</c>.</summary>
+    public string ModelsOrder { get; init; } = "provider";
+}
 
 /// <param name="Kind"><c>text</c>, <c>path</c>, <c>list</c>, <c>map</c> or <c>boolean</c>.</param>
 internal sealed record GlobalConfigPluginProviderSetting(string Key, string Label, string Kind, string? Description, string? Placeholder, bool Advanced, bool ReadOnly);
@@ -584,6 +598,9 @@ internal sealed record GlobalConfigSavePluginProviderRequest(string? ExpectedEpo
     public string? Color { get; init; }
 
     public string? PermissionMode { get; init; }
+
+    /// <summary>The order of the models (<c>provider</c>, <c>name</c>, <c>name_version</c>); blank for the order of its type.</summary>
+    public string? ModelsOrder { get; init; }
 }
 
 internal sealed record GlobalConfigPluginCatalogRequest(string? ExpectedEpoch, string? Type, bool Refresh);

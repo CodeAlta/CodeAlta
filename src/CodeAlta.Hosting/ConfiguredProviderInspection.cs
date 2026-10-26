@@ -208,7 +208,7 @@ public static class ConfiguredProviderInspection
 
         await using var _ = runtime;
         var probe = await runtime.ProbeAsync(cancellationToken);
-        var models = SortModelsIfRequested(probe.Models, definition.SortModels == true);
+        var models = ModelOrdering.Apply(probe.Models, ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider));
         return new ProviderInspectionModelListResult(true, formatSuccess(models.Count), models);
     }
 
@@ -230,12 +230,4 @@ public static class ConfiguredProviderInspection
         runtime = createRuntime();
         return true;
     }
-
-    private static IReadOnlyList<AgentModelInfo> SortModelsIfRequested(IReadOnlyList<AgentModelInfo> models, bool sortModels)
-        => sortModels
-            ? models
-                .OrderBy(static model => model.DisplayName ?? model.Id, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(static model => model.Id, StringComparer.OrdinalIgnoreCase)
-                .ToArray()
-            : models;
 }

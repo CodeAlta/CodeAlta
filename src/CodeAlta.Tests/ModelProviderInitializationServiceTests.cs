@@ -501,7 +501,7 @@ public sealed class ModelProviderInitializationServiceTests
     public async Task GetModelsAsync_SortsModelsByDisplayNameWhenConfiguredAsync()
     {
         await using var registry = new ModelProviderRegistry();
-        var descriptor = new ModelProviderDescriptor(new ModelProviderId("sorted"), "Sorted", "test") { SortModels = true };
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("sorted"), "Sorted", "test") { ModelOrder = ModelOrder.Name };
         var runtime = new TestRuntime(descriptor, CreateUnsortedModels());
         registry.RegisterOrReplace(descriptor, () => runtime);
         var service = new ModelProviderInitializationService(registry);

@@ -7,7 +7,7 @@ import { downloadSize, pluginFieldValues, pluginFieldsProblem, pluginSettingValu
 import { terminalCommandLine } from "./terminalCommand";
 
 const acp: GlobalConfigPluginProviderType = {
-  type: "acp", name: "ACP agent", tag: "ACP", permissionModes: ["default", "acceptEdits", "bypassPermissions"], hasCatalog: true, catalogTitle: "ACP registry", hasAccount: true,
+  type: "acp", name: "ACP agent", tag: "ACP", permissionModes: ["default", "acceptEdits", "bypassPermissions"], hasCatalog: true, catalogTitle: "ACP registry", hasAccount: true, modelsOrder: "name_version",
   settings: [
     { key: "command", label: "Command", kind: "path", description: null, placeholder: "npx", advanced: false, readOnly: false },
     { key: "arguments", label: "Arguments", kind: "list", description: null, placeholder: null, advanced: false, readOnly: false },
@@ -19,7 +19,7 @@ const acp: GlobalConfigPluginProviderType = {
 const copilot: GlobalConfigProvider = {
   key: "github-copilot-cli", type: "acp", enabled: true, displayName: "Copilot", effectiveName: "Copilot", model: null, reasoningEffort: null, apiUrl: null,
   effectiveApiUrl: null, apiKeyEnv: null, hasApiKey: false, defaults: { displayName: null, model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null },
-  icon: null, color: null, anthropicApiKey: null, permissionMode: null, configDir: null, command: null,
+  icon: null, color: null, anthropicApiKey: null, permissionMode: null, configDir: null, command: null, modelsOrder: null,
   plugin: {
     tag: "ACP", iconData: "data:image/svg+xml;base64,PHN2Zy8+",
     values: [

@@ -269,6 +269,31 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    public void LoadGlobalProviderDefinitions_ReadsModelsOrder_AndRefusesAnUnknownOne()
+    {
+        using var temp = TempDirectory.Create();
+        var config = Path.Combine(temp.Path, "config.toml");
+        File.WriteAllText(config, """
+            [providers.openai]
+            type = "openai-chat"
+            api_key_env = "OPENAI_API_KEY"
+            models_order = " Name_Version "
+            """);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        Assert.AreEqual("name_version", store.LoadGlobalProviderDefinitions(includeDisabled: true).Single(static provider => provider.ProviderKey == "openai").ModelsOrder);
+
+        File.WriteAllText(config, """
+            [providers.openai]
+            type = "openai-chat"
+            api_key_env = "OPENAI_API_KEY"
+            models_order = "newest"
+            """);
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path }).LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "models_order must be one of: provider, name, name_version");
+    }
+
+    [TestMethod]
     public void LoadGlobalProviderDefinitions_InvalidNetworkTimeout_Throws()
     {
         using var temp = TempDirectory.Create();

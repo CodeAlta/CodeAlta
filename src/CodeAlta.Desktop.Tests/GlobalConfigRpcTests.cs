@@ -667,6 +667,29 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task SaveProvider_WritesTheModelsOrder_InPlaceOfTheOlderSortModels()
+    {
+        await using var fixture = new Fixture(ProvidersConfig.Replace("network_timeout_seconds = 77", "network_timeout_seconds = 77\nsort_models = true", StringComparison.Ordinal));
+        var listed = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual("name", listed.Providers.Single(static provider => provider.Key == "local").ModelsOrder, "sort_models = true is the order by name.");
+        Assert.IsNull(listed.Providers.Single(static provider => provider.Key == "spare").ModelsOrder);
+        var edit = new GlobalConfigProviderEdit("local", "openai-chat", true, "Local", "model-a", null, "http://127.0.0.1:9999/v1", null, null, false);
+
+        Assert.AreEqual("invalid", fixture.Service.SaveProvider(new(Epoch, listed.Revision, "local", edit with { ModelsOrder = "newest" }, false, false)).Status);
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, "local", edit with { ModelsOrder = "Name_Version" }, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        var written = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(written, "models_order = \"name_version\"");
+        Assert.IsFalse(written.Contains("sort_models", StringComparison.Ordinal));
+        Assert.AreEqual("name_version", fixture.Service.Providers(new(Epoch)).Providers.Single(static provider => provider.Key == "local").ModelsOrder);
+
+        // Blank is the order of the type.
+        var cleared = fixture.Service.SaveProvider(new(Epoch, saved.Revision, "local", edit, false, false));
+        Assert.AreEqual("ok", cleared.Status, cleared.Message);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("models_order", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task SaveProvider_UpdatesOnlyTheEditedFieldsAndKeepsTheStoredSecret()
     {
         await using var fixture = new Fixture(ProvidersConfig);

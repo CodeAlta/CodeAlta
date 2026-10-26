@@ -248,7 +248,8 @@ public sealed class PluginModelProviderTypes
             IsEnabled = settings.IsEnabled,
             DefaultModelId = settings.DefaultModelId,
             DefaultReasoningEffort = settings.DefaultReasoningEffort,
-            SortModels = settings.GetBoolean("sort_models") ?? false,
+            // A value a newer version of CodeAlta wrote is left to the type.
+            ModelOrder = ModelOrdering.Resolve(settings.GetString("models_order"), settings.GetBoolean("sort_models"), contribution.ModelOrder),
             PermissionModes = contribution.PermissionModes,
             DefaultPermissionMode = permissionMode is not null && contribution.PermissionModes.Contains(permissionMode, StringComparer.Ordinal) ? permissionMode : null,
         };

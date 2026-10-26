@@ -65,10 +65,19 @@ public sealed record ModelProviderDescriptor
     /// </summary>
     public string? DefaultModelId { get; init; }
 
+    /// <summary>Gets the order the discovered models are listed in; the order of the provider by default.</summary>
+    public ModelOrder ModelOrder { get; init; }
+
     /// <summary>
-    /// Gets a value indicating whether discovered models should be sorted alphabetically for presentation.
+    /// Gets a value indicating whether discovered models are sorted for presentation; true sets <see cref="ModelOrder"/>
+    /// to <see cref="Agent.ModelOrder.Name"/>.
     /// </summary>
-    public bool SortModels { get; init; }
+    [Obsolete("Use ModelOrder.", error: false)]
+    public bool SortModels
+    {
+        get => ModelOrder != ModelOrder.Provider;
+        init => ModelOrder = value ? ModelOrder.Name : ModelOrder.Provider;
+    }
 
     /// <summary>
     /// Gets the configured default reasoning effort, when any.

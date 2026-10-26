@@ -338,14 +338,7 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
             var availability = probe.Availability is ModelProviderAvailability.Unknown or ModelProviderAvailability.Probing
                 ? ModelProviderAvailability.Ready
                 : probe.Availability;
-            var models = probe.Models ?? [];
-            if (descriptor.SortModels)
-            {
-                models = models
-                    .OrderBy(static model => model.DisplayName ?? model.Id, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(static model => model.Id, StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-            }
+            var models = ModelOrdering.Apply(probe.Models ?? [], descriptor.ModelOrder);
 
             PublishState(new ModelProviderStateSnapshot
             {

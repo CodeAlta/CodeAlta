@@ -759,7 +759,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             DefaultReasoningEffort = ParseReasoningEffort(definition.ReasoningEffort),
             IsDefault = true,
             IsEnabled = definition.Enabled != false,
-            SortModels = definition.SortModels == true,
+            ModelOrder = ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider),
             // The models of Claude Code are those of Anthropic: models.dev lists them under that provider.
             ModelCatalog = modelCatalog,
         };
@@ -1036,7 +1036,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             IsDefault = true,
             IsEnabled = definition.Enabled != false,
             DefaultModelId = NormalizeText(definition.SingleModelId) ?? NormalizeText(definition.Model),
-            SortModels = definition.SortModels == true,
+            ModelOrder = ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider),
             DefaultReasoningEffort = ParseReasoningEffort(definition.ReasoningEffort),
         };
     }

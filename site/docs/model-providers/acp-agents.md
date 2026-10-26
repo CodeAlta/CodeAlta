@@ -41,6 +41,7 @@ When the agent is not signed in, its form says so and shows how to sign in. A co
 - The agent works with its own tools (reading and editing files, running commands) and asks before it acts. The [permission mode](../workspace/settings.md#tool-permissions) of the session answers for it: reads always, edits in **Accept edits**, everything in **Bypass permissions**; you are asked otherwise.
 - CodeAlta's tools reach it through an MCP server of the session: the `alta` tool, the tools of plugins, and the tools turned on during a turn, such as the [UI tools](../ui-tools.md) with `alta ui activate`.
 - The model list shows the agent's models with their names, limits and prices, and the reasoning levels of each, read when the provider is tested. An agent with many models, such as Cursor, has the levels of the others read at its next tests.
+- The models are sorted by name, the newest version first: `Claude Fable 5.1` before `Claude Fable 5`. **Model order** in the form of the provider keeps the agent's own order instead (`models_order = "provider"`, see [Models of a provider](configuration.md#models-of-a-provider)).
 - A model that has other options, such as the context size or the fast mode of Cursor's models, shows them in the [Agent chip](../workspace/prompt.md#agent-and-model). CodeAlta sends them with every turn of that model.
 - Its tool calls, plan, thoughts and file changes appear in the timeline, and its usage, when it reports one, in the context usage of the session.
 - The agent keeps its own context and compacts it itself. After a restart, the session goes on in the same session of the agent when the agent can resume one; otherwise the agent is told the conversation.
@@ -74,6 +75,7 @@ arguments = ["--acp"]        # what starts it in ACP mode
 env = { MY_AGENT_LOG = "1" } # optional: variables of its process
 permission_mode = "default"  # optional: default, acceptEdits or bypassPermissions
 sandbox_hosts = ["api.example.com"] # optional: the hosts of its service, in a sandbox
+models_order = "provider"    # optional: provider, name or name_version (the default)
 ```
 
 An agent added from the registry also has `agent` and `agent_version`, the name and version of its registry entry.

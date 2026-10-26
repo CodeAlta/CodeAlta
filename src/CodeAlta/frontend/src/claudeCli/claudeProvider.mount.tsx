@@ -8,7 +8,7 @@ import { readAssignments, readSpaces, type SpaceResourceKind } from "../spaces/s
 const provider: GlobalConfigProvider = { key: "claude-code", type: "claude-code", enabled: true, displayName: null, effectiveName: "Claude Code", model: null,
   reasoningEffort: null, apiUrl: null, effectiveApiUrl: null, apiKeyEnv: null, hasApiKey: false,
   defaults: { displayName: "Claude Code", model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null,
-  permissionMode: null, configDir: null, command: null };
+  permissionMode: null, configDir: null, command: null, modelsOrder: null };
 const missing: GlobalConfigProvider = { ...provider, key: "claude-tools", effectiveName: "Claude Tools", command: "D:\\nowhere\\claude.exe" };
 const status: ClaudeCliStatusResponse = { status: "ok", supported: true, version: "2.1.292", size: "113796621", pinnedPath: null,
   installedPath: "C:\\Users\\me\\.local\\bin\\claude.exe", installedVersion: "2.1.300", windows: true, home: "C:\\Users\\me" };
