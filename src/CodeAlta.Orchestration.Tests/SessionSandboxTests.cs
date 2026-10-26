@@ -42,6 +42,21 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task AConfigurationThatCannotBeRead_KeepsTheSandboxesReadLast()
+    {
+        await using var f = await Fixture.CreateAsync();
+        await f.CreateSessionAsync("s");
+        f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n\n[providers.codex]\ntype = \"codex\"\nsandbox = \"workspace\"\n");
+        Assert.AreEqual(new SandboxChoice("workspace", SandboxScope.Provider), (await f.Runtime.GetSessionSandboxAsync("s")).Choice);
+
+        // Broken for a moment, or by a session: the sandbox of the session does not turn off.
+        f.WriteConfig("[sandbox\nall_sessions = ");
+        Assert.AreEqual(new SandboxChoice("workspace", SandboxScope.Provider), (await f.Runtime.GetSessionSandboxAsync("s")).Choice);
+        f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
+        Assert.AreEqual(new SandboxChoice("strict", SandboxScope.AllSessions), (await f.Runtime.GetSessionSandboxAsync("s")).Choice, "a configuration read again applies");
+    }
+
+    [TestMethod]
     public async Task AProfileThatCannotBeUsed_KeepsTheSessionSandboxed_WithAProblem()
     {
         await using var f = await Fixture.CreateAsync();

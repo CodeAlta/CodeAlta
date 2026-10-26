@@ -31,14 +31,21 @@ public sealed partial class SessionRuntimeService
         try
         {
             settings = _configStore.LoadGlobalSandbox();
+            Volatile.Write(ref _lastSandboxSettings, settings);
         }
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            settings = CodeAltaSandboxSettings.Empty;
+            // A configuration that cannot be read now is not one without a sandbox: the last one read applies.
+            settings = Volatile.Read(ref _lastSandboxSettings) ?? CodeAltaSandboxSettings.Empty;
         }
 
         return (settings.AllSessions, [.. settings.Profiles.Select(ToSandboxProfile)]);
     }
+
+    // The sandbox settings and the providers read last: what applies while the configuration cannot be read, so that
+    // a file broken for a moment, or by a session, never turns a sandbox off.
+    private CodeAltaSandboxSettings? _lastSandboxSettings;
+    private IReadOnlyDictionary<string, CodeAltaProviderDocument>? _lastSandboxProviders;
 
     /// <summary>
     /// Gets the sandbox of a session as it applies now: its own choice, else the sandbox of its model, of its provider,
@@ -201,19 +208,22 @@ public sealed partial class SessionRuntimeService
     private (string? Provider, string? Model) ProviderSandbox(string? providerKey, string? modelId)
     {
         if (string.IsNullOrWhiteSpace(providerKey)) return (null, null);
+        IReadOnlyDictionary<string, CodeAltaProviderDocument>? providers;
         try
         {
-            var providers = _configStore.LoadGlobal().Providers;
-            if (providers is null || !providers.TryGetValue(providerKey, out var provider)) return (null, null);
-            var model = !string.IsNullOrWhiteSpace(modelId) && provider.ModelOverrides is { } overrides && overrides.TryGetValue(modelId, out var modelOverride)
-                ? modelOverride.Sandbox
-                : null;
-            return (provider.Sandbox, model);
+            providers = _configStore.LoadGlobal().Providers;
+            Volatile.Write(ref _lastSandboxProviders, providers ?? new Dictionary<string, CodeAltaProviderDocument>());
         }
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            return (null, null);
+            providers = Volatile.Read(ref _lastSandboxProviders);
         }
+
+        if (providers is null || !providers.TryGetValue(providerKey, out var provider)) return (null, null);
+        var model = !string.IsNullOrWhiteSpace(modelId) && provider.ModelOverrides is { } overrides && overrides.TryGetValue(modelId, out var modelOverride)
+            ? modelOverride.Sandbox
+            : null;
+        return (provider.Sandbox, model);
     }
 
     private static SandboxProfile ToSandboxProfile(CodeAltaSandboxProfileSettings settings) => new()
