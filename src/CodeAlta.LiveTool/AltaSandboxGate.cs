@@ -12,13 +12,13 @@ internal static class AltaSandboxGate
 {
     // Paths of commands under `alta`; a path allows the commands under it. What is not here is refused: a command that
     // starts a program (terminals, plugin builds, automations, MCP servers), changes what runs outside the sandbox
-    // (prompts, spaces, projects, settings), drives the window, or uses the accounts of the user to change something.
+    // (prompts, spaces, labels, projects, settings), drives the window, or uses the accounts of the user to change something.
     private static readonly FrozenSet<string> Allowed = new[]
     {
         "version", "ask", "notes", "note", "skill", "skills", "skills_activate", "tool", "provider", "model", "documentation",
         "task", "plan", "review", "reminder", "job", "diff", "editor", "search", "sandbox list", "sandbox show", "sandbox status",
         "prompt list", "prompt show", "plugin list", "plugin status", "plugin api",
-        "project list", "project show", "project resolve", "project current", "space list", "space show", "space current",
+        "project list", "project show", "project resolve", "project current", "space list", "space show", "space current", "label list", "label show",
         "issue trackers", "issue list", "issue filters", "issue views", "issue show",
         "issues trackers", "issues list", "issues filters", "issues views", "issues show",
         "mcp activate", "mcp list", "mcp status", "mcp tool", "mcp skill",

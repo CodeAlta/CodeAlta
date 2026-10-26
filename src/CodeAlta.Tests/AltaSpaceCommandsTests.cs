@@ -7,9 +7,9 @@ using Microsoft.Data.Sqlite;
 
 namespace CodeAlta.Tests;
 
-/// <summary>Tests of <c>alta space</c> and of the <c>alta project</c> commands that read and change the spaces.</summary>
+/// <summary>Tests of <c>alta space</c>, <c>alta label</c> and of the <c>alta project</c> commands that read and change them.</summary>
 [TestClass]
-public sealed class AltaSpaceCommandsTests
+public sealed partial class AltaSpaceCommandsTests
 {
     private static readonly string[] SpaceLeaves = ["list", "show", "current", "create", "update", "delete", "add", "remove", "reorder"];
 
@@ -542,6 +542,9 @@ public sealed class AltaSpaceCommandsTests
 
         public Task<AltaCommandResult> RunAsync(params string[] args)
             => Dispatcher.InvokeAsync(args, caller: Mcp).AsTask();
+
+        public Task<AltaCommandResult> RunAsync(string[] args, AltaCallerIdentity caller)
+            => Dispatcher.InvokeAsync(args, caller: caller).AsTask();
 
         public Task<AltaCommandResult> OkAsync(params string[] args) => OkAsync(args, stdin: null);
 

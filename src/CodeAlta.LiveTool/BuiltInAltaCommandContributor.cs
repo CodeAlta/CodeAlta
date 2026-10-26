@@ -135,6 +135,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (context.Invocation.Services.Get<SpaceCatalog>() is not null)
         {
             yield return CreateSpaceCommand(context.Invocation);
+            yield return CreateLabelCommand(context.Invocation);
         }
 
         yield return CreateSessionCommand(context.Invocation);
@@ -259,6 +260,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
+        if (spaces) policies.AddRange(LabelPolicies);
         if (spaces && context.Services.Get<IAltaSpaceView>() is not null) policies.Add(SpaceSwitchPolicy);
         if (appearance) policies.AddRange(AppearancePolicies);
         if (workItems) policies.AddRange(WorkItemPolicies);
@@ -680,15 +682,19 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var detailed = false;
         string? space = null;
         var all = false;
+        string? label = null;
+        var direct = false;
         var command = Leaf("list", "List the projects of the current space from the CodeAlta catalog.");
         command.Add("include-archived", "Include archived projects.", value => includeArchived = value is not null);
         command.Add("detailed", "Emit one detailed metadata record per project instead of the compact project refs array.", value => detailed = value is not null);
         command.Add("space=", "List the projects of this space: id, start of id, or name. `default` lists every project.", value => space = value);
         command.Add("all", "List every project, whatever its spaces.", value => all = value is not null);
-        command.Add(async (_, _) => await HandleProjectListAsync(context, includeArchived, detailed, space, all).ConfigureAwait(false));
+        command.Add("label=", "List only the projects that have this label or one under it: id, name, path, or start of id.", value => label = value);
+        command.Add("direct", "With --label, leave out the projects that have only a label under it.", value => direct = value is not null);
+        command.Add(async (_, _) => await HandleProjectListAsync(context, includeArchived, detailed, space, all, label, direct).ConfigureAwait(false));
         AddHelpText(command,
             "Without --space or --all, the projects are those of the space the CodeAlta window shows; without a window, every project. `spaceId` names the space that was listed.",
-            "Examples: `alta project list`; `alta project list --all`; `alta project list --space work --detailed`.");
+            "Examples: `alta project list`; `alta project list --all`; `alta project list --space work --detailed`; `alta project list --all --label infra`.");
         return command;
     }
 
@@ -1922,7 +1928,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return AltaExitCodes.Success;
     }
 
-    private static async ValueTask<int> HandleProjectListAsync(AltaCommandContext context, bool includeArchived, bool detailed, string? spaceRef, bool all)
+    private static async ValueTask<int> HandleProjectListAsync(AltaCommandContext context, bool includeArchived, bool detailed, string? spaceRef, bool all,
+        string? labelRef = null, bool direct = false)
     {
         if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
         {
@@ -1935,10 +1942,17 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return exitCode;
         }
 
+        var (labels, labelExit) = await ResolveProjectListLabelAsync(context, labelRef, direct).ConfigureAwait(false);
+        if (labelExit != AltaExitCodes.Success)
+        {
+            return labelExit;
+        }
+
         var spaceId = space?.Id ?? SpaceDescriptor.DefaultId;
         var projects = await catalog.LoadAsync(context.CancellationToken).ConfigureAwait(false);
         var filtered = projects
-            .Where(project => (includeArchived || !project.Archived) && (space is null || project.Spaces.Contains(space.Id, StringComparer.Ordinal)))
+            .Where(project => (includeArchived || !project.Archived) && (space is null || project.Spaces.Contains(space.Id, StringComparer.Ordinal))
+                && (labels is null || project.Labels.Any(labels.Contains)))
             .OrderBy(static project => project.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (!detailed)
@@ -6397,7 +6411,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static void WriteProject(AltaCommandContext context, string type, ProjectDescriptor project)
         => AltaJsonlWriter.WriteRecord(context.Stdout, ProjectRecord(context, type, project));
 
-    // `spaces` names the spaces of the project besides the default one, which holds every project.
+    // `spaces` names the spaces of the project besides the default one, which holds every project; `labels` names its labels.
     private static Dictionary<string, object?> ProjectRecord(AltaCommandContext context, string type, ProjectDescriptor project)
     {
         var record = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -6417,6 +6431,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (project.Description is not null) record["description"] = project.Description;
         record["tags"] = project.Tags;
         record["spaces"] = project.Spaces;
+        record["labels"] = project.Labels;
         return record;
     }
 
