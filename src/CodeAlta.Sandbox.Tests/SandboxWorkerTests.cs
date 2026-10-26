@@ -109,6 +109,26 @@ public sealed class SandboxWorkerTests
     }
 
     [TestMethod]
+    public void AResultOfTheWorker_GivesTextAndImages_NeverAPathCodeAltaWouldRead()
+    {
+        var result = SandboxWorkerClient.FromSandbox(new AgentToolResult(true,
+        [
+            new AgentToolResultItem.Text("text"),
+            new AgentToolResultItem.Image("iVBORw0KGgo=", "image/png"),
+            new AgentToolResultItem.ImageUrl("data:image/png;base64,iVBORw0KGgo="),
+            new AgentToolResultItem.LocalImage(@"C:\Users\someone\.ssh\id_ed25519", "image/png"),
+            new AgentToolResultItem.ImageUrl("file:///C:/Users/someone/.ssh/id_ed25519"),
+        ], null));
+
+        Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items[0]);
+        Assert.IsInstanceOfType<AgentToolResultItem.Image>(result.Items[1]);
+        Assert.IsInstanceOfType<AgentToolResultItem.ImageUrl>(result.Items[2]);
+        Assert.IsFalse(result.Items.Any(static item => item is AgentToolResultItem.LocalImage), "a path the host would read with the rights of the user");
+        Assert.IsFalse(result.Items.OfType<AgentToolResultItem.ImageUrl>().Any(static item => item.Url.StartsWith("file:", StringComparison.Ordinal)));
+        Assert.HasCount(5, result.Items, "what is left out is said");
+    }
+
+    [TestMethod]
     public async Task AResultLongerThanAFrame_IsSentInParts()
     {
         using var temp = new TempTree();

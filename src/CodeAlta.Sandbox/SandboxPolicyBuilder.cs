@@ -150,6 +150,16 @@ public static class SandboxPolicyBuilder
         return SecretNameParts.Any(upper.Contains) || upper.EndsWith("_KEY", StringComparison.Ordinal);
     }
 
+    // The variables that load code into a process as it starts (a startup hook of .NET, a profiler, a preloaded
+    // library): a variable of the session, which a repository can set, never puts code into the worker this way.
+    private static bool IsLoaderName(string name)
+    {
+        var upper = name.ToUpperInvariant();
+        return upper is "DOTNET_STARTUP_HOOKS" or "DOTNET_ADDITIONAL_DEPS" or "DOTNET_SHARED_STORE" or "DOTNET_HOST_PATH" or "NODE_OPTIONS"
+               || upper.StartsWith("CORECLR_", StringComparison.Ordinal) || upper.StartsWith("COR_", StringComparison.Ordinal)
+               || upper.StartsWith("LD_", StringComparison.Ordinal) || upper.StartsWith("DYLD_", StringComparison.Ordinal);
+    }
+
     private static IReadOnlyDictionary<string, string> Environment(ResolvedSandboxProfile profile, SandboxHost host,
         IEnumerable<KeyValuePair<string, string>> sessionEnvironment, string sandboxHome, string caches, string temp, string userGitConfig, string userPackages)
     {
@@ -164,7 +174,7 @@ public static class SandboxPolicyBuilder
         var secretValues = host.Environment.Where(static pair => IsSecretName(pair.Key) && pair.Value.Length >= 6).Select(static pair => pair.Value).ToList();
         foreach (var (name, value) in sessionEnvironment)
         {
-            if (!IsSecretName(name) && !secretValues.Any(secret => value.Contains(secret, StringComparison.Ordinal))) environment[name] = value;
+            if (!IsSecretName(name) && !IsLoaderName(name) && !secretValues.Any(secret => value.Contains(secret, StringComparison.Ordinal))) environment[name] = value;
         }
 
         // What the profile passes on, by name, secrets included: the user named them.

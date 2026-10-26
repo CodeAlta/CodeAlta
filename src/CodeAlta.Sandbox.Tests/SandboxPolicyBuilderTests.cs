@@ -139,6 +139,9 @@ public sealed class SandboxPolicyBuilderTests
             // An identity of the repository that copies a secret of the application under another name.
             ["LEAK"] = "sk-host",
             ["WRAPPED"] = "Bearer sk-host",
+            // What loads code into the worker as it starts.
+            ["DOTNET_STARTUP_HOOKS"] = "C:/project/hook.dll",
+            ["LD_PRELOAD"] = "/project/hook.so",
         });
 
         Assert.AreEqual("s1", policy.Environment["CODEALTA_SESSION_ID"]);
@@ -147,6 +150,8 @@ public sealed class SandboxPolicyBuilderTests
         Assert.IsFalse(policy.Environment.ContainsKey("OPENAI_API_KEY"), "the application's own variables are not inherited");
         Assert.IsFalse(policy.Environment.ContainsKey("LEAK"), "nor their values under another name");
         Assert.IsFalse(policy.Environment.ContainsKey("WRAPPED"));
+        Assert.IsFalse(policy.Environment.ContainsKey("DOTNET_STARTUP_HOOKS"), "a variable of the session puts no code into the worker");
+        Assert.IsFalse(policy.Environment.ContainsKey("LD_PRELOAD"));
         Assert.AreEqual("feed", policy.Environment["MY_FEED_TOKEN"], "the profile names it");
         Assert.AreEqual(policy.Home, policy.Environment["HOME"]);
         Assert.AreEqual(policy.Temp, policy.Environment["TEMP"]);

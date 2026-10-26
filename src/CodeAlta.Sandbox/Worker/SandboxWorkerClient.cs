@@ -228,7 +228,7 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
             case SandboxWorkerMessageTypes.Result when _calls.TryGetValue(message.Id, out var call):
                 var result = message.Payload?.Deserialize(AgentJsonSerializerContext.Default.AgentToolResult)
                     ?? new AgentToolResult(false, [], "The sandbox gave no result.");
-                call.Result.TrySetResult(result);
+                call.Result.TrySetResult(FromSandbox(result));
                 break;
             case SandboxWorkerMessageTypes.Progress when _calls.TryGetValue(message.Id, out var running) && running.Invocation.Progress is { } progress:
                 // What the tool writes while it runs: the session shows it, as for a tool that runs in CodeAlta.
@@ -327,6 +327,19 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
     }
 
     private static AgentToolResult Failure(string tool, string reason) => new(false, [], $"{tool} did not run: {reason}");
+
+    // What the worker answers comes from the sandbox, where any process may speak for it: its text and the bytes of its
+    // images pass, never a path or a link that CodeAlta would read or follow with the rights of the user.
+    internal static AgentToolResult FromSandbox(AgentToolResult result)
+    {
+        var items = result.Items.Select(static item => item switch
+        {
+            AgentToolResultItem.Text or AgentToolResultItem.Image => item,
+            AgentToolResultItem.ImageUrl { Url: var url } when url.StartsWith("data:", StringComparison.OrdinalIgnoreCase) => item,
+            _ => new AgentToolResultItem.Text("[An item of the result that names a file or a link was left out: the sandbox gives text and images only.]"),
+        }).ToArray();
+        return result with { Items = items };
+    }
 
     private sealed class Call(AgentToolInvocation invocation, SandboxToolHost host)
     {
