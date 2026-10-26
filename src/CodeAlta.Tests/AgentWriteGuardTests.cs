@@ -44,6 +44,27 @@ public sealed class AgentWriteGuardTests
     }
 
     [TestMethod]
+    public void TheGuardOfASandbox_SaysTheSandboxRefuses_NotThatTheShellIsTurnedOff()
+    {
+        using var temp = new Temp();
+        var project = temp.Folder("project");
+        var alta = temp.Folder("home", ".alta");
+        var noShell = new AgentWriteGuard([project], [alta], [], temp.Folder("home"));
+        var sandbox = new AgentWriteGuard([project], [alta], [], temp.Folder("home")) { InSandbox = true };
+
+        foreach (var refused in new[] { Path.Combine(project, ".vscode", "tasks.json"), Path.Combine(alta, "config.toml"), Path.Combine(temp.Path, "elsewhere", "a.txt") })
+        {
+            StringAssert.Contains(noShell.Check(refused), "`shell_command` is turned off", refused);
+            var inSandbox = sandbox.Check(refused);
+            Assert.IsNotNull(inSandbox, refused);
+            Assert.DoesNotContain("shell_command", inSandbox, "a sandboxed session has its shell");
+            StringAssert.Contains(inSandbox, "sandbox", refused);
+        }
+
+        Assert.DoesNotContain("shell_command", sandbox.CheckTree(project)!, "nor when a folder is kept");
+    }
+
+    [TestMethod]
     public void TheGuard_OfASessionThatWorksInTheHomeFolder_RefusesTheSettingsOfTheUser()
     {
         using var temp = new Temp();

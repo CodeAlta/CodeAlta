@@ -57,6 +57,12 @@ public sealed class AgentWriteGuard
         _writableExceptions = Normalize(writableExceptions);
     }
 
+    /// <summary>
+    /// Gets whether the guard is the one of a sandboxed session, which has its shell: its refusals say that the sandbox
+    /// refuses, not that <c>shell_command</c> is turned off.
+    /// </summary>
+    public bool InSandbox { get; init; }
+
     /// <summary>Gets the folders the session may write in, with their links resolved.</summary>
     public IReadOnlyList<string> WritableRoots => _writableRoots;
 
@@ -97,18 +103,18 @@ public sealed class AgentWriteGuard
         // `<project>/.alta/worktrees` is the session's own, whatever is above it.
         if (_writableRoots.Where(candidate => IsInside(candidate, real)).OrderByDescending(static candidate => candidate.Length).FirstOrDefault() is not { } root)
         {
-            return $"'{path}' is outside the folders this session works in. `shell_command` is turned off for this session: it writes only in its own folders.";
+            return $"'{path}' is outside the folders this session works in. {Because("writes only in its own folders")}";
         }
 
         if (_protectedRoots.Any(@protected => IsInside(root, @protected) && IsInside(@protected, real)) || IsProtectedHomeEntry(root, real))
         {
-            return $"'{path}' holds settings of CodeAlta or of the user. `shell_command` is turned off for this session: it does not change them.";
+            return $"'{path}' holds settings of CodeAlta or of the user. {Because("does not change them")}";
         }
 
         if (ProtectedSegment(root, real) is { } segment)
         {
             return $"'{path}' is in '{segment}', which git, CodeAlta or a coding agent reads as settings or code (hooks, plugins, MCP servers, prompts). " +
-                   "`shell_command` is turned off for this session: it does not write there.";
+                   Because("does not write there");
         }
 
         return null;
@@ -138,7 +144,7 @@ public sealed class AgentWriteGuard
 
         if (_writableRoots.Concat(_protectedRoots).Any(root => IsInside(real, root)))
         {
-            return $"'{path}' is, or holds, a folder this session works in or a folder of CodeAlta: `shell_command` is turned off for this session, it does not delete or move it.";
+            return $"'{path}' is, or holds, a folder this session works in or a folder of CodeAlta. {Because("does not delete or move it")}";
         }
 
         var count = 0;
@@ -148,7 +154,7 @@ public sealed class AgentWriteGuard
             {
                 if (++count > MaximumTreeEntries)
                 {
-                    return $"'{path}' holds too many files to be looked through: `shell_command` is turned off for this session, it does not delete or move it.";
+                    return $"'{path}' holds too many files to be looked through. {Because("does not delete or move it")}";
                 }
 
                 if (Check(entry.FullName) is { } inner)
@@ -159,11 +165,14 @@ public sealed class AgentWriteGuard
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return $"'{path}' holds files this session cannot look through: `shell_command` is turned off for this session, it does not delete or move it.";
+            return $"'{path}' holds files this session cannot look through. {Because("does not delete or move it")}";
         }
 
         return null;
     }
+
+    // Why the session does not do it: its shell is turned off, or its sandbox keeps it from it.
+    private string Because(string what) => InSandbox ? $"The sandbox of this session {what}." : $"`shell_command` is turned off for this session: it {what}.";
 
     // The first part of the path below the folder of the session that is read as settings or code.
     private static string? ProtectedSegment(string root, string real)
