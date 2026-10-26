@@ -136,12 +136,17 @@ public sealed class SandboxPolicyBuilderTests
             ["CODEALTA_SESSION_ID"] = "s1",
             ["GIT_AUTHOR_NAME"] = "Ada",
             ["AWS_SECRET_ACCESS_KEY"] = "from-the-space",
+            // An identity of the repository that copies a secret of the application under another name.
+            ["LEAK"] = "sk-host",
+            ["WRAPPED"] = "Bearer sk-host",
         });
 
         Assert.AreEqual("s1", policy.Environment["CODEALTA_SESSION_ID"]);
         Assert.AreEqual("Ada", policy.Environment["GIT_AUTHOR_NAME"]);
         Assert.IsFalse(policy.Environment.ContainsKey("AWS_SECRET_ACCESS_KEY"), "a secret of the session is passed only when the profile names it");
         Assert.IsFalse(policy.Environment.ContainsKey("OPENAI_API_KEY"), "the application's own variables are not inherited");
+        Assert.IsFalse(policy.Environment.ContainsKey("LEAK"), "nor their values under another name");
+        Assert.IsFalse(policy.Environment.ContainsKey("WRAPPED"));
         Assert.AreEqual("feed", policy.Environment["MY_FEED_TOKEN"], "the profile names it");
         Assert.AreEqual(policy.Home, policy.Environment["HOME"]);
         Assert.AreEqual(policy.Temp, policy.Environment["TEMP"]);
