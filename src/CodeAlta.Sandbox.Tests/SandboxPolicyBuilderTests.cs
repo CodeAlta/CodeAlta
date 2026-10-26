@@ -78,6 +78,26 @@ public sealed class SandboxPolicyBuilderTests
     }
 
     [TestMethod]
+    public void AWorkingDirectoryInTheFolderOfCodeAlta_IsReplacedByAFolderOfTheSession_ButItsWorktreesStay()
+    {
+        using var temp = new TempTree();
+        var alta = temp.Folder("home/.alta");
+        var strict = SandboxProfiles.Resolve("strict", []);
+
+        // A global session works in the folder of CodeAlta, where its credentials and settings are.
+        var global = Build(temp, strict, alta);
+        Assert.IsFalse(global.ReadWrite.Any(path => path.StartsWith(alta, StringComparison.OrdinalIgnoreCase)), "the folder of CodeAlta is not granted");
+        Assert.IsTrue(global.WorkingDirectory.StartsWith(temp.Folder("data"), StringComparison.OrdinalIgnoreCase));
+        CollectionAssert.Contains(global.ReadWrite.ToList(), global.WorkingDirectory);
+        Assert.IsFalse(Build(temp, strict, Path.Combine(alta, "auth")).ReadWrite.Any(path => path.StartsWith(alta, StringComparison.OrdinalIgnoreCase)));
+        Assert.IsFalse(Build(temp, strict, Path.Combine(alta, "worktrees")).ReadWrite.Any(path => path.StartsWith(alta, StringComparison.OrdinalIgnoreCase)),
+            "the folder of the worktrees is not one of them");
+
+        var worktree = temp.Folder("home/.alta/worktrees/project/wt");
+        Assert.AreEqual(worktree, Build(temp, strict, worktree).WorkingDirectory, "a worktree of CodeAlta is the folder of its session");
+    }
+
+    [TestMethod]
     public void TheGitFolderOfTheWorkingTree_IsProtectedAsItIsFound()
     {
         using var temp = new TempTree();

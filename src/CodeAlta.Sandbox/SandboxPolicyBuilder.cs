@@ -70,7 +70,17 @@ public static class SandboxPolicyBuilder
         var profileRoot = Path.Combine(Full(host.DataRoot), "profiles", SafeName(profile.Name));
         var sandboxHome = Path.Combine(profileRoot, "home");
         var caches = Path.Combine(profileRoot, "caches");
-        var temp = Path.Combine(Full(host.DataRoot), "sessions", SafeName(sessionKey), "temp");
+        var sessionRoot = Path.Combine(Full(host.DataRoot), "sessions", SafeName(sessionKey));
+        var temp = Path.Combine(sessionRoot, "temp");
+        var secrets = HomeSecrets.Select(entry => Path.Combine(home, entry)).Concat(host.SecretFolders.Select(Full)).ToList();
+        // A working directory in a folder of secrets is not granted: a global session works in the folder of CodeAlta,
+        // and works in a folder of its own in the sandbox. The worktrees CodeAlta keeps there are the exception.
+        var codeAltaRoots = host.SecretFolders.Select(Full).Append(Path.Combine(home, ".alta"));
+        if (secrets.Any(secret => IsInside(secret, workingDirectory))
+            && !codeAltaRoots.Any(root => IsInside(Path.Combine(root, "worktrees"), workingDirectory) && !comparer.Equals(Path.Combine(root, "worktrees"), workingDirectory)))
+        {
+            workingDirectory = Path.Combine(sessionRoot, "work");
+        }
 
         var readWrite = new List<string> { workingDirectory };
         var gitFolders = GitFolders(workingDirectory, folders.Repositories.Select(Full).ToList());
@@ -106,7 +116,6 @@ public static class SandboxPolicyBuilder
         }
 
         var granted = readWrite.Concat(readOnly).ToList();
-        var secrets = HomeSecrets.Select(entry => Path.Combine(home, entry)).Concat(host.SecretFolders.Select(Full));
         var denied = profile.Deny.Select(path => Expand(path, home)).ToList();
         // A secret is denied where a grant would reach it; the session's own folders (a worktree under ~/.alta)
         // stay granted, since a granted child of a denied folder keeps its grant.
