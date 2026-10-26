@@ -145,6 +145,50 @@ public sealed class CodeModeToolTests
                 ? new CodeModeAgentResult("child-x", false, "failed", null, "it broke", Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero)
                 : new CodeModeAgentResult("child-" + request.Prompt, true, "completed", "answer to " + request.Prompt, null, Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero));
         }
+
+        public System.Collections.Concurrent.ConcurrentQueue<string> Kept { get; } = new();
+
+        public Task<CodeModeAgentResult> OpenAsync(string parentSessionId, CodeModeAgentRequest request, CancellationToken cancellationToken)
+        {
+            Kept.Enqueue("open " + request.Title);
+            return Task.FromResult(new CodeModeAgentResult("kept-1", true, "opened", null, null, Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero));
+        }
+
+        public Task<CodeModeAgentResult> AskAsync(string runId, string sessionId, string prompt, JsonElement? schema, TimeSpan? timeout, CancellationToken cancellationToken)
+        {
+            Kept.Enqueue($"ask {sessionId} {prompt}");
+            return Task.FromResult(new CodeModeAgentResult(sessionId, true, "completed", "reply to " + prompt, null, Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero));
+        }
+
+        public Task CloseAsync(string runId, string sessionId)
+        {
+            Kept.Enqueue("close " + sessionId);
+            return Task.CompletedTask;
+        }
+    }
+
+    [TestMethod]
+    public async Task Session_KeepsOneSessionForSeveralPrompts_AndClosesIt()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var agents = new FakeAgents();
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = agents }).Single(static tool => tool.Spec.Name == "exec");
+
+        var result = await InvokeAsync(exec, """
+            const reviewer = await session({ title: "Reviewer" });
+            const first = await reviewer.run("one");
+            const second = await reviewer.run("two");
+            await reviewer.close();
+            return [reviewer.id, first, second];
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        using var value = ValueOf(result);
+        Assert.AreEqual("""["kept-1","reply to one","reply to two"]""", value.RootElement.GetRawText());
+        CollectionAssert.AreEqual(new[] { "open Reviewer", "ask kept-1 one", "ask kept-1 two", "close kept-1" }, agents.Kept.ToArray());
     }
 
     [TestMethod]

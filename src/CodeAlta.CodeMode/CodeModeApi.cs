@@ -152,8 +152,58 @@ public sealed class CodeModeApi
               if (options !== undefined && (options === null || typeof options !== "object" || Array.isArray(options))) {
                 return Promise.reject(new TypeError('agent(prompt, options): options is an object, such as { tier: "quick" }.'));
               }
-              return host("codemode.agent", stringify(Object.assign({}, options, { prompt }))).then(unwrap).then((reply) => reply.answer);
+              return host("codemode.agent", stringify(Object.assign({}, options, { prompt }))).then(unwrap).then((reply) => reply.value !== undefined ? reply.value : reply.answer);
             });
+            // session(options): a session of its own the script keeps for several prompts; closed when the script ends.
+            global("session", function (options) {
+              if (options !== undefined && (options === null || typeof options !== "object" || Array.isArray(options))) {
+                return Promise.reject(new TypeError('session(options): options is an object, such as { tier: "quick", title: "Reviewer" }.'));
+              }
+              return host("codemode.session.open", stringify(options === undefined ? {} : options)).then(unwrap).then((opened) => freeze({
+                id: opened.sessionId,
+                run: (prompt, runOptions) => {
+                  if (typeof prompt !== "string" || prompt.length === 0) return Promise.reject(new TypeError("session.run(prompt, options): the prompt is a non-empty string."));
+                  return host("codemode.session.ask", stringify(Object.assign({}, runOptions, { sessionId: opened.sessionId, prompt }))).then(unwrap)
+                    .then((reply) => reply.value !== undefined ? reply.value : reply.answer);
+                },
+                close: () => host("codemode.session.close", stringify({ sessionId: opened.sessionId })).then(unwrap),
+              }));
+            });
+            // parallel(thunks, { limit }): a barrier over functions that each return a promise. A failure is null in the
+            // array, and a warning in the output; at most `limit` (8 by default) run at once.
+            global("parallel", async function (thunks, options) {
+              if (!Array.isArray(thunks) || thunks.some((t) => typeof t !== "function")) {
+                throw new TypeError("parallel(thunks, { limit }): thunks is an array of functions, such as [() => agent(\"a\"), () => agent(\"b\")].");
+              }
+              const limit = Math.max(1, Math.min(64, (options && options.limit) | 0 || 8));
+              const results = new Array(thunks.length).fill(null);
+              let next = 0;
+              const worker = async () => {
+                while (next < thunks.length) {
+                  const index = next++;
+                  try { results[index] = await thunks[index](); }
+                  catch (e) { writeOutput(2, `parallel: item ${index} failed: ${message(e)}`); }
+                }
+              };
+              await Promise.all(Array.from({ length: Math.min(limit, thunks.length) }, worker));
+              return results;
+            });
+            // pipeline(items, ...stages): each item goes through the stages on its own, without waiting for the other
+            // items at each stage. An item whose stage fails is null, and a warning in the output.
+            global("pipeline", async function (items, ...stages) {
+              if (!Array.isArray(items)) throw new TypeError("pipeline(items, ...stages): items is an array.");
+              if (stages.length === 0 || stages.some((s) => typeof s !== "function")) throw new TypeError("pipeline(items, ...stages): each stage is a function (item, index) => value or promise.");
+              return Promise.all(items.map(async (item, index) => {
+                let value = item;
+                for (let stage = 0; stage < stages.length; stage++) {
+                  try { value = await stages[stage](value, index); }
+                  catch (e) { writeOutput(2, `pipeline: item ${index} failed at stage ${stage + 1}: ${message(e)}`); return null; }
+                }
+                return value;
+              }));
+            });
+            // phase(title): a marker in the output, between the parts of the work.
+            global("phase", (title) => writeOutput(1, `## ${String(title)}`));
             global("args", freeze(argsJson === undefined ? {} : parse(argsJson)));
             // A name a namespace does not have is a function that fails when called and says what the namespace has, so a
             // guess fails with the fix instead of "is not a function".

@@ -103,7 +103,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         CodeModeRuns.Journal = (sessionId, record) => runtimeService.AppendScriptRecordAsync(sessionId, record);
         // The sessions scripts start go through a headless driver of the host, made when a script first asks for one.
         _codeModeAgents = new Lazy<CodeModeAgents>(() => new CodeModeAgents(this), LazyThreadSafetyMode.ExecutionAndPublication);
-        CodeModeRuns.RunEnded += runId => { if (_codeModeAgents.IsValueCreated) _codeModeAgents.Value.ForgetRun(runId); };
+        // The sessions a run kept open close with it.
+        CodeModeRuns.RunEnded += runId => { if (_codeModeAgents.IsValueCreated) _ = _codeModeAgents.Value.ForgetRunAsync(runId); };
         ExternalSessions = followExternalSessions
             ? new ExternalSessionFollower(catalogOptions, sessionViewCatalog.JournalStore.CreateSessionStore(), agentSessionCatalog, runtimeService)
             : null;

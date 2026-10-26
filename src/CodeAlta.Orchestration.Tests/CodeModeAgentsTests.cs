@@ -96,6 +96,73 @@ public sealed class CodeModeAgentsTests
     }
 
     [TestMethod]
+    public async Task AnAnswerWithASchema_IsTheCheckedValue_AfterOneCorrection_AndASecondMissFails()
+    {
+        var (root, provider, host, driver, parent) = await CreateAsync();
+        await using var scope = root;
+        await using var closing = driver;
+        using var schema = System.Text.Json.JsonDocument.Parse("""{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"]}""");
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("There are three."));
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("""{"count": 3}"""));
+
+        var corrected = await host.CodeModeAgents.RunAsync(parent.SessionId,
+            new CodeModeAgentRequest("Count them.") { RunId = "run-s", Schema = schema.RootElement.Clone() }, CancellationToken.None).WaitAsync(Hang);
+
+        Assert.IsTrue(corrected.Succeeded, corrected.Failure);
+        Assert.AreEqual("""{"count": 3}""", corrected.Value);
+        var requests = provider.RequestsOf(corrected.SessionId!);
+        Assert.AreEqual(2, requests.Length, "one corrective prompt");
+        StringAssert.Contains(System.Text.Json.JsonSerializer.Serialize(requests[0].Conversation), "only one JSON value");
+
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Three."));
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Still three."));
+        var missed = await host.CodeModeAgents.RunAsync(parent.SessionId,
+            new CodeModeAgentRequest("Count them.") { RunId = "run-s", Schema = schema.RootElement.Clone() }, CancellationToken.None).WaitAsync(Hang);
+
+        Assert.IsFalse(missed.Succeeded);
+        StringAssert.Contains(missed.Failure, "does not match the schema");
+    }
+
+    [TestMethod]
+    public async Task AKeptSession_TakesSeveralPrompts_AndNoneAfterItIsClosed()
+    {
+        var (root, provider, host, driver, parent) = await CreateAsync();
+        await using var scope = root;
+        await using var closing = driver;
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("First."));
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Second."));
+        var agents = (CodeModeAgents)host.CodeModeAgents;
+
+        var opened = await agents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-k", Title = "Kept" }, CancellationToken.None).WaitAsync(Hang);
+        var first = await agents.AskAsync("run-k", opened.SessionId!, "one", null, null, CancellationToken.None).WaitAsync(Hang);
+        var second = await agents.AskAsync("run-k", opened.SessionId!, "two", null, null, CancellationToken.None).WaitAsync(Hang);
+        await agents.CloseAsync("run-k", opened.SessionId!);
+        var after = await agents.AskAsync("run-k", opened.SessionId!, "three", null, null, CancellationToken.None);
+
+        Assert.AreEqual("opened", opened.Status, opened.Failure);
+        Assert.AreEqual(("First.", "Second."), (first.Answer, second.Answer));
+        Assert.AreEqual(2, provider.RequestsOf(opened.SessionId!).Length, "the same session took both prompts");
+        Assert.AreEqual("refused", after.Status);
+    }
+
+    [TestMethod]
+    public async Task ASpentBudget_StartsNoMoreSessions()
+    {
+        var (root, provider, host, driver, parent) = await CreateAsync();
+        await using var scope = root;
+        await using var closing = driver;
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Done once."));
+
+        // A scripted turn reports 100 input and 20 output tokens.
+        var first = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("one") { RunId = "run-b", BudgetTokens = 100 }, CancellationToken.None).WaitAsync(Hang);
+        var second = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("two") { RunId = "run-b", BudgetTokens = 100 }, CancellationToken.None).WaitAsync(Hang);
+
+        Assert.IsTrue(first.Succeeded, first.Failure);
+        Assert.AreEqual("refused", second.Status);
+        StringAssert.Contains(second.Failure, "budget of this script is spent");
+    }
+
+    [TestMethod]
     public async Task ARequestOutsideTheLimits_IsRefusedWithTheReason()
     {
         var (root, _, host, driver, parent) = await CreateAsync();

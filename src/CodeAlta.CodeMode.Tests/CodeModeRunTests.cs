@@ -69,6 +69,24 @@ public sealed class CodeModeRunTests
     }
 
     [TestMethod]
+    public async Task ParallelAndPipeline_KeepTheOrder_AndTurnAFailureIntoNull()
+    {
+        var result = await RunAsync("""
+            phase("Fan out");
+            const fanned = await parallel([1, 2, 3, 4].map((n) => () => n === 3 ? tools.fail({}) : tools.echo({ n })), { limit: 2 });
+            const piped = await pipeline([1, 2, 3], (n) => tools.echo({ n }), (r) => r.n === 2 ? Promise.reject(new Error("two")) : r.n * 10);
+            return { fanned: fanned.map((r) => r && r.n), piped };
+            """);
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        Assert.AreEqual("""{"fanned":[1,2,null,4],"piped":[10,null,30]}""", result.ValueJson);
+        Assert.AreEqual("## Fan out", result.Output[0].Text);
+        Assert.IsTrue(result.Output.Any(static entry => entry.Kind == CodeModeOutputKind.Warning && entry.Text.StartsWith("parallel: item 2 failed", StringComparison.Ordinal)));
+        Assert.IsTrue(result.Output.Any(static entry => entry.Kind == CodeModeOutputKind.Warning && entry.Text.Contains("item 1 failed at stage 2: two", StringComparison.Ordinal)));
+        Assert.IsLessThanOrEqualTo(2, result.MaxCallsAtOnce, "the limit holds");
+    }
+
+    [TestMethod]
     public async Task FinalExpression_IsReturned()
     {
         var result = await RunAsync("const items = [1, 2, 3];\nitems.map(x => x * 2)");

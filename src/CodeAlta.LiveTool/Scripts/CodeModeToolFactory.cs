@@ -56,12 +56,12 @@ public static class CodeModeToolFactory
         - `alta.<group>.<command>(args)`: the commands of `alta` as functions, not a shell, such as `alta.session.list({ limit: 20 })`. Positional arguments and options go by name in camelCase, and `stdin` holds what `--stdin` reads. Resolves to the record the command writes, or to the list of its records; a failure throws an `AltaError` with a `code`.
         - `mcp.<server>.<tool>(args)`: the tools of the MCP servers active in this session. A server that `alta.mcp.activate({ id: ["<server>"] })` activates is in `mcp` from the next `exec`, not in the script that activates it.
         - `codemode.help({ path })`, `codemode.search({ query })`, `codemode.describe({ path })`: find functions and read their TypeScript declarations, results included. Never guess a function or a field of a result: describe it first.
-        - `agent(prompt, { tier, model, title })` starts a session of its own for a part of the work and resolves with its final answer; several run at once under `Promise.all`.
+        - `agent(prompt, { tier, model, title, schema })` starts a session of its own for a part of the work and resolves with its final answer, or with the JSON value it answered when `schema` (a JSON Schema) is given. `parallel(thunks, { limit })` runs functions at once and turns a failure into `null`; `pipeline(items, ...stages)` takes each item through the stages on its own; `phase(title)` marks a part of the work. `session({ tier, title })` keeps a session for several prompts: `const s = await session(); await s.run("..."); await s.close();`.
         - `step(id, fn)` groups the calls of one part of the work; `log(...)`, `console.log(...)` and `text(...)` write output; `args` holds the arguments of the run.
 
         Calls run at the same time under `Promise.all`; tools that change files run one at a time. Await every call whose result matters: calls still pending when the script returns are cancelled. A failed call throws an error you can catch, and the calls made before a failure are not undone.
 
-        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "max_output_tokens": 4000, "timeout_ms": 600000}`. `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
+        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "max_output_tokens": 4000, "timeout_ms": 600000, "budget_tokens": 500000}` (`budget_tokens` caps the tokens of the sessions the script starts). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
 
         The result says where the source of the run was kept: to fix a long script, edit that file with your file tools and run it again with `return await workflow({ scriptPath: "<path>" })` instead of sending it whole.
         """;
@@ -144,7 +144,7 @@ public static class CodeModeToolFactory
         var tools = invocation.Tools is { } invoker ? new ToolScriptBinding(invoker, ["alta", ExecToolName, WaitToolName]) : null;
         CodeModeApi? api = null;
         api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions,
-            .. options.Agents is null ? [] : (CodeModeFunction[])[CodeModeAgentBinding.Function]]);
+            .. options.Agents is null ? [] : CodeModeAgentBinding.Functions]);
         var discovery = new CodeModeDiscovery(() => api);
         var limits = source.Options.TimeoutMilliseconds is { } timeout ? options.Limits with { Timeout = TimeSpan.FromMilliseconds(timeout) } : options.Limits;
         var maxOutputTokens = source.Options.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens;
@@ -153,10 +153,10 @@ public static class CodeModeToolFactory
         var run = options.Runs.TryStart(sessionId, source.Options.Title, maxOutputTokens, invocation.ToolCallId, (observer, runCancellation) =>
             {
                 // The observer of a run is its handle: the sessions it starts know its id.
-                var agents = options.Agents is { } sessions ? new CodeModeAgentBinding(sessions, sessionId, () => ((CodeModeRunHandle)observer).Id) : null;
+                var agents = options.Agents is { } sessions ? new CodeModeAgentBinding(sessions, sessionId, () => ((CodeModeRunHandle)observer).Id, source.Options.BudgetTokens) : null;
                 var handler = new CodeModeCallRouter(
                 [
-                    .. agents is null ? [] : (ReadOnlySpan<(string, ICodeModeCallHandler)>)[(CodeModeAgentBinding.Path, agents)],
+                    .. agents is null ? [] : CodeModeAgentBinding.Paths.Select(path => (path, (ICodeModeCallHandler)agents)),
                     (AltaScriptBinding.Namespace, new AltaScriptCallHandler(dispatcher, alta, identity, cwd)),
                     (ToolScriptBinding.ToolsNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),
                     (ToolScriptBinding.McpNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),

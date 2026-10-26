@@ -23,6 +23,9 @@ public sealed record CodeModeExecOptions
     /// <summary>Gets the wall time of the run, in milliseconds.</summary>
     public int? TimeoutMilliseconds { get; init; }
 
+    /// <summary>Gets the tokens the sessions the run starts may spend in all; once spent, no session starts.</summary>
+    public int? BudgetTokens { get; init; }
+
     /// <summary>
     /// Parses the JSON object of a pragma. Unknown keys and values of the wrong type are refused, so that a typo
     /// is reported instead of being ignored.
@@ -69,11 +72,14 @@ public sealed record CodeModeExecOptions
                     case "timeout_ms" when TryGetPositive(property.Value, out var timeoutMs):
                         options = options with { TimeoutMilliseconds = timeoutMs };
                         break;
-                    case "title" or "yield_ms" or "yield_time_ms" or "max_output_tokens" or "max_tokens" or "timeout_ms":
+                    case "budget_tokens" when TryGetPositive(property.Value, out var budget):
+                        options = options with { BudgetTokens = budget };
+                        break;
+                    case "title" or "yield_ms" or "yield_time_ms" or "max_output_tokens" or "max_tokens" or "timeout_ms" or "budget_tokens":
                         error = $"The option `{property.Name}` of `// @exec:` has a value of the wrong type.";
                         return null;
                     default:
-                        error = $"Unknown option `{property.Name}` in `// @exec:`. Known options: title, yield_ms, max_output_tokens, timeout_ms.";
+                        error = $"Unknown option `{property.Name}` in `// @exec:`. Known options: title, yield_ms, max_output_tokens, timeout_ms, budget_tokens.";
                         return null;
                 }
             }

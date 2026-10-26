@@ -15,9 +15,22 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
     /// <summary>The path of the function in scripts.</summary>
     public const string Path = "codemode.agent";
 
+    /// <summary>The path of the function that opens a session a script keeps (<c>session()</c>).</summary>
+    public const string OpenPath = "codemode.session.open";
+
+    /// <summary>The path of the function that sends a prompt to a session a script keeps.</summary>
+    public const string AskPath = "codemode.session.ask";
+
+    /// <summary>The path of the function that closes a session a script keeps.</summary>
+    public const string ClosePath = "codemode.session.close";
+
+    /// <summary>Gets the paths this binding runs.</summary>
+    public static IReadOnlyList<string> Paths { get; } = [Path, OpenPath, AskPath, ClosePath];
+
     private readonly ICodeModeAgents _agents;
     private readonly string _sessionId;
     private readonly Func<string> _runId;
+    private readonly long? _budgetTokens;
 
     /// <summary>Creates the binding of one run.</summary>
     /// <param name="agents">The sessions of scripts of the host.</param>
@@ -25,7 +38,19 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
     /// <param name="runId">Gives the id of the run.</param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     public CodeModeAgentBinding(ICodeModeAgents agents, string sessionId, Func<string> runId)
+        : this(agents, sessionId, runId, budgetTokens: null)
     {
+    }
+
+    /// <summary>Creates the binding of one run whose sessions have a budget of tokens.</summary>
+    /// <param name="agents">The sessions of scripts of the host.</param>
+    /// <param name="sessionId">The session that runs the script.</param>
+    /// <param name="runId">Gives the id of the run.</param>
+    /// <param name="budgetTokens">The tokens the sessions of the run may spend in all, or null.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public CodeModeAgentBinding(ICodeModeAgents agents, string sessionId, Func<string> runId, long? budgetTokens)
+    {
+        _budgetTokens = budgetTokens;
         ArgumentNullException.ThrowIfNull(agents);
         ArgumentNullException.ThrowIfNull(sessionId);
         ArgumentNullException.ThrowIfNull(runId);
@@ -34,7 +59,7 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
         _runId = runId;
     }
 
-    /// <summary>Gets the declaration of the function, for the API of a run.</summary>
+    /// <summary>Gets the declaration of <c>codemode.agent</c>.</summary>
     public static CodeModeFunction Function { get; } = new(Path)
     {
         Description = "Starts a session of its own for a part of the work, sends it the prompt, and resolves with its final answer once it and the sessions it started ended; scripts call it as agent(prompt, options). It runs in parallel with the other calls (8 sessions at once, 50 per script); a session that fails throws an AgentError with its sessionId.",
@@ -48,12 +73,38 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
               "agent":{"type":"string","description":"The agent prompt, such as default or plan."},
               "sandbox":{"type":"string","description":"A sandbox profile."},
               "timeout":{"type":"integer","minimum":1,"description":"Milliseconds the session is given."},
-              "step":{"type":"string","description":"The step the session belongs to, when not the current one."}
+              "step":{"type":"string","description":"The step the session belongs to, when not the current one."},
+              "schema":{"type":"object","description":"A JSON Schema of the answer: agent() then resolves with the JSON value the session answered, checked against it."}
             },"required":["prompt"],"additionalProperties":false}
             """,
-        ResultType = "{ sessionId: string; answer: string; status: string; inputTokens: number; outputTokens: number; durationMs: number }",
+        ResultType = "{ sessionId: string; answer: string; value?: unknown; status: string; inputTokens: number; outputTokens: number; durationMs: number }",
         Parallel = true,
     };
+
+    /// <summary>Gets the declarations of the functions, for the API of a run.</summary>
+    public static IReadOnlyList<CodeModeFunction> Functions { get; } =
+    [
+        Function,
+        new(OpenPath)
+        {
+            Description = "Creates a session of its own that the script keeps for several prompts; scripts call it as session(options), which gives { id, run(prompt, { schema }), close() }. The options are those of agent(), without the prompt. A session not closed is closed when the script ends.",
+            InputSchemaJson = """{"type":"object","properties":{"title":{"type":"string"},"model":{"type":"string"},"tier":{"type":"string","enum":["complex","standard","quick"]},"effort":{"type":"string"},"agent":{"type":"string"},"sandbox":{"type":"string"},"step":{"type":"string"}},"additionalProperties":false}""",
+            ResultType = "{ sessionId: string }",
+        },
+        new(AskPath)
+        {
+            Description = "Sends a prompt to a session the script keeps, and resolves with its answer (session(...).run(prompt, { schema })).",
+            InputSchemaJson = """{"type":"object","properties":{"sessionId":{"type":"string"},"prompt":{"type":"string"},"schema":{"type":"object"},"timeout":{"type":"integer","minimum":1}},"required":["sessionId","prompt"],"additionalProperties":false}""",
+            ResultType = "{ sessionId: string; answer: string; value?: unknown; status: string; inputTokens: number; outputTokens: number; durationMs: number }",
+            Parallel = true,
+        },
+        new(ClosePath)
+        {
+            Description = "Closes a session the script keeps (session(...).close()).",
+            InputSchemaJson = """{"type":"object","properties":{"sessionId":{"type":"string"}},"required":["sessionId"],"additionalProperties":false}""",
+            ResultType = "void",
+        },
+    ];
 
     /// <inheritdoc />
     public async ValueTask<CodeModeCallResult> InvokeAsync(CodeModeCall call, CancellationToken cancellationToken)
@@ -61,7 +112,23 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
         ArgumentNullException.ThrowIfNull(call);
         using var document = JsonDocument.Parse(call.ArgumentsJson);
         var arguments = document.RootElement;
-        if (String(arguments, "prompt") is not { Length: > 0 } prompt)
+        switch (call.Path)
+        {
+            case ClosePath:
+                await _agents.CloseAsync(_runId(), String(arguments, "sessionId") ?? string.Empty).ConfigureAwait(false);
+                return CodeModeCallResult.Success("null");
+            case AskPath:
+                if (String(arguments, "sessionId") is not { Length: > 0 } sessionId || String(arguments, "prompt") is not { Length: > 0 } asked)
+                {
+                    return CodeModeCallResult.Failure(new CodeModeCallError("TypeError", "session.run(prompt, options): the prompt is a non-empty string."));
+                }
+
+                return Answer(await _agents.AskAsync(_runId(), sessionId, asked, Schema(arguments), Timeout(arguments), cancellationToken).ConfigureAwait(false));
+        }
+
+        var opening = call.Path == OpenPath;
+        var prompt = String(arguments, "prompt");
+        if (!opening && prompt is not { Length: > 0 })
         {
             return CodeModeCallResult.Failure(new CodeModeCallError("TypeError", "agent(prompt, options): the prompt is a non-empty string."));
         }
@@ -77,7 +144,7 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
             effort = parsed;
         }
 
-        var result = await _agents.RunAsync(_sessionId, new CodeModeAgentRequest(prompt)
+        var request = new CodeModeAgentRequest(prompt ?? string.Empty)
         {
             RunId = _runId(),
             StepId = String(arguments, "step") ?? call.StepId,
@@ -87,10 +154,24 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
             Effort = effort,
             AgentPromptId = String(arguments, "agent"),
             Sandbox = String(arguments, "sandbox"),
-            Timeout = arguments.TryGetProperty("timeout", out var timeout) && timeout.TryGetInt32(out var milliseconds) && milliseconds > 0
-                ? TimeSpan.FromMilliseconds(milliseconds) : null,
-        }, cancellationToken).ConfigureAwait(false);
+            Timeout = Timeout(arguments),
+            Schema = Schema(arguments),
+            BudgetTokens = _budgetTokens,
+        };
+        return Answer(opening
+            ? await _agents.OpenAsync(_sessionId, request, cancellationToken).ConfigureAwait(false)
+            : await _agents.RunAsync(_sessionId, request, cancellationToken).ConfigureAwait(false));
+    }
 
+    private static TimeSpan? Timeout(JsonElement arguments)
+        => arguments.TryGetProperty("timeout", out var timeout) && timeout.TryGetInt32(out var milliseconds) && milliseconds > 0 ? TimeSpan.FromMilliseconds(milliseconds) : null;
+
+    private static JsonElement? Schema(JsonElement arguments)
+        => arguments.TryGetProperty("schema", out var schema) && schema.ValueKind == JsonValueKind.Object ? schema.Clone() : null;
+
+    // A session that did not answer is an AgentError the script can catch, with the session and the status.
+    private static CodeModeCallResult Answer(CodeModeAgentResult result)
+    {
         if (!result.Succeeded)
         {
             return CodeModeCallResult.Failure(new CodeModeCallError("AgentError", result.Failure ?? $"The session ended: {result.Status}.")
@@ -111,6 +192,12 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
             writer.WriteStartObject();
             if (result.SessionId is { } sessionId) writer.WriteString("sessionId", sessionId); else writer.WriteNull("sessionId");
             writer.WriteString("answer", result.Answer ?? string.Empty);
+            if (result.Value is { } value)
+            {
+                writer.WritePropertyName("value");
+                writer.WriteRawValue(value);
+            }
+
             writer.WriteString("status", result.Status);
             writer.WriteNumber("inputTokens", result.Usage.InputTokens);
             writer.WriteNumber("outputTokens", result.Usage.OutputTokens);
