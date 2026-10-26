@@ -1,10 +1,10 @@
 import type { WorkspaceProject } from "#neoastra";
-import { Fragment, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { Fragment, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
 import { ProjectRowActions, type ProjectRowAuthority, type ProjectRowDrop } from "./ProjectRowActions";
 import { SessionTabMenu } from "../SessionTabMenu";
-import { railGroupHidden, type RailGroup, type RailLabelGroup } from "./projectRail";
+import type { RailGroup, RailLabelGroup } from "./projectRail";
 
 /** What the Explorer remembers and shows of its scopes: which are open, which projects are favorites. */
 export type ProjectTreeView = Readonly<{
@@ -42,12 +42,15 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   } else if (event.key === "Home") target = rows()[0];
   else if (event.key === "End") target = rows().at(-1);
   else if (label && (event.key === "ArrowRight" && open === "false" || event.key === "ArrowLeft" && open === "true")) row.click();
-  else if (label && (event.key === "ArrowRight" || event.key === "ArrowLeft")) { /* Already as asked. */ }
+  else if (label && event.key === "ArrowRight") { /* Already open. */ }
   else if (event.key === "ArrowRight" && scope !== undefined && open === "false") toggle(scope || null);
   else if (event.key === "ArrowLeft" && scope !== undefined && open === "true") toggle(scope || null);
-  else if (event.key === "ArrowLeft" && scope === undefined)
-    target = row.closest(".project-session-branch")?.previousElementSibling?.querySelector<HTMLElement>(":scope > button:first-child");
-  else return;
+  else if (event.key === "ArrowLeft") {
+    // Left from a closed row goes up the tree: from a session to its scope, from a project or a label to its label.
+    const branch = row.closest(label || scope !== undefined ? ".project-label-branch" : ".project-session-branch");
+    target = branch?.previousElementSibling?.querySelector<HTMLElement>(":scope > button:first-child");
+    if (!target && !label) return;
+  } else return;
   event.preventDefault();
   target?.focus();
 }
@@ -184,13 +187,28 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     {...dropTarget ? { "data-label-drop": "", "data-drop": labels?.otherDrop } : {}}>
     {icon && <AppIcon name="star" size={11} />}<span>{t(key)}</span></li>;
   // Grouped under labels: the favorite projects, the labels with their projects, and the projects of no label. A
-  // folded label hides its projects and the labels under it; the sessions of the selected scope stay in the page.
+  // label is a branch, as a project is for its sessions: its projects and the labels under it are listed in it, after
+  // its title. A folded label hides them; the sessions of the selected scope stay in the page.
   const grouped = (shown: ProjectRailLabels) => {
-    const parts = shown.groups.filter(group => group.kind !== "label" || !railGroupHidden(group, shown.folded)).map(group => group.kind === "favorites"
+    const below = new Map<string, RailLabelGroup[]>();
+    for (const group of shown.groups) if (group.kind === "label" && group.ancestors.length) {
+      const parent = group.ancestors[group.ancestors.length - 1];
+      below.set(parent, [...below.get(parent) ?? [], group]);
+    }
+    const label = (group: RailLabelGroup): ReactNode => {
+      const inner = below.get(group.label.id) ?? [];
+      return <Fragment key={`label:${group.label.id}`}>{shown.row(group)}{!shown.folded(group.label.id) && (group.projects.length > 0 || inner.length > 0)
+        && <li className="project-label-branch" style={group.label.color ? { "--label-color": group.label.color } as CSSProperties : undefined}>
+          <ul className="project-label-children">
+            {group.projects.map(project => row(project, `label:${group.label.id}`, group.label.id))}
+            {inner.map(label)}
+          </ul>
+        </li>}</Fragment>;
+    };
+    const parts = shown.groups.map(group => group.kind === "favorites"
       ? <Fragment key="favorites">{title("Favorites", true)}{group.projects.map(project => row(project, "favorites"))}</Fragment>
       : group.kind === "other" ? <Fragment key="other">{title("Other projects", false, true)}{group.projects.map(project => row(project, "other"))}</Fragment>
-      : <Fragment key={`label:${group.label.id}`}>{shown.row(group)}{!shown.folded(group.label.id)
-        && group.projects.map(project => row(project, `label:${group.label.id}`, group.label.id))}</Fragment>);
+      : group.ancestors.length ? null : label(group));
     const kept = selectedId !== null && !listed.has(selectedId) ? <li className="project-session-branch" hidden>{children}</li> : null;
     return <>{parts}{kept}</>;
   };

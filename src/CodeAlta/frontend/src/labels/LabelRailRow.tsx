@@ -6,7 +6,7 @@ import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
 import { useShellLanguage } from "../shellLanguage";
 import { labelDepth, labelPath, maximumLabelDepth, type Label } from "./labels";
 import type { LabelEdit, LabelOutcome } from "./labelsHub";
-import { LabelBadge, LabelFormPopover, type LabelLook } from "./LabelViews";
+import { LabelFormPopover, LabelIcon, labelTint, type LabelLook } from "./LabelViews";
 
 /** What the title of a label can change: the label, its place, and the labels under it. Absent where nothing can be changed. */
 export type LabelRowEditing = Readonly<{
@@ -21,10 +21,10 @@ export type LabelRowEditing = Readonly<{
 type Form = "edit" | "child" | "delete" | null;
 
 /**
- * The title of a label in the Explorer, above its projects: its badge, how many projects it lists, and a chevron that
- * folds them, with the labels under it. On hover, a star keeps it on top and `⋯` opens what changes it: its look, a
- * label under it, its place, its deletion. Its row is dragged to put it before, after or under another label, and a
- * project dropped on it gets it.
+ * The title of a label in the Explorer, the head of its branch: its icon in its color, its name, how many projects it
+ * lists, and a chevron that folds them, with the labels under it. On hover, a star keeps it on top and `⋯` opens what
+ * changes it: its look, a label under it, its place, its deletion. Its row is dragged to put it before, after or under
+ * another label, and a project dropped on it gets it.
  */
 export function LabelRailRow({ group, labels, folded, onFold, editing, drop, drag }: {
   group: RailLabelGroup;
@@ -80,13 +80,15 @@ export function LabelRailRow({ group, labels, folded, onFold, editing, drop, dra
     t("The label could not be created."));
   const count = group.projects.length;
   return <li className="project-label-row" data-depth={group.depth} data-label-drop={label.id} data-drop={drop} data-movable={drag?.onPointerDown ? "true" : undefined}
-    onPointerDown={drag?.onPointerDown}
+    data-colored={label.color ? "true" : undefined} style={labelTint(label)} onPointerDown={drag?.onPointerDown}
     onContextMenu={event => { if (editing && !(event.target as HTMLElement).closest("input, textarea, [role=menu], dialog")) { event.preventDefault(); setMenu(true); } }}>
     <button type="button" className="project-label-toggle" data-label={label.id} aria-expanded={!folded}
       title={label.description ? `${path}\n${label.description}` : path} onClick={() => onFold(!folded)}>
       <span className="tree-twist" aria-hidden="true"><AppIcon name="chevronDown" size={12} className={folded ? "tree-chevron" : "tree-chevron expanded"} /></span>
-      <LabelBadge label={label} path={group.path} />
-      <span className="project-label-count" aria-label={t(count === 1 ? "{count} project" : "{count} projects", { count })}>{count}</span>
+      <LabelIcon label={label} size={15} />
+      <strong className="project-label-name">{label.name}</strong>
+      {count > 0 && <span className="project-label-count" aria-label={t(count === 1 ? "{count} project" : "{count} projects", { count })}>{count}</span>}
+      {group.path.length > 0 && <span className="project-label-path">{group.path.map(above => above.name).join(" › ")}</span>}
     </button>
     {editing && <button type="button" className="icon-button label-row-action label-favorite-trigger" data-on={label.favorite}
       aria-label={t(label.favorite ? "Remove {name} from favorites" : "Add {name} to favorites", { name: label.name })}

@@ -20,14 +20,14 @@ CodeAlta TUI lists the projects without their labels, and keeps them.
 
 ## The Explorer
 
-Each label is a title with its badge, above its projects, and the number of projects it has. The projects of a label stay where the other projects are: a label never pushes them to the right. A label under another label steps in a little, once, whatever its depth.
+The labels are a tree, like the folders of a file explorer. Each label shows its icon, its name and the number of its projects on a tint of its color; its projects and the labels under it step in below it, along a line of its color.
 
-- The chevron of a label folds its projects and the labels under it.
+- The chevron of a label folds its projects and the labels under it. With the keyboard, Left goes up to the label above.
 - **Favorites** come first, then the favorite labels, then the other labels, then **Other projects**, the projects without a label.
 - A favorite label under another label moves up alone and shows its path, such as **Infra › Helm charts**. Its parent stays in place.
 - The filter at the top of the sidebar keeps the labels that have a project that matches.
 
-In the **…** menu of **PROJECTS**, **One list** lists the projects without the titles: each project shows its labels as small badges after its name. **Group by labels** brings the titles back. This choice belongs to the window.
+In the **…** menu of **PROJECTS**, **One list** lists the projects without the tree: each project shows its labels as small badges after its name. **Group by labels** brings the tree back. This choice belongs to the window.
 
 ## Organize labels in the Explorer
 

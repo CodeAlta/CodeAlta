@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceProject } from "#neoastra";
 import type { Label } from "../labels/labels";
-import { projectRailGroups, railGroupHidden, type RailGroup } from "./projectRail";
+import { projectRailGroups, type RailGroup } from "./projectRail";
 
 const project = (id: string): WorkspaceProject => ({ id, name: id, path: `/${id}`, archived: false });
 const label = (id: string, projectIds: string[], look: Partial<Label> = {}): Label =>
@@ -16,12 +16,17 @@ test("a space without labels keeps the list as it is", () => {
   assert.deepEqual(projectRailGroups([project("a")], 0, []), []);
 });
 
-test("projects are listed under each of their labels, sub-labels step in once, the rest come last", () => {
-  const projects = ["fav", "a", "b", "c", "d"].map(project);
-  const labels = [label("infra", ["a", "b", "fav"]), label("helm", ["b"], { parent: "infra" }), label("charts", ["c"], { parent: "helm" }), label("tools", [])];
-  assert.deepEqual(shape(projectRailGroups(projects, 1, labels)), [
-    "favorites:fav", "infra@0:a,b", "helm@1:b", "charts@1:c", "tools@0:", "other:d",
+test("projects are listed under each of their labels, each sub-label one level deeper, the rest come last", () => {
+  const projects = ["fav", "a", "b", "c", "d", "e"].map(project);
+  const labels = [label("infra", ["a", "b", "fav"]), label("helm", ["b"], { parent: "infra" }), label("charts", ["c"], { parent: "helm" }),
+    label("local", ["e"], { parent: "charts" }), label("tools", [])];
+  const groups = projectRailGroups(projects, 1, labels);
+  assert.deepEqual(shape(groups), [
+    "favorites:fav", "infra@0:a,b", "helm@1:b", "charts@2:c", "local@3:e", "tools@0:", "other:d",
   ]);
+  const local = groups[4];
+  assert.ok(local.kind === "label");
+  assert.deepEqual(local.ancestors, ["infra", "helm", "charts"], "A label is listed in the last label above it.");
 });
 
 test("a favorite label comes first; a favorite sub-label moves up alone, with its path, and its parent stays", () => {
@@ -30,10 +35,10 @@ test("a favorite label comes first; a favorite sub-label moves up alone, with it
     label("ops", ["c"], { favorite: true }), label("inner", [], { parent: "ops", favorite: true })];
   const groups = projectRailGroups(projects, 0, labels);
   assert.deepEqual(shape(groups), ["infra/helm@0:b", "old@1:c", "ops@0:c", "inner@1:", "infra@0:a"]);
-  const old = groups[1];
-  assert.ok(old.kind === "label");
-  assert.equal(railGroupHidden(old, id => id === "helm"), true, "Folding a label hides the labels under it.");
-  assert.equal(railGroupHidden(old, id => id === "infra"), false, "A label moved up is not hidden by its parent.");
+  const [helm, old] = groups;
+  assert.ok(helm.kind === "label" && old.kind === "label");
+  assert.deepEqual(old.ancestors, ["helm"], "A label stays in the label above it.");
+  assert.deepEqual(helm.ancestors, [], "A label moved up is not in its parent.");
 });
 
 test("while the list is filtered, a label without a project listed is left out, unless a label under it has one", () => {

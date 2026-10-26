@@ -87,9 +87,9 @@ export type RailLabelGroup = Readonly<{
   label: Label;
   /** The labels above it that its title names, dimmed: those of a label shown away from its parent. */
   path: readonly Label[];
-  /** How far its title steps in: 0 at the top, 1 under a label shown above it (deeper labels step in no further). */
-  depth: 0 | 1;
-  /** The labels shown above it in this place, whose folding hides it. */
+  /** How many labels it is shown under: 0 at the top. */
+  depth: number;
+  /** The labels shown above it in this place, from the top: it is listed in the last one, and their folding hides it. */
   ancestors: readonly string[];
   /** Its projects, in the order of the list. */
   projects: readonly WorkspaceProject[];
@@ -102,7 +102,7 @@ export type RailGroup = Readonly<{ kind: "favorites"; projects: readonly Workspa
  * The parts of the Explorer when it lists the projects under their labels: the favorite projects first, then the
  * favorite labels (a favorite sub-label moves up alone, with its own sub-labels, under its path), then the other
  * labels in the order of their tree, then the projects of no label. A project with several labels is listed under
- * each. Labels are titles, never parents of rows: a sub-label steps in once, whatever its depth. Empty when the space
+ * each. A label is a branch of the tree: its projects and the labels under it are listed in it. Empty when the space
  * has no label: the Explorer then lists its projects as it does without labels.
  * @param projects The projects listed, in their order, the favorite ones first.
  * @param favorites How many of them, from the first, are favorites.
@@ -118,7 +118,7 @@ export function projectRailGroups(projects: readonly WorkspaceProject[], favorit
   const place = (label: Label, above: readonly string[], detached: boolean, skipFavorites: boolean) => {
     if (placed.has(label.id) || above.length >= labels.length) return;
     placed.add(label.id);
-    groups.push({ kind: "label", label, path: detached ? labelAncestors(label, labels) : [], depth: above.length ? 1 : 0, ancestors: above,
+    groups.push({ kind: "label", label, path: detached ? labelAncestors(label, labels) : [], depth: above.length, ancestors: above,
       projects: rest.filter(project => label.projectIds.includes(project.id)) });
     for (const child of labels) if (child.parent === label.id && !(skipFavorites && child.favorite)) place(child, [...above, label.id], false, skipFavorites);
   };
@@ -134,6 +134,3 @@ export function projectRailGroups(projects: readonly WorkspaceProject[], favorit
   for (const group of groups) if (group.kind === "label" && group.projects.length) { kept.add(group.label.id); for (const id of group.ancestors) kept.add(id); }
   return groups.filter(group => group.kind !== "label" || kept.has(group.label.id));
 }
-
-/** Whether the title of a label is hidden: a label shown above it in the same place is folded. */
-export const railGroupHidden = (group: RailLabelGroup, folded: (id: string) => boolean): boolean => group.ancestors.some(folded);

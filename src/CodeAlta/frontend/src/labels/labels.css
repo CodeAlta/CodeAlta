@@ -11,17 +11,34 @@
 .label-icon { display: inline-flex; flex: none; color: var(--label-color); }
 .label-badge:not([data-colored]) .label-icon { color: var(--muted); }
 
-/* The title of a label in the Explorer: a row of its own above its projects, which do not step in. A sub-label steps
-   in once, whatever its depth. */
-.ide-shell .project-list > .project-label-row { position: relative; display: flex; align-items: center; margin-top: 6px; border-radius: 4px; }
-.ide-shell .project-list > .project-label-row:first-child { margin-top: 0; }
-.ide-shell .project-list > .project-label-row[data-depth="1"] { margin-top: 2px; padding-left: 12px; }
-.ide-shell .project-list > .project-label-row:hover { background: var(--panel-2); }
-.ide-shell .project-label-row > .project-label-toggle { display: flex; flex: 1; align-items: center; gap: 6px; width: auto; min-width: 0; min-height: 26px;
-  padding: 2px 5px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font-size: 12px; }
+/* A label in the Explorer is a branch of the tree, as a project is for its sessions: its title, then its projects and
+   the labels under it, one step in, along a guide in its color from its chevron. Its title lines up with the projects
+   beside it: the same height, the chevron and the icon in the same places. */
+.ide-shell .project-label-row, .ide-shell .project-label-branch { --label-color: var(--muted); }
+/* Its title is tinted with its color, from where it starts to the right, where the tint fades out. */
+.ide-shell .project-label-row { position: relative; display: flex; align-items: center; border-radius: 4px;
+  background: linear-gradient(to right, color-mix(in srgb, var(--label-color) 22%, transparent), color-mix(in srgb, var(--label-color) 4%, transparent) 70%, transparent); }
+.ide-shell .project-list > .project-label-row:not(:first-child) { margin-top: 2px; }
+.ide-shell .project-label-row:hover {
+  background: linear-gradient(to right, color-mix(in srgb, var(--label-color) 30%, transparent), color-mix(in srgb, var(--label-color) 8%, transparent) 70%, transparent), var(--panel-2); }
+.ide-shell .project-label-row > .project-label-toggle { display: flex; flex: 1; align-items: center; gap: 5px; width: auto; min-width: 0; min-height: 28px;
+  padding: 3px 5px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font-size: 12px; }
 .ide-shell .project-label-row > .project-label-toggle:hover { background: transparent; }
-.ide-shell .project-list > .project-label-row:has(> .project-label-toggle:focus-visible) { outline: 1px solid var(--accent); outline-offset: -1px; }
-.ide-shell .project-label-count { flex: none; margin-left: auto; padding-right: 2px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ide-shell .project-label-row:has(> .project-label-toggle:focus-visible) { outline: 1px solid var(--accent); outline-offset: -1px; }
+.ide-shell .project-label-row .label-icon { width: 15px; justify-content: center; }
+/* A label shown away from its parent names the labels above it after its own name, dimmed: they shrink first. */
+.ide-shell .project-label-name, .ide-shell .project-label-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ide-shell .project-label-name { flex: 0 1 auto; font-size: 13px; font-weight: 600; }
+.ide-shell .project-label-path { flex: 0 100 auto; color: var(--muted); font-size: 11.5px; }
+/* How many projects the label lists itself, on a tint of its color. */
+.ide-shell .project-label-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; background: color-mix(in srgb, var(--label-color) 16%, transparent);
+  color: color-mix(in srgb, var(--label-color) 50%, var(--text)); font-size: 10.5px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.ide-shell .project-label-row:not([data-colored]) > .project-label-toggle > .project-label-count { color: var(--muted); }
+/* The branch of a label: its guide is under the chevron of its title, as the guide of the sessions of a project is. */
+.ide-shell .project-list .project-label-branch { margin-left: 11px; padding-left: 2px; border-left: 1px solid color-mix(in srgb, var(--label-color) 55%, transparent); transition: border-color .12s ease; }
+.ide-shell .project-label-row:hover + .project-label-branch, .ide-shell .project-label-row:focus-within + .project-label-branch { border-left-color: color-mix(in srgb, var(--label-color) 85%, transparent); }
+.ide-shell .project-label-children { margin: 0; padding: 0; list-style: none; }
+.ide-shell .project-label-children > li { margin: 0; }
 .ide-shell .project-label-row > .label-row-action { display: none; flex: 0 0 22px; width: 22px; min-height: 22px; height: 22px; padding: 0; border: 0;
   border-radius: 4px; align-items: center; justify-content: center; background: transparent; color: var(--muted); }
 .ide-shell .project-label-row > .label-row-action:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }

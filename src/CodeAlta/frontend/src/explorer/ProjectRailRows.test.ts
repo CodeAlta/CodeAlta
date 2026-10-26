@@ -221,7 +221,7 @@ test("left hides the sub-agents of a row and right shows them; any other key is 
   assert.equal(press("ArrowRight", true, { altKey: true }), "");
 });
 
-test("grouped under labels, a label is a title above its projects, a project is listed under each of its labels, and a folded label hides its projects", () => {
+test("grouped under labels, a label is a branch with its projects and its sub-labels, a project is listed under each of its labels, and a folded label hides its branch", () => {
   const projects = [project("a", "Alpha"), project("b", "Beta"), project("c", "Gamma")];
   const infra = { id: "infra", name: "Infra", description: null, icon: null, color: "#2d72d2", order: 1, parent: null, favorite: false, space: null, projectIds: ["a", "b"] };
   const helm = { ...infra, id: "helm", name: "Helm", parent: "infra", projectIds: ["b"] };
@@ -234,6 +234,15 @@ test("grouped under labels, a label is a title above its projects, a project is 
   let at = 0;
   for (const part of order) { const next = html.indexOf(part, at); assert.ok(next >= at, `${part} after ${at}: ${html}`); at = next + part.length; }
   assert.match(html, /data-depth="1">title Helm/);
+  // The branch of a label follows its title and holds its projects and its sub-labels, with their own branches; a
+  // label colors its guide. The projects of no label stay at the top.
+  const branch = (color: string) => `<li class="project-label-branch" style="--label-color:${color}"><ul class="project-label-children">`;
+  assert.ok(html.includes(`title Infra</li>${branch("#2d72d2")}`), html);
+  assert.ok(html.includes(`title Helm</li>${branch("#2d72d2")}`), html);
+  const inInfra = html.slice(html.indexOf(branch("#2d72d2")), html.indexOf('<li class="project-section"'));
+  assert.ok(inInfra.endsWith("</ul></li></ul></li>"), "Helm closes inside Infra.");
+  assert.match(inInfra, /Alpha[\s\S]*title Helm[\s\S]*Beta/);
+  assert.doesNotMatch(html.slice(html.indexOf('<li class="project-section"')), /project-label-branch/);
   // Folding Infra hides its projects and the labels under it; the sessions of the selected project stay in the page.
   const folded = render(["infra"], "b");
   assert.doesNotMatch(folded, /Alpha|Beta|title Helm/);
