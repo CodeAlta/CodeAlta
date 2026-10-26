@@ -16,7 +16,7 @@ import { TimelineImages } from "./TimelineImageStrip";
 import { AttachedFileChips } from "./PromptImageAttachments";
 import type { TimelineImageSource } from "./timelineImages";
 import { ActivitySpinner } from "./ActivitySpinner";
-import { formatSize, toolState } from "./toolCall";
+import { formatSize, readSandboxNote, toolState } from "./toolCall";
 import { useToolOutput, type ToolOutputs } from "./toolOutput";
 import { modalDialogOpen } from "./modalDialogs";
 import { SessionTabMenu } from "./SessionTabMenu";
@@ -197,6 +197,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const codePreview = clickableTile && item.summaryIsCode
     ? commandPreview(excerpt) : null;
   const toolOutput = live?.last || item.toolOutput;
+  const sandboxNote = toolTile ? readSandboxNote(item.toolSandbox) : null;
   const outcome = ({ completed: "Completed", failed: "Failed", canceled: "Canceled", requested: "Pending",
     started: "Running", progressed: "Running", selected: "Running", deselected: "Completed" } as Record<string, "Completed" | "Failed" | "Canceled" | "Pending" | "Running">)[item.toolPhase ?? ""];
   // Categories below have fixed UI titles in toTimelineItem; tool/provider names do not.
@@ -277,6 +278,10 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
         {job && <span className="tool-outcome job-result-outcome" title={job.result}>{job.result}</span>}
         {outcome && <span className="tool-outcome">{t(background ? backgroundOutcome[background] : outcome)}</span>}
         {!!item.toolExitCode && <span className="tool-exit-code">{t("Exit code {code}", { code: item.toolExitCode })}</span>}
+        {/* The command ran outside the sandbox of the session, or its sandbox blocked something: its note says what. */}
+        {sandboxNote && <span className="tool-sandbox-mark" data-outside={sandboxNote.outside || undefined} title={sandboxNote.text}>
+          <AppIcon name={sandboxNote.outside ? "warning" : "sandbox"} size={12} />
+          {t(sandboxNote.outside ? "Outside the sandbox" : "Sandbox {profile}", { profile: sandboxNote.profile })}</span>}
         {item.toolChanges && <span className="file-counts tool-changes" title={t("Lines added and removed by this call")}><b>+{item.toolChanges.added}</b> <em>−{item.toolChanges.removed}</em></span>}
         {live && live.total > 0 ? <span className="tool-output-stats">{live.lines}L · {formatSize(live.total)}</span>
           : item.toolOutputBytes != null && item.toolOutputLines != null && <span className="tool-output-stats">{item.toolOutputLines}L · {(item.toolOutputBytes / 1024).toFixed(1)} KB</span>}

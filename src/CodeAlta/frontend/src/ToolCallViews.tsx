@@ -13,6 +13,7 @@ import type { TimelineImage, TimelineImageSource } from "./timelineImages";
 import { altaEnvelope, argumentEntries, changedFiles, formatDuration, highlightDiffRows, highlightLanguage, highlightLines, matchRanges, outputShape,
   parseDirectoryListing, parseNumberedLines, parseSearchMatches, parseShellResult, type ChangedFile, type DirectoryEntry, type SearchFile,
   type ShellResult, type ToolArguments, type ToolCall } from "./toolCall";
+import { SandboxNoteLine } from "./sandbox/SandboxNoteLine";
 import type { ToolOutputState } from "./toolOutput";
 import { ToolTerminal } from "./ToolTerminal";
 import { CommandBlock, CopyButton, shellLanguage } from "./ToolCallChrome";
@@ -73,6 +74,7 @@ export function ShellView({ call, live, settled }: { call: ToolCall; live: ToolO
         : <ToolTerminal stream={settled ? `record:${text.length}` : "live"} text={text} offset={settled ? 0 : live?.offset ?? 0} />}
       {!settled && !text && <p className="tool-waiting">{t("Waiting for output…")}</p>}
     </div>
+    {result?.sandbox && <SandboxNoteLine note={result.sandbox} />}
     {settled && call.output?.partial && <p className="tool-partial">{t("The rest is too long to show.")}</p>}
   </div>;
 }

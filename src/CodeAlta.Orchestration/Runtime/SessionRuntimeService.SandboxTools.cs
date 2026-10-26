@@ -253,7 +253,7 @@ public sealed partial class SessionRuntimeService
                 // What blocked a command, when it can be told, stops the agent from trying it again the same way.
                 return tool.Spec.Name == ShellCommand && !result.Success
                     && SandboxOutsideCommands.FailureNote(profile, result, refusedBefore, runtime.SandboxWorkers.RecentRefusals(sessionId)) is { } note
-                    ? result with { Items = [.. result.Items, new AgentToolResultItem.Text(note)] }
+                    ? SandboxOutsideCommands.WithNote(result, note)
                     : result;
             }
             catch (SandboxUnavailableException unavailable)
@@ -291,7 +291,7 @@ public sealed partial class SessionRuntimeService
             var host = AgentBuiltInToolFactory.CreateDefaultTools(allowed).Single(static candidate => candidate.Spec.Name == ShellCommand);
             var result = await host.Handler(inside, cancellationToken).ConfigureAwait(false);
             // After the output, which starts with its exit code as the timelines read it.
-            return result with { Items = [.. result.Items, new AgentToolResultItem.Text($"[sandbox: {profile.Name}] The command ran outside the sandbox, as the user allowed.")] };
+            return SandboxOutsideCommands.WithNote(result, $"[sandbox: {profile.Name}] The command ran outside the sandbox, as the user allowed.");
         }
 
         private async Task<AgentToolResult> WebGetAsync(AgentToolDefinition tool, AgentBuiltInToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)

@@ -80,10 +80,10 @@ internal static class HistoryToolProjection
         var shell = ShellCommandResult.Parse(output);
         var written = shell is null ? output : shell.Stdout.Length == 0 ? shell.Stderr : shell.Stderr.Length == 0 ? shell.Stdout : $"{shell.Stdout}\n{shell.Stderr}";
         var preview = Preview(written, 160);
-        cost = 512 + 6 * (preview?.Length ?? 0);
+        cost = 512 + 6 * ((preview?.Length ?? 0) + (shell?.SandboxNote?.Length ?? 0));
         if (cost > budget) { cost = 0; return null; }
         var (lines, bytes) = MeasureOutput(written);
-        return new(null, false, preview, lines, [], bytes, ExitCode: shell?.ExitCode);
+        return new(null, false, preview, lines, [], bytes, ExitCode: shell?.ExitCode, Sandbox: shell?.SandboxNote);
     }
 
     private static (int Lines, int? Bytes) MeasureOutput(string? output)
@@ -184,8 +184,9 @@ internal static class HistoryToolProjection
 /// <param name="Removed">Lines the call removed from files, when its record has a diff.</param>
 /// <param name="ExitCode">The exit code of a shell command, when its result states one.</param>
 /// <param name="App">The MCP server whose view (an MCP App) the call has, read whole with <c>mcpApps.open</c>; null for none.</param>
+/// <param name="Sandbox">The note the sandbox of the session added after a shell command (<c>[sandbox: profile] …</c>); null for none.</param>
 internal sealed record HistoryToolSummary(string? Primary, bool IsCommand, string? Output, int OutputLines, HistoryToolField[] Fields, int? OutputBytes,
-    int? Added = null, int? Removed = null, int? ExitCode = null, string? App = null);
+    int? Added = null, int? Removed = null, int? ExitCode = null, string? App = null, string? Sandbox = null);
 internal sealed record HistoryToolField(string Path, string Text, bool Truncated);
 
 /// <summary>
@@ -196,15 +197,27 @@ internal sealed record HistoryToolField(string Path, string Text, bool Truncated
 /// <param name="WorkingDirectory">The folder the command ran in.</param>
 /// <param name="Stdout">What the command wrote to its standard output; empty when it wrote nothing.</param>
 /// <param name="Stderr">What the command wrote to its standard error; empty when it wrote nothing.</param>
-internal sealed record ShellCommandResult(int ExitCode, string WorkingDirectory, string Stdout, string Stderr)
+/// <param name="SandboxNote">The line the sandbox of the session added after the result (<c>[sandbox: profile] …</c>); null for none.</param>
+internal sealed record ShellCommandResult(int ExitCode, string WorkingDirectory, string Stdout, string Stderr, string? SandboxNote = null)
 {
     private const string Empty = "(empty)";
+    private const string SandboxPrefix = "\n[sandbox: ";
 
     /// <summary>Reads the text of a result, or returns null when it does not have that form.</summary>
     internal static ShellCommandResult? Parse(string? text)
     {
         if (text is null || !text.StartsWith("exit_code: ", StringComparison.Ordinal)) return null;
         var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        // The note of a sandbox is the last line, after the standard error: it is not something the command wrote.
+        string? note = null;
+        var end = normalized.TrimEnd('\n');
+        var last = end.LastIndexOf('\n');
+        if (last >= 0 && string.CompareOrdinal(end, last, SandboxPrefix, 0, SandboxPrefix.Length) == 0 && end.IndexOf(']', last) > last)
+        {
+            note = end[(last + 1)..];
+            normalized = end[..last];
+        }
+
         var first = normalized.IndexOf('\n');
         if (first < 0 || !int.TryParse(normalized.AsSpan(11, first - 11), System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var exitCode)) return null;
         var second = normalized.IndexOf('\n', first + 1);
@@ -217,6 +230,6 @@ internal sealed record ShellCommandResult(int ExitCode, string WorkingDirectory,
         if (split < body - 1) return null;
         var output = normalized[body..Math.Max(body, split)];
         var error = normalized[(split + standardError.Length)..];
-        return new(exitCode, normalized[(first + 1 + directory.Length)..second], output == Empty ? "" : output, error == Empty ? "" : error);
+        return new(exitCode, normalized[(first + 1 + directory.Length)..second], output == Empty ? "" : output, error == Empty ? "" : error, note);
     }
 }

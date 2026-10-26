@@ -10,7 +10,7 @@ type Entry = HistoryResponse["entries"][number];
 test("typed completed output retains authoritative totals with its exact activity", () => {
   const activity = entry({ eventType: "activity", kind: "ToolCall", activityId: "tool", phase: "Completed", name: "alta", text: null });
   const output = entry({ offset: "2", kind: "ToolOutput", parentActivityId: "tool", text: "bounded preview", textTruncated: true,
-    tool: { primary: null, isCommand: false, output: "bounded preview", outputLines: 27, outputBytes: 1434, fields: [], added: null, removed: null, exitCode: null, app: null } });
+    tool: { primary: null, isCommand: false, output: "bounded preview", outputLines: 27, outputBytes: 1434, fields: [], added: null, removed: null, exitCode: null, app: null, sandbox: null } });
   const items = buildTimelineItems([activity, output]);
   assert.equal(items.length, 1);
   assert.equal(items[0].toolOutputLines, 27);
@@ -170,7 +170,7 @@ test("the records of a tool call make one row, with what its details and its liv
 
   const completed = entry({ ...base, offset: "40", phase: "Completed", timestamp: "2026-09-22T10:00:05Z" });
   const output = entry({ offset: "30", kind: "ToolOutput", parentActivityId: "call", text: "exit_code: 1",
-    tool: { primary: null, isCommand: false, output: "failed", outputLines: 1, outputBytes: 6, fields: [], added: null, removed: null, exitCode: 1, app: null } });
+    tool: { primary: null, isCommand: false, output: "failed", outputLines: 1, outputBytes: 6, fields: [], added: null, removed: null, exitCode: 1, app: null, sandbox: null } });
   const [done, ...rest] = buildTimelineItems([requested, started, output, completed]);
   assert.equal(rest.length, 0);
   assert.equal(done.toolPhase, "completed");
@@ -178,8 +178,13 @@ test("the records of a tool call make one row, with what its details and its liv
   assert.equal(done.timestamp, "2026-09-22T10:00:00Z");
   assert.deepEqual([done.toolCall!.offset, done.toolCall!.outputOffset, done.toolCall!.startedAt, done.toolCall!.endedAt],
     ["40", "30", "2026-09-22T10:00:00Z", "2026-09-22T10:00:05Z"]);
+  assert.equal(done.toolSandbox ?? null, null);
   // The same records give the same row: a tile that did not change is not drawn again.
   assert.equal(buildTimelineItems([requested, started, output, completed])[0], done);
+  // The note of the sandbox the command ran in, or outside of, goes with the row: its tile marks it.
+  const outside = "[sandbox: workspace] The command ran outside the sandbox, as the user allowed.";
+  const allowed = entry({ ...output, tool: { ...output.tool!, sandbox: outside } });
+  assert.equal(buildTimelineItems([requested, started, allowed, completed])[0].toolSandbox, outside);
   // A window that starts after the call was started does not know when it started.
   assert.equal(buildTimelineItems([completed])[0].toolCall!.startedAt, null);
   // A late report of the start does not replace the record that ended the call.
@@ -249,7 +254,7 @@ test("the images a tool gave the model get a card after the tile of its call", (
   const activity = entry({ eventType: "activity", kind: "ToolCall", activityId: "tool", phase: "Completed", name: "view_image", text: null });
   const output = entry({ offset: "2", kind: "ToolOutput", parentActivityId: "tool", text: "Viewed image shot.png.\n[Image: shot.png (image/png, 640x480)]",
     details: '{"toolName":"view_image"}', images,
-    tool: { primary: null, isCommand: false, output: "Viewed image shot.png.", outputLines: 2, outputBytes: 60, fields: [], added: null, removed: null, exitCode: null, app: null } });
+    tool: { primary: null, isCommand: false, output: "Viewed image shot.png.", outputLines: 2, outputBytes: 60, fields: [], added: null, removed: null, exitCode: null, app: null, sandbox: null } });
 
   const [tile, card, ...rest] = buildTimelineItems([activity, output]);
 
@@ -611,10 +616,10 @@ test("details formatting and clipboard outcomes are deterministic", async () => 
 
 test("an edit shows the lines it added and removed, and its diff first among its fields", () => {
   const edit = entry({ eventType: "activity", kind: "ToolCall", phase: "Completed", name: "apply_patch", activityId: "edit", details: '{"toolName":"apply_patch"}',
-    tool: { primary: null, isCommand: false, output: "Patch applied:", outputLines: 2, outputBytes: 30, added: 2, removed: 1, exitCode: null, app: null,
+    tool: { primary: null, isCommand: false, output: "Patch applied:", outputLines: 2, outputBytes: 30, added: 2, removed: 1, exitCode: null, app: null, sandbox: null,
       fields: [{ path: "diff", text: "@@ -1 +1,2 @@\n-a\n+A\n+b\n", truncated: false }, { path: "arguments", text: "{}", truncated: false }] } });
   const read = entry({ offset: "2", eventType: "activity", kind: "ToolCall", phase: "Completed", name: "read_file", activityId: "read",
-    tool: { primary: "a.txt", isCommand: false, output: "a", outputLines: 1, outputBytes: 1, added: null, removed: null, exitCode: null, app: null, fields: [] } });
+    tool: { primary: "a.txt", isCommand: false, output: "a", outputLines: 1, outputBytes: 1, added: null, removed: null, exitCode: null, app: null, sandbox: null, fields: [] } });
   const [first, second] = buildTimelineItems([edit, read]);
   assert.deepEqual(first.toolChanges, { added: 2, removed: 1 });
   assert.equal(first.toolFields?.[0].path, "diff");

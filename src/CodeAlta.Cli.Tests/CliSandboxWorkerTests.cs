@@ -19,7 +19,9 @@ public sealed class CliSandboxWorkerTests
     {
         var backend = new MxcSandboxBackend();
         if (backend.GetAvailability() is { IsAvailable: false } availability) Assert.Inconclusive(availability.Reason ?? "No sandbox on this computer.");
-        var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-worker-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        // Not in the temporary folder of the user, whose entries are too many for the sandbox to deny each of them: the
+        // shell would not start in a folder below it.
+        var root = Directory.CreateDirectory(Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), "tests", "worker-" + Guid.NewGuid().ToString("N")[..8])).FullName;
         var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
         var secret = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codealta-sandbox-test-" + Guid.NewGuid().ToString("N")[..8]);
         File.WriteAllText(secret, "the-secret-of-the-user");
@@ -48,6 +50,15 @@ public sealed class CliSandboxWorkerTests
             Assert.Contains("done", Text(shell));
             Assert.DoesNotContain("the-secret-of-the-user", Text(shell), "commands run in the container");
             Assert.DoesNotContain("must-not-reach-the-sandbox", Text(shell), "the environment of the application does not reach the sandbox");
+
+            // A command, and a background command, run in the folder of the session.
+            var where = OperatingSystem.IsWindows() ? "'shell: ' + (Get-Location).Path" : "echo \"shell: $(pwd)\"";
+            var located = await worker.InvokeAsync(Call("shell_command", new { command = where }), host, CancellationToken.None).WaitAsync(Deadline);
+            Assert.Contains("shell: " + project, Text(located), StringComparison.OrdinalIgnoreCase);
+            var output = new System.Text.StringBuilder();
+            var job = worker.StartProcess(where, project, text => { lock (output) output.Append(text); });
+            Assert.AreEqual(0, await job.Completion.WaitAsync(Deadline));
+            lock (output) Assert.Contains(project, output.ToString(), StringComparison.OrdinalIgnoreCase);
             Console.WriteLine($"The worker was ready in {started.TotalMilliseconds:N0} ms.");
         }
         finally

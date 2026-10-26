@@ -22,6 +22,19 @@ internal static class SandboxOutsideCommands
         "UnauthorizedAccessException",
     ];
 
+    /// <summary>
+    /// Adds a note after the output of a command, on a line of its own at the end of its text: the timelines show the
+    /// first text of a result, and read the note there.
+    /// </summary>
+    public static AgentToolResult WithNote(AgentToolResult result, string note)
+    {
+        var index = result.Items.ToList().FindIndex(static item => item is AgentToolResultItem.Text { Value.Length: > 0 });
+        if (index < 0) return result with { Items = [.. result.Items, new AgentToolResultItem.Text(note)] };
+        var items = result.Items.ToArray();
+        items[index] = new AgentToolResultItem.Text(((AgentToolResultItem.Text)items[index]).Value.TrimEnd() + "\n" + note);
+        return result with { Items = items };
+    }
+
     /// <summary>Gives the specification of <c>shell_command</c> the parameter that asks to run a command outside the sandbox.</summary>
     public static AgentToolSpec WithParameter(AgentToolSpec spec)
     {

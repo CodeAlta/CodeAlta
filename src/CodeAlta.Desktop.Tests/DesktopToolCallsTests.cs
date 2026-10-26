@@ -286,6 +286,22 @@ public sealed class DesktopToolCallsTests
         Assert.AreEqual(3, WorkspaceService.ProjectHistory(new([new AgentSessionHistoryEntry(0, completed)], null, false)).Entries.Single().Tool!.ExitCode);
     }
 
+    [TestMethod]
+    public void RowSummary_OfAShellResultOfASandbox_KeepsTheNoteOfTheSandboxApartFromWhatTheCommandWrote()
+    {
+        // The note follows the standard error on a line of its own, as the result of the tool joins its items.
+        const string outside = "[sandbox: workspace] The command ran outside the sandbox, as the user allowed.";
+        var silent = HistoryToolProjection.ProjectOutput($"exit_code: 0\r\nworking_directory: C:\\code\r\nstdout:\r\n(empty)\r\nstderr:\r\n(empty)\r\n{outside}", 4096, out _)!;
+        Assert.AreEqual((0, null, 0, 0, outside), (silent.ExitCode, silent.Output, silent.OutputLines, silent.OutputBytes, silent.Sandbox));
+        const string refused = "[sandbox: strict] The network of the sandbox refused api.nuget.org: it reaches only the hosts of its profile.";
+        Assert.AreEqual(new ShellCommandResult(1, "/tmp", "", "error NU1301", refused),
+            ShellCommandResult.Parse($"exit_code: 1\nworking_directory: /tmp\nstdout:\n(empty)\nstderr:\nerror NU1301\n{refused}\n"));
+        // A line the command wrote itself is no note unless it is the last one, after the standard error.
+        Assert.AreEqual(new ShellCommandResult(0, "/tmp", "[sandbox: x] printed", ""),
+            ShellCommandResult.Parse("exit_code: 0\nworking_directory: /tmp\nstdout:\n[sandbox: x] printed\nstderr:\n(empty)"));
+        Assert.IsNull(HistoryToolProjection.ProjectOutput("exit_code: 0\nworking_directory: /tmp\nstdout:\nok\nstderr:\n(empty)", 4096, out _)!.Sandbox);
+    }
+
     private static ToolCallsService Service(Dictionary<long, AgentEvent> records)
         => new((sessionId, offset, _) => sessionId != "session" ? Task.FromException<AgentEvent?>(new AgentSessionHistoryException("missing_session"))
             : records.TryGetValue(offset, out var record) ? Task.FromResult<AgentEvent?>(record) : Task.FromException<AgentEvent?>(new AgentSessionHistoryException("invalid_cursor")), null, Epoch);

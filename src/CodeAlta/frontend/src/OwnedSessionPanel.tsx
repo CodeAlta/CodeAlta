@@ -16,7 +16,7 @@ import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectRefere
 import { IssuePicker } from "./IssuePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
-import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
+import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, sendAvailable, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -50,6 +50,8 @@ import { ComposerSurface, ComposerSelectionFields, ModelOptionFields, ReasoningS
 import { showToast } from "./appToaster";
 import { PermissionModeSelect } from "./PermissionModeSelect";
 import { ReviewBeforeCommitSelect } from "./ReviewBeforeCommitSelect";
+import { followScopes, nextSessionSandbox, sessionSandboxSummary, type SessionSandboxState } from "./sandbox/sandboxChoices";
+import { SessionSandboxSelect } from "./sandbox/SessionSandboxSelect";
 import { chosenPermissionMode, offeredPermissionModes, permissionModeName } from "./permissionModes";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
@@ -1172,6 +1174,27 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
 
     setReview({ key: reviewKey, own: result.own ?? null, effective: result.effective, setting: result.setting });
   }
+  // The sandbox the session runs in: read with the session and again after each turn (the settings may have changed
+  // meanwhile), and changed at once from the form of the Agent chip. What the settings give is known while the session
+  // follows them, and kept once it has a choice of its own.
+  const [sandbox, setSandbox] = useState<SessionSandboxState | null>(null);
+  useEffect(() => {
+    if (invalidEpoch) return;
+    const controller = new AbortController();
+    void sandboxSessions.session({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 8000 }).then(reply => {
+      if (!controller.signal.aborted && reply.status === "ok") setSandbox(current => nextSessionSandbox(current, reviewKey, reply));
+    }).catch(() => { /* The row is shown once the sandbox is known. */ });
+    return () => controller.abort();
+  }, [epoch, sessionId, reviewKey, invalidEpoch, composerBusy]);
+  const shownSandbox = sandbox?.key === reviewKey ? sandbox : null;
+  async function applySandbox(value: string | null) {
+    const reply = await sandboxSessions.setSession({ expectedEpoch: epoch, sessionId, value: value ?? followScopes }, { timeoutMilliseconds: 30_000 }).catch(() => null);
+    if (reply?.status !== "ok") {
+      showToast({ message: t("The sandbox was not changed ({status}).", { status: reply?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
+    setSandbox(current => nextSessionSandbox(current, reviewKey, reply));
+  }
 
   async function applyPermissionMode(current: SessionChoicesResponse, chosen: SessionSelection, value: string, signal: AbortSignal) {
     const next = changeSelection(current, chosen, "permissionMode", value);
@@ -1390,6 +1413,7 @@ ${value}` : value);
         provider: selectedProviderName, providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
         reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary, review: shownReview?.effective ?? null,
+        sandbox: sessionSandboxSummary(shownSandbox?.reply),
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })
           : reasoning.note === "unused" ? `${t("Reasoning")}: ${selected?.reasoningEffort} · ${t("Not used")}` : null }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
@@ -1424,6 +1448,8 @@ ${value}` : value);
         onChange={(optionId, value) => void applyModelOption(selectedModel.id, optionId, value)} /> : undefined}
       review={shownReview && <ReviewBeforeCommitSelect id={`composer-review-${sessionId}`} own={shownReview.own} setting={shownReview.setting}
         disabled={invalidEpoch} onChange={value => void applyReview(value)} />}
+      sandbox={shownSandbox && <SessionSandboxSelect id={`composer-sandbox-${sessionId}`} own={shownSandbox.reply.own} inherited={shownSandbox.inherited}
+        choices={shownSandbox.reply.choices} disabled={invalidEpoch} onChange={value => void applySandbox(value)} />}
       permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
         disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined} /></>}

@@ -499,6 +499,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .command-permission-panel > p.permission-show-skill { margin: 6px 0; }
 .command-permission-panel > p { margin: 4px 0 0; }
 .command-permission-panel > p.permission-shortened { color: var(--red); font-weight: 600; }
+/* The reason an agent gives to run a command outside the sandbox, quoted as the agent wrote it. */
+.command-permission-panel > blockquote.permission-reason-quote { margin: 6px 0 0; padding: 2px 0 2px 10px; border-left: 3px solid var(--yellow); color: var(--text); font-style: italic; overflow-wrap: anywhere; }
 .command-permission-panel code { overflow-wrap: anywhere; }
 .command-permission-panel .permission-choices { display: grid; gap: 6px; margin-top: 10px; }
 /* The list can have the focus without a choice having it: the card says so. */
@@ -1235,6 +1237,14 @@ dialog::backdrop { background: var(--scrim); }
 .provider-model-picker p { margin: 8px 0; color: var(--muted); }
 .provider-model-picker .bp6-menu-item-label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .provider-settings-wide { grid-column: 1 / -1; }
+/* The sandbox of a provider, then the models that have one of their own, a row each. */
+.provider-sandbox { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.provider-sandbox > .sandbox-scope-select { flex: 0 1 260px; min-width: 0; }
+.provider-sandbox-models { display: grid; flex: 1 0 100%; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.provider-sandbox-models > li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.provider-sandbox-model { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.provider-sandbox-models .sandbox-scope-select { flex: 0 1 220px; min-width: 0; }
+.provider-sandbox-add.bp6-html-select { flex: 0 1 260px; }
 .provider-settings-footer.bp6-section-card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .provider-settings-spacer { flex: 1 1 auto; }
 .provider-settings-problem { flex: 1 0 100%; color: var(--red); font-size: 12px; }
@@ -1498,6 +1508,54 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .disabled-tools { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
 .disabled-tools .disabled-tool code { font-size: 11.5px; background: none; padding: 0; box-shadow: none; }
 .disabled-tools .disabled-tool[data-inherited] { opacity: .7; }
+
+/* Settings > Sandbox: the status and its check, every session, the profiles, and the places that choose one. */
+.sandbox-settings-grid { display: grid; gap: 14px; }
+/* The status and the setting of every session side by side, one above the other in a narrow window. */
+.sandbox-settings-top { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 14px; }
+.sandbox-availability { display: flex; align-items: center; gap: 8px; }
+.sandbox-availability-dot { color: var(--red); font-size: 12px; }
+.sandbox-availability[data-available="true"] .sandbox-availability-dot { color: var(--green); }
+.sandbox-status .settings-field-help { margin-top: 6px; }
+.sandbox-setup { display: flex; align-items: baseline; gap: 6px; }
+.sandbox-setup > svg { flex: none; align-self: center; }
+.sandbox-check-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.sandbox-check-steps { display: grid; gap: 4px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 12.5px; }
+.sandbox-check-steps > li { display: grid; grid-template-columns: 16px minmax(120px, auto) minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.sandbox-check-steps > li > svg { color: var(--green); }
+.sandbox-check-steps > li[data-passed="false"] > svg { color: var(--red); }
+.sandbox-check-detail { min-width: 0; overflow: hidden; color: var(--muted); font-family: var(--code-font); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.sandbox-check-waiting { color: var(--muted); }
+.sandbox-every-session-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 8px; }
+.sandbox-every-session-choice .bp6-control { margin: 0; }
+.sandbox-every-session-choice .bp6-html-select { min-width: 160px; margin-left: -8px; }
+.sandbox-profile-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 8px; }
+.sandbox-list.bp6-tag-input { width: 420px; max-width: 100%; min-width: 0; }
+.sandbox-list-read { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 560px; }
+.sandbox-list-none { color: var(--muted); }
+.sandbox-choice.bp6-radio-group { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; }
+.sandbox-choice .bp6-control.bp6-inline { margin: 0; }
+.sandbox-inherited { overflow-wrap: anywhere; }
+.sandbox-profile-problem { margin-bottom: 8px; }
+.sandbox-profile-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sandbox-profile-spacer { flex: 1 1 auto; }
+.sandbox-scopes-none { margin: 0; color: var(--muted); }
+.sandbox-scope-list { display: grid; gap: 2px; margin: 8px 0 0; padding: 0; list-style: none; }
+.sandbox-scope-list > li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sandbox-scope-link.bp6-button { min-width: 0; }
+.sandbox-scope-link .bp6-button-text { display: inline-flex; gap: 6px; min-width: 0; overflow: hidden; }
+.sandbox-scope-kind { flex: none; color: var(--muted); }
+.sandbox-scope-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sandbox-scope-arrow { flex: none; color: var(--muted); }
+.sandbox-scope-profile.bp6-tag { flex: none; }
+.sandbox-scope-profile[data-off] { opacity: .75; }
+@container (max-width: 480px) {
+  .sandbox-choice.bp6-radio-group { justify-content: flex-start; }
+  .sandbox-list.bp6-tag-input { width: 100%; }
+  .sandbox-list-read { justify-content: flex-start; max-width: none; }
+  .sandbox-check-steps > li { grid-template-columns: 16px minmax(0, 1fr); }
+  .sandbox-check-detail { grid-column: 2; }
+}
 .disabled-tools-none { color: var(--muted); font-size: 12px; }
 .disabled-tools-add.bp6-button { min-height: 22px; color: var(--muted); }
 .disabled-tools-add.bp6-button:hover:not(.bp6-disabled) { color: var(--text); }
@@ -2251,6 +2309,12 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .rename-form .bp6-form-group { margin: 0; }
 .rename-form .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 .rename-form .bp6-form-helper-text { overflow-wrap: anywhere; }
+/* The sandbox of a project, beside its row, as its rename form. */
+.sandbox-project-form { width: min(320px, calc(100vw - 32px)); padding: 12px 14px 10px; }
+.sandbox-project-form .bp6-form-group { margin: 0; }
+.sandbox-project-form .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.sandbox-project-form .bp6-html-select { width: 100%; }
+.sandbox-project-form .bp6-form-helper-text { overflow-wrap: anywhere; }
 .rename-actions { display: flex; justify-content: flex-end; gap: 6px; }
 /* The form of a new session beside the row of its project, or of the chats: wider, for the chips of its choices. */
 .new-session-form { grid-template-columns: minmax(0, 1fr); width: min(420px, calc(100vw - 32px)); }
@@ -2581,6 +2645,11 @@ dialog.tool-call-dialog .tool-command pre.tool-command-text { flex: 1 1 auto; mi
 .tool-empty, .tool-waiting, .tool-partial { margin: 0; color: var(--muted); font-size: 12.5px; }
 .tool-partial { flex: none; font-size: 11.5px; }
 .tool-terminal-frame > :is(.tool-empty, .tool-waiting) { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+/* What the sandbox said after a command: a line of its own under the terminal. */
+.tool-sandbox-note { flex: none; display: flex; align-items: baseline; gap: 6px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.tool-sandbox-note > svg { flex: none; align-self: center; }
+.tool-sandbox-note > strong { flex: none; color: var(--text); font-weight: 600; }
+.tool-sandbox-note[data-outside] > :is(svg, strong) { color: var(--yellow); }
 
 /* A file: its name, then its lines with their numbers or the rows of its diff. */
 .tool-read, .tool-file { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -2682,6 +2751,8 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 /* A running call on its tile: the dots turn where the dot of its state is. */
 .tool-state-spinner { vertical-align: 0; margin-inline-end: 1px; }
 .ide-shell .tool-exit-code { color: var(--red); white-space: nowrap; }
+.tool-sandbox-mark { display: inline-flex; align-items: center; align-self: center; gap: 4px; white-space: nowrap; }
+.tool-sandbox-mark[data-outside] { color: var(--yellow); }
 .tool-argument-preview[data-path] { direction: rtl; text-align: left; }
 .detail-pane-diff > h3 { display: flex; align-items: baseline; gap: 10px; }
 .ide-shell .tool-changes { font: var(--bp-typography-size-code-small)/var(--bp-typography-line-height-large) var(--bp-typography-family-mono); }
@@ -2851,6 +2922,12 @@ span.workspace-chip-part.workspace-chip-changes { display: inline-flex; align-it
 .composer-selection-review::before { content: none !important; }
 .composer-selection-review { margin-left: 6px; }
 .composer-selection-review svg { color: var(--accent); }
+/* The box of the sandbox stands beside them too; red when its profile cannot be used. */
+.prompt-surface .composer-selection-sandbox { flex-shrink: 0; }
+.composer-selection-sandbox::before { content: none !important; }
+.composer-selection-sandbox { margin-left: 6px; }
+.composer-selection-sandbox svg { color: var(--green); }
+.composer-selection-sandbox[data-problem] svg { color: var(--red); }
 .prompt-surface .context-usage.bp6-button { height: 28px; min-height: 28px; padding: 0 8px; }
 .prompt-cache-countdown { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; cursor: default; }
 .prompt-cache-countdown[data-state="ending"] { color: var(--yellow); }

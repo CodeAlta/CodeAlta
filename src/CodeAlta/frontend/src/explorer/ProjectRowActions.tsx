@@ -10,6 +10,8 @@ import { usePluginMenuEntries } from "../pluginButtons/pluginMenu";
 import { useShellLanguage } from "../shellLanguage";
 import { modalDialogOpen } from "../modalDialogs";
 import { ExternalEditorIcon, openInFileManagerKey, useExternalOpener, type ExternalTarget } from "../externalEditors/externalEditors";
+import { ProjectSandboxPopover } from "../sandbox/ProjectSandboxPopover";
+import type { SandboxScopeApi } from "../sandbox/SandboxScopeControls";
 
 /** Session actions of one scope (a project, or the global "Global sessions" scope when the id is null). */
 export type ScopeSessionActions = {
@@ -37,6 +39,8 @@ export type ProjectRowAuthority = {
   canvases?: Readonly<{ list: () => Readonly<{ items: readonly CanvasItem[]; more: boolean }>; open: (item: CanvasItem, project: WorkspaceProject) => void; all: () => void }>;
   /** Whether a project is kept out of the local search, and what changes it. Absent where the host has no index or search is off. */
   search?: Readonly<{ excluded: (project: WorkspaceProject) => boolean; set: (project: WorkspaceProject, excluded: boolean) => void }>;
+  /** The host the sandbox of a project is chosen with, in a popover beside its row. Absent where the window owns no host. */
+  sandbox?: Readonly<{ epoch: string; api: SandboxScopeApi }>;
 };
 type Review = { project: WorkspaceProject; context: ProjectRowContext; origin: HTMLButtonElement;
   row: HTMLLIElement; details: boolean; opening: boolean };
@@ -57,6 +61,8 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
   const latest = useRef(authority); latest.current = authority;
   const review = useRef<Review | null>(null);
   const [shown, setShown] = useState<Review | null>(null);
+  // The project whose sandbox is being chosen, beside the row, once the menu is closed.
+  const [sandboxing, setSandboxing] = useState<WorkspaceProject | null>(null);
   function current(value: Review) {
     const context = latest.current?.current();
     return review.current === value && !!context && value.row === row.current && value.row.isConnected
@@ -140,6 +146,18 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
     dismiss();
     owner.worktrees(value.project);
   }
+  function sandboxAction(original: Review) {
+    const value = review.current;
+    const owner = latest.current;
+    if (!value || value !== original || value.details || !owner?.sandbox || !current(value) || modalDialogOpen() || !projectRowAccess(value.project, owner.current()).open) return;
+    dismiss();
+    setSandboxing(value.project);
+  }
+  function closeSandbox() {
+    setSandboxing(null);
+    // The focus goes back to the row, as after its rename.
+    if (!modalDialogOpen()) row.current?.querySelector<HTMLElement>(":scope > button")?.focus();
+  }
   function externalAction(target: ExternalTarget, original: Review) {
     const value = review.current;
     if (!value || value !== original || value.details || !latest.current || !current(value) || modalDialogOpen() || !projectRowAccess(value.project, latest.current.current()).open) return;
@@ -200,6 +218,7 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
           onSelect: () => setFavorite(visible, !favorite.value) }] : []),
         { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
         ...(authority?.worktrees && !project.archived ? [{ key: "worktrees", label: `${t("Worktrees")}…`, icon: "worktree" as const, onSelect: () => worktreesAction(visible) }] : []),
+        ...(authority?.sandbox && !project.archived ? [{ key: "sandbox", label: `${t("Sandbox")}…`, icon: "sandbox" as const, onSelect: () => sandboxAction(visible) }] : []),
         // The folder of the project outside CodeAlta: in the editor the user chose, and in the file manager of the system.
         ...(external.opener && !project.archived && external.editor ? [{ key: "external-editor", label: t("Open in {editor}", { editor: external.editor.name }),
           iconNode: <ExternalEditorIcon id={external.editor.id} size={15} />, onSelect: () => externalAction("editor", visible) }] : []),
@@ -218,6 +237,8 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
           ...(canvases.more ? [{ key: "canvases-more", label: t("More…"), icon: "canvases" as const, onSelect: () => canvasAction(null, visible) }] : [])] : []),
         ...pluginEntries,
       ]} />}
+    {sandboxing && authority?.sandbox && <ProjectSandboxPopover epoch={authority.sandbox.epoch} api={authority.sandbox.api} projectId={sandboxing.id}
+      projectName={sandboxing.name} onClose={closeSandbox} />}
     {visible?.details && visible.context.snapshot && <ProjectDetailsDialog project={visible.project} snapshot={visible.context.snapshot}
       isCurrent={() => current(visible)} onClose={() => dismiss(true)} />}
   </li>;

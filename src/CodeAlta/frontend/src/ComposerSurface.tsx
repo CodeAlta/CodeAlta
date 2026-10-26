@@ -6,6 +6,7 @@ import { ModelIcon, ProviderIcon } from "./ProviderIcon";
 import { ComposerChrome } from "./composerChrome";
 import { PromptEditor } from "./PromptEditor";
 import { permissionModeTone } from "./permissionModes";
+import { sandboxSources, type SessionSandboxSummary } from "./sandbox/sandboxChoices";
 import { MoreMenu } from "./promptSurface/MoreMenu";
 import { SurfaceDensityContext, useMeasuredDensity } from "./promptSurface/PromptSurfaceParts";
 import { useShellLanguage } from "./shellLanguage";
@@ -76,13 +77,15 @@ export type ComposerSelectionSummary = Readonly<{ agent: string; provider: strin
   permission?: Readonly<{ mode: string | null; name: string }> | null;
   /** Whether the user reviews the changes before an agent commits them, shown as an eye; null where it is not known. */
   review?: boolean | null;
+  /** The sandbox the session runs in, shown as a small box when it is sandboxed; null where it is not known. */
+  sandbox?: SessionSandboxSummary | null;
   /** What the tooltip says of the reasoning when the chip shows none ("Haiku 4.5 has no reasoning effort"). */
   reasoningNote?: string | null }>;
 
 // Both draft and owned composers present their selection as one chip, the Agent chip, that opens this form.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
 // open while a control owns an admitted change (a provider switch) that must not be orphaned.
-export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, modelOptions, permission, review, summary, locked = false, openRequest = 0, notice = null }: {
+export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, modelOptions, permission, review, sandbox, summary, locked = false, openRequest = 0, notice = null }: {
   sessionId: string; onOpenCatalog?: (page: "prompts" | "models") => void;
   agent: ReactNode; provider: ReactNode; model: ReactNode; reasoning: ReactNode;
   /** The other options of the model (its context, a fast mode), where its provider offers some. */
@@ -91,6 +94,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
   permission?: ReactNode;
   /** Whether the user reviews the changes of the session before an agent commits them. */
   review?: ReactNode;
+  /** The sandbox the commands and the file tools of the session run in, where the host has one. */
+  sandbox?: ReactNode;
   summary: ComposerSelectionSummary; locked?: boolean;
   /** Opens the form each time it changes from what it was: the owner asks for another choice. */
   openRequest?: number;
@@ -113,6 +118,10 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       labelFor={`composer-permission-${sessionId}`}>{permission}</FormGroup>}
     {review && <FormGroup label={<span className="composer-selection-label"><AppIcon name="eye" size={14} />{t("Review before commit")}</span>}
       labelFor={`composer-review-${sessionId}`}>{review}</FormGroup>}
+    {sandbox && <FormGroup label={<span className="composer-selection-label"><AppIcon name="sandbox" size={14} />{t("Sandbox")}</span>}
+      labelFor={`composer-sandbox-${sessionId}`} intent={summary.sandbox?.problem ? "danger" : "none"}
+      helperText={summary.sandbox?.problem ? <span className="composer-selection-notice" role="alert">{summary.sandbox.problem}</span>
+        : summary.sandbox ? sandboxSourceText(t, summary.sandbox) : undefined}>{sandbox}</FormGroup>}
     <div className="composer-selection-links">
       <Button variant="minimal" size="small" icon={<AppIcon name="assistant" size={14} />} onClick={() => onOpenCatalog?.("prompts")}>{t("Browse agent prompts")}</Button>
       <Button variant="minimal" size="small" icon={<AppIcon name="model" size={14} />} onClick={() => onOpenCatalog?.("models")}>{t("Browse models")}</Button>
@@ -126,7 +135,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       title={[`${t("Agent prompt")}: ${summary.agent}`, `${t("Provider")}: ${summary.provider}`, `${t("Model")}: ${summary.model}`,
         summary.reasoning ? `${t("Reasoning")}: ${summary.reasoning}` : summary.reasoningNote,
         summary.permission && `${t("Permissions")}: ${summary.permission.name}`,
-        summary.review != null && `${t("Review before commit")}: ${t(summary.review ? "On" : "Off")}`].filter(Boolean).join("\n")}
+        summary.review != null && `${t("Review before commit")}: ${t(summary.review ? "On" : "Off")}`,
+        summary.sandbox && sandboxTitle(t, summary.sandbox)].filter(Boolean).join("\n")}
       endIcon={<AppIcon name="chevronDown" size={14} />}>
       <span className="composer-selection-part composer-selection-agent"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
       {/* `<provider logo> Provider / <model logo> Model`: several accounts of one kind of provider (two of Claude Code) are
@@ -147,8 +157,21 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       {/* The changes wait for the user's review before a commit. */}
       {summary.review && <span className="composer-selection-part composer-selection-review"><AppIcon name="eye" size={14} />
         <span className="composer-selection-review-name">{t("Review before commit")}</span></span>}
+      {/* The commands of the session run in a sandbox: a small box, marked when its profile cannot be used. */}
+      {summary.sandbox?.profile && <span className="composer-selection-part composer-selection-sandbox" data-problem={summary.sandbox.problem ? "true" : undefined}
+        title={sandboxTitle(t, summary.sandbox)}><AppIcon name="sandbox" size={14} /></span>}
     </Button>
   </PopoverNext>;
+}
+
+type Translate = ReturnType<typeof useShellLanguage>["t"];
+// Where the sandbox of a session comes from.
+const sandboxSourceText = (t: Translate, sandbox: SessionSandboxSummary) => sandboxSources[sandbox.source] ? t(sandboxSources[sandbox.source]) : undefined;
+// What the chip says of the sandbox: its profile and where it comes from, or why the profile cannot be used.
+function sandboxTitle(t: Translate, sandbox: SessionSandboxSummary): string {
+  if (!sandbox.profile) return `${t("Sandbox")}: ${t("Off")}`;
+  const detail = sandbox.problem ?? sandboxSourceText(t, sandbox);
+  return `${t("Sandbox")}: ${sandbox.profile}${detail ? ` · ${detail}` : ""}`;
 }
 
 /** An option of a model other than its effort, as the host offers it: its values, the one it has, whether it is on or off. */

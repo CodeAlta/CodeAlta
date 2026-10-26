@@ -56,6 +56,8 @@ export type TimelineItem = Readonly<{
   toolChanges?: Readonly<{ added: number; removed: number }>;
   /** The exit code of a command, when its record has one. */
   toolExitCode?: number | null;
+  /** The note the sandbox of the session added after a command (`[sandbox: <profile>] …`), when it added one. */
+  toolSandbox?: string | null;
   /** The MCP server whose view (an MCP App) the call has, when it has one: the row shows it. */
   toolApp?: Readonly<{ server: string }>;
   /** True for a prompt another agent session delivered, shown without its routing envelope. */
@@ -239,7 +241,7 @@ function callItem(first: HistoryEntry, last: HistoryEntry, output: HistoryEntry 
     toolCall: base.toolCall && { ...base.toolCall, outputOffset: attached?.offset ?? null, images: projectTimelineImages(attached?.images),
       startedAt: isTerminalPhase(first.phase) ? null : first.timestamp, endedAt: isTerminalPhase(last.phase) ? last.timestamp : null },
     ...attached ? { toolOutput: attached.tool!.output, toolOutputLines: attached.tool!.outputLines, toolOutputBytes: attached.tool!.outputBytes,
-      toolExitCode: attached.tool!.exitCode ?? base.toolExitCode,
+      toolExitCode: attached.tool!.exitCode ?? base.toolExitCode, toolSandbox: attached.tool!.sandbox ?? base.toolSandbox,
       toolFields: [...(base.toolFields ?? []), { path: "content", text: attached.text ?? "", truncated: attached.textTruncated || attached.bodyOmitted }] } : {} };
   folded.set(last, { first, output, item });
   return item;
@@ -430,6 +432,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolFields: entry.tool?.fields,
     toolChanges: entry.tool?.added != null && entry.tool.removed != null ? { added: entry.tool.added, removed: entry.tool.removed } : undefined,
     toolExitCode: entry.tool?.exitCode,
+    toolSandbox: entry.tool?.sandbox,
     toolApp: entry.tool?.app ? { server: entry.tool.app } : undefined,
     delegated: delegated ? true : undefined,
     jobResult: job ?? undefined,

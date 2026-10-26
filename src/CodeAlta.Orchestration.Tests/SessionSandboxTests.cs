@@ -192,6 +192,8 @@ public sealed class SessionSandboxTests
         var allowed = await tools.CallAsync("shell_command", new { command = "echo out", outside_sandbox = "It needs the NuGet API key." });
         Assert.IsTrue(allowed.Success, allowed.Error);
         Assert.StartsWith("exit_code: 0", RoutedToolSet.Text(allowed), "the output keeps the form the timelines read");
+        Assert.HasCount(1, allowed.Items, "the note is a line of the text the timelines show, not a part they leave out");
+        Assert.EndsWith("\n[sandbox: workspace] The command ran outside the sandbox, as the user allowed.", ((AgentToolResultItem.Text)allowed.Items[0]).Value.Replace("\r\n", "\n"));
         Assert.Contains("ran outside the sandbox", RoutedToolSet.Text(allowed));
         Assert.Contains("out", RoutedToolSet.Text(allowed));
         Assert.AreEqual(0, backend.Starts.Count, "it ran here");

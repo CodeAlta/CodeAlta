@@ -144,6 +144,7 @@ import {
   Cog,
   X,
   Layers,
+  Box,
   type LucideIcon,
   AppWindow,
   PictureInPicture2,
@@ -298,6 +299,7 @@ const icons = {
   arrowLeft: ArrowLeft,
   arrowRight: ArrowRight,
   inherit: Layers,
+  sandbox: Box,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

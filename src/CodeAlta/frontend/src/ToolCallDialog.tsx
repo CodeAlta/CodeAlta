@@ -141,6 +141,8 @@ export function ToolCallDialog({ item, reader, outputs, imageSource, current, on
       {(duration !== null || exitCode !== null || directory || timeout !== null || written || files.length > 0) && <div className="tool-summary">
         {duration !== null && <span className="tool-fact" title={t("Duration")}><AppIcon name="reminder" size={13} />{formatDuration(duration)}</span>}
         {exitCode !== null && <Tag minimal intent={exitCode === 0 ? "success" : "danger"} className="tool-exit">{t("Exit code {code}", { code: exitCode })}</Tag>}
+        {shell?.sandbox?.outside && <Tag minimal intent="warning" className="tool-outside-sandbox" icon={<AppIcon name="warning" size={12} />}
+          title={shell.sandbox.text}>{t("Outside the sandbox")}</Tag>}
         {written && written.bytes > 0 && <span className="tool-fact">{t("{count} lines", { count: written.lines })} · {formatSize(written.bytes)}</span>}
         {files.length > 1 && <span className="tool-fact"><AppIcon name="file" size={13} />{t("{count} files", { count: files.length })}</span>}
         {files.length > 0 && <span className="file-counts"><b>+{added}</b> <em>−{removed}</em></span>}

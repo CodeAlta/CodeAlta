@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Card, HTMLSelect } from "@blueprintjs/core";
-import { agentPrompts, type AgentPromptEntry } from "#neoastra";
+import { agentPrompts, sandboxSettings, type AgentPromptEntry } from "#neoastra";
+import { SandboxScopeSelect, useSandboxScopes, type SandboxScopeApi } from "../sandbox/SandboxScopeControls";
 import { SettingsField as Field } from "../SettingsField";
 import { useShellLanguage } from "../shellLanguage";
 import { SpaceModelTiers } from "./SpaceModelTiers";
@@ -17,17 +18,20 @@ export async function readAgentPrompts(epoch: string): Promise<readonly AgentPro
 
 /**
  * The section "New sessions" of the page of a space: the agent prompt its new sessions start with when none is
- * chosen, among the agent prompts of the space, and the model tiers they use. The choice of the user in the window,
+ * chosen, among the agent prompts of the space, the sandbox they run in, and the model tiers they use. The choice of the user in the window,
  * and the prompt an agent or an automation names, still win.
  */
-export function SpaceNewSessions({ read = readAgentPrompts, ...section }: SpaceSectionProps & Readonly<{
+export function SpaceNewSessions({ read = readAgentPrompts, sandbox = sandboxSettings, ...section }: SpaceSectionProps & Readonly<{
   /** Reads the agent prompts; the page of Settings by default. */
   read?: (epoch: string) => Promise<readonly AgentPromptEntry[] | null>;
+  /** The sandbox of the sessions of the space; the host by default. */
+  sandbox?: SandboxScopeApi;
 }>) {
   const { space, hub, canEdit, busy, run } = section;
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
   const epoch = hub.hostEpoch();
+  const sandboxes = useSandboxScopes(epoch, sandbox);
   const [prompts, setPrompts] = useState<readonly AgentPromptEntry[] | null>(null);
   useEffect(() => {
     if (!epoch) return;
@@ -50,6 +54,11 @@ export function SpaceNewSessions({ read = readAgentPrompts, ...section }: SpaceS
         {listed.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.name || prompt.id}</option>)}
       </HTMLSelect>
     </Field>
+    {sandboxes.listing && <Field label={t("Sandbox")} htmlFor={`${id}-sandbox`}
+      notice={<p className="settings-field-help">{t("The sessions of this space run in it, unless their model, their provider or their project chooses another.")}</p>}>
+      <SandboxScopeSelect id={`${id}-sandbox`} value={sandboxes.value("space", space.id)} profiles={sandboxes.profiles} disabled={!canEdit || busy || sandboxes.busy}
+        label={t("Sandbox of {name}", { name: space.name })} onChange={value => void sandboxes.choose("space", space.id, null, value)} />
+    </Field>}
     {/* Each part is a component of its own, so that each can change without the others. */}
     <SpaceModelTiers {...section} />
   </Card>;

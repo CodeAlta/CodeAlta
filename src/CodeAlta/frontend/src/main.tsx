@@ -356,6 +356,10 @@ import { MeaningDialogHost } from "./search/MeaningDialog";
 import { contentTarget } from "./search/contentResults";
 import { worktrees as worktreesApi } from "#neoastra";
 import { externalEditors as externalEditorsApi } from "#neoastra";
+import { sandboxSettings, type SandboxScopeItem, type SandboxSessionResponse } from "#neoastra";
+import { notSandboxed, sessionSandboxSummary } from "./sandbox/sandboxChoices";
+import { SandboxSettings } from "./sandbox/SandboxSettings";
+import { SessionSandboxSelect } from "./sandbox/SessionSandboxSelect";
 import { createExternalOpener, ExternalOpenerContext } from "./externalEditors/externalEditors";
 import { sessionBookmarks, type Bookmark } from "./bookmarks/bookmarks";
 import { createBookmarksHub, type BookmarksHub } from "./bookmarks/bookmarksHub";
@@ -400,7 +404,7 @@ const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 if (!demoMode) installLocalCallPolicy(createSlowCallWatch(reportToHost));
 const noSubscription = () => () => { };
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
-type View = "workspace" | "appearance" | "general" | "windows" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage" | "speech" | "search" | "plugin";
+type View = "workspace" | "appearance" | "general" | "windows" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sandbox" | "sessions" | "storage" | "speech" | "search" | "plugin";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse | null }) {
@@ -668,6 +672,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [spacePage, setSpacePage] = useState<SpacePageTarget | null>(null);
   // The settings page of a plugin that Settings > Extensions shows, when the section is `plugin`.
   const [pluginPage, setPluginPage] = useState<PluginSettingsPage | null>(null);
+  // The provider Settings > Providers selects when it opens from a link of Settings > Sandbox.
+  const [providerFocus, setProviderFocus] = useState<string | null>(null);
   const currentSettingsSection = useRef<SettingsSection>(settingsSection);
   currentSettingsSection.current = settingsSection;
   const settingsOrigin = useRef<HTMLElement | null>(null);
@@ -687,6 +693,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     advanceBrowserRevision();
     invalidateCreation();
     focusRestoration.cancel();
+    setProviderFocus(null);
     if (next === "workspace") {
       settingsVisible.current = false;
       setSettingsOpen(false);
@@ -713,12 +720,19 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // A control outside the shell (a composer status item) asks for a Settings page by name.
   const openSettingsPage = useRef<(page: string) => void>(() => {});
   openSettingsPage.current = page => {
-    if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills" || page === "spaces" || page === "speech") { navigate(page); return; }
+    if (page === "mcp" || page === "plugins" || page === "providers" || page === "sandbox" || page === "skills" || page === "spaces" || page === "speech") { navigate(page); return; }
     // `spaces/<id>/<section>` opens the page of a space at one of its sections.
     const target = readSpacePageLink(page);
     if (target) { navigate("spaces"); setSpacePage(target); }
   };
   useEffect(() => settingsNavigation.subscribe(page => openSettingsPage.current(page)), []);
+  // A place that chooses a sandbox, from Settings > Sandbox: the editor of its provider, the page of its space, or the
+  // row of its project in the Explorer, where its "Sandbox…" action is.
+  function openSandboxScope(scope: SandboxScopeItem) {
+    if (scope.kind === "provider" || scope.kind === "model") { navigate("providers"); setProviderFocus(scope.id); }
+    else if (scope.kind === "space") { navigate("spaces"); setSpacePage({ spaceId: scope.id, section: "newSessions" }); }
+    else if (scope.kind === "project") { closeSettings(); selectProject(scope.id); }
+  }
   const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm,
     singleSessionTab: singleTab, setSingleSessionTab: setSingleTab } = useWindowPreferences();
   // With a single tab for the sessions, whatever opens a session shows it in that tab, in the place of the one that
@@ -2817,6 +2831,19 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     configurationState.snapshot, owned && (sessionId === null || creatingVisible) && view === "workspace" && !settingsOpen
       && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability,
     spacesState.available ? spaceId : null, providerSpaces);
+  // The sandbox of the new session: what its settings give (its model, its provider, its project, its space, every
+  // session), unless the draft composer gives it a choice of its own, applied once it is created, before its first prompt.
+  const [draftSandbox, setDraftSandbox] = useState<string | null>(null);
+  const [draftSandboxScopes, setDraftSandboxScopes] = useState<SandboxSessionResponse | null>(null);
+  const draftSandboxProvider = draftChoices.value.providerKey || null, draftSandboxModel = draftChoices.value.modelId || null;
+  useEffect(() => {
+    if (!status?.hostEpoch || !owned) { setDraftSandboxScopes(null); return; }
+    const controller = new AbortController();
+    void sandboxSettings.draft({ expectedEpoch: status.hostEpoch, providerKey: draftSandboxProvider, modelId: draftSandboxModel, projectId,
+      spaceId: spacesState.available ? spaceId : null, own: null }, { signal: controller.signal, timeoutMilliseconds: 8000 })
+      .then(reply => { if (!controller.signal.aborted) setDraftSandboxScopes(reply.status === "ok" ? reply : null); }).catch(() => { /* No row then. */ });
+    return () => controller.abort();
+  }, [status?.hostEpoch, owned, draftSandboxProvider, draftSandboxModel, projectId, spacesState.available, spaceId, creatingVisible, settingsSection, settingsOpen]);
   const currentHostEpoch = useRef(status?.hostEpoch);
   currentHostEpoch.current = status?.hostEpoch;
   // The external editor and the file manager of the system: the host is asked for the editor when an action first names it.
@@ -4280,9 +4307,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           : reasoning.note === "unused" ? `${t("Reasoning")}: ${value.reasoningEffort} · ${t("Not used")}` : null,
         permission: shownPermission === undefined ? null : { mode: shownPermission,
           name: shownPermission === null ? t("The setting of the CLI") : permissionModeName(shownPermission) ? t(permissionModeName(shownPermission)!) : shownPermission },
-        review: reviewSetting === null ? null : draftReview ?? reviewSetting }}
+        review: reviewSetting === null ? null : draftReview ?? reviewSetting,
+        sandbox: !draftSandboxScopes ? null : draftSandbox === null ? sessionSandboxSummary(draftSandboxScopes)
+          : { profile: draftSandbox.toLowerCase() === notSandboxed ? null : draftSandbox, source: "session", problem: null } }}
       review={reviewSetting !== null && <ReviewBeforeCommitSelect id={`composer-review-${choiceId}`} own={draftReview} setting={reviewSetting} disabled={locked}
         onChange={next => setDraftReview(next)} />}
+      sandbox={draftSandboxScopes && <SessionSandboxSelect id={`composer-sandbox-${choiceId}`} own={draftSandbox} inherited={draftSandboxScopes.profile}
+        choices={draftSandboxScopes.choices} disabled={locked} onChange={next => setDraftSandbox(next)} />}
       permission={permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${choiceId}`} value={value.permissionMode} modes={permissionModes}
         defaultMode={draftChoices.defaultPermissionMode} disabled={locked} onChange={next => change("permissionMode", next)} /> : undefined}
       agent={<HTMLSelect fill id={`composer-agent-${choiceId}`} aria-label={t("Agent prompt")} value={value.agentPromptId}
@@ -4403,6 +4434,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         await sessionOperations.setReviewBeforeCommit({ expectedEpoch: epoch, sessionId: result.id, reviewBeforeCommit: draftReview }, { timeoutMilliseconds: 30_000 })
           .catch(() => null);
         setDraftReview(null);
+        if (!creationAlive.current) return;
+      }
+      // The sandbox the draft chose for the session, before anything is sent to it.
+      if (result.kind === "created" && draftSandbox !== null) {
+        const reply = await sandboxSettings.setSession({ expectedEpoch: epoch, sessionId: result.id, value: draftSandbox }, { timeoutMilliseconds: 30_000 }).catch(() => null);
+        if (reply?.status !== "ok") showToast({ message: say("The sandbox was not changed ({status}).", { status: reply?.status ?? "no_answer" }),
+          intent: "warning", icon: "warning-sign", timeout: 8000 });
+        setDraftSandbox(null);
         if (!creationAlive.current) return;
       }
       if (result.kind === "created") {
@@ -5045,6 +5084,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 || !!projectRenameTarget || projectArchive.locked || projectDeletion.locked || !!projectDeleteTarget || !!projectOpening.getSnapshot() }),
               open: selectProject, rename: () => void beginProjectRename(), archive: beginProjectArchive, archiveAsks: confirms.projectArchive, delete: beginProjectDelete,
               worktrees: owned ? project => openWorktrees(project) : undefined,
+              sandbox: owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: sandboxSettings } : undefined,
               search: owned && searchOn ? { excluded: project => isExcluded(localSearchHub.getSnapshot(), "project", project.id),
                 set: (project, excluded) => void localSearchHub.setExcluded("project", project.id, excluded).then(status => {
                   if (!creationAlive.current) return;
@@ -5392,6 +5432,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       : settingsSection === "permissions" ? <PermissionSettings confirms={{ ...confirms, set: setConfirm }} tools={owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: globalConfig } : null}
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
           inherit: shellPreferences.inheritPermissions, setInherit: setInheritPermissions } : null} />
+      : settingsSection === "sandbox" ? <SandboxSettings epoch={owned ? status?.hostEpoch ?? null : null} onOpenScope={openSandboxScope} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
         chats={spaceChatCounts(catalog.current?.sessions ?? [])} showOthers={showOthers} onShowOthers={setShowOthers}
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)}
@@ -5436,7 +5477,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
           ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} /></>
       : settingsSection === "providers" ? owned && status?.hostEpoch
-        ? <ProviderSettings epoch={status.hostEpoch} readRuntime={modelCatalog.providers} probe={modelCatalog.probe}
+        ? <ProviderSettings key={providerFocus ?? ""} epoch={status.hostEpoch} readRuntime={modelCatalog.providers} probe={modelCatalog.probe} initialProvider={providerFocus}
           onOpenModels={() => navigate("models")} onOpenConfiguration={() => navigate("config")}
           // A renamed provider keeps its spaces under its new key: the chips read them again.
           onApplied={() => { void refreshConfiguration(); void spacesHub.refresh(); }} spaceScope={resourceScope}
@@ -5605,7 +5646,7 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
     ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["windows", "Windows", "window"], ["speech", "Speech", "mic"], ["search", "Search", "search"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
-      ["permissions", "Permissions", "shield"], ["sessions", "Sessions", "chat"],
+      ["permissions", "Permissions", "shield"], ["sandbox", "Sandbox", "sandbox"], ["sessions", "Sessions", "chat"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
     ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
     ["Advanced", [["config", "Configuration file", "config"], ["storage", "Storage", "database"], ["mcpHost", "CodeAlta MCP", "remote"]]],

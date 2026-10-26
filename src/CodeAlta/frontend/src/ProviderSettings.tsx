@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
-import { globalConfig, modelCatalog, providerLogin, providerUsage, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogCapability, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
+import { globalConfig, modelCatalog, providerLogin, providerUsage, sandboxSettings, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogCapability, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
 import { ProviderAccount } from "./ProviderAccount";
 import { ProviderModelPicker } from "./ProviderModelPicker";
@@ -29,6 +29,7 @@ import { pluginFieldsProblem, pluginSettingValues, pluginType } from "./pluginPr
 import { groupProviders, isFavoriteProvider, orderProviders, persistProviderListPreferences, providerListKey, renameFavoriteProvider, restoreProviderListPreferences,
   setFavoriteProvider, type ProviderGroupKind, type ProviderListPreferences } from "./providerListOrder";
 import type { MessageKey } from "./localization";
+import { ProviderSandboxField, type SandboxScopeApi } from "./sandbox/SandboxScopeControls";
 
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 const newProvider = "\u0000new";
@@ -52,7 +53,7 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal }: {
+export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal, sandbox = sandboxSettings, initialProvider = null }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider" | "duplicateProvider">;
   /** The providers whose type a plugin runs (ACP agents): their form, their catalog and their sign-in; the host by default. */
   plugins?: Pick<typeof globalConfig, "savePluginProvider" | "pluginCatalog" | "installPluginProvider" | "pluginProviderDetails" | "updatePluginProvider" | "pluginProviderSignIn">;
@@ -77,6 +78,10 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   filesApi?: SettingsFilesApi;
   /** The spaces of the providers, shown and changed beside each of them; null while there is only the default space. */
   spaceScope?: ResourceSpaces;
+  /** The sandbox of a provider and of its models; the host by default, null where it is not offered. */
+  sandbox?: SandboxScopeApi | null;
+  /** The provider selected when the page opens, as a link of Settings > Sandbox asks. */
+  initialProvider?: string | null;
 }) {
   const { t } = useShellLanguage();
   const page = useRef<HTMLElement>(null);
@@ -98,7 +103,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   const [confirmRemove, setConfirmRemove] = useState(false);  const [generation, setGeneration] = useState(0);
   const alive = useRef(true);
   // After a save, select the saved provider once the refreshed listing arrives.
-  const selectAfterLoad = useRef<string | null>(null);
+  const selectAfterLoad = useRef<string | null>(initialProvider);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   // The order of the list: the favorite providers first, and the enabled ones before the disabled ones.
   const [listPreferences, setListPreferences] = useState(() => restoreProviderListPreferences(() => localStorage.getItem(providerListKey)));
@@ -373,6 +378,10 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}
             {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">
               <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></FormGroup>}
+            {/* The sandbox of the sessions of a saved provider, and of some of its models; each choice is saved at once. */}
+            {sandbox && original && <FormGroup label={t("Sandbox")} labelFor="provider-sandbox" className="provider-settings-wide">
+              <ProviderSandboxField key={original.key} epoch={epoch} providerKey={original.key} providerName={original.effectiveName} disabled={busy}
+                api={sandbox} readModels={readModels} /></FormGroup>}
             {runsOwnCli(form.type) && <FormGroup label={t("Account folder")} labelFor="provider-config-dir"
               helperText={t("The folder of the Claude account of this provider (CLAUDE_CONFIG_DIR). A new folder starts without settings, memory or MCP servers.")}>
               <InputGroup id="provider-config-dir" value={form.configDir} disabled={busy} spellCheck={false} placeholder={t("~/.claude, the folder of Claude Code")}

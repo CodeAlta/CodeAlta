@@ -49,7 +49,9 @@ public sealed partial class SessionRuntimeService
         yield return new("profile", problem is null, problem ?? $"{profile!.Name}: network {profile.Network.ToString().ToLowerInvariant()}");
         if (problem is not null) yield break;
 
-        var folder = Directory.CreateTempSubdirectory("codealta-sandbox-check-").FullName;
+        // Not in the temporary folder of the user: a parent with that many entries is left out of reach of the sandbox,
+        // and the shell would not start in a folder below it.
+        var folder = Directory.CreateDirectory(Path.Combine(SandboxDataRoot ?? SandboxHostDiscovery.DefaultDataRoot(), "check", Guid.NewGuid().ToString("N")[..12])).FullName;
         var sessionId = "sandbox-check-" + Guid.NewGuid().ToString("N");
         try
         {

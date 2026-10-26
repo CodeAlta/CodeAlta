@@ -100,24 +100,54 @@ export function toolFamily(call: ToolCall): ToolFamily {
   return "generic";
 }
 
+/** The note the sandbox of a session adds after the output of a command: its profile, and what it says. */
+export type SandboxNote = Readonly<{ profile: string; text: string;
+  /** The user allowed the command to run outside the sandbox. */
+  outside: boolean }>;
+
 /** The result of the `shell_command` tool as its text states it. */
-export type ShellResult = Readonly<{ exitCode: number; workingDirectory: string; stdout: string; stderr: string }>;
+export type ShellResult = Readonly<{ exitCode: number; workingDirectory: string; stdout: string; stderr: string;
+  /** The note of the sandbox the command ran in, or outside of; null for a session that is not sandboxed. */
+  sandbox: SandboxNote | null }>;
+
+const sandboxNotePattern = /\n(\[sandbox: [^\]\n]+\] [^\n]+)\n*$/;
+
+/** Reads the note of a sandbox, `[sandbox: <profile>] <text>`, as the host writes it after a command; null for another text. */
+export function readSandboxNote(line: string | null | undefined): SandboxNote | null {
+  const match = /^\[sandbox: ([^\]\n]+)\] ([^\n]+)$/.exec(line?.trim() ?? "");
+  if (!match) return null;
+  const text = match[2].trim();
+  return { profile: match[1].trim(), text, outside: text.startsWith("The command ran outside the sandbox") };
+}
+
+/**
+ * Takes off the output of a command the note its sandbox adds after it, alone on the last line
+ * (`[sandbox: <profile>] …`): what the sandbox blocked, or that the command ran outside it.
+ */
+export function splitSandboxNote(value: string): Readonly<{ output: string; note: SandboxNote | null }> {
+  const normalized = value.replaceAll("\r\n", "\n");
+  const match = sandboxNotePattern.exec(normalized);
+  const note = match ? readSandboxNote(match[1]) : null;
+  return note ? { output: normalized.slice(0, match!.index), note } : { output: value, note: null };
+}
 
 /**
  * Reads `exit_code`, `working_directory`, `stdout` and `stderr` from the result of the `shell_command` tool, or
  * returns null when the text does not have that form. The last `stderr:` line starts the standard error: a
- * command that prints such a line itself is not told apart.
+ * command that prints such a line itself is not told apart. The note of a sandbox after them is read apart.
  */
 export function parseShellResult(value: string): ShellResult | null {
   if (!value.startsWith("exit_code: ")) return null;
-  const normalized = value.replaceAll("\r\n", "\n");
+  const { output, note } = splitSandboxNote(value);
+  const normalized = output.replaceAll("\r\n", "\n");
   const header = /^exit_code: (-?\d{1,10})\nworking_directory: ([^\n]*)\nstdout:\n/.exec(normalized);
   if (!header) return null;
   const body = header[0].length;
   const split = normalized.lastIndexOf("\nstderr:\n");
   if (split < body - 1) return null;
   const stdout = normalized.slice(body, Math.max(body, split)), stderr = normalized.slice(split + 9);
-  return { exitCode: Number(header[1]), workingDirectory: header[2], stdout: stdout === "(empty)" ? "" : stdout, stderr: stderr === "(empty)" ? "" : stderr };
+  return { exitCode: Number(header[1]), workingDirectory: header[2], stdout: stdout === "(empty)" ? "" : stdout, stderr: stderr === "(empty)" ? "" : stderr,
+    sandbox: note };
 }
 
 /** The lines of a file as a tool numbered them: the number of the first one and the lines without their numbers. */

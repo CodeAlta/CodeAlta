@@ -167,7 +167,8 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   const ready = canReview() && state === shown && armed === attempt;
   // Deny is the answer that means the same for every provider: the run goes on without the action. Stopping the run
   // is the Stop button of the composer. A skill whose files can be checked can also be allowed from now on.
-  const decisions: readonly (readonly [CommandDecision, "Allow this skill" | "Allow once" | "Deny"])[] = offersAllowAlways(entry)
+  // A command outside the sandbox is allowed once at most: the next one is asked again.
+  const decisions: readonly (readonly [CommandDecision, "Allow this skill" | "Allow once" | "Deny"])[] = !entry.outsideSandbox && offersAllowAlways(entry)
     ? [["allow_always", "Allow this skill"], ["allow_once", "Allow once"], ["deny", "Deny"]]
     : [["allow_once", "Allow once"], ["deny", "Deny"]];
   // The choices are one list: the arrows move along it, Enter answers with the focused one, Escape denies.
@@ -193,10 +194,11 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     event.preventDefault();
     items[index < 0 ? (step > 0 ? 0 : items.length - 1) : (index + step + items.length) % items.length].focus();
   }
-  return <section ref={card} className="command-permission-panel" aria-label={label ?? t("Pending command permissions")}>
+  return <section ref={card} className="command-permission-panel" aria-label={label ?? t("Pending command permissions")}
+    data-outside-sandbox={entry.outsideSandbox || undefined}>
     <h3 id={`${sessionId}-permission-question`}>{entry.kind === "skill" && entry.skill
       ? t("Load the skill {name} from the MCP server {server}?", { name: entry.skill.name, server: entry.skill.server })
-      : t(entry.kind === "commandExecution" ? "Allow this command?" : "Allow file changes under this folder?")}</h3>
+      : t(entry.outsideSandbox ? "Run outside the sandbox?" : entry.kind === "commandExecution" ? "Allow this command?" : "Allow file changes under this folder?")}</h3>
     <p className="sr-only" role="status">{t("A request waits for your permission.")}</p>
     {entry.kind === "skill" && entry.skill
       ? <>
@@ -220,7 +222,10 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       ? <><pre data-permission-command>{entry.command}</pre>
         <p className="detail"><code data-permission-directory>{entry.workingDirectory}</code></p></>
       : <pre data-permission-grant-root>{entry.grantRoot}</pre>}
-    {entry.reason !== null && entry.reason.trim() && <p className="detail" data-permission-reason>{entry.reason}</p>}
+    {/* Why the agent asks to leave the sandbox, in its own words. */}
+    {entry.reason !== null && entry.reason.trim() && (entry.outsideSandbox
+      ? <blockquote className="detail permission-reason-quote" data-permission-reason>“{entry.reason.trim()}”</blockquote>
+      : <p className="detail" data-permission-reason>{entry.reason}</p>)}
     {entry.shortened === true && <p className="permission-shortened" role="note" data-permission-shortened>
       {t("This request is too long to show in full: allowing it allows more than what is shown here.")}</p>}
     <div ref={choices} className="permission-choices" role="group" tabIndex={-1} aria-labelledby={`${sessionId}-permission-question`} onKeyDown={move}>

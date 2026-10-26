@@ -9,6 +9,7 @@ import { sessionChildrenMessages } from "./sessionChildren/messages";
 import { sessionArchiveMessages } from "./sessionArchive/messages";
 import { speechMessages } from "./speech/messages";
 import { modelTierMessages } from "./modelTierMessages";
+import { sandboxMessages } from "./sandbox/messages";
 import { promptProvenanceMessages } from "./promptProvenance";
 import { claudeCliMessages } from "./claudeCli/messages";
 import { pluginProviderMessages } from "./pluginProviders/messages";
@@ -2753,6 +2754,7 @@ export const messages = dictionary({
   ...bookmarkMessages,
   ...speechMessages,
   ...modelTierMessages,
+  ...sandboxMessages,
   ...promptProvenanceMessages,
   ...claudeCliMessages,
   ...pluginProviderMessages,

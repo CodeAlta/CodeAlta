@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { TimelineItem } from "./timeline";
 import { altaEnvelope, argumentEntries, callDuration, changedFiles, countLines, diffFiles, formatDuration, formatSize, highlightDiffRows, highlightLanguage,
-  highlightLines, matchRanges, outputShape, parseArguments, parseDirectoryListing, parseJsonRecords, parseNumberedLines, parseSearchMatches, parseShellResult,
+  highlightLines, matchRanges, outputShape, parseArguments, parseDirectoryListing, parseJsonRecords, parseNumberedLines, parseSearchMatches, parseShellResult, splitSandboxNote,
   patchFiles, toolCallFromItem, toolCallFromRecord, toolFamily, toolState, type ToolCall, type ToolCallRecord } from "./toolCall";
 
 const item = (overrides: Partial<TimelineItem>): TimelineItem => ({ key: "40", eventType: "activity", category: "tool", icon: "tool", title: "shell_command",
@@ -58,12 +58,30 @@ test("a call is shown by what it does: changes, a terminal, a file, or its argum
 
 test("the result of a shell command is read into its exit code, its folder and its two outputs", () => {
   assert.deepEqual(parseShellResult("exit_code: 0\r\nworking_directory: C:\\code\r\nstdout:\r\nline 1\r\nline 2\r\nstderr:\r\n(empty)"),
-    { exitCode: 0, workingDirectory: "C:\\code", stdout: "line 1\nline 2", stderr: "" });
+    { exitCode: 0, workingDirectory: "C:\\code", stdout: "line 1\nline 2", stderr: "", sandbox: null });
   assert.deepEqual(parseShellResult("exit_code: -3\nworking_directory: /tmp\nstdout:\n(empty)\nstderr:\nboom\nstderr:\nagain"),
-    { exitCode: -3, workingDirectory: "/tmp", stdout: "(empty)\nstderr:\nboom", stderr: "again" }, "The last stderr line starts the standard error.");
-  assert.deepEqual(parseShellResult("exit_code: 1\nworking_directory: /tmp\nstdout:\n(empty)\nstderr:\n(empty)"), { exitCode: 1, workingDirectory: "/tmp", stdout: "", stderr: "" });
+    { exitCode: -3, workingDirectory: "/tmp", stdout: "(empty)\nstderr:\nboom", stderr: "again", sandbox: null }, "The last stderr line starts the standard error.");
+  assert.deepEqual(parseShellResult("exit_code: 1\nworking_directory: /tmp\nstdout:\n(empty)\nstderr:\n(empty)"), { exitCode: 1, workingDirectory: "/tmp", stdout: "", stderr: "", sandbox: null });
   for (const other of ["", "shell_command was denied by the host.", "exit_code: x\nworking_directory: /\nstdout:\na\nstderr:\nb", "exit_code: 0\nstdout:\na\nstderr:\nb",
     "exit_code: 0\nworking_directory: /\nstdout:\nno error section"]) assert.equal(parseShellResult(other), null);
+});
+
+test("the note of a sandbox after the output of a command is read apart, and the exit code and the outputs stay", () => {
+  // What the sandbox blocked, after the standard error, as the host joins the items of the result (one line break).
+  const blocked = "exit_code: 1\r\nworking_directory: C:\\code\r\nstdout:\r\n(empty)\r\nstderr:\r\nAccess is denied.\r\n"
+    + "[sandbox: workspace] The network of the sandbox refused api.nuget.org: it reaches only the hosts of its profile. Ask the user, or run the command again with `outside_sandbox`.";
+  assert.deepEqual(parseShellResult(blocked), { exitCode: 1, workingDirectory: "C:\\code", stdout: "", stderr: "Access is denied.",
+    sandbox: { profile: "workspace", outside: false,
+      text: "The network of the sandbox refused api.nuget.org: it reaches only the hosts of its profile. Ask the user, or run the command again with `outside_sandbox`." } });
+  // A command the user allowed outside: its empty standard error stays empty.
+  const outside = "exit_code: 0\nworking_directory: /tmp\nstdout:\npushed\nstderr:\n(empty)\n[sandbox: strict] The command ran outside the sandbox, as the user allowed.\n";
+  assert.deepEqual(parseShellResult(outside), { exitCode: 0, workingDirectory: "/tmp", stdout: "pushed", stderr: "",
+    sandbox: { profile: "strict", outside: true, text: "The command ran outside the sandbox, as the user allowed." } });
+  // A line the command printed itself is no note unless it is the last one.
+  const printed = "exit_code: 0\nworking_directory: /tmp\nstdout:\n[sandbox: fake] printed\nmore\nstderr:\n(empty)";
+  assert.equal(parseShellResult(printed)!.sandbox, null);
+  assert.equal(parseShellResult(printed)!.stdout, "[sandbox: fake] printed\nmore");
+  assert.deepEqual(splitSandboxNote("no note"), { output: "no note", note: null });
 });
 
 test("numbered lines are read only when every line has the next number", () => {
