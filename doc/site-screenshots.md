@@ -110,7 +110,7 @@ closes every tab and dialog, opens what it shows and takes the capture.
 | `speech` | The **Set up dictation** popover of the microphone of the prompt (a crop). It shows once the choice of the microphone is not confirmed: set `codealta.desktop.speech.microphone.v1` to `{"device":null,"confirmed":false}` in the local storage of the developer instance, reload the page, press the microphone, take the picture, **Cancel**, and put the key back. Check that the name of the microphone says nothing private. |
 | `code-editor`, `editor-search`, `editor-session`, `editor-preview`, `editor-new-file`, `changes` | The code editor and the Changes tab of SharpYaml, with changes made for the capture. |
 | `theme-dark`, `theme-light`, `themes` | One scene in each theme; `themes` is a montage of six color schemes. |
-| `work-items`, `issues`, `sub-agents`, `conversation-width` | The Work items and Issues tabs of CodeAlta, a session with more sub-agents than the sidebar lists (five), a conversation at 70% (`alta appearance set --session <id> --session-width 70`, then `default`). |
+| `work-items`, `issues`, `sub-agents`, `conversation-width` | The Work items tab (All projects, a task selected) and the Issues tab of CodeAlta (an issue with a comment selected), each with the **Runs with** Agent chip of the selected item; a session with more sub-agents than the sidebar lists (five), a conversation at 70% (`alta appearance set --session <id> --session-width 70`, then `default`). |
 | `terminal`, `worktrees`, `automations`, `plugins` and their close-ups | They need state that is built for them (a running terminal, two worktrees, automations in the project configuration, a temporary plugin) and removed afterwards. |
 | `worktree-manager` | The **Worktrees…** window of SharpYaml with two worktrees made for it beside the project (`git worktree add -b alta/<name> C:\code\SharpYaml.worktrees\<name>`), so that no path names the account; removed with their branches after. View only: do not select or remove worktrees in the window. |
 | `statistics-overview`, `statistics-activity`, `statistics-models`, `statistics-tools`, `statistics-tools-time`, `statistics-projects`, `statistics-filters` | The Statistics tab beside a session tab, in the dark theme, with the numbers of a real profile for a space of public projects. `overview` is the last 90 days by week, the time by project; the pages are taken from their top, and `tools-time` is the Tools page scrolled to its end; `filters` is a crop of the bar with the **Filter** menu open. |
@@ -151,6 +151,9 @@ What the scenes with state of their own need:
   removed, and remove the worktrees and their branches after the capture.
 - **Automations.** They are in `.alta/config.toml` of the project, which git tracks: add them for the capture
   and put the file back. Automations are paused on the developer instance: let them run for the capture only.
+  `automation-editor` is a crop of the **Edit automation** window of "Issue triage" (a daily trigger, an issue
+  trigger, its **Runs with** Agent chip set to a model), opened from the **⋯** of its card and closed with
+  **Cancel**: never click **Allow** on a project automation for a capture.
 - **Plugins.** `alta plugin create <name>` makes a plugin of the user in `~/.alta/plugins`, which the two
   instances share: remove its folder and its build cache right after the capture.
 - **Statistics.** Keep the existing, approved real-data pictures unless a new capture has its own authorization
@@ -205,7 +208,8 @@ What the scenes with state of their own need:
   Settings window. The folders of that profile are outside any `.alta` folder, or the start is refused. Such a
   profile still finds the Claude Code CLI and the Claude account of the user: the form of a Claude Code provider
   there shows the path of the CLI and the usage of the account, so it is not a picture to take. The
-  `mcp-server` picture can instead be taken on the ordinary developer instance and cropped to Settings.
+  `mcp-server` picture can instead be taken on the ordinary developer instance and cropped to the page of
+  Settings, with **Run the MCP server** on and **Listen on the Tailscale network** off.
   Keep the actual address and client configuration in the picture: the developer instance normally uses
   port 2583, while the normal instance uses 2582. Explain that distinction in the caption; never rewrite
   a port or configuration value in the page just for the capture.
