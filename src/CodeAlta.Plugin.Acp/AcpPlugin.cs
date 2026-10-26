@@ -74,6 +74,12 @@ public sealed class AcpPlugin : PluginBase
                 },
                 new PluginProviderSetting(AcpAgentSettings.EnvironmentKey, "Environment", PluginProviderSettingKind.Map)
                 {
+                    Description = "Variables set for the agent, also in a sandbox: a token or an API key signs it in there.",
+                    Advanced = true,
+                },
+                new PluginProviderSetting(AcpAgentSettings.SandboxHostsKey, "Hosts in a sandbox", PluginProviderSettingKind.List)
+                {
+                    Description = "The hosts of the service of the agent, such as api.example.com or *.example.com, which it reaches in a sandbox whatever its network.",
                     Advanced = true,
                 },
                 new PluginProviderSetting(AcpAgentSettings.AgentKey, "Registry agent", PluginProviderSettingKind.Text) { ReadOnly = true, Advanced = true },

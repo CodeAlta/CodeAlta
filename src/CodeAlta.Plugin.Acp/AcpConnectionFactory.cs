@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using CodeAlta.Acp;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Plugin.Acp;
 
@@ -15,7 +16,36 @@ internal sealed record AcpConnectionRequest(
     IReadOnlyList<string> Arguments,
     IReadOnlyDictionary<string, string> Environment,
     string? WorkingDirectory,
-    TimeSpan InitializeTimeout);
+    TimeSpan InitializeTimeout)
+{
+    /// <summary>Gets what starts the agent elsewhere than as a child of CodeAlta (the sandbox of the session); null for a child.</summary>
+    public IAgentProcessHost? Host { get; init; }
+
+    /// <summary>Gets what the agent needs from the computer when <see cref="Host"/> starts it.</summary>
+    public AcpAgentNeeds Needs { get; init; } = AcpAgentNeeds.None;
+}
+
+/// <summary>
+/// What an agent needs from the computer when it runs in a sandbox: a home folder of its own, where it signs in and
+/// keeps its state, its folders, its hosts and the variables of its provider.
+/// </summary>
+/// <param name="ReadOnlyFolders">The folders it reads besides the system and the developer tools: its package, its runtime.</param>
+/// <param name="Hosts">The hosts of its vendor.</param>
+/// <param name="PassedVariables">The variables of its provider (a token, a key among them), passed with their values.</param>
+/// <param name="Environment">Variables set for it in the sandbox, unless its provider sets them.</param>
+/// <param name="OwnHome">The name of its home folder in the sandbox, kept between sessions: the key of its provider.</param>
+internal sealed record AcpAgentNeeds(
+    IReadOnlyList<string> ReadOnlyFolders,
+    IReadOnlyList<string> Hosts,
+    IReadOnlyList<string> PassedVariables,
+    IReadOnlyDictionary<string, string> Environment,
+    string? OwnHome)
+{
+    public static AcpAgentNeeds None { get; } = new([], [], [], new Dictionary<string, string>(), null);
+
+    /// <summary>Gets the ports of this computer it reaches through the proxy of the sandbox: the MCP server of CodeAlta.</summary>
+    public IReadOnlyList<int> LocalPorts { get; init; } = [];
+}
 
 /// <summary>Starts an agent and initializes the protocol with it; tests connect a scripted agent instead.</summary>
 internal interface IAcpConnectionFactory
@@ -37,6 +67,11 @@ internal sealed class AcpProcessConnectionFactory : IAcpConnectionFactory
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(messageHandler);
+        if (request.Host is { } host)
+        {
+            return StartHostedAsync(host, request, messageHandler, cancellationToken);
+        }
+
         return AcpClient.StartAsync(
             new AcpClientOptions
             {
@@ -54,6 +89,41 @@ internal sealed class AcpProcessConnectionFactory : IAcpConnectionFactory
                 MessageHandler = messageHandler,
             },
             cancellationToken);
+    }
+
+    // The agent in the sandbox of its session: the host starts it with what it needs, and the client reads and writes
+    // the streams of that process.
+    private static async Task<AcpClient> StartHostedAsync(IAgentProcessHost host, AcpConnectionRequest request, Action<AcpServerMessage> messageHandler,
+        CancellationToken cancellationToken)
+    {
+        var environment = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (name, value) in request.Needs.Environment)
+        {
+            environment[name] = value;
+        }
+
+        foreach (var (name, value) in request.Environment)
+        {
+            environment[name] = value;
+        }
+
+        foreach (var name in RemovedVariables)
+        {
+            environment[name] = null;
+        }
+
+        var launch = new AgentProcessLaunch(request.FileName, request.Arguments, request.WorkingDirectory, environment)
+        {
+            ReadOnlyFolders = request.Needs.ReadOnlyFolders,
+            Hosts = request.Needs.Hosts,
+            PassedVariables = request.Needs.PassedVariables,
+            LocalPorts = request.Needs.LocalPorts,
+            OwnHome = request.Needs.OwnHome,
+        };
+        var process = await host.StartAsync(launch, cancellationToken).ConfigureAwait(false);
+        var hosted = new AcpHostedProcess(Path.GetFileNameWithoutExtension(request.FileName), process.StandardOutput, process.StandardInput, process.StandardError,
+            process.Exited, process.DisposeAsync);
+        return await AcpClient.ConnectAsync(hosted, AcpClientInfo.CreateInitializeRequest(), messageHandler, request.InitializeTimeout, cancellationToken).ConfigureAwait(false);
     }
 }
 

@@ -42,6 +42,46 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task AnAgentInTheSandbox_ReachesTheToolsOfCodeAlta_WithTheHomeAndTheVariablesOfItsProvider()
+    {
+        var agent = new AcpFakeAgent();
+        var settings = new AcpAgentSettings("dotnet", [], new Dictionary<string, string> { ["AGENT_TOKEN"] = "token-of-the-test" }, null, null)
+        {
+            SandboxHosts = ["api.example.com"],
+        };
+        await using var fixture = new Fixture(agent, settings) { ProcessHost = new TestSandbox() };
+
+        await fixture.RunAsync([User("hello")]);
+
+        var request = agent.Connections.Single().Request;
+        Assert.IsNotNull(request.Host, "the agent starts in the sandbox");
+        var url = new Uri(agent.RequestsOf("session/new").Single()!["mcpServers"]![0]!["url"]!.GetValue<string>());
+        CollectionAssert.AreEqual(new[] { url.Port }, request.Needs.LocalPorts.ToArray(), "its proxy lets it reach the tools of CodeAlta");
+        Assert.AreEqual("acp-fake-acp", request.Needs.OwnHome, "it signs in once, in a home of its provider");
+        CollectionAssert.Contains(request.Needs.PassedVariables.ToArray(), "AGENT_TOKEN", "a token of its provider signs it in there");
+        CollectionAssert.Contains(request.Needs.Hosts.ToArray(), "api.example.com");
+    }
+
+    [TestMethod]
+    public async Task AnAgentInTheSandboxWithoutMcpOverHttp_IsGivenNoToolsOfCodeAlta()
+    {
+        var agent = new AcpFakeAgent { McpHttp = false };
+        await using var fixture = new Fixture(agent) { ProcessHost = new TestSandbox() };
+
+        await fixture.RunAsync([User("hello")]);
+
+        Assert.IsEmpty(agent.RequestsOf("session/new").Single()!["mcpServers"]!.AsArray(), "the endpoint opened for its port is closed again");
+    }
+
+    // A sandbox: the fake factory runs the agent on pipes whatever host the request names.
+    private sealed class TestSandbox : IAgentProcessHost
+    {
+        public string Key => "sandbox-of-the-test";
+
+        public Task<IAgentHostedProcess> StartAsync(AgentProcessLaunch launch, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    [TestMethod]
     public async Task AgentThatTakesASystemPrompt_IsGivenTheInstructionsThere()
     {
         var agent = new AcpFakeAgent { SystemPrompt = true };
@@ -867,6 +907,8 @@ public sealed class AcpTurnExecutorTests
 
         public Action<List<AgentConversationMessage>>? BeforeNextTurn { get; init; }
 
+        public IAgentProcessHost? ProcessHost { get; init; }
+
         public async Task<List<AgentConversationMessage>> RunAsync(IReadOnlyList<AgentConversationMessage> start, CancellationToken cancellationToken = default)
         {
             var conversation = new List<AgentConversationMessage>(start);
@@ -920,6 +962,7 @@ public sealed class AcpTurnExecutorTests
                 EarlierConversation = Earlier,
                 Tools = Tools,
                 State = State,
+                ProcessHost = ProcessHost,
             };
 
         public async ValueTask DisposeAsync()

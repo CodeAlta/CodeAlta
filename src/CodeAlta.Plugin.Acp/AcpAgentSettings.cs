@@ -25,6 +25,7 @@ internal sealed record AcpAgentSettings(
     public const string AgentKey = "agent";
     public const string AgentVersionKey = "agent_version";
     public const string DistributionKey = "distribution";
+    public const string SandboxHostsKey = "sandbox_hosts";
 
     /// <summary>Reads the settings of a provider; the command is required.</summary>
     /// <exception cref="InvalidOperationException">The provider names no command.</exception>
@@ -38,8 +39,14 @@ internal sealed record AcpAgentSettings(
             settings.GetList(ArgumentsKey),
             settings.GetMap(EnvironmentKey),
             settings.GetString(AgentKey),
-            settings.GetString(AgentVersionKey));
+            settings.GetString(AgentVersionKey))
+        {
+            SandboxHosts = settings.GetList(SandboxHostsKey),
+        };
     }
+
+    /// <summary>Gets the hosts the agent reaches in the sandbox of a session besides those CodeAlta knows for it: the service of its vendor.</summary>
+    public IReadOnlyList<string> SandboxHosts { get; init; } = [];
 
     /// <summary>Checks the settings of a provider.</summary>
     public static IReadOnlyList<string> Validate(PluginProviderSettings settings)

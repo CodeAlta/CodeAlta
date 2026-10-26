@@ -142,7 +142,9 @@ internal sealed partial class AcpAgentSession
             }
         }
 
-        var launchKey = string.Join('\u001f', [workingDirectory, .. environment.OrderBy(static pair => pair.Key, StringComparer.Ordinal).Select(static pair => $"{pair.Key}={pair.Value}")]);
+        // A process in another sandbox, or out of one, is another process.
+        var launchKey = string.Join('\u001f', [workingDirectory, request.ProcessHost?.Key ?? "-",
+            .. environment.OrderBy(static pair => pair.Key, StringComparer.Ordinal).Select(static pair => $"{pair.Key}={pair.Value}")]);
         if (_connection is { } running && !running.Client.HasExited && !running.Client.Completion.IsCompleted &&
             string.Equals(running.LaunchKey, launchKey, StringComparison.Ordinal) && running.AgentSessionId.Length > 0)
         {
@@ -163,17 +165,37 @@ internal sealed partial class AcpAgentSession
 
         Connection? connection = null;
         AcpClient client;
+        // In the sandbox of the session, when it has one, the agent runs its tools in its own process, and reaches the
+        // tools of CodeAlta through its proxy: their endpoint is opened first, for its port.
+        HarnessToolEndpoint? endpoint = null;
+        var needs = AcpAgentNeeds.None;
+        if (request.ProcessHost is not null)
+        {
+            endpoint = await _options.ToolEndpoints.OpenAsync(_mcpServer, cancellationToken).ConfigureAwait(false);
+            needs = _options.Quirks.SandboxNeeds(_options.Agent, executable, _options.ProviderKey) with { LocalPorts = [endpoint.Url.Port] };
+        }
+
         try
         {
             client = await _options.ConnectionFactory.StartAsync(
-                    new AcpConnectionRequest(executable, _options.Agent.Arguments, environment, workingDirectory, _options.InitializeTimeout),
+                    new AcpConnectionRequest(executable, _options.Agent.Arguments, environment, workingDirectory, _options.InitializeTimeout)
+                    {
+                        Host = request.ProcessHost,
+                        Needs = needs,
+                    },
                     message => OnMessage(connection, message),
                     cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is AcpConnectionClosedException or TimeoutException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException && !cancellationToken.IsCancellationRequested)
         {
+            if (endpoint is not null) await endpoint.DisposeAsync().ConfigureAwait(false);
             throw new AgentProviderFailureException($"{_options.AgentName} could not be started. {ex.Message}", new AgentFailureInfo(AgentFailureKind.Unavailable), ex);
+        }
+        catch
+        {
+            if (endpoint is not null) await endpoint.DisposeAsync().ConfigureAwait(false);
+            throw;
         }
 
         var capabilities = AcpAgentCapabilities.Read(JsonSerializer.SerializeToElement(client.InitializeResponse, AcpClient.CreateJsonSerializerOptions()));
@@ -193,9 +215,13 @@ internal sealed partial class AcpAgentSession
 
         try
         {
-            if (capabilities.McpHttp)
+            if (!capabilities.McpHttp)
             {
-                connection.Endpoint = await _options.ToolEndpoints.OpenAsync(_mcpServer, cancellationToken).ConfigureAwait(false);
+                if (endpoint is not null) await endpoint.DisposeAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                connection.Endpoint = endpoint ?? await _options.ToolEndpoints.OpenAsync(_mcpServer, cancellationToken).ConfigureAwait(false);
             }
 
             await OpenSessionAsync(request, connection, cancellationToken).ConfigureAwait(false);

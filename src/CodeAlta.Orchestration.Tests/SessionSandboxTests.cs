@@ -337,9 +337,9 @@ public sealed class SessionSandboxTests
         var host = router.ProcessHost!;
         var account = Path.Combine(f.Project.ProjectPath, "..", "claude-account");
         var launch = new CodeAlta.Agent.Runtime.AgentProcessLaunch("C:/tools/claude.exe", ["-p", "{\"a\":1}"], f.Project.ProjectPath,
-            new Dictionary<string, string?> { ["CLAUDE_CONFIG_DIR"] = account, ["CLAUDE_GONE"] = null })
+            new Dictionary<string, string?> { ["CLAUDE_CONFIG_DIR"] = account, ["CLAUDE_GONE"] = null, ["AGENT_SIGN_IN_TOKEN"] = "from-the-provider" })
         {
-            ReadOnlyFolders = ["C:/tools"], ReadWriteFolders = [account], Hosts = ["api.anthropic.com"], PassedVariables = ["ANTHROPIC_MODEL"],
+            ReadOnlyFolders = ["C:/tools"], ReadWriteFolders = [account], Hosts = ["api.anthropic.com"], PassedVariables = ["ANTHROPIC_MODEL", "AGENT_SIGN_IN_TOKEN"],
             ProtectedPaths = [Path.Combine(account, "settings.json")],
         };
         await using (await host.StartAsync(launch, CancellationToken.None))
@@ -354,6 +354,7 @@ public sealed class SessionSandboxTests
             "but not the settings that run hooks later");
         Assert.IsTrue(policy.ReadOnly.Any(static folder => folder.Replace('\\', '/').EndsWith("C:/tools", StringComparison.OrdinalIgnoreCase)));
         Assert.AreEqual(account, policy.Environment["CLAUDE_CONFIG_DIR"]);
+        Assert.AreEqual("from-the-provider", policy.Environment["AGENT_SIGN_IN_TOKEN"], "the sign-in the launch gives passes, though its name says a secret");
         Assert.IsFalse(policy.Environment.ContainsKey("CLAUDE_GONE"));
 
         // Another sandbox is another process: the key changes with the profile.
@@ -363,6 +364,34 @@ public sealed class SessionSandboxTests
         f.WriteConfig("");
         Assert.IsNull(await router.RefuseRunAsync(providerRunsItsOwnTools: true, CancellationToken.None));
         Assert.IsNull(router.ProcessHost, "out of the sandbox, the process is a child of CodeAlta again");
+    }
+
+    [TestMethod]
+    public async Task AnAcpAgent_StartsInTheSandbox_InAHomeOfItsOwn_AndReachesThePortOfTheToolsOfCodeAlta()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend, registry =>
+            registry.RegisterOrReplace(new ModelProviderDescriptor(new ModelProviderId("grok"), "Grok Build", "acp"), () => throw new InvalidOperationException("Not started.")));
+        await f.CreateSessionAsync("s");
+        f.WriteConfig("[sandbox]\nall_sessions = \"strict\"\n");
+
+        var router = f.Runtime.CreateSandboxToolRouter("s", "grok", [f.Project.ProjectPath]);
+        Assert.IsNull(await router.RefuseRunAsync(providerRunsItsOwnTools: true, CancellationToken.None));
+        var launch = new CodeAlta.Agent.Runtime.AgentProcessLaunch("C:/tools/grok.exe", ["agent", "stdio"], f.Project.ProjectPath,
+            new Dictionary<string, string?> { ["XAI_API_KEY"] = "from-the-provider" })
+        {
+            Hosts = ["api.x.ai"], PassedVariables = ["XAI_API_KEY"], LocalPorts = [50123], OwnHome = "acp-grok",
+        };
+        await using (await router.ProcessHost!.StartAsync(launch, CancellationToken.None))
+        {
+        }
+
+        var policy = backend.Starts.Single();
+        Assert.AreEqual("home", Path.GetFileName(policy.Home));
+        Assert.AreEqual("acp-grok", Path.GetFileName(Path.GetDirectoryName(policy.Home)), "the home of its provider, kept between sessions");
+        Assert.AreEqual(policy.Home, policy.Environment["HOME"]);
+        CollectionAssert.Contains(policy.LocalPorts.ToArray(), 50123, "its proxy lets it reach the tools of CodeAlta");
+        Assert.AreEqual("from-the-provider", policy.Environment["XAI_API_KEY"]);
     }
 
     [TestMethod]

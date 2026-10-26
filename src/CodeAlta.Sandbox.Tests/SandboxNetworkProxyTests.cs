@@ -31,14 +31,18 @@ public sealed class SandboxNetworkProxyTests
     }
 
     [TestMethod]
-    public async Task APlainHttpRequest_GoesOnInTheFormAnOriginServerReads()
+    public async Task APlainHttpRequest_GoesOnInTheFormAnOriginServerReads_AsTheOnlyOneOfItsConnection()
     {
         using var upstream = new EchoServer();
         await using var proxy = SandboxNetworkProxy.Start([], [upstream.Port], []);
 
-        var answer = await SendAsync(proxy, $"GET http://localhost:{upstream.Port}/index.json?x=1 HTTP/1.1\r\nHost: localhost\r\n\r\n", null);
+        var answer = await SendAsync(proxy,
+            $"GET http://localhost:{upstream.Port}/index.json?x=1 HTTP/1.1\r\nHost: localhost\r\nProxy-Connection: keep-alive\r\nConnection: keep-alive\r\nAccept: */*\r\n\r\n", null);
 
         Assert.StartsWith("GET /index.json?x=1 HTTP/1.1", answer, "the echo shows what the origin received");
+        Assert.Contains("Accept: */*\r\n", answer, "the headers of the request go on");
+        Assert.Contains("Connection: close\r\n", answer, "a next request opens a connection the proxy reads");
+        Assert.DoesNotContain("keep-alive", answer);
     }
 
     [TestMethod]

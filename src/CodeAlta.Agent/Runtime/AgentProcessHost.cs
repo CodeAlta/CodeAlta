@@ -29,11 +29,21 @@ public sealed record AgentProcessLaunch(
     /// <summary>Gets the hosts the process reaches: the service of its vendor.</summary>
     public IReadOnlyList<string> Hosts { get; init; } = [];
 
+    /// <summary>Gets the ports of this computer the process reaches, through the proxy of the sandbox: the MCP server of the tools of CodeAlta.</summary>
+    public IReadOnlyList<int> LocalPorts { get; init; } = [];
+
     /// <summary>
-    /// Gets the names of the variables of this process the started one receives as they are, such as the key of its
-    /// vendor: a host that builds the environment from scratch gives it those, and <see cref="Environment"/>.
+    /// Gets the names of the variables the started process receives, such as the key of its vendor: with the value
+    /// <see cref="Environment"/> gives one, else with the one of this process. A host that builds the environment from
+    /// scratch gives it those, and <see cref="Environment"/>.
     /// </summary>
     public IReadOnlyList<string> PassedVariables { get; init; } = [];
+
+    /// <summary>
+    /// Gets the name of a home folder of its own the process has in a sandbox, kept between sessions, where an agent
+    /// keeps its sign-in and its state; null for the home folder the sandbox gives every process of the session.
+    /// </summary>
+    public string? OwnHome { get; init; }
 }
 
 /// <summary>A process started by an <see cref="IAgentProcessHost"/>.</summary>

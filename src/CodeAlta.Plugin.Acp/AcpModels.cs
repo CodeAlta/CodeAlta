@@ -97,6 +97,54 @@ internal class AcpAgentQuirks
     public virtual string? CatalogProviderId => null;
 
     /// <summary>
+    /// Returns what the agent needs from the computer in the sandbox of a session, the same for every agent: a home
+    /// folder of its own, kept for its provider, where it signs in and keeps its state; the folder of its executable; the
+    /// hosts its provider lists, those CodeAlta knows for it (<see cref="AcpAgentSandbox"/>) and the registry its package
+    /// runner downloads it from; and the variables of its provider, with their values, where a token signs it in.
+    /// </summary>
+    /// <param name="agent">The settings of the agent.</param>
+    /// <param name="executable">The full path of its executable.</param>
+    /// <param name="providerKey">The key of its provider, which names its home folder.</param>
+    public virtual AcpAgentNeeds SandboxNeeds(AcpAgentSettings agent, string executable, string providerKey)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentException.ThrowIfNullOrWhiteSpace(executable);
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        var known = AcpAgentSandbox.Of(agent);
+        var readOnly = new List<string>();
+        AddFolderOf(readOnly, executable);
+        var hosts = new List<string>(agent.SandboxHosts.Select(static host => host.Trim()).Where(static host => host.Length > 0));
+        hosts.AddRange(known.Hosts);
+        hosts.AddRange(agent.CommandName switch
+        {
+            "npx" or "pnpx" or "bunx" => ["registry.npmjs.org"],
+            "uvx" => ["pypi.org", "files.pythonhosted.org"],
+            _ => [],
+        });
+        return new AcpAgentNeeds(readOnly, [.. hosts.Distinct(StringComparer.OrdinalIgnoreCase)], [.. agent.Environment.Keys], known.Environment, "acp-" + providerKey);
+
+        static void AddFolderOf(List<string> folders, string file)
+        {
+            if (Path.GetDirectoryName(Path.GetFullPath(file)) is { } folder)
+            {
+                folders.Add(folder);
+            }
+
+            // An agent installed by a package manager is often a link to the folder of its version.
+            try
+            {
+                if (File.ResolveLinkTarget(file, returnFinalTarget: true) is { } target && Path.GetDirectoryName(target.FullName) is { } real)
+                {
+                    folders.Add(real);
+                }
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    /// <summary>
     /// Returns whether the probe chooses each of the models in turn to read its reasoning efforts and its options. An
     /// agent that names them otherwise, or for which it takes too long, does not.
     /// </summary>

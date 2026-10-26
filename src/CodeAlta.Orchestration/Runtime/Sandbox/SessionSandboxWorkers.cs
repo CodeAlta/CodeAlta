@@ -98,10 +98,11 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
     }
 
     /// <summary>
-    /// Starts the process of an agent that runs its own tools (the CLI of Claude Code) in a container of its own, with
-    /// the profile of the session and what the process needs: the folder of its executable, its account folder, the
-    /// hosts of its vendor and the variables that configure it. A profile without network gets the hosts of the vendor
-    /// alone: the agent does not work without its service. The process and its proxy end together.
+    /// Starts the process of an agent that runs its own tools (the CLI of Claude Code, an ACP agent) in a container of its
+    /// own, with the profile of the session and what the process needs: the folder of its executable, its account folder
+    /// or a home of its own, the hosts of its vendor, the port of the tools of CodeAlta and the variables that configure
+    /// it. A profile without network gets the hosts of the vendor alone: the agent does not work without its service. The
+    /// process and its proxy end together.
     /// </summary>
     /// <exception cref="SandboxUnavailableException">The sandbox did not start.</exception>
     public async Task<CodeAlta.Agent.Runtime.IAgentHostedProcess> StartAgentProcessAsync(SessionSandboxStart start, CodeAlta.Agent.Runtime.AgentProcessLaunch launch,
@@ -110,8 +111,21 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
         var profile = AgentProfile(start.Profile, launch);
         var environment = launch.Environment.Where(static pair => pair.Value is not null).Select(static pair => new KeyValuePair<string, string>(pair.Key, pair.Value!))
             .Concat(start.Environment).DistinctBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase).ToArray();
-        var policy = SandboxPolicyBuilder.Build(profile, start.Folders with { Protected = [.. start.Folders.Protected, .. launch.ProtectedPaths] }, Host(), environment,
-            start.SessionId + "-agent");
+        // The variables that sign the agent in pass with the value its launch gives them (the settings of its provider),
+        // else with the one of this process.
+        var host = Host();
+        var given = launch.PassedVariables
+            .Where(name => launch.Environment.TryGetValue(name, out var value) && !string.IsNullOrEmpty(value))
+            .ToDictionary(static name => name, name => launch.Environment[name]!, StringComparer.OrdinalIgnoreCase);
+        if (given.Count > 0)
+        {
+            var merged = new Dictionary<string, string>(host.Environment, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            foreach (var (name, value) in given) merged[name] = value;
+            host = host with { Environment = merged };
+        }
+
+        var policy = SandboxPolicyBuilder.Build(profile, start.Folders with { Protected = [.. start.Folders.Protected, .. launch.ProtectedPaths], OwnHome = launch.OwnHome },
+            host, environment, start.SessionId + "-agent");
         SandboxNetworkProxy? proxy = null;
         try
         {
@@ -131,6 +145,7 @@ internal sealed class SessionSandboxWorkers : IAsyncDisposable
     {
         Network = profile.Network == SandboxNetwork.Off ? SandboxNetwork.Hosts : profile.Network,
         Hosts = profile.Network == SandboxNetwork.Off ? [.. launch.Hosts] : [.. profile.Hosts.Union(launch.Hosts, StringComparer.OrdinalIgnoreCase)],
+        LocalPorts = [.. profile.LocalPorts.Union(launch.LocalPorts)],
         Write = [.. profile.Write, .. launch.ReadWriteFolders],
         Read = [.. profile.Read, .. launch.ReadOnlyFolders],
         Env = [.. profile.Env.Union(launch.PassedVariables, StringComparer.OrdinalIgnoreCase)],

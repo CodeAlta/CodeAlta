@@ -21,6 +21,12 @@ public sealed record SandboxSessionFolders
 
     /// <summary>Gets the scratchpad folder of the session, or null.</summary>
     public string? Scratchpad { get; init; }
+
+    /// <summary>
+    /// Gets the name of a home folder of its own, kept between sessions and profiles: the one of an agent that signs in
+    /// there once and that no other process of a sandbox reaches; null for the home folder of the profile.
+    /// </summary>
+    public string? OwnHome { get; init; }
 }
 
 /// <summary>What the computer gives a sandbox: where its data goes, the home folder, the environment and the tools.</summary>

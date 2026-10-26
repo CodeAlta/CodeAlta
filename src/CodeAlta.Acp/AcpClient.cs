@@ -12,6 +12,7 @@ namespace CodeAlta.Acp;
 public sealed partial class AcpClient : IAsyncDisposable
 {
     private readonly AcpProcess? _process;
+    private AcpHostedProcess? _hosted;
     private readonly AcpJsonRpcTransport _transport;
     private readonly JsonSerializerOptions _jsonOptions;
     private InitializeResponse? _initializeResponse;
@@ -116,6 +117,53 @@ public sealed partial class AcpClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Connects an ACP client to the process of an agent that another component started (in the sandbox of a session),
+    /// gives each message of the agent to a handler, and performs initialization. The client ends the process when it
+    /// is disposed, and explains its exit with the last lines of its errors.
+    /// </summary>
+    /// <param name="process">The process of the agent.</param>
+    /// <param name="initializeRequest">The initialize request.</param>
+    /// <param name="messageHandler">Called on the reading loop for each notification and request of the agent, in order: it must not wait.</param>
+    /// <param name="initializeTimeout">How long the agent has to answer <c>initialize</c>.</param>
+    /// <param name="cancellationToken">A token to cancel the initialization.</param>
+    /// <returns>The connected client.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="process"/> or <paramref name="initializeRequest"/> is null.</exception>
+    /// <exception cref="TimeoutException">The agent did not answer <c>initialize</c> in time.</exception>
+    public static async Task<AcpClient> ConnectAsync(
+        AcpHostedProcess process,
+        InitializeRequest initializeRequest,
+        Action<AcpServerMessage>? messageHandler,
+        TimeSpan initializeTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        ArgumentNullException.ThrowIfNull(initializeRequest);
+
+        var logger = LogManager.GetLogger("acp.client");
+        var jsonOptions = CreateJsonSerializerOptions();
+        var lines = new StreamReader(process.StandardOutput, new System.Text.UTF8Encoding(false), detectEncodingFromByteOrderMarks: false);
+        var transport = new AcpJsonRpcTransport(
+            lines.ReadLineAsync,
+            process.StandardInput,
+            jsonOptions,
+            logger,
+            process.DescribeExit,
+            messageHandler);
+        var client = new AcpClient(process: null, transport, jsonOptions) { _hosted = process };
+        try
+        {
+            client._initializeResponse = await transport.SendRequestAsync<InitializeRequest, InitializeResponse>("initialize", initializeRequest, initializeTimeout, cancellationToken)
+                .ConfigureAwait(false);
+            return client;
+        }
+        catch
+        {
+            await client.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Gets a task that ends when the agent's output ends (it exited) or the client is disposed.
     /// </summary>
     public Task Completion => _transport.Completion;
@@ -128,12 +176,12 @@ public sealed partial class AcpClient : IAsyncDisposable
     /// <summary>
     /// Gets whether the agent process exited; always <see langword="false" /> for a client connected to streams.
     /// </summary>
-    public bool HasExited => _process?.HasExited ?? false;
+    public bool HasExited => _process?.HasExited ?? _hosted?.Exited.IsCompleted ?? false;
 
     /// <summary>
     /// Gets the last lines the agent wrote to its standard error, or an empty string.
     /// </summary>
-    public string ErrorTail => _process?.ErrorTail ?? string.Empty;
+    public string ErrorTail => _process?.ErrorTail ?? _hosted?.ErrorTail ?? string.Empty;
 
     /// <summary>
     /// Streams raw server-initiated ACP messages.
@@ -271,6 +319,11 @@ public sealed partial class AcpClient : IAsyncDisposable
         if (_process is not null)
         {
             await _process.DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (_hosted is not null)
+        {
+            await _hosted.End().ConfigureAwait(false);
         }
 
         GC.KeepAlive(_jsonOptions);

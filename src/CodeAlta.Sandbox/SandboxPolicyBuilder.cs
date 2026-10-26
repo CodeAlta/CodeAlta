@@ -22,7 +22,7 @@ public static class SandboxPolicyBuilder
     private static readonly string[] HomeSecrets =
     [
         ".alta", ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", Path.Combine(".config", "gh"), Path.Combine(".config", "git", "credentials"),
-        ".claude", ".codex", ".copilot", ".gemini", ".cursor", ".npmrc", ".yarnrc", ".pypirc", ".netrc", "_netrc", ".git-credentials",
+        ".claude", ".codex", ".copilot", ".gemini", ".cursor", ".grok", Path.Combine("AppData", "Roaming", "Cursor"), Path.Combine(".config", "cursor"), ".npmrc", ".yarnrc", ".pypirc", ".netrc", "_netrc", ".git-credentials",
         ".bash_history", ".zsh_history", Path.Combine(".local", "share", "keyrings"), Path.Combine("Library", "Keychains"),
         Path.Combine("AppData", "Roaming", "NuGet"), Path.Combine("AppData", "Roaming", "Microsoft", "Credentials"),
         Path.Combine("AppData", "Local", "Microsoft", "Credentials"), Path.Combine("AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine"),
@@ -68,7 +68,7 @@ public static class SandboxPolicyBuilder
         var home = Full(host.HomeDirectory);
         var workingDirectory = Full(folders.WorkingDirectory);
         var profileRoot = Path.Combine(Full(host.DataRoot), "profiles", SafeName(profile.Name));
-        var sandboxHome = Path.Combine(profileRoot, "home");
+        var sandboxHome = folders.OwnHome is { } ownHome ? Path.Combine(Full(host.DataRoot), "agents", SafeName(ownHome), "home") : Path.Combine(profileRoot, "home");
         var caches = Path.Combine(profileRoot, "caches");
         var sessionRoot = Path.Combine(Full(host.DataRoot), "sessions", SafeName(sessionKey));
         var temp = Path.Combine(sessionRoot, "temp");

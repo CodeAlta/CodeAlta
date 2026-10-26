@@ -121,7 +121,33 @@ public sealed class SandboxPolicyBuilderTests
         CollectionAssert.Contains(policy.ReadOnly.ToList(), temp.Folder("home"));
         CollectionAssert.Contains(policy.Denied.ToList(), Path.Combine(temp.Folder("home"), ".alta"));
         CollectionAssert.Contains(policy.Denied.ToList(), Path.Combine(temp.Folder("home"), ".ssh"));
+        // The sign-in of the coding agents, which keep it in files.
+        foreach (var entry in new[] { ".copilot", ".grok", Path.Combine("AppData", "Roaming", "Cursor"), Path.Combine(".config", "cursor") })
+        {
+            CollectionAssert.Contains(policy.Denied.ToList(), Path.Combine(temp.Folder("home"), entry), entry);
+        }
+
         Assert.IsEmpty(Build(temp, SandboxProfiles.Resolve("workspace", []), project).Denied, "nothing to deny when nothing holds them");
+    }
+
+    [TestMethod]
+    public void AProcessWithAHomeOfItsOwn_KeepsItBetweenProfiles_AndNotInTheHomeOfAProfile()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var shared = Build(temp, SandboxProfiles.Resolve("strict", []), project);
+
+        SandboxPolicy Agent(string profile) => SandboxPolicyBuilder.Build(SandboxProfiles.Resolve(profile, []),
+            new SandboxSessionFolders { WorkingDirectory = project, OwnHome = "grok-build" },
+            new SandboxHost { DataRoot = temp.Folder("data"), HomeDirectory = temp.Folder("home"), Environment = new Dictionary<string, string>() }, [], "session-1-agent");
+        var agent = Agent("strict");
+
+        Assert.AreEqual(Path.Combine(temp.Folder("data"), "agents", "grok-build", "home"), agent.Home);
+        Assert.AreEqual(agent.Home, Agent("workspace").Home, "it signs in once");
+        Assert.AreEqual(agent.Home, agent.Environment["HOME"]);
+        CollectionAssert.Contains(agent.ReadWrite.ToList(), agent.Home);
+        CollectionAssert.DoesNotContain(agent.ReadWrite.ToList(), shared.Home, "the home of the profile is the one of the other processes");
+        Assert.IsFalse(shared.ReadWrite.Concat(shared.ReadOnly).Any(path => SandboxPolicyBuilder.IsInside(path, agent.Home)), "and they do not reach its own");
     }
 
     [TestMethod]

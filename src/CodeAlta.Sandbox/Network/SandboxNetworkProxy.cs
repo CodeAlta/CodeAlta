@@ -169,8 +169,10 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
             {
                 host = uri.Host;
                 port = uri.Port;
-                // The request goes on with the form an origin server reads, and its other lines as they came.
-                forward = Encoding.ASCII.GetBytes($"{first[0]} {uri.PathAndQuery} {first[2]}\r\n" + string.Concat(lines.Skip(1).Select(static line => line + "\r\n")) + "\r\n");
+                // The request goes on with the form an origin server reads, and its other lines as they came. It is the
+                // only one of the connection: a next request, which names its host again, is read on a new one.
+                var headers = lines.Skip(1).Where(static line => !IsHopHeader(line)).Append("Connection: close");
+                forward = Encoding.ASCII.GetBytes($"{first[0]} {uri.PathAndQuery} {first[2]}\r\n" + string.Concat(headers.Select(static line => line + "\r\n")) + "\r\n");
             }
             else
             {
@@ -249,6 +251,15 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
         if (colon <= 0 || value.EndsWith(']')) return value.Length > 0;
         host = value[..colon];
         return int.TryParse(value[(colon + 1)..], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out port) && port is > 0 and < 65536;
+    }
+
+    // The headers of the connection to the proxy, not of the request.
+    private static bool IsHopHeader(string line)
+    {
+        var colon = line.IndexOf(':');
+        var name = colon < 0 ? line : line[..colon].Trim();
+        return name.Equals("Connection", StringComparison.OrdinalIgnoreCase) || name.Equals("Proxy-Connection", StringComparison.OrdinalIgnoreCase)
+               || name.Equals("Keep-Alive", StringComparison.OrdinalIgnoreCase) || name.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsLocalName(string name)
