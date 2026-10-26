@@ -2905,8 +2905,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return (AltaExitCodes.ServiceUnavailable, null);
         }
 
-        // The files of the project are the session's to write: a session without the shell has git run none of its hooks.
-        var withoutHooks = await ShellTurnedOffAsync(context).ConfigureAwait(false);
+        // The files of the project are the session's to write: a session without the shell, or in a sandbox, has git run
+        // none of its hooks, here outside the sandbox.
+        var withoutHooks = await ShellTurnedOffAsync(context).ConfigureAwait(false) || await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is not null;
         var worktree = await worktrees.CreateAsync(project, worktreeBase, progress: null, withoutHooks, context.CancellationToken).ConfigureAwait(false);
         if (worktree.Succeeded)
         {
