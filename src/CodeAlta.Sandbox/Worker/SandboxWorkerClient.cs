@@ -43,6 +43,7 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
     private readonly ConcurrentDictionary<long, SandboxedProcess> _processes = new();
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _closing = new();
+    private int _disposed;
     private readonly Task _reading;
     private long _nextId;
     private string? _ended;
@@ -160,6 +161,7 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
     /// <returns>A task that completes once the worker is gone.</returns>
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         End("The sandbox of the session was closed.");
         await _closing.CancelAsync().ConfigureAwait(false);
         if (_process is not null) await _process.DisposeAsync().ConfigureAwait(false);
