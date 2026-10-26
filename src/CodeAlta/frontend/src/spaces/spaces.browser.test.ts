@@ -244,11 +244,11 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.equal(await wait("[...document.querySelectorAll('.bp6-menu-item')].some(item=>item.textContent.includes('Organize spaces'))"), true);
       await evaluate("[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent.includes('Organize spaces')).click()");
       assert.equal(await wait("!!document.querySelector('.space-card .space-open')"), true);
-      // Spaces is a group of its own, right after Personalization: its overview, then each space.
+      // Spaces is a group of its own, right after Personalization: its overview, the labels of the projects, then each space.
       assert.deepEqual(await evaluate("[...document.querySelectorAll('.settings-dialog-group h3')].slice(0, 3).map(title=>title.textContent)"), ["Personalization", "Spaces", "Agent & models"]);
       assert.deepEqual(await evaluate(`(()=>{const group=document.querySelector('[data-settings-section="spaces"]').closest('.settings-dialog-group');
         return [...group.querySelectorAll('button')].map(button=>(button.dataset.settingsSection ?? button.dataset.settingsSpace)+':'+button.textContent+':'+(button.getAttribute('aria-current') ?? ''));})()`),
-        ["spaces:Overview:page", "default:Default:", "work:Work:"]);
+        ["spaces:Overview:page", "labels:Labels:", "default:Default:", "work:Work:"]);
       // Each card says what its space sets up, on one line: its projects and its own provider account.
       assert.equal(await wait("document.querySelector('.space-card[aria-label=Work] .space-card-summary')?.textContent==='1 project · Claude Business'"), true);
       assert.equal(await evaluate("document.querySelector('.space-pool .space-card-summary').textContent"), "2 projects · Claude Home");
