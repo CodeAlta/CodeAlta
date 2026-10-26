@@ -4579,9 +4579,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             return;
           }
           recordHandoff("");
-          if (handoff.images.length === 0 && handoff.text.trim()) autoSend.current = { sessionId: selection.sessionId, text: handoff.text };
-          // The session now owns the text; the New session tab starts empty again.
+          // The composer of the session sends what it was given, its attachments too: it refuses the images a model cannot read, and keeps them.
+          autoSend.current = { sessionId: selection.sessionId, text: handoff.text, images: handoff.images.length };
+          // The session now owns the text and the attachments; the New session tab starts empty again.
           if (handoff.scope === draftScope && localDrafts.peek(draftScope)?.revision === handoff.revision) editLocalDraft("");
+          if (handoff.images.length) submissions.imageDrafts.replace(handoff.imageKey, handoff.images, []);
         } else {
           // The session exists. When what was chosen cannot be kept for its first Send, it opens as it is, and says so.
           if (!offered || !nextSendSelections.set(epoch!, selection.sessionId, offered, creationSelection))

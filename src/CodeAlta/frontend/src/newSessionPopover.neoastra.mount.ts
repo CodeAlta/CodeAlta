@@ -13,6 +13,8 @@ const outcomes = new Map<string, WorkspaceCreateSessionResponse>();
 // What the test sets before a creation: it is held, refused, answered for another provider, its answer is lost on
 // the way, or its choices cannot be read.
 const fixture = { creates: [] as WorkspaceCreateSessionRequest[], hold: false, refused: false, uncertain: false, lost: false, choicesFail: false,
+  // Whether the models of the sessions created read images.
+  imageInput: false,
   outcomeReads: [] as string[],
   // The steps the host says while it creates the session, as the test sets them.
   steps: [] as WorkspaceCreationStep[], progressReads: 0,
@@ -101,7 +103,7 @@ export const sessionOperations = { ...baseOperations, choices: async (request: S
   return { status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
     current: { providerKey, agentPromptId: "default", modelId: "old", reasoningEffort: null, permissionMode: creation?.permissionMode ?? null },
     prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }],
-    models: models().map(model => ({ id: model.id, name: model.name, efforts: model.efforts, startEffort: model.defaultEffort, imageInput: false })),
+    models: models().map(model => ({ id: model.id, name: model.name, efforts: model.efforts, startEffort: model.defaultEffort, imageInput: fixture.imageInput })),
     permissionModes: permissionModes(providerKey), defaultPermissionMode: defaultPermissionMode(providerKey) };
 } };
 export const projectGit = { status: async () => ({ status: "ok", projectId: "project", branch: "main", detached: false, changes: { insertions: 0, deletions: 0, files: 0 } }) };

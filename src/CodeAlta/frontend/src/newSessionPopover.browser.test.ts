@@ -506,6 +506,37 @@ test("a new session is created from a form beside the row of its project or of t
     assert.equal(await evaluate("settingsShellFixture.sends[0].text"), "Held local draft");
     assert.equal(await evaluate("[...document.querySelectorAll('.notice')].some(node => node.textContent.includes('Creation may have completed'))"), false, "the creation is not said to be uncertain");
     assert.equal(await evaluate("!!document.querySelector('.session-row[data-session-id=created-1] button[aria-pressed=true]')"), true, "the session is opened");
+
+    // A prompt with a pasted image is sent with it by the session it creates, at once, and the prompt of the next
+    // session of the project is empty again: neither its text nor its image stays there.
+    await evaluate("Object.keys(localStorage).filter(key => key.includes('created-1')).forEach(key => localStorage.removeItem(key))");
+    await command("Page.reload");
+    await start("the shell for a draft with an image");
+    // The attachments are shown above the composer of the prompt, beside it.
+    const draftAttachments = "(document.querySelector('#catalog-prompt')?.closest('section.prompt-surface')?.parentElement.querySelectorAll('.prompt-image-tile').length ?? -1)";
+    await evaluate("newSessionFixture.imageInput=true");
+    await press(projectRow, 0.15);
+    await until(`document.querySelector(${JSON.stringify(projectRow)}).getAttribute("aria-pressed") === "true" && !!document.querySelector('#catalog-prompt textarea')`, "the prompt of a new session with an image");
+    await evaluate("document.querySelector('#catalog-prompt').focus()");
+    await command("Input.insertText", { text: "Local draft with an image" });
+    await evaluate(`(async () => { const canvas = document.createElement("canvas"); canvas.width = 4; canvas.height = 3;
+      canvas.getContext("2d").fillRect(0, 0, 4, 3);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      const data = new DataTransfer(); data.items.add(new File([blob], "image.png", { type: "image/png" }));
+      document.querySelector('#catalog-prompt textarea').dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true })); })()`);
+    await until(`${draftAttachments} === 1`, "the pasted image above the prompt");
+    await until("!document.querySelector('button[aria-label=\"Start session\"]').disabled", "the draft with an image can be sent");
+    await evaluate("document.querySelector('button[aria-label=\"Start session\"]').click()");
+    await until("settingsShellFixture.sends.length===1", "the draft with an image is sent at once");
+    assert.equal(await evaluate("settingsShellFixture.sends[0].text"), "Local draft with an image");
+    assert.deepEqual(await evaluate("settingsShellFixture.sends[0].images?.map(image => [image.title, image.mediaType])"), [["Image 1", "image/png"]]);
+    // The row of the project shows the session that is open: the prompt of the next session is shown from another scope.
+    await press(chatsRow, 0.15);
+    await until(`document.querySelector(${JSON.stringify(chatsRow)}).getAttribute("aria-pressed") === "true" && !!document.querySelector('#catalog-prompt textarea')`, "the prompt of a new chat");
+    await press(projectRow, 0.15);
+    await until(`document.querySelector(${JSON.stringify(projectRow)}).getAttribute("aria-pressed") === "true" && !!document.querySelector('#catalog-prompt textarea')`, "the prompt of the next session");
+    assert.equal(await evaluate("document.querySelector('#catalog-prompt textarea').value"), "", "the text went with the session");
+    assert.equal(await evaluate(draftAttachments), 0, "the image went with the session");
     assert.deepEqual(exceptions, []);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
