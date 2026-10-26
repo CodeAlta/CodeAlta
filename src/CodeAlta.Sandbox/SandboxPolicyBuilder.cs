@@ -216,6 +216,9 @@ public static class SandboxPolicyBuilder
         // the compiler then waits for its server before it compiles in the build. (The worker nodes of MSBuild need
         // `-m:1`, which the agent is told.)
         if (OperatingSystem.IsMacOS()) environment["UseSharedCompilation"] = "false";
+        // Claude Code keeps its own temporary folder in `/tmp/claude-<uid>` whatever TMPDIR says, and does not start
+        // without it on macOS: it is the temporary folder of the sandbox there.
+        if (OperatingSystem.IsMacOS()) environment["CLAUDE_CODE_TMPDIR"] = temp;
         if (File.Exists(userGitConfig)) environment["GIT_CONFIG_GLOBAL"] = userGitConfig;
         environment["CODEALTA_SANDBOX"] = profile.Name;
         return environment;

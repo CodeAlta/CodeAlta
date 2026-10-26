@@ -801,6 +801,15 @@ internal sealed partial class ClaudeCodeSession
         => string.Equals(subtype, "error_during_execution", StringComparison.Ordinal) &&
            ClaudeCodeJson.GetString(result, "terminal_reason") is "aborted_streaming" or "aborted_tools";
 
+    // What a turn that failed for the sign-in says: how to sign in. A CLI in a sandbox of macOS cannot read its sign-in,
+    // which is in the Keychain: signing in again would change nothing, it needs a token of its own.
+    internal static string SignedOutMessage(ClaudeCodeModelProviderRuntimeOptions options, bool sandboxedOnMacOS, string detail)
+        => sandboxedOnMacOS
+            ? "Claude Code is not signed in in the sandbox of this session: on macOS its sign-in is in the Keychain, which the sandbox does not reach. " +
+              "Start CodeAlta with CLAUDE_CODE_OAUTH_TOKEN set to a token made with `claude setup-token` (or with an API key), or turn the sandbox off for this session, " +
+              $"then send the message again. CodeAlta does not handle the credentials of Claude Code. ({detail})"
+            : $"Claude Code is not signed in. {options.SignInHint()}, then send the message again. CodeAlta does not handle the credentials of Claude Code. ({detail})";
+
     private AgentProviderFailureException CreateFailure(JsonElement result, string? subtype)
     {
         var rejected = _rejectedLimit;
@@ -830,9 +839,7 @@ internal sealed partial class ClaudeCodeSession
 
         if (string.Equals(apiError, "authentication_failed", StringComparison.Ordinal))
         {
-            return new AgentProviderFailureException(
-                $"Claude Code is not signed in. {_options.SignInHint()}, then send the message again. " +
-                $"CodeAlta does not handle the credentials of Claude Code. ({text.Trim()})",
+            return new AgentProviderFailureException(SignedOutMessage(_options, _processHost is not null && OperatingSystem.IsMacOS(), text.Trim()),
                 new AgentFailureInfo(AgentFailureKind.Auth));
         }
 
