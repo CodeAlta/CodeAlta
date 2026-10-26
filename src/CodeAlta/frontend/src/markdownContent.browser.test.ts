@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
+import { isSanitizerParseReport } from "./sanitizerParseReport";
 
 const edge = browserExecutable;
 
@@ -55,11 +56,8 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       if (m.method === "Page.frameNavigated" && m.params.frame.url !== page) failures.push(JSON.stringify(m));
       if (m.method === "Log.entryAdded" && m.params.entry.source === "security") {
         const text = String(m.params.entry.text);
-        // Chromium 156 reports the CSP of the page for an inline handler as soon as DOMPurify parses it into the inert
-        // document of DOMParser, before it removes it: nothing runs there (`executed` stays 0, no `on*` reaches the page).
-        const frames = (m.params.entry.stackTrace?.callFrames ?? []) as { functionName: string }[];
-        const inertParse = text.startsWith("Executing inline event handler") && frames[0]?.functionName.endsWith("parseFromString")
-          && frames.some(frame => frame.functionName === "DOMPurify.sanitize");
+        // The report of the inert parse of the sanitizer: nothing runs there (`executed` stays 0, no `on*` reaches the page).
+        const inertParse = isSanitizerParseReport(text, m.params.entry.stackTrace?.callFrames);
         if (text.includes("base-uri 'none'") && text.includes("https://remote.invalid/base/")) baseDiagnostics.push(text);
         else if (inertParse) inertParseDiagnostics.push(text);
         else failures.push(text);
