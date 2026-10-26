@@ -31,6 +31,12 @@ public sealed record AltaCallerIdentity
     [System.Text.Json.Serialization.JsonIgnore]
     public CodeAlta.Agent.AgentRunTools? RunTools { get; init; }
 
+    /// <summary>Gets the run of the Code Mode script that makes the call, or null; set by the host only, never by a script or by CLI arguments.</summary>
+    public string? ScriptRunId { get; init; }
+
+    /// <summary>Gets the step of the Code Mode script that makes the call, or null; set by the host only.</summary>
+    public string? ScriptStepId { get; init; }
+
     /// <summary>Gets a command-line caller identity.</summary>
     public static AltaCallerIdentity Cli { get; } = new() { Kind = "cli" };
 

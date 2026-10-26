@@ -62,7 +62,20 @@ public sealed class CodeModeDeclarationTests
     {
         Assert.ThrowsExactly<ArgumentException>(() => new CodeModeApi([new CodeModeFunction("console.log")]));
         Assert.ThrowsExactly<ArgumentException>(() => new CodeModeApi([new CodeModeFunction("tools")]));
-        Assert.ThrowsExactly<ArgumentException>(() => new CodeModeApi([new CodeModeFunction("tools.a"), new CodeModeFunction("tools.a.b")]));
+    }
+
+    [TestMethod]
+    public async Task AFunctionCanAlsoBeANamespace()
+    {
+        var api = new CodeModeApi([new CodeModeFunction("alta.search") { Description = "Search." }, new CodeModeFunction("alta.search.show")]);
+        var handler = new DelegateHandler().On("alta.search", _ => "found").On("alta.search.show", _ => "shown");
+
+        var result = await new CodeModeHost(api, new CodeModeScriptCache()).RunAsync(CodeModeSource.Prepare("return [await alta.search({}), await alta.search.show({})];"), handler);
+
+        Assert.AreEqual("""["found","shown"]""", result.ValueJson, result.Error?.Message);
+        StringAssert.Contains(api.Declarations, "search: {");
+        StringAssert.Contains(api.Declarations, "(args?: Record<string, unknown>): Promise<unknown>;");
+        StringAssert.Contains(api.Declarations, "show(args");
     }
 
     [TestMethod]

@@ -90,26 +90,37 @@ public static class CodeModeDeclarations
         return "unknown";
     }
 
-    private static void AppendNamespace(StringBuilder builder, NamespaceNode node, string indent)
+    private static void AppendNamespace(StringBuilder builder, NamespaceNode node, string indent, CodeModeFunction? callable = null)
     {
         var inner = indent + "  ";
         builder.Append("{\n");
+        if (callable is not null)
+        {
+            AppendFunction(builder, callable, inner, callSignature: true);
+        }
+
         foreach (var (name, child) in node.Children)
         {
             builder.Append(inner).Append(PropertyName(name)).Append(": ");
-            AppendNamespace(builder, child, inner);
+            AppendNamespace(builder, child, inner, node.Functions.FirstOrDefault(entry => entry.Name == name).Function);
             builder.Append(";\n");
         }
 
         foreach (var (name, function) in node.Functions)
         {
+            // A function that also has members is written as the call signature of its namespace.
+            if (node.Children.Any(child => child.Name == name))
+            {
+                continue;
+            }
+
             AppendFunction(builder, function with { Path = name }, inner);
         }
 
         builder.Append(indent).Append('}');
     }
 
-    private static void AppendFunction(StringBuilder builder, CodeModeFunction function, string indent)
+    private static void AppendFunction(StringBuilder builder, CodeModeFunction function, string indent, bool callSignature = false)
     {
         var name = function.Path[(function.Path.LastIndexOf('.') + 1)..];
         var description = function.Description?.Trim();
@@ -139,9 +150,9 @@ public static class CodeModeDeclarations
         }
 
         var input = function.InputSchemaJson is null ? "Record<string, unknown>" : RenderType(function.InputSchemaJson);
-        var optional = function.InputSchemaJson is not null && !HasRequired(function.InputSchemaJson) ? "?" : string.Empty;
+        var optional = function.InputSchemaJson is null || !HasRequired(function.InputSchemaJson) ? "?" : string.Empty;
         var output = function.ResultType ?? (function.OutputSchemaJson is null ? "unknown" : RenderType(function.OutputSchemaJson));
-        builder.Append(indent).Append(PropertyName(name)).Append("(args").Append(optional).Append(": ")
+        builder.Append(indent).Append(callSignature ? string.Empty : PropertyName(name)).Append("(args").Append(optional).Append(": ")
             .Append(Indent(input, indent)).Append("): Promise<").Append(Indent(output, indent)).Append(">;\n");
     }
 

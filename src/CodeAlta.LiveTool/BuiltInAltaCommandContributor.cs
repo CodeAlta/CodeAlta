@@ -67,6 +67,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("session report"),
         Read("session children"),
         Read("session model"),
+        Read("session choices"),
         Read("session metrics"),
         Read("session tail"),
         Read("session events"),

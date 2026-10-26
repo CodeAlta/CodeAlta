@@ -101,6 +101,71 @@ public sealed class AltaCommandRegistry
         return app;
     }
 
+    /// <summary>
+    /// Describes the commands of the tree a caller gets, for the scripts of Code Mode: their paths, arguments, options
+    /// and policies. The tree is built under a retention lifetime, as an invocation builds it, and nothing runs.
+    /// </summary>
+    /// <param name="context">The context of the caller, which decides the roots and the commands of plugins it gets.</param>
+    /// <returns>The commands that run something, in the order of the tree.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is null.</exception>
+    public IReadOnlyList<Scripts.AltaCommandDescriptor> Describe(AltaCommandContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        using var retentionLifetime = new AltaCommandRetentionLifetime(_retainedInvocations.Enqueue);
+        var app = CreateCommandApp(context with { RetentionLifetime = retentionLifetime });
+        var policies = new Dictionary<string, AltaCommandPolicy>(StringComparer.OrdinalIgnoreCase);
+        foreach (var policy in GetPolicies(context))
+        {
+            policies.TryAdd(policy.Path, policy);
+        }
+
+        var commands = new List<Scripts.AltaCommandDescriptor>();
+        var seen = new HashSet<Command>(ReferenceEqualityComparer.Instance);
+        foreach (var command in app.SubCommands.Values)
+        {
+            Describe(command, command.Name, policies, seen, commands);
+        }
+
+        return commands;
+    }
+
+    private static void Describe(Command command, string path, Dictionary<string, AltaCommandPolicy> policies, HashSet<Command> seen, List<Scripts.AltaCommandDescriptor> commands)
+    {
+        if (command.Hidden || !seen.Add(command))
+        {
+            return;
+        }
+
+        if (command.Action is not null)
+        {
+            var arguments = command.Arguments
+                .Where(static argument => !argument.Hidden && !argument.IsRemainder)
+                .Select(static argument => new Scripts.AltaArgumentDescriptor(argument.BasePrototype.Trim('<', '>', '[', ']', '?', '*', '+'), argument.Optional, argument.IsList)
+                {
+                    Description = argument.Description,
+                })
+                .ToArray();
+            var options = command.Options.Values
+                .Distinct()
+                .Where(static option => !option.Hidden && option is not HelpOption and not VersionOption)
+                .Select(static option =>
+                {
+                    var names = option.GetNames().OrderByDescending(static name => name.Length).ToArray();
+                    return new Scripts.AltaOptionDescriptor(names[0], names[1..], option.OptionValueType != OptionValueType.None)
+                    {
+                        Description = option.Description,
+                    };
+                })
+                .ToArray();
+            commands.Add(new Scripts.AltaCommandDescriptor(path, command.Description, arguments, options) { Policy = policies.GetValueOrDefault(path) });
+        }
+
+        foreach (var child in command.SubCommands.Values)
+        {
+            Describe(child, path + " " + child.Name, policies, seen, commands);
+        }
+    }
+
     private static void ObserveCommandOriginals(Command command, AltaCommandContext context)
     {
         if (command.Action is { } action)

@@ -24,7 +24,7 @@ public sealed class CodeModeApi
     /// <summary>Creates an API.</summary>
     /// <param name="functions">The functions. Each path has at least two segments, and its first one is not a reserved name.</param>
     /// <exception cref="ArgumentNullException"><paramref name="functions"/> is null.</exception>
-    /// <exception cref="ArgumentException">A path is empty, has one segment, takes a reserved name, or appears twice; or a path is both a function and a namespace.</exception>
+    /// <exception cref="ArgumentException">A path is empty, has one segment, takes a reserved name, or appears twice.</exception>
     public CodeModeApi(IEnumerable<CodeModeFunction> functions)
     {
         ArgumentNullException.ThrowIfNull(functions);
@@ -46,17 +46,6 @@ public sealed class CodeModeApi
             if (!byPath.TryAdd(function.Path, function))
             {
                 throw new ArgumentException($"The path `{function.Path}` appears twice.", nameof(functions));
-            }
-        }
-
-        foreach (var path in byPath.Keys)
-        {
-            for (var dot = path.IndexOf('.', StringComparison.Ordinal); dot > 0; dot = path.IndexOf('.', dot + 1))
-            {
-                if (byPath.ContainsKey(path[..dot]))
-                {
-                    throw new ArgumentException($"`{path[..dot]}` is both a function and the namespace of `{path}`.", nameof(functions));
-                }
             }
         }
 
@@ -155,29 +144,22 @@ public sealed class CodeModeApi
 
             """);
 
-        var root = new Dictionary<string, object>(StringComparer.Ordinal);
+        var root = new PathNode();
         foreach (var function in functions)
         {
-            var segments = function.Path.Split('.');
             var node = root;
-            for (var i = 0; i < segments.Length - 1; i++)
+            foreach (var segment in function.Path.Split('.'))
             {
-                if (!node.TryGetValue(segments[i], out var child))
-                {
-                    child = new Dictionary<string, object>(StringComparer.Ordinal);
-                    node[segments[i]] = child;
-                }
-
-                node = (Dictionary<string, object>)child;
+                node = node.Child(segment);
             }
 
-            node[segments[^1]] = function.Path;
+            node.Function = function.Path;
         }
 
-        foreach (var (name, value) in root)
+        foreach (var (name, node) in root.Children)
         {
             builder.Append("global(").Append(Quote(name)).Append(", ");
-            AppendNode(builder, value);
+            AppendNode(builder, node);
             builder.Append(");\n");
         }
 
@@ -185,17 +167,19 @@ public sealed class CodeModeApi
         return builder.ToString();
     }
 
-    private static void AppendNode(StringBuilder builder, object node)
+    // A path that is both a function and a namespace (`alta.search` and `alta.search.show`) is a function that carries
+    // its members.
+    private static void AppendNode(StringBuilder builder, PathNode node)
     {
-        if (node is string path)
+        if (node.Children.Count == 0)
         {
-            builder.Append("fn(").Append(Quote(path)).Append(')');
+            builder.Append("fn(").Append(Quote(node.Function!)).Append(')');
             return;
         }
 
-        builder.Append("freeze({");
+        builder.Append("freeze(Object.assign(").Append(node.Function is null ? "{}" : "fn(" + Quote(node.Function) + ")").Append(", {");
         var first = true;
-        foreach (var (name, child) in (Dictionary<string, object>)node)
+        foreach (var (name, child) in node.Children)
         {
             if (!first)
             {
@@ -207,7 +191,29 @@ public sealed class CodeModeApi
             AppendNode(builder, child);
         }
 
-        builder.Append("})");
+        builder.Append("}))");
+    }
+
+    private sealed class PathNode
+    {
+        public string? Function { get; set; }
+
+        public List<(string Name, PathNode Node)> Children { get; } = [];
+
+        public PathNode Child(string name)
+        {
+            foreach (var (existing, node) in Children)
+            {
+                if (existing == name)
+                {
+                    return node;
+                }
+            }
+
+            var added = new PathNode();
+            Children.Add((name, added));
+            return added;
+        }
     }
 
     private static string Quote(string value) => JsonSerializer.Serialize(value, CodeModeJsonContext.Default.String);
