@@ -28,6 +28,11 @@ In CodeAlta Desktop, **Settings > Sandbox** has:
 - **Every session**: not sandboxed, or sandboxed with a profile.
 - **Profiles**, and **Where it applies**: the providers, models, spaces and projects that choose a sandbox, each with a link to where it is set.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-sandbox-settings.webp" alt="Settings > Sandbox: the status of the sandbox of Windows with each step of its check passed, the choice for every session, and the profiles" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings > Sandbox: <strong>Check</strong> starts a sandbox with a profile and shows what it reaches and what stays out of reach.</figcaption>
+</figure>
+
 A sandbox is also chosen:
 
 - for a provider, in its form in [model providers](../model-providers/readme.md);
@@ -87,6 +92,11 @@ Run outside the sandbox?
   [Allow once]  [Deny]
 ```
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-sandbox-session.webp" alt="A sandboxed session of SharpYaml asks to run git fetch outside the sandbox, with its folder and its reason" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The sandbox keeps <code>git fetch</code> from reaching GitHub: the agent asks to run it outside, and says why.</figcaption>
+</figure>
+
 The timeline marks the commands that ran outside. With the `strict` profile, or **Never**, no command leaves the sandbox: the agent asks you to run it.
 
 When the sandbox blocks a command, the agent is told what blocked it, a host or a file, so that it does not try again the same way.
@@ -114,6 +124,8 @@ A sandboxed session runs on the providers whose model CodeAlta drives with its o
 A [fallback](../model-providers/readme.md) never moves a sandboxed session to a provider it cannot run on.
 
 ## Platforms
+
+The sandbox is built on [MXC](https://github.com/microsoft/mxc), Microsoft's policy-driven isolation and containment of processes, with the native sandbox of each system: the process container of Windows, Seatbelt on macOS and Bubblewrap on Linux. CodeAlta never falls back to a weaker sandbox of its own.
 
 - **Windows 11**: built in, nothing to install. MSBuild builds there with one node (`-m:1`). Before build .9550, the tests of VSTest do not run with a profile that reaches hosts, such as `workspace` (see [troubleshooting](../troubleshooting.md#a-sandboxed-session-runs-nothing)).
 - **macOS**: built in, on Apple silicon. The commands of Xcode or of its Command Line Tools (`git`, `python3`) and of Homebrew run there. MSBuild builds with one node (`-m:1`), and `dotnet test` does not run: no process of a sandbox listens on a port. A test project of Microsoft.Testing.Platform runs as a program: `dotnet build <tests> -m:1`, then `dotnet run --project <tests> --no-build` (see [troubleshooting](../troubleshooting.md#a-sandboxed-session-runs-nothing)).
