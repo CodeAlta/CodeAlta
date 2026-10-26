@@ -381,8 +381,22 @@ internal static class McpCommandFactory
         command.Add("refresh", "Ask every server for its tools, also one listed less than a day ago: it is started.", value => refresh = value is not null);
         command.Add(async (_, _) =>
         {
+            // A sandboxed session searches the servers of its profile alone: the others would start outside its sandbox.
+            var sandboxServers = context.ResolveSourceSandboxMcpServersAsync is { } sandboxOf ? await sandboxOf(context.CancellationToken).ConfigureAwait(false) : null;
+            if (server is not null && await RefuseOutsideSandboxAsync(context, [server]).ConfigureAwait(false) is { } unlisted)
+            {
+                return unlisted;
+            }
+
             await using var runtime = CreateRuntime(options);
-            var result = await runtime.SearchToolsAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), server, query, context.CancellationToken, useCache: !refresh).ConfigureAwait(false);
+            var request = await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false);
+            var result = new McpRuntimeToolSearchResult();
+            foreach (var searched in server is null && sandboxServers is not null ? sandboxServers.Select(static key => (string?)key) : [server])
+            {
+                var found = await runtime.SearchToolsAsync(request, searched, query, context.CancellationToken, useCache: !refresh).ConfigureAwait(false);
+                result = result with { Tools = [.. result.Tools, .. found.Tools], Diagnostics = [.. result.Diagnostics, .. found.Diagnostics] };
+            }
+
             foreach (var diagnostic in result.Diagnostics)
             {
                 WriteRecord(context.Stdout, CreateDiagnosticRecord(context, diagnostic));
@@ -424,6 +438,11 @@ internal static class McpCommandFactory
         {
             var serverKey = RequireServerKey(server);
             var toolName = RequireToolName(tool);
+            if (await RefuseOutsideSandboxAsync(context, [serverKey]).ConfigureAwait(false) is { } unlisted)
+            {
+                return unlisted;
+            }
+
             var diagnostics = new List<McpRuntimeDiagnostic>();
             await using var runtime = CreateRuntime(options);
             var result = await runtime.DescribeToolAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), serverKey, toolName, diagnostics, context.CancellationToken).ConfigureAwait(false);

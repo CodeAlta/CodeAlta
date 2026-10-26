@@ -129,7 +129,11 @@ public sealed partial class McpRuntimeServiceTests
         };
 
         // The server runs outside the sandbox: a profile that does not list it does not get it, activated or called.
-        foreach (var args in new[] { new[] { "activate", "tiny" }, ["tool", "call", "--server", "tiny", "--tool", "echo"] })
+        foreach (var args in new[]
+                 {
+                     new[] { "activate", "tiny" }, ["tool", "call", "--server", "tiny", "--tool", "echo"], ["tool", "describe", "--server", "tiny", "--tool", "echo"],
+                     ["tool", "search", "--server", "tiny", "--refresh"],
+                 })
         {
             var (exitCode, stdout) = await RunAsync([], args);
             Assert.AreEqual(1, exitCode, stdout);
@@ -137,6 +141,12 @@ public sealed partial class McpRuntimeServiceTests
             Assert.AreEqual("server_not_in_sandbox", error.RootElement.GetProperty("code").GetString());
             StringAssert.Contains(error.RootElement.GetProperty("message").GetString(), "tiny");
         }
+
+        // A search of every server searches those of the profile alone: none is started for a profile without any.
+        var (searchExit, searched) = await RunAsync([], "tool", "search", "--refresh");
+        Assert.AreEqual(0, searchExit, searched);
+        Assert.DoesNotContain("\"echo\"", searched);
+        Assert.Contains("\"matchingToolCount\":0", searched);
 
         // A profile that lists it uses it; the session keeps it, and gets it only while its sandbox lists it.
         Assert.AreEqual(0, (await RunAsync(["tiny"], "activate", "tiny")).ExitCode);
