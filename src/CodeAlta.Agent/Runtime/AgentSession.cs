@@ -716,7 +716,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
             var runTools = new AgentRunTools(toolMap.Keys, allTools.Where(static tool => tool.Spec.Deferred).Select(static tool => tool.Spec));
-            var toolRun = new ToolCallRun(runId, fileChangeTracker, instructionBundle, modelInfo, runTools);
+            var toolRun = new ToolCallRun(runId, fileChangeTracker, instructionBundle, modelInfo, runTools) { Tools = toolMap };
+            using var endToolRun = new ToolRunEnd(toolRun);
 
             while (true)
             {
@@ -728,6 +729,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     var names = addedTools.Select(static tool => AgentToolBridge.GetRegisteredToolName(tool.Spec.Name)).ToHashSet(StringComparer.Ordinal);
                     allTools = [.. allTools.Where(tool => !names.Contains(AgentToolBridge.GetRegisteredToolName(tool.Spec.Name))), .. WithoutDisabledTools(addedTools)];
                     toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
+                    toolRun.Tools = toolMap;
                 }
 
                 _ = await AppendPendingSteerInputsAsync(runId, linkedCts.Token).ConfigureAwait(false);
@@ -838,7 +840,24 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentTurnFileChangeTracker FileChanges,
         AgentInstructionBundle Instructions,
         AgentModelInfo? ModelInfo,
-        AgentRunTools RunTools);
+        AgentRunTools RunTools)
+    {
+        private volatile IReadOnlyDictionary<string, AgentToolDefinition> _tools = new Dictionary<string, AgentToolDefinition>(StringComparer.Ordinal);
+        private volatile bool _ended;
+
+        /// <summary>Gets or sets the tools of the run, by the name the model is given.</summary>
+        public IReadOnlyDictionary<string, AgentToolDefinition> Tools { get => _tools; set => _tools = value; }
+
+        /// <summary>Gets or sets whether the run ended: a script that goes on in the background no longer adds to its diff.</summary>
+        public bool Ended { get => _ended; set => _ended = value; }
+
+        /// <summary>Gets the gate of <see cref="FileChanges"/>, which the calls of the run and the calls of their scripts share.</summary>
+        public SemaphoreSlim FileChangesGate { get; } = new(1, 1);
+
+        /// <summary>Finds a tool of the run by its name, also one a call registered since the last model request.</summary>
+        public AgentToolDefinition? Resolve(string toolName)
+            => Tools.TryGetValue(AgentToolBridge.GetRegisteredToolName(toolName), out var tool) ? tool : RunTools.FindPending(toolName);
+    }
 
     // Runs the tool calls of an assistant message. The session runs its tools one after the other, in their order.
     // A provider that runs tools itself may run several of them at the same time: such a call is shown from when
@@ -981,7 +1000,15 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             {
                 toolFileChangeTracker = new AgentTurnFileChangeTracker(_summary.ExecutionDirectory);
                 await toolFileChangeTracker.CaptureBeforeAsync(trackedModifiedFiles, cancellationToken).ConfigureAwait(false);
-                await run.FileChanges.CaptureBeforeAsync(trackedModifiedFiles, cancellationToken).ConfigureAwait(false);
+                await run.FileChangesGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await run.FileChanges.CaptureBeforeAsync(trackedModifiedFiles, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    run.FileChangesGate.Release();
+                }
             }
         }
         finally
@@ -1025,7 +1052,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                             {
                                 gate.Release();
                             }
-                        }) { RunTools = run.RunTools },
+                        }) { RunTools = run.RunTools, Tools = new NestedToolInvoker(this, run, toolCall) },
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -1048,13 +1075,22 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     await toolFileChangeTracker.CaptureAfterAsync(trackedModifiedFiles, cancellationToken).ConfigureAwait(false);
                 }
 
-                await run.FileChanges.CaptureAfterAsync(trackedModifiedFiles, cancellationToken).ConfigureAwait(false);
+                await run.FileChangesGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await run.FileChanges.CaptureAfterAsync(trackedModifiedFiles, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    run.FileChangesGate.Release();
+                }
             }
 
             var toolDiff = toolFileChangeTracker?.CreateUnifiedDiff();
 
-            // An image the tool returned is checked, resized when needed and saved beside the journal.
-            result = await _toolImages.PrepareAsync(result, run.ModelInfo, cancellationToken).ConfigureAwait(false);
+            // An image the tool returned is checked, resized when needed and saved beside the journal. The value meant for
+            // scripts is neither sent to the model nor journaled: a direct call of the model has no use for it.
+            result = await _toolImages.PrepareAsync(result with { Structured = null }, run.ModelInfo, cancellationToken).ConfigureAwait(false);
             var modelVisibleResult = CreateModelVisibleToolResult(
                 toolCall,
                 result,
@@ -1152,6 +1188,218 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             gate.Release();
         }
+    }
+
+    // The most of a nested call's arguments and output that its record keeps: a script can make thousands of calls,
+    // and their full text is in the result the script received, not in the conversation.
+    private const int NestedRecordCharacters = 16 * 1024;
+
+    // A call that a script makes from a tool call of the run. It runs the run's own handler of the tool, so the
+    // permissions, the sandbox routing and the tools the session does without stay as for a call of the model, and it
+    // is recorded as an activity of the calling tool call, never as a message of the conversation: resume, forks and
+    // compaction see only the call of the model. A call made after the run ended (the script went on in the
+    // background) belongs to no run and adds nothing to the run's diff.
+    private async Task<AgentToolResult> RunNestedToolCallAsync(
+        ToolCallRun run,
+        AgentMessagePart.ToolCall parent,
+        string callId,
+        AgentNestedToolCall call,
+        CancellationToken cancellationToken)
+    {
+        var definition = run.Resolve(call.ToolName);
+        if (definition is null || definition.Spec.Exposure == AgentToolExposure.Model || string.Equals(definition.Spec.Name, parent.Name, StringComparison.Ordinal))
+        {
+            var reason = definition is null
+                ? $"'{call.ToolName}' is not a tool of this session."
+                : $"'{call.ToolName}' cannot be called from a script.";
+            return new AgentToolResult(false, [new AgentToolResultItem.Text(reason)], reason);
+        }
+
+        var ended = run.Ended;
+        AgentRunId? runId = ended ? null : run.RunId;
+        var toolCall = new AgentMessagePart.ToolCall(callId, definition.Spec.Name, call.Arguments);
+        var name = call.DisplayName ?? definition.Spec.Name;
+        await AppendEventsAsync([new AgentActivityEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentActivityKind.ToolCall,
+            AgentActivityPhase.Started, callId, parent.CallId, name, null, NestedDetails(CreateToolCallDetails(toolCall, _summary.ExecutionDirectory), call))], cancellationToken).ConfigureAwait(false);
+
+        var tracked = ended ? [] : GetTrackedFileMutationPaths(toolCall, _summary.ExecutionDirectory);
+        AgentTurnFileChangeTracker? callChanges = null;
+        if (tracked.Count > 0)
+        {
+            callChanges = new AgentTurnFileChangeTracker(_summary.ExecutionDirectory);
+            await callChanges.CaptureBeforeAsync(tracked, cancellationToken).ConfigureAwait(false);
+            await run.FileChangesGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await run.FileChanges.CaptureBeforeAsync(tracked, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                run.FileChangesGate.Release();
+            }
+        }
+
+        var outputContentId = $"{callId}:output";
+        AgentToolResult result;
+        try
+        {
+            result = await definition.Handler(
+                    new AgentToolInvocation(ProviderId, SessionId, callId, definition.Spec.Name, call.Arguments,
+                        async (update, progressToken) =>
+                        {
+                            if (string.IsNullOrEmpty(update.Delta))
+                            {
+                                return;
+                            }
+
+                            var delta = new AgentContentDeltaEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentContentKind.ToolOutput,
+                                outputContentId, callId, update.Delta, update.Details);
+                            await AppendEventsAsync([delta], AgentEventPersistenceMode.TransientOnly, progressToken).ConfigureAwait(false);
+                        }) { RunTools = run.RunTools },
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The script stopped waiting: the record of the call still ends, so it is never shown running.
+            var cancelled = new AgentToolResult(false, [new AgentToolResultItem.Text("The call was cancelled.")], "The call was cancelled.");
+            await AppendNestedEndAsync(runId, parent, toolCall, name, call, cancelled, null, outputContentId, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            result = CreateToolExecutionFailureResult(name, ex);
+        }
+
+        string? diff = null;
+        if (callChanges is not null)
+        {
+            await callChanges.CaptureAfterAsync(tracked, CancellationToken.None).ConfigureAwait(false);
+            await run.FileChangesGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await run.FileChanges.CaptureAfterAsync(tracked, CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                run.FileChangesGate.Release();
+            }
+
+            diff = callChanges.CreateUnifiedDiff();
+        }
+
+        await AppendNestedEndAsync(runId, parent, toolCall, name, call, result, diff, outputContentId, CancellationToken.None).ConfigureAwait(false);
+        return result;
+    }
+
+    private Task AppendNestedEndAsync(
+        AgentRunId? runId,
+        AgentMessagePart.ToolCall parent,
+        AgentMessagePart.ToolCall toolCall,
+        string name,
+        AgentNestedToolCall call,
+        AgentToolResult result,
+        string? diff,
+        string outputContentId,
+        CancellationToken cancellationToken)
+    {
+        var recorded = BoundNestedResult(result with { Structured = null, App = null });
+        var details = NestedDetails(CreateToolResultDetails(toolCall, recorded, _summary.ExecutionDirectory, diff), call);
+        var completed = new AgentActivityEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentActivityKind.ToolCall,
+            result.Success ? AgentActivityPhase.Completed : AgentActivityPhase.Failed, toolCall.CallId, parent.CallId, name, result.Error, details);
+        var output = new AgentContentCompletedEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentContentKind.ToolOutput,
+            outputContentId, toolCall.CallId, RenderToolResult(recorded), details);
+        return AppendEventsAsync([completed, output], cancellationToken);
+    }
+
+    // The record of a nested call keeps at most NestedRecordCharacters of its text, and says what it left out.
+    private static AgentToolResult BoundNestedResult(AgentToolResult result)
+    {
+        var left = NestedRecordCharacters;
+        var cut = false;
+        var items = new List<AgentToolResultItem>(result.Items.Count);
+        foreach (var item in result.Items)
+        {
+            if (item is not AgentToolResultItem.Text text)
+            {
+                items.Add(item);
+                continue;
+            }
+
+            if (text.Value.Length <= left)
+            {
+                items.Add(text);
+                left -= text.Value.Length;
+            }
+            else
+            {
+                items.Add(new AgentToolResultItem.Text(text.Value[..Math.Max(0, left)]));
+                left = 0;
+                cut = true;
+            }
+        }
+
+        if (cut)
+        {
+            items.Add(new AgentToolResultItem.Text($"\n… cut: the record of a call of a script keeps {NestedRecordCharacters:N0} characters."));
+        }
+
+        return cut ? result with { Items = items } : result;
+    }
+
+    // The details of a nested call: those of a call of the model, with long arguments cut, and the step of the script.
+    private static JsonElement NestedDetails(JsonElement details, AgentNestedToolCall call)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in details.EnumerateObject())
+            {
+                if (property.NameEquals("arguments") && property.Value.GetRawText() is { Length: > NestedRecordCharacters } arguments)
+                {
+                    writer.WriteString("arguments", arguments[..NestedRecordCharacters] + "…");
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WritePropertyName("script");
+            writer.WriteStartObject();
+            if (call.StepId is not null)
+            {
+                writer.WriteString("stepId", call.StepId);
+            }
+
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
+    }
+
+    /// <summary>The tools of a run, as the script of one of its tool calls calls them.</summary>
+    private sealed class NestedToolInvoker(AgentSession session, ToolCallRun run, AgentMessagePart.ToolCall parent) : IAgentRunToolInvoker
+    {
+        private int _count;
+
+        public IReadOnlyList<AgentToolSpec> ListTools()
+            => [.. run.Tools.Values.Where(tool => tool.Spec.Exposure != AgentToolExposure.Model && !string.Equals(tool.Spec.Name, parent.Name, StringComparison.Ordinal))
+                .Select(static tool => tool.Spec)];
+
+        public Task<AgentToolResult> InvokeAsync(AgentNestedToolCall call, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(call);
+            var callId = parent.CallId + "/" + Interlocked.Increment(ref _count).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return session.RunNestedToolCallAsync(run, parent, callId, call, cancellationToken);
+        }
+    }
+
+    /// <summary>Marks a run ended when its loop leaves: the scripts of its calls that go on stop adding to it.</summary>
+    private sealed class ToolRunEnd(ToolCallRun run) : IDisposable
+    {
+        public void Dispose() => run.Ended = true;
     }
 
     /// <inheritdoc />
@@ -1846,7 +2094,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             ProcessHost = _options.BuiltInToolRouter?.ProcessHost,
             Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo, _pdfInputs).ToArray(),
             EarlierConversation = _earlierConversation,
-            Tools = tools,
+            // The tools of scripts only are never offered to the model: a script calls them through its tool call.
+            Tools = [.. tools.Where(static tool => tool.Spec.Exposure != AgentToolExposure.Scripts)],
             CanUseProviderContinuation = _allowProviderContinuation,
             State = _state,
         };

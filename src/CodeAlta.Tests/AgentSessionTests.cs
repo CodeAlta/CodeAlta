@@ -9,7 +9,7 @@ using CodeAlta.Tui.Presentation.Formatting;
 namespace CodeAlta.Tests;
 
 [TestClass]
-public sealed class AgentSessionTests
+public sealed partial class AgentSessionTests
 {
     [TestMethod]
     public async Task AgentSession_RenameAsync_JoinsAnOlderSummaryWriteBeforePersistingTheNewTitle()

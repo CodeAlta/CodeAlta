@@ -183,37 +183,37 @@ public static class AgentBuiltInToolFactory
                 new AgentToolSpec(
                     "read_file",
                     $"Read a local text file by line number. Offsets are 1-based; use a negative offset to count from the end (-1 is the last line). Offsets past EOF return an empty text result, and oversized negative offsets clamp to line 1. Omitting limit returns up to {options.DefaultReadFileLineLimit} lines by default.",
-                    CreateReadFileSchema(options)),
+                    CreateReadFileSchema(options)) { RunsInParallel = true },
                 (invocation, cancellationToken) => ReadFileAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
                     ViewImageToolName,
                     ViewImageToolDescription,
-                    ViewImageSchema),
+                    ViewImageSchema) { RunsInParallel = true },
                 (invocation, cancellationToken) => ViewImageAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "list_dir",
                     "List the direct children of a directory as [dir] and [file] entries.",
-                    CreateListDirSchema()),
+                    CreateListDirSchema()) { RunsInParallel = true },
                 (invocation, cancellationToken) => ListDirectoryAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "grep",
                     $"Search one or more files or directories for line-based matches using a .NET regular expression. Recurses into directories, defaults to case-insensitive matching, skips likely-binary files, accepts one or more optional globs, and returns '(no matches)' when nothing matches.",
-                    CreateGrepSchema(options)),
+                    CreateGrepSchema(options)) { RunsInParallel = true },
                 (invocation, cancellationToken) => GrepAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "webget",
                     $"Fetch text-like web content from a known absolute URL. On success, returns a text result containing the fetched body. By default, HTML responses are simplified to plain text; set rawHtml=true to return raw HTML markup. Set includeHttpStatus=true to prefix the HTTP status line and response content type before the body. JSON and XML are returned as text bodies. Applies content-type checks and a {options.MaxWebGetBytes.ToString(CultureInfo.InvariantCulture)}-byte limit; default timeout is {FormatSeconds(options.WebGetTimeout)} seconds.",
-                    CreateWebGetSchema(options)),
+                    CreateWebGetSchema(options)) { RunsInParallel = true },
                 (invocation, cancellationToken) => WebGetAsync(options, httpClient, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "shell_command",
                     "Execute a local shell command or short shell script using the platform shell, subject to host approval. Some hosts may auto-approve. Returns exit_code, working_directory, stdout, and stderr as emitted by the shell and child processes; child commands may still include ANSI/control sequences. On Windows, pwsh runs with -NoProfile and preserves the final external command exit code when that command fails.",
-                    CreateShellCommandSchema()),
+                    CreateShellCommandSchema()) { OutputSchema = ShellCommandOutputSchema },
                 (invocation, cancellationToken) => ShellCommandAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
@@ -747,15 +747,17 @@ public static class AgentBuiltInToolFactory
         var stdout = (await stdoutTask.ConfigureAwait(false)).Trim();
         var stderr = (await stderrTask.ConfigureAwait(false)).Trim();
         var output = FormatShellCommandOutput(process.ExitCode, stdout, stderr, workdir);
+        var structured = CreateShellCommandValue(process.ExitCode, stdout, stderr, workdir);
         if (process.ExitCode != 0)
         {
             return new AgentToolResult(
                 false,
                 [new AgentToolResultItem.Text(output)],
-                $"shell_command exited with code {process.ExitCode}.");
+                $"shell_command exited with code {process.ExitCode}.")
+            { Structured = structured };
         }
 
-        return new AgentToolResult(true, [new AgentToolResultItem.Text(output)]);
+        return new AgentToolResult(true, [new AgentToolResultItem.Text(output)]) { Structured = structured };
     }
 
     private static async Task<AgentToolResult> WriteFileAsync(
@@ -1757,6 +1759,36 @@ public static class AgentBuiltInToolFactory
 
     private static string FormatSeconds(TimeSpan value)
         => value.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+
+    // What a script of Code Mode receives for a command, also when its exit code is not 0: scripts branch on the code.
+    private static JsonElement CreateShellCommandValue(int exitCode, string stdout, string stderr, string workdir)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("exitCode", exitCode);
+            writer.WriteString("stdout", stdout);
+            writer.WriteString("stderr", stderr);
+            writer.WriteString("workingDirectory", workdir);
+            writer.WriteEndObject();
+        }
+
+        return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
+    }
+
+    private static readonly JsonElement ShellCommandOutputSchema = JsonDocument.Parse("""
+        {
+          "type": "object",
+          "properties": {
+            "exitCode": { "type": "integer", "description": "The exit code; a script receives the output whatever it is." },
+            "stdout": { "type": "string" },
+            "stderr": { "type": "string" },
+            "workingDirectory": { "type": "string" }
+          },
+          "required": ["exitCode", "stdout", "stderr", "workingDirectory"]
+        }
+        """).RootElement.Clone();
 
     private static string FormatShellCommandOutput(int exitCode, string stdout, string stderr, string workdir)
     {
