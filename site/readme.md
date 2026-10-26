@@ -195,10 +195,10 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>14</span> Spaces</p>
             <h3 id="feature-title-spaces">A setup for<br>each kind of work.</h3>
-            <p>Keep work, personal and open-source projects in their own spaces, each with its own chats, providers and accounts, MCP servers, skills and agent prompts, and the Git, GitHub, Jira and command line identity its agents use. Switch spaces while your agents keep working in the background.</p>
+            <p>Keep work, personal and open-source projects in their own spaces, each with its own chats, providers and accounts, MCP servers, skills and agent prompts, and the Git, GitHub, Jira and command line identity its agents use. Inside a space, labels group its projects in the Explorer: one title per label, nested when you need it. Switch spaces while your agents keep working in the background.</p>
             <a href="{{site.basepath}}/docs/spaces/">Organize your spaces <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
-          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="The Open source workspace and the Spaces switch, with Work, Personal and Open source groups and session activity indicators" width="2400" height="1500" loading="lazy"></div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-labels.webp" alt="The Open source space in CodeAlta Desktop: its projects grouped under the labels Apps, Parsers, Config formats, Native and Terminal in the Explorer, beside a Markdig session" width="2400" height="1500" loading="lazy"></div>
         </section>
         <section class="alta-story-step" id="feature-welcome" aria-labelledby="feature-title-welcome" tabindex="-1">
           <div class="alta-story-copy">

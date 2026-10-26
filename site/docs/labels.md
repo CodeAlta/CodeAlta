@@ -13,6 +13,11 @@ A label groups projects inside a [space](spaces.md): **Infra**, **Helm charts**,
 
 CodeAlta TUI lists the projects without their labels, and keeps them.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-labels.webp" alt="The Explorer of the Open source space with its projects under the labels Apps, Parsers, Config formats, Native and Terminal, beside a Markdig session" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The favorite label Apps comes first. SharpYaml and Tomlyn are under Parsers and under its sub-label Config formats.</figcaption>
+</figure>
+
 ## The Explorer
 
 Each label is a title with its badge, above its projects, and the number of projects it has. The projects of a label stay where the other projects are: a label never pushes them to the right. A label under another label steps in a little, once, whatever its depth.
@@ -43,6 +48,11 @@ A label created from the Explorer is in the shown space, or in every space when 
 ## Settings > Labels
 
 **Settings > Labels**, under **Spaces**, shows every label as a tree. Drag a label to move it, or use the arrows of its row: up, down, under the label above, out of its parent. Select a label to change its name, icon, color, space, what it stands for, and its projects.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-label-settings.webp" alt="Settings > Labels: the tree of the labels with Parsers selected, and its form with its name, icon, color, space and projects" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Parsers is selected: its form changes it and its projects.</figcaption>
+</figure>
 
 Deleting a space deletes its labels.
 
