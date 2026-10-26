@@ -80,7 +80,7 @@ text(banner, (x + 104 * S + code_width, 52 * S), "Alta", name, [(122, 232, 255),
 title = font("segoeuib.ttf", 50)
 text(banner, (x, 176 * S), "Your agents.", title, (255, 255, 255))
 text(banner, (x, 236 * S), "One workspace.", title, [CYAN, (99, 102, 241), PURPLE])
-text(banner, (x, 320 * S), "Sessions  ·  Worktrees  ·  Plugins  ·  On your phone", font("segoeui.ttf", 20), (176, 198, 222))
+text(banner, (x, 320 * S), "Sessions  ·  Worktrees  ·  Sandbox  ·  On your phone", font("segoeui.ttf", 20), (176, 198, 222))
 
 # The command that installs CodeAlta Desktop, in a box of its own.
 draw = ImageDraw.Draw(banner)
@@ -90,7 +90,7 @@ box_right = round(x + 44 * S + draw.textlength(command, font=mono) + 22 * S)
 draw.rounded_rectangle((x, 376 * S, box_right, 432 * S), 12 * S, fill=(16, 30, 46, 235), outline=(98, 128, 160, 120), width=S)
 draw.text((x + 20 * S, 391 * S), "$", font=mono, fill=(45, 212, 191))
 draw.text((x + 44 * S, 391 * S), command, font=mono, fill=(236, 243, 252))
-draw.text((x, 452 * S), "Also in your terminal: CodeAlta TUI", font=font("segoeui.ttf", 17), fill=(132, 152, 176))
+draw.text((x, 452 * S), "Also in your terminal: CodeAlta TUI and altacli", font=font("segoeui.ttf", 17), fill=(132, 152, 176))
 draw.text((x, 556 * S), "codealta.github.io", font=font("segoeuisl.ttf", 23), fill=(158, 182, 208))
 
 output = sys.argv[1] if len(sys.argv) > 1 else "site/img/alta-banner.png"
