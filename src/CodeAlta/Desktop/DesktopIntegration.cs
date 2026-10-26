@@ -160,10 +160,15 @@ internal static class DesktopIntegration
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (home.Length == 0) return null;
         if (OperatingSystem.IsMacOS()) return Path.Combine(home, "Applications", "CodeAlta.app");
-        var data = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
-        return Path.Combine(string.IsNullOrWhiteSpace(data) || !Path.IsPathFullyQualified(data) ? Path.Combine(home, ".local", "share") : data,
-            "applications", LinuxApplicationId + ".desktop");
+        return LinuxEntryPath(home, Environment.GetEnvironmentVariable("XDG_DATA_HOME"));
     }
+
+    /// <summary>The desktop entry of Linux: in the data folder of the user (<c>XDG_DATA_HOME</c>, else <c>~/.local/share</c>), named by <see cref="LinuxApplicationId"/>.</summary>
+    /// <param name="home">The home folder of the user.</param>
+    /// <param name="dataHome">The value of <c>XDG_DATA_HOME</c>, or null; it is used when it is an absolute path.</param>
+    internal static string LinuxEntryPath(string home, string? dataHome)
+        => Path.Combine(string.IsNullOrWhiteSpace(dataHome) || !Path.IsPathFullyQualified(dataHome) ? Path.Combine(home, ".local", "share") : dataHome,
+            "applications", LinuxApplicationId + ".desktop");
 
     /// <summary>
     /// Whether the user is told that the application was added to the desktop, and on macOS shown how it gets

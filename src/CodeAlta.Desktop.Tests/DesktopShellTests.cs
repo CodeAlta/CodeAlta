@@ -498,6 +498,17 @@ public sealed class DesktopShellTests
     }
 
     [TestMethod]
+    public void LinuxEntryPath_IsNamedByTheIdentifierOfTheWindow()
+    {
+        // The dock finds the icon of a window by its identifier: it is the file name of the entry.
+        var applications = Path.Combine("applications", DesktopIntegration.LinuxApplicationId + ".desktop");
+        Assert.AreEqual(Path.Combine("/home/me", ".local", "share", applications), DesktopIntegration.LinuxEntryPath("/home/me", null));
+        Assert.AreEqual(Path.Combine("/home/me", ".local", "share", applications), DesktopIntegration.LinuxEntryPath("/home/me", "relative/data"));
+        var data = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "xdg-data"));
+        Assert.AreEqual(Path.Combine(data, applications), DesktopIntegration.LinuxEntryPath("/home/me", data));
+    }
+
+    [TestMethod]
     public void InstallationTooDeepForWindows_IsSaidInPlainWords()
     {
         // A usual global tool installation is far from the limit.
