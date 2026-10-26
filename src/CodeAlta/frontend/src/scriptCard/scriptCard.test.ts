@@ -71,3 +71,33 @@ test("the title of a script is read from its first line, in its code or in the J
   assert.equal(execTitle("return 1;"), null);
   assert.equal(execTitle('// @exec: {"yield_ms": 5}\nreturn 1;'), null);
 });
+
+// A record of a run as the history gives it: the call that runs the script is its parent.
+const record = (offset: string, kind: string, changes: Partial<HistoryEntry> = {}, details: Record<string, unknown> = {}): HistoryEntry =>
+  entry(offset, { eventType: "workflow", kind, runId: null, name: "run-1", parentActivityId: "call-1", activityId: null, phase: null, text: null,
+    details: JSON.stringify(details), ...changes });
+
+test("the records of a run give its card its steps and the sessions it started, each with its state", () => {
+  const entries = [
+    ...scriptEntries().slice(0, 1),
+    record("r1", "RunStarted", { text: "Review PR 231" }),
+    record("r2", "StepStarted", { activityId: "review" }),
+    record("r3", "SessionStarted", { activityId: "child-a", text: "Security" }, { stepId: "review" }),
+    record("r4", "SessionStarted", { activityId: "child-b", text: "Tests" }, { stepId: "review" }),
+    record("r5", "SessionEnded", { activityId: "child-a", phase: "completed" }, { durationMs: 1200, inputTokens: 900, outputTokens: 100 }),
+    record("r6", "SessionEnded", { activityId: "child-b", phase: "failed" }, { message: "It broke." }),
+    record("r7", "StepEnded", { activityId: "review", phase: "completed" }, { durationMs: 1500 }),
+  ];
+
+  const run = buildTimelineItems(entries)[0].scriptRun!;
+
+  assert.equal(run.runId, "run-1");
+  assert.equal(run.status, "running", "no RunEnded record yet");
+  assert.deepEqual(run.steps, [{ id: "review", status: "completed", durationMs: 1500 }]);
+  assert.deepEqual(run.sessions.map(session => [session.sessionId, session.title, session.stepId, session.status, session.inputTokens, session.message]),
+    [["child-a", "Security", "review", "completed", 900, null], ["child-b", "Tests", "review", "failed", null, "It broke."]]);
+  assert.equal(buildTimelineItems(entries)[0], buildTimelineItems(entries)[0], "the card keeps its identity while its records stay the same");
+  const ended = buildTimelineItems([...entries, record("r8", "RunEnded", { phase: "completed" })])[0];
+  assert.equal(ended.scriptRun?.status, "completed");
+  assert.equal(buildTimelineItems(entries).length, 1, "the records are no rows of their own");
+});

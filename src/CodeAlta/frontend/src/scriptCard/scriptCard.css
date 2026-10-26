@@ -16,3 +16,21 @@
 .script-call-error { min-width: 0; overflow: hidden; color: var(--red); text-overflow: ellipsis; white-space: nowrap; }
 .script-call-duration { white-space: nowrap; }
 .tool-panel .script-calls { margin: 0 0 12px; }
+
+/* The run of a script: its steps in a line, then a box for each session it started, which opens it. */
+.script-run { display: grid; gap: 6px; min-width: 0; margin: 4px 0 0; padding: 0 0 0 10px; border-left: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.script-run-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.script-run-steps li { --step-tone: var(--muted); display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--step-tone) 40%, var(--line)); border-radius: 10px; color: var(--text); font: 11px/16px var(--bp-typography-family-mono); }
+.script-run-steps li[data-state="completed"], .script-session[data-state="completed"] { --step-tone: var(--green); }
+.script-run-steps li[data-state="failed"], .script-session[data-state="failed"] { --step-tone: var(--red); }
+.script-run-steps li[data-state="running"], .script-session[data-state="running"] { --step-tone: var(--accent); }
+.script-run-sessions { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.script-session { --step-tone: var(--muted); display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--step-tone) 45%, var(--line)); border-left-width: 3px; border-radius: 5px; background: color-mix(in srgb, var(--step-tone) 6%, transparent); color: var(--text); font: inherit; text-align: start; }
+button.script-session { cursor: pointer; }
+button.script-session:hover { background: color-mix(in srgb, var(--step-tone) 14%, transparent); }
+button.script-session:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.script-session-mark { flex: none; display: inline-flex; color: var(--step-tone); }
+.script-session-text { display: grid; min-width: 0; }
+.script-session-text strong { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.script-session-text small { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.tool-panel .script-run { margin: 0 0 12px; }
