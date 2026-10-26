@@ -97,6 +97,9 @@ public sealed record SandboxPolicy
     /// <summary>Gets the home folder the sandbox's programs see.</summary>
     public required string Home { get; init; }
 
+    /// <summary>Gets the folder where the sandboxes keep their homes, temporary folders and caches, or null.</summary>
+    public string? DataRoot { get; init; }
+
     /// <summary>Gets the MCP servers the session may use.</summary>
     public required IReadOnlyList<string> McpServers { get; init; }
 

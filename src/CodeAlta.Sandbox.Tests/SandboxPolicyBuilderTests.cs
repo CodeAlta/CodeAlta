@@ -184,6 +184,31 @@ public sealed class SandboxPolicyBuilderTests
         Assert.IsTrue(policy.Environment["NUGET_PACKAGES"].StartsWith(temp.Folder("data"), StringComparison.OrdinalIgnoreCase));
         Assert.AreEqual("env", policy.Environment["CODEALTA_SANDBOX"]);
         Assert.AreEqual("/bin", policy.Environment["PATH"]);
+        // MSBuild and Roslyn put their pipes in `/tmp`, which Seatbelt does not let the sandbox write.
+        Assert.AreEqual(OperatingSystem.IsMacOS(), policy.Environment.TryGetValue("UseSharedCompilation", out var shared) && shared == "false");
+    }
+
+    [TestMethod]
+    public void TheCommandsOfAHomebrewPrefix_GetTheFoldersTheyLinkTo_ButNotTheDataOfItsServices()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Inconclusive("Homebrew runs on macOS and Linux.");
+        using var temp = new TempTree();
+        var bin = temp.Folder("brew/bin");
+        foreach (var folder in new[] { "brew/Cellar", "brew/opt", "brew/lib", "brew/etc", "brew/var", "other/bin" }) temp.Folder(folder);
+
+        var folders = SandboxHostDiscovery.LinkedToolFolders([bin, temp.Folder("other/bin")]);
+
+        CollectionAssert.AreEquivalent(new[] { "Cellar", "opt", "lib", "etc" }.Select(name => Path.Combine(temp.Root, "brew", name)).ToArray(), folders.ToArray());
+        Assert.IsFalse(folders.Any(folder => folder.EndsWith("var", StringComparison.Ordinal)), "the databases and logs of its services");
+    }
+
+    [TestMethod]
+    public void TheDeveloperFolderOfXcode_GrantsItsBundle_AndTheCommandLineToolsTheirFolder()
+    {
+        Assert.AreEqual("/Applications/Xcode-beta.app", SandboxHostDiscovery.DeveloperGrant("/Applications/Xcode-beta.app/Contents/Developer/"));
+        Assert.AreEqual("/Library/Developer/CommandLineTools", SandboxHostDiscovery.DeveloperGrant("/Library/Developer/CommandLineTools"));
+        if (OperatingSystem.IsMacOS() && SandboxHostDiscovery.DeveloperFolder() is { } developer)
+            CollectionAssert.Contains(SandboxHostDiscovery.Current(Path.GetTempPath(), []).ToolFolders.ToList(), SandboxHostDiscovery.DeveloperGrant(developer));
     }
 
     [TestMethod]

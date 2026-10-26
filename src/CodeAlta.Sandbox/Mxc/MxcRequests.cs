@@ -8,6 +8,14 @@ internal static class MxcRequests
     // The most entries denied beside the parent folders of the grants: a folder with more is left out of the chain.
     private const int MaximumChainEntries = 20_000;
 
+    // The services of macOS that tools need beside those of mxc's baseline:
+    // - the names of users and groups (getpwuid, the groups of a file), which .NET asks when it writes an apphost;
+    // - the check of a certificate: .NET validates TLS with Security.framework, which needs securityd and trustd
+    //   (NuGet fails with "bad certificate format" without them). The keychains stay out of reach: their files are
+    //   not granted, and mxc's `keychainAccess`, which grants them, is never set.
+    private static readonly string[] SeatbeltMachServices =
+        ["com.apple.system.opendirectoryd.libinfo", "com.apple.SecurityServer", "com.apple.trustd", "com.apple.trustd.agent"];
+
     public static ContainerRequest Create(SandboxPolicy policy, string commandLine, string? proxyEndpoint)
     {
         var filesystem = new FilesystemPolicy();
@@ -24,12 +32,13 @@ internal static class MxcRequests
             else if (Reachable(path)) filesystem.DeniedPaths.Add(path);
         }
 
-        if (OperatingSystem.IsWindows()) AddParentChain(filesystem);
+        if (OperatingSystem.IsWindows()) AddParentChain(filesystem, grantParents: true);
+        else if (OperatingSystem.IsMacOS()) AddParentChain(filesystem, grantParents: false, policy.DataRoot, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
         return new ContainerRequest(commandLine)
         {
             Containment = OperatingSystem.IsWindows() ? new Containment.ProcessContainer()
-                : OperatingSystem.IsMacOS() ? new Containment.Seatbelt()
+                : OperatingSystem.IsMacOS() ? new Containment.Seatbelt { ExtraMachLookups = [.. SeatbeltMachServices] }
                 : new Containment.Bubblewrap(),
             WorkingDirectory = policy.WorkingDirectory,
             Environment = new Dictionary<string, string>(policy.Environment),
@@ -45,7 +54,14 @@ internal static class MxcRequests
     // granted read-only with every other entry denied; the volume root goes in the read-write list, where a root does
     // not cascade and cannot be written. A file the system holds open (NTUSER.DAT) cannot be denied, and nobody else
     // can read it: it is left out.
-    internal static void AddParentChain(FilesystemPolicy filesystem)
+    // On macOS (grantParents false) the parents are not granted: Seatbelt lets every path be looked up, but shows the
+    // metadata of every file, so a file in a parent folder (.editorconfig, Directory.Build.props) seems there and
+    // cannot be opened, and builds fail. Its other entries are denied with their metadata, so that they are not there,
+    // as on Windows and Linux. A link is left out: mxc denies what a denied link names, which may be a grant. The
+    // grants in the data folder of the sandboxes (`unchained`) are left out too: tools walk up from the project, and
+    // mxc takes about half a second more to start with the hundreds of entries of `~/Library` and its caches denied.
+    // Only the folders inside `within` (the home folder) deny their entries: those of `/private` are the system's own.
+    internal static void AddParentChain(FilesystemPolicy filesystem, bool grantParents, string? unchained = null, string? within = null)
     {
         var comparer = SandboxPolicyBuilder.PathComparer;
         var grants = new HashSet<string>(filesystem.ReadwritePaths.Concat(filesystem.ReadonlyPaths).Select(static path => Path.TrimEndingDirectorySeparator(path)), comparer);
@@ -60,7 +76,7 @@ internal static class MxcRequests
             }
         }
 
-        foreach (var grant in filesystem.ReadwritePaths.ToList()) AddParents(grant);
+        foreach (var grant in filesystem.ReadwritePaths.Where(grant => unchained is null || !SandboxPolicyBuilder.IsInside(unchained, grant)).ToList()) AddParents(grant);
         // A read-only grant below a folder of the chain (a tool folder under the home folder) chains its own parents
         // too: otherwise its parent (~/.cargo) would stay readable whole, with what it holds beside the grant.
         foreach (var grant in filesystem.ReadonlyPaths.ToList())
@@ -68,9 +84,14 @@ internal static class MxcRequests
             if (chain.Any(folder => !comparer.Equals(folder, grant) && SandboxPolicyBuilder.IsInside(folder, grant))) AddParents(grant);
         }
 
-        foreach (var root in roots.Where(root => !filesystem.ReadwritePaths.Contains(root, comparer))) filesystem.ReadwritePaths.Add(root);
+        if (grantParents)
+        {
+            foreach (var root in roots.Where(root => !filesystem.ReadwritePaths.Contains(root, comparer))) filesystem.ReadwritePaths.Add(root);
+        }
+
         var denied = 0;
-        foreach (var folder in chain.Where(folder => !grants.Any(grant => SandboxPolicyBuilder.IsInside(grant, folder))).Order(comparer))
+        foreach (var folder in chain.Where(folder => !grants.Any(grant => SandboxPolicyBuilder.IsInside(grant, folder))
+                     && (within is null || SandboxPolicyBuilder.IsInside(within, folder))).Order(comparer))
         {
             List<string> entries;
             try
@@ -83,11 +104,12 @@ internal static class MxcRequests
             }
 
             if (denied + entries.Count > MaximumChainEntries) continue;
-            filesystem.ReadonlyPaths.Add(folder);
+            if (grantParents) filesystem.ReadonlyPaths.Add(folder);
             foreach (var entry in entries)
             {
-                if (chain.Contains(entry) || grants.Contains(entry)) continue;
-                if (File.Exists(entry) && IsHeldOpen(entry)) continue;
+                // An entry that leads to a grant stays (the data folder of the sandboxes, when it is not chained).
+                if (chain.Contains(entry) || grants.Any(grant => SandboxPolicyBuilder.IsInside(entry, grant))) continue;
+                if (grantParents ? File.Exists(entry) && IsHeldOpen(entry) : IsLink(entry)) continue;
                 filesystem.DeniedPaths.Add(entry);
                 denied++;
             }
@@ -162,6 +184,18 @@ internal static class MxcRequests
     }
 
     private static bool Reachable(string path) => Directory.Exists(path) || File.Exists(path) || Directory.Exists(Path.GetDirectoryName(path));
+
+    private static bool IsLink(string path)
+    {
+        try
+        {
+            return new FileInfo(path).LinkTarget is not null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
 
     private static bool IsHeldOpen(string path)
     {
