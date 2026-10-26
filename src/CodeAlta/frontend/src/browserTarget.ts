@@ -65,6 +65,9 @@ export async function endBrowser(browser: ChildProcess | undefined, timeoutMs = 
  * `--lang=en-US` and `--accept-lang=en-US` keep the pages in English whatever the language of the system: the app
  * follows `navigator.languages` when no language is chosen, and the tests look for its English labels. On macOS
  * Edge ignores `--lang` and takes the languages of the system; the headless `--accept-lang` sets them there.
+ *
+ * `--blink-settings=preferredColorScheme=0` makes `prefers-color-scheme` dark whatever the theme of the system: the
+ * pages that follow it (the phone page, a window on the system theme) render the same on every machine.
  */
 export const browserBaseArgs: readonly string[] = Object.freeze([
   "--headless=new",
@@ -76,6 +79,7 @@ export const browserBaseArgs: readonly string[] = Object.freeze([
   "--guest",
   "--lang=en-US",
   "--accept-lang=en-US",
+  "--blink-settings=preferredColorScheme=0",
 ]);
 
 /** Waits through missing/partial port files, with a real deadline and bounded launch diagnostics. */

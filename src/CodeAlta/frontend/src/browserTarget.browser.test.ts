@@ -7,8 +7,9 @@ import test from "node:test";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
 
 // The app follows the languages of the browser when none is chosen, and the tests look for its English labels:
-// the browser they drive speaks English whatever the language of the system.
-test("the browser of the tests speaks English whatever the language of the system", { skip: !browserExecutable, timeout: 60_000 }, async () => {
+// the browser they drive speaks English whatever the language of the system. Pages that follow the theme of the system
+// are dark there whatever the theme of the system.
+test("the browser of the tests speaks English and prefers dark, whatever the language and the theme of the system", { skip: !browserExecutable, timeout: 60_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-browser-language-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -22,9 +23,11 @@ test("the browser of the tests speaks English whatever the language of the syste
       const value = JSON.parse(String(event.data));
       if (value.id === 1) resolve(value);
     }));
-    socket.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression: "[...navigator.languages]", returnByValue: true } }));
-    const languages = (await reply).result.result.value as string[];
+    socket.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { returnByValue: true,
+      expression: "({ languages: [...navigator.languages], dark: matchMedia('(prefers-color-scheme: dark)').matches })" } }));
+    const { languages, dark } = (await reply).result.result.value as { languages: string[]; dark: boolean };
     assert.equal(languages[0], "en-US", `the languages of the page: ${JSON.stringify(languages)}`);
+    assert.equal(dark, true, "the page prefers the dark theme");
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 2, method: "Browser.close" }));
     socket?.close();
