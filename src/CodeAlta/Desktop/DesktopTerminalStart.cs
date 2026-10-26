@@ -144,6 +144,7 @@ internal static class DesktopTerminalStart
         ArgumentNullException.ThrowIfNull(options);
         var arguments = new List<string>(5);
         if (options.Developer) arguments.Add(CodeAltaInstanceProfile.DeveloperOption);
+        if (options.Automated) arguments.Add(DesktopCommandLine.AutomatedOption);
         if (options.McpHost is { } host)
         {
             arguments.Add(DesktopCommandLine.McpHostOption);

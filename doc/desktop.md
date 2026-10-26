@@ -109,6 +109,9 @@ sequenceDiagram
   sessions) are asked by the page of the main window only. Once the exit is confirmed, the services stop
   admitting new work (`CloseAdmission`) and `DesktopClosing` begins; once the host has closed, the secondary
   windows are saved, then closed, before the placement of the main window is written.
+- **An automated start asks nothing.** Started by another program (`--automated`, `CODEALTA_AUTOMATED`), a close, an
+  exit or SIGTERM never hides the window nor asks the page: `DesktopShell` waits until no session is at work, then
+  exits as a confirmed exit does. Whoever started CodeAlta also ends it, without a user to answer.
 - **The host closes off the window thread**, step by step, each step logged and logged again every 15 seconds
   while it waits (`CloseOwnedHostWhenRequestedAsync`, `CloseStepAsync`). The window thread stays free so that the
   page can still be told. `boot.status` reports `closing` with the step it waits for; after ten seconds the page

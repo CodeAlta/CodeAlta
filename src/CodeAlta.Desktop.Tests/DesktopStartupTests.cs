@@ -33,7 +33,7 @@ public sealed class DesktopStartupTests
         Assert.AreEqual(0, exit);
         var help = output.ToString();
         StringAssert.StartsWith(help, "CodeAlta Desktop");
-        foreach (var option in new[] { "--dev", "--wait", "--exit", "--version", "--help", "--data-root", "--catalog-root", "--allow-owned-host" })
+        foreach (var option in new[] { "--dev", "--wait", "--exit", "--automated", "CODEALTA_AUTOMATED", "--version", "--help", "--data-root", "--catalog-root", "--allow-owned-host" })
             StringAssert.Contains(help, option);
     }
 

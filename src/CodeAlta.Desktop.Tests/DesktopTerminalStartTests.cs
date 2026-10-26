@@ -27,6 +27,37 @@ public sealed class DesktopTerminalStartTests
     }
 
     [TestMethod]
+    public void AutomatedOption_GoesWithAnyStart_AndIsHandedOver()
+    {
+        Assert.IsFalse(Parse()!.Automated);
+        Assert.IsTrue(Parse("--automated")!.Automated);
+        Assert.IsTrue(Parse("--dev", "--automated", "--wait")!.Automated);
+        Assert.IsTrue(Parse("--automated", "--mcp-port", "0")!.Automated);
+        // alta --exit of a program that sets it everywhere is still an exit; the running application decides how.
+        Assert.IsTrue(Parse("--automated", "--exit")!.ExitRunning);
+        Assert.IsNull(Parse("--automated", "--automated"));
+        // After --, it is a folder.
+        Assert.IsTrue(DesktopCommandLine.TryParse(["--", "--automated"], _ => true, _ => false, out var folder, out _));
+        Assert.IsFalse(folder!.Automated);
+        Assert.AreEqual(1, folder.Projects.Count);
+
+        // The application a terminal hands the start to is automated too.
+        CollectionAssert.AreEqual(new[] { "--dev", "--automated" }, DesktopTerminalStart.Arguments(Parse("--dev", "--automated")!).ToArray());
+        Assert.AreEqual(0, DesktopTerminalStart.Arguments(Parse()!).Count);
+    }
+
+    [TestMethod]
+    [DataRow("1", true)]
+    [DataRow("true", true)]
+    [DataRow(" yes ", true)]
+    [DataRow("0", false)]
+    [DataRow("FALSE", false)]
+    [DataRow(" ", false)]
+    [DataRow(null, false)]
+    public void AutomatedVariable_IsOnForAnyValueButEmpty0OrFalse(string? value, bool automated)
+        => Assert.AreEqual(automated, DesktopCommandLine.IsAutomated(value));
+
+    [TestMethod]
     public void OnlyANormalStart_LeavesItsTerminal()
     {
         Assert.IsTrue(DesktopTerminalStart.Applies(Parse()!));

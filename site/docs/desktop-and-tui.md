@@ -217,6 +217,14 @@ Closing the main window can keep CodeAlta running in the notification area, with
 
 On macOS the menu bar has the standard items: **Quit CodeAlta** (⌘Q), **Hide** (⌘H), **Minimize** (⌘M), **Close** (⌘W), and the **Edit** menu. ⌘W closes the window as its close button does; ⌘Q exits.
 
+### Started by another program
+
+A program that starts CodeAlta Desktop and exits it by itself, such as a bot that restarts it after an update, starts it with `alta --automated`, or sets `CODEALTA_AUTOMATED=1` in its environment. Closing the window, `alta --exit`, Exit in the notification area and, on macOS and Linux, SIGTERM or SIGINT then ask nothing and never keep CodeAlta running in the background:
+
+- CodeAlta exits once no session is at work. Until then a notice says so, with **Exit now**, which stops the sessions.
+- Files with unsaved edits are not saved.
+- Terminals that run a command do not hold the exit.
+
 ### Updates from the app
 
 The desktop app checks for new versions at startup and every ten minutes, also from the notification area. A new version shows a notice with **Update and restart** in the bottom-right corner until you dismiss it; **Settings > About** keeps the update available afterwards. The TUI shows the `dotnet tool update` command to run.

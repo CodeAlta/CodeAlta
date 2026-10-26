@@ -21,6 +21,12 @@ internal enum DesktopCloseAction
     /// <summary>The page asks first: sessions are running, or terminals run a command, and exiting stops them.</summary>
     ConfirmExit,
 
+    /// <summary>
+    /// The application exits without a question once no session is at work: it was started by another program, which
+    /// exits it (see <see cref="DesktopLaunchOptions.Automated"/>).
+    /// </summary>
+    ExitWhenIdle,
+
     /// <summary>The application exits.</summary>
     Exit,
 }
@@ -28,6 +34,7 @@ internal enum DesktopCloseAction
 /// <summary>
 /// A notice for the page: <c>exit-requested</c> (the tray's Exit, or a closed window that cannot stay hidden),
 /// <c>confirm-exit</c>, which carries the number of running sessions and of terminals that run a command,
+/// <c>exit-pending</c> (an automated start exits once the sessions at work it carries end),
 /// <c>confirm-close</c> (the window was closed, and the user has not said yet what that does),
 /// <c>close-tab</c> (the native menu asks the page to close its focused tab, not the window),
 /// <c>entry-added</c> (the application was just added to the desktop's applications),
@@ -66,6 +73,7 @@ internal sealed class DesktopShell
     private bool _tray;
     private bool _commands;
     private bool _exiting;
+    private bool _exitPending;
     private bool _entryAdded;
     // The project a start of alta added before any page watched (see ShowProject).
     private DesktopShellEvent? _pendingProject;
@@ -94,6 +102,15 @@ internal sealed class DesktopShell
 
     /// <summary>The number of terminals whose shell runs a command; zero until there are terminals to ask.</summary>
     internal Func<int>? BusyTerminals { get; set; }
+
+    /// <summary>
+    /// Whether another program started the application and exits it: a close or an exit asks nothing, never hides the
+    /// window, and waits until no session is at work.
+    /// </summary>
+    internal bool Automated { get; init; }
+
+    /// <summary>How often an exit that waits for the sessions looks at them again.</summary>
+    internal TimeSpan IdlePoll { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>The desktop's dialogs; null until the desktop services have started.</summary>
     internal NeoAstra.Desktop.Dialogs.INeoDialogs? Dialogs { get; set; }
@@ -204,6 +221,15 @@ internal sealed class DesktopShell
         return DecideUserExit(hasPage);
     }
 
+    /// <summary>
+    /// What a close request leads to when another program started the application: no question and no hidden window,
+    /// an exit once no session is at work; the end of the session and anything that cannot be canceled exit at once.
+    /// </summary>
+    internal static DesktopCloseAction DecideAutomated(NeoWindowCloseReason reason, bool canCancel)
+        => !canCancel || reason is NeoWindowCloseReason.SessionEnd or NeoWindowCloseReason.System or NeoWindowCloseReason.Owner
+            ? DesktopCloseAction.Exit
+            : DesktopCloseAction.ExitWhenIdle;
+
     /// <summary>What Exit in the tray leads to: the page's own exit, or an exit at once when no page listens.</summary>
     internal static DesktopCloseAction DecideUserExit(bool hasPage) => hasPage ? DesktopCloseAction.RequestExit : DesktopCloseAction.Exit;
 
@@ -298,28 +324,31 @@ internal sealed class DesktopShell
     {
         ArgumentNullException.ThrowIfNull(request);
         request.Cancel();
-        var action = Decide(request.Reason, request.CanCancel, OnClose, CanHide, HasWatchers());
+        var action = Automated ? DecideAutomated(request.Reason, request.CanCancel) : Decide(request.Reason, request.CanCancel, OnClose, CanHide, HasWatchers());
         if (action != DesktopCloseAction.Hide) Log($"Closing the window ({request.Reason}): {action}.");
         Apply(action, 0);
     }
 
     /// <summary>
-    /// Exit as the user asks for it outside the page (the tray's menu, <c>alta --exit</c>): the page exits in
-    /// its own way, with its questions; without a page the application exits at once.
+    /// Exit as the user asks for it outside the page (the tray's menu, <c>alta --exit</c>, a signal): the page exits in
+    /// its own way, with its questions; without a page the application exits at once. An automated start asks nothing.
     /// </summary>
     internal void RequestUserExit()
     {
-        var action = DecideUserExit(HasWatchers());
-        Log($"Exit asked outside the page (the tray, the menu or alta --exit): {action}.");
+        var action = Automated ? DesktopCloseAction.ExitWhenIdle : DecideUserExit(HasWatchers());
+        Log($"Exit asked outside the page (the tray, the menu, alta --exit or a signal): {action}.");
         Apply(action, 0);
     }
 
-    /// <summary>The page's exit: the application exits, after the page's question while sessions run or terminals run a command.</summary>
+    /// <summary>
+    /// The page's exit: the application exits, after the page's question while sessions run or terminals run a command.
+    /// An automated start asks nothing and waits for the sessions instead, unless the exit is confirmed (Exit now).
+    /// </summary>
     internal void RequestExit(bool confirmed)
     {
         var running = Count(RunningSessions);
         var terminals = Count(BusyTerminals);
-        var action = DecideExit(confirmed, running + terminals, HasWatchers());
+        var action = Automated && !confirmed ? DesktopCloseAction.ExitWhenIdle : DecideExit(confirmed, running + terminals, HasWatchers());
         Log($"Exit asked by the page (confirmed: {confirmed}, sessions at work: {running}, busy terminals: {terminals}): {action}.");
         Apply(action, running, terminals);
     }
@@ -657,6 +686,15 @@ internal sealed class DesktopShell
                 Show();
                 PublishTo(Windows.DesktopWindows.MainLabel, new("confirm-close", 0));
                 break;
+            case DesktopCloseAction.ExitWhenIdle:
+                lock (_gate)
+                {
+                    // Another program may ask again while the sessions end: one wait.
+                    if (_exiting || _exitPending) return;
+                    _exitPending = true;
+                }
+                _ = ExitWhenIdleAsync();
+                break;
             default:
                 lock (_gate)
                 {
@@ -666,6 +704,37 @@ internal sealed class DesktopShell
                 Log("The application exits: its host closes.");
                 _exit();
                 break;
+        }
+    }
+
+    // The page says why the application has not exited yet. Terminals do not hold the exit: a command that never ends
+    // (a server) would hold it for good.
+    private async Task ExitWhenIdleAsync()
+    {
+        var running = Count(RunningSessions);
+        if (running > 0)
+        {
+            Log($"Exit asked of an automated start: it exits once the sessions at work end ({running} now).");
+            PublishTo(Windows.DesktopWindows.MainLabel, new("exit-pending", running));
+            await WhenIdleAsync(() => Count(RunningSessions), IdlePoll).ConfigureAwait(false);
+        }
+
+        Apply(DesktopCloseAction.Exit, 0);
+    }
+
+    /// <summary>
+    /// Completes once two looks in a row, <paramref name="poll"/> apart, find no session at work: a session between two
+    /// prompts of its queue, or a parent about to be told that its child ended, is not taken for idle.
+    /// </summary>
+    /// <param name="sessionsAtWork">Counts the sessions at work.</param>
+    /// <param name="poll">The time between two looks.</param>
+    internal static async Task WhenIdleAsync(Func<int> sessionsAtWork, TimeSpan poll)
+    {
+        ArgumentNullException.ThrowIfNull(sessionsAtWork);
+        for (var idle = 0; idle < 2;)
+        {
+            await Task.Delay(poll).ConfigureAwait(false);
+            idle = sessionsAtWork() == 0 ? idle + 1 : 0;
         }
     }
 

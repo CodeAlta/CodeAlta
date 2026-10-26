@@ -27,6 +27,13 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
     /// </summary>
     internal bool Wait { get; init; }
 
+    /// <summary>
+    /// The application was started by another program (<c>--automated</c>, <c>CODEALTA_AUTOMATED</c>), which also exits
+    /// it: closing the window, <c>alta --exit</c> and SIGTERM ask nothing, and the application exits once no session is
+    /// at work.
+    /// </summary>
+    internal bool Automated { get; init; }
+
     /// <summary>The token of the start that waits for this application's window; null when none does.</summary>
     internal string? StartToken { get; init; }
     internal bool ReviewOwnedCommandPermissions { get; init; }
@@ -68,6 +75,12 @@ internal static class DesktopCommandLine
     /// <summary>Names a space the folders given join.</summary>
     internal const string SpaceOption = "--space";
 
+    /// <summary>Says that another program started the application and exits it (see <see cref="DesktopLaunchOptions.Automated"/>).</summary>
+    internal const string AutomatedOption = "--automated";
+
+    /// <summary>The environment variable that does what <see cref="AutomatedOption"/> does.</summary>
+    internal const string AutomatedVariable = "CODEALTA_AUTOMATED";
+
     /// <summary>Largest number of folders one start adds.</summary>
     internal const int MaximumProjects = 64;
 
@@ -105,6 +118,10 @@ internal static class DesktopCommandLine
         --exit asks first when files have unsaved edits or sessions are running. Use
         alta --dev --exit for the developer instance. Exit before updating with
         dotnet tool update -g CodeAlta.
+
+        --automated, or CODEALTA_AUTOMATED=1, is for a program that starts and exits CodeAlta
+        Desktop by itself. Closing its window, alta --exit and SIGTERM then ask nothing: it
+        exits once no session is at work, and unsaved edits are lost.
 
         CodeAlta Desktop runs an MCP server on this computer for the applications that drive it,
         at http://127.0.0.1:2582/mcp (port 2583 with --dev). Settings shows the address and turns
@@ -153,6 +170,7 @@ internal static class DesktopCommandLine
                 return 2;
             }
 
+            if (IsAutomated(Environment.GetEnvironmentVariable(AutomatedVariable))) options = options! with { Automated = true };
             // Admission grants only desktop-owned browser storage and opt-in cache writes in a trusted copy.
             return startNative(options!);
         }
@@ -161,6 +179,16 @@ internal static class DesktopCommandLine
             error.WriteLine(exception.Message);
             return 1;
         }
+    }
+
+    /// <summary>
+    /// Whether the value of <see cref="AutomatedVariable"/> turns the automated start on: any value but an empty one,
+    /// <c>0</c> or <c>false</c>.
+    /// </summary>
+    internal static bool IsAutomated(string? value)
+    {
+        var trimmed = value?.Trim();
+        return !string.IsNullOrEmpty(trimmed) && trimmed != "0" && !trimmed.Equals("false", StringComparison.OrdinalIgnoreCase);
     }
 
     // Mandatory CLI seam. Tests supply existence facts without opening any storage or native services.
@@ -172,11 +200,27 @@ internal static class DesktopCommandLine
         ArgumentNullException.ThrowIfNull(fileExists);
         options = null;
         error = InvalidOptions;
+        // An automated start goes with any start, alta --exit included, where it changes nothing: the running
+        // application decides how it exits.
+        var end = Array.IndexOf(args, "--");
+        var automated = args.Take(end < 0 ? args.Length : end).Count(static arg => arg == AutomatedOption);
+        if (automated > 1) return false;
+        if (automated == 1) args = [.. args.Where((arg, index) => arg != AutomatedOption || (end >= 0 && index > end))];
+        if (!TryParseStart(args, directoryExists, fileExists, out options, out error)) return false;
+        if (automated == 1) options = options! with { Automated = true };
+        return true;
+    }
+
+    private static bool TryParseStart(string[] args, Func<string, bool> directoryExists, Func<string, bool> fileExists,
+        out DesktopLaunchOptions? options, out string? error)
+    {
+        options = null;
+        error = InvalidOptions;
         // Where the MCP server listens goes with any start that runs the application.
         if (!TryTakeMcpEndpoint(ref args, out var mcpHost, out var mcpPort)) return false;
         if (mcpHost is not null || mcpPort is not null)
         {
-            if (!TryParse(args, directoryExists, fileExists, out options, out error)) return false;
+            if (!TryParseStart(args, directoryExists, fileExists, out options, out error)) return false;
             if (options!.ExitRunning)
             {
                 options = null;

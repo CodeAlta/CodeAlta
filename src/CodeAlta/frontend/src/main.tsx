@@ -1990,6 +1990,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setExiting(current => current?.busy ? current : { tabs: unsaved, busy: false });
   }
   const requestExit = useRef(exitApplication);
+  // Exit now: the sessions at work stop, as after the question of an exit.
+  const requestImmediateExit = useRef(() => quitApplication(true));
   // A project that a start of alta added (`alta .`): the window reads the catalog again and selects it.
   const showHostProject = useRef(async (_projectId: string, _spaceId: string | null) => {});
   const nativeCloseTab = useRef<() => void>(() => {});
@@ -2145,6 +2147,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           else if (notice.kind === "close-tab") nativeCloseTab.current();
           else if (notice.kind === "confirm-exit") setExitQuestionFor({ sessions: notice.runningSessions, terminals: notice.busyTerminals });
           else if (notice.kind === "confirm-close" && !exitPending.current) setCloseQuestion(true);
+          // The program that started CodeAlta asked it to exit: it does once the sessions at work end.
+          else if (notice.kind === "exit-pending") showToast({ intent: "primary", icon: "time", timeout: 0,
+            message: translate(shownLocale.current, "CodeAlta exits once the sessions at work end."),
+            action: { text: translate(shownLocale.current, "Exit now"), onClick: () => requestImmediateExit.current() } }, "exit-pending");
           // An application that drives CodeAlta through its MCP server creates sessions without the window asking.
           else if (notice.kind === "sessions-changed") readSessionList.current();
           else if (notice.kind === "show-project" && notice.projectId) void showHostProject.current(notice.projectId, notice.spaceId ?? null);

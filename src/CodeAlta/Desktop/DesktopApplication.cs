@@ -331,6 +331,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         Windows.DesktopWindows? desktopWindows = null;
         Mcp.DesktopMcpServer? mcp = null;
         DesktopKeepAwake? keepAwake = null;
+        DesktopExitSignals? exitSignals = null;
         DesktopUiWatchdog? uiWatchdog = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
         IAsyncDisposable? uiLifetime = null;
@@ -360,6 +361,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var shell = new DesktopShell(window, application.Dispatcher, options.DataRoot, () =>
             {
                 retention?.ProtectionRpc.InvalidatePage();
+                // From now on a signal ends the process as it does by default: a close that lasts can be cut short.
+                exitSignals?.Dispose();
                 operations?.CloseAdmission();
                 asks?.CloseAdmission();
                 reminders?.CloseAdmission();
@@ -367,7 +370,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 closing.Begin();
                 closeRequested.TrySetResult();
                 application.Dispatcher.Post(() => { if (!shutdownUnconfirmed && !shutdownWindow.IsClosed) shutdownWindow.Title = "CodeAlta — shutdown pending; lease retained"; });
-            });
+            }) { Automated = options.Automated };
+            // The program that started an automated CodeAlta may exit it with a signal: it then exits as alta --exit asks.
+            if (options.Automated) exitSignals = DesktopExitSignals.Start(shell.RequestUserExit);
             // The computer does not go to idle sleep while CodeAlta runs, its window shown or hidden, unless the user
             // turned it off: sessions, automations and reminders keep going. A system that refuses says so in the log.
             // The secondary windows hide and come back with the main one; a dialog opens over the window the user used last.
@@ -1207,6 +1212,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         }
         // The host has ended: nothing runs that needs the computer awake.
         keepAwake?.Dispose();
+        exitSignals?.Dispose();
         uiWatchdog?.Dispose();
         // The secondary windows are kept for the next start, then closed without asking their pages: their views and
         // bindings end before the RPC host does.

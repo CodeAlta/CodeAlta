@@ -48,6 +48,31 @@ public sealed class DesktopShellTests
     }
 
     [TestMethod]
+    // Started by another program: never a question nor a hidden window, whatever the user chose; an exit once idle.
+    [DataRow(NeoWindowCloseReason.User, true, DesktopCloseAction.ExitWhenIdle)]
+    [DataRow(NeoWindowCloseReason.Programmatic, true, DesktopCloseAction.ExitWhenIdle)]
+    [DataRow(NeoWindowCloseReason.ApplicationQuit, true, DesktopCloseAction.ExitWhenIdle)]
+    // What cannot wait still exits at once.
+    [DataRow(NeoWindowCloseReason.SessionEnd, true, DesktopCloseAction.Exit)]
+    [DataRow(NeoWindowCloseReason.System, true, DesktopCloseAction.Exit)]
+    [DataRow(NeoWindowCloseReason.User, false, DesktopCloseAction.Exit)]
+    public void ClosingTheWindowOfAnAutomatedStart_ExitsOnceIdle(NeoWindowCloseReason reason, bool canCancel, object expected)
+        => Assert.AreEqual((DesktopCloseAction)expected, DesktopShell.DecideAutomated(reason, canCancel));
+
+    [TestMethod]
+    public async Task WhenIdle_WaitsForTwoLooksInARowWithoutASessionAtWork()
+    {
+        // At work, idle for one look (between two prompts of a queue), at work again, then idle.
+        var counts = new Queue<int>([2, 0, 1, 0, 0, 3]);
+        var looks = 0;
+
+        await DesktopShell.WhenIdleAsync(() => { looks++; return counts.Dequeue(); }, TimeSpan.FromMilliseconds(1));
+
+        Assert.AreEqual(5, looks);
+        Assert.AreEqual(3, counts.Single(), "Nothing is counted once idle.");
+    }
+
+    [TestMethod]
     public void Preferences_AskByDefault_AndRememberTheChoice()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-preferences-" + Guid.NewGuid().ToString("N"));

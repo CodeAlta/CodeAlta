@@ -34,7 +34,7 @@ Only one CodeAlta runs on a profile at a time, desktop or TUI. It holds the lock
 
 - A second `altatui` exits with the PID of the running instance.
 - A second `alta` shows the window of the running desktop app; `alta .` or `alta <folder>` adds the folder as a project there.
-- `alta --exit` asks the running desktop app to exit.
+- `alta --exit` asks the running desktop app to exit; one started with `alta --automated` exits without a question once no session is at work (see [Started by another program](desktop-and-tui.md#started-by-another-program)).
 
 The desktop app can keep running in the notification area after its window is closed. If the TUI reports a running instance and you see no window, look for the CodeAlta icon in the notification area (on macOS, in the Dock), or run `alta --exit`.
 
