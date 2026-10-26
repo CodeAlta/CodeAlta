@@ -51,7 +51,8 @@ public sealed class MxcRequestTests
 
         var off = MxcRequests.Create(Policy(temp, project, SandboxNetwork.Off), "cmd", null).Network!;
         var hosts = MxcRequests.Create(Policy(temp, project, SandboxNetwork.Hosts), "cmd", "http://127.0.0.1:50000").Network!;
-        var on = MxcRequests.Create(Policy(temp, project, SandboxNetwork.On), "cmd", null).Network!;
+        var onPolicy = Policy(temp, project, SandboxNetwork.On);
+        var on = MxcRequests.Create(onPolicy, "cmd", onPolicy.ThroughProxy ? "http://127.0.0.1:50001" : null).Network!;
 
         Assert.AreEqual(NetworkAction.Deny, off.Egress!.Default);
         if (OperatingSystem.IsWindows())
@@ -62,8 +63,22 @@ public sealed class MxcRequestTests
 
         Assert.AreEqual(NetworkAction.Deny, hosts.Egress!.Default);
         Assert.AreEqual("http://127.0.0.1:50000", hosts.RuntimeConfig!.NetworkProxy);
-        Assert.AreEqual(NetworkAction.Allow, on.Egress!.Default);
         Assert.AreEqual(NetworkAction.Deny, on.Ingress!.HostLoopback, "the internet, never the services of this computer");
+        if (OperatingSystem.IsWindows())
+        {
+            // The container itself keeps the networks of this computer out.
+            Assert.IsFalse(onPolicy.ThroughProxy);
+            Assert.AreEqual(NetworkAction.Allow, on.Egress!.Default);
+            CollectionAssert.IsSubsetOf(new[] { "10.0.0.0/8", "169.254.0.0/16", "192.168.0.0/16", "fe80::/10" }, on.Egress.Deny!.Single().To!.Select(static peer => peer.Cidr).ToArray());
+        }
+        else
+        {
+            // Seatbelt and Bubblewrap do not: every host of the internet goes through the proxy, which refuses them.
+            Assert.IsTrue(onPolicy.ThroughProxy);
+            Assert.IsNull(onPolicy.ProxyHosts);
+            Assert.AreEqual(NetworkAction.Deny, on.Egress!.Default);
+            Assert.AreEqual("http://127.0.0.1:50001", on.RuntimeConfig!.NetworkProxy);
+        }
     }
 
     private static SandboxPolicy Policy(TempTree temp, string project, SandboxNetwork network)

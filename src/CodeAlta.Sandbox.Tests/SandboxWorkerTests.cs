@@ -116,9 +116,12 @@ public sealed class SandboxWorkerTests
 
         Assert.IsFalse(result.Success);
         Assert.IsTrue(client.HasEnded, "a worker that does not stop is ended: what it runs does not hold the session");
-        await client.DisposeAsync();
+        // As the end of the worker's process: its input ends, then its output, which the reader of the client sees end
+        // (on Linux a read that waits on a pipe is not woken by closing the handle it reads).
         toWorker.Dispose();
         await silent.WaitAsync(Deadline);
+        fromWorker.Dispose();
+        await client.DisposeAsync().AsTask().WaitAsync(Deadline);
     }
 
     [TestMethod]
