@@ -1,6 +1,6 @@
 ---
 title: Organize projects with nested labels
-status: in-progress
+status: done
 created: 2026-10-26
 summary: Projects get labels (nestable, ordered, with icon, badge color, favorite and an optional space). The left bar groups projects under their labels without adding indentation, labels are edited in place or on a new Settings page, and agents manage and query them with `alta label`.
 ---
