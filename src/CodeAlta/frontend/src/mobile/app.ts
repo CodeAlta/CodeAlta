@@ -1,3 +1,5 @@
+import { isImageAttachment } from "../promptImages";
+import { addAttachments, hasImages, type PhoneAttachment } from "./attachments";
 import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
 import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
 import { coalesce, composerView } from "./composer";
@@ -377,6 +379,11 @@ export function startMobile(window: Window & typeof globalThis) {
     const fill = () => markdown.fill(content, block.text, fill);
     const diagram = fill();
     item.append(content);
+    if (block.attachments?.length) {
+      const files = make("div", "msg-files");
+      for (const title of block.attachments) files.append(make("span", "attach-chip", title));
+      item.append(files);
+    }
     return { element: item, version: block.key, diagram };
   }
 
@@ -603,7 +610,53 @@ export function startMobile(window: Window & typeof globalThis) {
   const composer = $<HTMLFormElement>("composer"), promptBox = $<HTMLTextAreaElement>("prompt");
   const sendButton = $<HTMLButtonElement>("send"), queueButton = $<HTMLButtonElement>("queue"), abortButton = $<HTMLButtonElement>("abort");
   const hint = $("composer-hint");
+  const attachNote = $("attach-note"), attachStrip = $("attach-strip"), newAttachNote = $("new-attach-note"), newAttachStrip = $("new-attach-strip");
+  const attachInput = $<HTMLInputElement>("attach-input");
+  const attachmentsOf = new Map<string, PhoneAttachment[]>();
+  let newFiles: PhoneAttachment[] = [];
+  let attachTarget: "session" | "new" = "session";
   let composerFor: string | null = null;
+
+  // Files and photos held with a prompt, as the desktop composer holds them. Images need a model that reads them.
+  function paintAttachments(strip: HTMLElement, files: readonly PhoneAttachment[], replace: (next: PhoneAttachment[]) => void) {
+    strip.replaceChildren(...files.map(file => {
+      const chip = make("span", "attach-chip");
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `Remove ${file.title}`);
+      remove.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
+      remove.addEventListener("click", () => replace(files.filter(item => item !== file)));
+      chip.append(make("span", null, file.title), remove);
+      return chip;
+    }));
+    strip.hidden = files.length === 0;
+  }
+  function drawAttachments() {
+    paintAttachments(attachStrip, composerFor ? attachmentsOf.get(composerFor) ?? [] : [], next => {
+      if (composerFor) attachmentsOf.set(composerFor, next);
+      drawAttachments();
+    });
+    paintAttachments(newAttachStrip, newFiles, next => { newFiles = next; drawAttachments(); });
+  }
+  function showAttachNote(note: HTMLElement, notice: string | null) {
+    note.textContent = notice ?? "";
+    note.hidden = !notice;
+  }
+  async function takeFiles(list: FileList | null) {
+    const chosen = list ? Array.from(list) : [];
+    attachInput.value = "";
+    if (!chosen.length) return;
+    const session = attachTarget === "session" ? composerFor : null;
+    const current = session ? attachmentsOf.get(session) ?? [] : newFiles;
+    const allowed = session ? sessionImagesAllowed(session) : newImagesAllowed();
+    const added = await addAttachments(current, chosen, allowed !== false);
+    if (session) attachmentsOf.set(session, [...added.files]); else newFiles = [...added.files];
+    drawAttachments();
+    showAttachNote(session ? attachNote : newAttachNote, added.notice);
+  }
+  $<HTMLButtonElement>("attach").addEventListener("click", () => { attachTarget = "session"; attachInput.click(); });
+  $<HTMLButtonElement>("new-attach").addEventListener("click", () => { attachTarget = "new"; attachInput.click(); });
+  attachInput.addEventListener("change", () => { void takeFiles(attachInput.files); });
   const stopping = new Map<string, number>(), stoppedAt = new Map<string, number>();
 
   function bindComposer(id: string | null) {
@@ -611,6 +664,8 @@ export function startMobile(window: Window & typeof globalThis) {
     composerFor = id;
     promptBox.value = id ? drafts.get(id) : "";
     grow();
+    drawAttachments();
+    showAttachNote(attachNote, null);
   }
   const buttonFaces: Readonly<Record<PromptMode, Readonly<{ icon: "send" | "steer" | "queue"; label: string; title: string }>>> = {
     send: { icon: "send", label: "Send", title: "Send the prompt" },
@@ -629,6 +684,8 @@ export function startMobile(window: Window & typeof globalThis) {
     const busy = isBusy(view?.live?.live);
     if (id && !busy && stopping.has(id)) endStopping(id);
     const typed = promptBox.value.trim().length > 0;
+    const filesHeld = !!id && (attachmentsOf.get(id)?.length ?? 0) > 0;
+    const filesWait = filesHeld && busy;
     const state = composerView(busy, typed, !!view?.live?.canSteer, queueFirst);
     sendButton.hidden = state.primary === null;
     if (state.primary) face(sendButton, state.primary);
@@ -637,10 +694,12 @@ export function startMobile(window: Window & typeof globalThis) {
     abortButton.hidden = !state.stop;
     const halting = !!id && stopping.has(id);
     abortButton.disabled = halting;
+    sendButton.disabled = filesWait;
+    queueButton.disabled = filesWait;
     abortButton.querySelector("span")!.textContent = halting ? "Stopping…" : "Stop";
-    hint.textContent = state.hint;
+    hint.textContent = filesWait ? "Files wait until the turn ends." : state.hint;
     // The empty box says what the composer does now.
-    promptBox.placeholder = busy && !typed ? state.hint : "Ask for more…";
+    promptBox.placeholder = filesWait ? "Files wait until the turn ends." : busy && !typed ? state.hint : "Ask for more…";
     composer.dataset.submit = state.submit;
     showSelection();
   }
@@ -658,6 +717,7 @@ export function startMobile(window: Window & typeof globalThis) {
     try {
       const read = await api.choices(id);
       choicesOf.set(id, { current: read.current, models: read.models ?? [], prompts: read.prompts ?? [], permissionModes: read.permissionModes ?? [], error: read.error ?? null });
+      reconcileImages(id);
     } catch (error) {
       if (error instanceof SignedOutError) return;
       // An older CodeAlta has no choices: the chip keeps what the list says, and its sheet says why.
@@ -768,24 +828,30 @@ export function startMobile(window: Window & typeof globalThis) {
 
   async function submitPrompt(mode: "send" | "steer" | "queue") {
     const id = composerFor, text = promptBox.value.trim();
-    if (!id || !text) return;
+    const files = id ? [...(attachmentsOf.get(id) ?? [])] : [];
+    if (!id || (!text && !files.length)) return;
+    // Files go with a new prompt. While a turn runs they stay, and leave with Send once the session is idle.
+    if (files.length && mode !== "send") { attachNote.textContent = "Attachments go with the next prompt, once the session is idle."; attachNote.hidden = false; return; }
+    if (hasImages(files) && sessionImagesAllowed(id) === false) { attachNote.textContent = "This model does not read images."; attachNote.hidden = false; return; }
     composer.classList.add("sending");
     // The prompt leaves the input (and its draft) as it is sent: the request can take a while to return while the
     // turn already runs. If it fails, the text goes back to the session it was written for.
     promptBox.value = "";
     drafts.clear(id);
+    attachmentsOf.set(id, []);
+    drawAttachments();
     grow();
     showComposer();
     const sentAt = Date.now();
     // The prompt shows in the timeline at once, as the user's message: it goes when the journal holds it, or when the send fails.
-    const prompt: PendingPrompt = { key: `p${++pendingSeq}`, text, mode, sentAt, after: detail.id === id ? detail.events.at(-1)?.seq ?? 0 : 0 };
+    const prompt: PendingPrompt = { key: `p${++pendingSeq}`, text, mode, sentAt, after: detail.id === id ? detail.events.at(-1)?.seq ?? 0 : 0, ...(files.length ? { attachments: files.map(file => file.title) } : {}) };
     const forget = () => { pendingPrompts.set(id, (pendingPrompts.get(id) ?? []).filter(p => p !== prompt)); if (detail.id === id) drawTimeline(); };
     pendingPrompts.set(id, [...pendingPrompts.get(id) ?? [], prompt]);
     if (detail.id === id) { drawTimeline(); toBottom(); }
     // What was picked goes with a send or a queue; a steer leaves it for the next one.
     const picked = picks.get(id) ?? {}, selection = mode === "steer" ? {} : pickedChanges(choicesOf.get(id), picked);
     try {
-      await api.prompt(id, text, mode, selection);
+      await api.prompt(id, text, mode, selection, files);
       if (mode !== "steer" && picks.get(id) === picked) picks.delete(id);
       if (Object.keys(selection).length) {
         // The session runs on it now: its choices say so.
@@ -805,6 +871,7 @@ export function startMobile(window: Window & typeof globalThis) {
       forget();
       if (composerFor === id && !promptBox.value.trim()) { promptBox.value = text; drafts.set(id, text); grow(); }
       else drafts.giveBack(id, text);
+      if ((attachmentsOf.get(id) ?? []).length === 0 && files.length) { attachmentsOf.set(id, files); if (composerFor === id) drawAttachments(); }
       if (error instanceof SignedOutError) return;
       if (detail.id === id) detailNote.textContent = `Not sent: ${failureText(error, host)}`;
       else showToast(`Not sent to “${sessions.view(id)?.title || "the session"}”: ${failureText(error, host)} The text is kept as its draft.`, undefined, 8000);
@@ -882,6 +949,36 @@ export function startMobile(window: Window & typeof globalThis) {
   const newMoreSheet = createSheet(document, $("new-more-sheet"));
   let options: Options | null = null;
   let choice: Choice = { tier: null, provider: "", model: "", effort: "" };
+  // Images go only to a model that says it reads them. A model that does not say is treated as one that does not.
+  // Null until the choices are known: a photo picked then is kept and checked when they arrive.
+  function sessionImagesAllowed(id: string): boolean | null {
+    const choices = choicesOf.get(id);
+    if (!choices || choices.error || choices.models.length === 0) return null;
+    return choices.models.find(model => model.id === sessionShown(id).model)?.imageInput === true;
+  }
+  function newImagesAllowed(): boolean | null {
+    if (!options) return null;
+    const id = choice.tier ? options.tiers.find(tier => tier.tier === choice.tier)?.model : choice.model;
+    return options.models.find(model => model.id === id && model.provider === (choice.provider || model.provider))?.imageInput === true;
+  }
+  function reconcileImages(id: string) {
+    if (sessionImagesAllowed(id) !== false) return;
+    const files = attachmentsOf.get(id) ?? [];
+    if (!hasImages(files)) return;
+    const kept = files.filter(file => !isImageAttachment(file));
+    attachmentsOf.set(id, kept);
+    if (composerFor === id) {
+      drawAttachments();
+      showAttachNote(attachNote, kept.length ? "This model does not read images. The other files were attached." : "This model does not read images.");
+    }
+  }
+  function reconcileNewImages() {
+    if (newImagesAllowed() !== false || !hasImages(newFiles)) return;
+    const kept = newFiles.filter(file => !isImageAttachment(file));
+    newFiles = kept;
+    drawAttachments();
+    showAttachNote(newAttachNote, kept.length ? "This model does not read images. The other files were attached." : "This model does not read images.");
+  }
   // The permission mode of the new session; "" is the provider's.
   let newPermission = "";
   const allPreferences = (): Record<string, ProjectPreferences> => { try { return JSON.parse(store.get(preferencesKey) ?? "{}") ?? {}; } catch { return {}; } };
@@ -1073,6 +1170,7 @@ export function startMobile(window: Window & typeof globalThis) {
       newAgent.replaceChildren(...options.prompts.map(p => option(p.id, p.name, p.id === options!.defaults?.prompt)));
       if (!newText.value) newText.value = drafts.get(newSessionDraft);
       initForm();
+      reconcileNewImages();
       padComposer();
     } catch (error) {
       if (!(error instanceof SignedOutError)) newNote.textContent = `Could not read the choices: ${failureText(error, host)}`;
@@ -1083,7 +1181,9 @@ export function startMobile(window: Window & typeof globalThis) {
   $("new-form").addEventListener("submit", async event => {
     event.preventDefault();
     const text = newText.value.trim();
-    if (!text || !newProject.value) return;
+    const files = [...newFiles];
+    if ((!text && !files.length) || !newProject.value) return;
+    if (hasImages(files) && newImagesAllowed() === false) { newAttachNote.textContent = "This model does not read images."; newAttachNote.hidden = false; return; }
     const start = $<HTMLButtonElement>("new-start");
     start.disabled = true;
     newNote.textContent = "Starting…";
@@ -1091,12 +1191,19 @@ export function startMobile(window: Window & typeof globalThis) {
       const created = await api.create({
         project: newProject.value, text, prompt: newAgent.value || undefined, ...choiceRequest(choice),
         ...(newPermission ? { permissionMode: newPermission } : {}), worktree: newWorktree.checked,
+        ...(files.length ? { attachments: files } : {}),
       });
       newText.value = "";
+      newFiles = [];
+      drawAttachments();
       drafts.clear(newSessionDraft);
       newNote.textContent = "";
       // A prompt that did not go is shown on the page of its session, back in its composer.
-      if (created.sendError) { drafts.set(created.id, text); pendingNotes.set(created.id, `Created, but the prompt was not sent: ${created.sendError}`); }
+      if (created.sendError) {
+        drafts.set(created.id, text);
+        if (files.length) attachmentsOf.set(created.id, files);
+        pendingNotes.set(created.id, `Created, but the prompt was not sent: ${created.sendError}`);
+      }
       scheduleListRead(0);
       window.location.hash = `#/session/${encodeURIComponent(created.id)}`;
     } catch (error) {

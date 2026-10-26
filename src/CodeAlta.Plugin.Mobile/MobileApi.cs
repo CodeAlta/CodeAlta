@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using CodeAlta.Plugins.Abstractions;
 
@@ -11,16 +12,27 @@ namespace CodeAlta.Plugin.Mobile;
 /// permission modes of the providers from <c>provider list --detailed</c>, and what the composer of a session offers from
 /// <c>session choices</c>. A session the phone does not see (<see cref="MobileSessions.FindAsync"/>) is refused as unknown.
 /// </summary>
-internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions)
+internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions, string? attachmentsDirectory = null)
 {
     /// <summary>The longest prompt the phone sends.</summary>
     internal const int MaximumPrompt = 100_000;
+
+    /// <summary>Most files of one prompt, as a send from the desktop takes.</summary>
+    private const int MaximumAttachments = 64;
+
+    /// <summary>Largest file, and largest total, in bytes.</summary>
+    private const long MaximumFileBytes = 20L * 1024 * 1024;
+
+    private const long MaximumTotalBytes = 64L * 1024 * 1024;
 
     // How long a request waits for a command that goes on with a turn: Tailscale Serve and the phone give up on a long answer,
     // and the live stream says the rest.
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(3);
 
     private static readonly string[] Tiers = ["complex", "standard", "quick"];
+
+    // The plugin's data folder. Tests that omit it use a directory of their own under the temp folder.
+    private readonly string _attachmentsDirectory = attachmentsDirectory ?? Path.Combine(Path.GetTempPath(), "alta-mobile-attach");
 
     /// <summary>Whether a text is the id of a session or the value of an option, which alta receives as one argument.</summary>
     internal static bool IsId(string? value) => value is { Length: > 0 and <= 200 } && !value.StartsWith('-') && !value.Any(char.IsControl);
@@ -72,13 +84,15 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
         foreach (var model in (await models.ConfigureAwait(false)).OfType("alta.model.item"))
         {
             var providerKey = MobileAlta.Text(model, "providerKey");
-            modelList.Add(new JsonObject
+            var entry = new JsonObject
             {
                 ["provider"] = providerKey, ["id"] = MobileAlta.Text(model, "modelId"),
                 ["name"] = MobileAlta.Text(model, "displayName") ?? MobileAlta.Text(model, "modelId"),
                 ["providerName"] = providerKey is null ? null : await sessions.ProviderNameAsync(providerKey, cancellationToken).ConfigureAwait(false),
                 ["efforts"] = model["supportedReasoningEfforts"]?.DeepClone() ?? new JsonArray(), ["defaultEffort"] = MobileAlta.Text(model, "defaultReasoningEffort"),
-            });
+            };
+            if (model["imageInput"] is JsonValue readsImages && readsImages.TryGetValue<bool>(out var imageInput)) entry["imageInput"] = imageInput;
+            modelList.Add(entry);
         }
 
         var agents = new JsonArray();
@@ -112,7 +126,9 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
     {
         var project = Option(body, "project");
         var text = Prompt(body);
-        if (project is null || text is null) return Error("A project and a prompt are needed.");
+        var (files, attachmentError) = ReadAttachments(body);
+        if (attachmentError is not null) return Error(attachmentError);
+        if (project is null || (text is null && files is null)) return Error("A project and a prompt are needed.");
         var tier = Option(body, "tier");
         if (tier is not null && !Tiers.Contains(tier, StringComparer.Ordinal)) return Error("Unknown tier.");
         var (projects, _) = await ReadProjectsAsync(cancellationToken).ConfigureAwait(false);
@@ -133,10 +149,12 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
         if (created.Error is not null || id is null) return Error(created.Error ?? "The session was not created.");
 
         // A send from a plugin returns when its turn ends: the request waits a moment for a refusal, and the turn goes on.
-        var send = MobileAlta.RunAsync(alta, ["session", "send", id, "--stdin"], text, CancellationToken.None);
-        if (await Task.WhenAny(send, Task.Delay(Patience, CancellationToken.None)).ConfigureAwait(false) != send)
-            return new JsonObject { ["id"] = id, ["pending"] = true, ["error"] = null };
-        var sent = await send.ConfigureAwait(false);
+        // Files go with that first prompt, the same way a send of the window carries them.
+        string? attachmentFile = null;
+        List<string> sendArgs = ["session", "send", id, "--stdin"];
+        if (files is not null) sendArgs.AddRange(["--attachments", attachmentFile = await WriteAttachmentsAsync(files).ConfigureAwait(false)]);
+        var sent = await RunPromptAsync(sendArgs, text ?? "", attachmentFile).ConfigureAwait(false);
+        if (sent is null) return new JsonObject { ["id"] = id, ["pending"] = true, ["error"] = null };
         return new JsonObject { ["id"] = id, ["sendError"] = sent.Error, ["error"] = null };
     }
 
@@ -155,11 +173,13 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
         foreach (var item in (choices["models"] as JsonArray ?? []).OfType<JsonObject>())
         {
             if (MobileAlta.Text(item, "id") is not { } modelId) continue;
-            models.Add(new JsonObject
+            var choice = new JsonObject
             {
                 ["id"] = modelId, ["name"] = MobileAlta.Text(item, "name") ?? modelId,
                 ["efforts"] = Strings(item["efforts"]), ["startEffort"] = MobileAlta.Text(item, "startEffort"),
-            });
+            };
+            if (item["imageInput"] is JsonValue image && image.TryGetValue<bool>(out var readsImages)) choice["imageInput"] = readsImages;
+            models.Add(choice);
         }
 
         var prompts = new JsonArray();
@@ -193,7 +213,11 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
     {
         var text = Prompt(body);
         var mode = Option(body, "mode") ?? "send";
-        if (text is null || mode is not ("send" or "steer" or "queue")) return Error("A prompt is needed.");
+        var (files, attachmentError) = ReadAttachments(body);
+        if (attachmentError is not null) return Error(attachmentError);
+        if ((text is null && files is null) || mode is not ("send" or "steer" or "queue")) return Error("A prompt is needed.");
+        // A file joins a new prompt. It is not steered into the turn that runs, and it is not left in the text queue.
+        if (files is not null && mode != "send") return Error("Attachments go with the next prompt, once the session is idle.");
         if (await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
         List<string> args = ["session", mode, id, "--stdin"];
         if (mode != "steer")
@@ -205,13 +229,14 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
         }
 
         // The phone sends to a session it saw idle: when a turn started on the computer meanwhile, the prompt waits for it
-        // in the queue, and is never steered into a turn the phone did not see.
-        if (mode == "send") args.Add("--queue-if-busy");
+        // in the queue, and is never steered into a turn the phone did not see. Files cannot wait there: the send is refused
+        // while the session works, and the phone keeps them.
+        string? attachmentFile = null;
+        if (files is not null) args.AddRange(["--attachments", attachmentFile = await WriteAttachmentsAsync(files).ConfigureAwait(false)]);
+        else if (mode == "send") args.Add("--queue-if-busy");
 
-        var run = MobileAlta.RunAsync(alta, args, text, CancellationToken.None);
-        if (await Task.WhenAny(run, Task.Delay(Patience, CancellationToken.None)).ConfigureAwait(false) != run)
-            return new JsonObject { ["ok"] = true, ["mode"] = mode, ["pending"] = true, ["error"] = null };
-        var result = await run.ConfigureAwait(false);
+        var result = await RunPromptAsync(args, text ?? "", attachmentFile).ConfigureAwait(false);
+        if (result is null) return new JsonObject { ["ok"] = true, ["mode"] = mode, ["pending"] = true, ["error"] = null };
         return new JsonObject { ["ok"] = result.Error is null, ["mode"] = mode, ["error"] = result.Error };
     }
 
@@ -284,6 +309,88 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
     private static string? Option(JsonObject body, string name) =>MobileAlta.Text(body, name)?.Trim() is { } value && IsId(value) ? value : null;
 
     private static string? Prompt(JsonObject body) => MobileAlta.Text(body, "text") is { Length: <= MaximumPrompt } text && text.Trim().Length > 0 ? text : null;
+
+    // The files of a prompt, or null when it has none. An error names one the host would refuse.
+    private static (JsonArray? Files, string? Error) ReadAttachments(JsonObject body)
+    {
+        if (body["attachments"] is null or JsonArray { Count: 0 }) return (null, null);
+        if (body["attachments"] is not JsonArray rows) return (null, "The attachments could not be read.");
+        if (rows.Count > MaximumAttachments) return (null, $"A prompt has at most {MaximumAttachments} attachments.");
+        long total = 0;
+        var files = new JsonArray();
+        foreach (var row in rows)
+        {
+            if (row is not JsonObject attachment
+                || MobileAlta.Text(attachment, "title") is not { } title || title.Length > 80 || title.Any(static c => char.IsControl(c) || c is '/' or '\\')
+                || MobileAlta.Text(attachment, "mediaType") is not { } mediaType || mediaType.Length > 128 || mediaType.Count(static c => c == '/') != 1
+                || mediaType.Any(static c => char.IsControl(c) || char.IsWhiteSpace(c))
+                || attachment["base64"] is not JsonValue data || !data.TryGetValue<string>(out var base64) || !Base64Size(base64, out var bytes))
+                return (null, "An attachment needs a name, a type and its content.");
+            if (bytes is 0 or > MaximumFileBytes) return (null, "A file can be from 1 byte to 20 MB.");
+            if ((total += bytes) > MaximumTotalBytes) return (null, "A prompt's files are limited to 64 MB in all.");
+            files.Add(new JsonObject { ["title"] = title, ["mediaType"] = mediaType, ["base64"] = base64 });
+        }
+
+        return (files, null);
+    }
+
+    private static bool Base64Size(string data, out long bytes)
+    {
+        bytes = 0;
+        if (data.Length == 0) return true;
+        if (data.Length % 4 != 0) return false;
+        // Longer than 20 MB of bytes: the size is refused, without reading it all into a buffer here.
+        if (data.Length > (MaximumFileBytes + 2) / 3 * 4) { bytes = MaximumFileBytes + 1; return true; }
+        for (var index = 0; index < data.Length; index++)
+        {
+            var character = data[index];
+            if (character is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '+' or '/') continue;
+            if (character == '=' && index >= data.Length - 2) continue;
+            return false;
+        }
+
+        bytes = (long)data.Length / 4 * 3 - (data.EndsWith("==", StringComparison.Ordinal) ? 2 : data.EndsWith('=') ? 1 : 0);
+        return bytes > 0;
+    }
+
+    /// <summary>Deletes attachment files left by a turn that did not finish, from a previous run of the plugin.</summary>
+    internal static void RemoveStaleAttachments(string directory)
+    {
+        if (!Directory.Exists(directory)) return;
+        foreach (var path in Directory.EnumerateFiles(directory, "alta-attach-*.json"))
+        {
+            try { File.Delete(path); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    private async Task<string> WriteAttachmentsAsync(JsonArray attachments)
+    {
+        Directory.CreateDirectory(_attachmentsDirectory);
+        var path = Path.Combine(_attachmentsDirectory, "alta-attach-" + Guid.NewGuid().ToString("N") + ".json");
+        await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 65536, FileOptions.Asynchronous);
+        await using (var writer = new Utf8JsonWriter(stream))
+        {
+            attachments.WriteTo(writer);
+            await writer.FlushAsync().ConfigureAwait(false);
+        }
+
+        return path;
+    }
+
+    // Runs a prompt and drops its attachment file when the command ends, including when this request has stopped waiting.
+    private async Task<MobileAltaResult?> RunPromptAsync(IReadOnlyList<string> args, string text, string? attachmentFile)
+    {
+        var run = MobileAlta.RunAsync(alta, args, text, CancellationToken.None);
+        if (attachmentFile is not null)
+            _ = run.ContinueWith(static (_, path) =>
+            {
+                try { File.Delete((string)path!); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+            }, attachmentFile, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+        if (await Task.WhenAny(run, Task.Delay(Patience, CancellationToken.None)).ConfigureAwait(false) != run) return null;
+        return await run.ConfigureAwait(false);
+    }
 
     private static JsonObject Error(string message) => new() { ["error"] = message };
 

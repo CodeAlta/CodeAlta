@@ -152,10 +152,13 @@ public sealed class MobilePlugin : PluginBase
         }
 
         var sessions = new MobileSessions(Services.Alta, Services.Spaces, _live);
+        var attachments = Path.Combine(Context.Host.UserDataDirectory, "plugin-data", "mobile");
+        Directory.CreateDirectory(attachments);
+        MobileApi.RemoveStaleAttachments(attachments);
         var server = new MobileServer(new MobileServerOptions
         {
             Port = _settings.Port, Token = () => _settings.Token!, Hosts = () => _state.TailnetHost is { } host ? [host] : [],
-            Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions), Live = _live, Logger = Logger,
+            Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions, attachments), Live = _live, Logger = Logger,
         });
         try
         {

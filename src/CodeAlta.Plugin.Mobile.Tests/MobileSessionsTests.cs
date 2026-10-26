@@ -221,6 +221,8 @@ public sealed class MobileSessionsTests
         var models = (JsonArray)choices["models"]!;
         Assert.AreEqual(("haiku", "haiku", 0), ((string?)models[1]!["id"], (string?)models[1]!["name"], ((JsonArray)models[1]!["efforts"]!).Count), "A model without a name is named by its id.");
         CollectionAssert.AreEqual(new[] { "low", "high" }, ((JsonArray)models[0]!["efforts"]!).Select(static effort => (string?)effort).ToArray());
+        Assert.AreEqual(true, (bool?)models[0]!["imageInput"], "A model that reads images says so, as the composer's choices do.");
+        Assert.IsFalse(models[1]!.AsObject().ContainsKey("imageInput"), "A model that does not say is left without the field.");
         CollectionAssert.AreEqual(new[] { "default", "acceptEdits" }, ((JsonArray)choices["permissionModes"]!).Select(static mode => (string?)mode!["id"]).ToArray());
         Assert.IsNull(choices["error"]);
 
@@ -284,6 +286,141 @@ public sealed class MobileSessionsTests
         var models = (JsonArray)(await api.OptionsAsync(default))["models"]!;
 
         CollectionAssert.AreEqual(new[] { "Codex", "local" }, models.Select(static model => (string?)model!["providerName"]).ToArray(), "A provider without a name keeps the one of its models.");
+    }
+
+    [TestMethod]
+    public async Task Prompt_SendsFilesWithThePrompt_AndRefusesThemOnASteerOrAQueue()
+    {
+        string? saved = null;
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session send", (args, stdin) =>
+            {
+                var list = args.ToArray();
+                var at = Array.IndexOf(list, "--attachments");
+                saved = at < 0 ? null : File.ReadAllText(list[at + 1]);
+                Assert.AreEqual("Read this", stdin);
+                return FakeAlta.Transcript(0, new JsonObject { ["type"] = "alta.session.submitted" });
+            });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()));
+        JsonObject Attachment(string name) => new() { ["title"] = name, ["mediaType"] = "text/plain", ["base64"] = "aGk=" };
+
+        var sent = await api.PromptAsync("a", new JsonObject { ["text"] = "Read this", ["attachments"] = new JsonArray(Attachment("notes.txt")) }, default);
+
+        Assert.AreEqual((true, null), ((bool)sent!["ok"]!, (string?)sent["error"]));
+        var send = alta.CallsOf("session send").Single();
+        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin", "--attachments" }, send.Take(5).ToArray());
+        Assert.IsFalse(send.Contains("--queue-if-busy"), "Files cannot wait in the text queue.");
+        StringAssert.Contains(saved, "notes.txt");
+        var path = send[^1];
+        for (var wait = 0; File.Exists(path) && wait < 50; wait++) await Task.Delay(20);
+        Assert.IsFalse(File.Exists(path), "The file of the command is removed when the command ends.");
+
+        var before = alta.Calls.Count;
+        Assert.AreEqual("Attachments go with the next prompt, once the session is idle.",
+            (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["mode"] = "steer", ["attachments"] = new JsonArray(Attachment("a.txt")) }, default))!["error"]);
+        Assert.AreEqual("Attachments go with the next prompt, once the session is idle.",
+            (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["mode"] = "queue", ["attachments"] = new JsonArray(Attachment("a.txt")) }, default))!["error"]);
+        Assert.AreEqual(before, alta.Calls.Count, "A steer or a queue with files is refused before alta is asked.");
+        Assert.AreEqual("An attachment needs a name, a type and its content.",
+            (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["attachments"] = new JsonArray(new JsonObject { ["title"] = "../x", ["mediaType"] = "text/plain", ["base64"] = "aGk=" }) }, default))!["error"]);
+        Assert.AreEqual("A file can be from 1 byte to 20 MB.",
+            (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["attachments"] = new JsonArray(new JsonObject { ["title"] = "empty.txt", ["mediaType"] = "text/plain", ["base64"] = "" }) }, default))!["error"]);
+    }
+
+    [TestMethod]
+    public async Task Options_SayWhetherAModelReadsImages()
+    {
+        var alta = new FakeAlta()
+            .Answer("model list --detailed",
+                new JsonObject { ["type"] = "alta.model.item", ["providerKey"] = "claude", ["modelId"] = "opus", ["imageInput"] = true },
+                new JsonObject { ["type"] = "alta.model.item", ["providerKey"] = "local", ["modelId"] = "text", ["imageInput"] = false },
+                new JsonObject { ["type"] = "alta.model.item", ["providerKey"] = "local", ["modelId"] = "unknown" });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()));
+
+        var models = (JsonArray)(await api.OptionsAsync(default))["models"]!;
+
+        Assert.AreEqual((true, false, null), ((bool?)models[0]!["imageInput"], (bool?)models[1]!["imageInput"], models[2]!["imageInput"] as JsonNode));
+    }
+
+    [TestMethod]
+    public async Task Create_SendsFilesWithTheFirstPrompt_AndDropsTheFileWhenTheCommandEnds()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "alta-mobile-create-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var alta = new FakeAlta()
+                .Answer("project list --detailed --space personal", FakeAlta.Project("p1", "Alpha", @"C:\alpha", "personal"))
+                .Answer("session create", new JsonObject { ["type"] = "alta.session.created", ["sessionId"] = "new-1" })
+                .Answer("session send", (args, stdin) =>
+                {
+                    Assert.AreEqual("", stdin);
+                    var list = args.ToArray();
+                    var at = Array.IndexOf(list, "--attachments");
+                    Assert.IsTrue(at > 0 && File.ReadAllText(list[at + 1]).Contains("notes.txt", StringComparison.Ordinal));
+                    return FakeAlta.Transcript(0, new JsonObject { ["type"] = "alta.session.submitted" });
+                });
+            var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()), directory);
+            var created = await api.CreateAsync(new JsonObject
+            {
+                ["project"] = "p1", ["tier"] = "quick",
+                ["attachments"] = new JsonArray(new JsonObject { ["title"] = "notes.txt", ["mediaType"] = "text/plain", ["base64"] = "aGk=" }),
+            }, default);
+
+            Assert.AreEqual("new-1", (string?)created["id"]);
+            Assert.IsNull((string?)created["sendError"]);
+            var send = alta.CallsOf("session send").Single();
+            CollectionAssert.AreEqual(new[] { "session", "send", "new-1", "--stdin", "--attachments" }, send.Take(5).ToArray());
+            Assert.IsFalse(send.Contains("--queue-if-busy"));
+            for (var wait = 0; File.Exists(send[^1]) && wait < 50; wait++) await Task.Delay(20);
+            Assert.IsFalse(File.Exists(send[^1]));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void RemoveStaleAttachments_DeletesFilesLeftFromAnEarlierRun()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "alta-mobile-stale-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var stale = Path.Combine(directory, "alta-attach-old.json");
+            File.WriteAllText(stale, "[]");
+            var kept = Path.Combine(directory, "mobile.json");
+            File.WriteAllText(kept, "{}");
+            MobileApi.RemoveStaleAttachments(directory);
+            Assert.IsFalse(File.Exists(stale));
+            Assert.IsTrue(File.Exists(kept));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task Events_CarryTheFileNamesTheHostNamed()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session events", new JsonObject
+            {
+                ["type"] = "alta.session.event", ["sequenceNumber"] = 3, ["timestamp"] = "2026-10-24T10:00:00Z", ["kind"] = "user.message",
+                ["content"] = new JsonArray(new JsonObject { ["text"] = "Read these" }),
+                ["metadata"] = new JsonObject { ["attachments"] = new JsonArray("photo.png", "notes.txt") },
+            });
+        var api = new MobileSessions(alta, new FakeSpaces(), new MobileLive());
+
+        var page = await api.EventsAsync("a", 0, default);
+
+        var events = (JsonArray)page!["events"]!;
+        Assert.AreEqual("Read these", (string?)events[0]!["text"]);
+        CollectionAssert.AreEqual(new[] { "photo.png", "notes.txt" }, ((JsonArray)events[0]!["attachments"]!).Select(static name => (string?)name).ToArray());
     }
 
     private static JsonObject Event(int sequence, string kind, string text, string? activity = null)

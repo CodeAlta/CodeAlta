@@ -53,11 +53,14 @@
   <main id="create" hidden>
     <form id="new-form" class="composer-form">
       <div class="field"><div class="field-row"><label for="new-project">Project</label><span id="new-space" class="space-tag"></span></div><select id="new-project" required></select></div>
-      <textarea id="new-text" rows="5" placeholder="What should the agent do?" aria-label="Prompt" required></textarea>
+      <p id="new-attach-note" class="attach-note muted" role="status" hidden></p>
+      <div id="new-attach-strip" class="attach-strip" hidden></div>
+      <textarea id="new-text" rows="5" placeholder="What should the agent do?" aria-label="Prompt"></textarea>
       <div id="create-bar" class="create-bar">
         <p id="new-note" class="muted" role="status" aria-live="polite"></p>
         <div class="create-row">
           <div class="pick-chips">
+            <button id="new-attach" type="button" class="pick-more" aria-label="Attach files" title="Attach files or photos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
             <button id="new-model" type="button" class="pick-chip" aria-haspopup="dialog"><span id="new-model-name" class="pick-text"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
             <button id="new-more" type="button" class="pick-more" aria-haspopup="dialog" aria-label="More options" title="More options"><span id="new-more-text" class="pick-tags"></span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
           </div>
@@ -77,9 +80,12 @@
     <p id="detail-note" class="muted" role="status" aria-live="polite"></p>
     <ol id="timeline" class="timeline" aria-label="Timeline"></ol>
     <form id="composer" class="composer">
+      <p id="attach-note" class="attach-note muted" role="status" hidden></p>
+      <div id="attach-strip" class="attach-strip" hidden></div>
       <textarea id="prompt" rows="1" placeholder="Ask for more…" aria-label="Prompt"></textarea>
       <div class="composer-actions"><span id="composer-hint" class="sr-only" aria-live="polite"></span>
         <div class="pick-chips">
+          <button id="attach" type="button" class="pick-more" aria-label="Attach files" title="Attach files or photos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
           <button id="pick-model" type="button" class="pick-chip" aria-haspopup="dialog"><span id="pick-model-text" class="pick-text"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
           <button id="pick-more" type="button" class="pick-more" aria-haspopup="dialog" aria-label="More options" title="More options"><span id="pick-more-text" class="pick-tags"></span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
         </div>
@@ -89,6 +95,7 @@
       </div>
     </form>
   </main>
+  <input id="attach-input" type="file" multiple hidden>
   <footer id="foot" class="muted" role="status" aria-live="polite"></footer>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <div id="sheet" class="sheet" hidden>

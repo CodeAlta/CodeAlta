@@ -68,7 +68,7 @@ export type SessionPage = Readonly<{
 }>;
 
 /** An event of a session's timeline (`GET /api/sessions/<id>/events`). */
-export type TimelineEvent = Readonly<{ seq: number; at: string | null; kind: string; text: string | null; activityId: string | null }>;
+export type TimelineEvent = Readonly<{ seq: number; at: string | null; kind: string; text: string | null; activityId: string | null; attachments?: readonly string[] | null }>;
 
 /** The events of a session after a sequence number. */
 export type EventPage = Readonly<{ since: number; events: readonly TimelineEvent[]; error: string | null }>;
@@ -79,8 +79,8 @@ export type Project = Readonly<{ id: string; path: string; name: string; /** The
 /** `GET /api/projects`. */
 export type ProjectList = Readonly<{ projects: readonly Project[]; default: string | null; error: string | null }>;
 
-/** A model a session can be started with. */
-export type ModelOption = Readonly<{ provider: string; id: string; name: string; providerName: string; efforts: readonly string[]; defaultEffort: string | null }>;
+/** A model a session can be started with. `imageInput` is true only when the model says it reads images. */
+export type ModelOption = Readonly<{ provider: string; id: string; name: string; providerName: string; efforts: readonly string[]; defaultEffort: string | null; imageInput?: boolean | null }>;
 
 /** An agent prompt. */
 export type PromptOption = Readonly<{ id: string; name: string; description: string | null }>;
@@ -103,8 +103,8 @@ export type Options = Readonly<{
   error: string | null;
 }>;
 
-/** A model of the provider of a session, as its composer offers it. */
-export type ChoiceModel = Readonly<{ id: string; name: string; efforts: readonly string[]; startEffort: string | null }>;
+/** A model of the provider of a session, as its composer offers it. `imageInput` is true only when the model says it reads images. */
+export type ChoiceModel = Readonly<{ id: string; name: string; efforts: readonly string[]; startEffort: string | null; imageInput?: boolean | null }>;
 
 /** `GET /api/sessions/<id>/choices`: what the composer of the session offers, as the desktop's does. */
 export type SessionChoices = Readonly<{
@@ -120,6 +120,9 @@ export type SessionChoices = Readonly<{
   error: string | null;
 }>;
 
+/** A file sent with a prompt: its name, its type and its content, as the desktop composer sends them. */
+export type PromptAttachment = Readonly<{ title: string; mediaType: string; base64: string }>;
+
 /** How a prompt goes to a session. */
 export type PromptMode = "send" | "steer" | "queue";
 
@@ -129,6 +132,7 @@ export type PromptSelection = Readonly<{ model?: string; reasoning?: string; age
 /** `POST /api/sessions`. */
 export type NewSessionRequest = Readonly<{
   project: string; text: string; tier?: string; provider?: string; model?: string; reasoning?: string; prompt?: string; permissionMode?: string; worktree?: boolean;
+  attachments?: readonly PromptAttachment[];
 }>;
 
 /** What `POST /api/sessions` answers. */

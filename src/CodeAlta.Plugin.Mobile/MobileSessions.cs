@@ -132,11 +132,22 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
                 if (kind is "host.usageupdated" or "host.modelchanged") continue;
                 var text = string.Concat((record["content"] as JsonArray ?? []).Select(static part => (string?)part?["text"] ?? ""));
                 if (text.Length > MaximumText) text = text[..MaximumText] + "…";
-                events.Add(new JsonObject
+                var metadata = record["metadata"] as JsonObject;
+                var entry = new JsonObject
                 {
                     ["seq"] = sequence, ["at"] = MobileAlta.Text(record, "timestamp"), ["kind"] = kind, ["text"] = text,
-                    ["activityId"] = MobileAlta.Text(record["metadata"] as JsonObject, "activityId"),
-                });
+                    ["activityId"] = MobileAlta.Text(metadata, "activityId"),
+                };
+                // The host already took the path lines out of the text and named the files.
+                if (kind == "user.message" && metadata?["attachments"] is JsonArray names && names.Count > 0)
+                {
+                    var attachments = new JsonArray();
+                    foreach (var name in names)
+                        if (name is JsonValue node && node.TryGetValue<string>(out var title) && title.Length > 0) attachments.Add(title);
+                    if (attachments.Count > 0) entry["attachments"] = attachments;
+                }
+
+                events.Add(entry);
             }
 
             // A read that filled its page, or whose output the host cut, says there may be more after the last one read.

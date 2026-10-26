@@ -2,7 +2,7 @@ import { thoughtHeadline } from "../timelineActivity/activityText";
 import type { ActivityFacts, TimelineEvent } from "./contract";
 
 /** A prompt, an answer or an error: a message on its own line. */
-export type MessageBlock = Readonly<{ kind: "message"; key: string; role: "user" | "assistant" | "error"; text: string }>;
+export type MessageBlock = Readonly<{ kind: "message"; key: string; role: "user" | "assistant" | "error"; text: string; attachments?: readonly string[] }>;
 /** A thought of the agent, inside an activity. */
 export type ThoughtRow = Readonly<{ type: "thought"; key: string; text: string; at: string | null }>;
 /** A tool call, inside an activity: its last phase and the times of its first and last events. */
@@ -35,7 +35,10 @@ export function foldEvents(events: readonly TimelineEvent[]): TimelineBlock[] {
     const role = kind === "user.message" ? "user" : kind === "assistant.message" ? "assistant" : kind === "error" || kind.endsWith(".error") ? "error" : null;
     if (role) {
       close();
-      if ((event.text ?? "").trim() || role === "error") blocks.push({ kind: "message", key: `m${event.seq}`, role, text: event.text ?? "" });
+      const names = role === "user" ? (event.attachments ?? []).filter(name => name.trim().length > 0) : [];
+      const text = event.text ?? "";
+      if (text.trim() || names.length || role === "error")
+        blocks.push({ kind: "message", key: `m${event.seq}`, role, text, ...(names.length ? { attachments: names } : {}) });
       continue;
     }
     const thought = isThought(kind);
@@ -117,7 +120,7 @@ export const liveBlock = (blocks: readonly TimelineBlock[], index: number, busy:
   busy && index === blocks.length - 1 && blocks[index].kind === "activity";
 
 /** A prompt the session accepted that its timeline does not hold yet: a steered one only reaches the journal later. */
-export type PendingPrompt = Readonly<{ key: string; text: string; mode: "send" | "steer" | "queue"; sentAt: number; after: number }>;
+export type PendingPrompt = Readonly<{ key: string; text: string; mode: "send" | "steer" | "queue"; sentAt: number; after: number; attachments?: readonly string[] }>;
 
 /** How long a prompt waits for its message once the session is idle: then the journal had time to write it. */
 export const pendingGrace = 30_000;
@@ -136,4 +139,6 @@ export function stillPending(pending: readonly PendingPrompt[], events: readonly
 }
 
 /** The message a pending prompt shows as, after the blocks of the timeline. */
-export const pendingBlock = (prompt: PendingPrompt): MessageBlock => ({ kind: "message", key: prompt.key, role: "user", text: prompt.text });
+export const pendingBlock = (prompt: PendingPrompt): MessageBlock => ({
+  kind: "message", key: prompt.key, role: "user", text: prompt.text, ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}),
+});

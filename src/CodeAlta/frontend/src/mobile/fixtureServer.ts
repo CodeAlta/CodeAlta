@@ -28,6 +28,8 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     created: 0,
     /** What the next `POST /api/sessions` answers besides its id. */
     createAnswer: {} as Record<string, unknown>,
+    /** The next prompt fails with this text, once. */
+    promptError: null as string | null,
   };
   const requests: FixtureRequest[] = [];
   const streams = new Set<ServerResponse>();
@@ -119,6 +121,11 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       }
       if (action === "choices") return send(response, 200, choicesOf(target));
       if (action === "prompt") {
+        if (state.promptError) {
+          const error = state.promptError;
+          state.promptError = null;
+          return send(response, 200, { ok: false, error });
+        }
         // A send or a queue that carries a selection: the session runs on it now, as alta would say.
         const { mode, model, reasoning, agent, permissionMode } = body as { mode: string } & PromptSelection;
         if (mode !== "steer" && (model || reasoning || agent || permissionMode)) {

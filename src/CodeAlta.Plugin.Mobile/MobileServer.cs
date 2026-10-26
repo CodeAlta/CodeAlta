@@ -57,6 +57,9 @@ internal sealed partial class MobileServer : IAsyncDisposable
     // A diagram is Mermaid's SVG, never trusted: no script, no request, nothing but its own inline styles and images.
     private const string DiagramPolicy = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox";
     private const long MaximumBody = 1024 * 1024;
+
+    // A prompt and its files: 64 MB of files, as base64, with the text around them.
+    private const long MaximumPromptBody = 90L * 1024 * 1024;
     private const long MaximumDiagram = 4 * 1024 * 1024;
 
     private readonly MobileServerOptions _options;
@@ -87,6 +90,7 @@ internal sealed partial class MobileServer : IAsyncDisposable
         builder.Services.AddSingleton<IHostLifetime, QuietLifetime>();
         var app = builder.Build();
         app.Use(GuardAsync);
+        app.Use(AllowPromptBodyAsync);
         Map(app);
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
         _app = app;
@@ -128,9 +132,9 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapGet("/projects", async (CancellationToken ct) => Json(await _options.Api.ProjectsAsync(ct).ConfigureAwait(false)));
         api.MapGet("/options", async (CancellationToken ct) => Json(await _options.Api.OptionsAsync(ct).ConfigureAwait(false)));
         api.MapPost("/sessions", async (HttpRequest request, CancellationToken ct) =>
-            await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Api.CreateAsync(body, ct).ConfigureAwait(false)) : Invalid());
+            await BodyAsync(request, ct, MaximumPromptBody).ConfigureAwait(false) is { } body ? Json(await _options.Api.CreateAsync(body, ct).ConfigureAwait(false)) : Invalid());
         api.MapPost("/sessions/{id}/prompt", async (string id, HttpRequest request, CancellationToken ct) =>
-            await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Api.PromptAsync(id, body, ct).ConfigureAwait(false)) : Invalid());
+            await BodyAsync(request, ct, MaximumPromptBody).ConfigureAwait(false) is { } body ? Json(await _options.Api.PromptAsync(id, body, ct).ConfigureAwait(false)) : Invalid());
         api.MapPost("/sessions/{id}/abort", async (string id, CancellationToken ct) => Json(await _options.Api.AbortAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/archive", async (string id, CancellationToken ct) => Json(await _options.Api.ArchiveAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/restore", async (string id, CancellationToken ct) => Json(await _options.Api.RestoreAsync(id, ct).ConfigureAwait(false)));
@@ -176,6 +180,25 @@ internal sealed partial class MobileServer : IAsyncDisposable
                 _options.Live.Unsubscribe(channel);
             }
         });
+    }
+
+    // The two routes that carry a prompt's files. Every other route keeps the server's small limit.
+    private static bool IsPromptBody(PathString path)
+    {
+        var text = path.Value ?? "";
+        return text.Equals("/api/sessions", StringComparison.OrdinalIgnoreCase)
+            || text.StartsWith("/api/sessions/", StringComparison.OrdinalIgnoreCase) && text.EndsWith("/prompt", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Task AllowPromptBodyAsync(HttpContext context, RequestDelegate next)
+    {
+        if (HttpMethods.IsPost(context.Request.Method) && IsPromptBody(context.Request.Path))
+        {
+            var feature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+            if (feature is { IsReadOnly: false }) feature.MaxRequestBodySize = MaximumPromptBody;
+        }
+
+        return next(context);
     }
 
     // Every answer: no cache unless a file says otherwise, no sniffing, no referrer, no frame. A request that names another

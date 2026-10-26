@@ -167,9 +167,11 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     // What it runs on, on the line of the buttons: the chip of the model and its effort, and "⋯".
     await waitUntil(() => count("GET", "/api/sessions/s1/choices") === 1, "the choices of the session read");
     assert.equal(await evaluate("document.getElementById('pick-model-text').textContent"), "GPT-6.1 Sol · low");
-    const line = await evaluate<{ chip: number; send: number; box: number; composer: number }>(`(() => { const r = e => document.getElementById(e).getBoundingClientRect();
-      return { chip: r("pick-model").top, send: r("send").top, box: r("prompt").height, composer: r("composer").height }; })()`);
+    const line = await evaluate<{ chip: number; send: number; attach: number; box: number; composer: number }>(`(() => { const r = e => document.getElementById(e).getBoundingClientRect();
+      return { chip: r("pick-model").top, send: r("send").top, attach: r("attach").top, box: r("prompt").height, composer: r("composer").height }; })()`);
     assert.equal(line.chip, line.send, "the chip is on the line of Send: no room taken");
+    assert.equal(line.attach, line.send, "the paperclip is on the line of Send");
+    assert.equal(await evaluate("getComputedStyle(document.getElementById('attach-strip')).display"), "none", "no files: the strip takes no room");
     assert.ok(line.composer <= line.box + 44 + 60, `the composer at rest is a box, one line of buttons and the footer (${JSON.stringify(line)})`);
     assert.ok(await evaluate<number>("document.getElementById('pick-more').getBoundingClientRect().height") >= 44, "touch targets of 44 px");
     await click("#timeline .act-toggle");
@@ -347,9 +349,9 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     // The screen is the project, the prompt, and one line of chips beside Start.
     await click("#new");
     await waitFor(`document.getElementById('new-model-name').textContent === "Standard · GPT-6.1 · medium"`, "the default tier");
-    const bar = await evaluate<{ chip: number; more: number; start: number; height: number }>(`(() => { const r = e => document.getElementById(e).getBoundingClientRect();
-      return { chip: r("new-model").top, more: r("new-more").top, start: r("new-start").top, height: r("create-bar").height }; })()`);
-    assert.ok(bar.chip === bar.start && bar.more === bar.start, `the chips are on the line of Start (${JSON.stringify(bar)})`);
+    const bar = await evaluate<{ chip: number; more: number; attach: number; start: number; height: number }>(`(() => { const r = e => document.getElementById(e).getBoundingClientRect();
+      return { chip: r("new-model").top, more: r("new-more").top, attach: r("new-attach").top, start: r("new-start").top, height: r("create-bar").height }; })()`);
+    assert.ok(bar.chip === bar.start && bar.more === bar.start && bar.attach === bar.start, `the chips are on the line of Start (${JSON.stringify(bar)})`);
     await click("#new-model");
     await waitFor(shown("#model-sheet"), "the model sheet");
     assert.deepEqual(await evaluate("[...document.querySelectorAll('#tiers .tier')].map(b => [b.textContent, b.disabled])"),
@@ -381,6 +383,40 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await waitFor(`document.getElementById('detail-note').textContent.includes("not sent: The provider is busy.")`, "the failed send on its page");
     assert.equal(await evaluate("document.getElementById('prompt').value"), "Make it faster");
     await waitFor(`document.querySelector('#detail-title').textContent === "New: Make it faster"`, "a session out of the list read alone");
+
+    // Files: a chip, one removed, a send that clears the strip and shows the file, then a failed send that gives the files back.
+    await evaluate("location.hash = '#/session/s1'");
+    await waitFor(`document.querySelector('#detail-title').textContent === "Fix the parser"`, "the session for a file");
+    const prompts = count("POST", "/api/sessions/s1/prompt");
+    await evaluate(`(() => {
+      const input = document.getElementById("attach-input");
+      const data = new DataTransfer();
+      data.items.add(new File(["hello"], "notes.txt", { type: "text/plain" }));
+      data.items.add(new File(["x"], "extra.txt", { type: "text/plain" }));
+      input.files = data.files;
+      input.dispatchEvent(new Event("change"));
+    })()`);
+    await waitFor(`[...document.querySelectorAll("#attach-strip .attach-chip")].map(c => c.textContent).join("|") === "notes.txt|extra.txt"`, "both files");
+    await evaluate(`document.querySelector('#attach-strip button[aria-label="Remove extra.txt"]').click()`);
+    await waitFor(`document.querySelectorAll("#attach-strip .attach-chip").length === 1`, "one file removed");
+    await evaluate("document.getElementById('prompt').value = ''");
+    await evaluate("document.getElementById('composer').requestSubmit()");
+    await waitUntil(() => count("POST", "/api/sessions/s1/prompt") === prompts + 1, "the file sent");
+    const sentFile = server.requests.filter(r => r.path === "/api/sessions/s1/prompt").at(-1)?.body as { text: string; attachments?: { title: string }[] };
+    assert.equal(sentFile.text, "");
+    assert.deepEqual(sentFile.attachments?.map(file => file.title), ["notes.txt"]);
+    await waitFor(`document.getElementById("attach-strip").hidden && document.querySelector("#timeline .attach-chip")?.textContent === "notes.txt"`, "the strip clears and the timeline names the file");
+    server.state.promptError = "The provider is busy.";
+    await evaluate(`(() => {
+      const input = document.getElementById("attach-input");
+      const data = new DataTransfer();
+      data.items.add(new File(["again"], "again.txt", { type: "text/plain" }));
+      input.files = data.files;
+      input.dispatchEvent(new Event("change"));
+    })()`);
+    await waitFor(`document.querySelector("#attach-strip .attach-chip")?.textContent === "again.txt"`, "the file that will fail");
+    await evaluate("document.getElementById('composer').requestSubmit()");
+    await waitFor(`document.getElementById("detail-note").textContent.includes("Not sent") && document.querySelector("#attach-strip .attach-chip")?.textContent === "again.txt"`, "a failed send gives the file back");
 
     // The page fits the phone: nothing wider than the screen.
     for (const hash of ["#/", "#/session/s1", "#/new"]) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { TimelineEvent } from "./contract";
-import { activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, planTimeline, type ActivityBlock } from "./timeline";
+import { activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingGrace, planTimeline, stillPending, type ActivityBlock, type PendingPrompt } from "./timeline";
 
 let seq = 0;
 const at = (second: number) => new Date(Date.UTC(2026, 9, 24, 12, 0, second)).toISOString();
@@ -95,4 +95,16 @@ test("drawing the timeline again keeps the blocks that did not change, updates t
   assert.deepEqual(planTimeline(drawn, opened).steps.map(s => s.action), ["keep", "update"]);
   // Blocks that are gone (another read replaced the events) are removed.
   assert.deepEqual(planTimeline(drawn, []).removed, first.map(b => b.key));
+});
+
+test("a user message keeps its words and the file names the server sent", () => {
+  seq = 0;
+  const sent = { ...event("user.message", "Read these"), attachments: ["photo.png", "notes.txt"] };
+  const [message] = foldEvents([sent]);
+  assert.equal(message.kind, "message");
+  if (message.kind !== "message") return;
+  assert.equal(message.text, "Read these");
+  assert.deepEqual(message.attachments, ["photo.png", "notes.txt"]);
+  const prompt: PendingPrompt = { key: "p", text: "Read these", mode: "send", sentAt: 0, after: 0, attachments: ["photo.png", "notes.txt"] };
+  assert.deepEqual(stillPending([prompt], [sent], true, pendingGrace).map(item => item.key), []);
 });

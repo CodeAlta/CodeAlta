@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Reflection;
 using System.Text.Json;
 using CodeAlta.Agent;
@@ -2208,7 +2209,7 @@ public sealed partial class AltaLiveToolTests
                     DisplayName: "Claude Sonnet 4.6",
                     DefaultReasoningEffort: AgentReasoningEffort.Low,
                     SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.Medium],
-                    Capabilities: new Dictionary<string, object?> { ["supportsToolCall"] = true }),
+                    Capabilities: new Dictionary<string, object?> { ["supportsToolCall"] = true, ["SupportsImageInput"] = true }),
                 new AgentModelInfo(
                     "gpt-4o",
                     DisplayName: "GPT-4o",
@@ -2237,6 +2238,7 @@ public sealed partial class AltaLiveToolTests
         Assert.AreEqual(AltaExitCodes.Success, detailed.ExitCode);
         var detailedRecord = ReadJsonLines(detailed.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.model.item");
         Assert.AreEqual("models:claude-sonnet-4.6@low", detailedRecord.GetProperty("modelRef").GetString());
+        Assert.IsTrue(detailedRecord.GetProperty("imageInput").GetBoolean(), "Image support is the host's reading of the capabilities, whatever their letter case.");
         Assert.AreEqual(1, ReadJsonLines(detailed.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.model.summary").GetProperty("count").GetInt32());
 
         Assert.AreEqual(AltaExitCodes.Success, show.ExitCode);
@@ -2826,6 +2828,154 @@ public sealed partial class AltaLiveToolTests
             : (provider.CreatedOptions[^1].Model, provider.CreatedOptions[^1].ReasoningEffort);
         Assert.AreEqual("gpt-first", model);
         Assert.AreEqual(AgentReasoningEffort.High, effort);
+    }
+
+    [TestMethod]
+    public async Task SessionSend_SendsAttachmentsToAnIdleSession_AndRefusesThemOtherwise()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("attach");
+        var provider = new StatefulProviderRuntime(providerId)
+        {
+            PublishIdleBeforeSendReturns = true,
+            Models =
+            [
+                new AgentModelInfo("gpt-vision", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = true }),
+                new AgentModelInfo("gpt-text", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = false }),
+            ],
+        };
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(providerId, "Attach"), () => provider);
+        var runtime = CreateRuntime(options, registry);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime)
+            .Add<IReadOnlyList<ModelProviderDescriptor>>(registry.ListProviders())
+            .Add<IModelProviderInitializationService>(new ModelProviderInitializationService(registry))
+            .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
+
+        async Task<string> CreateAsync(string model)
+        {
+            var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value, "--model", model], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, created.ExitCode, created.Stdout + created.Stderr);
+            return ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        }
+
+        var sessionId = await CreateAsync("gpt-vision").ConfigureAwait(false);
+        var png = OnePixelPng();
+        var path = Path.Combine(root.Path, "attachments.json");
+        await File.WriteAllTextAsync(path, "[" +
+            "{\"title\":\"photo.png\",\"mediaType\":\"image/png\",\"base64\":\"" + Convert.ToBase64String(png) + "\"}," +
+            "{\"title\":\"notes.txt\",\"mediaType\":\"text/plain\",\"base64\":\"" + Convert.ToBase64String("hello"u8) + "\"}]").ConfigureAwait(false);
+
+        var sent = await dispatcher.InvokeAsync(["session", "send", sessionId, "--stdin", "--attachments", path], stdin: "Look", caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode, sent.Stderr);
+        await WaitUntilAsync(() => provider.SentOptions.Count == 1).ConfigureAwait(false);
+        var items = provider.SentOptions[0].Input.Items;
+        Assert.AreEqual("Look", ((AgentInputItem.Text)items[0]).Value);
+        var image = (AgentInputItem.LocalImage)items[1];
+        Assert.AreEqual("photo.png", image.DisplayName);
+        CollectionAssert.AreEqual(png, await File.ReadAllBytesAsync(image.Path).ConfigureAwait(false));
+        var file = (AgentInputItem.LocalFile)items[2];
+        Assert.AreEqual(("notes.txt", "text/plain", "hello"), (file.DisplayName, file.MediaType, await File.ReadAllTextAsync(file.Path).ConfigureAwait(false)));
+
+        var only = await dispatcher.InvokeAsync(["session", "send", sessionId, "--stdin", "--attachments", path], stdin: "  \n", caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, only.ExitCode, only.Stderr);
+        await WaitUntilAsync(() => provider.SentOptions.Count == 2).ConfigureAwait(false);
+        Assert.IsFalse(provider.SentOptions[1].Input.Items.OfType<AgentInputItem.Text>().Any(), "Spaces are not a prompt.");
+
+        var steered = await dispatcher.InvokeAsync(["session", "steer", sessionId, "--message", "now", "--attachments", path], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Unsupported, steered.ExitCode, steered.Stdout);
+        StringAssert.Contains(steered.Stdout, "session.attachments");
+        var queued = await dispatcher.InvokeAsync(["session", "queue", sessionId, "--message", "later", "--attachments", path], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Unsupported, queued.ExitCode, queued.Stdout);
+        StringAssert.Contains(queued.Stdout, "Attachments go with the next prompt, once the session is idle.");
+
+        var invalid = Path.Combine(root.Path, "invalid.json");
+        await File.WriteAllTextAsync(invalid, "{}").ConfigureAwait(false);
+        var refused = await dispatcher.InvokeAsync(["session", "send", sessionId, "--stdin", "--attachments", invalid], stdin: "x", caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Usage, refused.ExitCode, refused.Stdout);
+        StringAssert.Contains(refused.Stdout, "usage.invalidAttachments");
+
+        var textSession = await CreateAsync("gpt-text").ConfigureAwait(false);
+        var images = await dispatcher.InvokeAsync(["session", "send", textSession, "--stdin", "--attachments", path], stdin: "Look", caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Unsupported, images.ExitCode, images.Stdout);
+        StringAssert.Contains(images.Stdout, "session.imageUnsupported");
+    }
+
+    [TestMethod]
+    public async Task SessionSend_RefusesAttachmentsWhileTheSessionWorks()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("attach-busy");
+        var blocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new StatefulProviderRuntime(providerId) { SendBlocker = blocker, PublishRunEventOnSend = true };
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(providerId, "Attach"), () => provider);
+        var runtime = CreateRuntime(options, registry);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var path = Path.Combine(root.Path, "attachments.json");
+        await File.WriteAllTextAsync(path, "[{\"title\":\"notes.txt\",\"mediaType\":\"text/plain\",\"base64\":\"aGk=\"}]").ConfigureAwait(false);
+        var running = dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "work"], caller: AltaCallerIdentity.Cli).AsTask();
+        await WaitUntilAsync(() => provider.SentOptions.Count == 1).ConfigureAwait(false);
+
+        var refused = await dispatcher.InvokeAsync(["session", "send", sessionId, "--stdin", "--attachments", path], stdin: "more", caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Unsupported, refused.ExitCode, refused.Stdout);
+        StringAssert.Contains(refused.Stdout, "session.running");
+        blocker.TrySetResult();
+        Assert.AreEqual(AltaExitCodes.Success, (await running.ConfigureAwait(false)).ExitCode);
+    }
+
+    [TestMethod]
+    public async Task SessionEvents_NamesAttachmentsWithoutTheirPaths()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("openai");
+        var sessionId = "session-files";
+        var timestamp = new DateTimeOffset(2026, 10, 26, 12, 0, 0, TimeSpan.Zero);
+        var imagePath = @"C:\sessions\photo.png";
+        var filePath = @"C:\sessions\notes.txt";
+        var content = "Read these" + Environment.NewLine + $"Local image (photo.png): {imagePath}" + Environment.NewLine + $"Attached file (notes.txt): {filePath}";
+        using var details = JsonDocument.Parse(
+            "{\"items\":[{\"$type\":\"text\",\"text\":\"Read these\"},{\"$type\":\"localImage\",\"path\":" + JsonSerializer.Serialize(imagePath) + ",\"displayName\":\"photo.png\",\"mediaType\":\"image/png\"},{\"$type\":\"localFile\",\"path\":" + JsonSerializer.Serialize(filePath) + ",\"displayName\":\"notes.txt\",\"mediaType\":\"text/plain\"}]}");
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(root.Path));
+        await store.UpsertSessionAsync(new AgentSessionSummary
+        {
+            SessionId = sessionId, ProviderId = providerId, ProtocolFamily = "openai", ProviderKey = providerId.Value,
+            ModelId = "gpt", WorkingDirectory = root.Path, Title = "Files", Summary = "Files", CreatedAt = timestamp, UpdatedAt = timestamp,
+        }).ConfigureAwait(false);
+        await store.AppendEventsAsync(providerId.Value, providerId.Value, sessionId,
+        [
+            new AgentContentCompletedEvent(providerId, sessionId, timestamp, new AgentRunId("run"), AgentContentKind.User, "user-1", null, content, details.RootElement.Clone()),
+        ]).ConfigureAwait(false);
+        var runtime = CreateRuntime(options, providerId);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+
+        var events = await dispatcher.InvokeAsync(["session", "events", sessionId, "--include", "user"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, events.ExitCode, events.Stderr);
+        var record = ReadJsonLines(events.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.event");
+        Assert.AreEqual("Read these", record.GetProperty("content")[0].GetProperty("text").GetString());
+        CollectionAssert.AreEqual(new[] { "photo.png", "notes.txt" }, record.GetProperty("metadata").GetProperty("attachments").EnumerateArray().Select(static item => item.GetString()).ToArray());
     }
 
     [TestMethod]
@@ -6303,6 +6453,43 @@ public sealed partial class AltaLiveToolTests
 
     private static async Task AppendJournalStateAsync(SessionViewCatalog catalog, SessionViewDescriptor session, SessionViewLocalState state)
         => await catalog.JournalStore.AppendStateAsync(session, state).ConfigureAwait(false);
+
+    private static byte[] OnePixelPng()
+    {
+        using var output = new MemoryStream();
+        output.Write(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
+        var header = new byte[13];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header, 1);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(4), 1);
+        header[8] = 8;
+        header[9] = 6;
+        Chunk("IHDR", header);
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.Fastest, leaveOpen: true))
+            zlib.Write(new byte[] { 0, 0, 0, 0, 0 });
+        Chunk("IDAT", compressed.ToArray());
+        Chunk("IEND", []);
+        return output.ToArray();
+
+        void Chunk(string name, byte[] bytes)
+        {
+            Span<byte> length = stackalloc byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(length, bytes.Length);
+            output.Write(length);
+            var type = System.Text.Encoding.ASCII.GetBytes(name);
+            output.Write(type);
+            output.Write(bytes);
+            var crc = uint.MaxValue;
+            foreach (var b in type.Concat(bytes))
+            {
+                crc ^= b;
+                for (var bit = 0; bit < 8; bit++) crc = (crc >> 1) ^ ((crc & 1) != 0 ? 0xedb88320u : 0);
+            }
+
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(length, ~crc);
+            output.Write(length);
+        }
+    }
 
     private static string ExtractText(AgentInput input)
         => ((AgentInputItem.Text)input.Items.Single()).Value;
