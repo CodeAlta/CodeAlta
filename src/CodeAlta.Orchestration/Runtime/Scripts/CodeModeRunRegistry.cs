@@ -211,6 +211,8 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         var runs = _runs.Values.Where(run => run.Running && string.Equals(run.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)).ToArray();
         foreach (var run in runs)
         {
+            // The tree of the session was stopped: its result is not given back to it, which would start a new turn.
+            run.Silence();
             run.Stop();
         }
 
@@ -511,7 +513,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             });
             // What reads the journal after the result sees the whole run.
             await run.JournalWritten.ConfigureAwait(false);
-            if (run.Backgrounded && run.Waiters == 0)
+            if (run.Backgrounded && run.Waiters == 0 && !run.Silenced)
             {
                 await DeliverAsync(run, result).ConfigureAwait(false);
             }
@@ -756,6 +758,13 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
 
     /// <summary>Stops the run.</summary>
     public void Stop() => _cancellation.Cancel();
+
+    private int _silenced;
+
+    // Whether the end of the run is given to nobody: the user stopped the tree of its session.
+    internal bool Silenced => Volatile.Read(ref _silenced) == 1;
+
+    internal void Silence() => Volatile.Write(ref _silenced, 1);
 
     /// <summary>Gets the last lines it wrote.</summary>
     /// <returns>The lines, joined by new lines.</returns>

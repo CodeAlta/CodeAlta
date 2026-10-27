@@ -109,6 +109,127 @@ public sealed partial class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AThousandNestedCalls_AreActivitiesOfOneCall_WithTheirTextsCut_InABoundedJournal()
+    {
+        using var temp = TestTempDirectory.Create();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        Directory.CreateDirectory(workspace);
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-thousand-calls") with { WorkingDirectory = workspace };
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(CreateState(summary.SessionId));
+        const int Calls = 1000;
+        const int Large = 20 * 1024;
+        var pad = new string('a', Large);
+        // A tool whose every tenth call takes large arguments and every hundredth gives a large output.
+        var big = new AgentToolDefinition(new AgentToolSpec("big", "Gives text.", Json("""{"type":"object","properties":{"n":{"type":"integer"},"pad":{"type":"string"}}}""")) { RunsInParallel = true },
+            (invocation, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text(
+                invocation.Arguments.GetProperty("n").GetInt32() % 100 == 0 ? new string('o', Large) : "ok")])));
+        var failures = 0;
+        var script = ScriptTool(async (tools, cancellationToken) =>
+        {
+            for (var index = 0; index < Calls; index++)
+            {
+                var arguments = index % 10 == 0 ? $$"""{"n":{{index}},"pad":"{{pad}}"}""" : $$"""{"n":{{index}}}""";
+                if (!(await tools.InvokeAsync(new AgentNestedToolCall("big", Json(arguments)), cancellationToken)).Success) failures++;
+            }
+
+            return new AgentToolResult(true, [new AgentToolResultItem.Text("done")]);
+        });
+        var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, CreateState(summary.SessionId), [], store,
+            new ScriptedTurnExecutor(CallScript(),
+                (_, _, _) => Task.FromResult(new AgentTurnResponse { AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]) })),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = workspace,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            });
+        IReadOnlyList<AgentEvent> history;
+        try
+        {
+            await session.SendAsync(new() { Input = AgentInput.Text("Work"), AdditionalTools = [script, big] });
+            history = await session.GetHistoryAsync();
+        }
+        finally
+        {
+            // The records of the calls of scripts are written in batches: the end of the session writes the last one.
+            await session.DisposeAsync();
+        }
+
+        Assert.AreEqual(0, failures);
+        var calls = history.OfType<AgentActivityEvent>().Where(static e => e.Kind == AgentActivityKind.ToolCall).ToArray();
+        CollectionAssert.AreEquivalent(new[] { "call-1" }, calls.Where(static e => e.ParentActivityId is null).Select(static e => e.ActivityId).Distinct().ToArray(),
+            "the model made one call: the calls of its script are its activities");
+        var nested = calls.Where(static e => e.ParentActivityId == "call-1").ToArray();
+        Assert.AreEqual(Calls, nested.Count(static e => e.Phase == AgentActivityPhase.Completed));
+        Assert.IsTrue(nested.All(static e => e.Details is null || e.Details.Value.GetRawText().Length < 3 * 16 * 1024), "the arguments of a call are cut");
+        var outputs = history.OfType<AgentContentCompletedEvent>().Where(static e => e.Kind == AgentContentKind.ToolOutput && e.ParentActivityId?.StartsWith("call-1/", StringComparison.Ordinal) == true).ToArray();
+        Assert.IsTrue(outputs.Length >= Calls / 100);
+        Assert.IsTrue(outputs.All(static e => e.Content.Length <= 16 * 1024 + 200), "the output of a call is cut");
+        StringAssert.Contains(outputs.First(static e => e.Content.Length > 1000).Content, "cut: the record of a call of a script keeps");
+        var lines = Directory.EnumerateFiles(Path.Combine(temp.Path, "machine"), "*.jsonl", SearchOption.AllDirectories).SelectMany(File.ReadLines).ToArray();
+        var longest = lines.Max(static line => line.Length);
+        Assert.IsLessThan(4 * 16 * 1024, longest, "no record of the journal grows with what a call carried");
+        Assert.IsLessThan(Calls * 8 * 1024L + 4 * 1024 * 1024, lines.Sum(static line => (long)line.Length), "the journal is bounded");
+    }
+
+    [TestMethod]
+    public async Task ADeniedWrite_OfAScript_IsAFailedCallItCatches_AndTheFileIsNotWritten()
+    {
+        using var temp = TestTempDirectory.Create();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        Directory.CreateDirectory(workspace);
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-denied-write") with { WorkingDirectory = workspace };
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(CreateState(summary.SessionId));
+        var asked = new ConcurrentQueue<string>();
+        CodeAlta.CodeMode.CodeModeRunResult? run = null;
+        // A script of Code Mode, run with the tools of the run as functions, as exec runs it.
+        var script = ScriptTool(async (tools, cancellationToken) =>
+        {
+            var binding = new CodeAlta.LiveTool.Scripts.ToolScriptBinding(tools, ["script"]);
+            run = await new CodeAlta.CodeMode.CodeModeHost(new CodeAlta.CodeMode.CodeModeApi(binding.Functions), new CodeAlta.CodeMode.CodeModeScriptCache())
+                .RunAsync(CodeAlta.CodeMode.CodeModeSource.Prepare("""
+                    try { await tools.write_file({ path: "denied.txt", content: "nope" }); return "written"; }
+                    catch (e) { return `${e.name}: ${e.message}`; }
+                    """), binding, cancellationToken: cancellationToken);
+            return new AgentToolResult(true, [new AgentToolResultItem.Text(run.ValueJson ?? "")]);
+        });
+
+        await using var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, CreateState(summary.SessionId), [], store,
+            new ScriptedTurnExecutor(CallScript(),
+                (_, _, _) => Task.FromResult(new AgentTurnResponse { AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]) })),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = workspace,
+                // The user refuses the change.
+                OnPermissionRequest = (request, _) =>
+                {
+                    asked.Enqueue(request.GetType().Name);
+                    return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny));
+                },
+            });
+
+        await session.SendAsync(new() { Input = AgentInput.Text("Work"), AdditionalTools = [script] });
+
+        Assert.IsNotNull(run);
+        Assert.AreEqual(CodeAlta.CodeMode.CodeModeRunStatus.Completed, run.Status, run.Error?.Message);
+        StringAssert.StartsWith(run.ValueJson, "\"ToolError: ", "the script caught the refusal as an error");
+        Assert.IsTrue(asked.Contains(nameof(AgentFileChangePermissionRequest)), "the write asked, as a write of the model does");
+        Assert.IsFalse(File.Exists(Path.Combine(workspace, "denied.txt")), "a denied write writes nothing");
+        var history = await session.GetHistoryAsync();
+        Assert.IsTrue(history.OfType<AgentActivityEvent>().Any(static e => e is { ParentActivityId: "call-1", Name: "write_file", Phase: AgentActivityPhase.Failed }),
+            "the call is recorded as failed under the call of the script");
+    }
+
+    [TestMethod]
     public async Task NestedCalls_OfToolsTheSessionDoesWithout_AreRefused_AndRoutedToolsRunWhereTheRouterSays()
     {
         using var temp = TestTempDirectory.Create();

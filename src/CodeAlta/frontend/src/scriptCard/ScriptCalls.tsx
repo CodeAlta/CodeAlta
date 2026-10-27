@@ -19,16 +19,24 @@ export function scriptCallCounts(calls: ReadonlyArray<ScriptCall>) {
 }
 
 /**
+ * The calls of a script the card lists: at most {@link shownScriptCalls}, the last running and failed ones first, then the
+ * last of the others, in the order the script made them.
+ */
+export function shownScriptCallsOf(calls: ReadonlyArray<ScriptCall>): ScriptCall[] {
+  const notable = calls.filter(call => { const state = toolState(call.phase ?? undefined); return state !== "completed" && state !== "canceled"; });
+  const kept = new Set(notable.slice(-shownScriptCalls));
+  for (let index = calls.length - 1; index >= 0 && kept.size < shownScriptCalls; index--) kept.add(calls[index]);
+  return calls.filter(call => kept.has(call));
+}
+
+/**
  * The calls the script of a call made (Code Mode's `exec`), under its tile: their counts, then the last ones, each with
  * its state, its tool, its step and its duration. The running calls and the failed ones come first among those shown.
  */
 export const ScriptCalls = memo(function ScriptCalls({ calls }: { calls: ReadonlyArray<ScriptCall> }) {
   const { t } = useShellLanguage();
   const counts = scriptCallCounts(calls);
-  const notable = calls.filter(call => { const state = toolState(call.phase ?? undefined); return state !== "completed" && state !== "canceled"; });
-  const rest = calls.filter(call => !notable.includes(call));
-  const shown = [...notable.slice(-shownScriptCalls), ...rest.slice(-Math.max(0, shownScriptCalls - notable.length))]
-    .sort((a, b) => calls.indexOf(a) - calls.indexOf(b));
+  const shown = shownScriptCallsOf(calls);
   return <div className="script-calls" role="group" aria-label={t("Calls of the script")}>
     <div className="script-calls-counts">
       <span>{t("{count} call(s)", { count: counts.total })}</span>

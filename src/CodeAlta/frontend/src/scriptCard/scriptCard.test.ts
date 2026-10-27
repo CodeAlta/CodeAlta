@@ -4,7 +4,7 @@ import { reconcileTimeline } from "../reconcileTimeline";
 import { buildTimelineItems, execTitle, type HistoryEntry } from "../timeline";
 import { toolFamily, toolCallFromItem } from "../toolCall";
 import { groupTimelineTools } from "../toolGroups";
-import { scriptCallCounts } from "./ScriptCalls";
+import { scriptCallCounts, shownScriptCalls, shownScriptCallsOf } from "./ScriptCalls";
 import { scriptMarkState, scriptRunOffers, scriptWaitTarget, wakeTime } from "./scriptRunOffers";
 
 const entry = (offset: string, changes: Partial<HistoryEntry> = {}): HistoryEntry => ({ offset,
@@ -41,6 +41,23 @@ test("the calls of a script are lines of the card of its call, also those made a
   assert.equal(card.scriptCalls?.[0].endedAt, "2026-10-26T00:00:03Z");
   assert.deepEqual(scriptCallCounts(card.scriptCalls!), { total: 2, running: 0, failed: 1 });
   assert.equal(toolFamily(toolCallFromItem(card)), "script");
+});
+
+test("a thousand calls of a script give the card its counts and a few lines, the running and failed ones first", () => {
+  const nested = Array.from({ length: 1000 }, (_, index) => {
+    const phase = index === 500 ? "Started" : index % 300 === 7 ? "Failed" : "Completed";
+    return entry(`n${index}`, { activityId: `call-1/${index + 1}`, parentActivityId: "call-1", phase, name: index % 2 ? "read_file" : "grep" });
+  });
+  const items = buildTimelineItems([scriptEntries()[0], ...nested]);
+  const calls = items[0].scriptCalls!;
+  const shown = shownScriptCallsOf(calls);
+
+  assert.equal(items.length, 1, "the calls are no rows of their own");
+  assert.equal(calls.length, 1000);
+  assert.deepEqual(scriptCallCounts(calls), { total: 1000, running: 1, failed: 4 });
+  assert.equal(shown.length, shownScriptCalls);
+  assert.deepEqual(shown.map(call => call.activityId), ["call-1/8", "call-1/308", "call-1/501", "call-1/608", "call-1/908", "call-1/1000"],
+    "the running and the failed calls, then the last one, in the order the script made them");
 });
 
 test("a card keeps its identity while its records do not change", () => {

@@ -279,6 +279,75 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task AScriptOfASandboxedSession_IsRefusedWhatItsSandboxForbids_AndReadsTheLibraryWithoutChangingIt()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: true, withLibrary: true).ConfigureAwait(false);
+        var strict = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal", "--sandbox", "strict").ConfigureAwait(false);
+        var unrelated = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
+        var library = new CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary(fixture.Options);
+        Assert.IsNull(library.Save("count", CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptScope.Global, "return 1;", null, null).Refusal);
+        // The identity of a script of the session: the session, and its run.
+        var identity = Agent(strict) with { ScriptRunId = "run-sandboxed" };
+        var binding = new CodeAlta.LiveTool.Scripts.AltaScriptBinding(fixture.Dispatcher.Describe(identity, null));
+
+        var result = await new CodeAlta.CodeMode.CodeModeHost(new CodeAlta.CodeMode.CodeModeApi(binding.Functions), new CodeAlta.CodeMode.CodeModeScriptCache())
+            .RunAsync(CodeAlta.CodeMode.CodeModeSource.Prepare($$"""
+                const outcomes = {};
+                const attempt = async (name, call) => {
+                  try { await call(); outcomes[name] = "ok"; } catch (e) { outcomes[name] = `${e.name}:${e.code}`; }
+                };
+                await attempt("createUnsandboxed", () => alta.session.create({ global: true, sandbox: "off" }));
+                await attempt("queueOther", () => alta.session.queue({ sessionId: "{{Id(unrelated)}}", message: "hi" }));
+                await attempt("jobsOfAll", () => alta.job.list({ all: true }));
+                await attempt("save", () => alta.script.save({ name: "mine", stdin: "return 2;" }));
+                await attempt("delete", () => alta.script.delete({ name: "count" }));
+                await attempt("list", () => alta.script.list({}));
+                await attempt("show", () => alta.script.show({ name: "count" }));
+                await attempt("check", () => alta.script.check({ stdin: "return 3;" }));
+                await attempt("edit", () => alta.script.edit({ name: "count" }));
+                return outcomes;
+                """), new CodeAlta.LiveTool.Scripts.AltaScriptCallHandler(fixture.Dispatcher, binding, identity, null)).ConfigureAwait(false);
+
+        Assert.AreEqual(CodeAlta.CodeMode.CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        using var outcomes = JsonDocument.Parse(result.ValueJson!);
+        string Outcome(string name) => outcomes.RootElement.GetProperty(name).GetString()!;
+        Assert.AreEqual("AltaError:sandbox.choiceDenied", Outcome("createUnsandboxed"), "a script asks no session out of its sandbox");
+        Assert.AreEqual("AltaError:sandbox.notOwnSession", Outcome("queueOther"));
+        Assert.AreEqual("AltaError:sandbox.notOwnSession", Outcome("jobsOfAll"));
+        StringAssert.StartsWith(Outcome("save"), "AltaError:sandbox.", "a sandboxed script saves no script in the library");
+        StringAssert.StartsWith(Outcome("delete"), "AltaError:sandbox.", "nor deletes one");
+        foreach (var allowed in new[] { "list", "show", "check", "edit" })
+        {
+            Assert.AreEqual("ok", Outcome(allowed), $"a sandboxed script still runs alta.script.{allowed}");
+        }
+
+        Assert.IsNull(library.Find("mine", null), "nothing was saved");
+        Assert.IsNotNull(library.Find("count", null), "nothing was deleted");
+    }
+
+    [TestMethod]
+    public async Task AScript_CreatesNoSessionWithAToolItsSessionDoesWithout_AsTheModelsOwnCall()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: true).ConfigureAwait(false);
+        var parent = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
+        fixture.Runtime.SetDisabledToolPatterns(Id(parent), ["shell_command"]);
+        var identity = Agent(parent) with { ScriptRunId = "run-narrow" };
+        var binding = new CodeAlta.LiveTool.Scripts.AltaScriptBinding(fixture.Dispatcher.Describe(identity, null));
+        var direct = await fixture.Dispatcher.InvokeAsync(["session", "create", "--global"], caller: Agent(parent)).ConfigureAwait(false);
+
+        var result = await new CodeAlta.CodeMode.CodeModeHost(new CodeAlta.CodeMode.CodeModeApi(binding.Functions), new CodeAlta.CodeMode.CodeModeScriptCache())
+            .RunAsync(CodeAlta.CodeMode.CodeModeSource.Prepare("""
+                try { const created = await alta.session.create({ global: true }); return { created: created.sessionId }; }
+                catch (e) { return { refused: e.code }; }
+                """), new CodeAlta.LiveTool.Scripts.AltaScriptCallHandler(fixture.Dispatcher, binding, identity, null)).ConfigureAwait(false);
+
+        Assert.AreEqual(CodeAlta.CodeMode.CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        using var value = JsonDocument.Parse(result.ValueJson!);
+        AssertSandboxRefused(direct, "session.widerTools");
+        Assert.AreEqual("session.widerTools", value.RootElement.GetProperty("refused").GetString(), "the script is refused as the model's own call is");
+    }
+
+    [TestMethod]
     public async Task SandboxCommands_SayWhatEachProfileAllows_AndASandboxedAgentReadsItsOwnAlone()
     {
         await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: true).ConfigureAwait(false);
@@ -407,7 +476,10 @@ public sealed partial class AltaLiveToolTests
         public static Task<SpaceResourceFixture> CreateAsync(params string[] moreProviders) => CreateAsync(withOwner: false, moreProviders);
 
         // withOwner: the command owner of the host, which the commands that change an attached session need.
-        public static async Task<SpaceResourceFixture> CreateAsync(bool withOwner, params string[] moreProviders)
+        public static Task<SpaceResourceFixture> CreateAsync(bool withOwner, params string[] moreProviders) => CreateAsync(withOwner, withLibrary: false, moreProviders);
+
+        // withLibrary: the library of scripts, for `alta script` and the scripts of Code Mode.
+        public static async Task<SpaceResourceFixture> CreateAsync(bool withOwner, bool withLibrary, params string[] moreProviders)
         {
             var root = TempDirectory.Create();
             var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "global") };
@@ -428,6 +500,7 @@ public sealed partial class AltaLiveToolTests
             var view = new ShownSpaceView { ShownSpaceId = "personal" };
             var services = new AltaServiceCollection();
             if (withOwner) services.Add(new OwnedSessionCommandService(runtime, projectCatalog, options, 8, () => true));
+            if (withLibrary) services.Add(new CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary(options));
             var dispatcher = CreateDispatcher(services
                 .Add(options)
                 .Add(projectCatalog)

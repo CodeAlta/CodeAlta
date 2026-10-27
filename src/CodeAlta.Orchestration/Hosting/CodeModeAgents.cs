@@ -147,6 +147,8 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         if (Interlocked.Increment(ref state.Started) > MaxPerRun)
             return Refused($"This script already started {MaxPerRun} sessions, the most for one run.");
         if (request.Schema is { } asked && StructuredAnswer.Inspect(asked) is { Count: > 0 } problems) return Refused(SchemaRefusal(problems));
+        if (request.Sandbox is { } sandbox && await RefuseSandboxAsync(parentSessionId, sandbox, cancellationToken).ConfigureAwait(false) is { } sandboxRefusal)
+            return Refused(sandboxRefusal);
 
         ModelTier? tier = null;
         if (request.Tier is { } tierName && (tier = ModelTiers.Parse(tierName)) is null)
@@ -225,6 +227,20 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         });
         return new CodeModeAgentResult(session.SessionId, run.Status == HeadlessRunStatus.Completed, status, run.FinalMessage,
             run.Status == HeadlessRunStatus.Completed ? null : run.FailureMessage ?? $"The session ended: {status}.", run.Usage, clock.Elapsed) { Value = value };
+    }
+
+    // The sandbox a script asks for its session, under the rules of the model's own `alta session create --sandbox`: a
+    // session started by the script of a sandboxed session has that sandbox and no other, and a script turns a sandbox on,
+    // never off. Null when the choice stands.
+    private async Task<string?> RefuseSandboxAsync(string parentSessionId, string asked, CancellationToken cancellationToken)
+    {
+        var own = await _host.RuntimeService.GetSessionSandboxAsync(parentSessionId, cancellationToken).ConfigureAwait(false);
+        if (own.IsSandboxed)
+            return $"The session that runs the script is sandboxed (profile '{own.Choice.Profile}'): the sessions it starts have its sandbox, and the script chooses no other. Leave `sandbox` out.";
+        var wanted = asked.Trim();
+        return wanted.Equals(CodeAlta.Sandbox.SandboxProfiles.Off, StringComparison.OrdinalIgnoreCase) || wanted.Equals(OwnedSessionCommandService.ScopeSandbox, StringComparison.OrdinalIgnoreCase)
+            ? "A script turns a sandbox on, never off: the user chooses where sessions run without one. Leave `sandbox` out, or name a profile."
+            : null;
     }
 
     private static string SchemaRefusal(IReadOnlyList<string> problems)
