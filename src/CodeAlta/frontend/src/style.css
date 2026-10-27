@@ -1111,6 +1111,10 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .model-tier-fallback .bp6-switch { margin: 0; }
 .model-tier-triggers { padding-left: 38px; color: var(--muted); }
 .model-tier-triggers .bp6-checkbox { margin: 0 14px 0 0; font-size: 12px; }
+.model-tier-resume { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding-left: 38px; }
+.model-tier-resume .bp6-switch { margin: 0; font-size: 12px; }
+.model-tier-max-resumes { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.model-tier-max-resumes .bp6-input-group { width: 64px; }
 .model-tier-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 @container (max-width: 640px) { .model-tier-columns { grid-template-columns: minmax(0, 1fr); } }
 .model-tier { display: grid; align-content: start; gap: 4px; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }

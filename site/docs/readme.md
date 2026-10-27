@@ -28,7 +28,7 @@ This guide applies to the two apps. Screenshots have a **Desktop / TUI** switch,
 ## Working with agents
 
 - [Agent Prompts](prompts.md): Default and Plan modes, and prompts of your own.
-- [Model Tiers](model-tiers.md): run a session on Complex, Standard or Quick, and fall back to the next model when a provider runs out of quota.
+- [Model Tiers](model-tiers.md): run a session on Complex, Standard or Quick, fall back to the next model when a provider runs out of quota, and resume when the limit resets.
 - [Spaces](spaces.md): a setup for each kind of work, with its projects, providers, tools and identity.
 - [Worktrees](worktrees.md): sessions that work in a git worktree of their own.
 - [Reviews](reviews.md): comment on a plan, a file or changes, and have agents wait for your approval before they commit.

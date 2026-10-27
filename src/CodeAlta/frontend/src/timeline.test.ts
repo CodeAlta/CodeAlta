@@ -541,6 +541,28 @@ test("a fallback after a failure shows why and the models left and taken", () =>
   assert.equal(item.markdown, "Claude Code quota reached until 18:00, continuing on Codex GPT-6.1 high.");
 });
 
+test("a card that schedules a resume after a limit offers it, and the cards of its end are titled by what happened", () => {
+  const resumeId = "0123456789abcdef0123456789abcdef";
+  const [scheduled, resumed, cancelled, plain] = buildTimelineItems([
+    entry({ eventType: "sessionUpdate", kind: "Warning", offset: "10",
+      text: "PROV-B quota reached, and no other model of the standard tier can take over. Resumes at 14:05 with Claude Code.",
+      details: JSON.stringify({ reason: "QuotaExhausted", from: "prov-b:model-b@high", resumeId, resume: "scheduled",
+        resumeAt: "2026-10-27T13:05:30.0000000+00:00", resumeProvider: "claude-code", resumeProviderName: "Claude Code", resumeAttempt: 1 }) }),
+    entry({ eventType: "sessionUpdate", kind: "ProviderFallback", offset: "11", text: "The limit of Claude Code has reset: resuming on Claude Code Opus high.",
+      details: JSON.stringify({ reason: "QuotaExhausted", from: "prov-b:model-b@high", to: "claude-code:opus@high", resumeId, resume: "automatic" }) }),
+    entry({ eventType: "sessionUpdate", kind: "Info", offset: "12", text: "Automatic resume cancelled.",
+      details: JSON.stringify({ reason: "QuotaExhausted", from: "prov-b:model-b@high", resumeId, resume: "cancelled" }) }),
+    entry({ eventType: "sessionUpdate", kind: "Warning", offset: "13", text: "No other model can take over.", details: JSON.stringify({ reason: "QuotaExhausted", from: "a:b" }) }),
+  ]);
+  assert.deepEqual(scheduled.resumeOffer, { id: resumeId, at: "2026-10-27T13:05:30.0000000+00:00", providerName: "Claude Code" });
+  assert.equal(scheduled.category, "error");
+  assert.equal(resumed.title, "Session resumed");
+  assert.equal(resumed.resumeOffer, undefined);
+  assert.equal(cancelled.title, "Automatic resume cancelled");
+  assert.equal(cancelled.icon, "reminder");
+  assert.equal(plain.resumeOffer, undefined);
+});
+
 test("raw persistence records are not rendered as unavailable provider cards", () => {
   const items = buildTimelineItems([
     entry({ eventType: "raw", text: null, details: null, bodyOmitted: true }),

@@ -33,7 +33,7 @@ const held = new Map<string, ModelTierList[]>([
   ["", [list("complex", [["claude-code", "opus", ["High", "XHigh"]], ["codex", "gpt-6.1", ["XHigh"]], ["gone", "m", []]]), list("standard", []), list("quick", [])]],
   ["business", [list("complex", []), list("standard", []), list("quick", [["claude-code", "haiku", ["Low"]], ["codex", "gpt-6.1", ["Medium", "High"]]])]],
 ]);
-const fallbacks = new Map([["", { enabled: false, onQuota: true, onUnavailable: true }], ["business", { enabled: false, onQuota: true, onUnavailable: true }]]);
+const fallbacks = new Map([["", { enabled: false, onQuota: true, onUnavailable: true, resume: false, maxResumes: 5 }], ["business", { enabled: false, onQuota: true, onUnavailable: true, resume: false, maxResumes: 5 }]]);
 const state = { saved: [] as GlobalConfigSaveModelTiersRequest[] };
 const reply = (spaceId: string | null): GlobalConfigModelTiersResponse =>
   ({ status: "ok", message: null, source: spaceId ? "space" : "global", spaceId, fallback: fallbacks.get(spaceId ?? "")!, tiers: held.get(spaceId ?? "")! });

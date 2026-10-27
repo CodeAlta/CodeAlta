@@ -135,6 +135,7 @@ A busy session puts the prompt in its waiting list instead of sending it.
 - **An agent has no `shell_command`**: it is turned off in **Settings > Permissions > Tools**, in the **Tools** of the space, or in the agent prompt. See [Tools turned off](workspace/settings.md#tools-turned-off).
 - **Commits have the wrong author**: open the space in **Settings > Spaces**, then **Identity**, and **Check** on the Git card. A running session keeps the identity it started with, and a repository's own `.git/config` comes first. See [Identity](spaces.md#identity).
 - **A session did not fall back after a quota error**: the fallback is off until you turn it on, and uses only the models of the session's tier whose provider is in its space. See [Model tiers and fallback](model-tiers.md#fallback-when-a-provider-fails).
+- **A session did not resume after its limit reset**: **Resume when the limit resets** is off until you turn it on, it resumes a session at most 5 times in a row by default, and a prompt sent to the session while it waits cancels it. See [Resume when the limit resets](model-tiers.md#resume-when-the-limit-resets).
 
 ### History cannot be read
 

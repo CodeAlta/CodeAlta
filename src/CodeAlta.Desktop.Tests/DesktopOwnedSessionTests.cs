@@ -39,6 +39,31 @@ public sealed class DesktopOwnedSessionTests
     }
 
     [TestMethod]
+    public async Task ResumeRequests_AreCheckedBeforeTheHostIsAsked()
+    {
+        var service = new SessionOperationsService("epoch", _ => throw new AssertFailedException("Unexpected send"), _ => throw new AssertFailedException("Unexpected abort"));
+        const string resume = "0123456789abcdef0123456789abcdef";
+        Assert.AreEqual("unconfigured", new SessionOperationsService().PendingResume(new("epoch", "session"), CancellationToken.None).Status);
+        Assert.AreEqual("unconfigured", (await new SessionOperationsService().CancelResumeAsync(new("epoch", "session", resume), CancellationToken.None)).Status);
+        Assert.AreEqual("unconfigured", new SessionOperationsService().ResumeNow(new("epoch", "session", resume), CancellationToken.None).Status);
+        Assert.AreEqual("stale_epoch", service.PendingResume(new("another", "session"), CancellationToken.None).Status);
+        Assert.AreEqual("stale_epoch", (await service.CancelResumeAsync(new("another", "session", resume), CancellationToken.None)).Status);
+        Assert.AreEqual("stale_epoch", service.ResumeNow(new("another", "session", resume), CancellationToken.None).Status);
+        Assert.AreEqual("invalid_request", service.PendingResume(new("epoch", " session"), CancellationToken.None).Status);
+        foreach (var refused in new SessionResumeActionRequest[] { new("epoch", " ", resume), new("epoch", "session", ""), new("epoch", "session", new string('x', 65)) })
+        {
+            Assert.AreEqual("invalid_request", (await service.CancelResumeAsync(refused, CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_request", service.ResumeNow(refused, CancellationToken.None).Status);
+        }
+
+        // A page whose host owns no session has no resume.
+        var none = service.PendingResume(new("epoch", "session"), CancellationToken.None);
+        Assert.AreEqual(("unavailable", null), (none.Status, none.Resume));
+        Assert.AreEqual("unavailable", (await service.CancelResumeAsync(new("epoch", "session", resume), CancellationToken.None)).Status);
+        Assert.AreEqual("unavailable", service.ResumeNow(new("epoch", "session", resume), CancellationToken.None).Status);
+    }
+
+    [TestMethod]
     public async Task ReferenceContractsRefuseUnownedAndStaleAndFreezeExpectedScope()
     {
         OwnedTextSendRequest? captured = null;

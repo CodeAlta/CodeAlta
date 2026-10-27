@@ -182,6 +182,8 @@ import { OpenRunContext } from "./workflows/openRun";
 import { createMessageReader, MessageReaderContext } from "./wholeMessage";
 import { createWorkflowsHub } from "./workflows/workflowsHub";
 import { ScriptRunActionsContext } from "./scriptCard/SaveAsScript";
+import { SessionResumeContext } from "./resumeCard/TimelineResumeCard";
+import { createResumeHub } from "./resumeCard/resumeHub";
 import { IssuesPanel } from "./issues/IssuesPanel";
 import { PullRequestButton } from "./pullRequests/PullRequestButton";
 import { PullRequestSettings } from "./pullRequests/PullRequestSettings";
@@ -317,6 +319,7 @@ import "./style.css";
 import "./timelineEmphasis/timelineEmphasis.css";
 import "./timelineActivity/timelineActivity.css";
 import "./scriptCard/scriptCard.css";
+import "./resumeCard/resumeCard.css";
 import "./editor/editor.css";
 import "./pluginProviders/pluginProviders.css";
 import "./review/review.css";
@@ -6290,7 +6293,11 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
       return outcome.ok ? null : outcome.message ?? "";
     },
   } : null, [cliEpoch, session.id]);
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><MessageReaderContext.Provider value={readMessage}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  // The resume after a limit the session waits for: its warning card offers Resume now and Cancel, in an owned host only.
+  // It is read when a card shows it, and again when the run of the session starts or ends.
+  const resumeHub = useMemo(() => cliEpoch ? createResumeHub(sessionOperations, cliEpoch, session.id) : null, [cliEpoch, session.id]);
+  useEffect(() => { resumeHub?.noteRunning(running === true); }, [resumeHub, running]);
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><SessionResumeContext.Provider value={resumeHub}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><MessageReaderContext.Provider value={readMessage}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       // The conversation of the Claude Code CLI the session continues: read when the window opens; another provider has none.
       conversation={ownedSession && !demoMode && session.providerConversation === true
@@ -6379,7 +6386,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div></MessageReaderContext.Provider></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></ScriptRunActionsContext.Provider></MarkdownLinkScopeContext.Provider>;
+  </div></MessageReaderContext.Provider></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></ScriptRunActionsContext.Provider></SessionResumeContext.Provider></MarkdownLinkScopeContext.Provider>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

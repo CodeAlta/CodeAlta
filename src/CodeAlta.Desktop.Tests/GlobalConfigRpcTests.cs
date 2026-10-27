@@ -177,7 +177,7 @@ public sealed class GlobalConfigRpcTests
         Assert.AreEqual("ok", empty.Status);
         CollectionAssert.AreEqual(new[] { "complex", "standard", "quick" }, empty.Tiers.Select(static list => list.Tier).ToArray());
         Assert.IsTrue(empty.Tiers.All(static list => list.Targets.Count == 0 && list.Choice is null));
-        Assert.AreEqual(new ModelFallbackSetting(false, true, true), empty.Fallback);
+        Assert.AreEqual(new ModelFallbackSetting(false, true, true, false, 5), empty.Fallback);
 
         var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch)
         {
@@ -195,23 +195,26 @@ public sealed class GlobalConfigRpcTests
         [
             new("complex", [new("claude-code", "opus", ["High", "XHigh"]), new("codex", "gpt-6.1", ["XHigh"])]),
             new("quick", [new("claude-code", "haiku", [])]),
-        ], new(true, true, false)));
+        ], new(true, true, false, true, 3)));
         Assert.AreEqual("ok", saved.Status, saved.Message);
+        Assert.AreEqual(new ModelFallbackSetting(true, true, false, true, 3), saved.Fallback, "The resume after a limit is saved with the fallback.");
         // Claude Code is not ready: the complex tier gives the next target.
         Assert.AreEqual(new ModelTierChoiceItem("codex", "gpt-6.1", "XHigh", "Codex", "GPT-6.1"), saved.Tiers[0].Choice);
         Assert.IsNull(saved.Tiers[2].Choice);
         var text = File.ReadAllText(fixture.ConfigPath);
         StringAssert.Contains(text, "\"claude-code:opus@high,xhigh\"");
         StringAssert.Contains(text, "on = [\"quota\"]");
+        StringAssert.Contains(text, "resume = true");
+        StringAssert.Contains(text, "max_resumes = 3");
         StringAssert.Contains(text, "sk-kept", "The other settings stay.");
         CollectionAssert.AreEqual(new[] { "High", "XHigh" }, ReadTiers(service, new(Epoch)).Tiers[0].Targets[0].Reasoning.ToArray());
 
         // What is not a target is refused with what is wrong, and nothing is written.
-        var refused = SaveTiers(service, new(Epoch, [new("quick", [new("claude-code", "haiku", ["Huge"])])], new(false, true, true)));
+        var refused = SaveTiers(service, new(Epoch, [new("quick", [new("claude-code", "haiku", ["Huge"])])], new(false, true, true, false, 5)));
         Assert.AreEqual(("invalid", "'Huge' is not a reasoning effort."), (refused.Status, refused.Message));
-        Assert.AreEqual("invalid", SaveTiers(service, new(Epoch, [new("quick", [new("", "haiku", [])])], new(false, true, true))).Status);
-        Assert.AreEqual("invalid", SaveTiers(service, new(Epoch, [new("fast", [])], new(false, true, true))).Status);
-        StringAssert.Contains(SaveTiers(service, new(Epoch, [new("quick", [new("a", "m", []), new("A", "M", [])])], new(false, true, true))).Message, "listed twice");
+        Assert.AreEqual("invalid", SaveTiers(service, new(Epoch, [new("quick", [new("", "haiku", [])])], new(false, true, true, false, 5))).Status);
+        Assert.AreEqual("invalid", SaveTiers(service, new(Epoch, [new("fast", [])], new(false, true, true, false, 5))).Status);
+        StringAssert.Contains(SaveTiers(service, new(Epoch, [new("quick", [new("a", "m", []), new("A", "M", [])])], new(false, true, true, false, 5))).Message, "listed twice");
         Assert.AreEqual(text, File.ReadAllText(fixture.ConfigPath));
 
         // Tiers the file writes wrong are said, and shown as none.
@@ -262,7 +265,7 @@ public sealed class GlobalConfigRpcTests
 
         // Tiers of its own, in the file of the space; the settings keep theirs.
         var global = File.ReadAllText(fixture.ConfigPath);
-        var own = SaveTiers(service, new(Epoch, [new("quick", [new("claude-code", "haiku", ["Low"])])], new(false, true, true)) { SpaceId = "business" });
+        var own = SaveTiers(service, new(Epoch, [new("quick", [new("claude-code", "haiku", ["Low"])])], new(false, true, true, false, 5)) { SpaceId = "business" });
         Assert.AreEqual(("ok", "space"), (own.Status, own.Source), own.Message);
         Assert.AreEqual(0, own.Tiers[1].Targets.Count, "The tiers of a space replace the global ones, also where it sets none.");
         Assert.AreEqual("haiku", own.Tiers[2].Choice?.ModelId);
@@ -271,13 +274,13 @@ public sealed class GlobalConfigRpcTests
         Assert.AreEqual("space", ReadTiers(service, new(Epoch) { SessionId = "s1" }).Source);
 
         // Back to the global tiers.
-        var back = SaveTiers(service, new(Epoch, [], new(false, true, true)) { SpaceId = "business", UseGlobal = true });
+        var back = SaveTiers(service, new(Epoch, [], new(false, true, true, false, 5)) { SpaceId = "business", UseGlobal = true });
         Assert.AreEqual(("ok", "global"), (back.Status, back.Source));
         Assert.IsFalse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(fixture.ConfigPath)!, "spaces", "business.md")).Contains("haiku", StringComparison.Ordinal));
 
         Assert.AreEqual("not_found", ReadTiers(service, new(Epoch) { SpaceId = "nowhere" }).Status);
         Assert.AreEqual("not_found", ReadTiers(service, new(Epoch) { SessionId = "unknown" }).Status);
-        Assert.AreEqual("not_found", SaveTiers(service, new(Epoch, [new("quick", [])], new(false, true, true)) { SpaceId = "nowhere" }).Status);
+        Assert.AreEqual("not_found", SaveTiers(service, new(Epoch, [new("quick", [])], new(false, true, true, false, 5)) { SpaceId = "nowhere" }).Status);
     }
 
     [TestMethod]
@@ -300,7 +303,7 @@ public sealed class GlobalConfigRpcTests
         var file = Path.Combine(root, "spaces", "business.md");
         var service = new GlobalConfigService(fixture.Store, fixture.Registry, root, Epoch) { Spaces = spaces };
         var global = File.ReadAllText(fixture.ConfigPath);
-        var usual = new ModelFallbackSetting(true, true, true);
+        var usual = new ModelFallbackSetting(true, true, true, false, 5);
         Assert.AreEqual(usual, ReadTiers(service, new(Epoch) { SpaceId = "business" }).Fallback, "A space with the usual settings has the global fallback.");
 
         // Customizing with the global fallback writes tiers only: the space follows the global fallback.
@@ -312,7 +315,7 @@ public sealed class GlobalConfigRpcTests
         StringAssert.Contains(File.ReadAllText(file), "work-claude:opus@high");
 
         // Changed there, the space has its own fallback, kept once it is the same as the global one again.
-        var quotaOnly = new ModelFallbackSetting(true, true, false);
+        var quotaOnly = new ModelFallbackSetting(true, true, false, false, 5);
         Assert.AreEqual(quotaOnly, SaveTiers(service, new(Epoch, tiers, quotaOnly) { SpaceId = "business" }).Fallback);
         StringAssert.Contains(File.ReadAllText(file), "fallback:");
         Assert.AreEqual(quotaOnly, ReadTiers(service, new(Epoch) { SpaceId = "business" }).Fallback);
@@ -860,8 +863,8 @@ public sealed class GlobalConfigRpcTests
         Assert.IsTrue((await spaces.CreateAsync("Personal")).Succeeded);
         var service = new GlobalConfigService(fixture.Store, fixture.Registry, root, Epoch) { Spaces = spaces };
         // Business names only the provider that goes; Personal names both.
-        Assert.AreEqual("ok", SaveTiers(service, new(Epoch, [new("standard", [new("alpha", "model-a", [])])], new(true, true, false)) { SpaceId = "business" }).Status);
-        Assert.AreEqual("ok", SaveTiers(service, new(Epoch, [new("quick", [new("bravo", "model-b", []), new("alpha", "model-q", [])])], new(true, true, true)) { SpaceId = "personal" }).Status);
+        Assert.AreEqual("ok", SaveTiers(service, new(Epoch, [new("standard", [new("alpha", "model-a", [])])], new(true, true, false, false, 5)) { SpaceId = "business" }).Status);
+        Assert.AreEqual("ok", SaveTiers(service, new(Epoch, [new("quick", [new("bravo", "model-b", []), new("alpha", "model-q", [])])], new(true, true, true, false, 5)) { SpaceId = "personal" }).Status);
 
         var deleted = await service.DeleteProviderAsync(new(Epoch, service.Providers(new(Epoch)).Revision, "alpha", false), CancellationToken.None);
         Assert.AreEqual("ok", deleted.Status, deleted.Message);

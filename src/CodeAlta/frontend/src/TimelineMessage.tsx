@@ -27,6 +27,7 @@ import { SystemPromptReaderContext } from "./SystemPromptDialog";
 import { promptProblem, promptTokens } from "./systemPrompt";
 import { usePromptChange } from "./systemPromptReader";
 import { TimelineClaudeCli } from "./claudeCli/timelineCard";
+import { TimelineResumeCard } from "./resumeCard/TimelineResumeCard";
 import { promptProvenanceTitle } from "./promptProvenance";
 import type { MessageKey } from "./localization";
 import { ScriptCalls } from "./scriptCard/ScriptCalls";
@@ -327,6 +328,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       {item.images && <TimelineImages images={item.images} source={imageSource} />}
       {item.attachments && <AttachedFileChips attachments={item.attachments} />}
       {item.missingCliProvider && <TimelineClaudeCli providerKey={item.missingCliProvider} />}
+      {item.resumeOffer && <TimelineResumeCard offer={item.resumeOffer} />}
       {item.fileChanges && <FileChangeInspection key={item.fileChanges.source} changes={item.fileChanges} canInspect={canInspect} />}
       {details && <TimelineDetails item={details.item} current={detailCurrent} onClose={closeDetails} />}
       {branch && branchMenu && article.current && <SessionTabMenu anchor={article.current} at={branchMenu} container={document.body}

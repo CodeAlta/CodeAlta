@@ -182,6 +182,8 @@ Cleanup runs at the **next startup**, never at once. Session cleanup runs on loc
 
 The model browser (**Settings > Models**, `Ctrl+G Ctrl+O` or `/models`) lists the models of every provider with their context size, their capabilities (reasoning, tool calls, images) and their model refs, such as `codex:gpt-5.5@high`.
 
+Above it, **Model tiers** sets the models of the Complex, Standard and Quick tiers, the fallback to the next model of a tier when a provider fails, and the resume of a session when the limit resets. See [Model Tiers and Fallback](../model-tiers.md).
+
 ## Agent prompts
 
 Open the prompt manager with `Ctrl+G Ctrl+H` or `/prompt` (**Settings > Agent prompts**). It lists the built-in prompts, such as Default and Plan, and your global and project prompts, shows which are overridden, and edits the selected one: `name`, `description`, `system` and the Markdown body. Built-in prompts are read-only: **Customize a copy**, or a prompt with the same id, overrides one. System prompt files follow the same rules. The `</>` button opens the file of a prompt in the [code editor](code.md#code-editor). See [Agent Prompts](../prompts.md).

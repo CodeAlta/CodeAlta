@@ -83,6 +83,15 @@ test("the tiers of a space offer its providers and have their own fallback; the 
     await page.until(`document.querySelector('#space .model-tier-triggers')`, "the failures of the space's fallback");
     assert.equal(await page.evaluate(`document.querySelector('#global .model-tier-fallback input').checked`), false, "the global fallback stays off");
 
+    // With the fallback on quota, the space can resume a session when the limit resets, and say how many times in a row.
+    await page.click('#space .model-tier-resume label.bp6-switch');
+    await page.until(`tiersFixture.saved.length === 3`, "the save of the resume of the space");
+    assert.deepEqual(await page.evaluate(`[tiersFixture.saved[2].spaceId, tiersFixture.saved[2].fallback.resume, tiersFixture.saved[2].fallback.maxResumes]`), ["business", true, 5]);
+    await page.until(`document.querySelector('#space [aria-label="Automatic resumes in a row"]')`, "the number of resumes in a row");
+    await page.click('#space .model-tier-max-resumes .bp6-numeric-input .bp6-button-group button');
+    await page.until(`tiersFixture.saved.length === 4`, "the save of the number of resumes");
+    assert.equal(await page.evaluate(`tiersFixture.saved[3].fallback.maxResumes`), 6);
+
     // The global tiers, the usual settings of every space, offer every provider and name the spaces of those not in all.
     await page.until(`!document.querySelector('.model-tier-add')`, "the picker of the space closed");
     await page.click('#global [aria-label="Add a model to Standard"]');

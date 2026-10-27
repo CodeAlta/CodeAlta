@@ -13,7 +13,7 @@ const never = () => assert.fail("rendering must not act");
 const space: Space = { id: "business", name: "Business", description: null, icon: null, color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] };
 const reply = (source: "global" | "space"): GlobalConfigModelTiersResponse => ({
   status: "ok", message: null, source, spaceId: "business",
-  fallback: { enabled: true, onQuota: true, onUnavailable: true },
+  fallback: { enabled: true, onQuota: true, onUnavailable: true, resume: false, maxResumes: 5 },
   tiers: [
     { tier: "complex", targets: [{ providerKey: "claude-code", modelId: "opus", reasoning: ["High"] }],
       choice: { providerKey: "claude-code", modelId: "opus", reasoning: "High", providerName: "Claude Code", modelName: "Opus" } },

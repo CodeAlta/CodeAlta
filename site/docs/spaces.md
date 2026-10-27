@@ -329,7 +329,7 @@ Libraries I maintain and the projects I contribute to.
 | `order` | The place of the space in the list |
 | `new_sessions.agent_prompt` | The agent prompt of **New sessions** |
 | `new_sessions.tiers` | Its own `complex`, `standard` and `quick` tiers, as in [Model tiers](model-tiers.md#in-the-file) |
-| `new_sessions.fallback` | Its fallback: `enabled`, and `on` with `quota` or `unavailable` to fall back on one failure only |
+| `new_sessions.fallback` | Its fallback: `enabled`, `on` with `quota` or `unavailable` to fall back on one failure only, and `resume` with `max_resumes` to [resume when the limit resets](model-tiers.md#resume-when-the-limit-resets) |
 | `new_sessions.sandbox` | The [sandbox](sessions/sandbox.md) of its sessions: a profile, or `off` |
 | `tools.disabled` | The tools of **Tools** |
 

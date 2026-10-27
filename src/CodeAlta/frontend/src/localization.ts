@@ -13,6 +13,7 @@ import { sandboxMessages } from "./sandbox/messages";
 import { promptProvenanceMessages } from "./promptProvenance";
 import { codeModeSettingsMessages } from "./codeModeSettingsMessages";
 import { scriptCardMessages } from "./scriptCard/messages";
+import { resumeCardMessages } from "./resumeCard/messages";
 import { scriptAutomationMessages } from "./automations/scriptAutomationMessages";
 import { workflowMessages } from "./workflows/messages";
 import { claudeCliMessages } from "./claudeCli/messages";
@@ -2789,6 +2790,7 @@ export const messages = dictionary({
   ...promptProvenanceMessages,
   ...codeModeSettingsMessages,
   ...scriptCardMessages,
+  ...resumeCardMessages,
   ...scriptAutomationMessages,
   ...workflowMessages,
   ...claudeCliMessages,
