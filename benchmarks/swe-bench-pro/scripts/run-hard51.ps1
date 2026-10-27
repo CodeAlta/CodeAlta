@@ -26,6 +26,9 @@ param(
 
     [switch]$PrepareOnly,
 
+    # Skips the install preflights, for example to add a job to a run whose preflight already passed.
+    [switch]$SkipPreflight,
+
     [switch]$ConfirmPaidRun,
 
     [switch]$DryRun
@@ -284,7 +287,7 @@ $preflights = [ordered]@{
 }
 $harnesses = @($selectedRuns | ForEach-Object { $runDefinitions[$_].Harness } | Select-Object -Unique)
 foreach ($harness in $preflights.Keys) {
-    if ($harnesses -notcontains $harness) {
+    if ($SkipPreflight -or $harnesses -notcontains $harness) {
         continue
     }
     $preflight = $preflights[$harness]
