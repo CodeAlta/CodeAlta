@@ -56,7 +56,6 @@ public sealed partial class CodeAltaConfigStore
     private const string CodexSubscriptionDefaultDisplayName = "Codex";
     private const string CodexSubscriptionDefaultApiUrl = "https://api.openai.com/v1";
     private const string CodexSubscriptionDefaultAuthSource = "codealta_oauth";
-    private const string CodexSubscriptionDefaultTextVerbosity = "medium";
     private const string CodexSubscriptionDefaultModelDiscovery = "codex_endpoint_with_static_fallback";
     private const string CodexSubscriptionDefaultResponseTransport = "http";
     private const string CodexSubscriptionDefaultInstallationIdSource = "codealta_state";
@@ -2512,7 +2511,6 @@ public sealed partial class CodeAltaConfigStore
         definition.ApiUrl ??= CodexSubscriptionDefaultApiUrl;
         definition.AuthSource ??= CodexSubscriptionDefaultAuthSource;
         definition.MaxConcurrentRequests ??= CodexSubscriptionDefaultMaxConcurrentRequests;
-        definition.TextVerbosity ??= CodexSubscriptionDefaultTextVerbosity;
         definition.IncludeEncryptedReasoning ??= true;
         definition.ModelDiscovery ??= CodexSubscriptionDefaultModelDiscovery;
         definition.ResponseTransport ??= CodexSubscriptionDefaultResponseTransport;
@@ -2651,6 +2649,7 @@ public sealed partial class CodeAltaConfigStore
             case "openai-responses":
                 RejectUnsupportedField(definition, "project", definition.Project);
                 RejectUnsupportedField(definition, "location", definition.Location);
+                ValidateTextVerbosity(definition);
                 break;
 
             case "azure-openai":
@@ -2835,7 +2834,11 @@ public sealed partial class CodeAltaConfigStore
         RejectUnsupportedField(definition, "auth_source", definition.AuthSource);
         RejectUnsupportedField(definition, "account_id", definition.AccountId);
         RejectUnsupportedField(definition, "max_concurrent_requests", definition.MaxConcurrentRequests);
-        RejectUnsupportedField(definition, "text_verbosity", definition.TextVerbosity);
+        if (!string.Equals(definition.ProviderType, "openai-responses", StringComparison.Ordinal))
+        {
+            RejectUnsupportedField(definition, "text_verbosity", definition.TextVerbosity);
+        }
+
         RejectUnsupportedField(definition, "include_encrypted_reasoning", definition.IncludeEncryptedReasoning);
         RejectUnsupportedField(definition, "model_discovery", definition.ModelDiscovery);
         RejectUnsupportedField(definition, "response_transport", definition.ResponseTransport);
@@ -2843,6 +2846,15 @@ public sealed partial class CodeAltaConfigStore
         RejectUnsupportedField(definition, "send_installation_id", definition.SendInstallationId);
         RejectUnsupportedField(definition, "installation_id_source", definition.InstallationIdSource);
         RejectUnsupportedField(definition, "experimental", definition.Experimental);
+    }
+
+    // Not set, the model's own default verbosity is sent, where it is known.
+    private static void ValidateTextVerbosity(CodeAltaProviderDocument definition)
+    {
+        if (definition.TextVerbosity is not (null or "low" or "medium" or "high"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} text_verbosity must be one of: low, medium, high.");
+        }
     }
 
     private static void RejectRequestExtraBodyFields(CodeAltaProviderDocument definition)
@@ -2891,11 +2903,7 @@ public sealed partial class CodeAltaConfigStore
             throw new InvalidOperationException($"providers.{definition.ProviderKey} auth_source must be codealta_oauth. Use Continue with ChatGPT in CodeAlta; legacy Codex credential imports are not supported.");
         }
 
-        if (definition.TextVerbosity is not ("low" or "medium" or "high"))
-        {
-            throw new InvalidOperationException($"providers.{definition.ProviderKey} text_verbosity must be one of: low, medium, high.");
-        }
-
+        ValidateTextVerbosity(definition);
         if (definition.ModelDiscovery is not ("codex_endpoint_with_static_fallback" or "codex_endpoint" or "static"))
         {
             throw new InvalidOperationException($"providers.{definition.ProviderKey} model_discovery must be one of: codex_endpoint_with_static_fallback, codex_endpoint, static.");
@@ -3148,11 +3156,6 @@ public sealed partial class CodeAltaConfigStore
             if (definition.MaxConcurrentRequests == CodexSubscriptionDefaultMaxConcurrentRequests)
             {
                 definition.MaxConcurrentRequests = null;
-            }
-
-            if (string.Equals(definition.TextVerbosity, CodexSubscriptionDefaultTextVerbosity, StringComparison.Ordinal))
-            {
-                definition.TextVerbosity = null;
             }
 
             if (definition.ServiceTier == "default")

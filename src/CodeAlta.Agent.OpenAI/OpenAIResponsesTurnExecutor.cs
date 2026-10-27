@@ -1460,6 +1460,24 @@ internal sealed class OpenAIResponsesTurnExecutor(
             options.IncludedProperties.Add(IncludedResponseProperty.ReasoningEncryptedContent);
         }
 
+        if (provider.CodexSubscription is null)
+        {
+            if (IsOfficialOpenAIResponsesEndpoint(provider))
+            {
+                // As for the Codex provider: the requests of a session, and of its forks, go to the same cache. Another
+                // endpoint that speaks the protocol may reject a field it does not know; its extra_body can add it.
+                options.Patch.Set("$.prompt_cache_key"u8, request.PromptCacheKey ?? request.SessionId);
+            }
+
+            SetTextVerbosity(
+                options,
+                OpenAITextVerbosity.ForResponses(
+                    provider.TextVerbosity,
+                    request.ModelId,
+                    request.ModelInfo,
+                    IsOfficialOpenAIResponsesEndpoint(provider)));
+        }
+
         var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
         OpenAIExtraBodyPatchHelper.Apply(
             ref options.Patch,
@@ -1515,6 +1533,18 @@ internal sealed class OpenAIResponsesTurnExecutor(
         => request.Provider.Profile?.SupportsToolResultImages
            ?? (provider.CodexSubscription is not null || provider.IsAzureOpenAI || IsOfficialOpenAIResponsesEndpoint(provider));
 
+    private static void SetTextVerbosity(CreateResponseOptions options, string? verbosity)
+    {
+        if (verbosity is null)
+        {
+            return;
+        }
+
+        // Avoid the SDK's root-level "$.text.*" propagator, which dereferences null text options.
+        var textOptions = options.TextOptions ??= new ResponseTextOptions();
+        textOptions.Patch.Set("$.verbosity"u8, verbosity);
+    }
+
     private static bool IsOfficialOpenAIResponsesEndpoint(OpenAIProviderOptions provider)
         => provider.CodexSubscription is null &&
            !provider.IsAzureOpenAI &&
@@ -1553,9 +1583,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         options.Patch.Set("$.prompt_cache_key"u8, request.PromptCacheKey ?? request.SessionId);
         if (modelCapabilities.SupportsVerbosity)
         {
-            // Avoid the SDK's root-level "$.text.*" propagator, which dereferences null text options.
-            var textOptions = options.TextOptions ??= new ResponseTextOptions();
-            textOptions.Patch.Set("$.verbosity"u8, codexOptions.TextVerbosity);
+            SetTextVerbosity(options, OpenAITextVerbosity.ForCodexSubscription(codexOptions.TextVerbosity, request.ModelId, request.ModelInfo));
         }
 
         if (codexOptions.EnableSequentialCutoffReasoningSummaries &&

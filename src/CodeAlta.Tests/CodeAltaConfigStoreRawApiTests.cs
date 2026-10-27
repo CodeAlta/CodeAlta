@@ -751,7 +751,8 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("https://api.openai.com/v1", provider.ApiUrl);
         Assert.AreEqual("codealta_oauth", provider.AuthSource);
         Assert.AreEqual(16, provider.MaxConcurrentRequests);
-        Assert.AreEqual("medium", provider.TextVerbosity);
+        // Not set: each model gets its own default verbosity.
+        Assert.IsNull(provider.TextVerbosity);
         Assert.IsNull(provider.ServiceTier);
         Assert.IsTrue(provider.IncludeEncryptedReasoning);
         Assert.AreEqual("codex_endpoint_with_static_fallback", provider.ModelDiscovery);
@@ -890,6 +891,47 @@ public sealed class CodeAltaConfigStoreRawApiTests
             Assert.IsFalse(saved.Contains("service_tier", StringComparison.Ordinal));
         }
         Assert.AreEqual(expected, provider.ServiceTier, "Saving must not mutate the caller's document.");
+    }
+
+    [TestMethod]
+    [DataRow("codex", null, null)]
+    [DataRow("codex", "medium", "medium")]
+    [DataRow("codex", " LOW ", "low")]
+    [DataRow("openai-responses", null, null)]
+    [DataRow("openai-responses", " High ", "high")]
+    [DataRow("openai-responses", "medium", "medium")]
+    public void TextVerbosity_NormalizesAndRoundTrips(string type, string? configured, string? expected)
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Combine(temp.Path, "config.toml");
+        File.WriteAllText(path, $"[providers.p]\ntype = \"{type}\"\n" +
+            (type == "codex" ? "" : "api_key_env = \"OPENAI_API_KEY\"\n") +
+            (configured is null ? "" : $"text_verbosity = \"{configured}\"\n"));
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
+        Assert.AreEqual(expected, provider.TextVerbosity);
+
+        store.SaveGlobalProviderDefinitions([provider]);
+
+        // A medium the user chose is kept: unset, the model's own default is sent instead.
+        Assert.AreEqual(expected, store.LoadGlobalProviderDefinitions(includeDisabled: true).Single().TextVerbosity);
+        Assert.AreEqual(expected is not null, File.ReadAllText(path).Contains("text_verbosity", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    [DataRow("openai-responses", "verbose")]
+    [DataRow("openai-chat", "low")]
+    [DataRow("anthropic", "low")]
+    public void TextVerbosity_IsRejectedWhereNotSupported(string type, string value)
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            $"[providers.p]\ntype = \"{type}\"\ntext_verbosity = \"{value}\"\n");
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "text_verbosity");
     }
 
     [TestMethod]
