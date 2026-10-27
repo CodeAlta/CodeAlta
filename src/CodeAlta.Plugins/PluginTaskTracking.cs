@@ -321,6 +321,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
 
     public IPluginAppFileService AppFiles => _inner.AppFiles;
 
+    public IPluginAskService Asks => _inner.Asks;
+
     // The spaces of the plugin as the global configuration says them when they are asked.
     private sealed class AssignedSpaces(string pluginId, Func<CodeAlta.Catalog.SpaceAssignments> read) : IPluginSpaceService
     {

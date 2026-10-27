@@ -233,5 +233,8 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         public IPluginSpaceService Spaces => inner.Spaces;
 
         public IPluginAppFileService AppFiles => inner.AppFiles;
+
+        // An agent runs these commands: through them it would answer what it asked the user.
+        public IPluginAskService Asks => NoopPluginAskService.Instance;
     }
 }

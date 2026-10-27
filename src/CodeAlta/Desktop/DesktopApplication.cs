@@ -460,6 +460,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var retentionProtection = DesktopSessionRetention.CreateProtection();
             var pluginUi = new DesktopPluginUi(retentionProtection);
             var pluginIdentities = new DesktopPluginIdentities();
+            var pluginAsks = new DesktopPluginAsks();
             // The tabs that plugins provide: created with the plugins, which start before the window has a page, and attached to their runtime once it exists.
             canvases = pluginAlta is null ? null : new DesktopCanvases(pluginUi);
             pluginUi.Modules = canvases?.Modules;
@@ -527,7 +528,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
                     DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay), PluginSafeMode = DesktopPlugins.SafeMode,
-                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest)),
+                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, modelsDev, pluginProviderTypes),
@@ -766,6 +767,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // A session that reviews before commit may commit the work tree its last review approved.
                 host.RuntimeService.Reviews = reviewService;
                 asks = new SessionAsksService(host.Commands.Asks, epoch, reviewService, host.ProjectCatalog);
+                pluginAsks.Attach(host.Commands.Asks, asks, epoch);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch, host.RetentionProtection);
                 changesView = new DesktopChangesView();
                 // The space the window shows, and what a command asks of it. A catalog that never had spaces
