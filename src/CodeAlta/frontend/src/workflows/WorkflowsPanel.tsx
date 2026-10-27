@@ -10,6 +10,10 @@ import { RunScriptWindow } from "./RunScriptWindow";
 import { ScriptSource } from "./ScriptSource";
 import { filterScripts, projectScriptPath, runDuration, runStateLabel, runTone, runsRefreshMilliseconds, scopeLabel, sortRuns, stepColumns } from "./workflows";
 import { createWorkflowsHub, type WorkflowsApi, type WorkflowsHub, type WorkflowsList } from "./workflowsHub";
+import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
+import type { RunProvider } from "../workItems/runsWith";
+
+const noProviders: readonly RunProvider[] = [];
 
 /** The steps a script declares, small: a column for each stage, the steps of a stage side by side, an arrow between stages. */
 function StepGraph({ steps }: { steps: readonly WorkflowStepItem[] }) {
@@ -139,7 +143,7 @@ function useNow(visible: boolean, running: boolean) {
  * The Workflows tab: the scripts of the library a project sees, with their steps drawn small and Run…, and the runs of
  * scripts of CodeAlta, running first, each opening its session.
  */
-export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visible, onActivate, onOpenSession, onOpenRun, onEditScript }: {
+export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visible, onActivate, onOpenSession, onOpenRun, onEditScript, providers = noProviders, sessionSettings = null }: {
   api: WorkflowsApi;
   /** The epoch of the host of the window; null in a window without a host of its own, undefined while it is not known. */
   epoch: string | null | undefined;
@@ -155,6 +159,10 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
   onOpenRun?: (run: Readonly<{ runId: string; title: string | null }>) => void;
   /** Opens a script of a project in the code editor of that project, at its path there; without it, no script is edited from the tab. */
   onEditScript?: (project: WorkspaceProject, path: string) => void;
+  /** The providers a run can use, for the form of the Agent chip of Run…; none hides it. */
+  providers?: readonly RunProvider[];
+  /** Reads what the form of the Agent chip offers for a project; null where nothing reads it. */
+  sessionSettings?: ((projectId: string) => SessionSettingsApi | null) | null;
 }) {
   const { t } = useShellLanguage();
   const hub = useMemo(() => epoch ? createWorkflowsHub(api, epoch) : null, [api, epoch]);
@@ -212,7 +220,7 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
         </section>
       </aside>
     </div>
-    {running && hub && <RunScriptWindow hub={hub} script={running} projects={projects} projectId={project} onClose={() => setRunning(null)}
+    {running && hub && <RunScriptWindow hub={hub} script={running} projects={projects} projectId={project} providers={providers} sessionSettings={sessionSettings} onClose={() => setRunning(null)}
       onStarted={sessionId => { setRunning(null); setReading(value => value + 1); onOpenSession(sessionId); }} />}
   </div>;
 }

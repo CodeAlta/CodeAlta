@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Desktop.WorkItems;
 using CodeAlta.Orchestration.Runtime.Scripts;
 using NeoAstra.Rpc;
@@ -146,7 +147,11 @@ internal sealed class WorkflowsService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
-        if (!CodeModeScriptLibrary.IsName(request.Name) || !Identifier(request.ProjectId) || request.Arguments is { Length: > MaximumArgumentsLength })
+        if (!CodeModeScriptLibrary.IsName(request.Name) || !Identifier(request.ProjectId) || request.Arguments is { Length: > MaximumArgumentsLength }
+            || request.ProviderId is not null && !Name(request.ProviderId) || request.ModelId is not null && (request.ProviderId is null || !Name(request.ModelId))
+            || request.ReasoningEffort is not null && (request.ModelId is null || !Name(request.ReasoningEffort))
+            || request.PermissionMode is not null && !Name(request.PermissionMode) || request.Sandbox is not null && !Name(request.Sandbox)
+            || request.AgentPromptId is not null && !Name(request.AgentPromptId))
             return new("invalid_request", null, null);
         var project = await _projects!.GetByIdAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project is null || project.Archived) return new("refused", null, "The project is no longer one of the projects of CodeAlta.");
@@ -155,7 +160,12 @@ internal sealed class WorkflowsService
             cancellationToken).ConfigureAwait(false);
         if (prompt is null) return new("refused", null, problem);
         var title = _scripts!.Find(request.Name, project.ProjectPath)?.Title is { Length: > 0 } named ? named : request.Name;
-        var started = await _starter!.StartAsync(project, title, _ => prompt, false, null, "workflow", new SessionStartModel { CodeMode = true }).ConfigureAwait(false);
+        // The session runs the script and its model is the one of the sessions the script starts without a tier: what the
+        // user chose in the form of the Agent chip, else the defaults.
+        var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
+        var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox, SessionOptionsChoice.Record(request.Options));
+        var model = new SessionStartModel(asked) { CodeMode = true };
+        var started = await _starter!.StartAsync(project, title, _ => prompt, false, null, "workflow", settings?.Apply(model) ?? model).ConfigureAwait(false);
         return started.Problem is null ? new("ok", started.SessionId, null) : new("refused", started.SessionId, started.Problem);
     }
 
@@ -211,6 +221,9 @@ internal sealed class WorkflowsService
         => _scripts is null ? "unavailable" : string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
 
     private static bool Identifier(string? value) => value is { Length: > 0 and <= 256 } && !value.Any(char.IsControl);
+
+    // A provider, a model, an effort, a mode, a profile or an agent prompt: one trimmed line.
+    private static bool Name(string value) => value is { Length: > 0 and <= 256 } && value == value.Trim() && !value.Any(char.IsControl);
 
     private static bool RunId(string? value) => value is { Length: > 0 and <= 64 } && value.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
 
@@ -295,7 +308,17 @@ internal sealed record WorkflowRecordItem(string Kind, string? ActivityId, strin
 
 /// <summary>Starts a script in a new session of a project.</summary>
 /// <param name="Arguments">Its arguments, a JSON object; null for none.</param>
-internal sealed record WorkflowRunRequest(string? ExpectedEpoch, string Name, string ProjectId, string? Arguments);
+/// <param name="ProviderId">The provider the user chose for the session that runs it; null for the default.</param>
+/// <param name="ModelId">The model the user chose, of that provider; null leaves it to the provider.</param>
+/// <param name="ReasoningEffort">The reasoning effort the user chose, for that model; null leaves it to the model.</param>
+/// <param name="AgentPromptId">The agent prompt the user chose; null for the default one of the space.</param>
+/// <param name="PermissionMode">The permission mode the user chose; null for the one of the provider.</param>
+/// <param name="ReviewBeforeCommit">Whether the user reviews the changes of the session before a commit; null follows the setting.</param>
+/// <param name="Sandbox">The sandbox of the session, a profile or <c>off</c>; null for what the settings give.</param>
+/// <param name="Options">The options of the session, such as whether it can start sessions of its own; null for the defaults.</param>
+internal sealed record WorkflowRunRequest(string? ExpectedEpoch, string Name, string ProjectId, string? Arguments,
+    string? ProviderId = null, string? ModelId = null, string? ReasoningEffort = null, string? AgentPromptId = null, string? PermissionMode = null,
+    bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null);
 
 /// <param name="SessionId">The session that was created, also when the prompt was not sent.</param>
 /// <param name="Message">Why the run did not start.</param>

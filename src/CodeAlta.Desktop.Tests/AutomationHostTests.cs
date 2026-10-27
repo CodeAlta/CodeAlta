@@ -966,6 +966,27 @@ public sealed class AutomationHostTests
             Assert.AreEqual("Triage issues", (await workspace.SnapshotAsync(new(), default)).Sessions.Single(session => session.Id == sessionId).Title);
             provider.Release.SetResult();
 
+            // What its session runs with: what the form of the Agent chip chose, checked like the choice of an issue or an automation.
+            var providerId = provider.Descriptor.ProviderId.Value;
+            Assert.AreEqual("invalid_request", (await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 3}", ModelId: "fixture-model"), default)).Status, "a model without its provider");
+            foreach (var (model, effort, expected) in new (string, string?, string)[]
+                     {
+                         ("other-model", null, "does not offer the model 'other-model'"),
+                         ("fixture-model", "xhigh", "has no reasoning effort 'xhigh'"),
+                     })
+            {
+                var refused = await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 3}", providerId, model, effort), default);
+                Assert.AreEqual("refused", refused.Status, refused.Message);
+                StringAssert.Contains(refused.Message, expected);
+            }
+
+            var chosen = await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 3}", providerId, "fixture-model", "low", ReviewBeforeCommit: true), default);
+            Assert.AreEqual(("ok", null), (chosen.Status, chosen.Message));
+            var (chosenSession, _) = await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            Assert.AreEqual(chosen.SessionId, chosenSession);
+            Assert.AreEqual((bool?)true, (await host.Commands.GetReviewBeforeCommitAsync(chosenSession)).Own, "The session is given what the form chose.");
+            Assert.IsTrue(host.CodeModeRuns.RequiresCodeMode(chosenSession), "A choice keeps exec for the session.");
+
             // The runs of the host, running first; an ended one says how it ended and when.
             var gate = new TaskCompletionSource<CodeAlta.CodeMode.CodeModeRunResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             var ended = host.CodeModeRuns.TryStart(sessionId, "first", 1000, "call-1",

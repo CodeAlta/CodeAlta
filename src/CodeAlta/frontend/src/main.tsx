@@ -5477,7 +5477,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={(catalog.current ?? snapshot)?.sessions ?? []}
                 projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null} visible={visible && view === "workspace" && !settingsOpen}
                 onActivate={activateShown(tab, visible)} onOpenSession={id => void openAutomationSession(id)} onOpenRun={owned ? openRun : undefined}
-                onEditScript={owned ? (project, path) => openEditor(project, { path, line: null, column: null, explorer: null }) : undefined} />
+                onEditScript={owned ? (project, path) => openEditor(project, { path, line: null, column: null, explorer: null }) : undefined}
+                providers={runProviders} sessionSettings={sessionSettingsFor} />
               : isWorkflowRunTab(tab)
               ? <RunTab key={fileTabKey(tab)} api={workflowsApi} epoch={!status ? undefined : owned ? status.hostEpoch : null} runId={tab.key ?? ""}
                 visible={visible && view === "workspace" && !settingsOpen} onActivate={activateShown(tab, visible)} onGone={() => closeFile(tab)} />

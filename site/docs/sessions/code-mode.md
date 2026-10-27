@@ -190,6 +190,8 @@ In CodeAlta Desktop, the **Workflows** button of the title bar (or **Workflows**
 
 To run a script, click **Run…** on it, fill in its parameters, choose the project it runs in, then click **Run**. A list or an object is written as JSON. The script runs in a new session of that project, which opens. That session has `exec` even when Code Mode is off.
 
+**Runs with** is the [Agent chip](../workspace/prompt.md#agent-and-model) of that session: with **Use the defaults** on, it takes the [default provider](../model-providers/readme.md) and your settings; turn it off to choose the agent prompt, the model, its reasoning effort, the permission mode, review before commit and the sandbox. That model starts the script, and the sessions the script starts without a `tier` or a `model` run with it too.
+
 To keep a script that ran in a session, click **Save as script…** on its card in the timeline once it ended, and give it a name. The session is asked to turn it into a library script: the values it was written for become parameters, then it is checked and saved under that name.
 
 ## Stop a script
