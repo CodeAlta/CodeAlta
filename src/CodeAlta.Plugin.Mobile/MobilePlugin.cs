@@ -51,11 +51,14 @@ public sealed class MobilePlugin : PluginBase
     private readonly List<IPluginCanvasRpc> _open = [];
     private readonly List<IPluginCanvasRpc> _settingsPages = [];
     private volatile MobileSettings _settings = new();
+    private volatile MobileAccess? _access;
     private MobileServer? _server;
     private volatile MobileState _state = MobileState.Starting;
     // The ports Tailscale serves the view with now, as this instance published them: what is taken off when the ports change or the plugin stops.
     private (int Port, int HttpsPort)? _published;
     private bool _stopped;
+    // Whether the last reading of the asks failed: it is logged once.
+    private bool _askingFailed;
 
     /// <summary>Creates the plugin with the Tailscale command line of this computer.</summary>
     public MobilePlugin()
@@ -72,6 +75,12 @@ public sealed class MobilePlugin : PluginBase
 
     /// <summary>Gets what the plugin serves now.</summary>
     internal MobileState State => _state;
+
+    /// <summary>Gets who may use the view, once the plugin read it.</summary>
+    internal MobileAccess? Access => _access;
+
+    /// <summary>Gets the pairing token the QR code shows in this run, or null until the Mobile tab asked for it.</summary>
+    internal string? PairingToken => _access?.PairingToken;
 
     /// <inheritdoc />
     /// <remarks>Deltas are observed: the dot turns blue while reasoning streams, and the line says "Writing…" while an answer is written.</remarks>
@@ -129,13 +138,17 @@ public sealed class MobilePlugin : PluginBase
         await ChangedAsync().ConfigureAwait(false);
     }
 
-    // The token is made at the first start and kept: a phone that scanned the code once stays signed in.
+    // The access of the phones is read with the settings. A file of before kept the token itself: the phones it signed in keep
+    // their access through its hash, and the token leaves the file.
     private async Task<MobileSettings> ReadSettingsAsync(CancellationToken cancellationToken)
     {
         var settings = await Services.State.ReadJsonAsync<MobileSettings>(PluginStateScope.User, SettingsName, cancellationToken).ConfigureAwait(false) ?? new MobileSettings();
+        var access = await MobileAccess.LoadAsync(Services.State, cancellationToken).ConfigureAwait(false);
+        if (MobileToken.IsValid(settings.Token)) await access.AdoptAsync(settings.Token!, cancellationToken).ConfigureAwait(false);
+        _access = access;
         var valid = settings with
         {
-            Token = MobileToken.IsValid(settings.Token) ? settings.Token : MobileToken.Create(),
+            Token = null,
             Port = IsPort(settings.Port) ? settings.Port : DefaultPort,
             HttpsPort = IsPort(settings.HttpsPort) ? settings.HttpsPort : DefaultHttpsPort,
         };
@@ -157,8 +170,9 @@ public sealed class MobilePlugin : PluginBase
         MobileApi.RemoveStaleAttachments(attachments);
         var server = new MobileServer(new MobileServerOptions
         {
-            Port = _settings.Port, Token = () => _settings.Token!, Hosts = () => _state.TailnetHost is { } host ? [host] : [],
-            Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions, attachments), Live = _live, Logger = Logger,
+            Port = _settings.Port, Access = _access!, Hosts = () => _state.TailnetHost is { } host ? [host] : [],
+            Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions, attachments),
+            Asks = new MobileAsks(Services.Asks, sessions), Live = _live, Logger = Logger,
         });
         try
         {
@@ -254,16 +268,16 @@ public sealed class MobilePlugin : PluginBase
         return Status();
     }
 
-    // A new token: every phone has to scan the new code. The streams of the phones end, and they cannot sign in again.
+    // A new pairing token, and no phone signed in: every phone has to scan the new code. The streams of the phones end, and they
+    // cannot sign in again.
     internal async Task<MobileSettingsView> ResetAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            _settings = _settings with { Token = MobileToken.Create() };
-            await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, _settings, cancellationToken).ConfigureAwait(false);
+            if (_access is { } access) await access.ResetAsync(cancellationToken).ConfigureAwait(false);
             _server?.Disconnect();
-            Logger.Info("Mobile: the access token was reset; the phones have to scan the new code.");
+            Logger.Info("Mobile: the access was reset; the phones have to scan the new code.");
         }
         finally
         {
@@ -350,7 +364,7 @@ public sealed class MobilePlugin : PluginBase
         {
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                _live.Flush();
+                _live.Flush(await ReadAskingAsync(cancellationToken).ConfigureAwait(false));
                 if (++ticks % 60 == 0) _live.Broadcast("ping", "{}");
             }
         }
@@ -360,10 +374,40 @@ public sealed class MobilePlugin : PluginBase
         }
     }
 
+    /// <summary>
+    /// Reads the asks the sessions wait on for the next flush. A host that cannot say stops nothing: the flush keeps those
+    /// read before (null), and the failure is logged once until a reading succeeds again.
+    /// </summary>
+    internal async ValueTask<IReadOnlyList<PluginAskSummary>?> ReadAskingAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var asking = await Services.Asks.ListAskingAsync(cancellationToken).ConfigureAwait(false);
+            _askingFailed = false;
+            return asking;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            if (!_askingFailed) Logger.Warn(exception, "Mobile: the asks of the sessions could not be read; the phones keep those read before.");
+            _askingFailed = true;
+            return null;
+        }
+    }
+
     private async Task<bool> CanSteerAsync(string sessionId)
     {
         var result = await MobileAlta.RunAsync(Services.Alta, ["session", "status", sessionId], null, CancellationToken.None).ConfigureAwait(false);
         return result.OfType("alta.session.status").Any(static status => MobileAlta.Flag(status, "isRunning"));
+    }
+
+    // The pairing token lives in memory only: after a restart, the tab that shows the QR code makes a new one.
+    private async Task<MobileStatus> PairedAsync(Func<MobileStatus> status, CancellationToken cancellationToken)
+        => await PairedAsync(() => Task.FromResult(status()), cancellationToken).ConfigureAwait(false);
+
+    private async Task<MobileStatus> PairedAsync(Func<Task<MobileStatus>> status, CancellationToken cancellationToken)
+    {
+        if (_access is { } access) await access.PairAsync(cancellationToken).ConfigureAwait(false);
+        return await status().ConfigureAwait(false);
     }
 
     /// <summary>What the Mobile tab shows.</summary>
@@ -371,7 +415,7 @@ public sealed class MobilePlugin : PluginBase
     {
         var state = _state;
         var url = state.Tailscale.Url;
-        var connect = state.Server == "listening" && url is not null && _settings.Token is { } token ? $"{url}/#k={token}" : null;
+        var connect = state.Server == "listening" && url is not null && _access?.PairingToken is { } token ? $"{url}/#k={token}" : null;
         return new MobileStatus(state.Server, _settings.Port, state.ServerDetail,
             new MobileTailscaleView(state.Tailscale.State, url, state.Tailscale.Detail, state.Tailscale.FixUrl),
             connect, connect is null ? null : url, connect is null ? null : MobileQr.Rows(connect));
@@ -391,7 +435,8 @@ public sealed class MobilePlugin : PluginBase
         Services.Ui.InvalidateButtons();
         IPluginCanvasRpc[] tabs, pages;
         lock (_canvases) (tabs, pages) = ([.. _open], [.. _settingsPages]);
-        if (tabs.Length > 0) await PublishAsync(tabs, "mobile.changed", Status()).ConfigureAwait(false);
+        // A tab opened before the plugin read its access gets its QR code now.
+        if (tabs.Length > 0) await PublishAsync(tabs, "mobile.changed", await PairedAsync(Status, CancellationToken.None).ConfigureAwait(false)).ConfigureAwait(false);
         if (pages.Length > 0) await PublishAsync(pages, "mobile.settings.changed", Settings()).ConfigureAwait(false);
     }
 
@@ -448,8 +493,9 @@ public sealed class MobilePlugin : PluginBase
             {
                 // The calls of the tab are registered before the view that names its module is returned.
                 canvas.Rpc.JsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web) { TypeInfoResolver = MobileJsonContext.Default };
-                canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.status", (_, _) => ValueTask.FromResult(Status()));
-                canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.retry", async (_, ct) => await RetryAsync(ct).ConfigureAwait(false));
+                // The tab shows the QR code: it makes the pairing token of this run when there is none yet.
+                canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.status", async (_, ct) => await PairedAsync(Status, ct).ConfigureAwait(false));
+                canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.retry", async (_, ct) => await PairedAsync(() => RetryAsync(ct), ct).ConfigureAwait(false));
                 Track(canvas, _open);
                 return ValueTask.FromResult(new PluginCanvasView { Script = PluginScript.App(AppModule) });
             },
@@ -512,7 +558,11 @@ public sealed class MobilePlugin : PluginBase
 /// <summary>What the plugin keeps between starts, in its state of the user.</summary>
 internal sealed record MobileSettings
 {
-    /// <summary>Gets the access token of the phones.</summary>
+    /// <summary>
+    /// Gets the access token a file of before kept itself. It is read once, its hash taken over by <see cref="MobileAccess"/>,
+    /// and never written again: the file keeps no secret.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? Token { get; init; }
 
     /// <summary>Gets the port of the server on the loopback address.</summary>
@@ -564,6 +614,7 @@ internal sealed record MobileSettingsView(int Port, int HttpsPort, string? Addre
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileEmpty))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileStatus))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettings))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(MobileAccessFile))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobilePorts))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettingsView))]
 internal sealed partial class MobileJsonContext : System.Text.Json.Serialization.JsonSerializerContext;

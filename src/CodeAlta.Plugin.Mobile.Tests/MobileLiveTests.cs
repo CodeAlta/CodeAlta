@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using CodeAlta.Agent;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugin.Mobile.Tests;
 
@@ -42,10 +43,73 @@ public sealed class MobileLiveTests
     [TestMethod]
     public void AQuietSession_HasTheShapeOfALiveOne()
     {
-        var quiet = MobileLive.Quiet("s2", "p2", running: true);
-        CollectionAssert.AreEquivalent(new[] { "id", "projectId", "live", "kind", "line", "at", "activity", "canSteer" }, quiet.Select(static property => property.Key).ToArray());
+        var live = new MobileLive();
+        var quiet = live.Quiet("s2", "p2", running: true);
+        CollectionAssert.AreEquivalent(new[] { "id", "projectId", "live", "kind", "line", "at", "activity", "canSteer", "asking" }, quiet.Select(static property => property.Key).ToArray());
         Assert.AreEqual(("running", true), ((string?)quiet["live"], (bool)quiet["canSteer"]!));
+        Assert.IsNull(quiet["asking"]);
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-1"), "p1");
+        CollectionAssert.AreEquivalent(quiet.Select(static property => property.Key).ToArray(), live.Describe("s1")!.Select(static property => property.Key).ToArray());
     }
+
+    [TestMethod]
+    public void ASessionThatAsksTheUser_IsPushedWhenItStartsAndWhenItEndsToAsk()
+    {
+        var live = new MobileLive();
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-1"), "p1");
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Completed, "turn-1"), "p1");
+        live.Flush([]);
+        var phone = live.Subscribe();
+        Assert.IsTrue(phone.Reader.TryRead(out _), "the state of now");
+
+        live.Flush([Asking("s1"), Asking("s-unseen")]);
+        Assert.IsTrue(phone.Reader.TryRead(out var asking));
+        Assert.AreEqual(("ask-1", "0", "pending", false), Mark(asking));
+        Assert.AreEqual("s1", (string?)Data(asking)["id"]);
+        Assert.IsFalse(phone.Reader.TryRead(out _), "A session the plugin has not seen run is not told of on the stream.");
+        Assert.AreEqual("ask-1", (string?)live.Quiet("s-unseen", "p1", running: false)["asking"]!["id"], "The list says it of a session it shows.");
+
+        live.Flush([Asking("s1")]);
+        live.Flush();
+        Assert.IsFalse(phone.Reader.TryRead(out _), "Nothing changed: nothing is pushed.");
+
+        // An answer goes, the session does not take it, and the ask waits again with a new revision: each is pushed.
+        live.Flush([Asking("s1", state: "submitting")]);
+        Assert.IsTrue(phone.Reader.TryRead(out var submitting));
+        Assert.AreEqual(("ask-1", "0", "submitting", false), Mark(submitting));
+        live.Flush([Asking("s1", revision: "1")]);
+        Assert.IsTrue(phone.Reader.TryRead(out var again));
+        Assert.AreEqual(("ask-1", "1", "pending", false), Mark(again));
+        live.Flush([Asking("s1", revision: "1") with { Immediate = true }]);
+        Assert.IsTrue(phone.Reader.TryRead(out var immediate));
+        Assert.IsTrue((bool)Data(immediate)["asking"]!["immediate"]!);
+
+        live.Flush([]);
+        Assert.IsTrue(phone.Reader.TryRead(out var answered));
+        Assert.IsNull(Data(answered)["asking"]);
+    }
+
+    [TestMethod]
+    public void TheSameAsks_AreKept_NotBuiltAgain()
+    {
+        var live = new MobileLive();
+        live.Flush([Asking("s1")]);
+        var before = live.Asking;
+        live.Flush([Asking("s1")]);
+        Assert.AreSame(before, live.Asking, "nothing changed: the asks of the last flush are kept");
+        live.Flush([Asking("s1", revision: "1")]);
+        Assert.AreNotSame(before, live.Asking);
+    }
+
+    private static PluginAskSummary Asking(string sessionId, string revision = "0", string state = "pending") => new(sessionId, "ask-1", revision, state, false);
+
+    private static (string?, string?, string?, bool) Mark(string frame)
+    {
+        var ask = Data(frame)["asking"]!;
+        return ((string?)ask["id"], (string?)ask["revision"], (string?)ask["state"], (bool)ask["immediate"]!);
+    }
+
+    private static JsonNode Data(string frame) => JsonNode.Parse(frame["event: session\ndata: ".Length..].Trim())!;
 
     [TestMethod]
     public void TheLine_IsTheFirstLineOfATextWithoutItsMarks()

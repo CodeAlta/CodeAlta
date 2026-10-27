@@ -64,6 +64,12 @@ public interface IPluginServices
     /// A host without such a page has none.
     /// </summary>
     IPluginAppFileService AppFiles => NoopPluginAppFileService.Instance;
+
+    /// <summary>
+    /// Gets the questions agents ask the user and the reviews they request, which a plugin that serves the user beyond the
+    /// window shows and answers. A host without asks, and the commands a plugin gives agents, have none.
+    /// </summary>
+    IPluginAskService Asks => NoopPluginAskService.Instance;
 }
 
 /// <summary>

@@ -55,7 +55,7 @@ CodeAlta Desktop brings together:
 - **Bookmarks**: mark a message or a whole session, jump between the bookmarks of a timeline, and find them all in one tab.
 - **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues; start sessions and open PRs.
 - **Automations**: start sessions on a schedule, issue/PR events or on demand.
-- **On your phone**: [follow, answer, steer and start sessions from a phone](https://codealta.github.io/docs/plugins/mobile/), on your own tailnet through Tailscale.
+- **On your phone**: [follow, answer, steer and start sessions from a phone, and answer the questions and review requests of agents](https://codealta.github.io/docs/plugins/mobile/), on your own tailnet through Tailscale.
 - **Canvases**: use interactive boards, checklists and custom tools beside your conversations.
 - **Plugins**: ask agents to build trusted local .NET canvases, dialogs, tools, commands and buttons for one project or the whole workspace.
 - **Local statistics**: track activity, models, tokens, costs, tool use, skills and MCP tools by project, session or sub-agent, all on your computer.

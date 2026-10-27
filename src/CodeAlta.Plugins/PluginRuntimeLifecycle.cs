@@ -279,7 +279,8 @@ public sealed class PluginRuntimeActivator
                 state,
                 database,
                 PluginContributionRegistry.PluginIdOf(discoveredType.Descriptor.RuntimeKey, sourcePackage?.PackageId),
-                options.SpaceAssignments);
+                options.SpaceAssignments,
+                builtIn: sourcePackage is null);
             dependencies.Add(services);
             var context = new PluginRuntimeContext
             {

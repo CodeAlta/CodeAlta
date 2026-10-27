@@ -27,7 +27,12 @@ export type Live = Readonly<{
   at: string | null;
   activity: ActivityFacts | null;
   canSteer: boolean;
+  /** The ask the session waits on, which the page reads again when it changes; null when it waits for none (an older CodeAlta does not say). */
+  asking?: AskMark | null;
 }>;
+
+/** The ask of a session, as the live stream says it: what changes when an answer goes, or did not reach the session. */
+export type AskMark = Readonly<{ id: string; revision: string; state: Ask["state"]; immediate: boolean }>;
 
 /** A space of the computer: its name, and the color and icon the desktop shows it with. */
 export type Space = Readonly<{ id: string; name: string; color: string | null; icon: string | null }>;
@@ -146,6 +151,57 @@ export type NewSessionResult = Readonly<{ id: string; pending?: boolean; sendErr
 
 /** What the commands of a session answer. */
 export type ActionResult = Readonly<{ ok?: boolean; mode?: PromptMode; pending?: boolean; error?: string | null }>;
+
+/** A question of an ask: answered with one of its choices, with text, or both. */
+export type AskQuestion = Readonly<{
+  title: string;
+  question: string;
+  description: string | null;
+  choices: readonly Readonly<{ title: string; description: string | null }>[];
+  freeform: Readonly<{ title: string | null; placeholder: string | null }> | null;
+}>;
+
+/** What a review request asks the user to review. */
+export type AskReview = Readonly<{
+  kind: "file" | "changes" | "branch";
+  /** The file of a `file` review, relative to the folder of the session. */
+  path: string | null;
+  title: string | null;
+  /** The message of the agent, in Markdown. */
+  message: string | null;
+  /** The comments the user wrote on the computer that the answer sends; null when the computer cannot say. */
+  comments: number | null;
+}>;
+
+/** The ask a session waits on: the questions an agent asks the user, or a review it requests. */
+export type Ask = Readonly<{
+  id: string;
+  /** The revision an answer names: it changes when the ask waits again after an answer the session did not take. */
+  revision: string;
+  state: "pending" | "submitting" | "indeterminate";
+  /** A question of a script, which waits for the answer while its turn runs: shown at once (an older CodeAlta does not say). */
+  immediate?: boolean;
+  questions: readonly AskQuestion[];
+  review: AskReview | null;
+}>;
+
+/** `GET /api/sessions/<id>/ask`. */
+export type AskPage = Readonly<{ ask: Ask | null; error: string | null }>;
+
+/** The verdict of a review. */
+export type AskVerdict = "approved" | "changes_requested" | "commented";
+
+/** `POST /api/sessions/<id>/ask/answer`; a cancel sends the first three only. */
+export type AskAnswerRequest = Readonly<{
+  actionId: string;
+  askId: string;
+  revision: string;
+  answers: readonly Readonly<{ question: number; choices: readonly number[]; text: string | null }>[];
+  review?: Readonly<{ verdict: AskVerdict; overall: string | null }>;
+}>;
+
+/** What an answer or a cancel became: `admitted` and `cancelled` reached the session; `pending` while the session takes it. */
+export type AskResult = Readonly<{ ok: boolean; status: string; pending?: boolean; error: string | null }>;
 
 /** Whether a session works now. */
 export const isBusy = (state: LiveState | null | undefined): boolean => state === "running" || state === "tools" || state === "thinking";

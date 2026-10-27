@@ -94,6 +94,7 @@
         <button id="send" type="submit" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg><span>Send</span></button>
       </div>
     </form>
+    <section id="ask" class="ask-bar" aria-label="Answer the agent" hidden></section>
   </main>
   <input id="attach-input" type="file" multiple hidden>
   <footer id="foot" class="muted" role="status" aria-live="polite"></footer>
@@ -130,6 +131,17 @@
       <label class="sheet-field">Provider<select id="new-provider"></select></label>
       <label id="new-mode-field" class="sheet-field">Permissions<select id="new-mode"></select><small id="new-mode-text"></small></label>
       <label class="check"><input id="new-worktree" type="checkbox"> Work in a new git worktree</label>
+    </div>
+  </div>
+  <div id="ask-cancel-sheet" class="sheet" hidden>
+    <div class="sheet-panel confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="ask-cancel-title" aria-describedby="ask-cancel-detail">
+      <h2 id="ask-cancel-title">Cancel Ask</h2>
+      <p>Exit ask mode without sending a response?</p>
+      <p id="ask-cancel-detail" class="confirm-detail">The queued ask will be canceled and the session will return to the normal prompt editor.</p>
+      <div class="confirm-actions">
+        <button id="ask-cancel-keep" class="ghost" type="button">Keep answering</button>
+        <button id="ask-cancel-exit" class="danger" type="button">Exit without responding</button>
+      </div>
     </div>
   </div>
   <div id="install-sheet" class="sheet" hidden>

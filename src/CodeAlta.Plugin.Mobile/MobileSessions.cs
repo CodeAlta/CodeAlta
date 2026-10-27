@@ -244,7 +244,7 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
             ["summary"] = PlainSummary(MobileAlta.Text(item, "latestSummary")),
             ["lastActivity"] = at == DateTimeOffset.MinValue ? null : at.ToString("O", CultureInfo.InvariantCulture),
             // What the plugin saw of the session since it started; else what alta says of it now.
-            ["live"] = live.Describe(id) ?? MobileLive.Quiet(id, projectId, MobileAlta.Flag(item, "isRunning")),
+            ["live"] = live.Describe(id) ?? live.Quiet(id, projectId, MobileAlta.Flag(item, "isRunning")),
         };
     }
 

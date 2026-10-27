@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
+import type { Ask, AskResult, Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
 
 /** The policy the plugin's server sets on the page (the contract of the phone page). */
 export const mobilePolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -15,7 +15,10 @@ export type FixtureRequest = Readonly<{ method: string; path: string; query: str
  */
 export async function startFixtureServer(files: Readonly<Record<string, Readonly<{ type: string; body: string | Buffer }>>>) {
   const state = {
+    /** The pairing token of the QR code. */
     token: "secret",
+    /** The keys of the phones signed in, which sign them in again; the pairing token gives a new one. */
+    keys: new Set<string>(),
     cookies: new Set<string>(),
     sessions: [] as Session[],
     events: new Map<string, TimelineEvent[]>(),
@@ -30,10 +33,16 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     createAnswer: {} as Record<string, unknown>,
     /** The next prompt fails with this text, once. */
     promptError: null as string | null,
+    /** The asks the sessions wait on: an answer or a cancel that goes ends it. */
+    asks: new Map<string, Ask>(),
+    /** What the next answer or cancel of an ask becomes; null: it goes. */
+    askResult: null as AskResult | null,
+    /** What becomes of the ask when the next answer or cancel is refused or still goes; null leaves it as it is. */
+    askAfter: null as Ask | null,
   };
   const requests: FixtureRequest[] = [];
   const streams = new Set<ServerResponse>();
-  let cookieSeq = 0;
+  let cookieSeq = 0, keySeq = 0;
 
   const send = (response: ServerResponse, status: number, body?: unknown, headers: Record<string, string> = {}) => {
     response.writeHead(status, { "Content-Security-Policy": mobilePolicy, "Cache-Control": "no-store", ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...headers });
@@ -71,10 +80,13 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       return response.end(file.body);
     }
     if (path === "/api/login" && request.method === "POST") {
-      if ((body as { token?: string } | undefined)?.token !== state.token) return send(response, 401);
+      const given = (body as { token?: string } | undefined)?.token ?? "";
+      const key = state.keys.has(given) ? given : given === state.token ? `key${++keySeq}` : null;
+      if (!key) return send(response, 401);
+      state.keys.add(key);
       const cookie = `c${++cookieSeq}`;
       state.cookies.add(cookie);
-      return send(response, 204, undefined, { "Set-Cookie": `alta_mobile=${cookie}; Path=/; HttpOnly; SameSite=Strict` });
+      return send(response, 200, { key }, { "Set-Cookie": `alta_mobile=${cookie}; Path=/; HttpOnly; SameSite=Strict` });
     }
     if (!signedIn(request)) return send(response, 401);
     if (path === "/api/events") {
@@ -100,7 +112,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     }
     if (path === "/api/projects") return send(response, 200, { projects: state.projects, default: "p1", error: null });
     if (path === "/api/options") return send(response, 200, state.options);
-    const found = /^\/api\/sessions\/([^/]+)(?:\/(events|prompt|abort|archive|restore|choices))?$/.exec(path);
+    const found = /^\/api\/sessions\/([^/]+)(?:\/(events|prompt|abort|archive|restore|choices|ask|ask\/answer|ask\/cancel))?$/.exec(path);
     if (found) {
       const id = decodeURIComponent(found[1]), action = found[2];
       // An archived session is out of the list, and can still be restored.
@@ -120,6 +132,16 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         return send(response, 200, { since: Math.max(since, ...events.map(e => e.seq)), events, error: null });
       }
       if (action === "choices") return send(response, 200, choicesOf(target));
+      if (action === "ask") return send(response, 200, { ask: state.asks.get(id) ?? null, error: null });
+      if (action === "ask/answer" || action === "ask/cancel") {
+        const result = state.askResult ?? { ok: true, status: action === "ask/answer" ? "admitted" : "cancelled", error: null };
+        state.askResult = null;
+        const { askId } = body as { askId: string };
+        if (state.askAfter) state.asks.set(id, state.askAfter);
+        else if (result.ok && !result.pending && state.asks.get(id)?.id === askId) state.asks.delete(id);
+        state.askAfter = null;
+        return send(response, 200, result);
+      }
       if (action === "prompt") {
         if (state.promptError) {
           const error = state.promptError;

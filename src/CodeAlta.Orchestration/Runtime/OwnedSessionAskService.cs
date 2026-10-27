@@ -148,6 +148,17 @@ public sealed class OwnedSessionAskService
         }
     }
 
+    /// <summary>Lists the first ask of each session that waits for the user to answer a question.</summary>
+    /// <returns>One head per session, as <see cref="List"/> gives it; a reading that can be stale at once.</returns>
+    public IReadOnlyList<OwnedAskHead> ListWaiting()
+    {
+        lock (_gate)
+        {
+            return [.. _asks.Values.Select(static ask => ask.Origin.SessionId).Distinct(StringComparer.Ordinal)
+                .Select(sessionId => _queue.GetPending(sessionId).FirstOrDefault()).OfType<AltaQueuedAsk>().Select(Head)];
+        }
+    }
+
     /// <summary>Returns the pending head and latest retained disposition, never an acknowledgment.</summary>
     /// <exception cref="ArgumentException">The session identity is invalid.</exception>
     public OwnedAskPage List(string sessionId)
