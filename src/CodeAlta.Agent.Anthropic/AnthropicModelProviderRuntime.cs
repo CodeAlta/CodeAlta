@@ -112,7 +112,12 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
             configureOptions: ConfigureOptions,
-            prepareRequest: (request, messages, options) => MarkCacheBreakpoints(request, messages, MarkDeferredTools(provider, request, options), provider.PromptCacheTtl),
+            // The results of parallel tool calls go out in one user message, then the markers go on that message.
+            prepareRequest: (request, messages, options) => MarkCacheBreakpoints(
+                request,
+                AnthropicToolResultMessages.MergeConsecutive(messages),
+                MarkDeferredTools(provider, request, options),
+                provider.PromptCacheTtl),
             classifyFailure: ClassifyFailure,
             promptCacheLifetime: provider.HonorsPromptCacheTtl ? provider.PromptCacheTtl : null,
             describeContentFilter: DescribeRefusal,
@@ -354,7 +359,8 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             return (messages, options);
         }
 
-        var marked = AnthropicPromptCache.MarkBreakpoints(messages, options, lifetime);
+        // The instructions of the session are a system block of their own, after the one that takes the marker.
+        var marked = AnthropicPromptCache.MarkBreakpoints(messages, options, lifetime, AgentInstructionText.Session(request.SessionInstructions));
         return (marked.Messages, marked.Options ?? options);
     }
 

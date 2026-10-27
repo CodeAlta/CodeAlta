@@ -181,6 +181,44 @@ public sealed class AutomationConfigTests
     }
 
     [TestMethod]
+    public void TheOptionsOfItsSessions_AreWrittenOnlyOff_AndAllowedAgain()
+    {
+        var plain = new AutomationDefinition(First, "Nightly") { Prompt = "Review." };
+        var leaf = plain with { SessionOptions = new AgentSessionOptions { SubSessions = false } };
+        var written = AutomationConfig.Write(string.Empty, leaf);
+        StringAssert.Contains(written, "sub_sessions = false\n");
+        AssertSame(leaf, AutomationConfig.Read(written, Global).Definitions.Single());
+
+        // The defaults are written as nothing, and read as nothing whether written or not.
+        Assert.IsFalse(AutomationConfig.Write(string.Empty, plain with { SessionOptions = AgentSessionOptions.Default }).Contains("sub_sessions", StringComparison.Ordinal));
+        Assert.IsNull(AutomationConfig.Read($"[automations.{First}]\nname = \"n\"\nprompt = \"p\"\nsub_sessions = true\n", Global).Definitions.Single().SessionOptions);
+
+        // An automation kept with a project is allowed again when its sessions lose their sub-sessions; one without options keeps its fingerprint.
+        Assert.AreNotEqual(plain.Fingerprint(), leaf.Fingerprint());
+        Assert.AreEqual(plain.Fingerprint(), (plain with { SessionOptions = AgentSessionOptions.Default }).Fingerprint());
+        var (_, faults) = AutomationConfig.Read($"[automations.{First}]\nname = \"n\"\nprompt = \"p\"\nsub_sessions = \"no\"\n", Global);
+        StringAssert.Contains(faults.Single().Message, "sub_sessions");
+    }
+
+    [TestMethod]
+    public void AnAutomationThatRunsAScript_IsWrittenWithItsArguments_AndHasNoPrompt()
+    {
+        var definition = new AutomationDefinition(First, "Triage") { Script = "triage", ScriptArguments = "{\"days\": 1, \"label\": \"a \\\"b\\\"\"}" };
+        Assert.IsNull(AutomationConfig.Validate(definition));
+        var written = AutomationConfig.Write(string.Empty, definition);
+        StringAssert.Contains(written, "script = \"triage\"\n");
+        Assert.IsFalse(written.Contains("prompt", StringComparison.Ordinal));
+        AssertSame(definition, AutomationConfig.Read(written, Global).Definitions.Single());
+        Assert.AreNotEqual(definition.Fingerprint(), (definition with { ScriptArguments = "{\"days\": 2}" }).Fingerprint());
+
+        StringAssert.Contains(AutomationConfig.Validate(definition with { Prompt = "Also this." }), "not both");
+        StringAssert.Contains(AutomationConfig.Validate(definition with { Script = "Not A Name" }), "name of a script");
+        StringAssert.Contains(AutomationConfig.Validate(definition with { ScriptArguments = "[1]" }), "JSON object");
+        StringAssert.Contains(AutomationConfig.Validate(definition with { ScriptArguments = "{ days: 1" }), "JSON object");
+        StringAssert.Contains(AutomationConfig.Validate(new AutomationDefinition(First, "n") { Prompt = "p", ScriptArguments = "{}" }), "runs a script");
+    }
+
+    [TestMethod]
     public void Write_ReplacesOnlyTheTextOfItsAutomation()
     {
         var before = $"""

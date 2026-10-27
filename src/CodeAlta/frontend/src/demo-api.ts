@@ -134,6 +134,8 @@ export const sessionOperations = Object.freeze({
   queue: unavailable, receipts: emptyPage, send: unavailable, steer: unavailable,
   // The demo has no session whose changes are reviewed before commit.
   reviewBeforeCommit: unavailable, setReviewBeforeCommit: unavailable,
+  // Nor options of a session: the defaults.
+  options: unavailable, setOptions: unavailable,
   claudeCodeConversation: noClaudeCodeConversation, releaseClaudeCodeConversation: noClaudeCodeConversation,
   openInVsCode: async (request: SessionClaudeCodeRequest) => ({ status: "unconfigured", epoch: null, sessionId: request.sessionId }),
 });
@@ -201,6 +203,9 @@ export const terminals = Object.freeze({ acknowledge: unavailable, attach: unava
 const noAutomations = async () => ({ status: "unavailable", paused: false, scanned: false, items: [], faults: [], runs: [], upcoming: [] });
 export const automations = Object.freeze({ list: noAutomations, refresh: noAutomations, save: unavailable, delete: unavailable, setEnabled: unavailable,
   allow: unavailable, setPaused: unavailable, run: unavailable, runs: unavailable, preview: unavailable, watch: unavailable });
+// The demo has no library of scripts and runs none.
+export const workflows = Object.freeze({ scripts: async () => ({ status: "unavailable", scripts: [] }), runs: async () => ({ status: "unavailable", runs: [] }),
+  run: unavailable, saveAsScript: unavailable, resume: unavailable, stop: unavailable, source: async () => ({ status: "unavailable", source: null }), runDetail: async () => ({ status: "unavailable", run: null, records: [], source: null, result: null, mermaid: null }) });
 // The demo has no project folder to keep tasks and plans in.
 export const workItems = Object.freeze({ list: async () => ({ status: "unavailable", projects: [], settings: null }), read: unavailable, act: unavailable,
   saveSettings: unavailable, watch: unavailable });
@@ -219,7 +224,8 @@ export const localSearch = Object.freeze({ query: async () => ({ status: "unavai
   cancelDownload: unavailable, deleteModel: unavailable, answerOffer: unavailable });
 // The demo has no repository whose issues could be read.
 export const issues = Object.freeze({ sources: async () => ({ status: "unavailable", sources: [] }), list: unavailable, read: unavailable, start: unavailable, openLink: unavailable });
-export const markdownLinks = Object.freeze({ open: async () => ({ status: "unavailable", hostEpoch: "" }) });
+export const markdownLinks = Object.freeze({ open: async () => ({ status: "unavailable", hostEpoch: "" }),
+  image: async () => ({ status: "unavailable", hostEpoch: "", mediaType: null, base64: null, fullPath: null }), reveal: async () => ({ status: "unavailable", hostEpoch: "" }) });
 // The demo has no host to keep the instructions for a pull request.
 // The identity of a space needs a host that keeps spaces.
 export const spaceIdentity = Object.freeze({ get: async () => ({ status: "unavailable", message: null, identity: null, usual: null }),
@@ -299,6 +305,10 @@ export const globalConfig = Object.freeze({
   saveCommitSettings: async () => ({ status: "unavailable", coAuthor: true }),
   promptSuggestionSettings: async () => ({ status: "unavailable", enabled: true }),
   savePromptSuggestionSettings: async () => ({ status: "unavailable", enabled: true }),
+  codeModeSettings: async () => ({ status: "unavailable", mode: null, modes: [], scopes: [] }),
+  saveCodeModeSettings: async () => ({ status: "unavailable", mode: null, modes: [], scopes: [] }),
+  codeModeProvider: async () => ({ status: "unavailable", provider: null, allSessions: null, models: [] }),
+  saveCodeModeScope: async () => ({ status: "unavailable", message: null }),
   validate: async () => ({ valid: true, message: null, line: null, column: null }),
   save: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   providers: async () => ({ status: "unavailable", revision: null, defaultProvider: null, providers: [], providerTypes: [], reasoningEfforts: [], typeDefaults: [], builtIn: [] }),

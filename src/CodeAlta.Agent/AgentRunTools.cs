@@ -141,6 +141,16 @@ public sealed class AgentRunTools
         }
     }
 
+    // A tool added since the last model request, which a script may call at once: an MCP server it activated.
+    internal AgentToolDefinition? FindPending(string toolName)
+    {
+        var name = AgentToolBridge.GetRegisteredToolName(toolName);
+        lock (_gate)
+        {
+            return _added?.LastOrDefault(tool => string.Equals(AgentToolBridge.GetRegisteredToolName(tool.Spec.Name), name, StringComparison.Ordinal));
+        }
+    }
+
     // The run takes what was added since its last model request.
     internal IReadOnlyList<AgentToolDefinition>? Take()
     {

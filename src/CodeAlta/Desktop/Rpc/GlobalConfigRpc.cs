@@ -267,6 +267,121 @@ internal sealed partial class GlobalConfigService
         }
     }
 
+    /// <summary>
+    /// Reads the mode of Code Mode of every session (<c>[code_mode] mode</c>, <c>on</c> when the file sets none), the
+    /// modes, and the providers and models that choose a mode of their own.
+    /// </summary>
+    [NeoRpcMethod("codeModeSettings")]
+    public GlobalConfigCodeModeSettingsResponse CodeModeSettings(GlobalConfigSessionTitlesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return GlobalConfigCodeModeSettingsResponse.Failed("unavailable");
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return GlobalConfigCodeModeSettingsResponse.Failed("stale_epoch");
+        try
+        {
+            lock (_gate) return CodeModeListing();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return GlobalConfigCodeModeSettingsResponse.Failed("config_invalid");
+        }
+    }
+
+    /// <summary>Saves the mode of Code Mode of every session (<c>on</c>, the default, removes the setting); a session takes it with its next prompt.</summary>
+    [NeoRpcMethod("saveCodeModeSettings")]
+    public GlobalConfigCodeModeSettingsResponse SaveCodeModeSettings(GlobalConfigSaveCodeModeSettingsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return GlobalConfigCodeModeSettingsResponse.Failed("unavailable");
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return GlobalConfigCodeModeSettingsResponse.Failed("stale_epoch");
+        if (request.Mode is not { } mode || !CodeAltaConfigStore.CodeModeModes.Contains(mode, StringComparer.Ordinal)) return GlobalConfigCodeModeSettingsResponse.Failed("invalid");
+        lock (_gate)
+        {
+            try
+            {
+                _store.SaveCodeModeMode(mode);
+                return CodeModeListing();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
+            {
+                return GlobalConfigCodeModeSettingsResponse.Failed("write_failed");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads the mode of Code Mode of a provider and of its models: its own, those its models choose, and the one of every
+    /// session, which a provider without a mode of its own follows.
+    /// </summary>
+    [NeoRpcMethod("codeModeProvider")]
+    public GlobalConfigCodeModeProviderResponse CodeModeProvider(GlobalConfigCodeModeProviderRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return GlobalConfigCodeModeProviderResponse.Failed("unavailable");
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return GlobalConfigCodeModeProviderResponse.Failed("stale_epoch");
+        if (string.IsNullOrWhiteSpace(request.ProviderKey)) return GlobalConfigCodeModeProviderResponse.Failed("invalid");
+        CodeAltaConfigDocument document;
+        try
+        {
+            lock (_gate) document = _store.LoadGlobal();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return GlobalConfigCodeModeProviderResponse.Failed("config_invalid");
+        }
+
+        var key = request.ProviderKey.Trim();
+        var provider = document.Providers?.FirstOrDefault(entry => string.Equals(entry.Key, key, StringComparison.OrdinalIgnoreCase)).Value;
+        if (provider is null) return GlobalConfigCodeModeProviderResponse.Failed("not_found");
+        var models = new List<GlobalConfigCodeModeModelItem>();
+        foreach (var (modelId, entry) in provider.ModelOverrides ?? [])
+        {
+            if (CodeModeScopes.Known(entry.CodeMode) is { } own) models.Add(new(modelId, own));
+        }
+
+        return new("ok", CodeModeScopes.Known(provider.CodeMode), CodeModeScopes.Resolve(null, null, document.CodeMode?.Mode), models);
+    }
+
+    /// <summary>Chooses the mode of Code Mode of a provider, or of one of its models: a mode, or null for none.</summary>
+    [NeoRpcMethod("saveCodeModeScope")]
+    public GlobalConfigCodeModeScopeResponse SaveCodeModeScope(GlobalConfigSaveCodeModeScopeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", null);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null);
+        if (string.IsNullOrWhiteSpace(request.ProviderKey)) return new("invalid", "Name the provider.");
+        var mode = string.IsNullOrEmpty(request.Mode) ? null : request.Mode;
+        if (mode is not null && !CodeAltaConfigStore.CodeModeModes.Contains(mode, StringComparer.Ordinal)) return new("invalid", $"'{mode}' is not a mode of Code Mode.");
+        try
+        {
+            bool saved;
+            lock (_gate) saved = _store.SaveGlobalProviderCodeMode(request.ProviderKey, request.ModelId, mode);
+            return saved ? new("ok", null) : new("not_found", $"No provider is '{request.ProviderKey}'.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
+        {
+            return new("write_failed", exception.Message);
+        }
+    }
+
+    // The page of Code Mode: the setting of every session, and where a provider or a model chooses.
+    private GlobalConfigCodeModeSettingsResponse CodeModeListing()
+    {
+        var document = _store!.LoadGlobal();
+        var scopes = new List<GlobalConfigCodeModeScopeItem>();
+        foreach (var (key, provider) in document.Providers ?? [])
+        {
+            var name = string.IsNullOrWhiteSpace(provider.DisplayName) ? key : provider.DisplayName.Trim();
+            if (CodeModeScopes.Known(provider.CodeMode) is { } mode) scopes.Add(new(key, name, null, mode));
+            foreach (var (modelId, entry) in provider.ModelOverrides ?? [])
+            {
+                if (CodeModeScopes.Known(entry.CodeMode) is { } modelMode) scopes.Add(new(key, name, modelId, modelMode));
+            }
+        }
+
+        return new("ok", CodeModeScopes.Resolve(null, null, document.CodeMode?.Mode), CodeAltaConfigStore.CodeModeModes, scopes);
+    }
+
     /// <summary>Reads the tools every session does without (<c>[tools] disabled</c>), and the names of the built-in tools.</summary>
     [NeoRpcMethod("disabledTools")]
     public GlobalConfigDisabledToolsResponse DisabledTools(GlobalConfigSessionTitlesRequest request)
@@ -920,6 +1035,52 @@ internal sealed record GlobalConfigSavePromptSuggestionSettingsRequest(string? E
 /// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c> or <c>write_failed</c>.</param>
 /// <param name="Enabled">Whether the model suggests the next prompt at the end of a turn.</param>
 internal sealed record GlobalConfigPromptSuggestionSettingsResponse(string Status, bool Enabled);
+
+/// <param name="ExpectedEpoch">The host epoch the page was loaded with.</param>
+/// <param name="Mode">One of the modes of Code Mode: <c>off</c>, <c>on</c> or <c>only</c>.</param>
+internal sealed record GlobalConfigSaveCodeModeSettingsRequest(string? ExpectedEpoch, string? Mode);
+
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>config_invalid</c>, <c>invalid</c> or <c>write_failed</c>.</param>
+/// <param name="Mode">The mode of every session, <c>on</c> when the file sets none; null unless <c>ok</c>.</param>
+/// <param name="Modes">The modes this version knows.</param>
+/// <param name="Scopes">The providers and models that choose a mode of their own.</param>
+internal sealed record GlobalConfigCodeModeSettingsResponse(string Status, string? Mode, IReadOnlyList<string> Modes, IReadOnlyList<GlobalConfigCodeModeScopeItem> Scopes)
+{
+    public static GlobalConfigCodeModeSettingsResponse Failed(string status) => new(status, null, CodeAltaConfigStore.CodeModeModes, []);
+}
+
+/// <param name="ProviderKey">The provider.</param>
+/// <param name="ProviderName">What the window calls it.</param>
+/// <param name="ModelId">The model, or null for the provider itself.</param>
+/// <param name="Mode">The mode it chooses.</param>
+internal sealed record GlobalConfigCodeModeScopeItem(string ProviderKey, string ProviderName, string? ModelId, string Mode);
+
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="ProviderKey">The provider.</param>
+internal sealed record GlobalConfigCodeModeProviderRequest(string? ExpectedEpoch, string? ProviderKey);
+
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid</c>, <c>not_found</c> or <c>config_invalid</c>.</param>
+/// <param name="Provider">The mode of the provider, or null.</param>
+/// <param name="AllSessions">The mode of every session (<c>on</c> when the file sets none), which a provider without a mode of its own follows; null unless <c>ok</c>.</param>
+/// <param name="Models">The models with a mode of their own.</param>
+internal sealed record GlobalConfigCodeModeProviderResponse(string Status, string? Provider, string? AllSessions, IReadOnlyList<GlobalConfigCodeModeModelItem> Models)
+{
+    public static GlobalConfigCodeModeProviderResponse Failed(string status) => new(status, null, null, []);
+}
+
+/// <param name="ModelId">The model.</param>
+/// <param name="Mode">The mode it chooses.</param>
+internal sealed record GlobalConfigCodeModeModelItem(string ModelId, string Mode);
+
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="ProviderKey">The provider.</param>
+/// <param name="ModelId">The model, or null for the provider itself.</param>
+/// <param name="Mode">A mode, or null for none.</param>
+internal sealed record GlobalConfigSaveCodeModeScopeRequest(string? ExpectedEpoch, string? ProviderKey, string? ModelId, string? Mode);
+
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid</c>, <c>not_found</c> or <c>write_failed</c>.</param>
+/// <param name="Message">Why it was not saved, or null.</param>
+internal sealed record GlobalConfigCodeModeScopeResponse(string Status, string? Message);
 
 /// <summary>The tools every session does without.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>

@@ -1209,6 +1209,41 @@ public sealed class AutomationServiceTests
         => new(CodeAlta.Plugins.Abstractions.TrackedItemKind.Issue, key, title, "https://example.atlassian.net/browse/" + key, CodeAlta.Plugins.Abstractions.TrackedItemState.Open) { Author = "Ana", Type = "Bug" };
 
     // A tracker that says what a test put in it happened.
+    [TestMethod]
+    public async Task AnAutomationThatRunsAScript_IsAllowedWithItsScript_AndAChangeOfTheScriptAsksAgain()
+    {
+        await using var fixture = new Fixture();
+        fixture.ScriptHashes["triage"] = "hash-1";
+        fixture.WriteGlobal($$"""
+            [automations.{{First}}]
+            name = "Triage"
+            script = "triage"
+            script_args = '{"days": 1}'
+            triggers = [{ type = "daily", at = ["12:30"] }]
+            """);
+        await fixture.Service.RefreshAsync();
+        var written = fixture.Service.Snapshot.Find(First)!;
+        Assert.AreEqual(("triage", "{\"days\": 1}", ""), (written.Definition.Script, written.Definition.ScriptArguments, written.Definition.Prompt));
+        // Written in the file by someone else, even the user's own: the script is read before it runs on its own.
+        Assert.IsFalse(fixture.Service.IsAllowed(written));
+
+        // Saved through the application, it is allowed with the script as it is.
+        Assert.IsNull(await fixture.Service.SaveAsync(written.Definition, null, CancellationToken.None));
+        Assert.IsTrue(fixture.Service.IsAllowed(fixture.Service.Snapshot.Find(First)!));
+        Assert.IsNotNull(fixture.Service.NextDue(First));
+
+        // An agent saves another version of the script: its triggers wait until it is allowed again.
+        fixture.ScriptHashes["triage"] = "hash-2";
+        Assert.IsFalse(fixture.Service.IsAllowed(fixture.Service.Snapshot.Find(First)!));
+        Assert.IsNull(fixture.Service.NextDue(First));
+        Assert.IsTrue(fixture.Service.Allow(First));
+        Assert.IsTrue(fixture.Service.IsAllowed(fixture.Service.Snapshot.Find(First)!));
+
+        // A script that is gone is a change too.
+        fixture.ScriptHashes.Remove("triage");
+        Assert.IsFalse(fixture.Service.IsAllowed(fixture.Service.Snapshot.Find(First)!));
+    }
+
     private sealed class FakeTrackerEvents : CodeAlta.Plugins.Abstractions.IIssueEventSource
     {
         public List<CodeAlta.Plugins.Abstractions.TrackedItem> Created { get; } = [];
@@ -1238,8 +1273,12 @@ public sealed class AutomationServiceTests
         {
             State = new AutomationStateStore(System.IO.Path.Combine(Root, "state", "automations.json"), paused);
             if (aliveBefore is { } alive) State.Alive(alive);
-            Service = new AutomationService(GlobalPath, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([.. _projects]), State, Runner, Clock, TimeZoneInfo.Utc, Feed, () => Trackers);
+            Service = new AutomationService(GlobalPath, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([.. _projects]), State, Runner, Clock, TimeZoneInfo.Utc, Feed, () => Trackers,
+                scriptHash: entry => entry.Definition.Script is { } script && ScriptHashes.TryGetValue(script, out var hash) ? hash : null);
         }
+
+        /// <summary>The hashes of the scripts of the library, by name.</summary>
+        internal Dictionary<string, string> ScriptHashes { get; } = [];
 
         /// <summary>The plugins that say what happened in a tracker.</summary>
         internal List<CodeAlta.Plugins.Abstractions.IIssueEventSource> Trackers { get; } = [];

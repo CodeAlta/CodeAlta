@@ -41,14 +41,17 @@ public sealed class InstructionPathNormalizerPlugin : PluginBase
             changeSummary: "Normalized path separators in the generated runtime context."));
     }
 
+    // The paths are in the Runtime Context and in the Session Context (where the session works), which comes last.
     private static string? NormalizeRuntimeContextSection(string? developerInstructions)
+        => NormalizeSection(NormalizeSection(developerInstructions, "# Runtime Context"), "# Session Context");
+
+    private static string? NormalizeSection(string? developerInstructions, string heading)
     {
         if (string.IsNullOrEmpty(developerInstructions))
         {
             return developerInstructions;
         }
 
-        const string heading = "# Runtime Context";
         var start = developerInstructions.IndexOf(heading, StringComparison.Ordinal);
         if (start < 0)
         {

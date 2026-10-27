@@ -339,7 +339,7 @@ public sealed class SessionWorktreeTests
                 throw failure;
             }
 
-            Turns.Writer.TryWrite(new(request.WorkingDirectory, string.Join("\n", request.SystemMessage, request.DeveloperInstructions)));
+            Turns.Writer.TryWrite(new(request.WorkingDirectory, string.Join("\n", request.SystemMessage, request.DeveloperInstructions, request.SessionInstructions)));
             if (Hold is { } hold)
             {
                 Hold = null;

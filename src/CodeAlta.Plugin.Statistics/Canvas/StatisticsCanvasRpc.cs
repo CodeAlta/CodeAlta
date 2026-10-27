@@ -112,6 +112,7 @@ internal sealed class StatisticsCanvasRpc
         Question(rpc, "statistics.skills", (queries, call, token) => queries.SkillsAsync(Request(call), token));
         Question(rpc, "statistics.mcp-tools", (queries, call, token) => queries.McpToolsAsync(Request(call), token));
         Question(rpc, "statistics.runs", (queries, call, token) => queries.RunsAsync(Request(call), Required(call.Sort, "sort"), token));
+        Question(rpc, "statistics.scripts", (queries, call, token) => queries.ScriptsAsync(Request(call), token));
 
         // The state of the history and its controls. Each answers with the status after the call.
         Control(rpc, "statistics.status", async (engine, _, token) =>

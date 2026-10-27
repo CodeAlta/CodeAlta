@@ -63,6 +63,7 @@ internal sealed class JournalPayloadParser
             JournalRecordKind.SystemPrompt => ParseSystemPrompt(ref reader),
             JournalRecordKind.Header => ParseHeader(ref reader),
             JournalRecordKind.State => ParseState(ref reader, line, isFinalBlock, isPromptSeen),
+            JournalRecordKind.Workflow => ParseWorkflow(ref reader),
             _ => null,
         };
     }
@@ -264,6 +265,15 @@ internal sealed class JournalPayloadParser
                 }
 
                 record.McpTool = ReadString(ref reader);
+            }
+            else if (reader.ValueTextEquals("script"u8))
+            {
+                // A call a script made: its details name the step, which is not kept.
+                record.IsScriptCall = true;
+                if (!SkipValue(ref reader))
+                {
+                    return false;
+                }
             }
             else if (!SkipValue(ref reader))
             {
@@ -1887,6 +1897,15 @@ internal sealed class JournalPayloadParser
 
                 actor.AutomationId = ReadString(ref reader);
             }
+            else if (reader.ValueTextEquals("CorrelationId"u8) || reader.ValueTextEquals("correlationId"u8))
+            {
+                if (!reader.Read())
+                {
+                    return actor;
+                }
+
+                actor.ScriptRunId = ScriptRunOfCorrelation(ReadString(ref reader));
+            }
             else if (!SkipValue(ref reader))
             {
                 return actor;
@@ -1894,6 +1913,104 @@ internal sealed class JournalPayloadParser
         }
 
         return actor;
+    }
+
+    // A session a script started is correlated with its run: `workflow:<run>` or `workflow:<run>/<step>`.
+    private static string? ScriptRunOfCorrelation(string? correlation)
+    {
+        const string Prefix = "workflow:";
+        if (correlation is null || !correlation.StartsWith(Prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var rest = correlation.AsSpan(Prefix.Length);
+        var slash = rest.IndexOf('/');
+        var run = slash >= 0 ? rest[..slash] : rest;
+        return ScriptNames.IsIdentifier(run) ? run.ToString() : null;
+    }
+
+    // ----- runs of scripts -----
+
+    private JournalRecord? ParseWorkflow(ref Utf8JsonReader reader)
+    {
+        var record = new WorkflowRecord();
+        var hasKind = false;
+        var sawKind = false;
+        string? message = null;
+        while (NextTopLevelProperty(ref reader))
+        {
+            var name = reader.GetString();
+            if (!reader.Read())
+            {
+                break;
+            }
+
+            switch (name)
+            {
+                case "kind":
+                    sawKind = reader.TokenType == JsonTokenType.String;
+                    if (reader.TokenType == JsonTokenType.String && Enum.TryParse(reader.GetString(), ignoreCase: false, out AgentWorkflowEventKind kind) && Enum.IsDefined(kind))
+                    {
+                        record.WorkflowKind = kind;
+                        hasKind = true;
+                    }
+
+                    break;
+                case "workflowRunId":
+                    record.WorkflowRunId = ReadString(ref reader);
+                    break;
+                case "title":
+                    record.Title = ReadString(ref reader);
+                    break;
+                case "stepId":
+                    record.StepId = ScriptNames.StepOf(ReadString(ref reader));
+                    break;
+                case "status":
+                    record.Status = ScriptNames.StepOf(ReadString(ref reader));
+                    break;
+                case "message":
+                    message = ReadString(ref reader);
+                    break;
+                case "durationMs":
+                    record.DurationMs = ReadLong(ref reader);
+                    break;
+                case "calls":
+                    record.Calls = ReadLong(ref reader);
+                    break;
+                case "replayed":
+                    record.Replayed = reader.TokenType == JsonTokenType.True;
+                    break;
+                case "resumesRunId":
+                    record.ResumesRunId = ReadString(ref reader);
+                    break;
+                case "scriptName":
+                    record.ScriptName = ScriptNames.ScriptOf(ReadString(ref reader));
+                    break;
+                case "recordsScripts":
+                    record.RecordsScripts = reader.TokenType == JsonTokenType.True;
+                    break;
+            }
+
+            if (!SkipCurrent(ref reader))
+            {
+                break;
+            }
+        }
+
+        // The message of an end is text the script or its calls wrote: only the name of its error is kept.
+        if (record.WorkflowKind == AgentWorkflowEventKind.RunEnded)
+        {
+            record.ErrorName = ScriptNames.ErrorOf(message);
+        }
+
+        if (!sawKind || string.IsNullOrEmpty(record.WorkflowRunId))
+        {
+            return null;
+        }
+
+        // A kind a later version adds is a record this version does not count, not a damaged one.
+        return hasKind ? record : new TouchRecord();
     }
 
     // ----- helpers -----

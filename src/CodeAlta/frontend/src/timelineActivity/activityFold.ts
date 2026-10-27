@@ -1,6 +1,7 @@
 import { liveTextItem, liveToolItem } from "../liveTimeline";
 import type { ReconciledRow } from "../reconcileTimeline";
-import type { TimelineItem } from "../timeline";
+import type { ScriptRun, TimelineItem } from "../timeline";
+import { hasWorkflowBlock } from "../workflows/runFlow";
 import type { TimelineEntryType } from "../timelineEmphasis/timelineEmphasis";
 import type { TimelineGroup } from "../toolGroups";
 import type { BackgroundCallState } from "../backgroundTasks";
@@ -203,6 +204,32 @@ export function activityViews(groups: readonly TimelineGroup[]): ActivityView[] 
     views.push({ rowKey: row.key, offset: item.toolCall.offset, server: item.toolApp.server, timestamp: item.toolCall.endedAt ?? item.timestamp });
   }
   return views;
+}
+
+/** The tool calls of an activity, by the identity a background task names its call with, separated by spaces. */
+export function activityCalls(groups: readonly TimelineGroup[]): string {
+  const calls: string[] = [];
+  for (const group of groups) for (const row of group.rows) {
+    const id = row.source === "history" ? row.item.toolCall?.activityId : undefined;
+    if (id && !/\s/u.test(id)) calls.push(id);
+  }
+  return calls.join(" ");
+}
+
+/** A run of a script of an activity that has its workflow block: the call that runs it, and the run. */
+export type ActivityWorkflow = Readonly<{ rowKey: string; run: ScriptRun; title: string | null }>;
+
+/**
+ * The runs of scripts of an activity that ran steps or started sessions, in order: each is a block of its own under the
+ * line, folded or not, as the views are.
+ */
+export function activityWorkflows(groups: readonly TimelineGroup[]): ActivityWorkflow[] {
+  const runs: ActivityWorkflow[] = [];
+  for (const group of groups) for (const row of group.rows) {
+    if (row.source !== "history" || !row.item.scriptRun || !hasWorkflowBlock(row.item.scriptRun)) continue;
+    runs.push({ rowKey: row.key, run: row.item.scriptRun, title: row.item.scriptTitle ?? null });
+  }
+  return runs;
 }
 
 /**

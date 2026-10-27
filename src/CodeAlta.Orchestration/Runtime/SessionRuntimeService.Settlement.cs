@@ -169,6 +169,7 @@ public sealed partial class SessionRuntimeService
             stops.Add(AbortQuietlyAsync(sessionId));
             foreach (var job in Jobs.List(sessionId).Where(static job => job.State == CodeAlta.Orchestration.Jobs.SessionJobState.Running))
                 stops.Add(Jobs.CancelAsync(job.Id, byUser: false, CancellationToken.None));
+            if (ScriptRuns is { } scripts) stops.Add(scripts.StopAsync(sessionId));
         }
 
         await Task.WhenAll(stops).WaitAsync(cancellationToken).ConfigureAwait(false);

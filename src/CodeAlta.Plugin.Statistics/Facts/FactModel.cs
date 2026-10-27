@@ -57,6 +57,9 @@ internal enum ToolKind : byte
 
     /// <summary>The activation of a skill.</summary>
     Skill,
+
+    /// <summary>The tools of Code Mode that run a script and wait for it: <c>exec</c> and <c>wait</c>.</summary>
+    Script,
 }
 
 /// <summary>Who wrote a prompt.</summary>
@@ -170,6 +173,15 @@ internal enum DetailList : byte
     /// well-formed identifier is counted under its own name, those a later version adds included.
     /// </summary>
     PromptProvenance,
+
+    /// <summary>A step of a library script that failed, as <c>script/step</c>.</summary>
+    ScriptStepFailed,
+
+    /// <summary>The name of the error a run of a script failed with: <c>TypeError</c>, <c>Stopped</c>.</summary>
+    ScriptError,
+
+    /// <summary>A library script a run loaded with <c>workflow("name")</c>, once per load.</summary>
+    ScriptCalled,
 }
 
 /// <summary>The measures that have a distribution in fixed steps.</summary>
@@ -198,6 +210,15 @@ internal enum HistogramMeasure : byte
 
     /// <summary>The tool calls of a run.</summary>
     RunToolCalls,
+
+    /// <summary>The duration of a run of a script in milliseconds, when it is known; the subject is the script.</summary>
+    ScriptRunDurationMs,
+
+    /// <summary>The sessions a run of a script started; the subject is the script.</summary>
+    ScriptRunSessions,
+
+    /// <summary>The calls a run of a script made; the subject is the script.</summary>
+    ScriptRunCalls,
 }
 
 /// <summary>The measures of which the facts keep the largest value and where it came from.</summary>
@@ -217,6 +238,12 @@ internal enum ExtremeMeasure : byte
 
     /// <summary>The request with the most input tokens; the subject is the model.</summary>
     LargestRequestInputTokens,
+
+    /// <summary>The longest run of a script, in milliseconds; the run is the run of the script.</summary>
+    LongestScriptRunMs,
+
+    /// <summary>The run of a script that started the most sessions; the run is the run of the script.</summary>
+    WidestScriptRun,
 }
 
 /// <summary>How a run ended.</summary>
@@ -453,10 +480,14 @@ internal sealed class ToolMeasures
     /// <summary>Gets or sets the lines the diffs of the calls removed.</summary>
     public long LinesRemoved { get; set; }
 
+    /// <summary>Gets or sets the calls a script of Code Mode made: a part of <see cref="Calls"/>.</summary>
+    public long ScriptCalls { get; set; }
+
     /// <summary>Adds another set of measures; the longest duration is the larger of the two.</summary>
     /// <param name="other">The measures to add.</param>
     public void Add(ToolMeasures other)
     {
+        ScriptCalls += other.ScriptCalls;
         Calls += other.Calls;
         Failures += other.Failures;
         Canceled += other.Canceled;
@@ -473,11 +504,100 @@ internal sealed class ToolMeasures
 
     /// <summary>Gets a value indicating whether every measure is zero.</summary>
     public bool IsZero => Calls == 0 && Failures == 0 && Canceled == 0 && DurationCount == 0 && DurationMsTotal == 0 && DurationMsMax == 0
-        && BytesIn == 0 && BytesOut == 0 && FilesRead == 0 && FilesChanged == 0 && LinesAdded == 0 && LinesRemoved == 0;
+        && BytesIn == 0 && BytesOut == 0 && FilesRead == 0 && FilesChanged == 0 && LinesAdded == 0 && LinesRemoved == 0 && ScriptCalls == 0;
 
     /// <inheritdoc />
     public override string ToString()
-        => $"calls={Calls} fail={Failures} cancel={Canceled} dur={DurationCount}/{DurationMsTotal}/{DurationMsMax} bytes={BytesIn}/{BytesOut} files={FilesRead}/{FilesChanged} lines=+{LinesAdded}/-{LinesRemoved}";
+        => $"calls={Calls} fail={Failures} cancel={Canceled} dur={DurationCount}/{DurationMsTotal}/{DurationMsMax} bytes={BytesIn}/{BytesOut} files={FilesRead}/{FilesChanged} lines=+{LinesAdded}/-{LinesRemoved} script={ScriptCalls}";
+}
+
+/// <summary>The key of the runs of scripts of Code Mode.</summary>
+/// <param name="Quarter">The quarter hour.</param>
+/// <param name="Provider">The provider in force when the script started, its old names folded.</param>
+/// <param name="Model">The model in force when the script started.</param>
+/// <param name="Script">The library script the run loaded first; <c>inline</c> for a run that loaded none, <c>unknown</c> for a run recorded before that was written.</param>
+/// <param name="Origin">Who sent the turn that started it: <c>you</c>, <c>agent</c>, <c>automation</c>, <c>reminder</c>, <c>other</c>; <c>resume</c> for a resume, <c>unknown</c> without a turn.</param>
+internal readonly record struct ScriptKey(QuarterHour Quarter, string Provider, string Model, string Script, string Origin);
+
+/// <summary>
+/// The measures of <see cref="ScriptKey"/>. A run is counted when it starts; everything else it did is counted when it ends, in
+/// the quarter of its end: a script may sleep for days, and only its end says what it did.
+/// </summary>
+internal sealed class ScriptMeasures
+{
+    /// <summary>Gets or sets the runs that started.</summary>
+    public long RunsStarted { get; set; }
+
+    /// <summary>Gets or sets the runs that completed.</summary>
+    public long RunsCompleted { get; set; }
+
+    /// <summary>Gets or sets the runs that failed.</summary>
+    public long RunsFailed { get; set; }
+
+    /// <summary>Gets or sets the runs that were stopped.</summary>
+    public long RunsCancelled { get; set; }
+
+    /// <summary>Gets or sets the runs CodeAlta ended while they ran.</summary>
+    public long RunsInterrupted { get; set; }
+
+    /// <summary>Gets or sets the ended runs whose duration is known (an interrupted run has none).</summary>
+    public long DurationCount { get; set; }
+
+    /// <summary>Gets or sets the sum of those durations in milliseconds.</summary>
+    public long DurationMs { get; set; }
+
+    /// <summary>Gets or sets the milliseconds the runs waited for an answer or an approval of the user.</summary>
+    public long WaitMs { get; set; }
+
+    /// <summary>Gets or sets the calls the runs made: tools, <c>alta</c>, sessions.</summary>
+    public long Calls { get; set; }
+
+    /// <summary>Gets or sets the steps that ended (at most 200 records of steps per run: a lower bound).</summary>
+    public long Steps { get; set; }
+
+    /// <summary>Gets or sets the steps that failed.</summary>
+    public long StepsFailed { get; set; }
+
+    /// <summary>Gets or sets the steps that gave the result of an earlier run instead of running.</summary>
+    public long StepsReplayed { get; set; }
+
+    /// <summary>Gets or sets the sessions the runs started.</summary>
+    public long SessionsStarted { get; set; }
+
+    /// <summary>Gets or sets the asks of those sessions that failed.</summary>
+    public long AsksFailed { get; set; }
+
+    /// <summary>Gets or sets the sleeps of the runs.</summary>
+    public long Sleeps { get; set; }
+
+    /// <summary>Adds another set of measures.</summary>
+    /// <param name="other">The measures to add.</param>
+    public void Add(ScriptMeasures other)
+    {
+        RunsStarted += other.RunsStarted;
+        RunsCompleted += other.RunsCompleted;
+        RunsFailed += other.RunsFailed;
+        RunsCancelled += other.RunsCancelled;
+        RunsInterrupted += other.RunsInterrupted;
+        DurationCount += other.DurationCount;
+        DurationMs += other.DurationMs;
+        WaitMs += other.WaitMs;
+        Calls += other.Calls;
+        Steps += other.Steps;
+        StepsFailed += other.StepsFailed;
+        StepsReplayed += other.StepsReplayed;
+        SessionsStarted += other.SessionsStarted;
+        AsksFailed += other.AsksFailed;
+        Sleeps += other.Sleeps;
+    }
+
+    /// <summary>Gets a value indicating whether every measure is zero.</summary>
+    public bool IsZero => RunsStarted == 0 && RunsCompleted == 0 && RunsFailed == 0 && RunsCancelled == 0 && RunsInterrupted == 0 && DurationCount == 0
+        && DurationMs == 0 && WaitMs == 0 && Calls == 0 && Steps == 0 && StepsFailed == 0 && StepsReplayed == 0 && SessionsStarted == 0 && AsksFailed == 0 && Sleeps == 0;
+
+    /// <inheritdoc />
+    public override string ToString()
+        => $"runs={RunsStarted} ended={RunsCompleted}/{RunsFailed}/{RunsCancelled}/{RunsInterrupted} dur={DurationCount}/{DurationMs} wait={WaitMs} calls={Calls} steps={Steps}/{StepsFailed}/{StepsReplayed} sessions={SessionsStarted}/{AsksFailed} sleeps={Sleeps}";
 }
 
 /// <summary>The key of the contents the session wrote or received.</summary>
@@ -660,6 +780,9 @@ internal sealed class RunRow
     /// <summary>Gets or sets the permission mode in force when the run started.</summary>
     public string PermissionMode { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets the <c>exec</c> calls of the run: the scripts of Code Mode it sent.</summary>
+    public long ExecCalls { get; set; }
+
     /// <summary>Gets the duration of the run.</summary>
     public TimeSpan Duration => End - Start - TimeSpan.FromMilliseconds(SkippedMs) is var duration && duration > TimeSpan.Zero ? duration : TimeSpan.Zero;
 }
@@ -715,4 +838,65 @@ internal sealed class SessionRow
 
     /// <summary>Gets or sets a value indicating whether a header was read.</summary>
     public bool HasHeader { get; set; }
+
+    /// <summary>Gets or sets the run of the script that started the session, for a session a script started.</summary>
+    public string? ScriptRunId { get; set; }
+}
+
+/// <summary>A run of a script of Code Mode as the table of script runs holds it: one row, replaced each time the run changes.</summary>
+internal sealed class ScriptRunRow
+{
+    /// <summary>Gets or sets the session that runs the script.</summary>
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the run of the script (<c>run-7f3c2a</c>).</summary>
+    public string RunId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the library script, <c>inline</c> or <c>unknown</c> (see <see cref="ScriptKey.Script"/>).</summary>
+    public string Script { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets who sent the turn that started it (see <see cref="ScriptKey.Origin"/>).</summary>
+    public string Origin { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the title of the run, in the form titles are kept in (<see cref="SessionTitles.Clean"/>).</summary>
+    public string? Title { get; set; }
+
+    /// <summary>Gets or sets how it ended: <c>running</c>, <c>completed</c>, <c>failed</c>, <c>cancelled</c> or <c>interrupted</c>.</summary>
+    public string Status { get; set; } = "running";
+
+    /// <summary>Gets or sets the name of the error it failed with.</summary>
+    public string? Error { get; set; }
+
+    /// <summary>Gets or sets when it started.</summary>
+    public DateTimeOffset Start { get; set; }
+
+    /// <summary>Gets or sets when it ended; null while it runs.</summary>
+    public DateTimeOffset? End { get; set; }
+
+    /// <summary>Gets or sets its duration in milliseconds, as its end gives it; null while it runs and for an interrupted run.</summary>
+    public long? DurationMs { get; set; }
+
+    /// <summary>Gets or sets the run it resumes.</summary>
+    public string? ResumesRunId { get; set; }
+
+    /// <summary>Gets or sets the provider in force when it started.</summary>
+    public string Provider { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the model in force when it started.</summary>
+    public string Model { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the calls it made, as its end gives them.</summary>
+    public long Calls { get; set; }
+
+    /// <summary>Gets or sets the steps that ended.</summary>
+    public long Steps { get; set; }
+
+    /// <summary>Gets or sets the steps that failed.</summary>
+    public long StepsFailed { get; set; }
+
+    /// <summary>Gets or sets the sessions it started.</summary>
+    public long Sessions { get; set; }
+
+    /// <summary>Gets or sets the milliseconds it waited for the user.</summary>
+    public long WaitMs { get; set; }
 }

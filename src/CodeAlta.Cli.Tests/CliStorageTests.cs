@@ -198,8 +198,9 @@ public sealed class CliStorageTests
         Assert.AreEqual(0, prompts.ExitCode, prompts.Stdout + prompts.Stderr);
         Assert.IsFalse(prompts.Stdout.Contains("giraffe-agent", StringComparison.Ordinal), prompts.Stdout);
 
-        // The other modes read them, as CodeAlta Desktop does, and the alta commands list what the sessions see.
-        var visible = await root.RunAsync(provider, ["run", Plain, "hello"]);
+        // The other modes read them, as CodeAlta Desktop does, and the alta commands list what the sessions see. The agent
+        // prompts are listed with the mode handoff, which a run leaves out by default.
+        var visible = await root.RunAsync(provider, ["run", Plain, "--enable", "mode-handoff", "hello"]);
         Assert.AreEqual(CliExitCodes.Completed, visible.ExitCode, visible.Stderr);
         StringAssert.Contains(PromptOfLastRequest(provider), "zebra-skill");
         StringAssert.Contains(PromptOfLastRequest(provider), "giraffe-agent");

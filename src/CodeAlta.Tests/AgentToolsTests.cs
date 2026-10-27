@@ -958,6 +958,171 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public async Task ShellCommandTool_KeepsTheHeadAndTailOfALongOutputAndSavesTheWholeOutput()
+    {
+        using var temp = TestTempDirectory.Create();
+        var outputFolder = Path.Combine(temp.Path, "session.attachments", "tool-output");
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(new AgentBuiltInToolOptions
+            {
+                ProviderId = ModelProviderIds.OpenAIResponses,
+                SessionId = "session-1",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                MaxShellCommandOutputCharacters = 2_000,
+                ResolveToolOutputDirectoryAsync = _ => ValueTask.FromResult<string?>(outputFolder),
+            })
+            .Single(static tool => tool.Spec.Name == "shell_command");
+        StringAssert.Contains(tool.Spec.Description, "2000 characters");
+        var command = OperatingSystem.IsWindows()
+            ? "1..5000 | ForEach-Object { \"line-$_\" }"
+            : "seq -f 'line-%g' 1 5000";
+        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":60000}""");
+
+        var result = await tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "call/1", tool.Spec.Name, args.RootElement.Clone()),
+            CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(90)).ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success);
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        Assert.IsTrue(output.Length <= 2_000, $"Expected at most 2,000 characters, got {output.Length}.");
+        StringAssert.Contains(output, "exit_code: 0");
+        StringAssert.Contains(output, "line-1" + Environment.NewLine);
+        Assert.IsTrue(output.TrimEnd().Contains("line-5000", StringComparison.Ordinal));
+        Assert.IsFalse(output.Contains("line-2500", StringComparison.Ordinal));
+        StringAssert.Contains(output, "lines) cut ...]");
+        var saved = Directory.GetFiles(outputFolder).Single();
+        StringAssert.Contains(output, "output_truncated: ");
+        StringAssert.Contains(output, saved);
+        StringAssert.Contains(Path.GetFileName(saved), "call_1");
+        var whole = await File.ReadAllTextAsync(saved).ConfigureAwait(false);
+        StringAssert.Contains(whole, "line-2500");
+        // The user is shown the whole output, and a script receives all of it.
+        Assert.AreEqual(whole, result.Display);
+        StringAssert.Contains(result.Structured!.Value.GetProperty("stdout").GetString(), "line-2500");
+    }
+
+    [TestMethod]
+    public async Task ShellCommandTool_LeavesAShortOutputWhole()
+    {
+        using var temp = TestTempDirectory.Create();
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path))
+            .Single(static tool => tool.Spec.Name == "shell_command");
+        var command = OperatingSystem.IsWindows()
+            ? "1..100 | ForEach-Object { \"line-$_\" }"
+            : "seq -f 'line-%g' 1 100";
+        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":60000}""");
+
+        var result = await tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+            CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(90)).ConfigureAwait(false);
+
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.Contains(output, "line-50");
+        Assert.IsFalse(output.Contains("output_truncated", StringComparison.Ordinal));
+        Assert.IsNull(result.Display);
+    }
+
+    [TestMethod]
+    public async Task ReadFileTool_CutsALongLineForTheModelAndKeepsItWholeForScripts()
+    {
+        using var temp = TestTempDirectory.Create();
+        var longLine = new string('x', 5_000);
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "data.txt"), ["first", longLine, "last"]).ConfigureAwait(false);
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path)).Single(static tool => tool.Spec.Name == "read_file");
+        using var args = JsonDocument.Parse("""{"path":"data.txt"}""");
+
+        var result = await tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+            CancellationToken.None).ConfigureAwait(false);
+
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.Contains(output, "    2: " + new string('x', 2_000) + "… [line cut: 5,000 characters]");
+        StringAssert.Contains(output, "    3: last");
+        Assert.IsTrue(output.Length < 2_200, $"Expected the long line to be cut, got {output.Length} characters.");
+        StringAssert.Contains(result.Structured!.Value.GetProperty("content").GetString(), longLine);
+    }
+
+    [TestMethod]
+    public async Task ReadFileTool_StopsAtTheCharacterLimitAndNamesTheOffsetToReadOnFrom()
+    {
+        using var temp = TestTempDirectory.Create();
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "data.txt"), Enumerable.Range(1, 20).Select(static index => $"line-{index:00}")).ConfigureAwait(false);
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(new AgentBuiltInToolOptions
+            {
+                ProviderId = ModelProviderIds.OpenAIResponses,
+                SessionId = "session-1",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                MaxReadFileCharacters = 100,
+            })
+            .Single(static tool => tool.Spec.Name == "read_file");
+        using var args = JsonDocument.Parse("""{"path":"data.txt","offset":3}""");
+
+        var result = await tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+            CancellationToken.None).ConfigureAwait(false);
+
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        var next = int.Parse(Regex.Match(output, @"read on with offset=(\d+)\.").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.IsTrue(next > 3 && next < 20, $"Expected the read to stop within the file, got offset={next}.");
+        StringAssert.Contains(output, $"{next - 1,5}: line-{next - 1:00}");
+        Assert.IsFalse(output.Contains($"line-{next:00}", StringComparison.Ordinal));
+        var lines = output[..output.LastIndexOf("[read_file stopped", StringComparison.Ordinal)];
+        Assert.IsTrue(lines.Length <= 100 + Environment.NewLine.Length, $"Expected at most 100 characters of lines, got {lines.Length}.");
+        // A script receives every line it asked for.
+        Assert.AreEqual(20, result.Structured!.Value.GetProperty("endLine").GetInt32());
+        Assert.IsFalse(result.Structured.Value.GetProperty("more").GetBoolean());
+    }
+
+    [TestMethod]
+    public async Task GrepTool_CutsALongMatchingLineAroundTheMatch()
+    {
+        using var temp = TestTempDirectory.Create();
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "data.txt"), [new string('a', 3_000) + "NEEDLE" + new string('b', 3_000)]).ConfigureAwait(false);
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path)).Single(static tool => tool.Spec.Name == "grep");
+        using var args = JsonDocument.Parse("""{"path":"data.txt","pattern":"needle"}""");
+
+        var result = await tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+            CancellationToken.None).ConfigureAwait(false);
+
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.StartsWith(output, "data.txt:1: …");
+        StringAssert.Contains(output, "NEEDLE");
+        StringAssert.EndsWith(output, "… [line cut: 6,006 characters]");
+        Assert.IsTrue(output.Length < 600, $"Expected the line to be cut, got {output.Length} characters.");
+    }
+
+    [TestMethod]
+    public async Task GrepTool_StopsAtTheCharacterLimitAndSaysWhatWasLeftOut()
+    {
+        using var temp = TestTempDirectory.Create();
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "data.txt"), Enumerable.Range(1, 50).Select(static index => $"match-{index:00}")).ConfigureAwait(false);
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(new AgentBuiltInToolOptions
+            {
+                ProviderId = ModelProviderIds.OpenAIResponses,
+                SessionId = "session-1",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                MaxGrepCharacters = 200,
+            })
+            .Single(static tool => tool.Spec.Name == "grep");
+        using var args = JsonDocument.Parse("""{"path":"data.txt","pattern":"match"}""");
+
+        var result = await tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+            CancellationToken.None).ConfigureAwait(false);
+
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.StartsWith(output, "data.txt:1: match-01");
+        var note = Regex.Match(output, @"\[grep stopped at 200 characters: (\d+) more of the first 50 matches left out\.");
+        Assert.IsTrue(note.Success, output);
+        var shown = output[..note.Index];
+        Assert.IsTrue(shown.Length <= 200 + Environment.NewLine.Length, $"Expected at most 200 characters of matches, got {shown.Length}.");
+        Assert.AreEqual(50, Regex.Matches(shown, "match-").Count + int.Parse(note.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [TestMethod]
     public async Task ShellCommandTool_TreatsNullOptionalArgumentsAsMissing()
     {
         using var temp = TestTempDirectory.Create();

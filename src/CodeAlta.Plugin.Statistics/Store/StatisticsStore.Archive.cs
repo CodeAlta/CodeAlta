@@ -11,15 +11,37 @@ internal sealed partial class StatisticsStore
     internal bool HasArchive => _archives is not null;
     internal int SavedSessions { get; private set; }
 
-    private static IReadOnlyList<(string Name, string[] Columns)> ArchiveTables()
-        => [.. FactTables.All.Select(table => (table.Name + "_q", table.KeyColumns(RollupLevel.Quarter).Concat(table.Measures.Select(measure => measure.Name)).ToArray())),
+    // Version 2 of the saved statistics adds the runs of scripts (Code Mode): their facts and rows, the calls scripts make, the
+    // exec calls of a run and the run of the script that started a session. A copy saved at version 1 stays readable as it was.
+    private const int CurrentArchiveVersion = 2;
+
+    private static IReadOnlyList<(string Name, string[] Columns)> ArchiveTables(int version = CurrentArchiveVersion)
+    {
+        string[] run = ["session_id", "run_id", "start_ms", "end_ms", "outcome", "sender", "prompt_kind", "prompt_chars", "prompt_words", "requests", "tool_calls", "tool_failures", "input_tokens", "output_tokens", "compactions", "answer_chars", "answer_words", "cost_usd_micro", "cost_credits_micro", "provider", "model", "effort", "permission_mode", "skipped_ms"];
+        // `deleted` stays the last column of a session and `title` the eighth: the export and the checks name them by place.
+        string[] session = ["session_id", "project_ref", "session_kind", "parent_session_id", "created_by_kind", "created_by_session_id", "automation_id", "title", "provider", "permission_mode", "first_ms", "last_ms"];
+        var facts = FactTables.All
+            .Where(table => version >= 2 || table != FactTables.Scripts)
+            .Select(table => (table.Name + "_q", table.KeyColumns(RollupLevel.Quarter)
+                .Concat(table.Measures.Select(measure => measure.Name).Where(name => version >= 2 || !(table == FactTables.Tools && name == "script_calls"))).ToArray()));
+        List<(string Name, string[] Columns)> tables =
+        [
+            .. facts,
             ("extreme_q", ["session_id", "q", "measure", "subject", "value", "run_id", "at_ms"]),
-            ("run", ["session_id", "run_id", "start_ms", "end_ms", "outcome", "sender", "prompt_kind", "prompt_chars", "prompt_words", "requests", "tool_calls", "tool_failures", "input_tokens", "output_tokens", "compactions", "answer_chars", "answer_words", "cost_usd_micro", "cost_credits_micro", "provider", "model", "effort", "permission_mode", "skipped_ms"]),
-            ("session", ["session_id", "project_ref", "session_kind", "parent_session_id", "created_by_kind", "created_by_session_id", "automation_id", "title", "provider", "permission_mode", "first_ms", "last_ms", "deleted"]),
-            ("project", ["project_ref", "name", "updated_ms"])];
+            ("run", version >= 2 ? [.. run, "exec_calls"] : run),
+            ("session", version >= 2 ? [.. session, "script_run_id", "deleted"] : [.. session, "deleted"]),
+            ("project", ["project_ref", "name", "updated_ms"]),
+        ];
+        if (version >= 2)
+        {
+            tables.Add(("script_run", ["session_id", "run_id", "script", "origin", "title", "status", "error", "start_ms", "end_ms", "duration_ms", "resumes_run_id", "provider", "model", "calls", "steps", "steps_failed", "sessions", "wait_ms"]));
+        }
+
+        return tables;
+    }
 
     internal static string[] CurrentMetrics()
-        => [.. FactTables.All.SelectMany(table => table.Measures.Select(measure => table.Name + "." + measure.Name)), "extreme", "run", "run.skipped_ms", "session.lineage"];
+        => [.. FactTables.All.SelectMany(table => table.Measures.Select(measure => table.Name + "." + measure.Name)), "extreme", "run", "run.skipped_ms", "session.lineage", "run.exec_calls", "session.script_run", "script_run"];
 
     internal async ValueTask<StatisticsArchiveEntry> SaveArchiveAsync(string sessionId, SessionStatisticsSource? source, CancellationToken token)
     {
@@ -98,6 +120,7 @@ internal sealed partial class StatisticsStore
 
         return new StatisticsArchivePayload
         {
+            ArchiveVersion = CurrentArchiveVersion,
             SessionId = sessionId,
             FactsVersion = journal.FactsVersion,
             Source = source,
@@ -113,7 +136,7 @@ internal sealed partial class StatisticsStore
 
     private static void ValidatePayload(StatisticsArchivePayload payload, string sessionId, SessionStatisticsSource? source)
     {
-        if (payload.ArchiveVersion != 1 || payload.FactsVersion < 1 || payload.FactsVersion > SessionFactsState.CurrentVersion || payload.SessionId != sessionId || payload.Source != source
+        if (payload.ArchiveVersion is < 1 or > CurrentArchiveVersion || payload.FactsVersion < 1 || payload.FactsVersion > SessionFactsState.CurrentVersion || payload.SessionId != sessionId || payload.Source != source
             // A partial legacy cursor stores length=0 until EOF. Preserve that unknown-length sentinel, not an invented total.
             || payload.ReadOffset < 0 || payload.SourceLength < 0 || (payload.SourceLength != 0 && payload.SourceLength < payload.ReadOffset) || payload.FullSourceVerified != (source is not null)
             || (source is not null && (source.SessionId != sessionId || payload.ReadOffset != source.Length || payload.SourceLength != source.Length || payload.FloorQuarter != int.MinValue)))
@@ -121,7 +144,7 @@ internal sealed partial class StatisticsStore
             throw new InvalidDataException("Unsupported or inconsistent saved Statistics coverage; the existing projection was not reset.");
         }
 
-        var definitions = ArchiveTables();
+        var definitions = ArchiveTables(payload.ArchiveVersion);
         if (payload.Tables.Length != definitions.Count || payload.Tables.Select(table => table.Name).Distinct(StringComparer.Ordinal).Count() != definitions.Count
             || payload.RecordedMetrics.Except(CurrentMetrics(), StringComparer.Ordinal).Any())
         {

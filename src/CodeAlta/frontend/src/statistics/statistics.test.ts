@@ -11,7 +11,7 @@ import {
 import { statisticsContext } from "./canvasContext";
 import { assumedBytesPerSecond, canReadMore, historyView, progressOf, readMoreChoices, readingSeconds, skippedToRetry, timeLeft } from "./history";
 import { distributionOption, hatchFraction, maskSeries, partsOption, periodOfBrush, ratioSeries, scatterOption, timeAxis, timeSeriesOption, toolDurationOption, treemapOption, unreadBuckets } from "./options";
-import { providerNamer, provenanceLabel, senderLabel, skillSourceLabel } from "./labels";
+import { creatorLabel, filterValueLabel, providerNamer, provenanceLabel, scriptKindLabel, scriptLabel, scriptOriginLabel, scriptStatusLabel, senderLabel, skillSourceLabel } from "./labels";
 import { QueryStore, joinRanges } from "./queryStore";
 import { binSteps, boxStatsOfSteps, mergeSteps, percentileOfSteps, stepsCount } from "./steps";
 import type { DistributionStep, SeriesResult, StatisticsStatus } from "./types";
@@ -366,7 +366,7 @@ test("filters list the values the plugin knows, and a chip knows when its filter
   assert.ok(filterChoices("model", sources).every(choice => choice.detail));
   assert.deepEqual(filterChoices("effort", sources).map(choice => choice.value).sort(), ["high", "low", "medium"]);
   assert.deepEqual(filterChoices("origin", sources).map(choice => choice.label), ["YOU", "AGENT", "AUTOMATION", "REMINDER"]);
-  assert.equal(filterChoices("toolKind", sources).length, 8);
+  assert.equal(filterChoices("toolKind", sources).length, 9);
   assert.deepEqual(filterChoices("space", sources), [{ value: "space-work", label: "Work" }]);
   assert.deepEqual(filterChoices("model", { ...sources, models: null }), []);
   assert.deepEqual([...ignoredKinds(["origin", "nonsense", "model"])].sort(), ["model", "origin"]);
@@ -560,8 +560,51 @@ test("the chip of a provider filter reads the name the window has now, whatever 
   assert.equal(filterChipValue("origin", { value: "agent" }, after), "An agent");
 });
 
+test("the runs of scripts add up the same in the question of the page, its series and its lists", async () => {
+  const api = createFixtureApi({ sessionCount: 300 });
+  const request = { period: "all", frequency: "week" as const, comparison: "none" as const };
+  const scripts = await api.scripts({ ...request, limit: 100 });
+  const runs = await api.series(request, "script-runs", null);
+  const kinds = await api.series(request, "script-runs", "script-kind");
+  const outcomes = await Promise.all(["completed", "failed", "cancelled", "interrupted"].map(outcome => api.series(request, `script-runs-${outcome}`, null)));
+  const total = (result: SeriesResult) => result.series.reduce((sum, line) => sum + line.total, 0);
+  assert.ok(scripts.totals.runs > 0);
+  assert.equal(total(runs), scripts.totals.runs);
+  assert.equal(total(kinds), scripts.totals.runs, "library, inline and unknown runs are every run");
+  assert.deepEqual(new Set(kinds.series.map(line => line.key)), new Set(["library", "inline", "unknown"]));
+  assert.equal(outcomes.reduce((sum, result) => sum + total(result), 0), scripts.totals.completed + scripts.totals.failed + scripts.totals.cancelled + scripts.totals.interrupted);
+  assert.equal(scripts.scripts.reduce((sum, row) => sum + row.runs, 0), scripts.totals.runs);
+  assert.equal(scripts.scripts.reduce((sum, row) => sum + row.spark.reduce((a, b) => a + b, 0), 0), scripts.totals.runs);
+  assert.ok(scripts.recent.length > 0 && scripts.recent.length <= 20);
+  assert.ok(scripts.adoption.every(row => row.turnsWithScript <= row.turns));
+  // A step of a library script is named after its script; the code sent to exec has none.
+  const steps = await api.details(request, "script-step-failed");
+  assert.ok(steps.rows.length > 0 && steps.rows.every(row => /^[a-z][a-z-]*\/[a-z]+$/.test(row.name)));
+  // The calls scripts made of a tool are a part of its calls.
+  const tools = await api.tools({ ...request, limit: 50 });
+  assert.ok(tools.rows.some(row => row.scriptCalls > 0) && tools.rows.filter(row => Number.isFinite(row.calls)).every(row => row.scriptCalls <= row.calls));
+  // A filter of the origin keeps the runs of the turns it started.
+  const yours = await api.scripts({ ...request, filter: { origin: "you" } });
+  assert.ok(yours.totals.runs < scripts.totals.runs && yours.query.ignoredFilters.length === 0);
+});
+
+test("the names of the scripts, of their kinds, of their outcomes and of who started them read in every language", () => {
+  for (const locale of locales) {
+    const t = (key: Parameters<typeof translate>[1], parameters?: Readonly<Record<string, string | number>>) => translate(locale, key, parameters);
+    assert.notEqual(scriptLabel(t, "(inline)"), "(inline)");
+    assert.notEqual(scriptLabel(t, "(unknown)"), "(unknown)");
+    assert.equal(scriptLabel(t, "review-pr"), "review-pr", "a library script keeps its name");
+    for (const kind of ["library", "inline", "unknown"]) assert.notEqual(scriptKindLabel(t, kind), kind);
+    assert.equal(scriptStatusLabel(t, "cancelled"), t("Stopped"));
+    assert.equal(scriptOriginLabel(t, "resume"), t("A resume"));
+    assert.equal(scriptOriginLabel(t, "you"), senderLabel(t, "you"));
+    assert.equal(creatorLabel(t, "script"), t("A script"));
+    assert.equal(filterValueLabel(t, "toolKind", "script"), t("Scripts"));
+  }
+});
+
 test("a tool the plugin has under two keys is one row, one box and one cell: its numbers are added up and its keys are kept", () => {
-  const row = (tool: string, kind: string, calls: number, more: Partial<Parameters<typeof mergeToolRows>[0][number]> = {}) => ({ kind, tool, calls, failures: 1, failureRate: 1 / calls, timeMs: calls * 10, p50Ms: 100, p90Ms: 400, maxMs: 900, bytesIn: 10, bytesOut: 20, spark: [calls, 0], ...more });
+  const row = (tool: string, kind: string, calls: number, more: Partial<Parameters<typeof mergeToolRows>[0][number]> = {}) => ({ kind, tool, calls, failures: 1, failureRate: 1 / calls, timeMs: calls * 10, p50Ms: 100, p90Ms: 400, maxMs: 900, bytesIn: 10, bytesOut: 20, spark: [calls, 0], scriptCalls: 3, ...more });
   const merged = mergeToolRows([row("ToolCall:mcp__github__issue_read", "mcp", 30, { p50Ms: 100, maxMs: 500 }), row("ToolCall:read_file", "files", 50), row("McpToolCall:mcp__github__issue_read", "mcp", 10, { p50Ms: 500, maxMs: 900, spark: [4, 6] }),
     row("ToolCall:alta", "alta", 5), row("Skill:alta", "skill", 2), row("ToolCall:mcp__jira__issue_read", "mcp", 1, { p50Ms: undefined })]);
   assert.deepEqual(merged.map(item => [item.name, item.server, item.kind, item.calls]), [["issue_read", "github", "mcp", 40], ["read_file", null, "files", 50], ["alta", null, "alta", 5], ["alta", null, "skill", 2], ["issue_read", "jira", "mcp", 1]],
@@ -569,7 +612,7 @@ test("a tool the plugin has under two keys is one row, one box and one cell: its
   const issue = merged[0];
   assert.deepEqual(issue.keys, ["ToolCall:mcp__github__issue_read", "McpToolCall:mcp__github__issue_read"]);
   assert.equal(issue.tool, "ToolCall:mcp__github__issue_read", "the key with the most calls names the row");
-  assert.deepEqual([issue.failures, issue.failureRate, issue.timeMs, issue.maxMs, issue.bytesIn, issue.bytesOut], [2, 2 / 40, 400, 900, 20, 40]);
+  assert.deepEqual([issue.failures, issue.failureRate, issue.timeMs, issue.maxMs, issue.bytesIn, issue.bytesOut, issue.scriptCalls], [2, 2 / 40, 400, 900, 20, 40, 6]);
   assert.deepEqual(issue.spark, [34, 6]);
   assert.equal(issue.p50Ms, (100 * 30 + 500 * 10) / 40, "a median does not add up: the medians weighted by their calls");
   assert.equal(merged[4].p50Ms, undefined);

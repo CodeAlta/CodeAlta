@@ -9,6 +9,11 @@ internal sealed partial class ClaudeCodeSession
     /// <summary>The tool Claude Code always loads, whatever the number of tools: the gateway to the host.</summary>
     internal const string AlwaysLoadedTool = "alta";
 
+    // The tools Claude Code always loads: `alta`, and `exec` with `wait` while the session has Code Mode, which its
+    // instructions tell it to reach for first. A deferred one would wait for a tool search the model rarely makes.
+    private static readonly System.Collections.Frozen.FrozenSet<string> AlwaysLoadedTools =
+        System.Collections.Frozen.FrozenSet.Create(StringComparer.Ordinal, AlwaysLoadedTool, "exec", "wait");
+
     private const int PermissionReasonLimit = 1000;
 
     // Answers a permission prompt of the CLI with the permission policy of CodeAlta. The CLI only prompts for
@@ -473,10 +478,10 @@ internal sealed partial class ClaudeCodeSession
                         }
 
                         // Claude Code defers the tools of an MCP server behind its own tool search once they are many.
-                        // `alta` is always loaded: it is how a session finds and uses everything else. The other tools
-                        // (of MCP servers, of plugins, of the window) are left to the CLI, which loads them all while
-                        // they are few and lets the model search them when they are many.
-                        if (string.Equals(name, AlwaysLoadedTool, StringComparison.Ordinal))
+                        // `alta` is always loaded: it is how a session finds and uses everything else; so are the tools of
+                        // Code Mode. The other tools (of MCP servers, of plugins, of the window) are left to the CLI, which
+                        // loads them all while they are few and lets the model search them when they are many.
+                        if (AlwaysLoadedTools.Contains(name))
                         {
                             writer.WriteStartObject("_meta");
                             writer.WriteBoolean("anthropic/alwaysLoad", true);

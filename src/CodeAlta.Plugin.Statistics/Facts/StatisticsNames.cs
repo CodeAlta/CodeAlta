@@ -35,7 +35,22 @@ internal static class StatisticsToolBuckets
         ["alta"] = ToolKind.Alta,
         ["skill"] = ToolKind.Skill,
         ["codealta_skills_activate"] = ToolKind.Skill,
+        ["exec"] = ToolKind.Script,
+        ["wait"] = ToolKind.Script,
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Tells whether a call is the <c>exec</c> of Code Mode, under its own name or through the MCP server of CodeAlta.</summary>
+    /// <param name="name">The name of the tool.</param>
+    /// <returns><see langword="true"/> for <c>exec</c>.</returns>
+    public static bool IsExec(string? name)
+    {
+        var trimmed = name?.Trim();
+        return string.Equals(trimmed, "exec", StringComparison.OrdinalIgnoreCase)
+            || (TrySplitMcp(trimmed, out var server, out var tool) && IsCodeAltaServer(server) && string.Equals(tool, "exec", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // The MCP server through which a provider that runs its own tools (Claude Code) reaches the tools of CodeAlta.
+    private static bool IsCodeAltaServer(string server) => string.Equals(server, "codealta", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Names the bucket of a tool call: <c>shell</c> for a command, <c>&lt;ActivityKind&gt;:&lt;name&gt;</c> for the others. This
@@ -90,9 +105,14 @@ internal static class StatisticsToolBuckets
             return kind == AgentActivityKind.McpToolCall ? ToolKind.Mcp : ToolKind.Other;
         }
 
-        if (TrySplitMcp(trimmed, out _, out var mcpTool))
+        if (TrySplitMcp(trimmed, out var mcpServer, out var mcpTool))
         {
-            // The alta tool reached through an MCP server of the same application is still the alta tool.
+            // The alta tool reached through an MCP server of the same application is still the alta tool, and so are the tools of Code Mode.
+            if (IsCodeAltaServer(mcpServer) && (string.Equals(mcpTool, "exec", StringComparison.OrdinalIgnoreCase) || string.Equals(mcpTool, "wait", StringComparison.OrdinalIgnoreCase)))
+            {
+                return ToolKind.Script;
+            }
+
             return string.Equals(mcpTool, "alta", StringComparison.OrdinalIgnoreCase) ? ToolKind.Alta : ToolKind.Mcp;
         }
 
@@ -128,6 +148,19 @@ internal static class StatisticsToolBuckets
         tool = name[(separator + 2)..];
         return true;
     }
+}
+
+/// <summary>
+/// The names the facts give a run of a script that loaded no library script; the parentheses keep them apart from the names of
+/// library scripts, which are lowercase letters, digits and hyphens.
+/// </summary>
+internal static class ScriptLabels
+{
+    /// <summary>A run that ran only the code sent to <c>exec</c>.</summary>
+    public const string Inline = "(inline)";
+
+    /// <summary>A run recorded before the library scripts it loads were: which script it ran is not known.</summary>
+    public const string Unknown = "(unknown)";
 }
 
 /// <summary>The names of the providers as the facts keep them.</summary>

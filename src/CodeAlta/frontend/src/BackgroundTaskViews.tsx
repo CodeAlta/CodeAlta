@@ -4,6 +4,7 @@ import { AppIcon } from "./AppIcon";
 import { backgroundTaskElapsed, backgroundTaskEnd, backgroundTaskIcon, backgroundTaskKind, listedBackgroundTasks,
   type BackgroundCallState, type BackgroundTask } from "./backgroundTasks";
 import { useShellLanguage } from "./shellLanguage";
+import { revealableTask } from "./timelineReveal";
 
 /**
  * The tool calls of the session whose task goes on in the background or ended there, by the identity the
@@ -32,7 +33,7 @@ export type BackgroundJobOutputProps = Readonly<{
  * are, and on a click each of them with what it does, how long it has been going on and a button that stops it.
  * A background job also shows what it writes, and stays listed a moment after it ended.
  */
-export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }: {
+export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput, onReveal }: {
   /** The background tasks of the session: the ones that go on and the last that ended. */
   tasks: readonly BackgroundTask[];
   /** Whether a task can be stopped now. */
@@ -41,9 +42,16 @@ export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }:
   onStop: (taskId: string) => Promise<void>;
   /** Draws the window that shows what a job writes; without it a job only has its line in the list. */
   renderOutput?: (props: BackgroundJobOutputProps) => ReactNode;
+  /**
+   * Goes to the place of a task in the timeline (a run of a script, the call that started a task), from the button of
+   * the list, which is in the session; without it such a task only has its line.
+   */
+  onReveal?: (task: BackgroundTask, origin: HTMLElement) => void;
 }) {
   const { t } = useShellLanguage();
   const [open, setOpen] = useState(false);
+  // A task gone to keeps the focus where it went: the list closes without giving it back to its button.
+  const [revealing, setRevealing] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
   const [now, setNow] = useState(() => Date.now());
@@ -97,6 +105,13 @@ export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }:
               // Like timeline cards, open on release so Enter cannot also activate the window's Close button.
               onKeyDown={event => { if (event.key === "Enter" || event.key === " " && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
               onKeyUp={event => { if (event.key === "Enter" && !event.defaultPrevented && !event.repeat && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) event.currentTarget.click(); }}>{content}</button>
+              : onReveal && revealableTask(task) ? <button type="button" className="background-task-open" title={t("Go to it in the timeline")}
+                aria-label={`${t("Go to it in the timeline")} · ${task.description ?? kind}`}
+                onClick={() => {
+                  setRevealing(true); setOpen(false);
+                  requestAnimationFrame(() => { if (trigger.current?.isConnected) onReveal(task, trigger.current); });
+                }}>
+                {content}<AppIcon name="chevronRight" size={14} /></button>
               : <div className="background-task-info" title={task.description ?? kind}>{content}</div>}
             {task.state === "running" && <Button variant="minimal" size="small" className="background-task-stop" icon={<AppIcon name="stop" size={13} />} disabled={disabled || stopping.has(task.id)}
               aria-label={t("Stop this background task")} title={t("Stop this background task")} onClick={() => stop(task.id)} />}
@@ -106,7 +121,8 @@ export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }:
     })}</div>
   </div>;
   return <>
-    <PopoverNext isOpen={open} onInteraction={next => setOpen(next)} placement="top-start" content={list} popoverClassName="background-tasks-popover" shouldReturnFocusOnClose={!shown}>
+    <PopoverNext isOpen={open} onInteraction={next => { if (next) setRevealing(false); setOpen(next); }} placement="top-start" content={list}
+      popoverClassName="background-tasks-popover" shouldReturnFocusOnClose={!shown && !revealing}>
       <Button ref={trigger} variant="minimal" size="small" className="background-tasks-status" data-running={running > 0 ? "true" : undefined}
         aria-label={label} title={label}
         // The spinner says that tasks go on; where the label is too long for the composer, the glyph of the tasks

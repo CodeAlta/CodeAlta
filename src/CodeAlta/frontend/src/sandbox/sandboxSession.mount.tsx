@@ -3,10 +3,12 @@
 // `sandboxSessionFixture`.
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { SandboxProfileItem, SandboxSetScopeRequest } from "#neoastra";
+import type { SandboxProfileItem, SandboxSetScopeRequest, SessionOptionsChoice } from "#neoastra";
 import { CommandPermissionPanel } from "../CommandPermissionPanel";
 import { ComposerSelectionFields } from "../ComposerSurface";
 import { createPermissionReviewer } from "../sessionPermissions";
+import { SessionOptionsFields } from "../sessionSettings/SessionOptionsFields";
+import { changedSessionOptions, sessionOptionsOf } from "../sessionSettings/sessionOptions";
 import { ShellLanguageContext } from "../shellLanguage";
 import { ProjectSandboxPopover } from "./ProjectSandboxPopover";
 import type { SessionSandboxSummary } from "./sandboxChoices";
@@ -20,6 +22,7 @@ type Resolve = Parameters<typeof createPermissionReviewer>[1];
 const epoch = "11111111-1111-4111-8111-111111111111";
 const decisions: Parameters<Resolve>[0][] = [];
 const chosen: (string | null)[] = [];
+const optionsChosen: (SessionOptionsChoice | null)[] = [];
 let answered = false;
 const list: List = async request => ({ status: "ok", hostEpoch: epoch, sessionId: request.sessionId, hasMore: false, entries: answered ? [] : [{
   handle: { operationId: epoch, runtimeInstanceId: epoch, attachmentGeneration: "1", sessionId: request.sessionId, runId: null, interactionId: "request",
@@ -37,7 +40,7 @@ const scopeApi: SandboxScopeApi = {
     availability: { available: true, backend: "Windows process container", reason: null, setup: null, networks: [] } }),
   setScope: async request => { scopes.push(request); projectSandbox = request.sandbox; return { status: "ok", message: null }; },
 };
-Object.assign(window, { sandboxSessionFixture: { decisions, chosen, scopes } });
+Object.assign(window, { sandboxSessionFixture: { decisions, chosen, scopes, optionsChosen } });
 
 function ProjectRow() {
   const [open, setOpen] = useState(true);
@@ -46,17 +49,22 @@ function ProjectRow() {
     {open && <ProjectSandboxPopover epoch={epoch} projectId="lib" projectName="Lib" api={scopeApi} onClose={() => setOpen(false)} />}</li></ul>;
 }
 
-// The session follows the settings, which give `workspace` through its provider, until the row gives it its own.
+// The session follows the settings, which give `workspace` through its provider, until the row gives it its own. Its
+// options (sub-sessions) are under More options.
 function Composer() {
   const [own, setOwn] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [options, setOptions] = useState<SessionOptionsChoice | null>(null);
   Object.assign(window, { breakProfile: () => setProblem("There is no sandbox profile 'gone'.") });
   const profile = own === null ? "workspace" : own === "off" ? null : own;
   const sandbox: SessionSandboxSummary = { profile, source: own === null ? "provider" : "session", problem };
   return <ComposerSelectionFields sessionId="s" agent={<span />} provider={<span />} model={<span />} reasoning={<span />}
-    summary={{ agent: "Default", provider: "Codex", model: "GPT-6.1", reasoning: "Low", providerKey: "codex", modelId: "gpt-6.1", sandbox }}
+    summary={{ agent: "Default", provider: "Codex", model: "GPT-6.1", reasoning: "Low", providerKey: "codex", modelId: "gpt-6.1", sandbox,
+      subSessions: sessionOptionsOf(options).subSessions }}
     sandbox={<SessionSandboxSelect id="composer-sandbox-s" own={own} inherited="workspace" choices={["off", "workspace", "strict"]}
-      onChange={value => { chosen.push(value); setOwn(value); }} />} />;
+      onChange={value => { chosen.push(value); setOwn(value); }} />}
+    options={{ changed: changedSessionOptions(options),
+      content: <SessionOptionsFields id="s" value={options} onChange={value => { optionsChosen.push(value); setOptions(value); }} /> }} />;
 }
 
 createRoot(document.getElementById("root")!).render(<StrictMode>

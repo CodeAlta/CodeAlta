@@ -79,9 +79,47 @@ public sealed class AgentBuiltInToolOptions
     public int MaxReadFileLineLimit { get; init; } = 5000;
 
     /// <summary>
+    /// Gets or initializes the maximum number of characters of one line <c>read_file</c> gives the model: a longer line
+    /// keeps its start and says how long it is. Zero or less for no limit. A script of Code Mode receives whole lines.
+    /// </summary>
+    public int MaxReadFileLineCharacters { get; init; } = 2_000;
+
+    /// <summary>
+    /// Gets or initializes the maximum number of characters one <c>read_file</c> gives the model: the read stops before
+    /// the line that would pass it and names the offset to read on from. Zero or less for no limit. A script of Code
+    /// Mode receives the lines read whole.
+    /// </summary>
+    public int MaxReadFileCharacters { get; init; } = 100_000;
+
+    /// <summary>
     /// Gets or initializes the maximum number of grep matches returned.
     /// </summary>
     public int MaxGrepMatches { get; init; } = 200;
+
+    /// <summary>
+    /// Gets or initializes the maximum number of characters of one matching line <c>grep</c> gives: a longer line keeps
+    /// the part around its first match and says how long it is. Zero or less for no limit.
+    /// </summary>
+    public int MaxGrepLineCharacters { get; init; } = 500;
+
+    /// <summary>
+    /// Gets or initializes the maximum number of characters one <c>grep</c> gives: the matches after it are left out,
+    /// and the result says so. Zero or less for no limit.
+    /// </summary>
+    public int MaxGrepCharacters { get; init; } = 30_000;
+
+    /// <summary>
+    /// Gets or initializes the maximum number of characters of the output <c>shell_command</c> gives the model: a longer
+    /// output keeps the head and the tail of each stream, and the whole of it is saved to a file the result names. Zero
+    /// or less for no limit. The user is shown the whole output, and a script of Code Mode receives it.
+    /// </summary>
+    public int MaxShellCommandOutputCharacters { get; init; } = 30_000;
+
+    /// <summary>
+    /// Gets or initializes what gives the folder where <c>shell_command</c> saves the whole of an output it cuts, such
+    /// as a folder of the session; null, or a null folder, for a folder of the session in the temporary folder.
+    /// </summary>
+    public Func<CancellationToken, ValueTask<string?>>? ResolveToolOutputDirectoryAsync { get; init; }
 
     /// <summary>
     /// Gets or initializes the maximum payload size fetched by <c>webget</c>.

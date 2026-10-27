@@ -171,7 +171,7 @@ internal sealed partial class IssuesService
 
         // What the user chose in the form of the Agent chip, else what the session that shows the item runs with, else the defaults.
         var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
-        var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox);
+        var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox, SessionOptionsChoice.Record(request.Options));
         var model = asked is null && settings is null ? null : settings?.Apply(new SessionStartModel(asked)) ?? new SessionStartModel(asked);
         var started = await _starter.StartAsync(project, IssuePrompts.SessionTitle(row), _ => IssuePrompts.For(tracker.DisplayName, GitIssuesService.Clean(tracker.Location, MaximumTitle), row, detail.Body),
             request.Worktree, request.SessionId, "issue", model).ConfigureAwait(false);
@@ -419,9 +419,10 @@ internal sealed record IssueComment(string? Author, DateTimeOffset? CreatedAt, s
 /// <param name="PermissionMode">The permission mode the user chose; null for the one of the provider.</param>
 /// <param name="ReviewBeforeCommit">Whether the user reviews the changes of the session before a commit; null follows the setting.</param>
 /// <param name="Sandbox">The sandbox of the session, a profile or <c>off</c>; null for what the settings give.</param>
+/// <param name="Options">The options of the session, such as whether it can start sessions of its own; null for the defaults.</param>
 internal sealed record IssueStartRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Id, bool Worktree, string? SessionId,
     string? ProviderId = null, string? ModelId = null, string? ReasoningEffort = null, string? AgentPromptId = null, string? PermissionMode = null,
-    bool? ReviewBeforeCommit = null, string? Sandbox = null);
+    bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null);
 
 /// <summary>
 /// The start of a session. Status is <c>ok</c>, <c>refused</c> (with a message, and a reason code when the page

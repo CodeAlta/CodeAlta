@@ -397,6 +397,43 @@ internal sealed class SessionOperationsService
         return new(result.Status, _epoch, request.SessionId, result.Own, result.Effective, result.Setting);
     }
 
+    /// <summary>Reads the options of a session, such as whether it can start sessions of its own.</summary>
+    [NeoRpcMethod("options")]
+    public async Task<SessionOptionsResult> OptionsAsync(SessionOptionsRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null);
+            if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId, null);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId, null);
+        }
+
+        var result = await _commands.GetSessionOptionsAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
+        return new(result.Status, _epoch, request.SessionId, result.Options is null ? null : SessionOptionsChoice.Of(result.Options));
+    }
+
+    /// <summary>
+    /// Changes the options of a session: they are saved with it, and its tools and instructions follow them from its
+    /// next prompt. A run in progress goes on with what it started with.
+    /// </summary>
+    [NeoRpcMethod("setOptions")]
+    public async Task<SessionOptionsResult> SetOptionsAsync(SessionSetOptionsRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null);
+            if (!Identity(request.SessionId, 256) || request.Options is null) return new("invalid_request", _epoch, request.SessionId, null);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId, null);
+        }
+
+        var result = await _commands.SetSessionOptionsAsync(request.SessionId, SessionOptionsChoice.Record(request.Options), cancellationToken).ConfigureAwait(false);
+        return new(result.Status, _epoch, request.SessionId, result.Options is null ? null : SessionOptionsChoice.Of(result.Options));
+    }
+
     // The tier of a session says what it falls back on; the model itself goes with the selection of its next prompt.
     [NeoRpcMethod("setTier")]
     public async Task<SessionTierResult> SetTierAsync(SessionTierRequest request, CancellationToken cancellationToken)

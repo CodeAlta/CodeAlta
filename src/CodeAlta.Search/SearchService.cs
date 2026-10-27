@@ -695,7 +695,7 @@ public sealed class SearchService
     }
 
     // The kinds whose items a space lets its sessions see or not.
-    private static readonly SearchKind[] CatalogKindsOfSpace = [SearchKind.Skill, SearchKind.Mcp, SearchKind.Plugin];
+    private static readonly SearchKind[] CatalogKindsOfSpace = [SearchKind.Skill, SearchKind.Mcp, SearchKind.Plugin, SearchKind.Script];
 
     private const int MaximumCatalogItems = 5000;
 

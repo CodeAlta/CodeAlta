@@ -37,7 +37,7 @@ public sealed class ConfiguredProviderRegistrationTests
         var options = Assert.IsInstanceOfType<OpenAIProviderOptions>(providerField.GetValue(executor));
         Assert.IsNotNull(options.CodexSubscription);
         Assert.AreEqual(expected, options.CodexSubscription.ServiceTier);
-        Assert.AreEqual("medium", options.CodexSubscription.TextVerbosity);
+        Assert.IsNull(options.CodexSubscription.TextVerbosity);
         Assert.AreEqual("http", options.CodexSubscription.ResponseTransport);
     }
 

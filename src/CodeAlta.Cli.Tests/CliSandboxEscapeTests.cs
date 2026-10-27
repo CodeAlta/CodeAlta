@@ -169,9 +169,17 @@ public sealed class CliSandboxEscapeTests
             return;
         }
 
+        // On Windows a service on a local network address makes the firewall ask the user to let the test host through,
+        // again for each folder the tests run from: the test runs there only when asked.
+        if (OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("CODEALTA_TEST_LOCAL_NETWORK") != "1")
+        {
+            Assert.Inconclusive("Set CODEALTA_TEST_LOCAL_NETWORK=1 to listen on a local network address, which the Windows firewall asks about.");
+            return;
+        }
+
         var root = Directory.CreateDirectory(Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), "tests", "network-on-" + Guid.NewGuid().ToString("N")[..8])).FullName;
         var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
-        using var service = new TcpListener(IPAddress.Any, 0);
+        using var service = new TcpListener(local, 0);
         service.Start();
         var port = ((IPEndPoint)service.LocalEndpoint).Port;
         try

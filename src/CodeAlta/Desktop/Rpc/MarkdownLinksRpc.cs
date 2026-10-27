@@ -4,7 +4,8 @@ namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
 /// The explicit bridge grant for the links of the Markdown that the window shows: an address of the web opens in
-/// the system browser, and a link to a file of the disk opens the code editor (<see cref="DesktopFileLinks"/>).
+/// the system browser, and a link to a file of the disk opens the code editor (<see cref="DesktopFileLinks"/>). A
+/// picture of the disk is read for the window to draw it, and its file can be shown in the file manager.
 /// </summary>
 [NeoRpcService("markdownLinks", Version = 1)]
 internal sealed class MarkdownLinksService
@@ -46,9 +47,7 @@ internal sealed class MarkdownLinksService
     private async Task<MarkdownLinkResponse> OpenFromAsync(MarkdownLinkRequest request, string? originLabel, CancellationToken cancellationToken)
     {
         MarkdownLinkResponse Reply(string status) => new(status, _epoch);
-        if (request is null || !Guid.TryParseExact(request.ExpectedHostEpoch, "D", out var epoch) || epoch == Guid.Empty
-            || epoch.ToString("D") != request.ExpectedHostEpoch) return Reply("invalid_request");
-        if (request.ExpectedHostEpoch != _epoch) return Reply("stale_epoch");
+        if (Validate(request) is { } refused) return Reply(refused);
         if (WebAddress(request.Address) is { } address)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -60,6 +59,53 @@ internal sealed class MarkdownLinksService
         cancellationToken.ThrowIfCancellationRequested();
         try { return Reply(await _files.OpenAsync(link, request.SessionId, request.ProjectId, request.Directory, originLabel, cancellationToken).ConfigureAwait(false)); }
         catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); } // Nor the paths of the disk.
+    }
+
+    /// <summary>
+    /// Reads a picture of the disk that a link of the Markdown names, for the window to draw it in the text: a PNG,
+    /// JPEG, GIF, WebP or BMP file, by its name and by its content, of at most
+    /// <see cref="ProjectFilesService.MaximumImageBytes"/>.
+    /// </summary>
+    /// <remarks>
+    /// The answer is <c>ok</c> with the picture and the full path of its file, or <c>not_found</c>, <c>not_image</c>,
+    /// <c>too_large</c>, <c>failed</c>, <c>invalid_request</c> or <c>stale_epoch</c> with nothing else.
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">The request was canceled.</exception>
+    [NeoRpcMethod("image", TimeoutMilliseconds = 60_000)]
+    public async Task<MarkdownImageResponse> ImageAsync(MarkdownLinkRequest request, CancellationToken cancellationToken)
+    {
+        MarkdownImageResponse Reply(string status) => new(status, _epoch, null, null, null);
+        if (Validate(request) is { } refused) return Reply(refused);
+        if (_files is null || !DesktopFileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var image = await _files.ReadImageAsync(link, request.SessionId, request.ProjectId, request.Directory, cancellationToken).ConfigureAwait(false);
+            return image.Status == "ok" ? new("ok", _epoch, image.MediaType, Convert.ToBase64String(image.Bytes!), image.FullPath) : Reply(image.Status);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); }
+    }
+
+    /// <summary>Shows the file that a link of the Markdown names in the file manager of the system.</summary>
+    /// <remarks>The answer is <c>ok</c>, <c>not_found</c>, <c>failed</c>, <c>invalid_request</c> or <c>stale_epoch</c>.</remarks>
+    /// <exception cref="OperationCanceledException">The request was canceled before anything was shown.</exception>
+    [NeoRpcMethod("reveal")]
+    public async Task<MarkdownLinkResponse> RevealAsync(MarkdownLinkRequest request, CancellationToken cancellationToken)
+    {
+        MarkdownLinkResponse Reply(string status) => new(status, _epoch);
+        if (Validate(request) is { } refused) return Reply(refused);
+        if (_files is null || !DesktopFileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
+        cancellationToken.ThrowIfCancellationRequested();
+        try { return Reply(await _files.RevealAsync(link, request.SessionId, request.ProjectId, request.Directory, cancellationToken).ConfigureAwait(false)); }
+        catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); }
+    }
+
+    // Why a request is not answered, or null when it names the epoch of this host.
+    private string? Validate(MarkdownLinkRequest? request)
+    {
+        if (request is null || !Guid.TryParseExact(request.ExpectedHostEpoch, "D", out var epoch) || epoch == Guid.Empty
+            || epoch.ToString("D") != request.ExpectedHostEpoch) return "invalid_request";
+        return request.ExpectedHostEpoch != _epoch ? "stale_epoch" : null;
     }
 
     private static string? WebAddress(string? address)
@@ -91,3 +137,5 @@ internal sealed class MarkdownLinksService
 internal sealed record MarkdownLinkRequest(string ExpectedHostEpoch, string Address, string? SessionId = null, string? ProjectId = null, string? Directory = null);
 /// <summary>A bounded result with no address, process details or private diagnostics.</summary>
 internal sealed record MarkdownLinkResponse(string Status, string HostEpoch);
+/// <summary>A picture that a link names: its media type, its content in base64 and the full path of its file, only for <c>ok</c>.</summary>
+internal sealed record MarkdownImageResponse(string Status, string HostEpoch, string? MediaType, string? Base64, string? FullPath);

@@ -537,7 +537,15 @@ public sealed partial class McpPlugin : PluginBase
             ? CreateArgumentsJsonWrapperSchema(tool)
             : tool.InputSchema.Clone();
         return new AgentToolDefinition(
-            new AgentToolSpec(tool.Alias, description, inputSchema),
+            new AgentToolSpec(tool.Alias, description, inputSchema)
+            {
+                // A script calls it as mcp.<server>.<tool>, at the same time as its other calls, and receives its
+                // structured content when the server declares one.
+                Group = tool.Server,
+                ScriptName = tool.Name,
+                RunsInParallel = true,
+                OutputSchema = useArgumentsJsonWrapper ? null : tool.OutputSchema,
+            },
             async (invocation, cancellationToken) => await InvokeDirectToolAsync(
                 tool.Server,
                 tool.Name,
@@ -824,6 +832,8 @@ public sealed partial class McpPlugin : PluginBase
                 index == 0 ? $"{server}-{tool}" : $"{server}-{tool}-{index + 1}"));
         return new AgentToolResult(!result.IsError, [new AgentToolResultItem.Text(text), .. images], result.IsError ? text : null)
         {
+            // A script receives the structured content of the result, when the server sent one.
+            Structured = result.StructuredContent,
             // A host that shows views gets the view of the call with it; the model never sees it.
             App = connections?.AdvertiseApps == true && result.App is { } app
                 ? new AgentToolAppResult(server, tool, app.ResourceUri, app.StructuredContent, app.Meta, app.Content)

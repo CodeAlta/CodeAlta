@@ -105,7 +105,7 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "alta plan status <plan-id> done");
         // Long instructions are written down where a compaction of the context does not lose them.
         StringAssert.Contains(defaultPrompt.Body, "many instructions at once");
-        StringAssert.Contains(defaultPrompt.Body, "in the scratchpad file named in your runtime context");
+        StringAssert.Contains(defaultPrompt.Body, "in the scratchpad file named in your session context");
         StringAssert.Contains(defaultPrompt.Body, "reread it when you resume after a compaction");
         StringAssert.Contains(defaultPrompt.Body, "never commit it");
         // Git: a branch for work that is committed on the default branch, no branch from a branch, and nothing lands unasked.

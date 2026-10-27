@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Orchestration.Runtime.Scripts;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
@@ -55,7 +56,9 @@ internal sealed class AutomationRunner : IAutomationRunner
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(prompt);
+        // An automation that runs a script has no prompt of its own: what started it may still say something.
+        if (entry.Definition.Script is null) ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         string? sessionId = null;
         try
         {
@@ -74,6 +77,15 @@ internal sealed class AutomationRunner : IAutomationRunner
             // A run starts with a provider of its space: the one the automation names, which must be there, else the
             // default provider of the configuration when it is, else the first enabled provider of the space.
             var inSpace = new SpaceFilter(new CachedSpaceAssignments(new CodeAltaConfigStore(_host.CatalogOptions)).Current(), spaceId);
+            if (definition.Script is { } scriptName)
+            {
+                // What started the automation (an issue, the output of a command) is the `event` argument of a script that
+                // declares it. A script of yours or a sample runs only in a space that has it.
+                if (CodeModeScriptRunPrompt.Build(_host.CodeModeScripts, scriptName, definition.ScriptArguments, prompt, project?.ProjectPath, inSpace, out var problem) is not { } scriptPrompt)
+                    return Refuse(problem!);
+                prompt = scriptPrompt;
+            }
+
             if (definition.Model.Provider is { Length: > 0 } named && !inSpace.Allows(SpaceResourceKind.Provider, named))
                 return Refuse($"The provider '{named}' is not available in the space '{spaceId}'.");
             var providers = _host.ModelProviderRegistry.ListProviders().Where(candidate => inSpace.Allows(SpaceResourceKind.Provider, candidate.ProviderId.Value)).ToArray();
@@ -123,7 +135,7 @@ internal sealed class AutomationRunner : IAutomationRunner
                 SourceProjectId = project?.Id,
                 CorrelationId = runId,
                 CreatedAt = DateTimeOffset.UtcNow,
-            }, null, spaceId, definition.PermissionMode).ConfigureAwait(false);
+            }, null, spaceId, definition.PermissionMode, null, null, definition.SessionOptions).ConfigureAwait(false);
             sessionId = session.SessionId;
             // The review and the sandbox the automation chose, before anything is sent to the session.
             if (definition.ReviewBeforeCommit is { } review
@@ -133,6 +145,8 @@ internal sealed class AutomationRunner : IAutomationRunner
                 && (await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false)).Status is var sandboxed and not "ok")
                 return new(sessionId, $"The sandbox '{sandbox}' could not be chosen ({sandboxed}).", null);
 
+            // A script runs through exec, which its session has whatever the setting of Code Mode says.
+            if (definition.Script is not null) _host.CodeModeRuns.RequireCodeMode(sessionId);
             // The effort of a model that reports its efforts is completed by the host when the automation names none.
             var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, model.Id, definition.Model.Effort);
             var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest("automation:" + runId, sessionId, prompt)

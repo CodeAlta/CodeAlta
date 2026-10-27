@@ -437,6 +437,9 @@ internal sealed class LocalSearchService
                         SearchKind.Skill when extra.TryGetValue("name", out var name) => filter.Allows(SpaceResourceKind.Skill, name),
                         SearchKind.Mcp when extra.TryGetValue("server", out var server) => filter.Allows(SpaceResourceKind.McpServer, server),
                         SearchKind.Plugin when extra.TryGetValue("id", out var id) => filter.Allows(SpaceResourceKind.Plugin, id),
+                        // A script of a project is in the spaces of its sessions; yours and the samples as the user assigned them.
+                        SearchKind.Script when extra.TryGetValue("name", out var name) && !(extra.TryGetValue("scope", out var where) && where == "project")
+                            => filter.Allows(SpaceResourceKind.Script, name),
                         _ => true,
                     };
                 },

@@ -125,7 +125,7 @@ public sealed class HeadlessHostStateTests
     }
 
     [TestMethod]
-    public async Task ScratchpadRoot_IsTheFolderTheRuntimeContextNames()
+    public async Task ScratchpadRoot_IsTheFolderTheSessionContextNames()
     {
         await using var root = new HeadlessTestRoot();
         var scratchpad = Path.Combine(root.Root, "cli-scratchpad");
@@ -136,8 +136,8 @@ public sealed class HeadlessHostStateTests
         await host.RuntimeService.SendAsync(session, HeadlessTestRoot.Options(provider, root.ProjectRoot), new AgentSendOptions { Input = AgentInput.Text("hello") });
 
         Assert.IsTrue(provider.Requests.TryPeek(out var request));
-        var instructions = request.SystemMessage + "\n" + request.DeveloperInstructions;
-        StringAssert.Contains(instructions, Path.Combine(scratchpad, "<yyyy-mm-dd>-<short-name>-"));
+        var instructions = request.SystemMessage + "\n" + request.DeveloperInstructions + "\n" + request.SessionInstructions;
+        StringAssert.Contains(request.SessionInstructions, Path.Combine(scratchpad, "<yyyy-mm-dd>-<short-name>-"));
         Assert.IsFalse(instructions.Contains(Path.Combine(root.GlobalRoot, "scratchpad"), StringComparison.OrdinalIgnoreCase));
     }
 

@@ -1,5 +1,6 @@
 // The page's link to the work items of the application: what they are now, and the calls that change them.
 import type { workItems, WorkItemActionResponse, WorkItemsProject, WorkItemsSettings } from "#neoastra";
+import { storedSessionOptions } from "../sessionSettings/sessionOptions";
 import type { SessionStartRequest } from "../sessionSettings/sessionSettings";
 import { defaultWorkSettings, type WorkKind } from "./workItems";
 
@@ -112,7 +113,8 @@ export function createWorkItemsHub(api: WorkItemsApi, timers: Timers = { set: (r
         // What the user chose for a new session; nothing leaves it to the item, then to the defaults.
         providerId: start?.providerId ?? null, modelId: start?.providerId ? start.modelId : null,
         reasoningEffort: start?.providerId && start.modelId ? start.reasoningEffort : null, agentPromptId: start?.agentPromptId ?? null,
-        permissionMode: start?.permissionMode ?? null, reviewBeforeCommit: start?.reviewBeforeCommit ?? null, sandbox: start?.sandbox ?? null }, { timeoutMilliseconds: 600_000 });
+        permissionMode: start?.permissionMode ?? null, reviewBeforeCommit: start?.reviewBeforeCommit ?? null, sandbox: start?.sandbox ?? null,
+        options: storedSessionOptions(start?.options) }, { timeoutMilliseconds: 600_000 });
       await readProject(target.projectId);
       return { ok: reply.status === "ok", status: reply.status, message: reply.message ?? null, reason: reply.reason ?? null, sessionId: reply.sessionId ?? null,
         prompt: reply.prompt ?? null, agentPromptId: reply.agentPromptId ?? null };

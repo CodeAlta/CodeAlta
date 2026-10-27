@@ -56,7 +56,6 @@ public sealed partial class CodeAltaConfigStore
     private const string CodexSubscriptionDefaultDisplayName = "Codex";
     private const string CodexSubscriptionDefaultApiUrl = "https://api.openai.com/v1";
     private const string CodexSubscriptionDefaultAuthSource = "codealta_oauth";
-    private const string CodexSubscriptionDefaultTextVerbosity = "medium";
     private const string CodexSubscriptionDefaultModelDiscovery = "codex_endpoint_with_static_fallback";
     private const string CodexSubscriptionDefaultResponseTransport = "http";
     private const string CodexSubscriptionDefaultInstallationIdSource = "codealta_state";
@@ -620,6 +619,129 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// The modes of Code Mode: <c>off</c>; <c>on</c>, the default, for its tools beside the others; <c>only</c> for its
+    /// tools alone, through which the model calls the others.
+    /// </summary>
+    public static IReadOnlyList<string> CodeModeModes => CodeModeScopes.Modes;
+
+    /// <summary>Reads the mode of Code Mode of every session (<c>[code_mode] mode</c>), from the user's file only.</summary>
+    /// <returns><c>on</c> when the file sets none, or sets a mode this version does not know.</returns>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read.</exception>
+    public string LoadCodeModeMode() => CodeModeScopes.Known(ReadSharedGlobalDocument().CodeMode?.Mode) ?? CodeModeScopes.On;
+
+    /// <summary>Saves the mode of Code Mode of every session; <c>on</c>, the default, removes the setting.</summary>
+    /// <param name="mode">The mode, one of <see cref="CodeModeModes"/>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="mode"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="mode"/> is not a mode.</exception>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public void SaveCodeModeMode(string mode)
+    {
+        ArgumentNullException.ThrowIfNull(mode);
+        var normalized = CodeModeMode(mode, nameof(mode)) ?? throw new ArgumentException("A mode of Code Mode is named.", nameof(mode));
+        ThrowIfReadOnly();
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        NormalizeDocument(document);
+        document.CodeMode = normalized == CodeModeScopes.On ? null : new CodeAltaCodeModeSettingsDocument { Mode = normalized };
+        Save(_options.ConfigPath, document);
+    }
+
+    /// <summary>
+    /// Resolves the mode of Code Mode of a session on a provider and a model, from the user's file only
+    /// (<see cref="CodeModeScopes"/>): its model, its provider, every session, else <c>on</c>.
+    /// </summary>
+    /// <param name="providerKey">The key of its provider, or null.</param>
+    /// <param name="modelId">Its model, or null.</param>
+    /// <returns><c>off</c>, <c>on</c> or <c>only</c>.</returns>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read.</exception>
+    public string ResolveCodeMode(string? providerKey, string? modelId)
+    {
+        var document = ReadSharedGlobalDocument();
+        var provider = FindProvider(document, providerKey);
+        var model = provider?.ModelOverrides is { } overrides && FindModelOverride(overrides, modelId) is { } entry ? entry.CodeMode : null;
+        return CodeModeScopes.Resolve(model, provider?.CodeMode, document.CodeMode?.Mode);
+    }
+
+    /// <summary>
+    /// Saves the mode of Code Mode of the sessions of a provider, or of one of its models
+    /// (<c>[providers.x.model_overrides."id"]</c>), and nothing else of the provider. An override that is left with nothing
+    /// is removed.
+    /// </summary>
+    /// <param name="providerKey">The provider.</param>
+    /// <param name="modelId">The model, or null for the provider itself.</param>
+    /// <param name="mode">A mode of <see cref="CodeModeModes"/>, or null for none.</param>
+    /// <returns>False when the file has no such provider; nothing is written then.</returns>
+    /// <exception cref="ArgumentException">The key is empty, or <paramref name="mode"/> is not a mode.</exception>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public bool SaveGlobalProviderCodeMode(string providerKey, string? modelId, string? mode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        var normalized = CodeModeMode(mode, nameof(mode));
+        ThrowIfReadOnly();
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        NormalizeDocument(document);
+        if (document.Providers is null || !document.Providers.TryGetValue(providerKey.Trim(), out var provider)) return false;
+        if (CodeAltaSandboxSettings.Text(modelId) is not { } model)
+        {
+            provider.CodeMode = normalized;
+        }
+        else
+        {
+            provider.ModelOverrides ??= new Dictionary<string, CodeAltaProviderModelOverrideDocument>(StringComparer.OrdinalIgnoreCase);
+            if (!provider.ModelOverrides.TryGetValue(model, out var entry))
+            {
+                if (normalized is null) return true;
+                provider.ModelOverrides[model] = entry = new CodeAltaProviderModelOverrideDocument();
+            }
+
+            entry.CodeMode = normalized;
+            RemoveIfEmpty(provider, model, entry);
+        }
+
+        Save(_options.ConfigPath, document);
+        return true;
+    }
+
+    // A mode to save: null (or blank) for none.
+    private static string? CodeModeMode(string? mode, string parameter)
+    {
+        if (string.IsNullOrWhiteSpace(mode)) return null;
+        return CodeModeScopes.Known(mode) ?? throw new ArgumentException($"'{mode}' is not a mode of Code Mode: {string.Join(", ", CodeModeModes)}.", parameter);
+    }
+
+    private static CodeAltaProviderDocument? FindProvider(CodeAltaConfigDocument document, string? providerKey)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey) || document.Providers is not { } providers) return null;
+        var key = providerKey.Trim();
+        return providers.TryGetValue(key, out var provider) ? provider
+            : providers.FirstOrDefault(entry => string.Equals(entry.Key, key, StringComparison.OrdinalIgnoreCase)).Value;
+    }
+
+    private static CodeAltaProviderModelOverrideDocument? FindModelOverride(Dictionary<string, CodeAltaProviderModelOverrideDocument> overrides, string? modelId)
+    {
+        if (string.IsNullOrWhiteSpace(modelId)) return null;
+        var id = modelId.Trim();
+        return overrides.TryGetValue(id, out var entry) ? entry
+            : overrides.FirstOrDefault(candidate => string.Equals(candidate.Key, id, StringComparison.OrdinalIgnoreCase)).Value;
+    }
+
+    // An override that sets nothing any more is removed, and the table of overrides once it is empty.
+    private static void RemoveIfEmpty(CodeAltaProviderDocument provider, string model, CodeAltaProviderModelOverrideDocument entry)
+    {
+        if (entry is { Sandbox: null, CodeMode: null, DisplayName: null, Description: null, ContextWindow: null, InputTokenLimit: null, OutputTokenLimit: null, MaxTokens: null,
+            SupportsReasoning: null, SupportsToolCall: null, SupportsAttachments: null, SupportsStructuredOutput: null })
+            provider.ModelOverrides!.Remove(model);
+        if (provider.ModelOverrides!.Count == 0) provider.ModelOverrides = null;
+    }
+
+    /// <summary>
     /// Reads the sandbox settings (<c>[sandbox]</c>), from the user's file only: the same table in a project's file is
     /// never read, since a repository would loosen its own sandbox (<see cref="ProjectSetsSandbox"/> tells it is there).
     /// </summary>
@@ -681,10 +803,7 @@ public sealed partial class CodeAltaConfigStore
             }
 
             entry.Sandbox = sandbox;
-            if (entry is { Sandbox: null, DisplayName: null, Description: null, ContextWindow: null, InputTokenLimit: null, OutputTokenLimit: null, MaxTokens: null,
-                SupportsReasoning: null, SupportsToolCall: null, SupportsAttachments: null, SupportsStructuredOutput: null })
-                provider.ModelOverrides.Remove(model);
-            if (provider.ModelOverrides.Count == 0) provider.ModelOverrides = null;
+            RemoveIfEmpty(provider, model, entry);
         }
 
         Save(_options.ConfigPath, document);
@@ -2054,6 +2173,7 @@ public sealed partial class CodeAltaConfigStore
         definition.ApiKeyEnv = NormalizeText(definition.ApiKeyEnv);
         definition.ApiUrl = NormalizeText(definition.ApiUrl);
         definition.Sandbox = NormalizeText(definition.Sandbox);
+        definition.CodeMode = NormalizeText(definition.CodeMode);
         definition.GitHubEnterpriseUrl = NormalizeText(definition.GitHubEnterpriseUrl);
         definition.GitHubTokenEnv = NormalizeText(definition.GitHubTokenEnv);
         definition.CopilotTokenEnv = NormalizeText(definition.CopilotTokenEnv);
@@ -2391,7 +2511,6 @@ public sealed partial class CodeAltaConfigStore
         definition.ApiUrl ??= CodexSubscriptionDefaultApiUrl;
         definition.AuthSource ??= CodexSubscriptionDefaultAuthSource;
         definition.MaxConcurrentRequests ??= CodexSubscriptionDefaultMaxConcurrentRequests;
-        definition.TextVerbosity ??= CodexSubscriptionDefaultTextVerbosity;
         definition.IncludeEncryptedReasoning ??= true;
         definition.ModelDiscovery ??= CodexSubscriptionDefaultModelDiscovery;
         definition.ResponseTransport ??= CodexSubscriptionDefaultResponseTransport;
@@ -2530,6 +2649,7 @@ public sealed partial class CodeAltaConfigStore
             case "openai-responses":
                 RejectUnsupportedField(definition, "project", definition.Project);
                 RejectUnsupportedField(definition, "location", definition.Location);
+                ValidateTextVerbosity(definition);
                 break;
 
             case "azure-openai":
@@ -2714,7 +2834,11 @@ public sealed partial class CodeAltaConfigStore
         RejectUnsupportedField(definition, "auth_source", definition.AuthSource);
         RejectUnsupportedField(definition, "account_id", definition.AccountId);
         RejectUnsupportedField(definition, "max_concurrent_requests", definition.MaxConcurrentRequests);
-        RejectUnsupportedField(definition, "text_verbosity", definition.TextVerbosity);
+        if (!string.Equals(definition.ProviderType, "openai-responses", StringComparison.Ordinal))
+        {
+            RejectUnsupportedField(definition, "text_verbosity", definition.TextVerbosity);
+        }
+
         RejectUnsupportedField(definition, "include_encrypted_reasoning", definition.IncludeEncryptedReasoning);
         RejectUnsupportedField(definition, "model_discovery", definition.ModelDiscovery);
         RejectUnsupportedField(definition, "response_transport", definition.ResponseTransport);
@@ -2722,6 +2846,15 @@ public sealed partial class CodeAltaConfigStore
         RejectUnsupportedField(definition, "send_installation_id", definition.SendInstallationId);
         RejectUnsupportedField(definition, "installation_id_source", definition.InstallationIdSource);
         RejectUnsupportedField(definition, "experimental", definition.Experimental);
+    }
+
+    // Not set, the model's own default verbosity is sent, where it is known.
+    private static void ValidateTextVerbosity(CodeAltaProviderDocument definition)
+    {
+        if (definition.TextVerbosity is not (null or "low" or "medium" or "high"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} text_verbosity must be one of: low, medium, high.");
+        }
     }
 
     private static void RejectRequestExtraBodyFields(CodeAltaProviderDocument definition)
@@ -2770,11 +2903,7 @@ public sealed partial class CodeAltaConfigStore
             throw new InvalidOperationException($"providers.{definition.ProviderKey} auth_source must be codealta_oauth. Use Continue with ChatGPT in CodeAlta; legacy Codex credential imports are not supported.");
         }
 
-        if (definition.TextVerbosity is not ("low" or "medium" or "high"))
-        {
-            throw new InvalidOperationException($"providers.{definition.ProviderKey} text_verbosity must be one of: low, medium, high.");
-        }
-
+        ValidateTextVerbosity(definition);
         if (definition.ModelDiscovery is not ("codex_endpoint_with_static_fallback" or "codex_endpoint" or "static"))
         {
             throw new InvalidOperationException($"providers.{definition.ProviderKey} model_discovery must be one of: codex_endpoint_with_static_fallback, codex_endpoint, static.");
@@ -2931,6 +3060,7 @@ public sealed partial class CodeAltaConfigStore
                 modelOverride.DisplayName = NormalizeText(modelOverride.DisplayName);
                 modelOverride.Description = NormalizeText(modelOverride.Description);
                 modelOverride.Sandbox = NormalizeText(modelOverride.Sandbox);
+                modelOverride.CodeMode = NormalizeText(modelOverride.CodeMode);
                 return KeyValuePair.Create(entry.Key.Trim(), modelOverride);
             })
             .ToDictionary(
@@ -3026,11 +3156,6 @@ public sealed partial class CodeAltaConfigStore
             if (definition.MaxConcurrentRequests == CodexSubscriptionDefaultMaxConcurrentRequests)
             {
                 definition.MaxConcurrentRequests = null;
-            }
-
-            if (string.Equals(definition.TextVerbosity, CodexSubscriptionDefaultTextVerbosity, StringComparison.Ordinal))
-            {
-                definition.TextVerbosity = null;
             }
 
             if (definition.ServiceTier == "default")
@@ -3265,6 +3390,7 @@ public sealed partial class CodeAltaConfigStore
             Arguments = definition.Arguments is null ? null : [.. definition.Arguments],
             PermissionMode = definition.PermissionMode,
             Sandbox = definition.Sandbox,
+            CodeMode = definition.CodeMode,
             AnthropicApiKey = definition.AnthropicApiKey,
             RefusalFallback = definition.RefusalFallback,
             PromptCacheTtl = definition.PromptCacheTtl,
@@ -3587,6 +3713,7 @@ public sealed partial class CodeAltaConfigStore
                 SupportsAttachments = entry.Value.SupportsAttachments,
                 SupportsStructuredOutput = entry.Value.SupportsStructuredOutput,
                 Sandbox = entry.Value.Sandbox,
+                CodeMode = entry.Value.CodeMode,
             },
             StringComparer.OrdinalIgnoreCase);
     }

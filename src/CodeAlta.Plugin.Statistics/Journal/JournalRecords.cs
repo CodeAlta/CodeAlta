@@ -41,6 +41,8 @@ internal enum JournalRecordKind : byte
     /// <summary>A <c>system_prompt</c> record.</summary>
     SystemPrompt,
 
+    /// <summary>A record of a run of a script of Code Mode (<c>workflow</c>).</summary>
+    Workflow,
 }
 
 /// <summary>Base of the records the reader hands to its sink. Only the cheap, shared fields live here.</summary>
@@ -130,6 +132,12 @@ internal sealed class JournalActor
 
     /// <summary>Gets or sets the identifier of the automation, for an automation.</summary>
     public string? AutomationId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the run of the script that created the session, from the correlation of a session created by kind
+    /// <c>workflow</c> (<c>workflow:&lt;run&gt;/&lt;step&gt;</c>); null for any other.
+    /// </summary>
+    public string? ScriptRunId { get; set; }
 }
 
 /// <summary>The state of a session: the choices in force and the prompts that were not seen before.</summary>
@@ -275,6 +283,9 @@ internal sealed class ToolRecord : JournalRecord
 
     /// <summary>Gets or sets the MCP tool of an MCP call, from its details.</summary>
     public string? McpTool { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether a script of Code Mode made the call (its details have <c>script</c>).</summary>
+    public bool IsScriptCall { get; set; }
 }
 
 /// <summary>A prompt of a user: a <c>contentCompleted</c> record of kind <c>User</c>.</summary>
@@ -437,5 +448,51 @@ internal sealed class SystemPromptRecord : JournalRecord
 
     /// <summary>Gets or sets the approximate tokens of the whole.</summary>
     public long ApproxTokens { get; set; }
+}
+
+/// <summary>
+/// A record of a run of a script of Code Mode (<see cref="AgentWorkflowEvent"/>). Only names are kept: the name of a library
+/// script, the id of a step and the name of an error when they are written as identifiers, never a message or a title as written.
+/// </summary>
+internal sealed class WorkflowRecord : JournalRecord
+{
+    /// <inheritdoc />
+    public override JournalRecordKind Kind => JournalRecordKind.Workflow;
+
+    /// <summary>Gets or sets what the record says.</summary>
+    public AgentWorkflowEventKind WorkflowKind { get; set; }
+
+    /// <summary>Gets or sets the run of the script.</summary>
+    public string? WorkflowRunId { get; set; }
+
+    /// <summary>Gets or sets the title of the run (the start of a run), as written; the reducer keeps it cleaned.</summary>
+    public string? Title { get; set; }
+
+    /// <summary>Gets or sets the step, when it is written as an identifier.</summary>
+    public string? StepId { get; set; }
+
+    /// <summary>Gets or sets how it ended, or what a wait is for (<c>question</c>, <c>approval</c>, <c>sleep</c>).</summary>
+    public string? Status { get; set; }
+
+    /// <summary>Gets or sets the name of the error of a failed end (<c>TypeError</c>), when its message starts with one.</summary>
+    public string? ErrorName { get; set; }
+
+    /// <summary>Gets or sets the duration in milliseconds, for an end.</summary>
+    public long? DurationMs { get; set; }
+
+    /// <summary>Gets or sets the calls the run made, for its end.</summary>
+    public long? Calls { get; set; }
+
+    /// <summary>Gets or sets whether a step gave a recorded result instead of running.</summary>
+    public bool Replayed { get; set; }
+
+    /// <summary>Gets or sets the run this one resumes, for its start.</summary>
+    public string? ResumesRunId { get; set; }
+
+    /// <summary>Gets or sets the library script, for <see cref="AgentWorkflowEventKind.ScriptLoaded"/>, when it is written as a name.</summary>
+    public string? ScriptName { get; set; }
+
+    /// <summary>Gets or sets whether the run records the library scripts it loads, for its start.</summary>
+    public bool RecordsScripts { get; set; }
 }
 

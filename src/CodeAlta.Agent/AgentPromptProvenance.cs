@@ -42,6 +42,9 @@ public static class AgentPromptProvenance
     /// <summary>The message of a turn the provider started by itself (a background command of an agent CLI ended).</summary>
     public const string Provider = "provider";
 
+    /// <summary>The result of a Code Mode script that went on in the background after its tool call.</summary>
+    public const string Workflow = "workflow";
+
     /// <summary>The longest identifier, in characters.</summary>
     public const int MaxLength = 64;
 
@@ -56,6 +59,7 @@ public static class AgentPromptProvenance
         [ModelFallback] = "Model Fallback",
         [Plugin] = "Plugin",
         [Provider] = "Provider",
+        [Workflow] = "Workflow",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>Gets the identifiers this version knows, with a display name of their own.</summary>

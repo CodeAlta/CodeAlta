@@ -148,7 +148,8 @@ internal sealed class WorkItemsService
             {
                 // The session is created whether or not the page still waits: it is told when it lists again.
                 var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
-                var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox);
+                var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox,
+                    SessionOptionsChoice.Record(request.Options));
                 var started = await _runner!.StartAsync(project, request.Kind, request.Id, request.Action == "start_worktree", request.SessionId, asked, settings).ConfigureAwait(false);
                 return started.Problem is null ? new("ok") { SessionId = started.SessionId }
                     : new("refused") { SessionId = started.SessionId, Message = started.Problem, Reason = started.Reason };
@@ -305,9 +306,10 @@ internal sealed record WorkItemReadResponse(string Status, string? Markdown, boo
 /// <param name="PermissionMode">The permission mode the user chose for a new session; null for the one of its provider.</param>
 /// <param name="ReviewBeforeCommit">Whether the user reviews the changes of a new session before a commit; null follows the setting.</param>
 /// <param name="Sandbox">The sandbox of a new session, a profile or <c>off</c>; null for what the settings give.</param>
+/// <param name="Options">The options of a new session, such as whether it can start sessions of its own; null for the defaults.</param>
 internal sealed record WorkItemActionRequest(string? ExpectedEpoch, string ProjectId, string Kind, string Id, string Action, string? Value = null,
     string? SessionId = null, string? WorkingDirectory = null, string? ProviderId = null, string? ModelId = null, string? ReasoningEffort = null,
-    string? AgentPromptId = null, string? PermissionMode = null, bool? ReviewBeforeCommit = null, string? Sandbox = null);
+    string? AgentPromptId = null, string? PermissionMode = null, bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null);
 
 /// <param name="Status"><c>ok</c>, <c>refused</c> (with a message), <c>not_found</c>, <c>write_failed</c>, <c>invalid_request</c>, <c>unavailable</c> or <c>stale_epoch</c>.</param>
 internal sealed record WorkItemActionResponse(string Status)

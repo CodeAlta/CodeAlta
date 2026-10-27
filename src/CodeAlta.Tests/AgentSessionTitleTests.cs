@@ -467,7 +467,8 @@ public sealed class AgentSessionTitleTests
 
         public List<AgentEvent> Live { get; } = [];
 
-        public IReadOnlyList<string?> DeveloperInstructions => [.. Requests.Select(static request => request.DeveloperInstructions)];
+        // The title paragraph is of this session alone: it comes with the instructions of the session, after the others.
+        public IReadOnlyList<string?> DeveloperInstructions => [.. Requests.Select(static request => AgentInstructionText.DeveloperAndSession(request))];
 
         /// <summary>A session titled "CodeAlta", as one created without a title in the project of that name.</summary>
         public static async Task<Fixture> CreateAsync(string sessionId, AgentSessionTitleMode mode, AgentSessionTitleSource? source,

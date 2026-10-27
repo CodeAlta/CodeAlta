@@ -165,7 +165,26 @@ public sealed class SandboxWorkerTests
     }
 
     [TestMethod]
-    public async Task AResultLongerThanAFrame_IsSentInParts()
+    public async Task AMessageLongerThanAFrame_IsSentInParts()
+    {
+        using var toReader = new AnonymousPipeServerStream(PipeDirection.Out);
+        using var readerInput = new AnonymousPipeClientStream(PipeDirection.In, toReader.ClientSafePipeHandle);
+        var writer = new SandboxWorkerChannel(Stream.Null, toReader);
+        var reader = new SandboxWorkerChannel(readerInput, Stream.Null);
+        var big = new string('x', 5_000_000);
+
+        // The pipe holds less than one frame: the reader takes the parts while the writer sends them.
+        var read = Task.Run(() => reader.ReadAsync());
+        await writer.WriteAsync(new SandboxWorkerMessage { Type = SandboxWorkerMessageTypes.Result, Id = 7, Tool = big }, CancellationToken.None).WaitAsync(Deadline);
+        var message = await read.WaitAsync(Deadline);
+
+        Assert.IsNotNull(message);
+        Assert.AreEqual(7, message.Id);
+        Assert.AreEqual(big, message.Tool);
+    }
+
+    [TestMethod]
+    public async Task ALongReadInTheSandbox_StopsAtTheReadLimit()
     {
         using var temp = new TempTree();
         var project = temp.Folder("project");
@@ -176,8 +195,10 @@ public sealed class SandboxWorkerTests
         var result = await worker.Client.InvokeAsync(Call("read_file", new { path = "big.txt", limit = 2000 }),
             Host((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce))), CancellationToken.None).WaitAsync(Deadline);
 
+        // The file tools of a sandbox keep the limits of the host: 6 MB of lines do not reach the model.
         Assert.IsTrue(result.Success, result.Error);
-        Assert.IsGreaterThan(5_000_000, Text(result).Length);
+        Assert.IsLessThan(110_000, Text(result).Length);
+        StringAssert.Contains(Text(result), "read on with offset=");
     }
 
     private static SandboxToolHost Host(Func<AgentPermissionRequest, CancellationToken, Task<AgentPermissionDecision>> permission)

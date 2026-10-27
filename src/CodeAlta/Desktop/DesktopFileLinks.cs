@@ -119,6 +119,13 @@ internal readonly partial record struct DesktopFileLink(string Path, int? Line, 
     private static partial Regex HeadingName();
 }
 
+/// <summary>A picture that a link names, read for the window to draw it.</summary>
+/// <param name="Status"><c>ok</c>, <c>not_found</c>, <c>not_image</c>, <c>too_large</c> or <c>failed</c>.</param>
+/// <param name="MediaType">The media type of its content; null unless <c>ok</c>.</param>
+/// <param name="Bytes">Its content; null unless <c>ok</c>.</param>
+/// <param name="FullPath">The full path of the file; null unless <c>ok</c>.</param>
+internal sealed record DesktopLinkedImage(string Status, string? MediaType = null, byte[]? Bytes = null, string? FullPath = null);
+
 /// <summary>
 /// Follows a link to a file of the disk: finds the file, and has the window show it in the code editor.
 /// </summary>
@@ -209,9 +216,8 @@ internal sealed class DesktopFileLinks
     /// <param name="cancellationToken">Cancels the request.</param>
     internal async Task<string> OpenAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, string? originLabel, CancellationToken cancellationToken)
     {
-        var sessionRoot = sessionId is { Length: > 0 and <= 128 } ? await _sessionFolder(sessionId, cancellationToken).ConfigureAwait(false) : null;
-        var start = sessionRoot ?? await DocumentFolderAsync(projectId, directory, cancellationToken).ConfigureAwait(false);
-        if (Locate(link.Path, start) is not { } full) return "not_found";
+        var (full, sessionRoot) = await ResolveAsync(link, sessionId, projectId, directory, cancellationToken).ConfigureAwait(false);
+        if (full is null) return "not_found";
         bool isDirectory;
         try
         {
@@ -248,6 +254,73 @@ internal sealed class DesktopFileLinks
 
         if (Path.GetDirectoryName(full) is not { Length: > 0 } parent || ProjectFilesService.Normalize(Path.GetFileName(full), out var name) != "ok") return "not_found";
         return _view.OpenFolder(_folders.Give(parent), name, link.Line, link.Column, sessionId, originLabel) ? "ok" : "failed";
+    }
+
+    /// <summary>
+    /// Reads a picture that a link names, for the window to draw it: <c>ok</c> with its media type and its bytes,
+    /// <c>not_found</c>, <c>not_image</c> for a file that is no PNG, JPEG, GIF, WebP or BMP picture by its name and
+    /// by its content, <c>too_large</c> past <see cref="ProjectFilesService.MaximumImageBytes"/>, or <c>failed</c>.
+    /// </summary>
+    /// <param name="link">The link.</param>
+    /// <param name="sessionId">The session whose message has the link: a relative path starts from its folder.</param>
+    /// <param name="projectId">Without a session, the project or the folder whose document has the link.</param>
+    /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <exception cref="OperationCanceledException">The request was canceled.</exception>
+    internal async Task<DesktopLinkedImage> ReadImageAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    {
+        var (full, _) = await ResolveAsync(link, sessionId, projectId, directory, cancellationToken).ConfigureAwait(false);
+        if (full is null) return new("not_found");
+        if (Path.GetExtension(full).ToLowerInvariant() is not (".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".bmp")) return new("not_image");
+        try
+        {
+            var info = new FileInfo(full);
+            if (!info.Exists) return new("not_found");
+            if (info.Length > ProjectFilesService.MaximumImageBytes) return new("too_large");
+            var bytes = await File.ReadAllBytesAsync(full, cancellationToken).ConfigureAwait(false);
+            if (bytes.Length > ProjectFilesService.MaximumImageBytes) return new("too_large");
+            // The content decides: a file named as a picture may be anything else.
+            return ProjectFilesService.ImageMediaType(bytes) is { } mediaType and ("image/png" or "image/jpeg" or "image/gif" or "image/webp" or "image/bmp")
+                ? new("ok", mediaType, bytes, full) : new("not_image");
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new("not_found");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return new("failed");
+        }
+    }
+
+    /// <summary>
+    /// Shows the file that a link names in the file manager of the system: <c>ok</c>, <c>not_found</c>, or
+    /// <c>failed</c> when the file manager could not be started.
+    /// </summary>
+    /// <param name="link">The link.</param>
+    /// <param name="sessionId">The session whose message has the link: a relative path starts from its folder.</param>
+    /// <param name="projectId">Without a session, the project or the folder whose document has the link.</param>
+    /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <exception cref="OperationCanceledException">The request was canceled.</exception>
+    internal async Task<string> RevealAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    {
+        var (full, _) = await ResolveAsync(link, sessionId, projectId, directory, cancellationToken).ConfigureAwait(false);
+        if (full is null || !Path.Exists(full)) return "not_found";
+        cancellationToken.ThrowIfCancellationRequested();
+        return Reveal(full) ? "ok" : "failed";
+    }
+
+    /// <summary>Shows a file in the file manager of the system; false when it could not. Tests replace it.</summary>
+    internal Func<string, bool> Reveal { get; init; } = DesktopFileReveal.Show;
+
+    // The full path a link names, and the folder of its session: a relative path starts from that folder, or from
+    // the folder of its document without a session.
+    private async Task<(string? Full, string? SessionRoot)> ResolveAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    {
+        var sessionRoot = sessionId is { Length: > 0 and <= 128 } ? await _sessionFolder(sessionId, cancellationToken).ConfigureAwait(false) : null;
+        var start = sessionRoot ?? await DocumentFolderAsync(projectId, directory, cancellationToken).ConfigureAwait(false);
+        return (Locate(link.Path, start), sessionRoot);
     }
 
     // The folder a relative link of a document starts from: the one of the document, inside its project.

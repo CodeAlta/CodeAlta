@@ -109,7 +109,7 @@ internal sealed class SessionStarter : ISessionStarter
                 folder = existing;
             }
 
-            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space, model?.PermissionMode).ConfigureAwait(false);
+            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space, model?.PermissionMode, null, null, model?.SessionOptions).ConfigureAwait(false);
             sessionId = session.SessionId;
             // The review and the sandbox chosen for the session, before anything is sent to it.
             if (model?.ReviewBeforeCommit is { } review
@@ -118,6 +118,8 @@ internal sealed class SessionStarter : ISessionStarter
             if (model?.Sandbox is { } sandbox
                 && (await _host.Commands.SetSandboxAsync(sessionId, sandbox, CancellationToken.None).ConfigureAwait(false)).Status is var sandboxed and not "ok")
                 return new(sessionId, $"The session was created, but its sandbox '{sandbox}' could not be chosen ({sandboxed}).");
+            // A script of the library runs through exec, which the session then has whatever the setting of Code Mode says.
+            if (model?.CodeMode == true) _host.CodeModeRuns.RequireCodeMode(sessionId);
             // The host completes what the choice leaves to the provider and to the model.
             var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, choice.ModelId, choice.ModelId is null ? null : choice.Effort);
             var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest(origin + ":" + Guid.NewGuid().ToString("N"), sessionId, prompt(folder ?? project.ProjectPath))

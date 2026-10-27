@@ -42,6 +42,7 @@ internal static class StatisticsCommands
         command.Add(Details(plugin, context));
         command.Add(Skills(plugin, context));
         command.Add(Mcp(plugin, context));
+        command.Add(Scripts(plugin, context));
         command.Add(Session(plugin, context));
         command.Add(Status(plugin, context));
         command.Add(History(plugin, context));
@@ -144,6 +145,18 @@ internal static class StatisticsCommands
         options.AddTo(command, frequency: true);
         command.Add(async (_, _) => await Run(plugin, context, async queries => Write(context, "alta.statistics.mcp", await queries.McpToolsAsync(options.ToRequest(), context.CancellationToken).ConfigureAwait(false))).ConfigureAwait(false));
         Help(command, "A server is named as the call named it: the key given to `alta mcp tool call`, or the server part of an `mcp__<server>__<tool>` name, where a character other than a letter or a digit is `_`. Only the project, the space and the session filters apply.");
+        return command;
+    }
+
+    private static Command Scripts(StatisticsPlugin plugin, PluginAltaCommandContext context)
+    {
+        var options = new QueryOptions();
+        var command = Leaf("scripts", "The runs of scripts of Code Mode in a period: their outcomes, each script with its failures, durations and the sessions it started, how much each model sends scripts, and the latest runs.");
+        options.AddTo(command, frequency: true);
+        command.Add(async (_, _) => await Run(plugin, context, async queries => Write(context, "alta.statistics.scripts", await queries.ScriptsAsync(options.ToRequest(), context.CancellationToken).ConfigureAwait(false))).ConfigureAwait(false));
+        Help(command,
+            "A run is named by the first library script it loads with `workflow(\"name\")`: `(inline)` is a run of the code sent to `exec` alone, `(unknown)` a run recorded before the scripts were. A run is counted when it starts, its outcome, duration, calls and sessions when it ends. The tokens and the cost of a script are those of the sessions its runs started, in the period. The turns with and without a script describe; they do not measure what a script brings.",
+            "Example: `alta statistics scripts --period 30d`; the failing steps and the errors: `alta statistics details script-step-failed`, `alta statistics details script-error`.");
         return command;
     }
 

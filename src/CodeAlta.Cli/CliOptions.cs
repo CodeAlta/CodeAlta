@@ -37,8 +37,19 @@ internal class CliCommonOptions
 
     public bool NoSkills { get; set; }
 
+    // --code-mode[=on|only|off]: the mode of Code Mode of every session, whatever the configuration says; null for the configuration (on by default).
+    public string? CodeMode { get; set; }
+
     // The sandbox profile of the sessions of run and acp, or `off`; null for what the settings decide.
     public string? Sandbox { get; set; }
+
+    // --no-sub-sessions of run and acp: the sessions start no session of their own, and their prompt does not mention them.
+    public bool NoSubSessions { get; set; }
+
+    // --enable and --disable of run and acp: the parts of the agent prompt kept or left out over the defaults of the command.
+    public List<string> EnableFeatures { get; } = [];
+
+    public List<string> DisableFeatures { get; } = [];
 
     public bool Verbose { get; set; }
 

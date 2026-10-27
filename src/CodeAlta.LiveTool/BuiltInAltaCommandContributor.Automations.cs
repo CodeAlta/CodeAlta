@@ -1,5 +1,6 @@
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Scripts;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.LiveTool;
@@ -93,7 +94,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateAutomationRunCommand(AltaCommandContext context)
     {
         string? id = null;
-        var command = Leaf("run", "Run an automation now, whatever its triggers: it starts a new session and sends it the prompt.");
+        var command = AltaSubSessionsGate.Leaf(context, "run", "Run an automation now, whatever its triggers: it starts a new session and sends it the prompt.");
         command.Add("<automation-id>", "Automation id from `alta automation list`.", value => id = value);
         command.Add(async (_, _) => await HandleAutomationRunAsync(context, id).ConfigureAwait(false));
         AddHelpText(command, "The command returns once the session exists: it does not wait for its answer. Follow it with `alta automation runs <id>`.");
@@ -103,10 +104,12 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateAutomationCreateCommand(AltaCommandContext context)
     {
         var options = new AutomationCreateOptions();
-        var command = Leaf("create", "Create an automation: a prompt that starts a session by itself.");
+        var command = AltaSubSessionsGate.Leaf(context, "create", "Create an automation: a prompt, or a script of the library, that starts a session by itself.");
         command.Add("name=", "Name of the automation, which also names the sessions it starts. Required.", value => options.Name = value);
         command.Add("content=", "The prompt sent at each run. Prefer --stdin for multi-line content.", value => options.Content = value);
         command.Add("stdin", "Read the prompt from stdin.", value => options.UseStdin = value is not null);
+        command.Add("script=", "Run this script of the library (`alta script list`) in place of a prompt: its session runs it with `exec`.", value => options.Script = value);
+        command.Add("script-args=", "The arguments of the script, a JSON object such as `{\"lenses\":[\"security\"]}`. A script that declares an `event` parameter gets what started the run (the issue, the pull request).", value => options.ScriptArguments = value);
         command.Add("trigger=", "A trigger; repeat the option for several. Without one the automation is run by hand.", value => { if (value is not null) options.Triggers.Add(value); });
         command.Add("project=", "The project it runs in: id, slug or path. Defaults to the caller's project.", value => options.Project = value);
         command.Add("chat", "Run as a chat, in no project.", value => options.Chat = value is not null);
@@ -119,7 +122,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         AddHelpText(
             command,
             "Write the prompt for a session that starts with nothing else: say what to look at and what to produce.",
-            "Examples: `alta automation create --name \"Issue triage\" --trigger daily@09:00 --content \"Triage the issues opened since yesterday.\"`; `--trigger issue@opened` to run for every issue a maintainer opens; `--trigger \"command@gh run watch 123 --exit-status\"` to run each time that command succeeds; `--chat` for one that needs no project.");
+            "Examples: `alta automation create --name \"Issue triage\" --trigger daily@09:00 --content \"Triage the issues opened since yesterday.\"`; `--trigger issue@opened` to run for every issue a maintainer opens; `--trigger \"command@gh run watch 123 --exit-status\"` to run each time that command succeeds; `--chat` for one that needs no project; `alta automation create --name \"PR review\" --trigger pull_request@opened --script review-pr` to run a script on each pull request.");
         return command;
     }
 
@@ -369,10 +372,33 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.contentConflict", "Use either --content or --stdin, not both.", "alta automation create");
         }
 
-        var prompt = options.UseStdin ? await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false) : options.Content;
-        if (string.IsNullOrWhiteSpace(prompt))
+        var script = NormalizeOptionalText(options.Script);
+        var scriptArguments = NormalizeOptionalText(options.ScriptArguments);
+        if (script is not null && (!string.IsNullOrWhiteSpace(options.Content) || options.UseStdin))
         {
-            return UsageError(context, "usage.missingContent", "The prompt is required. Use --content <text> or --stdin.", "alta automation create");
+            return UsageError(context, "usage.contentConflict", "An automation runs a prompt or a script: use --content or --stdin, or --script, not both.", "alta automation create");
+        }
+
+        if (script is null && scriptArguments is not null)
+        {
+            return UsageError(context, "usage.scriptArgsWithoutScript", "--script-args are the arguments of --script: name the script.", "alta automation create");
+        }
+
+        if (script is not null && !CodeModeScriptLibrary.IsName(script))
+        {
+            return UsageError(context, "usage.invalidScript", "--script is the name of a script of the library: lowercase letters, digits and hyphens (`alta script list`).", "alta automation create");
+        }
+
+        if (scriptArguments is not null && !IsJsonObject(scriptArguments))
+        {
+            return UsageError(context, "usage.invalidScriptArgs", "--script-args is a JSON object, such as {\"pr\": 42}.", "alta automation create");
+        }
+
+        var prompt = script is not null ? string.Empty
+            : options.UseStdin ? await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false) : options.Content;
+        if (script is null && string.IsNullOrWhiteSpace(prompt))
+        {
+            return UsageError(context, "usage.missingContent", "The prompt is required. Use --content <text> or --stdin, or --script <name>.", "alta automation create");
         }
 
         var store = NormalizeOptionalText(options.Store)?.ToLowerInvariant() ?? "user";
@@ -382,6 +408,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         }
 
         string? projectId = null;
+        string? projectPath = null;
         if (!options.Chat)
         {
             var reference = NormalizeOptionalText(options.Project) ?? NormalizeOptionalText(context.Caller.SourceProjectId);
@@ -398,6 +425,7 @@ internal sealed partial class BuiltInAltaCommandContributor
                 }
 
                 projectId = project.Id;
+                projectPath = project.ProjectPath;
             }
         }
         else if (NormalizeOptionalText(options.Project) is not null)
@@ -429,8 +457,17 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         if (!AcceptsAutomationPrompt(context)) return AutomationPermissionDenied(context);
 
-        var change = await automations.CreateAsync(new AltaAutomationRequest(name, prompt)
+        // The script is checked as a run checks it: in the library of the project, and its arguments; an `event` it declares comes from the trigger.
+        if (script is not null && context.Services.Get<CodeModeScriptLibrary>() is { } library
+            && CodeModeScriptRunPrompt.Build(library, script, scriptArguments, "---\nevent", projectPath, await CallerSpaceFilterAsync(context).ConfigureAwait(false), out var scriptProblem) is null)
         {
+            return UsageError(context, "automation.scriptRefused", scriptProblem!, "alta automation create");
+        }
+
+        var change = await automations.CreateAsync(new AltaAutomationRequest(name, prompt!)
+        {
+            Script = script,
+            ScriptArguments = scriptArguments,
             ProjectId = projectId,
             StoreInProject = store == "project",
             Model = NormalizeOptionalText(options.Model),
@@ -554,7 +591,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         allowed = automation.Allowed,
         problem = automation.Problem,
         file = automation.File,
-        prompt = prompt ? automation.Prompt : null,
+        script = automation.Script,
+        prompt = prompt && automation.Script is null ? automation.Prompt : null,
     };
 
     private static object AutomationRunRecord(AltaCommandContext context, AltaAutomationRun run) => new
@@ -598,5 +636,22 @@ internal sealed partial class BuiltInAltaCommandContributor
         public bool Disabled { get; set; }
 
         public bool CatchUp { get; set; }
+
+        public string? Script { get; set; }
+
+        public string? ScriptArguments { get; set; }
+    }
+
+    private static bool IsJsonObject(string json)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
     }
 }

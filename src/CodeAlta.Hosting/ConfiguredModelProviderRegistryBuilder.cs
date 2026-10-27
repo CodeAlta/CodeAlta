@@ -412,6 +412,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ModelRequestOverrides = CreateModelRequestOverrides(definition.ModelRequest),
                     ModelCatalog = modelCatalog,
                     ProtocolTracing = CreateOpenAIProtocolTraceOptions(definition, stateRootPath),
+                    TextVerbosity = NormalizeText(definition.TextVerbosity),
                     // Another vendor's Responses endpoint keeps its cache for a time it does not say.
                     PromptCacheLifetime = IsOpenAIApi(baseUri) ? OpenAIProviderOptions.OpenAIApiPromptCacheLifetime : null,
                 },
@@ -520,7 +521,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                 AuthSource = NormalizeText(definition.AuthSource) ?? "codealta_oauth",
                 AccountId = NormalizeText(definition.AccountId),
                 MaxConcurrentRequests = definition.MaxConcurrentRequests ?? 16,
-                TextVerbosity = NormalizeText(definition.TextVerbosity) ?? "medium",
+                TextVerbosity = NormalizeText(definition.TextVerbosity),
                 ServiceTier = definition.ServiceTier,
                 WebSearch = definition.WebSearch switch
                 {

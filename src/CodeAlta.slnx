@@ -14,6 +14,7 @@
     <File Path="../doc/statistics.md" />
     <File Path="../doc/review.md" />
     <File Path="../doc/sandbox.md" />
+    <File Path="../doc/codemode.md" />
   </Folder>
   <Folder Name="/general/">
     <File Path="../.editorconfig" />
@@ -42,6 +43,7 @@
     <Project Path="CodeAlta.Agent.OpenAI/CodeAlta.Agent.OpenAI.csproj" />
     <Project Path="CodeAlta.Agent/CodeAlta.Agent.csproj" />
     <Project Path="CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
+    <Project Path="CodeAlta.CodeMode/CodeAlta.CodeMode.csproj" />
     <Project Path="CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
     <Project Path="CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />
     <Project Path="CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
@@ -64,6 +66,7 @@
     <Project Path="CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj" />
     <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
     <Project Path="CodeAlta.Cli.Tests/CodeAlta.Cli.Tests.csproj" />
+    <Project Path="CodeAlta.CodeMode.Tests/CodeAlta.CodeMode.Tests.csproj" />
     <Project Path="CodeAlta.Hosting.Tests/CodeAlta.Hosting.Tests.csproj" />
     <Project Path="CodeAlta.Orchestration.Tests/CodeAlta.Orchestration.Tests.csproj" />
     <Project Path="CodeAlta.Plugin.Mobile.Tests/CodeAlta.Plugin.Mobile.Tests.csproj" />
@@ -79,5 +82,6 @@
     <Project Path="CodeAlta.Acp.Generator/CodeAlta.Acp.Generator.csproj" />
     <Project Path="CodeAlta.Agent.ModelsDev.Updater/CodeAlta.Agent.ModelsDev.Updater.csproj" />
     <Project Path="CodeAlta.Benchmarks/CodeAlta.Benchmarks.csproj" />
+    <Project Path="CodeAlta.Evals/CodeAlta.Evals.csproj" />
     <Project Path="CodeAlta.ColorSchemes.Generator/CodeAlta.ColorSchemes.Generator.csproj" />
   </Folder></Solution>

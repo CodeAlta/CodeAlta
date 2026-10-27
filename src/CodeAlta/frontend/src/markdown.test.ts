@@ -71,6 +71,17 @@ test("the entries of a front matter are its keys with their text, their items, o
   assert.deepEqual(frontMatterEntries(""), []);
 });
 
+test("a picture of the disk is a link to its file marked as a picture, never an image", () => {
+  const html = createMarkdownParser({ fileLinkMark: "m1" })("![Chart <b>](charts/run.png) and ![web](https://example.invalid/a.png) and ![](C:%5Cout%5Cmy%20plot.png#L1)");
+  assert.match(html, /<a href="charts\/run.png" data-file-link="m1" data-file-image="m1">Chart &lt;b&gt;<\/a>/);
+  assert.match(html, / and web and /);
+  // Without an alternative text, the link says the name of the file.
+  assert.match(html, /<a href="C:%5Cout%5Cmy%20plot.png#L1" data-file-link="m1" data-file-image="m1">my plot.png<\/a>/);
+  assert.doesNotMatch(html, /<img/);
+  // Without a mark, no link is a file's: a picture is its alternative text.
+  assert.doesNotMatch(createMarkdownParser()("![Chart](charts/run.png)"), /<a |data-file/);
+});
+
 test("deliberate policy differences: escaped image alt, tasks left to the boundary, no fuzzy links or grid/footnote plugins", () => {
   const html = createMarkdownParser()('![alt <b>](https://example.invalid/a)\n\n- [x] task\n\nwww.example.invalid x@y.invalid\n\n[^note]\n\n[^note]: text');
   assert.match(html, /alt &lt;b&gt;/); assert.match(html, /\[x\] task/);

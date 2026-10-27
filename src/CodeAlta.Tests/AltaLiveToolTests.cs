@@ -395,7 +395,7 @@ public sealed partial class AltaLiveToolTests
         StringAssert.Contains(tool.Spec.Description, "create project/global child sessions");
         StringAssert.Contains(tool.Spec.Description, "send, queue, steer, abort, compact");
         StringAssert.Contains(tool.Spec.Description, "peer-agent requests");
-        StringAssert.Contains(tool.Spec.Description, "args [\"--help\"] for the quick-start");
+        StringAssert.Contains(tool.Spec.Description, "read help only for a command or an option they do not give: args [\"--help\"] for the quick-start");
         StringAssert.Contains(tool.Spec.Description, "compact JSONL headed by alta.result");
     }
 
@@ -3383,8 +3383,9 @@ public sealed partial class AltaLiveToolTests
             line.GetProperty("type").GetString() == "alta.session.item" &&
             line.GetProperty("sessionId").GetString() == childSessionId &&
             line.GetProperty("parentSessionId").GetString() == canonicalParentSessionId));
-        Assert.IsNotNull(providerRuntime.CreatedOptions.Last().DeveloperInstructions);
-        StringAssert.Contains(providerRuntime.CreatedOptions.Last().DeveloperInstructions!, $"Parent session: `{canonicalParentSessionId}`");
+        // The parent is of this session alone: it is told in the instructions of the session.
+        Assert.IsNotNull(providerRuntime.CreatedOptions.Last().SessionInstructions);
+        StringAssert.Contains(providerRuntime.CreatedOptions.Last().SessionInstructions!, $"Parent session: `{canonicalParentSessionId}`");
         await WaitUntilAsync(() => providerRuntime.SteeredOptions.Count == 1).ConfigureAwait(false);
         var parentNotification = ExtractText(providerRuntime.SteeredOptions.Single().Input);
         StringAssert.Contains(parentNotification, $"Source session: {childSessionId}");
@@ -4977,10 +4978,11 @@ public sealed partial class AltaLiveToolTests
                 new AltaActorProvenance { Kind = "agent", SourceSessionId = parent.SessionId, CreatedAt = DateTimeOffset.UtcNow })
             .ConfigureAwait(false);
 
-        Assert.IsNotNull(providerRuntime.CreatedOptions[1].DeveloperInstructions);
-        StringAssert.Contains(providerRuntime.CreatedOptions[1].DeveloperInstructions!, $"Parent session: {parent.SessionId}");
-        StringAssert.Contains(providerRuntime.CreatedOptions[1].DeveloperInstructions!, "CodeAlta auto-forwards your final assistant reply");
-        StringAssert.Contains(providerRuntime.CreatedOptions[1].DeveloperInstructions!, "<notify-parent>update text</notify-parent>");
+        // The parent is of this session alone: it is told in the instructions of the session.
+        Assert.IsNotNull(providerRuntime.CreatedOptions[1].SessionInstructions);
+        StringAssert.Contains(providerRuntime.CreatedOptions[1].SessionInstructions!, $"Parent session: {parent.SessionId}");
+        StringAssert.Contains(providerRuntime.CreatedOptions[1].SessionInstructions!, "CodeAlta auto-forwards your final assistant reply");
+        StringAssert.Contains(providerRuntime.CreatedOptions[1].SessionInstructions!, "<notify-parent>update text</notify-parent>");
 
         await runtime.SendAsync(parent, executionOptions, new AgentSendOptions { Input = AgentInput.Text("parent running") }).ConfigureAwait(false);
         var childRunId = await runtime.SendAsync(child, executionOptions, new AgentSendOptions { Input = AgentInput.Text("child work") }).ConfigureAwait(false);
@@ -5280,6 +5282,52 @@ public sealed partial class AltaLiveToolTests
             .ToDictionary(static item => item.Text, static item => item.Provenance, StringComparer.Ordinal);
         Assert.AreEqual(AgentPromptProvenance.BackgroundJob, delivered["job ended"]);
         Assert.AreEqual(AgentPromptProvenance.UserReview, delivered["review round"]);
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task HostPromptImages_SteeredOrQueuedIntoABusySession_GoWithThePrompt(bool supportsSteering)
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var sessionCatalog = new SessionViewCatalog(options);
+        var providerId = new ModelProviderId("host-prompt-images");
+        var providerRuntime = new StatefulProviderRuntime(providerId) { SupportsSteering = supportsSteering };
+        await using var runtime = CreateRuntime(options, providerRuntime);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options).Add(new ProjectCatalog(options)).Add(sessionCatalog).Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var first = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "first prompt"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, first.ExitCode, first.Stderr);
+
+        // The end of a script that went on in the background, with the picture it attached, while the turn of the user runs.
+        var png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=");
+        var delivery = await runtime.DeliverHostPromptAsync(sessionId, "Script run-1a2b3c ended:\nScript completed", AgentPromptProvenance.Workflow,
+            [new PromptImageAttachment("run-1a2b3c-image-1", "Chart", png, "image/png", ".png")]).ConfigureAwait(false);
+
+        Assert.AreEqual(supportsSteering ? "steered" : "queued", delivery);
+        if (!supportsSteering)
+        {
+            // The picture of a queued prompt is saved with the attachments of the session, and named by the queue in the journal.
+            var state = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
+            var queued = state.QueuedPrompts.Single(static prompt => prompt.State == "queued");
+            var image = queued.Images!.Single();
+            Assert.AreEqual("Chart", image.Title);
+            Assert.AreEqual("image/png", image.MediaType);
+            StringAssert.Contains(Path.GetDirectoryName(image.Path)!, ".attachments");
+            CollectionAssert.AreEqual(png, File.ReadAllBytes(image.Path));
+            providerRuntime.PublishIdle(sessionId, new AgentRunId("run-1"));
+            await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 2).ConfigureAwait(false);
+        }
+
+        var input = supportsSteering ? providerRuntime.SteeredOptions.Single().Input : providerRuntime.SentOptions[1].Input;
+        Assert.AreEqual("Script run-1a2b3c ended:\nScript completed", ((AgentInputItem.Text)input.Items[0]).Value);
+        var sent = input.Items.OfType<AgentInputItem.LocalImage>().Single();
+        Assert.AreEqual("Chart", sent.DisplayName);
+        Assert.AreEqual("image/png", sent.MediaType);
+        CollectionAssert.AreEqual(png, File.ReadAllBytes(sent.Path));
     }
 
     [TestMethod]
@@ -5602,6 +5650,14 @@ public sealed partial class AltaLiveToolTests
             StringAssert.Contains(notification.GetProperty("guidance").GetString()!, "Do not poll or actively wait");
             CollectionAssert.Contains(notification.GetProperty("forbiddenWaitActions").EnumerateArray().Select(static item => item.GetString()).ToArray(), "shell sleep");
             await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+
+            // A script that sends gets no answer either: it is told so, and what gives it one.
+            var otherCreated = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", ProviderId.Value, "--parent", parentSessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            var otherSessionId = ReadJsonLines(otherCreated.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+            var fromScript = await dispatcher.InvokeAsync(["session", "send", otherSessionId, "--message", "a part of the work"], caller: caller with { ScriptRunId = "run-1" }).ConfigureAwait(false);
+            var scriptRecord = ReadJsonLines(fromScript.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.submitted");
+            StringAssert.Contains(scriptRecord.GetProperty("nextStep").GetString()!, "never to this script");
+            StringAssert.Contains(scriptRecord.GetProperty("nextStep").GetString()!, "agent(prompt, { tier })");
         }
         finally
         {

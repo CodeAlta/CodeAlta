@@ -178,7 +178,8 @@ public sealed class AgentSessionPromptSuggestionTests
         public async Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request,
             Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
         {
-            lock (DeveloperInstructions) DeveloperInstructions.Add(request.DeveloperInstructions);
+            // The paragraph is of this session alone: it comes with the instructions of the session, after the others.
+            lock (DeveloperInstructions) DeveloperInstructions.Add(AgentInstructionText.DeveloperAndSession(request));
             foreach (var chunk in Chunks)
             {
                 await onUpdate(new AgentTurnDelta { Kind = AgentContentKind.Assistant, ContentId = "answer-1", Text = chunk }, cancellationToken);

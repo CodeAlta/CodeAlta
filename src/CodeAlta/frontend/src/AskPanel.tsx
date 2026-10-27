@@ -3,7 +3,7 @@ import { createPortal, flushSync } from "react-dom";
 import { sessionAsks } from "#neoastra";
 import { askActionUnconfirmed, askWireHandle, captureAskAction, type AskHandle, type AskPage, type AskQuestion, type createAskActions } from "./sessionAsks";
 import type { createMutationCapability } from "./sessionOperations";
-import { showAskDetails } from "./workspacePresentation";
+import { askInPlace, showAskDetails } from "./workspacePresentation";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { ObservationStatus } from "./ObservationStatus";
@@ -154,8 +154,9 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     if (presentable && source !== presented) { if (idle) setPresented(source); }
     else if (!presentable && presented !== null) setPresented(null);
   }, [presentable, source, presented, idle]);
-  // Without a place for the questions (a host that gives none) they are shown where this panel is.
-  const inPlace = formSlot === undefined;
+  // Without a place for the questions (a host that gives none) they are shown where this panel is. So is a question of a
+  // script while the turn that waits for it runs: it is shown at once, and the prompt stays, with its Stop.
+  const inPlace = askInPlace(formSlot !== undefined, head?.immediate === true, idle);
   const asking = presentable && (inPlace || (presented === source && !!formSlot));
   const reviewing = asking && !!file && !!fileSlot;
   const mode: AskMode = !asking || inPlace ? "none" : reviewing ? "file" : "questions";

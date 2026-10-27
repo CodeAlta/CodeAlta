@@ -52,6 +52,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
     private readonly Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> _projects;
     private readonly AutomationStateStore _state;
     private readonly IAutomationRunner _runner;
+    private readonly Func<AutomationEntry, string?>? _scriptHash;
     private readonly TimeProvider _time;
     private readonly TimeZoneInfo _zone;
     private readonly CancellationTokenSource _stop = new();
@@ -83,12 +84,18 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// <param name="feed">Reads the repositories for the event triggers, and is disposed with the service; null when they are not watched.</param>
     /// <param name="trackers">Gives the plugins that say what happened in a tracker, as they are active when asked; null when there are none.</param>
     /// <param name="commands">Runs the commands of the command triggers; null when they are not run.</param>
+    /// <param name="scriptHash">
+    /// Gives the hash of the script an automation runs, as the library holds it now, or null when there is none: what
+    /// an automation that runs a script is allowed with. Null when no automation runs a script.
+    /// </param>
     internal AutomationService(string globalConfigPath, Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> projects,
         AutomationStateStore state, IAutomationRunner runner, TimeProvider time, TimeZoneInfo zone, IAutomationFeed? feed = null,
-        Func<IReadOnlyList<CodeAlta.Plugins.Abstractions.IIssueEventSource>>? trackers = null, IAutomationCommands? commands = null)
+        Func<IReadOnlyList<CodeAlta.Plugins.Abstractions.IIssueEventSource>>? trackers = null, IAutomationCommands? commands = null,
+        Func<AutomationEntry, string?>? scriptHash = null)
     {
         _trackers = trackers;
         _commands = commands;
+        _scriptHash = scriptHash;
         ArgumentException.ThrowIfNullOrWhiteSpace(globalConfigPath);
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(state);
@@ -130,21 +137,22 @@ internal sealed partial class AutomationService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Whether the triggers of an automation may start it: always for one kept with the user, and for one kept
-    /// with a project once the user allowed it as it is now, in that file.
+    /// Whether the triggers of an automation may start it: always for one kept with the user that sends a prompt, and
+    /// for one kept with a project, or that runs a script, once the user allowed it as it is now, in that file, with
+    /// that script: a script saved by an agent or brought by someone else asks again.
     /// </summary>
     internal bool IsAllowed(AutomationEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        return entry.Source.IsGlobal || _state.IsAllowed(entry.Id, Allowance(entry));
+        return !NeedsAllowance(entry) || _state.IsAllowed(entry.Id, Allowance(entry));
     }
 
-    /// <summary>Allows the triggers of an automation of a project to start it, as it is now.</summary>
+    /// <summary>Allows the triggers of an automation of a project, or that runs a script, to start it, as it is now.</summary>
     /// <returns>Whether there is such an automation.</returns>
     internal bool Allow(string id)
     {
         if (Snapshot.Find(id) is not { } entry) return false;
-        if (!entry.Source.IsGlobal) _state.Allow(entry.Id, Allowance(entry));
+        if (NeedsAllowance(entry)) _state.Allow(entry.Id, Allowance(entry));
         lock (_gate)
         {
             // Its schedules count from now, its event triggers look at their repository soon, and its commands are started.
@@ -165,8 +173,12 @@ internal sealed partial class AutomationService : IAsyncDisposable
     private string Allowance(AutomationEntry entry)
     {
         var content = _fingerprints.GetValue(entry.Definition, static definition => definition.Fingerprint());
+        // The script is read as it is now: a change of it is a change of what runs.
+        if (entry.Definition.Script is not null) content += "\n" + (_scriptHash?.Invoke(entry) ?? "missing");
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content + "\n" + PathKey(entry.Source.FilePath))));
     }
+
+    private static bool NeedsAllowance(AutomationEntry entry) => !entry.Source.IsGlobal || entry.Definition.Script is not null;
 
     /// <summary>Starts reading the configuration files and watching the schedules, without waiting for either.</summary>
     internal void Start()
@@ -361,7 +373,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
         await RefreshAsync().ConfigureAwait(false);
         // What was read back is what is allowed: the definition as the file now holds it.
-        if (projectId is not null) Allow(definition.Id);
+        if (projectId is not null || definition.Script is not null) Allow(definition.Id);
         return null;
     }
 

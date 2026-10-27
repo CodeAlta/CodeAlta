@@ -12,6 +12,35 @@ namespace CodeAlta.Tests;
 public sealed class AgentSessionProviderToolHostTests
 {
     [TestMethod]
+    public async Task AProviderThatRunsItsOwnTools_KeepsTheToolsOfCodeAlta_WhenAToolTakesOverTheOthers()
+    {
+        using var directory = TestTempDirectory.Create();
+        var provider = new ToolHostProvider { Responses = [new AgentMessagePart.Text("done")] };
+        AgentToolDefinition Tool(string name, bool takesOver = false) => new(
+            new AgentToolSpec(name, "A tool of the session.", JsonSerializer.SerializeToElement(new { type = "object" }))
+            {
+                Exposure = takesOver ? AgentToolExposure.Model : AgentToolExposure.Direct,
+                ScriptsTakeOver = takesOver,
+            },
+            static (_, _) => Task.FromResult(new AgentToolResult(true, [])));
+        await using var session = await provider.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = "tool-host-fixture",
+            WorkingDirectory = directory.Path,
+            Tools = [Tool("alta"), Tool("exec", takesOver: true)],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("go"), EnableUserInputTool = false });
+
+        // Code Mode's `only` is `on` for an agent CLI: it keeps its own shell and sub-agents whatever it is offered, and
+        // without `alta` it delegated through them (the evaluation's Claude Code runs).
+        var offered = provider.LastRequest!.Tools.Select(static tool => tool.Spec.Name).ToArray();
+        CollectionAssert.Contains(offered, "alta");
+        CollectionAssert.Contains(offered, "exec");
+    }
+
+    [TestMethod]
     public async Task ToolCallOfTheProvider_IsRunByTheDefinitionTheProviderResolves()
     {
         using var directory = TestTempDirectory.Create();

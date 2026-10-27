@@ -66,14 +66,26 @@ internal sealed class HarnessPendingMcpCall(HarnessMcpToolCall call)
 /// </para>
 /// <para>
 /// An MCP call names no tool call: it is matched to the oldest call of the same tool and arguments that waits for one,
-/// else to the oldest of the same tool. A call that matches none (a sub-agent of the harness) is run by itself.
+/// else to the oldest of the same tool. The call of the harness and its MCP call come by two channels, so an MCP call may
+/// come first: it waits <see cref="MatchGrace"/> for its call. A call that matches none then (a sub-agent of the harness)
+/// is run by itself.
 /// </para>
 /// </remarks>
 public sealed class HarnessToolCallBridge
 {
+    /// <summary>
+    /// How long an MCP call that matches no call yet waits for one to be registered: the harness tells its call and makes
+    /// its MCP call by two channels, and under load the MCP call comes first. Run by itself, a call has not the run of the
+    /// session, and a script of <c>exec</c> has no <c>tools</c>.
+    /// </summary>
+    public static readonly TimeSpan MatchGrace = TimeSpan.FromSeconds(1);
+
     private readonly Lock _gate = new();
     private readonly Dictionary<string, HarnessToolCall> _calls = new(StringComparer.Ordinal);
     private readonly List<HarnessToolCall> _order = [];
+
+    // Completed, and replaced, at each registration: an MCP call that waits for its call looks again then.
+    private TaskCompletionSource _registered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
     /// Registers a tool call of an answer of the harness.
@@ -98,6 +110,9 @@ public sealed class HarnessToolCallBridge
             var call = new HarnessToolCall(callId, name, arguments.Clone(), isCodeAltaTool);
             _calls[callId] = call;
             _order.Add(call);
+            var registered = _registered;
+            _registered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            registered.TrySetResult();
             return call;
         }
     }
@@ -264,30 +279,12 @@ public sealed class HarnessToolCallBridge
     /// <param name="callId">The identifier of the call.</param>
     public Task? WhenStarted(string callId) => Find(callId)?.Started.Task;
 
-    /// <summary>
-    /// Runs a call of a tool of CodeAlta the harness made through the MCP server of the session: the call the session
-    /// runs, when it matches one, else the tool by itself.
-    /// </summary>
-    /// <param name="call">The MCP call.</param>
-    /// <param name="findTool">Returns the tool of the session with a name, or <see langword="null" />.</param>
-    /// <param name="providerId">The provider of the session.</param>
-    /// <param name="sessionId">The session.</param>
-    /// <param name="cancellationToken">A token to cancel the call.</param>
-    /// <returns>The result to give the harness.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="call" /> or <paramref name="findTool" /> is <see langword="null" />.</exception>
-    public async Task<AgentToolResult> CallFromMcpAsync(
-        HarnessMcpToolCall call,
-        Func<string, AgentToolDefinition?> findTool,
-        ModelProviderId providerId,
-        string sessionId,
-        CancellationToken cancellationToken)
+    // The call an MCP call is of, now marked as matched, or null; and what completes at the next registration.
+    private (HarnessToolCall? Owner, Task Registered) Match(HarnessMcpToolCall call)
     {
-        ArgumentNullException.ThrowIfNull(call);
-        ArgumentNullException.ThrowIfNull(findTool);
-        HarnessToolCall? owner = null;
         lock (_gate)
         {
-            HarnessToolCall? byName = null;
+            HarnessToolCall? owner = null, byName = null;
             foreach (var candidate in _order)
             {
                 if (!candidate.IsCodeAltaTool || candidate.McpMatched || candidate.Result.Task.IsCompleted ||
@@ -310,6 +307,42 @@ public sealed class HarnessToolCallBridge
             {
                 owner.McpMatched = true;
             }
+
+            return (owner, _registered.Task);
+        }
+    }
+
+    /// <summary>
+    /// Runs a call of a tool of CodeAlta the harness made through the MCP server of the session: the call the session
+    /// runs, when it matches one, possibly told a moment after (<see cref="MatchGrace"/>), else the tool by itself.
+    /// </summary>
+    /// <param name="call">The MCP call.</param>
+    /// <param name="findTool">Returns the tool of the session with a name, or <see langword="null" />.</param>
+    /// <param name="providerId">The provider of the session.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">A token to cancel the call.</param>
+    /// <returns>The result to give the harness.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="call" /> or <paramref name="findTool" /> is <see langword="null" />.</exception>
+    /// <exception cref="OperationCanceledException">The call was cancelled while it waited for its call.</exception>
+    public async Task<AgentToolResult> CallFromMcpAsync(
+        HarnessMcpToolCall call,
+        Func<string, AgentToolDefinition?> findTool,
+        ModelProviderId providerId,
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+        ArgumentNullException.ThrowIfNull(findTool);
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        HarnessToolCall? owner;
+        while (true)
+        {
+            (owner, var registered) = Match(call);
+            var left = MatchGrace - waited.Elapsed;
+            if (owner is not null || left <= TimeSpan.Zero) break;
+            // Its call may not be told yet: look again when one is registered, until the grace has passed.
+            await Task.WhenAny(registered, Task.Delay(left, cancellationToken)).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         if (owner is not null)

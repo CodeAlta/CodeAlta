@@ -147,6 +147,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         Jobs = new SessionJobService(DeliverJobResultAsync);
         _sessionViewCatalog.JournalStore.StateAppended += OnSessionStateAppended;
         instructionTemplateProvider.SessionToolPatterns = GetDisabledToolPatterns;
+        instructionTemplateProvider.CodeModeOf = (sessionId, providerKey, modelId) => ScriptRuns?.CodeModeOf(sessionId, providerKey, modelId) ?? "off";
         _events.Published = PulseSettlement;
     }
 
@@ -192,7 +193,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         + "No user is available while this run goes on: nobody reads a question, approves a plan or reviews a change before it ends. "
         + "Decide by yourself instead of asking: choose the narrowest safe interpretation of the request, go on, and say in your final answer what you assumed. "
         + "The commands `alta ask`, `alta review`, `alta reminder` and the commands of the windows and of the user interface (`alta ui`, `alta window`) are not available here. "
-        + "Your final answer is the result of the run, read by a script or a program: make it complete and self-contained.";
+        + "Your final answer is the result of the run, read by a script or a program: make it complete and self-contained. "
+        + "Nobody reads what you write between tool calls: do not narrate your steps, and keep what matters for the final answer.\n\n"
+        + "Run builds and tests in the foreground with the shell tool when they fit its timeout. "
+        + "A job you start with `alta job start` must have ended before your final answer: one that ends after it starts this session again, with the whole context, and the answer is given twice. "
+        + "While a job runs, go on with other work; when only the job is left, end your turn with one line that names it, not with your answer: its result comes back to you as a prompt, and you give the final answer then.";
 
     /// <summary>
     /// Gets or initializes whether the host shows the prompts the model suggests. False, the default: no session
@@ -1147,6 +1152,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // Only the local state says it, and none is a choice too: the mode of the provider.
         session.PermissionMode = NormalizeOptionalText(localState.PermissionMode);
         session.Sandbox = NormalizeOptionalText(localState.Sandbox);
+        session.Options = AgentSessionOptions.Stored(localState.Options);
         session.TitleMode = AgentSessionTitles.ParseMode(localState.TitleMode) is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null;
 
         if (!string.IsNullOrWhiteSpace(localState.AgentPromptId))
@@ -1180,6 +1186,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ReasoningEffort = localState.ReasoningEffort,
             PermissionMode = localState.PermissionMode,
             Sandbox = localState.Sandbox,
+            Options = localState.Options,
             TitleMode = localState.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null,
             AgentPromptId = localState.AgentPromptId,
             Archived = localState.Archived,
@@ -1538,6 +1545,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         using var lineage = ClaimRetentionWork(parentSessionId, createdBy?.SourceSessionId);
         ArgumentNullException.ThrowIfNull(options);
         ValidateDiscoveryPaths(null, options);
+        // A session without sub-sessions creates none; the options of a child are never wider than its creator's.
+        var sessionOptions = await GetCreatedSessionOptionsAsync(options.SessionOptions, createdBy?.SourceSessionId, cancellationToken).ConfigureAwait(false);
         if (requestedSessionId is not null) await ReserveRequestedSessionIdAsync(requestedSessionId, cancellationToken).ConfigureAwait(false);
 
         var now = DateTimeOffset.UtcNow;
@@ -1545,6 +1554,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             SessionId = requestedSessionId ?? string.Empty,
             Kind = SessionViewKind.GlobalSession,
+            Options = sessionOptions,
             ProviderId = options.ProviderId.Value,
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
             SpaceId = spaceId,
@@ -1727,6 +1737,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         using var projectCreation = ClaimProjectCreation(project);
 
         ValidateDiscoveryPaths(null, options, project);
+        // A session without sub-sessions creates none; the options of a child are never wider than its creator's.
+        var sessionOptions = await GetCreatedSessionOptionsAsync(options.SessionOptions, createdBy?.SourceSessionId, cancellationToken).ConfigureAwait(false);
 
         var requestedProjectId = project.Id;
         var previousProject = await _projectCatalog.GetByPathAsync(project.ProjectPath, cancellationToken).ConfigureAwait(false);
@@ -1752,6 +1764,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             SessionId = requestedSessionId ?? string.Empty,
             Kind = SessionViewKind.ProjectSession,
+            Options = sessionOptions,
             ProviderId = options.ProviderId.Value,
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
             ProjectRef = project.Id,
@@ -2073,6 +2086,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             : null;
         var effectiveAgentPromptId = selectedPrompt;
         session.AgentPromptId = effectiveAgentPromptId;
+        // The options of an attached session are those of its attachment, which the owner changes: the instructions follow them.
+        if (previousEntry is not null) session.Options = AgentSessionOptions.Stored(previousEntry.Options);
         // The preparation built them a moment ago, for a session that had no attachment: they are built again only
         // when what they were built from changed since (a worktree that is gone, another project or model).
         AgentInstructionBundle instructions;
@@ -2097,8 +2112,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var developerInstructions = instructions.DeveloperInstructions;
         // A session moved to another project is told so once, by the first attachment after the move.
         var movedNotice = TakeMovedNotice(session.SessionId);
-        var additionalDeveloperInstructions = AppendPromptPart(AppendPromptPart(AppendPromptPart(BuildParentNotificationGuidance(session), worktreeGone), movedNotice),
-            options.AdditionalDeveloperInstructions);
+        // What is of this session alone is sent last, apart from what the sessions of the prompt share, which the prompt
+        // cache of the provider then serves to them all.
+        var sessionInstructions = AppendPromptPart(AppendPromptPart(AppendPromptPart(instructions.SessionInstructions, BuildParentNotificationGuidance(session)),
+            worktreeGone), movedNotice);
+        var additionalDeveloperInstructions = options.AdditionalDeveloperInstructions;
         var tools = options.Tools;
         // The identity of the space of the session as it is now: the session keeps it until it attaches again,
         // whatever the window shows and whatever is changed in the space meanwhile.
@@ -2125,6 +2143,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var instructionsAlreadyComposed = false;
         if (options.InstructionProcessor is not null)
         {
+            // The plugins read and change the whole text; one they changed is sent as it is, in one part.
+            var processedDeveloperInstructions = AppendPromptPart(finalDeveloperInstructions, sessionInstructions);
             var processing = await options.InstructionProcessor(
                     new SessionInstructionProcessingRequest
                     {
@@ -2134,7 +2154,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         ProviderId = options.ProviderId.Value,
                         Model = options.Model,
                         SystemMessage = systemMessage,
-                        DeveloperInstructions = finalDeveloperInstructions,
+                        DeveloperInstructions = processedDeveloperInstructions,
                         ActiveToolNames = (tools ?? []).Select(static tool => tool.Spec.Name).ToArray(),
                         Manifest = new Dictionary<string, string>
                         {
@@ -2149,7 +2169,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }
 
             systemMessage = processing.SystemMessage;
-            finalDeveloperInstructions = processing.DeveloperInstructions;
+            if (!string.Equals(processing.DeveloperInstructions, processedDeveloperInstructions, StringComparison.Ordinal))
+            {
+                finalDeveloperInstructions = processing.DeveloperInstructions;
+                sessionInstructions = null;
+            }
+
             instructionTransformations = processing.Transformations;
             instructionsAlreadyComposed = instructionTransformations.Count > 0;
         }
@@ -2181,7 +2206,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Title = title,
             TitleSource = titleSource,
             TitleMode = titleMode,
-            TitleInstructions = SessionTitleGuidance,
+            // A host whose sessions are listed nowhere does not ask for a title.
+            TitleInstructions = _instructionTemplateProvider.DisabledPromptFeatures.Contains(PromptFeatures.SessionTitle) ? null : SessionTitleGuidance,
             // A suggestion is for somebody who reads it and writes the next prompt: not in a host that shows none,
             // and not for a session an agent drives. The setting is read at each prompt.
             PromptSuggestions = ShowsPromptSuggestions && string.IsNullOrWhiteSpace(session.ParentSessionId),
@@ -2199,6 +2225,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Environment = processEnvironment,
             SystemMessage = systemMessage,
             DeveloperInstructions = finalDeveloperInstructions,
+            SessionInstructions = sessionInstructions,
             InstructionsAlreadyComposed = instructionsAlreadyComposed,
             InstructionTransformations = instructionTransformations,
             AgentPromptId = NormalizeOptionalText(session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
@@ -2275,7 +2302,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             // The modes a session is created with are saved with it: the next attachment reads them from there.
             await UpdateSessionLocalStateAsync(session, actorCancellationToken, startNewSession ? permissionMode : null,
                 startNewSession ? session.TitleMode : null, createdReviewBeforeCommit: startNewSession ? session.ReviewBeforeCommit : null,
-                createdSandbox: startNewSession ? ownSandbox : keptSandbox).ConfigureAwait(false);
+                createdSandbox: startNewSession ? ownSandbox : keptSandbox, createdOptions: startNewSession ? session.Options : null).ConfigureAwait(false);
             return true;
         }, CancellationToken.None).ConfigureAwait(false);
         if (startNewSession)
@@ -2330,6 +2357,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderRegistrationVersion = providerVersion,
             PermissionMode = permissionMode,
             OwnSandbox = ownSandbox,
+            Options = AgentSessionOptions.Of(session.Options),
+            ComposedOptions = AgentSessionOptions.Of(session.Options),
             OwnTitleMode = ownTitleMode,
             TitleMode = titleMode,
             OwnReviewBeforeCommit = startNewSession ? session.ReviewBeforeCommit : savedLocalState?.ReviewBeforeCommit,
@@ -2787,11 +2816,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         string kind,
         AltaActorProvenance? submittedBy,
         CancellationToken cancellationToken = default)
-        => await AdmitAsync(() => QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, CancellationToken.None), cancellationToken)
+        => await AdmitAsync(() => QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, images: null, CancellationToken.None), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
 
+    // The images of a queued prompt are files saved with the attachments of the session: the drain sends them with its text.
     private async Task<SessionViewQueuedPrompt> QueuePromptOwnedBodyAsync(SessionViewDescriptor session, string prompt, string kind,
-        AltaActorProvenance? submittedBy, CancellationToken cancellationToken)
+        AltaActorProvenance? submittedBy, IReadOnlyList<PromptImageAttachmentReference>? images, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
@@ -2813,6 +2843,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         Kind = kind,
                         Prompt = prompt,
                         PromptPreview = CreatePromptPreview(prompt),
+                        Images = images is { Count: > 0 }
+                            ? [.. images.Select(static image => new SessionViewQueuedPromptImage { Path = image.Path, Title = image.Title, MediaType = image.MediaType })]
+                            : null,
                         State = "queued",
                         SubmittedBy = submittedBy,
                         CreatedAt = timestamp,
@@ -3146,6 +3179,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
         // A background job is a task of the host, not of the provider: the user stops it whatever the session does.
         if (taskId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase)) return StopJobAsync(sessionId, taskId, cancellationToken);
+        // So is a script of Code Mode that went on in the background: the user stops it from the tasks of its session.
+        if (ScriptRuns?.StopRun(sessionId, taskId, "the user") == true) return Task.FromResult(true);
         return AdmitAsync(() => StopBackgroundTaskBodyAsync(sessionId, taskId, cancellationToken), cancellationToken);
     }
 
@@ -3831,6 +3866,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private static string CreatePromptPreview(string prompt)
         => prompt.Length <= 160 ? prompt : prompt[..160];
 
+    // The input of a queued prompt: its text, then its images.
+    private static AgentInput QueuedInput(SessionViewQueuedPrompt prompt)
+        => prompt.Images is not { Count: > 0 } images
+            ? AgentInput.Text(prompt.Prompt)
+            : new AgentInput([new AgentInputItem.Text(prompt.Prompt),
+                .. images.Where(static image => !string.IsNullOrWhiteSpace(image.Path)).Select(static image => new AgentInputItem.LocalImage(image.Path, image.Title, image.MediaType))]);
+
     private static void TrimLocalStateHistory(SessionViewLocalState localState)
     {
         const int MaxPromptProvenanceRecords = 200;
@@ -3966,7 +4008,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Gets the built-in tools a session would do without under an agent prompt, as the settings of the user, of its
     /// space and of that prompt say them now: a session given another prompt, or one about to be created, whose
-    /// descriptor names its project and its space.
+    /// descriptor names its project and its space. One about to be created (no <see cref="SessionViewDescriptor.SessionId"/>)
+    /// also does without what the patterns it takes from its parent or its creator name (<see cref="SetDisabledToolPatterns"/>),
+    /// when its descriptor names them (<see cref="SessionViewDescriptor.ParentSessionId"/>, <see cref="SessionViewDescriptor.CreatedBy"/>).
     /// </summary>
     /// <param name="session">The session, or what a session about to be created records.</param>
     /// <param name="agentPromptId">The agent prompt; <see langword="null"/> for the one the session records.</param>
@@ -3978,7 +4022,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(session);
         var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
-        return _instructionTemplateProvider.ResolveDisabledTools(session, project, NormalizeOptionalText(agentPromptId) ?? session.AgentPromptId);
+        var disabled = _instructionTemplateProvider.ResolveDisabledTools(session, project, NormalizeOptionalText(agentPromptId) ?? session.AgentPromptId);
+        if (!string.IsNullOrWhiteSpace(session.SessionId) || InheritedPatternTools(session) is not { Count: > 0 } inherited) return disabled;
+        var union = new HashSet<string>(disabled, StringComparer.Ordinal);
+        union.UnionWith(inherited);
+        return union;
     }
 
     /// <summary>
@@ -4630,7 +4678,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var runStartedAt = DateTimeOffset.UtcNow;
             var sendOptions = new AgentSendOptions
             {
-                Input = AgentInput.Text(work.Prompt!.Prompt), SourceSessionId = AgentSource(work.Prompt.SubmittedBy),
+                Input = QueuedInput(work.Prompt!), SourceSessionId = AgentSource(work.Prompt!.SubmittedBy),
                 Provenance = SessionPromptProvenance.Of(work.Prompt.Kind, work.Prompt.SubmittedBy),
             };
             if (askExecution is not null) sendOptions = ComposeRunAsk(askExecution, work.Entry, sendOptions);
@@ -4868,6 +4916,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Kind = item.Kind,
             Prompt = item.Prompt,
             PromptPreview = item.PromptPreview,
+            Images = item.Images,
             State = item.State,
             RunId = item.RunId,
             SubmittedBy = item.SubmittedBy,
@@ -4971,7 +5020,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 }
             }
 
-            await QueuePromptOwnedBodyAsync(parent, prompt, SessionPromptProvenance.ParentNotifyKind, submittedBy, CancellationToken.None).ConfigureAwait(false);
+            await QueuePromptOwnedBodyAsync(parent, prompt, SessionPromptProvenance.ParentNotifyKind, submittedBy, images: null, CancellationToken.None).ConfigureAwait(false);
             await TryDrainNextQueuedPromptAsync(parent.SessionId).ConfigureAwait(false);
         }
         catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex)
@@ -5718,12 +5767,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // createdPermissionMode, createdTitleMode: the modes of a session that starts, when it has them. Any other
     // update leaves the saved modes as they are: only the owner of the session changes them.
     private async Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken, string? createdPermissionMode,
-        string? createdTitleMode = null, bool archive = false, bool? createdReviewBeforeCommit = null, string? createdSandbox = null)
+        string? createdTitleMode = null, bool archive = false, bool? createdReviewBeforeCommit = null, string? createdSandbox = null,
+        AgentSessionOptions? createdOptions = null)
     {
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) ?? new SessionViewLocalState();
         if (createdPermissionMode is not null) localState.PermissionMode = createdPermissionMode;
         if (createdSandbox is not null) localState.Sandbox = createdSandbox;
+        if (AgentSessionOptions.Stored(createdOptions) is { } options) localState.Options = options;
         if (createdTitleMode is not null) localState.TitleMode = createdTitleMode;
         if (createdReviewBeforeCommit is not null) localState.ReviewBeforeCommit = createdReviewBeforeCommit;
         localState.ProviderKey = session.ResolvedProviderKey;
@@ -5876,6 +5927,22 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         private string? _ownSandbox;
+
+        /// <summary>
+        /// The options of the session (whether it can start sessions of its own). Read from any thread: the commands that
+        /// create sessions read it at each call. Changed by the owner of the session; the attachment is replaced when the
+        /// tools and instructions they decide change.
+        /// </summary>
+        public AgentSessionOptions Options
+        {
+            get => Volatile.Read(ref _options);
+            set => Volatile.Write(ref _options, value ?? AgentSessionOptions.Default);
+        }
+
+        private AgentSessionOptions _options = AgentSessionOptions.Default;
+
+        /// <summary>The options the instructions and the tools of this attachment were composed with.</summary>
+        public AgentSessionOptions ComposedOptions { get; init; } = AgentSessionOptions.Default;
 
         /// <summary>How the session titles itself when it does not follow the setting. Read and written on the actor of the session.</summary>
         public AgentSessionTitleMode? OwnTitleMode { get; set; }
@@ -6048,7 +6115,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 && string.Equals(AdditionalSystemMessage, options.AdditionalSystemMessage, StringComparison.Ordinal)
                 && string.Equals(AdditionalDeveloperInstructions, options.AdditionalDeveloperInstructions, StringComparison.Ordinal)
                 && (InstructionProcessor is null) == (options.InstructionProcessor is null)
-                && ToolSignatures.SequenceEqual(CreateToolSignatures(options.Tools), StringComparer.Ordinal);
+                && ToolSignatures.SequenceEqual(CreateToolSignatures(options.Tools), StringComparer.Ordinal)
+                // Options changed since the instructions were composed: they are composed again.
+                && ComposedOptions.Equals(Options);
         }
 
         public void ObserveEvent(AgentEvent @event)
@@ -6137,7 +6206,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public IReadOnlyList<ParentNotificationWork> TakeParentNotifications(AgentEvent? @event)
         {
-            if (string.IsNullOrWhiteSpace(ParentSessionId) || @event is null)
+            // A session a script created answers the script, which waits for its outcome: its parent is told nothing.
+            if (string.IsNullOrWhiteSpace(ParentSessionId) || @event is null
+                || string.Equals(CreatedBy?.Kind, AltaActorProvenance.WorkflowKind, StringComparison.Ordinal))
             {
                 return [];
             }

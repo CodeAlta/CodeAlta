@@ -31,7 +31,7 @@ const host: FileReviewHost = {
   page: { status: "ok", hostEpoch: epoch, sessionId, hasMore: false, latest: null, head: {
     handle: { operationId: "22222222-2222-4222-8222-222222222222", runtimeInstanceId: "33333333-3333-4333-8333-333333333333", attachmentGeneration: "1",
       providerId: "fixture", sessionId, runId: "run-1", askId: "44444444-4444-4444-8444-444444444444", responseGeneration: "0" },
-    state: "pending", request: { questions: [], review: { kind: "file", path: "plan.md", title: "The plan", message: "Please review **the plan**.", projectId: "p", checkout: null } } } },
+    state: "pending", immediate: false, request: { questions: [], review: { kind: "file", path: "plan.md", title: "The plan", message: "Please review **the plan**.", projectId: "p", checkout: null } } } },
 };
 Object.assign(window, { fileReviewHost: host });
 

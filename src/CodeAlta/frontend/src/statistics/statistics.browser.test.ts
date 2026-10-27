@@ -6,8 +6,8 @@ import { edge, withCanvas, type Page } from "./browserHarness";
 // Every test ends by checking that the page raised no exception, no console error and no request outside itself.
 
 type Call = { method: string; request: any; args: unknown[]; aborted: boolean };
-const pageNames = ["overview", "activity", "models", "cost", "tools", "prompts", "agents", "code", "projects", "sessions", "health"];
-const tabTitles = ["Overview", "Activity", "Models", "Cost", "Tools", "Prompts", "Agents", "Code", "Projects", "Sessions", "Health"];
+const pageNames = ["overview", "activity", "models", "cost", "tools", "prompts", "agents", "scripts", "code", "projects", "sessions", "health"];
+const tabTitles = ["Overview", "Activity", "Models", "Cost", "Tools", "Prompts", "Agents", "Scripts", "Code", "Projects", "Sessions", "Health"];
 const settled = `document.querySelector('.statistics-canvas') && !document.querySelector('.stats-block[data-state="loading"]') && !document.querySelector('.stats-tile-skeleton') && document.querySelectorAll('.stats-block').length > 0`;
 const questions = (calls: Call[]) => calls.filter(call => !["status", "chooseHistory", "pause", "resume", "stopHere", "forgetDeleted", "resetStatistics"].includes(call.method));
 const calls = (page: Page) => page.evaluate<Call[]>(`statsFixture.calls()`);
@@ -179,6 +179,40 @@ test("a click on a bar, a row, a day or a session drills down", { skip: !edge, t
     await openPage(page, "Overview");
     await page.click('.stats-record');
     await page.until(`statsFixture.opened.length === 2`, "the session of a record opened");
+  });
+});
+
+test("the Scripts page tells the runs of scripts by name, the other pages count them, and a recent run opens its session", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    const block = (title: string) => `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3')?.textContent === ${JSON.stringify(title)})`;
+    const texts = (title: string, selector: string) => page.evaluate<string[]>(`[...(${block(title)}?.querySelectorAll(${JSON.stringify(selector)}) ?? [])].map(item => item.textContent.trim())`);
+    const tiles = `[...document.querySelectorAll('.stats-tiles .stat-tile-label')].map(item => item.textContent.trim())`;
+    const legend = (title: string) => texts(title, ".chart-legend-item");
+    await render(page, { scenario: "ready" });
+    await page.until(settled, "the overview");
+    assert.ok((await page.evaluate<string[]>(tiles)).includes("Script runs"), "the Overview counts the runs of scripts when there were some");
+
+    await openPage(page, "Scripts");
+    const labels = await page.evaluate<string[]>(tiles);
+    for (const label of ["Script runs", "Success rate", "Calls made by scripts", "Sessions started", "Tokens of their sessions", "Waiting for you"]) assert.ok(labels.includes(label), labels.join(", "));
+    const scripts = await texts("The scripts", "tbody td:first-child");
+    assert.ok(scripts.includes("review-pr") && scripts.includes("Inline scripts") && scripts.includes("Unknown scripts"), scripts.join(" | "));
+    assert.ok(!scripts.some(name => name.startsWith("(")), "no script is named by the key of the plugin");
+    await page.until(`${JSON.stringify(["Library scripts", "Inline scripts"])}.every(name => [...(${block("Library and inline scripts")}?.querySelectorAll('.chart-legend-item') ?? [])].some(item => item.textContent.trim() === name))`, "the kinds of scripts");
+    assert.ok((await legend("Runs by outcome")).includes("Stopped"));
+    const steps = await texts("Failing steps", ".stats-ranked-name span");
+    assert.ok(steps.length > 0 && steps.every(step => / · [a-z-]+$/.test(step)), steps.join(" | "));
+    assert.ok((await texts("Why runs fail", ".stats-ranked-name span")).includes("TypeError"));
+    assert.ok((await texts("Scripts by model", "tbody tr")).length > 0);
+    assert.deepEqual(await texts("A turn, with a script and without", "tbody td:first-child"), ["With a script", "Without a script"]);
+    await page.evaluate(`${block("Recent runs")}.querySelector('.stats-cell-link').click()`);
+    await page.until(`statsFixture.opened.length === 1`, "the session of the run opened");
+
+    // The Agents page names who created the sessions, a script among them, and the Tools page the calls scripts made.
+    await openPage(page, "Agents");
+    await page.until(`[...(${block("Sessions started by")}?.querySelectorAll('.chart-legend-item') ?? [])].some(item => item.textContent.trim() === "A script")`, "the sessions a script started");
+    await openPage(page, "Tools");
+    assert.ok((await texts("The tools", "thead th")).includes("By scripts"));
   });
 });
 
@@ -747,7 +781,7 @@ test("the canvas speaks the language of the window and writes numbers in it", { 
     for (const [locale, overview, health] of [["fr", "Vue d’ensemble", "Santé"], ["de", "Übersicht", "Zustand"], ["ja", "概要", "状態"], ["es", "Resumen", "Salud"], ["zh-CN", "概览", "健康"]] as const) {
       await render(page, { scenario: "ready", locale });
       await page.until(settled, `the ${locale} overview`);
-      assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('[role="tab"]')].map(tab => tab.textContent.trim()).filter((text, index) => index === 0 || index === 10)`), [overview, health]);
+      assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('[role="tab"]')].map(tab => tab.textContent.trim()).filter((text, index, all) => index === 0 || index === all.length - 1)`), [overview, health]);
       assert.ok(!(await page.evaluate<string>(`document.querySelector('.statistics-canvas').innerText`)).includes("Activity over time"), `${locale} has no English left in the blocks`);
       await page.shot(`overview-${locale}`);
     }

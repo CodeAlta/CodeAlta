@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -51,7 +52,23 @@ public sealed partial class SessionRuntimeService
     private void InheritToolPatterns(string sessionId, string? parentSessionId, string? creatorSessionId)
     {
         if (_toolPatterns.ContainsKey(sessionId)) return;
-        var source = GetDisabledToolPatterns(parentSessionId) is { Count: > 0 } fromParent ? fromParent : GetDisabledToolPatterns(creatorSessionId);
+        var source = InheritedToolPatterns(parentSessionId, creatorSessionId);
         if (source.Count > 0) _toolPatterns.TryAdd(sessionId, source);
     }
+
+    // A fork does without what its source does without, and what a session created by its parent or creator would.
+    private void InheritForkToolPatterns(string forkSessionId, string sourceSessionId, string? parentSessionId, string? creatorSessionId)
+    {
+        var patterns = GetDisabledToolPatterns(sourceSessionId).Union(InheritedToolPatterns(parentSessionId, creatorSessionId), StringComparer.OrdinalIgnoreCase).ToArray();
+        if (patterns.Length > 0) _toolPatterns.TryAdd(forkSessionId, patterns);
+    }
+
+    private IReadOnlyList<string> InheritedToolPatterns(string? parentSessionId, string? creatorSessionId)
+        => GetDisabledToolPatterns(parentSessionId) is { Count: > 0 } fromParent ? fromParent : GetDisabledToolPatterns(creatorSessionId);
+
+    // The built-in tools a session about to be created does without by the patterns it will inherit.
+    private IReadOnlySet<string> InheritedPatternTools(SessionViewDescriptor session)
+        => InheritedToolPatterns(session.ParentSessionId, session.CreatedBy?.SourceSessionId) is { Count: > 0 } patterns
+            ? AgentToolPatterns.Expand(AgentToolPatterns.KnownToolNames, patterns)
+            : new HashSet<string>();
 }

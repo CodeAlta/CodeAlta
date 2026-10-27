@@ -92,7 +92,7 @@ public sealed class RawApiModelProviderRuntimeTests
         Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Reasoning && e.Content == "thinking"));
         Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Assistant && e.Content == "Anthropic answer."));
         var usageEvent = history.OfType<AgentSessionUpdateEvent>().Single(static e => e.Kind == AgentSessionUpdateKind.UsageUpdated);
-        Assert.IsTrue(usageEvent.Usage?.CurrentTokens > 24L);
+        Assert.AreEqual(24L, usageEvent.Usage?.CurrentTokens);
         Assert.AreEqual(24L, usageEvent.Usage?.LastOperation?.InputTokens + usageEvent.Usage?.LastOperation?.OutputTokens);
         Assert.AreEqual(200000L, usageEvent.Usage?.TokenLimit);
         Assert.IsNotNull(client.LastOptions);

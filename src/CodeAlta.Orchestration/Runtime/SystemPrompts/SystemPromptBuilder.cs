@@ -116,7 +116,8 @@ public sealed class SystemPromptBuilder
         }
 
         var parts = new List<SystemPromptManifestPart>();
-        var systemMessage = PromptToolConditions.Apply(systemResolution.Body!, disabledTools).Trim();
+        var disabledFeatures = request.DisabledFeatures;
+        var systemMessage = ApplyConditions(systemResolution.Body!, disabledTools, disabledFeatures).Trim();
         foreach (var applied in systemResolution.Applied)
         {
             parts.Add(CreateResourcePart(applied.Resource, "system", selectedSystemName, "system", 100, applied.Status, applied.Replaces));
@@ -142,7 +143,7 @@ public sealed class SystemPromptBuilder
         }
 
         var agentPromptBody = JoinPromptBodies(inherited.Select(static prompt => prompt.Resolution.Body!).Append(promptResolution.Body!));
-        developerParts.Add(new RenderedPromptPart($"agents/{composition.AgentPromptName}", RenderSection("Agent Prompt", PromptToolConditions.Apply(agentPromptBody, disabledTools))));
+        developerParts.Add(new RenderedPromptPart($"agents/{composition.AgentPromptName}", RenderSection("Agent Prompt", ApplyConditions(agentPromptBody, disabledTools, disabledFeatures))));
         foreach (var skipped in promptResolution.Skipped)
         {
             parts.Add(CreateResourcePart(skipped.Resource, "agent_prompt", composition.AgentPromptName, "developer", 300, skipped.Status, null));
@@ -150,15 +151,30 @@ public sealed class SystemPromptBuilder
 
         composition = composition with { SystemPromptName = selectedSystemName, SystemPromptReason = selectedSystemReason, PartOptions = effectivePartOptions };
 
+        // What is of this session alone (where it works, its parent, its scratchpad) is a part of its own, sent last: the
+        // text before it is then the same for the sessions of a prompt, which the prompt cache of a provider serves to all.
+        var sessionParts = new List<RenderedPromptPart>();
         if (composition.PartOptions.RuntimeContext)
         {
-            AddGeneratedPart(developerParts, parts, "runtime.context", "runtime_context", "Runtime Context", 400, BuildRuntimeContext(request, projectRoot, roots, disabledTools));
+            var (shared, session) = BuildRuntimeContext(request, projectRoot, roots, disabledTools);
+            AddGeneratedPart(developerParts, parts, "runtime.context", "runtime_context", "Runtime Context", 400, shared);
+            if (session.Length > 0)
+            {
+                var part = AddGeneratedPart(sessionParts, parts, "session.context", "session_context", "Session Context", 900, session);
+                parts[^1] = part with { Target = "session" };
+            }
         }
 
         if (composition.PartOptions.ToolGuidance)
         {
             AddGeneratedPart(developerParts, parts, "tool.guidance", "tool_guidance", "Tool Guidance", 500, BuildToolGuidance(request));
-            var agentPromptGuidance = BuildAgentPromptGuidance(request, projectRoot, composition.AgentPromptName);
+            if (BuildCodeModeGuidance(request, disabledTools) is { } codeMode)
+            {
+                AddGeneratedPart(developerParts, parts, "tool.codemode", "code_mode", "Code Mode", 510, codeMode);
+            }
+
+            // The agent prompts are listed for a session that may switch to another one (Mode handoff).
+            var agentPromptGuidance = IsOff(disabledFeatures, PromptFeatures.ModeHandoff) ? null : BuildAgentPromptGuidance(request, projectRoot, composition.AgentPromptName);
             if (!string.IsNullOrWhiteSpace(agentPromptGuidance))
             {
                 AddGeneratedPart(developerParts, parts, "prompt.discovery", "agent_prompts", "Agent Prompts", 525, agentPromptGuidance);
@@ -192,8 +208,12 @@ public sealed class SystemPromptBuilder
         var developerInstructions = developerParts.Count == 0
             ? null
             : string.Join(Environment.NewLine + Environment.NewLine, developerParts.Select(static part => part.Markdown.Trim()));
-        var statistics = SystemPromptStatistics.FromMessages(systemMessage, developerInstructions, parts);
-        var effectiveHash = ComputeHash(systemMessage, developerInstructions, request.ProviderKey, request.ProviderType, request.ProtocolFamily, request.Model, "native-system-and-developer");
+        var sessionInstructions = sessionParts.Count == 0 ? null : sessionParts[0].Markdown.Trim();
+        var allDeveloperInstructions = sessionInstructions is null ? developerInstructions
+            : developerInstructions is null ? sessionInstructions
+            : developerInstructions + Environment.NewLine + Environment.NewLine + sessionInstructions;
+        var statistics = SystemPromptStatistics.FromMessages(systemMessage, allDeveloperInstructions, parts);
+        var effectiveHash = ComputeHash(systemMessage, allDeveloperInstructions, request.ProviderKey, request.ProviderType, request.ProtocolFamily, request.Model, "native-system-and-developer");
         var provider = new SystemPromptProviderMapping(
             request.ProviderKey,
             request.ProviderType,
@@ -217,6 +237,7 @@ public sealed class SystemPromptBuilder
         {
             SystemMessage = systemMessage,
             DeveloperInstructions = developerInstructions,
+            SessionInstructions = sessionInstructions,
             EffectivePromptHash = effectiveHash,
             Manifest = manifest,
             Statistics = statistics,
@@ -224,6 +245,14 @@ public sealed class SystemPromptBuilder
             DisabledTools = disabledTools.ToFrozenSet(StringComparer.Ordinal),
         };
     }
+
+    // The text of a prompt file for the tools and the features of the session: the tools first, whose `else` would
+    // otherwise be read as the one of a feature.
+    private static string ApplyConditions(string text, IReadOnlySet<string> disabledTools, IReadOnlySet<string>? disabledFeatures)
+        => PromptFeatureConditions.Apply(PromptToolConditions.Apply(text, disabledTools), disabledFeatures);
+
+    private static bool IsOff(IReadOnlySet<string>? disabledFeatures, string feature)
+        => disabledFeatures?.Contains(feature) == true;
 
     private static void ValidateRoots(SystemPromptContentRoots roots, List<SystemPromptDiagnostic> diagnostics)
     {
@@ -646,7 +675,9 @@ public sealed class SystemPromptBuilder
         return part;
     }
 
-    private static string BuildRuntimeContext(SystemPromptBuildRequest request, string? projectRoot, SystemPromptContentRoots? roots = null,
+    // The lines of the Runtime Context, and those of the Session Context: what is of this session alone (where it works,
+    // its parent, its scratchpad), which goes last, so that the text before it is the same for the sessions of a prompt.
+    private static (string Shared, string Session) BuildRuntimeContext(SystemPromptBuildRequest request, string? projectRoot, SystemPromptContentRoots? roots = null,
         IReadOnlySet<string>? disabledTools = null)
     {
         var lines = new List<string>
@@ -654,6 +685,7 @@ public sealed class SystemPromptBuilder
             $"- Current date: {DateTimeOffset.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}",
             $"- Platform: {GetPlatformLabel()}",
         };
+        var sessionLines = new List<string>();
         // A session without the shell is not told which one it would have.
         if (disabledTools?.Contains(PromptToolConditions.ShellCommand) != true) lines.Add($"- Default shell for shell commands: {GetDefaultShellLabel()}");
         // A session in a git worktree works there: the folder of its project is then named as what it is, the
@@ -662,23 +694,23 @@ public sealed class SystemPromptBuilder
         var workingDirectory = worktree ?? NormalizeOptionalRoot(request.Session.WorkingDirectory) ?? NormalizeOptionalRoot(request.WorkingDirectory);
         if (workingDirectory is not null)
         {
-            lines.Add($"- Current working directory: {MarkdownCode(workingDirectory)}");
+            sessionLines.Add($"- Current working directory: {MarkdownCode(workingDirectory)}");
         }
 
         if (worktree is not null)
         {
-            lines.Add($"- Project root: {MarkdownCode(worktree)}");
-            lines.Add(projectRoot is null
+            sessionLines.Add($"- Project root: {MarkdownCode(worktree)}");
+            sessionLines.Add(projectRoot is null
                 ? "- Git worktree: the working directory is a git worktree, a checkout of its own with its own branch."
                 : $"- Git worktree: the working directory is a git worktree of the project, a checkout of its own with its own branch. The main checkout of the project is {MarkdownCode(projectRoot)}: work in the working directory, and leave the main checkout as it is unless asked.");
         }
         else if (projectRoot is not null)
         {
-            lines.Add($"- Project root: {MarkdownCode(projectRoot)}");
+            sessionLines.Add($"- Project root: {MarkdownCode(projectRoot)}");
         }
 
         // How an answer names a file: the frontends open such a link on the file, at its line. A relative path is
-        // read from the folder the session works in, which is the root named above.
+        // read from the folder the session works in, which is the root the Session Context names.
         if (worktree is not null || projectRoot is not null || workingDirectory is not null)
         {
             var root = worktree is not null || projectRoot is not null ? "the project root" : "the current working directory";
@@ -687,7 +719,7 @@ public sealed class SystemPromptBuilder
 
         if (!string.IsNullOrWhiteSpace(request.Session.ParentSessionId))
         {
-            lines.Add($"- Parent session: {request.Session.ParentSessionId}");
+            sessionLines.Add($"- Parent session: {request.Session.ParentSessionId}");
         }
 
         lines.Add($"- Session kind: {request.Session.Kind.ToString().ToLowerInvariant()}");
@@ -708,7 +740,7 @@ public sealed class SystemPromptBuilder
         }
 
         // The models the user prefers for each kind of work: an agent asks for a tier instead of naming a model.
-        if (!string.IsNullOrWhiteSpace(request.ModelTiers))
+        if (!string.IsNullOrWhiteSpace(request.ModelTiers) && !IsOff(request.DisabledFeatures, PromptFeatures.SubAgents))
         {
             lines.Add($"- Model tiers: {request.ModelTiers}. Give a session one with `alta session create --tier <name>` instead of naming a model."
                 + (request.ModelFallback ? " When its provider fails (quota, outage), a session goes on with the next model of its tier." : string.Empty));
@@ -717,9 +749,9 @@ public sealed class SystemPromptBuilder
         // Where an agent writes down long instructions of the user, so that they outlive a compaction of the context.
         // The agent names the file after the day and the request; the end of the name is a short hash of the session,
         // so that two agents never write the same file.
-        if (ScratchpadFile(request) is { } scratchpad)
+        if (!IsOff(request.DisabledFeatures, PromptFeatures.Scratchpad) && ScratchpadFile(request) is { } scratchpad)
         {
-            lines.Add($"- Scratchpad file: {MarkdownCode(scratchpad)}");
+            sessionLines.Add($"- Scratchpad file: {MarkdownCode(scratchpad)}");
         }
 
         // The user guide that ships with the application: the agent answers questions about CodeAlta from it.
@@ -728,7 +760,7 @@ public sealed class SystemPromptBuilder
             lines.Add($"- CodeAlta user guide: {MarkdownCode(roots.ShippedUserGuideRoot)} (start with `readme.md`; the pictures its pages name are in `img/`). For a question about CodeAlta itself (what a feature does, where a setting is, how to do something in its interface), read the guide and answer from it; you can guide the user step by step.");
         }
 
-        return string.Join(Environment.NewLine, lines);
+        return (string.Join(Environment.NewLine, lines), string.Join(Environment.NewLine, sessionLines));
     }
 
     // The space of the session, with what it is for on the same line: a description of several lines is joined, and
@@ -804,10 +836,75 @@ public sealed class SystemPromptBuilder
 
         if (request.Tools.Any(static tool => string.Equals(tool.Spec.Name, "alta", StringComparison.OrdinalIgnoreCase)))
         {
-            builder.AppendLine("Use the `alta` live tool for finite CodeAlta host/session/catalog operations. Start with args [\"--help\"], then narrower help such as [\"session\",\"--help\"] before invoking mutating commands.");
+            builder.AppendLine("Use the `alta` live tool for finite CodeAlta host/session/catalog operations. Call the commands these instructions give as they give them; read help ([\"--help\"], then narrower help such as [\"session\",\"--help\"]) only for a command or an option they do not give.");
         }
 
         return builder.ToString().Trim();
+    }
+
+    /// <summary>What a session that has <c>exec</c> is told about using it; the same text for every session of a mode, so that prompt caches hold.</summary>
+    internal const string CodeModeGuidance = """
+        `exec` runs a JavaScript program that calls your tools, `alta` and sub-agents; the user watches each run live, as a graph of its steps and sessions. It is your way to run work that splits.
+
+        - **Independent parts run together, in one `exec`.** When a request names several items to look into, change, check or compare (topics, projects, sources, modules, files, options, angles of a review), your first call is one `exec` that gives each item an `agent()` and runs them at once with `parallel()`; do not work through them yourself one after another. Items still to find (the files of a folder, the matches of a search) are found by that script (`tools.list_dir`, `tools.grep`), not by a call before it. A sub-agent has the tools you have (web search too, when you have it). Never start sub-agents one at a time with `alta session create`/`send`. A loop or batch of tool calls goes in a script too, not one call per turn.
+        - **Write the script for the task**, without a library script; `workflow("name")` reuses one that fits (`codemode.search({ query: "workflow:" })`).
+        - **Show the plan:** start with `export const meta = { title: "…", steps: [{ id: "…", title: "…" }] };`, declaring only the steps the script runs, and wrap each in `step("<id>", fn)` with those ids (`step`, `agent` and `parallel` are given: never define your own).
+        - **Brief each sub-agent fully** (it sees nothing else): what to find or do, when to stop, and a short answer, or a `schema` when code combines the answers. `tier: "quick"` for lookups; `worktree: true` for parts that edit files at the same time. Use their answers as they are: do not redo their work to check it.
+        - **Return a compact result**, it is all you read back: findings, decisions, branches, failures. Return text as Markdown, which the user sees rendered (files as `[name](path)`), and data as an object.
+        - Call the tools directly for one or two calls, for items that each take a single call (make those calls together), and for steps that each need the previous result.
+
+        ```js
+        export const meta = { title: "Compare caches", steps: [{ id: "research", title: "Research each option" }, { id: "compare", title: "Compare" }] };
+        const notes = await step("research", () => parallel(["Redis", "Memcached", "in-process LRU"].map((name) => () =>
+          agent(`Research ${name} as a cache for <context>. Answer in 10 lines: strengths, limits, sources.`, { title: name, tier: "quick" }))));
+        return step("compare", () => agent(`Recommend one, in 5 lines:\n${notes.join("\n---\n")}`, { title: "Compare" }));
+        ```
+        """;
+
+    /// <summary>
+    /// What a session that has <c>exec</c> but cannot start sessions of its own is told: scripts batch its tool calls,
+    /// without sub-agents.
+    /// </summary>
+    internal const string CodeModeGuidanceWithoutSubAgents = """
+        `exec` runs a JavaScript program that calls your tools and `alta`; the user watches each run live. It is your way to batch tool calls.
+
+        - **A loop or batch of tool calls goes in one `exec`**, not one call per turn. Items still to find (the files of a folder, the matches of a search) are found by that script (`tools.list_dir`, `tools.grep`), not by a call before it, and independent calls run together under `Promise.all`.
+        - **Show the plan:** start with `export const meta = { title: "…", steps: [{ id: "…", title: "…" }] };`, declaring only the steps the script runs, and wrap each in `step("<id>", fn)` with those ids (`step` is given: never define your own).
+        - **Return a compact result**, it is all you read back: findings, decisions, failures.
+        - Call the tools directly for one or two calls, and for steps that each need the previous result.
+
+        ```js
+        export const meta = { title: "Read the configs", steps: [{ id: "read", title: "Read each config" }] };
+        return step("read", async () => {
+          const files = ["package.json", "tsconfig.json"];
+          const read = await Promise.all(files.map((path) => tools.read_file({ path })));
+          return files.map((path, i) => `${path}: ${read[i].content.length} characters`);
+        });
+        ```
+        """;
+
+    /// <summary>The line added for a session where <c>exec</c> takes over the other tools.</summary>
+    internal const string CodeModeOnlyGuidance = "The tools of CodeAlta that are not in your tool list are called from scripts, as `tools.<name>(args)` in `exec`: batch them in one script instead of one `exec` per call.";
+
+    /// <summary>The line added for a session a script started: each level of sub-agents is a whole session more.</summary>
+    internal const string CodeModeSubAgentGuidance = "You are a sub-agent of a script: do your part yourself, with direct calls or a script of tool calls; start sub-agents only when your part is itself large and splits.";
+
+    // The section of a session that has exec, or null for one that has not.
+    private static string? BuildCodeModeGuidance(SystemPromptBuildRequest request, IReadOnlySet<string> disabledTools)
+    {
+        if (request.CodeMode is not ("on" or "only") || disabledTools.Contains("exec"))
+        {
+            return null;
+        }
+
+        // A session that cannot start sessions of its own is told how scripts batch its calls, and nothing of sub-agents.
+        if (IsOff(request.DisabledFeatures, PromptFeatures.SubAgents))
+        {
+            return request.CodeMode == "only" ? CodeModeGuidanceWithoutSubAgents + "\n\n" + CodeModeOnlyGuidance : CodeModeGuidanceWithoutSubAgents;
+        }
+
+        var text = request.CodeMode == "only" ? CodeModeGuidance + "\n\n" + CodeModeOnlyGuidance : CodeModeGuidance;
+        return request.Session.CreatedBy?.Kind == AltaActorProvenance.WorkflowKind ? text + "\n\n" + CodeModeSubAgentGuidance : text;
     }
 
     private string? BuildAgentPromptGuidance(SystemPromptBuildRequest request, string? projectRoot, string currentPromptName)
@@ -907,6 +1004,9 @@ public sealed class SystemPromptBuilder
             return null;
         }
 
+        // A file of the project is named from its root, which the Session Context names: the text is then the same for
+        // the sessions of the project in other folders (its worktrees).
+        var root = ExistingWorktree(request.Session) ?? projectRoot ?? NormalizeOptionalRoot(request.Session.WorkingDirectory ?? request.WorkingDirectory);
         var builder = new StringBuilder();
         foreach (var path in selectedFiles)
         {
@@ -938,7 +1038,7 @@ public sealed class SystemPromptBuilder
                 builder.AppendLine().AppendLine();
             }
 
-            builder.AppendLine($"File: {MarkdownCode(path)}");
+            builder.AppendLine($"File: {MarkdownCode(FromRoot(path, root))}");
             builder.AppendLine();
             builder.AppendLine("<INSTRUCTIONS>");
             builder.AppendLine();
@@ -959,13 +1059,23 @@ public sealed class SystemPromptBuilder
             builder.AppendLine("Instructions for some files only (`.github/instructions`). Before you change a file that matches a pattern, read the file of instructions and follow it:");
             foreach (var (path, applyTo) in scoped)
             {
-                builder.AppendLine($"- {MarkdownCode(path)} applies to {MarkdownCode(applyTo)}");
+                builder.AppendLine($"- {MarkdownCode(FromRoot(path, root))} applies to {MarkdownCode(applyTo)}");
             }
 
             builder.Length -= Environment.NewLine.Length;
         }
 
         return builder.Length == 0 ? null : builder.ToString();
+    }
+
+    // A path inside a root as a path from that root, with forward slashes (`AGENTS.md`, `src/AGENTS.md`); any other path whole.
+    private static string FromRoot(string path, string? root)
+    {
+        if (root is null) return path;
+        var relative = Path.GetRelativePath(root, path);
+        return relative is "." or ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || Path.IsPathRooted(relative)
+            ? path
+            : relative.Replace('\\', '/');
     }
 
     // The home folder whose files of other tools the prompt reads; null for none.
@@ -1403,6 +1513,12 @@ public sealed class SystemPromptBuildRequest
     /// <summary>Gets whether, in the space of the session, a session goes on with the next model of its tier when its provider fails.</summary>
     public bool ModelFallback { get; init; }
 
+    /// <summary>
+    /// Gets the mode of Code Mode the session has: <c>off</c> when the host gives none; <c>on</c> when it has <c>exec</c>; <c>only</c> when
+    /// <c>exec</c> takes over its other tools. The instructions tell a session with <c>exec</c> when to use it.
+    /// </summary>
+    public string CodeMode { get; init; } = "off";
+
     /// <summary>Gets active-skills markdown restored from session state.</summary>
     public string? ActiveSkillsMarkdown { get; init; }
 
@@ -1435,6 +1551,13 @@ public sealed class SystemPromptBuildRequest
     /// prompt adds its own <c>disabled_tools</c>. The text that names a tool turned off is left out. Null for none.
     /// </summary>
     public IReadOnlySet<string>? DisabledTools { get; init; }
+
+    /// <summary>
+    /// Gets the parts of the workflow the host leaves out of the prompt (<see cref="PromptFeatures"/>): the text of the
+    /// prompt files that depends on one of them (<see cref="PromptFeatureConditions"/>) and the generated lines about it.
+    /// Null for none, as in CodeAlta Desktop and TUI.
+    /// </summary>
+    public IReadOnlySet<string>? DisabledFeatures { get; init; }
 }
 
 /// <summary>
@@ -1487,6 +1610,13 @@ public sealed class SystemPromptBundle
 
     /// <summary>Gets the logical developer instructions.</summary>
     public string? DeveloperInstructions { get; init; }
+
+    /// <summary>
+    /// Gets what the instructions say of this session alone (the Session Context: where it works, its parent, its
+    /// scratchpad), sent after <see cref="SystemMessage"/> and <see cref="DeveloperInstructions"/>, which are then the same
+    /// text for the sessions of a prompt in other folders; null for none.
+    /// </summary>
+    public string? SessionInstructions { get; init; }
 
     /// <summary>Gets the stable effective prompt hash.</summary>
     public required string EffectivePromptHash { get; init; }

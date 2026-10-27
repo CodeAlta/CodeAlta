@@ -11,6 +11,10 @@ import { speechMessages } from "./speech/messages";
 import { modelTierMessages } from "./modelTierMessages";
 import { sandboxMessages } from "./sandbox/messages";
 import { promptProvenanceMessages } from "./promptProvenance";
+import { codeModeSettingsMessages } from "./codeModeSettingsMessages";
+import { scriptCardMessages } from "./scriptCard/messages";
+import { scriptAutomationMessages } from "./automations/scriptAutomationMessages";
+import { workflowMessages } from "./workflows/messages";
 import { claudeCliMessages } from "./claudeCli/messages";
 import { pluginProviderMessages } from "./pluginProviders/messages";
 import { spaceResourceMessages } from "./spaces/resourceMessages";
@@ -636,6 +640,7 @@ export const messages = dictionary({
   "Stopped": ["Detenido", "Arrêté", "Angehalten", "停止", "已停止"],
   "Background job": ["Tarea en segundo plano", "Tâche en arrière-plan", "Hintergrundjob", "バックグラウンドジョブ", "后台作业"],
   "Show the output of this job": ["Mostrar la salida de esta tarea", "Afficher la sortie de cette tâche", "Ausgabe dieses Jobs anzeigen", "このジョブの出力を表示", "显示此作业的输出"],
+  "Go to it in the timeline": ["Ir a ella en la línea de tiempo", "Y aller dans la chronologie", "In der Zeitleiste anzeigen", "タイムラインで表示", "在时间线中转到它"],
   "Agent": ["Agente", "Agent", "Agent", "エージェント", "代理"],
   "Workflow": ["Flujo de trabajo", "Workflow", "Workflow", "ワークフロー", "工作流"],
   "Prompt ready": ["Prompt listo", "Prompt prêt", "Prompt bereit", "入力できます", "提示词就绪"],
@@ -673,6 +678,14 @@ export const messages = dictionary({
   "Only the latest output is retained.": ["Solo se conserva la salida más reciente.", "Seule la sortie la plus récente est conservée.", "Nur die neueste Ausgabe wird aufbewahrt.", "最新の出力のみが保持されます。", "仅保留最新的输出。"],
   "Waiting for output…": ["Esperando la salida…", "En attente de la sortie…", "Warten auf Ausgabe…", "出力を待機中…", "正在等待输出…"],
   "The rest is too long to show.": ["El resto es demasiado largo para mostrarlo.", "La suite est trop longue pour être affichée.", "Der Rest ist zu lang für die Anzeige.", "残りは長すぎるため表示できません。", "其余部分过长，无法显示。"],
+  // A message of the timeline the history page shows the start of.
+  "The rest of this message is too long to show here.": ["El resto de este mensaje es demasiado largo para mostrarlo aquí.", "La suite de ce message est trop longue pour être affichée ici.",
+    "Der Rest dieser Nachricht ist zu lang, um ihn hier anzuzeigen.", "このメッセージの残りは長すぎるため、ここには表示できません。", "此消息的其余部分过长，无法在此显示。"],
+  "Show the whole message": ["Mostrar el mensaje completo", "Afficher le message entier", "Ganze Nachricht anzeigen", "メッセージ全体を表示", "显示完整消息"],
+  "The message could not be read.": ["No se pudo leer el mensaje.", "Le message n’a pas pu être lu.", "Die Nachricht konnte nicht gelesen werden.", "メッセージを読み込めませんでした。", "无法读取该消息。"],
+  "Only the first {characters} characters of this message are shown.": ["Solo se muestran los primeros {characters} caracteres de este mensaje.",
+    "Seuls les {characters} premiers caractères de ce message sont affichés.", "Nur die ersten {characters} Zeichen dieser Nachricht werden angezeigt.",
+    "このメッセージの最初の {characters} 文字だけを表示しています。", "仅显示此消息的前 {characters} 个字符。"],
   "Lines {start}–{end}": ["Líneas {start}–{end}", "Lignes {start}–{end}", "Zeilen {start}–{end}", "{start}～{end} 行", "第 {start}–{end} 行"],
   "Moved": ["Movido", "Déplacé", "Verschoben", "移動", "已移动"],
   "Image unavailable": ["Imagen no disponible", "Image indisponible", "Bild nicht verfügbar", "画像を表示できません", "图像不可用"],
@@ -930,6 +943,8 @@ export const messages = dictionary({
   "Look into each new issue when it is opened.": ["Examina cada incidencia nueva cuando se abre.", "Examiner chaque nouveau ticket à son ouverture.", "Jedes neue Issue beim Öffnen untersuchen.", "新しい Issue がオープンされるたびに調査します。", "每当有新议题创建时进行调查。"],
   "Pull request review": ["Revisión de pull requests", "Revue de pull request", "Pull-Request-Review", "プルリクエストのレビュー", "拉取请求审查"],
   "Review each pull request when it is opened.": ["Revisa cada pull request cuando se abre.", "Relire chaque pull request à son ouverture.", "Jeden Pull Request beim Öffnen prüfen.", "プルリクエストがオープンされるたびにレビューします。", "每当有拉取请求创建时进行审查。"],
+  "Pull request review in parallel": ["Revisión de pull requests en paralelo", "Revue de pull request en parallèle", "Paralleles Pull-Request-Review", "プルリクエストの並列レビュー", "并行审查拉取请求"],
+  "Run the review-pr script on each pull request: one session per angle, then one merged review.": ["Ejecuta el script review-pr en cada pull request: una sesión por enfoque y luego una revisión combinada.", "Exécuter le script review-pr sur chaque pull request : une session par angle, puis une revue fusionnée.", "Das Skript review-pr für jeden Pull Request ausführen: eine Sitzung pro Blickwinkel, dann ein zusammengeführtes Review.", "各プルリクエストでスクリプト review-pr を実行します。観点ごとに 1 つのセッション、その後 1 つの統合レビュー。", "对每个拉取请求运行 review-pr 脚本：每个角度一个会话，然后合并为一份审查。"],
   "Changelog draft": ["Borrador del registro de cambios", "Brouillon du journal des modifications", "Entwurf des Änderungsprotokolls", "変更履歴の下書き", "更新日志草稿"],
   "Draft the changelog of the week from the merged work.": ["Redacta el registro de cambios de la semana a partir del trabajo fusionado.", "Rédiger le journal des modifications de la semaine à partir du travail fusionné.", "Das Änderungsprotokoll der Woche aus den zusammengeführten Arbeiten entwerfen.", "マージされた作業から今週の変更履歴を下書きします。", "根据已合并的工作起草本周的更新日志。"],
   "Test health": ["Estado de las pruebas", "Santé des tests", "Testzustand", "テストの健全性", "测试健康状况"],
@@ -2771,6 +2786,10 @@ export const messages = dictionary({
   ...modelTierMessages,
   ...sandboxMessages,
   ...promptProvenanceMessages,
+  ...codeModeSettingsMessages,
+  ...scriptCardMessages,
+  ...scriptAutomationMessages,
+  ...workflowMessages,
   ...claudeCliMessages,
   ...pluginProviderMessages,
   ...spaceResourceMessages,

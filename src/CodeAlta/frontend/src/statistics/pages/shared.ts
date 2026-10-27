@@ -96,7 +96,7 @@ export function mergeToolRows(rows: readonly ToolRow[]): ToolGroup[] {
     return {
       kind: first.kind, tool: first.tool, calls, failures, failureRate: calls === 0 ? 0 : failures / calls, timeMs: sum(row => row.timeMs),
       ...(p50Ms === undefined ? {} : { p50Ms }), ...(p90Ms === undefined ? {} : { p90Ms }), maxMs: Math.max(...members.map(row => row.maxMs)),
-      bytesIn: sum(row => row.bytesIn), bytesOut: sum(row => row.bytesOut), spark: Array.from({ length }, (_, at) => sum(row => row.spark[at] ?? 0)),
+      bytesIn: sum(row => row.bytesIn), bytesOut: sum(row => row.bytesOut), spark: Array.from({ length }, (_, at) => sum(row => row.spark[at] ?? 0)), scriptCalls: sum(row => row.scriptCalls),
       name: parts.name, server: parts.server, keys: members.map(row => row.tool),
     };
   });

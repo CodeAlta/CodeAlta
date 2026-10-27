@@ -65,8 +65,10 @@ internal static class CliCommandLine
             "  errors; -q hides the progress, --verbose adds warnings and the log.",
             "Output, --format jsonl: stdout has one ACP JSON-RPC notification per line:",
             "  1. _codealta/session (no line when the run gets no session): schemaVersion,",
-            "     sessionId, created, cwd, provider, model, reasoning, agentPrompt, tier,",
-            "     storage.",
+            "     sessionId, created, cwd, provider, providerType (anthropic, codex,",
+            "     claude-code...), model, reasoning, agentPrompt, tier, storage,",
+            "     disabledFeatures (the parts of the agent prompt left out), options",
+            "     {{subSessions}} (false with --no-sub-sessions).",
             "  2. session/update, params {{sessionId, update}}; update.sessionUpdate is",
             "     agent_message_chunk, agent_thought_chunk, tool_call (kind, title,",
             "     rawInput), tool_call_update (status, content), plan or usage_update.",
@@ -81,7 +83,9 @@ internal static class CliCommandLine
             "     {{kind, message}}, usage {{inputTokens, outputTokens, totalTokens,",
             "     cachedReadTokens, cachedWriteTokens, thoughtTokens}}, cost {{amount,",
             "     currency}}, durationMs. Unknown is never 0: usage and cost are null",
-            "     when not reported, and a count of usage not reported is left out.",
+            "     when not reported, and a count of usage not reported is left out. A",
+            "     cost the provider does not report is estimated in USD from the public",
+            "     price of the model (_meta.codealta.estimated: true).",
             "  status: completed, failed, aborted, timeout, provider_not_ready,",
             "  session_in_use, invalid_output, invalid_usage.",
             "  --output-last-message also writes the final answer to a file (UTF-8); when",
@@ -127,6 +131,9 @@ internal static class CliCommandLine
             _,
         };
         AddTools(runCommand, run, run.DisableTools);
+        AddFeatures(runCommand, run,
+            "  Off by default: scratchpad, notes, tasks, review, mode-handoff; also",
+            "  session-title with --ephemeral.");
         AddStorage(runCommand, run);
         runCommand.Add("<>", "The words of the prompt");
         runCommand.Add(new HelpOption());
@@ -198,6 +205,9 @@ internal static class CliCommandLine
             _,
         };
         AddTools(acpCommand, acp, acp.DisableTools);
+        AddFeatures(acpCommand, acp,
+            "  Off by default: review (its commands are not offered); also",
+            "  session-title with --ephemeral.");
         AddStorage(acpCommand, acp);
         acpCommand.Add(new HelpOption());
         acpCommand.Add(_);
@@ -450,7 +460,24 @@ internal static class CliCommandLine
         command.Add("no-mcp", "Start no MCP server", v => options.NoMcp = v is not null);
         command.Add("no-plugins", "Start no plugin (nor MCP)", v => options.NoPlugins = v is not null);
         command.Add("no-skills", "List and offer no skill to the agents", v => options.NoSkills = v is not null);
+        command.Add("code-mode:", "Code Mode {MODE} on|only|off over the settings", v => options.CodeMode = v ?? "on");
         command.Add("sandbox=", "Run the tools in the sandbox {PROFILE} (or off)", v => options.Sandbox = v);
+        command.Add("no-sub-sessions", "Start no session of its own (sub-agents, agent())", v => options.NoSubSessions = v is not null);
+        command.Add(_);
+    }
+
+    // The parts of the agent prompt the sessions keep or leave out (CliPromptFeatures): run and acp, with their defaults.
+    private static void AddFeatures(Command command, CliCommonOptions options, params string[] defaults)
+    {
+        command.Add("Agent prompt:");
+        command.Add("  --enable, --disable: parts of the agent prompt, comma separated, or `all`:");
+        command.Add("  scratchpad (a copy of a long request), notes (sticky notes), tasks");
+        command.Add("  (follow-up tasks), review (by the user), mode-handoff (Plan mode, the");
+        command.Add("  list of agent prompts), session-title. The sub-agents follow the");
+        command.Add("  session: --no-sub-sessions removes them, their tools and their text.");
+        foreach (var line in defaults) command.Add(line);
+        command.Add("enable=", "Keep the prompt parts {NAMES}; repeatable", v => options.EnableFeatures.Add(v!));
+        command.Add("disable=", "Leave out the prompt parts {NAMES}; repeatable", v => options.DisableFeatures.Add(v!));
         command.Add(_);
     }
 

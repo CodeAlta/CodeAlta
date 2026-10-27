@@ -54,6 +54,8 @@
 
 /* The views of the MCP calls of the work (MCP Apps), under its line or its open rows, aligned with the steps: the
    result to see, folded or not. */
+/* The runs of scripts with steps or sessions: blocks of their own, the width of the conversation, folded or not. */
+.timeline-activity-workflows { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin: 2px 0 8px; }
 .timeline-activity-views { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0 10px 6px 29px; padding: 0 0 0 10px; border-left: 1px solid var(--line); }
 .timeline-activity-views > .mcp-app-view { margin-top: 0; }
 

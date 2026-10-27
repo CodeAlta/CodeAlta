@@ -84,6 +84,7 @@ internal static class CodeAltaConfigDocumentCopy
                 }
                 : null,
             Tools = document.Tools is { } tools ? new CodeAltaToolSettingsDocument { Disabled = Copy(tools.Disabled) } : null,
+            CodeMode = document.CodeMode is { } codeMode ? new CodeAltaCodeModeSettingsDocument { Mode = codeMode.Mode } : null,
             Sandbox = document.Sandbox is { } sandbox
                 ? new CodeAltaSandboxSettingsDocument
                 {
@@ -128,6 +129,7 @@ internal static class CodeAltaConfigDocumentCopy
         Arguments = Copy(provider.Arguments),
         PermissionMode = provider.PermissionMode,
         Sandbox = provider.Sandbox,
+        CodeMode = provider.CodeMode,
         AnthropicApiKey = provider.AnthropicApiKey,
         RefusalFallback = provider.RefusalFallback,
         PromptCacheTtl = provider.PromptCacheTtl,
@@ -219,6 +221,7 @@ internal static class CodeAltaConfigDocumentCopy
             SupportsAttachments = modelOverride.SupportsAttachments,
             SupportsStructuredOutput = modelOverride.SupportsStructuredOutput,
             Sandbox = modelOverride.Sandbox,
+            CodeMode = modelOverride.CodeMode,
         }),
         ModelRequest = Copy(provider.ModelRequest, static modelRequest => new CodeAltaProviderModelRequestDocument
         {

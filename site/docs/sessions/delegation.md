@@ -20,6 +20,17 @@ A sub-agent is a child session with a context of its own, which works in paralle
 
 Say so when you want it otherwise: "do not use sub-agents", or "use a sub-agent for each folder".
 
+### Sessions without sub-sessions
+
+A session can be created without sub-sessions: it does all the work itself, its instructions say nothing of sub-agents, and the tools that start sessions (`alta session create` and `fork`, `alta script run`, `alta automation run` and `create`, `agent()` and `session()` in [Code Mode](code-mode.md)) are not offered and are refused.
+
+- In CodeAlta Desktop, turn off **Sub-sessions** under **More options** in the [Agent chip](../workspace/prompt.md#agent-and-model), for a new session or one that exists (from its next prompt); the same chip of [automations](../automations.md), [tasks and plans](../work-items.md) and [issues](../issues.md) chooses it for the sessions they start.
+- An agent creates such a child with `alta session create --no-sub-sessions`, or `agent(prompt, { subSessions: false })` in a script, for a part that must be done by that child itself.
+- A session created by another one never has sub-sessions its creator has not: an agent turns them off for a child, never on.
+- `altacli run` and `altacli acp` take `--no-sub-sessions` (see [Command line](../command-line.md)).
+
+The session keeps the choice when it is resumed, forked or restarted. `alta session info` and `alta session list` say it as `options.subSessions`.
+
 In CodeAlta Desktop:
 
 - The sub-agents of a session are listed under it in the Explorer, and the session shows how many it started. Click its arrow to hide or show them.
@@ -212,7 +223,7 @@ The agent finds the turn with `alta session turns`, by its number or its run id,
 
 ## What agents can use
 
-The `alta` commands depend on the host, the plugins turned on and the session. An agent reaches only the sessions of its own [space](../spaces.md), and the resources its space has.
+The `alta` commands depend on the host, the plugins turned on and the session. An agent reaches only the sessions of its own [space](../spaces.md), and the resources its space has. With [Code Mode](code-mode.md), a script of the agent calls them as functions, such as `alta.session.list({ limit: 20 })`.
 
 {.table}
 | Group | What the agent can do | Example prompt | Good to know |
@@ -228,6 +239,8 @@ The `alta` commands depend on the host, the plugins turned on and the session. A
 | `notes` | Read, replace or clear the notes of the session. | “Keep a 5-item checklist visible in Notes while you work.” | `note` is an older name. |
 | `reminder` | Schedule a prompt for a session; list and delete reminders. | “Remind yourself in 5 minutes to check the child session result.” | Only while CodeAlta runs. |
 | `job` | Run a command in the background; list jobs, read their output, cancel them. | “Run the full tests as a background job and fix what fails.” | Runs with the rights of CodeAlta. Jobs end when CodeAlta exits. |
+| `workflow` | List the runs of [Code Mode](code-mode.md) scripts, show their steps and the sessions they started, read their result, cancel one. | “Show me where the review script of the other session is.” | A session cancels the runs of the sessions it may abort: its own, those it started, and the others of its space; a sandboxed session, only its own and those it created. |
+| `script` | List, show, check, edit, save and delete the [scripts of the library](code-mode.md#scripts-of-the-library). | “Save the script you just ran as `triage` in the project.” | A sandboxed session does not save or delete. |
 | `provider`, `model` | List providers, models and [model tiers](../model-tiers.md). | “List enabled providers that can run a high-reasoning model.” | Read-only; says nothing of billing. |
 | `skill` | List, show and activate skills. | “Activate the IL decompile skill before inspecting the assembly.” | `skills` and `skills_activate` are older names. |
 | `diff`, `editor` | Show you the changes of a project (`alta diff show`, `--file` to select one), or open a file at a line (`alta editor open --file <path> --line <n>`). | “Open the file you changed at the line of the fix.” | CodeAlta Desktop only. |

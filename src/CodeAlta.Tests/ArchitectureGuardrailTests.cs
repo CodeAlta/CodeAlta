@@ -125,6 +125,8 @@ public sealed class ArchitectureGuardrailTests
         // The sandbox knows the agent contracts and the worker frames: its settings come from the runtime, which
         // reads them in the catalog, so that a sandbox never depends on the files it keeps out of reach.
         CollectionAssert.AreEqual(new[] { "CodeAlta.Agent", "CodeAlta.NativeEngines" }, References(Path.Combine(sourceRoot, "CodeAlta.Sandbox", "CodeAlta.Sandbox.csproj")));
+        // The engine of Code Mode knows no CodeAlta project: every function a script calls is bound by its host.
+        Assert.IsEmpty(References(Path.Combine(sourceRoot, "CodeAlta.CodeMode", "CodeAlta.CodeMode.csproj")));
     }
 
     [TestMethod]

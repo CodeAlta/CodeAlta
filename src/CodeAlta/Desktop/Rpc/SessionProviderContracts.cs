@@ -27,6 +27,30 @@ internal sealed record SessionSetReviewBeforeCommitRequest(string ExpectedEpoch,
 internal sealed record SessionReviewBeforeCommitResult(string Status, string? Epoch, string SessionId, bool? Own, bool Effective, bool Setting);
 
 /// <summary>
+/// The options of a session as the page shows and chooses them (<see cref="CodeAlta.Agent.AgentSessionOptions"/>): each
+/// option by its value, the defaults being every option on.
+/// </summary>
+/// <param name="SubSessions">Whether the session can start sessions of its own (sub-agents).</param>
+internal sealed record SessionOptionsChoice(bool SubSessions)
+{
+    /// <summary>The options of a session, or of what records none.</summary>
+    public static SessionOptionsChoice Of(CodeAlta.Agent.AgentSessionOptions? options) => new(CodeAlta.Agent.AgentSessionOptions.Of(options).SubSessions);
+
+    /// <summary>What a choice records: null for the defaults, every option on.</summary>
+    public static CodeAlta.Agent.AgentSessionOptions? Record(SessionOptionsChoice? choice)
+        => choice is null ? null : CodeAlta.Agent.AgentSessionOptions.Stored(new CodeAlta.Agent.AgentSessionOptions { SubSessions = choice.SubSessions });
+}
+
+/// <summary>Asks for the options of a session.</summary>
+internal sealed record SessionOptionsRequest(string ExpectedEpoch, string SessionId);
+
+/// <summary>Changes the options of a session: its tools and its instructions follow them from its next prompt.</summary>
+internal sealed record SessionSetOptionsRequest(string ExpectedEpoch, string SessionId, SessionOptionsChoice Options);
+
+/// <summary>The options of a session after the request, when <paramref name="Status"/> is <c>ok</c>.</summary>
+internal sealed record SessionOptionsResult(string Status, string? Epoch, string SessionId, SessionOptionsChoice? Options);
+
+/// <summary>
 /// <c>ok</c> with the mode of the session after the request (null for the one of its provider); <c>invalid_mode</c>,
 /// <c>unavailable</c> (an unknown session, or one this window does not own), <c>busy</c> (its provider is being
 /// changed, or it is being deleted), <c>closed</c>, or why it was refused.

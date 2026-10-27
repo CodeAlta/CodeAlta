@@ -41,6 +41,7 @@ The provider editor can:
 - in CodeAlta Desktop, **Duplicate** a provider to add another account of the same type;
 - in CodeAlta Desktop, set the **Icon** and **Icon color** of a provider, and its **Spaces** with the chip of its row (see [Providers of a space](../spaces.md#providers-of-a-space));
 - in CodeAlta Desktop, run the sessions of a provider, or of one of its models, in a **Sandbox**, for example a provider of local models you trust less (see [Sandbox](../sessions/sandbox.md));
+- in CodeAlta Desktop, choose the **Code Mode** of a provider, or of one of its models (see [Code Mode](../sessions/code-mode.md#turn-it-off-or-change-it));
 - in CodeAlta Desktop, choose the **Model order** of the lists: the provider's order, by name, or by name with the newest version first, the default for [ACP agents](acp-agents.md);
 - store an API key, or name the environment variable that holds it;
 - check keys, endpoint URLs, missing credentials and settings that conflict;
@@ -157,7 +158,8 @@ A session sends its whole conversation with every request. A provider bills the 
 {.table}
 | Requests | What CodeAlta sends | What the usage reports |
 |---|---|---|
-| Anthropic Messages: the `anthropic` provider and the Claude models of Copilot | `cache_control` markers on the tools, the system prompt, the last message and the message that ended the previous request; nothing is cached without them | Cached input and cache write tokens |
+| Anthropic Messages: the `anthropic` provider and the Claude models of Copilot | `cache_control` markers on the system prompt (its part that every session of the project shares), the last message and the message that ended the previous request; nothing is cached without them | Cached input and cache write tokens |
+| OpenAI API: the `openai-responses` provider | Nothing: the API caches a repeated start by itself. The lines of the session alone (its folder, its scratchpad) come after the instructions and the tools, so the sessions of a project share their cache | Cached input and cache write tokens |
 | OpenAI Responses of Copilot (GPT, Grok and other models) | The session id as `prompt_cache_key`, so its requests reach the cache that holds its conversation | Cached input, and cache write tokens for the models that bill them |
 | Codex | The session id as `prompt_cache_key` | Cached input |
 | Other OpenAI-compatible and Google endpoints | Nothing: the endpoint caches a repeated start by itself when it can | Cached input when the endpoint reports it |

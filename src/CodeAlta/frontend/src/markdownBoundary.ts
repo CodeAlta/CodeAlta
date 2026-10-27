@@ -16,6 +16,13 @@ export type MarkdownLabels = Readonly<Record<AlertKind, string> & {
 const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy",
   notDrawn: "Not drawn as a diagram:" };
 
+/** The image of the renderer in a link to a picture of the disk, without a source until the window draws it. */
+export const localImageClass = "markdown-local-image";
+/** What such a link shows while its picture is not drawn: the alternative text of the picture. */
+export const localImageAltClass = "markdown-local-image-alt";
+// What the parser writes on a link to a picture of the disk (see `createMarkdownParser`).
+const fileImageAttribute = "data-file-image";
+
 /**
  * How a text is rendered: a document is a file or a text written as one, whose lines are wrapped in its source.
  * With `sourceLines`, each block says which lines of the text it comes from, in `data-source-lines` (see `markdownSourceLines`).
@@ -44,6 +51,8 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
   purifier.addHook("uponSanitizeElement", node => {
     if (node.nodeName === "A" && (node as Element).getAttribute("data-file-link") === fileLinkMark) fileLinks.add(node);
   });
+  // A picture of the disk that the Markdown names is such a link, marked as a picture too: it keeps `data-file-image`
+  // without the mark, for `dressFileImages` alone. An `<img>` and a `data-file-image` written in HTML are removed.
   purifier.addHook("uponSanitizeAttribute", (node, data) => {
     const tag = node.nodeName.toLowerCase();
     const { attrName: name, attrValue: value } = data;
@@ -55,9 +64,12 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
     if (link) data.forceKeepAttr = true;
     const lines = name === sourceLinesAttribute ? ownSourceLines(value) : null;
     if (lines !== null) data.attrValue = lines;
+    const image = name === fileImageAttribute && tag === "a" && fileLinks.has(node) && value === fileLinkMark;
+    if (image) data.attrValue = "";
     data.keepAttr = name === "title"
       || link
       || lines !== null
+      || image
       || name === "class" && tag === "code" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(value)
       || name === "open" && tag === "details"
       || name === "scope" && tag === "th" && /^(col|row|colgroup|rowgroup)$/.test(value)
@@ -196,6 +208,23 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       quote.setAttribute("data-alert", kind);
     }
   }
+  // A picture of the disk stays a link to its file, which shows its alternative text, with an image of the renderer
+  // in it that has no source: the window that can read the file draws it there (`MarkdownContent`). Authored HTML keeps
+  // no `<img>` and no class, so such an image is always the renderer's.
+  function dressFileImages(fragment: DocumentFragment) {
+    for (const link of Array.from(fragment.querySelectorAll(`a[${fileImageAttribute}]`))) {
+      link.removeAttribute(fileImageAttribute);
+      if (!link.hasAttribute("href")) continue;
+      const alt = view.document.createElement("span");
+      alt.className = localImageAltClass;
+      alt.append(...Array.from(link.childNodes));
+      const image = view.document.createElement("img");
+      image.className = localImageClass;
+      image.alt = alt.textContent ?? "";
+      image.draggable = false;
+      link.append(alt, image);
+    }
+  }
   // A code block has a button that copies its text: an element of the renderer, with constant attributes and no
   // content of its own. Authored HTML keeps no button and no class, so this one is always the renderer's. It names
   // the language of the block, which it shows beside its icon.
@@ -225,7 +254,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       try {
         fragment = purifier.sanitize(html, {
           ALLOWED_TAGS: tags,
-          ALLOWED_ATTR: ["href", "title", "class", "open", "scope", "align", "colspan", "rowspan", "start", "value", "reversed", sourceLinesAttribute],
+          ALLOWED_ATTR: ["href", "title", "class", "open", "scope", "align", "colspan", "rowspan", "start", "value", "reversed", sourceLinesAttribute, fileImageAttribute],
           ALLOW_ARIA_ATTR: false, ALLOW_DATA_ATTR: false, RETURN_DOM_FRAGMENT: true,
         });
       } finally { sourceLinesMark = null; }
@@ -235,6 +264,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         if (mark !== null) block.setAttribute(sourceLinesAttribute, `1-${frontMatterLines}`);
         fragment.prepend(block);
       }
+      dressFileImages(fragment);
       dressFences(fragment, undrawn);
       dressTasks(fragment);
       dressAlerts(fragment);

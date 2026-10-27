@@ -821,7 +821,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     new Automations.AutomationRunner(host), TimeProvider.System, TimeZoneInfo.Local, new Automations.GitAutomationFeed(),
                     () => [.. (host.PluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueEventSource>()],
                     // A command runs with the identity of the space its runs go to (AutomationRunner): the space of its project.
-                    new Automations.ShellAutomationCommands(projectId => host.Identities.ResolveAsync(null, projectId).GetAwaiter().GetResult().Environment));
+                    new Automations.ShellAutomationCommands(projectId => host.Identities.ResolveAsync(null, projectId).GetAwaiter().GetResult().Environment),
+                    // An automation that runs a script is allowed with the script as the library holds it.
+                    entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null);
                 // A host that has the user review the commands of its sessions lets no session type in a terminal, nor
                 // give an automation a command to run.
                 // A host that started its plugins builds one again while it runs, and tells the page when it did. Building
@@ -861,6 +863,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                             return worker;
                         }, load), searchLog));
                 }
+                // The runs of scripts are kept with the results of their steps: one CodeAlta ended during is resumed from its card.
+                _ = host.KeepCodeModeRunsAsync();
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
                     new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
@@ -991,7 +995,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddSessionRetentionProtectionService(retention.ProtectionRpc);
-                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch));
+                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts));
                     var pullRequestPrompts = new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions);
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
                     builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, async () =>
@@ -1018,6 +1022,26 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                             caller: AltaCallerIdentity.Host with { PromptProvenance = CodeAlta.Agent.AgentPromptProvenance.UserReview }, cancellationToken: token).ConfigureAwait(false);
                         return sent.ExitCode == 0 ? null : FirstLine(sent.Stderr.Length > 0 ? sent.Stderr : sent.Stdout);
                     }, sessionStarter, epoch));
+                    // The Workflows tab: a script runs in a new session started from the window; Save as script asks the session of a run.
+                    builder.AddWorkflowsService(new WorkflowsService(host.CodeModeScripts, host.CodeModeRuns, host.ProjectCatalog, sessionStarter, async (sessionId, text, token) =>
+                    {
+                        // The answer comes once the prompt is accepted, not when the turn it starts ends; a session at work gets it queued.
+                        var admission = host.Commands.AdmitSend(new CodeAlta.Orchestration.Runtime.OwnedTextSendRequest("workflow-save:" + Guid.NewGuid().ToString("N"), sessionId, text),
+                            CancellationToken.None);
+                        if (admission.Kind is CodeAlta.Orchestration.Runtime.OwnedSessionCommandAdmissionKind.Accepted or CodeAlta.Orchestration.Runtime.OwnedSessionCommandAdmissionKind.Replay)
+                            return null;
+                        if (admission.Kind is not CodeAlta.Orchestration.Runtime.OwnedSessionCommandAdmissionKind.Busy)
+                            return $"The prompt was not accepted ({admission.Kind.ToString().ToLowerInvariant()}).";
+                        var queued = await altaCommands.InvokeAsync(["session", "send", sessionId, "--stdin", "--queue-if-busy"], stdin: text,
+                            caller: AltaCallerIdentity.Host, cancellationToken: token).ConfigureAwait(false);
+                        return queued.ExitCode == 0 ? null : FirstLine(queued.Stderr.Length > 0 ? queued.Stderr : queued.Stdout);
+                    }, epoch, (project, token) => host.RuntimeService.GetSpaceFilterAsync(spaceView.ShownSpaceId, project, token),
+                        // The tab of a run reads its records in the journal of its session, the one journal it reads.
+                        async (sessionId, runId, token) =>
+                            await host.RuntimeService.TryGetResumableSessionAsync(sessionId, token).ConfigureAwait(false) is { } session
+                            && await host.RuntimeService.TryReadStoredHistoryAsync(session, token).ConfigureAwait(false) is { } history
+                                ? [.. history.OfType<CodeAlta.Agent.AgentWorkflowEvent>().Where(record => record.WorkflowRunId == runId)]
+                                : []));
                     // The local search: the queries of the search window and of the Search canvas, in the space the window shows.
                     builder.AddLocalSearchService(new LocalSearchService(search,
                         async (spaceId, token) => await host.RuntimeService.GetSpaceFilterAsync(spaceId, null, token).ConfigureAwait(false),
@@ -1397,6 +1421,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddMcpHostService(new McpHostService());
             builder.AddTerminalsService(new TerminalsService());
             builder.AddAutomationsService(new AutomationsService());
+            builder.AddWorkflowsService(new WorkflowsService());
             builder.AddWorkItemsService(new WorkItemsService());
             builder.AddReviewsService(new ReviewsService());
             builder.AddBookmarksService(new BookmarksService());

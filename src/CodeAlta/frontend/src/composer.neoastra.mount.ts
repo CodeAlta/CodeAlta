@@ -30,6 +30,7 @@ const optionsOf = (fixture: OptionsFixture) => [
 // The provider of the session: the removed one until the host switched it.
 const provider = () => removed()?.switched.at(-1) ?? (removed() ? "fixture-removed" : "fixture-provider");
 export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "unavailable" }), setReviewBeforeCommit: async () => ({ status: "unavailable" }),
+  options: async () => ({ status: "unavailable" }), setOptions: async () => ({ status: "unavailable" }),
   providerChoices: async ({ expectedEpoch, sessionId }: { expectedEpoch: string; sessionId: string }) => ({ status: "ok", epoch: expectedEpoch, sessionId,
     runtimeInstanceId: "11111111-1111-4111-8111-111111111111", attachmentGeneration: null, providerKey: provider(), revision: "1",
     providers: [{ id: "fixture-provider", name: "Fixture Default" }] }),

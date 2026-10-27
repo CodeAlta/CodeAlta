@@ -17,13 +17,13 @@ import type { StackBy, UsageUnit } from "../frame";
 const stackMetric: Record<UsageUnit, string> = { tokens: "tokens", requests: "requests", time: "active-time" };
 
 /** The tiles at the top of a page: a number, its change against the compared period, and its line. */
-export function SummaryTiles({ ids, showUpdatedAt = false }: Readonly<{ ids: readonly string[]; showUpdatedAt?: boolean }>) {
+export function SummaryTiles({ ids, showUpdatedAt = false, whenUsed = [] }: Readonly<{ ids: readonly string[]; showUpdatedAt?: boolean; /** Tiles shown only when they have a value in one of the periods. */ whenUsed?: readonly string[] }>) {
   const { t } = useText();
   const { fmt, frame } = useStatistics();
   const summary = useSummary({ main: true });
   const updatedAt = summary.data?.dataUpdatedAt;
   const costs = summary.data?.costs ?? [];
-  const tiles = summary.data ? ids.flatMap(id => summary.data!.tiles.filter(tile => tile.id === id)) : [];
+  const tiles = summary.data ? ids.flatMap(id => summary.data!.tiles.filter(tile => tile.id === id && (!whenUsed.includes(id) || tile.value > 0 || (tile.previous ?? 0) > 0))) : [];
   const phrase = comparisonPhrase(t, frame.comparison);
   const show = (tile: SummaryTile, label: string, value: string, key = tile.id) => <StatTile key={key} label={label} value={value} current={tile.value} compared={tile.previous ?? null}
     comparedLabel={phrase} goodWhen={tile.id === "errors" || tile.id === "tool-failures" ? "down" : "neutral"} trend={tile.spark} />;
@@ -94,7 +94,7 @@ export function OverviewPage() {
   const unitOptions = [{ value: "tokens", label: t("Tokens") }, { value: "requests", label: t("Requests") }, { value: "time", label: t("Time") }] as const;
   const stackOptions = [{ value: "provider", label: t("Provider") }, { value: "project", label: t("Project") }, { value: "model", label: t("Model") }] as const;
   return <>
-    <SummaryTiles ids={["sessions", "runs", "active-time", "your-prompts", "tokens", "cost"]} showUpdatedAt />
+    <SummaryTiles ids={["sessions", "runs", "active-time", "your-prompts", "tokens", "cost", "script-runs"]} whenUsed={["script-runs"]} showUpdatedAt />
     <div className="stats-grid">
       <Block title={t("Activity over time")} span={12} minHeight={300} query={stacked}
         actions={<><Choice label={t("Show")} value={unit} onChange={value => dispatch({ type: "view", view: { unit: value } })} options={unitOptions} />

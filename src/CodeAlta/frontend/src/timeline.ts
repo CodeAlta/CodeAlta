@@ -8,6 +8,7 @@ import { fileChangesMarkdown, projectFileChanges, type FileChanges } from "./fil
 import { projectTimelineImages, type TimelineImage } from "./timelineImages";
 import { projectTimelineAttachments, type TimelineAttachment } from "./timelineAttachments";
 import { promptRow, promptTokens, type PromptRow } from "./systemPrompt";
+import { parseWorkflowResult, type WorkflowResult } from "./workflows/scriptResult";
 
 export type HistoryEntry = HistoryResponse["entries"][number];
 
@@ -66,6 +67,10 @@ export type TimelineItem = Readonly<{
   sourceSessionId?: string;
   /** The recorded result of a background job, shown as a compact card with its facts and output in a window. */
   jobResult?: JobResult;
+  /** The result of a script that ended in the background: its Markdown is the body, its facts and what it wrote are beside. */
+  workflowResult?: WorkflowResult;
+  /** True when the history page gave only the start of the text of the record: the card reads the rest on demand. */
+  textShortened?: boolean;
   /** True for the message of a turn the provider started by itself: nobody wrote it, and it is not a prompt to continue from. */
   providerPrompt?: boolean;
   /**
@@ -82,7 +87,51 @@ export type TimelineItem = Readonly<{
   notSent?: true;
   /** What a system prompt record says: its row is one line, and its texts are read by its window. */
   prompt?: PromptRow;
+  /** The calls the script of a tool call made (Code Mode's `exec`), in their order: shown inside its row. */
+  scriptCalls?: ReadonlyArray<ScriptCall>;
+  /** The title of the script of a tool call, from the `// @exec: {"title": …}` line of its code. */
+  scriptTitle?: string;
+  /** The run of the script of a tool call, as its records in the journal tell it: its steps and the sessions it started. */
+  scriptRun?: ScriptRun;
 }>;
+
+/**
+ * A run of a script of Code Mode, from its records (`workflow` entries of the journal). `declared` lists the steps its
+ * scripts declare (`meta.steps`), which its graph draws from the start; `startedAt` is the time of its first record.
+ */
+export type ScriptRun = Readonly<{ runId: string; status: string | null; steps: ReadonlyArray<ScriptStep>; sessions: ReadonlyArray<ScriptSession>;
+  waiting?: ScriptWait | null; resumesAt?: string | null; declared?: ReadonlyArray<ScriptDeclaredStep>; startedAt?: string | null; endedAt?: string | null;
+  /** The title its start gives it, when it has one. */
+  title?: string | null }>;
+
+/** A step a script of a run declares: `after` the steps it runs after (null: the one declared before it; empty: the start), `each` a fan-out. */
+export type ScriptDeclaredStep = Readonly<{ id: string; title: string; after: readonly string[] | null; each: boolean }>;
+
+/** A record of a run as the card reads it: a `workflow` row of the history, or a record the tab of the run reads from the host. */
+export type ScriptRunRecord = Readonly<{ kind?: string | null; activityId?: string | null; phase?: string | null; text?: string | null; details?: string | null;
+  name?: string | null; timestamp?: string | null }>;
+
+/**
+ * What a running script waits for: the answer of an `ask()`, the approval of one of its calls, or the end of a `sleep()`
+ * (`until`, its wake time). A run CodeAlta ended during a sleep says in `resumesAt` when it resumes by itself.
+ */
+export type ScriptWait = Readonly<{ kind: "question" | "approval" | "sleep"; stepId: string | null; text: string | null; until?: string | null }>;
+
+/**
+ * A step of a run: its state, and how long it took once ended. `key` is what a rerun from it names (`merge#1`), once ended;
+ * `replayed` says it gave the result a previous run recorded instead of running.
+ */
+export type ScriptStep = Readonly<{ id: string; status: string; durationMs: number | null; key: string | null; replayed: boolean;
+  startedAt?: string | null; endedAt?: string | null }>;
+
+/** A session a run started: its state, and what it spent once ended; the provider and the model it runs with, when its record says them. */
+export type ScriptSession = Readonly<{ sessionId: string; title: string | null; stepId: string | null; status: string; durationMs: number | null;
+  inputTokens: number | null; outputTokens: number | null; message: string | null; startedAt?: string | null; endedAt?: string | null;
+  providerKey?: string | null; modelId?: string | null }>;
+
+/** A call that the script of a tool call made: a line of the card of that call. */
+export type ScriptCall = Readonly<{ key: string; activityId: string; name: string; phase: string | null; startedAt: string | null; endedAt: string | null;
+  stepId: string | null; error: string | null }>;
 
 /**
  * The identity of a tool call and where its records are. `offset` is the journal offset of its newest
@@ -158,7 +207,8 @@ export function externalOrigin(contentId: string | null | undefined): ExternalOr
 // refreshed. Remembering the item of a record keeps a long timeline cheap to rebuild and lets its rows
 // see that nothing changed.
 const presented = new WeakMap<HistoryEntry, TimelineItem>();
-const folded = new WeakMap<HistoryEntry, { first: HistoryEntry; output: HistoryEntry | undefined; item: TimelineItem }>();
+const folded = new WeakMap<HistoryEntry, { first: HistoryEntry; output: HistoryEntry | undefined; scriptCalls: ReadonlyArray<ScriptCall> | undefined;
+  scriptRun: ScriptRun | undefined; item: TimelineItem }>();
 function presentedItem(entry: HistoryEntry): TimelineItem {
   let item = presented.get(entry);
   if (!item) presented.set(entry, item = toTimelineItem(entry, false));
@@ -179,6 +229,9 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     // A record that ended the call is not replaced by a late report of its start.
     else if (!isTerminalPhase(call.last.phase) || isTerminalPhase(entry.phase)) call.last = entry;
   }
+  // The calls a script made are lines of the card of the call that ran it, not rows of their own.
+  const children = scriptChildren(calls);
+  const runRecords = scriptRunRecords(entries);
   const deltas = new Map<string, TimelineItem>();
   const outputs = new Map<string, HistoryEntry>();
   for (const entry of entries) {
@@ -190,7 +243,8 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
   for (const entry of entries) {
     // Raw provider records are persistence/runtime plumbing duplicated by typed content and
     // activity events. The TUI intentionally keeps them out of its visual timeline too.
-    if (entry.eventType === "raw" || entry.eventType === "notes") continue;
+    // The records of a run of a script describe the card of its exec call, not rows of their own.
+    if (entry.eventType === "raw" || entry.eventType === "notes" || entry.eventType === "workflow") continue;
     // These update the TUI's status/usage surfaces, not its conversation timeline.
     if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "providerfallback", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")) continue;
     if ((entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") &&
@@ -224,7 +278,9 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
       result.push(item.category === "user" && entry.runId && unsent.has(entry.runId) ? notSentItem(item) : item);
       continue;
     }
-    if (entry === call.first) result.push(callItem(call.first, call.last, outputs.get(activityKey(entry))));
+    if (children.nested.has(call.first)) continue;
+    if (entry === call.first) result.push(callItem(call.first, call.last, outputs.get(activityKey(entry)), children.of.get(activityKey(entry)),
+      runRecords.get(JSON.stringify([entry.sessionId, entry.activityId]))));
   }
   return result.filter(item => item.category !== "reasoning" || !!item.markdown?.trim());
 }
@@ -232,19 +288,207 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
 // The row of a call: what its newest record says, at the time of its first one, with the output record of the
 // call when there is one. A typed completed output belongs to this exact session/provider/run/activity; a
 // bounded preview or retained streaming deltas are never counted as a total.
-function callItem(first: HistoryEntry, last: HistoryEntry, output: HistoryEntry | undefined): TimelineItem {
+function callItem(first: HistoryEntry, last: HistoryEntry, output: HistoryEntry | undefined, scriptCalls?: ReadonlyArray<ScriptCall>,
+  runRecords?: ReadonlyArray<HistoryEntry>): TimelineItem {
+  const scriptRun = runRecords ? scriptRunOf(runRecords) : undefined;
   const known = folded.get(last);
-  if (known && known.first === first && known.output === output) return known.item;
+  if (known && known.first === first && known.output === output && sameScriptCalls(known.scriptCalls, scriptCalls) && known.scriptRun === scriptRun) return known.item;
   const base = presentedItem(last);
   const attached = output?.tool ? output : undefined;
-  const item: TimelineItem = { ...base, timestamp: first.timestamp,
+  const title = scriptTitleOf(first, last);
+  // A script reads by its title, under the name of its tool.
+  const item: TimelineItem = { ...base, timestamp: first.timestamp, ...scriptCalls ? { scriptCalls } : {}, ...scriptRun ? { scriptRun } : {},
+    ...title ? { scriptTitle: title, summary: title, summaryIsCode: false } : {},
     toolCall: base.toolCall && { ...base.toolCall, outputOffset: attached?.offset ?? null, images: projectTimelineImages(attached?.images),
       startedAt: isTerminalPhase(first.phase) ? null : first.timestamp, endedAt: isTerminalPhase(last.phase) ? last.timestamp : null },
     ...attached ? { toolOutput: attached.tool!.output, toolOutputLines: attached.tool!.outputLines, toolOutputBytes: attached.tool!.outputBytes,
       toolExitCode: attached.tool!.exitCode ?? base.toolExitCode, toolSandbox: attached.tool!.sandbox ?? base.toolSandbox,
       toolFields: [...(base.toolFields ?? []), { path: "content", text: attached.text ?? "", truncated: attached.textTruncated || attached.bodyOmitted }] } : {} };
-  folded.set(last, { first, output, item });
+  folded.set(last, { first, output, scriptCalls, scriptRun, item });
   return item;
+}
+
+// The records of the runs of scripts, by the session and the tool call that ran each (its `parentActivityId`).
+function scriptRunRecords(entries: readonly HistoryEntry[]): Map<string, HistoryEntry[]> {
+  const runs = new Map<string, HistoryEntry[]>();
+  for (const entry of entries) {
+    if (entry.eventType !== "workflow" || !entry.parentActivityId) continue;
+    const key = JSON.stringify([entry.sessionId, entry.parentActivityId]);
+    let list = runs.get(key);
+    if (!list) runs.set(key, list = []);
+    list.push(entry);
+  }
+  return runs;
+}
+
+function lastIndex<T>(items: readonly T[], match: (item: T) => boolean): number {
+  for (let index = items.length - 1; index >= 0; index--) if (match(items[index])) return index;
+  return -1;
+}
+
+// A run read from its records, kept while its records stay the same so that the row keeps its identity.
+const scriptRuns = new WeakMap<ScriptRunRecord, { count: number; run: ScriptRun }>();
+
+/** Reads a run from its records, in their order: its steps, the sessions it started, what its scripts declare, and its times. */
+export function scriptRunOf(records: ReadonlyArray<ScriptRunRecord>, runId?: string): ScriptRun {
+  const last = records[records.length - 1];
+  const known = last ? scriptRuns.get(last) : undefined;
+  if (known && known.count === records.length) return known.run;
+  let status: string | null = "running";
+  let waiting: ScriptWait | null = null;
+  let resumesAt: string | null = null;
+  let endedAt: string | null = null;
+  let title: string | null = null;
+  const steps: ScriptStep[] = [];
+  const sessions: ScriptSession[] = [];
+  const declared: ScriptDeclaredStep[] = [];
+  for (const record of records) {
+    const details = parseDetails(record.details ?? null);
+    const number = (name: string) => { const value = details?.[name]; return typeof value === "number" ? value : null; };
+    const at = record.timestamp ?? null;
+    switch (record.kind) {
+      case "RunStarted":
+        title ??= record.text?.trim() || null;
+        break;
+      case "StepsDeclared": {
+        const listed = details?.steps;
+        if (!Array.isArray(listed)) break;
+        for (const item of listed) {
+          if (!isObject(item) || typeof item.id !== "string" || declared.some(step => step.id === item.id)) continue;
+          const after = Array.isArray(item.after) ? item.after.filter((id): id is string => typeof id === "string") : null;
+          declared.push({ id: item.id, title: typeof item.title === "string" && item.title ? item.title : item.id, after, each: item.each === true });
+        }
+        break;
+      }
+      case "StepStarted":
+        if (record.activityId) steps.push({ id: record.activityId, status: "running", durationMs: null, key: null, replayed: false, startedAt: at, endedAt: null });
+        break;
+      case "StepEnded": {
+        const index = lastIndex(steps, step => step.id === record.activityId && step.status === "running");
+        const ended: ScriptStep = { id: record.activityId ?? "", status: record.phase ?? "completed", durationMs: number("durationMs"),
+          key: stringAt(details, "stepKey"), replayed: details?.replayed === true, startedAt: index >= 0 ? steps[index].startedAt ?? null : null, endedAt: at };
+        if (index >= 0) steps[index] = ended; else steps.push(ended);
+        break;
+      }
+      case "SessionStarted":
+        if (record.activityId) sessions.push({ sessionId: record.activityId, title: record.text ?? null, stepId: stringAt(details, "stepId"), status: "running",
+          durationMs: null, inputTokens: null, outputTokens: null, message: null, startedAt: at, endedAt: null,
+          providerKey: stringAt(details, "providerKey"), modelId: stringAt(details, "modelId") });
+        break;
+      case "SessionEnded": {
+        const index = lastIndex(sessions, session => session.sessionId === record.activityId);
+        if (index >= 0) sessions[index] = { ...sessions[index], status: record.phase ?? "completed", durationMs: number("durationMs"),
+          inputTokens: number("inputTokens"), outputTokens: number("outputTokens"), message: stringAt(details, "message"), endedAt: at };
+        break;
+      }
+      case "RunEnded":
+        status = record.phase ?? "completed";
+        endedAt = at;
+        resumesAt = status === "interrupted" ? stringAt(details, "wakeAt") : null;
+        break;
+      case "WaitStarted":
+        waiting = record.phase === "sleep"
+          ? { kind: "sleep", stepId: record.activityId ?? null, text: null, until: stringAt(details, "wakeAt") }
+          : { kind: record.phase === "approval" ? "approval" : "question", stepId: record.activityId ?? null, text: record.text ?? null };
+        break;
+      case "WaitEnded":
+        waiting = null;
+        break;
+    }
+  }
+  // A step that waits for the user says so while the run goes on.
+  if (status !== "running") waiting = null;
+  else if (waiting?.stepId) {
+    const index = lastIndex(steps, step => step.id === waiting!.stepId && step.status === "running");
+    if (index >= 0) steps[index] = { ...steps[index], status: "waiting" };
+  }
+  // CodeAlta ended while the run ran: what still ran then stopped with it.
+  if (status === "interrupted") {
+    for (let index = 0; index < steps.length; index++) if (steps[index].status === "running") steps[index] = { ...steps[index], status: "interrupted" };
+    for (let index = 0; index < sessions.length; index++) if (sessions[index].status === "running") sessions[index] = { ...sessions[index], status: "interrupted" };
+  }
+  const startedAt = records[0]?.timestamp ?? null;
+  const run: ScriptRun = { runId: runId ?? last?.name ?? "", status, steps, sessions, ...waiting ? { waiting } : {}, ...resumesAt ? { resumesAt } : {},
+    ...declared.length > 0 ? { declared } : {}, ...startedAt ? { startedAt } : {}, ...endedAt ? { endedAt } : {}, ...title ? { title } : {} };
+  if (last) scriptRuns.set(last, { count: records.length, run });
+  return run;
+}
+
+// The calls of scripts, and the call each belongs to. A call names the call that ran its script as its parent; a call
+// made after the run of its parent ended (the script went on in the background) has no run, so the parent is found by
+// its session, its provider and its identifier.
+function scriptChildren(calls: ReadonlyMap<string, { first: HistoryEntry; last: HistoryEntry }>) {
+  const owners = new Map<string, string>();
+  for (const [key, call] of calls) owners.set(JSON.stringify([call.first.sessionId, call.first.providerId, call.first.activityId]), key);
+  const nested = new Set<HistoryEntry>();
+  const of = new Map<string, ScriptCall[]>();
+  for (const [key, call] of calls) {
+    const parentId = call.first.parentActivityId;
+    if (!parentId || parentId === call.first.activityId) continue;
+    const owner = owners.get(JSON.stringify([call.first.sessionId, call.first.providerId, parentId]));
+    if (!owner || owner === key) continue;
+    nested.add(call.first);
+    let list = of.get(owner);
+    if (!list) of.set(owner, list = []);
+    list.push(scriptCall(call.first, call.last));
+  }
+  return { nested, of };
+}
+
+const scriptCalls = new WeakMap<HistoryEntry, { first: HistoryEntry; call: ScriptCall }>();
+function scriptCall(first: HistoryEntry, last: HistoryEntry): ScriptCall {
+  const known = scriptCalls.get(last);
+  if (known && known.first === first) return known.call;
+  const details = parseDetails(last.details) ?? parseDetails(first.details);
+  const phase = last.phase?.toLowerCase() ?? null;
+  const call: ScriptCall = { key: last.offset, activityId: last.activityId!, name: last.name?.trim() || friendly(last.kind || "Tool"), phase,
+    startedAt: isTerminalPhase(first.phase) ? null : first.timestamp, endedAt: isTerminalPhase(last.phase) ? last.timestamp : null,
+    stepId: stringAt(details, "script", "stepId"), error: phase === "failed" ? last.text?.trim() || null : null };
+  scriptCalls.set(last, { first, call });
+  return call;
+}
+
+function sameScriptCalls(a: ReadonlyArray<ScriptCall> | undefined, b: ReadonlyArray<ScriptCall> | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((call, index) => call === b[index]);
+}
+
+/** The records of the calls scripts made, which are shown inside the row of the call that ran the script. */
+export function scriptCallRecords(entries: readonly HistoryEntry[]): ReadonlySet<HistoryEntry> {
+  const calls = new Map<string, { first: HistoryEntry; last: HistoryEntry }>();
+  for (const entry of entries) {
+    if (entry.eventType !== "activity" || !entry.activityId) continue;
+    const key = activityKey(entry);
+    if (!calls.has(key)) calls.set(key, { first: entry, last: entry });
+  }
+  const { nested } = scriptChildren(calls);
+  const keys = new Set([...nested].map(activityKey));
+  return new Set(entries.filter(entry => entry.eventType === "activity" && entry.activityId && keys.has(activityKey(entry))));
+}
+
+// The title of a script: the `title` of the `// @exec: {...}` line that starts its code, when the record has it.
+function scriptTitleOf(first: HistoryEntry, last: HistoryEntry): string | null {
+  if (last.name !== "exec" && first.name !== "exec") return null;
+  for (const entry of [last, first]) {
+    const code = stringAt(parseDetails(entry.details), "arguments", "code")
+      ?? entry.tool?.fields?.find(field => field.path === "arguments")?.text ?? null;
+    const title = code ? execTitle(code) : null;
+    if (title) return title;
+  }
+  return null;
+}
+
+/** Reads the title of a script of Code Mode from its first line, `// @exec: {"title": "…"}`; null when it has none. */
+export function execTitle(code: string): string | null {
+  // In the arguments of a call the code is a JSON string: its first line ends at an escaped line break.
+  const match = /\/\/\s*@exec:\s*(\{[^\n]*?\})\s*(?:\n|\\n|$)/u.exec(code);
+  if (!match) return null;
+  try {
+    const options: unknown = JSON.parse(match[1].replaceAll('\\"', '"'));
+    const title = isObject(options) && typeof options.title === "string" ? options.title.trim() : "";
+    return title || null;
+  } catch { return null; }
 }
 
 function contentKey(entry: HistoryEntry): string {
@@ -290,6 +534,8 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     ?? (entry.sourceSessionId ? { sourceSessionId: entry.sourceSessionId, kind: "prompt", body: entry.text ?? "" } : null);
   // The end of a background job is a prompt of the host: it is shown as what it is, without its envelope.
   const job = !fromAgent || delegated ? null : parseJobResult(entry.text);
+  // So is the end of a script that went on in the background: its result is shown as Markdown, what it wrote beside.
+  const workflow = provenance === promptProvenanceIds.workflow && !delegated ? parseWorkflowResult(entry.text) : null;
   const toolImages = !streaming && normalizedKind === "tooloutput" && entry.eventType === "contentCompleted" ? projectTimelineImages(entry.images) : undefined;
   const elsewhere = fromAgent && !delegated && !job && !provenance ? externalOrigin(entry.contentId) : null;
   // A prompt of the host that has no card of its own (a message of an agent, a job result) is titled by its provenance.
@@ -301,6 +547,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       category = "user"; icon = delegated ? "branch" : job ? "terminal" : hostPrompt ? promptProvenanceIcon(hostPrompt) : "user";
       title = delegated ? "Agent message" : job ? "Background job" : hostPrompt ? userTitle(hostPrompt) : "You";
       if (delegated) markdown = delegated.body;
+      if (workflow) markdown = workflow.result ?? (workflow.notes || null);
       if (job) {
         markdown = job.body;
         summary = job.title || job.command || job.jobId;
@@ -317,6 +564,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     subtitle = streaming ? "Streaming" : elsewhere ? externalOriginSubtitles[elsewhere] : delegated
       ? friendly(delegated.kind)
       : job ? [job.title, job.result].filter(part => part).join(" · ")
+      : workflow ? workflow.title ?? workflow.runId
       : category === "image" ? toolImages!.map(image => image.title).join(", ") : null;
   } else if (entry.eventType === "activity") {
     category = normalizedKind === "filechange" ? "file" : "tool";
@@ -436,6 +684,8 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolApp: entry.tool?.app ? { server: entry.tool.app } : undefined,
     delegated: delegated ? true : undefined,
     jobResult: job ?? undefined,
+    workflowResult: workflow ?? undefined,
+    textShortened: entry.textTruncated ? true : undefined,
     providerPrompt: category === "user" && (entry.contentId?.startsWith("provider:") || provenance === promptProvenanceIds.provider) ? true : undefined,
     provenance: category === "user" ? provenance ?? undefined : undefined,
     missingCliProvider: entry.eventType === "error" && entry.kind === "claude-code-not-found" && entry.providerId ? entry.providerId : undefined,
@@ -443,6 +693,18 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
     prompt,
   };
+}
+
+/**
+ * The body of a message from its whole text, as its row makes it from the start the history page gave: the result of
+ * a script without the facts of its run, the message of an agent without its envelope.
+ */
+export function wholeMessageBody(item: Pick<TimelineItem, "workflowResult" | "delegated">, text: string): string {
+  if (item.workflowResult) {
+    const read = parseWorkflowResult(text);
+    return read ? read.result ?? read.notes : text;
+  }
+  return item.delegated ? parseDelegatedMessage(text)?.body ?? text : text;
 }
 
 // The English title of a prompt of the host: the key of the translations of a known provenance, the words of another.

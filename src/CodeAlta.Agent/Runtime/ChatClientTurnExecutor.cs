@@ -316,28 +316,8 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         return supportsReasoningEffort?.Invoke(request, reasoningEffort) ?? true;
     }
 
-    private static string? ComposeInstructions(AgentTurnRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.SystemMessage))
-        {
-            return string.IsNullOrWhiteSpace(request.DeveloperInstructions)
-                ? null
-                : request.DeveloperInstructions.Trim();
-        }
-
-        if (string.IsNullOrWhiteSpace(request.DeveloperInstructions))
-        {
-            return request.SystemMessage.Trim();
-        }
-
-        return $"""
-                {request.SystemMessage.Trim()}
-
-                <developer_instructions>
-                {request.DeveloperInstructions.Trim()}
-                </developer_instructions>
-                """;
-    }
+    // The instructions of the session come last: what is before them is the same for every session of a prompt.
+    private static string? ComposeInstructions(AgentTurnRequest request) => AgentInstructionText.Compose(request);
 
     private static ChatMessage MapMessage(AgentConversationMessage message, bool inlineImages)
         => new(MapRole(message.Role), message.Parts.Select(part => MapPart(part, inlineImages)).ToList());
