@@ -2218,7 +2218,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         IReadOnlyList<AgentConversationMessage> conversation,
         AgentSessionUsage? previousUsage,
         AgentSessionUsage? usage,
-        bool providerKeepsContext)
+        bool providerKeepsContext,
+        bool usageIsIncremental)
     {
         if (usage is null)
         {
@@ -2231,8 +2232,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
 
         // A provider that keeps the context counts all of it with each request, and trims it by itself (it clears
-        // old tool results, it compacts): a count smaller than the one before is what it holds now.
-        var usageForEstimate = providerKeepsContext ? usage : SelectUsageForConversationEstimate(previousUsage, usage, conversation.Count);
+        // old tool results, it compacts): a count smaller than the one before is what it holds now. A request that
+        // carried the whole conversation is counted whole too, even below the local estimate made before it (which
+        // over-counts on some models). Only a request that continued a response the provider kept may count no more
+        // than its tail: the larger count of the conversation stands then.
+        var usageForEstimate = providerKeepsContext || !usageIsIncremental
+            ? usage
+            : SelectUsageForConversationEstimate(previousUsage, usage, conversation.Count);
         var estimate = AgentTokenEstimator.EstimatePromptTokens(
             systemMessage,
             developerInstructions,
@@ -2515,7 +2521,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             providerConversation.Messages,
             _state.Usage,
             response.Usage,
-            providerKeepsContext: _turnExecutor is IAgentProviderCompaction);
+            providerKeepsContext: _turnExecutor is IAgentProviderCompaction,
+            usageIsIncremental: response.UsageIsIncremental);
 
         _state = _state with
         {

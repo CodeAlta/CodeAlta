@@ -498,6 +498,14 @@ public sealed record AgentTurnResponse
     public AgentSessionUsage? Usage { get; init; }
 
     /// <summary>
+    /// Gets or initializes a value indicating whether the request sent only what was added to a context the provider
+    /// kept from a previous response (a provider-native continuation), so that <see cref="Usage"/> may count only
+    /// that part. The session then keeps its own count of the whole conversation when the reported one is smaller;
+    /// otherwise the reported count is the size of the context, even when it is smaller than the local estimate.
+    /// </summary>
+    public bool UsageIsIncremental { get; init; }
+
+    /// <summary>
     /// Gets or initializes a value indicating whether the provider explicitly requested another inference cycle.
     /// </summary>
     public bool RequiresProviderFollowUp { get; init; }

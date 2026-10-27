@@ -177,6 +177,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 requestContext,
                                 transport,
                                 sideChannelEvents,
+                                attemptState,
                                 cancellationToken).ConfigureAwait(false))
                         {
                             if (provider.CodexSubscription is not null)
@@ -468,6 +469,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         AssistantMessage = assistantMessage,
                         AssistantPartContentIds = assistantPartContentIds,
                         Usage = CreateUsage(request, completedResponse, codexMetadata, provider.PromptCacheLifetime),
+                        UsageIsIncremental = attemptState.SentContinuation,
                         ProviderSessionId = string.IsNullOrWhiteSpace(completedResponse.Id) ? null : completedResponse.Id,
                         ProviderState = CreateProviderState(completedResponse, codexMetadata),
                         Summary = ExtractSummary(assistantMessage),
@@ -742,6 +744,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         CodexSubscriptionRequestContext? requestContext,
         OpenAIResponsesTransport transport,
         List<OpenAIResponsesWebSocketSideChannelEvent> sideChannelEvents,
+        CodexStreamAttemptState attemptState,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (transport == OpenAIResponsesTransport.WebSocket)
@@ -755,6 +758,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             var options = entry.Session.HasOpenConnection
                 ? CreateWebSocketContinuationRequestOptions(request, fullOptions)
                 : fullOptions;
+            attemptState.SentContinuation = !string.IsNullOrWhiteSpace(options.PreviousResponseId);
             var previousSideChannelReceived = entry.Session.SideChannelReceived;
             try
             {
@@ -4174,6 +4178,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
         public bool CommittedFinalContent { get; set; }
 
+        // The request continued a response the provider kept (previous_response_id) and sent only the new input.
+        public bool SentContinuation { get; set; }
+
         public bool HasEmittedVisibleDelta => EmittedAssistantDelta || EmittedReasoningDelta;
 
         public bool HasObservedDraftOrOutput =>
@@ -4196,6 +4203,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             ObservedToolCallItem = false;
             DispatchedToolSideEffect = false;
             CommittedFinalContent = false;
+            SentContinuation = false;
         }
     }
 

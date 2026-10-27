@@ -1715,6 +1715,87 @@ public sealed partial class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_SendAsync_TrustsAWholeRequestCountSmallerThanTheLocalEstimate()
+    {
+        // The estimate made after the tool results counts more than the provider does (as on GPT models): the count of
+        // the provider, which covers the whole request, replaces it instead of being kept below it.
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-whole-request-usage");
+        var state = CreateState("session-whole-request-usage");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        using var schema = JsonDocument.Parse("""{"type":"object"}""");
+        using var toolArguments = JsonDocument.Parse("""{}""");
+        var models = new[]
+        {
+            new AgentModelInfo(
+                "gpt-5.4",
+                "GPT-5.4",
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["contextWindow"] = 272000L,
+                }),
+        };
+        long? estimateBeforeSecondRequest = null;
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                models,
+                summaryHandler: null,
+                (_, _, _) => Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new AgentConversationMessage(
+                        AgentConversationRole.Assistant,
+                        [new AgentMessagePart.ToolCall("call-read", "emit_output", toolArguments.RootElement.Clone())]),
+                    Usage = CreateWindowUsageSnapshot(50_000, 272_000, 49_700, 300),
+                }),
+                (request, _, _) =>
+                {
+                    estimateBeforeSecondRequest = request.State.Usage?.CurrentTokens;
+                    return Task.FromResult(new AgentTurnResponse
+                    {
+                        AssistantMessage = new AgentConversationMessage(
+                            AgentConversationRole.Assistant,
+                            [new AgentMessagePart.Text("Done.")]),
+                        Usage = CreateWindowUsageSnapshot(52_000, 272_000, 51_800, 200),
+                    });
+                }),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                Tools =
+                [
+                    new AgentToolDefinition(
+                        new AgentToolSpec("emit_output", "Emit output", schema.RootElement.Clone()),
+                        static (_, _) => Task.FromResult(
+                            new AgentToolResult(true, [new AgentToolResultItem.Text(new string('x', 40_000))]))),
+                ],
+            },
+            allowProviderContinuation: true);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Read it") }).ConfigureAwait(false);
+
+        Assert.IsTrue(estimateBeforeSecondRequest > 52_000L, $"Expected the local estimate to exceed the provider count, got {estimateBeforeSecondRequest}.");
+        var usageEvents = (await session.GetHistoryAsync().ConfigureAwait(false))
+            .OfType<AgentSessionUpdateEvent>()
+            .Where(static evt => evt.Kind == AgentSessionUpdateKind.UsageUpdated && evt.Usage?.LastOperation is not null)
+            .ToArray();
+        Assert.AreEqual(2, usageEvents.Length);
+        Assert.AreEqual(52_000L, usageEvents[1].Usage?.CurrentTokens);
+    }
+
+    [TestMethod]
     public async Task AgentSession_SendAsync_DoesNotResetWindowWhenProviderReportsContinuationDeltaUsage()
     {
         using var temp = TestTempDirectory.Create();
@@ -1765,6 +1846,7 @@ public sealed partial class AgentSessionTests
                             AgentConversationRole.Assistant,
                             [new AgentMessagePart.Text("Second answer.")]),
                         Usage = CreateWindowUsageSnapshot(1_200, 272_000, 1_100, 100),
+                        UsageIsIncremental = true,
                     });
                 }),
             new AgentSessionCreateOptions
