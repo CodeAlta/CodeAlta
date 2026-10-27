@@ -107,5 +107,5 @@ public sealed class CliPromptFeatureTests
         => [.. JsonDocument.Parse(run.Lines[0]).RootElement.GetProperty("params").GetProperty("disabledFeatures").EnumerateArray().Select(static item => item.GetString()!)];
 
     private static string PromptOfLastRequest(FakeProvider provider)
-        => provider.Requests.Last().SystemMessage + "\n" + provider.Requests.Last().DeveloperInstructions;
+        => provider.Requests.Last().SystemMessage + "\n" + provider.Requests.Last().DeveloperInstructions + "\n" + provider.Requests.Last().SessionInstructions;
 }

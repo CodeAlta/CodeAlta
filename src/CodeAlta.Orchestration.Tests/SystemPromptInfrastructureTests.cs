@@ -348,13 +348,14 @@ public sealed class SystemPromptInfrastructureTests
         var text = Build(home).DeveloperInstructions!;
         // The instructions the user wrote for every project come first, then those of the project.
         var personal = text.IndexOf($"File: `{Path.Combine(home, ".copilot", "copilot-instructions.md")}`", StringComparison.Ordinal);
-        var project = text.IndexOf($"File: `{Path.Combine(projectRoot, "AGENTS.md")}`", StringComparison.Ordinal);
+        // The files of the project are named from its root, which the Session Context names.
+        var project = text.IndexOf("File: `AGENTS.md`", StringComparison.Ordinal);
         Assert.IsTrue(personal >= 0 && project > personal, text);
         StringAssert.Contains(text, "Answer in short sentences.");
         // The instructions for some files are named with their patterns, and not included.
         StringAssert.Contains(text, "Before you change a file that matches a pattern, read the file of instructions and follow it:");
-        StringAssert.Contains(text, $"- `{Path.Combine(instructions, "csharp.instructions.md")}` applies to `**/*.cs`");
-        StringAssert.Contains(text, $"- `{Path.Combine(instructions, "web", "frontend.instructions.md")}` applies to `src/**/*.ts, src/**/*.tsx`");
+        StringAssert.Contains(text, "- `.github/instructions/csharp.instructions.md` applies to `**/*.cs`");
+        StringAssert.Contains(text, "- `.github/instructions/web/frontend.instructions.md` applies to `src/**/*.ts, src/**/*.tsx`");
         foreach (var absent in new[] { "File-scoped namespaces.", "Use function components.", "review.instructions.md", "manual.instructions.md", "notes.md" })
         {
             Assert.IsFalse(text.Contains(absent, StringComparison.Ordinal), absent);
@@ -405,10 +406,10 @@ public sealed class SystemPromptInfrastructureTests
                 ToolGuidance: false),
         });
 
-        var developerInstructions = bundle.DeveloperInstructions!;
-        StringAssert.Contains(developerInstructions, $"- Current working directory: `{Path.GetFullPath(workingDirectory)}`");
-        StringAssert.Contains(developerInstructions, $"- Project root: `{Path.GetFullPath(projectRoot)}`");
-        StringAssert.Contains(developerInstructions, $"File: `{Path.GetFullPath(projectContextFile)}`");
+        var developerInstructions = All(bundle);
+        StringAssert.Contains(bundle.SessionInstructions, $"- Current working directory: `{Path.GetFullPath(workingDirectory)}`");
+        StringAssert.Contains(bundle.SessionInstructions, $"- Project root: `{Path.GetFullPath(projectRoot)}`");
+        StringAssert.Contains(bundle.DeveloperInstructions, "File: `AGENTS.md`");
         // How an answer names a file, so that the frontends open it: a link relative to the root that is named above.
         StringAssert.Contains(developerInstructions, "- Links to files: to point the user to a file, write a Markdown link whose target is the path of the file relative to the project root, with forward slashes, and `#L<line>` after it");
         StringAssert.Contains(developerInstructions, "`[Program.cs](src/Program.cs#L42)`");
@@ -422,7 +423,7 @@ public sealed class SystemPromptInfrastructureTests
             Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = workingDirectory, Kind = SessionViewKind.ProjectSession },
             PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
         });
-        StringAssert.Contains(rooted.DeveloperInstructions!, $"- Scratchpad file: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md")}`");
+        StringAssert.Contains(rooted.SessionInstructions!, $"- Scratchpad file: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md")}`");
         var developerRoot = Path.Combine(projectRoot, "dev");
         var isolated = builder.Build(new SystemPromptBuildRequest
         {
@@ -431,7 +432,7 @@ public sealed class SystemPromptInfrastructureTests
             Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = workingDirectory, Kind = SessionViewKind.ProjectSession },
             PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
         });
-        StringAssert.Contains(isolated.DeveloperInstructions!, $"- Scratchpad file: `{Path.Combine(developerRoot, "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md")}`");
+        StringAssert.Contains(isolated.SessionInstructions!, $"- Scratchpad file: `{Path.Combine(developerRoot, "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md")}`");
         // A session of no project has no project root: its links start from where it works.
         StringAssert.Contains(rooted.DeveloperInstructions!, "the path of the file relative to the current working directory, with forward slashes");
         // Another session has another hash, whatever its id is made of: two agents never write the same file.
@@ -445,7 +446,7 @@ public sealed class SystemPromptInfrastructureTests
         Assert.IsFalse(developerInstructions.Contains("CodeAlta user guide", StringComparison.Ordinal));
         var guide = Directory.CreateDirectory(Path.Combine(appBase, "content", "user-guide")).FullName;
         File.WriteAllText(Path.Combine(guide, "readme.md"), "# User Guide");
-        StringAssert.Contains(other.DeveloperInstructions!, "- Scratchpad file:");
+        StringAssert.Contains(other.SessionInstructions!, "- Scratchpad file:");
         var guided = builder.Build(new SystemPromptBuildRequest
         {
             ProviderKey = "codex", ProviderType = "codex", ProtocolFamily = "codex",
@@ -456,7 +457,7 @@ public sealed class SystemPromptInfrastructureTests
         StringAssert.Contains(guided, "For a question about CodeAlta itself");
         var otherHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData("../other"u8), 0, 3);
         Assert.AreNotEqual(hash, otherHash);
-        StringAssert.Contains(other.DeveloperInstructions!, $"- Scratchpad file: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad", $"<yyyy-mm-dd>-<short-name>-{otherHash}.md")}`");
+        StringAssert.Contains(other.SessionInstructions!, $"- Scratchpad file: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad", $"<yyyy-mm-dd>-<short-name>-{otherHash}.md")}`");
     }
 
     [TestMethod]
@@ -523,7 +524,7 @@ public sealed class SystemPromptInfrastructureTests
             PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: true, RuntimeContext: true, ToolGuidance: false),
         });
 
-        var inWorktree = Build(worktree).DeveloperInstructions!;
+        var inWorktree = All(Build(worktree));
         StringAssert.Contains(inWorktree, $"- Current working directory: `{worktree}`");
         StringAssert.Contains(inWorktree, $"- Project root: `{worktree}`");
         // The links to files of that session start from the worktree, which is its project root.
@@ -535,14 +536,14 @@ public sealed class SystemPromptInfrastructureTests
         StringAssert.Contains(inWorktree, "Project folder, main checkout only.");
         Assert.IsFalse(inWorktree.Contains("Repository, main checkout.", StringComparison.Ordinal));
 
-        var inProject = Build(null).DeveloperInstructions!;
+        var inProject = All(Build(null));
         StringAssert.Contains(inProject, $"- Current working directory: `{projectRoot}`");
         StringAssert.Contains(inProject, "Repository, main checkout.");
         Assert.IsFalse(inProject.Contains("Git worktree", StringComparison.Ordinal));
         Assert.IsFalse(inProject.Contains("Repository, worktree.", StringComparison.Ordinal));
 
         // A worktree whose folder is gone is not where the session works.
-        var gone = Build(Path.Combine(temp.Path, "trees", "gone", "src", "app")).DeveloperInstructions!;
+        var gone = All(Build(Path.Combine(temp.Path, "trees", "gone", "src", "app")));
         StringAssert.Contains(gone, $"- Current working directory: `{projectRoot}`");
         Assert.IsFalse(gone.Contains("Git worktree", StringComparison.Ordinal));
     }
@@ -864,6 +865,9 @@ public sealed class SystemPromptInfrastructureTests
         Assert.AreEqual("maui-system", inheritance.SystemPromptName);
         CollectionAssert.AreEqual(new[] { "webget" }, inheritance.DisabledTools.ToArray());
     }
+
+    // The developer instructions and the Session Context, as a provider is sent them.
+    private static string All(SystemPromptBundle bundle) => bundle.DeveloperInstructions + "\n\n" + bundle.SessionInstructions;
 
     private static void WriteSystem(string root, string id, string body, IReadOnlyList<string>? frontmatterLines = null)
     {

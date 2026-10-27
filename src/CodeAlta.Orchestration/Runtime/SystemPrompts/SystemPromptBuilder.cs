@@ -151,9 +151,18 @@ public sealed class SystemPromptBuilder
 
         composition = composition with { SystemPromptName = selectedSystemName, SystemPromptReason = selectedSystemReason, PartOptions = effectivePartOptions };
 
+        // What is of this session alone (where it works, its parent, its scratchpad) is a part of its own, sent last: the
+        // text before it is then the same for the sessions of a prompt, which the prompt cache of a provider serves to all.
+        var sessionParts = new List<RenderedPromptPart>();
         if (composition.PartOptions.RuntimeContext)
         {
-            AddGeneratedPart(developerParts, parts, "runtime.context", "runtime_context", "Runtime Context", 400, BuildRuntimeContext(request, projectRoot, roots, disabledTools));
+            var (shared, session) = BuildRuntimeContext(request, projectRoot, roots, disabledTools);
+            AddGeneratedPart(developerParts, parts, "runtime.context", "runtime_context", "Runtime Context", 400, shared);
+            if (session.Length > 0)
+            {
+                var part = AddGeneratedPart(sessionParts, parts, "session.context", "session_context", "Session Context", 900, session);
+                parts[^1] = part with { Target = "session" };
+            }
         }
 
         if (composition.PartOptions.ToolGuidance)
@@ -199,8 +208,12 @@ public sealed class SystemPromptBuilder
         var developerInstructions = developerParts.Count == 0
             ? null
             : string.Join(Environment.NewLine + Environment.NewLine, developerParts.Select(static part => part.Markdown.Trim()));
-        var statistics = SystemPromptStatistics.FromMessages(systemMessage, developerInstructions, parts);
-        var effectiveHash = ComputeHash(systemMessage, developerInstructions, request.ProviderKey, request.ProviderType, request.ProtocolFamily, request.Model, "native-system-and-developer");
+        var sessionInstructions = sessionParts.Count == 0 ? null : sessionParts[0].Markdown.Trim();
+        var allDeveloperInstructions = sessionInstructions is null ? developerInstructions
+            : developerInstructions is null ? sessionInstructions
+            : developerInstructions + Environment.NewLine + Environment.NewLine + sessionInstructions;
+        var statistics = SystemPromptStatistics.FromMessages(systemMessage, allDeveloperInstructions, parts);
+        var effectiveHash = ComputeHash(systemMessage, allDeveloperInstructions, request.ProviderKey, request.ProviderType, request.ProtocolFamily, request.Model, "native-system-and-developer");
         var provider = new SystemPromptProviderMapping(
             request.ProviderKey,
             request.ProviderType,
@@ -224,6 +237,7 @@ public sealed class SystemPromptBuilder
         {
             SystemMessage = systemMessage,
             DeveloperInstructions = developerInstructions,
+            SessionInstructions = sessionInstructions,
             EffectivePromptHash = effectiveHash,
             Manifest = manifest,
             Statistics = statistics,
@@ -661,7 +675,9 @@ public sealed class SystemPromptBuilder
         return part;
     }
 
-    private static string BuildRuntimeContext(SystemPromptBuildRequest request, string? projectRoot, SystemPromptContentRoots? roots = null,
+    // The lines of the Runtime Context, and those of the Session Context: what is of this session alone (where it works,
+    // its parent, its scratchpad), which goes last, so that the text before it is the same for the sessions of a prompt.
+    private static (string Shared, string Session) BuildRuntimeContext(SystemPromptBuildRequest request, string? projectRoot, SystemPromptContentRoots? roots = null,
         IReadOnlySet<string>? disabledTools = null)
     {
         var lines = new List<string>
@@ -669,6 +685,7 @@ public sealed class SystemPromptBuilder
             $"- Current date: {DateTimeOffset.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}",
             $"- Platform: {GetPlatformLabel()}",
         };
+        var sessionLines = new List<string>();
         // A session without the shell is not told which one it would have.
         if (disabledTools?.Contains(PromptToolConditions.ShellCommand) != true) lines.Add($"- Default shell for shell commands: {GetDefaultShellLabel()}");
         // A session in a git worktree works there: the folder of its project is then named as what it is, the
@@ -677,23 +694,23 @@ public sealed class SystemPromptBuilder
         var workingDirectory = worktree ?? NormalizeOptionalRoot(request.Session.WorkingDirectory) ?? NormalizeOptionalRoot(request.WorkingDirectory);
         if (workingDirectory is not null)
         {
-            lines.Add($"- Current working directory: {MarkdownCode(workingDirectory)}");
+            sessionLines.Add($"- Current working directory: {MarkdownCode(workingDirectory)}");
         }
 
         if (worktree is not null)
         {
-            lines.Add($"- Project root: {MarkdownCode(worktree)}");
-            lines.Add(projectRoot is null
+            sessionLines.Add($"- Project root: {MarkdownCode(worktree)}");
+            sessionLines.Add(projectRoot is null
                 ? "- Git worktree: the working directory is a git worktree, a checkout of its own with its own branch."
                 : $"- Git worktree: the working directory is a git worktree of the project, a checkout of its own with its own branch. The main checkout of the project is {MarkdownCode(projectRoot)}: work in the working directory, and leave the main checkout as it is unless asked.");
         }
         else if (projectRoot is not null)
         {
-            lines.Add($"- Project root: {MarkdownCode(projectRoot)}");
+            sessionLines.Add($"- Project root: {MarkdownCode(projectRoot)}");
         }
 
         // How an answer names a file: the frontends open such a link on the file, at its line. A relative path is
-        // read from the folder the session works in, which is the root named above.
+        // read from the folder the session works in, which is the root the Session Context names.
         if (worktree is not null || projectRoot is not null || workingDirectory is not null)
         {
             var root = worktree is not null || projectRoot is not null ? "the project root" : "the current working directory";
@@ -702,7 +719,7 @@ public sealed class SystemPromptBuilder
 
         if (!string.IsNullOrWhiteSpace(request.Session.ParentSessionId))
         {
-            lines.Add($"- Parent session: {request.Session.ParentSessionId}");
+            sessionLines.Add($"- Parent session: {request.Session.ParentSessionId}");
         }
 
         lines.Add($"- Session kind: {request.Session.Kind.ToString().ToLowerInvariant()}");
@@ -734,7 +751,7 @@ public sealed class SystemPromptBuilder
         // so that two agents never write the same file.
         if (!IsOff(request.DisabledFeatures, PromptFeatures.Scratchpad) && ScratchpadFile(request) is { } scratchpad)
         {
-            lines.Add($"- Scratchpad file: {MarkdownCode(scratchpad)}");
+            sessionLines.Add($"- Scratchpad file: {MarkdownCode(scratchpad)}");
         }
 
         // The user guide that ships with the application: the agent answers questions about CodeAlta from it.
@@ -743,7 +760,7 @@ public sealed class SystemPromptBuilder
             lines.Add($"- CodeAlta user guide: {MarkdownCode(roots.ShippedUserGuideRoot)} (start with `readme.md`; the pictures its pages name are in `img/`). For a question about CodeAlta itself (what a feature does, where a setting is, how to do something in its interface), read the guide and answer from it; you can guide the user step by step.");
         }
 
-        return string.Join(Environment.NewLine, lines);
+        return (string.Join(Environment.NewLine, lines), string.Join(Environment.NewLine, sessionLines));
     }
 
     // The space of the session, with what it is for on the same line: a description of several lines is joined, and
@@ -959,6 +976,9 @@ public sealed class SystemPromptBuilder
             return null;
         }
 
+        // A file of the project is named from its root, which the Session Context names: the text is then the same for
+        // the sessions of the project in other folders (its worktrees).
+        var root = ExistingWorktree(request.Session) ?? projectRoot ?? NormalizeOptionalRoot(request.Session.WorkingDirectory ?? request.WorkingDirectory);
         var builder = new StringBuilder();
         foreach (var path in selectedFiles)
         {
@@ -990,7 +1010,7 @@ public sealed class SystemPromptBuilder
                 builder.AppendLine().AppendLine();
             }
 
-            builder.AppendLine($"File: {MarkdownCode(path)}");
+            builder.AppendLine($"File: {MarkdownCode(FromRoot(path, root))}");
             builder.AppendLine();
             builder.AppendLine("<INSTRUCTIONS>");
             builder.AppendLine();
@@ -1011,13 +1031,23 @@ public sealed class SystemPromptBuilder
             builder.AppendLine("Instructions for some files only (`.github/instructions`). Before you change a file that matches a pattern, read the file of instructions and follow it:");
             foreach (var (path, applyTo) in scoped)
             {
-                builder.AppendLine($"- {MarkdownCode(path)} applies to {MarkdownCode(applyTo)}");
+                builder.AppendLine($"- {MarkdownCode(FromRoot(path, root))} applies to {MarkdownCode(applyTo)}");
             }
 
             builder.Length -= Environment.NewLine.Length;
         }
 
         return builder.Length == 0 ? null : builder.ToString();
+    }
+
+    // A path inside a root as a path from that root, with forward slashes (`AGENTS.md`, `src/AGENTS.md`); any other path whole.
+    private static string FromRoot(string path, string? root)
+    {
+        if (root is null) return path;
+        var relative = Path.GetRelativePath(root, path);
+        return relative is "." or ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || Path.IsPathRooted(relative)
+            ? path
+            : relative.Replace('\\', '/');
     }
 
     // The home folder whose files of other tools the prompt reads; null for none.
@@ -1552,6 +1582,13 @@ public sealed class SystemPromptBundle
 
     /// <summary>Gets the logical developer instructions.</summary>
     public string? DeveloperInstructions { get; init; }
+
+    /// <summary>
+    /// Gets what the instructions say of this session alone (the Session Context: where it works, its parent, its
+    /// scratchpad), sent after <see cref="SystemMessage"/> and <see cref="DeveloperInstructions"/>, which are then the same
+    /// text for the sessions of a prompt in other folders; null for none.
+    /// </summary>
+    public string? SessionInstructions { get; init; }
 
     /// <summary>Gets the stable effective prompt hash.</summary>
     public required string EffectivePromptHash { get; init; }

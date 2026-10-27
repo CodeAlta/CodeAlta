@@ -2102,8 +2102,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var developerInstructions = instructions.DeveloperInstructions;
         // A session moved to another project is told so once, by the first attachment after the move.
         var movedNotice = TakeMovedNotice(session.SessionId);
-        var additionalDeveloperInstructions = AppendPromptPart(AppendPromptPart(AppendPromptPart(BuildParentNotificationGuidance(session), worktreeGone), movedNotice),
-            options.AdditionalDeveloperInstructions);
+        // What is of this session alone is sent last, apart from what the sessions of the prompt share, which the prompt
+        // cache of the provider then serves to them all.
+        var sessionInstructions = AppendPromptPart(AppendPromptPart(AppendPromptPart(instructions.SessionInstructions, BuildParentNotificationGuidance(session)),
+            worktreeGone), movedNotice);
+        var additionalDeveloperInstructions = options.AdditionalDeveloperInstructions;
         var tools = options.Tools;
         // The identity of the space of the session as it is now: the session keeps it until it attaches again,
         // whatever the window shows and whatever is changed in the space meanwhile.
@@ -2130,6 +2133,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var instructionsAlreadyComposed = false;
         if (options.InstructionProcessor is not null)
         {
+            // The plugins read and change the whole text; one they changed is sent as it is, in one part.
+            var processedDeveloperInstructions = AppendPromptPart(finalDeveloperInstructions, sessionInstructions);
             var processing = await options.InstructionProcessor(
                     new SessionInstructionProcessingRequest
                     {
@@ -2139,7 +2144,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         ProviderId = options.ProviderId.Value,
                         Model = options.Model,
                         SystemMessage = systemMessage,
-                        DeveloperInstructions = finalDeveloperInstructions,
+                        DeveloperInstructions = processedDeveloperInstructions,
                         ActiveToolNames = (tools ?? []).Select(static tool => tool.Spec.Name).ToArray(),
                         Manifest = new Dictionary<string, string>
                         {
@@ -2154,7 +2159,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }
 
             systemMessage = processing.SystemMessage;
-            finalDeveloperInstructions = processing.DeveloperInstructions;
+            if (!string.Equals(processing.DeveloperInstructions, processedDeveloperInstructions, StringComparison.Ordinal))
+            {
+                finalDeveloperInstructions = processing.DeveloperInstructions;
+                sessionInstructions = null;
+            }
+
             instructionTransformations = processing.Transformations;
             instructionsAlreadyComposed = instructionTransformations.Count > 0;
         }
@@ -2205,6 +2215,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Environment = processEnvironment,
             SystemMessage = systemMessage,
             DeveloperInstructions = finalDeveloperInstructions,
+            SessionInstructions = sessionInstructions,
             InstructionsAlreadyComposed = instructionsAlreadyComposed,
             InstructionTransformations = instructionTransformations,
             AgentPromptId = NormalizeOptionalText(session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,

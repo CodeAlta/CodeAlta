@@ -170,7 +170,7 @@ public sealed class SessionPromptSuggestionTests
 
         public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
         {
-            lock (Instructions) Instructions.Add(request.DeveloperInstructions);
+            lock (Instructions) Instructions.Add(AgentInstructionText.DeveloperAndSession(request));
             return Task.FromResult(new AgentTurnResponse
             {
                 AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(Reply)]),

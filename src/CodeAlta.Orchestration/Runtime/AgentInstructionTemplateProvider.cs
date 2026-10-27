@@ -160,6 +160,7 @@ public sealed class AgentInstructionTemplateProvider
         {
             SystemMessage = bundle.SystemMessage,
             DeveloperInstructions = bundle.DeveloperInstructions,
+            SessionInstructions = bundle.SessionInstructions,
             PromptBundle = bundle,
         };
     }
@@ -194,6 +195,7 @@ public sealed class AgentInstructionTemplateProvider
         {
             SystemMessage = bundle.SystemMessage,
             DeveloperInstructions = bundle.DeveloperInstructions,
+            SessionInstructions = bundle.SessionInstructions,
             PromptBundle = bundle,
         };
     }
@@ -220,6 +222,7 @@ public sealed class AgentInstructionTemplateProvider
         {
             SystemMessage = bundle.SystemMessage,
             DeveloperInstructions = bundle.DeveloperInstructions,
+            SessionInstructions = bundle.SessionInstructions,
             PromptBundle = bundle,
         };
     }

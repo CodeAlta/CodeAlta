@@ -544,6 +544,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 new AgentRunId($"provider-remote-control:{Guid.CreateVersion7()}"),
                 instructionBundle.SystemMessage,
                 CombineDeveloperInstructions(instructionBundle.DeveloperInstructions, instructionBundle.RuntimeContext),
+                instructionBundle.SessionInstructions,
                 modelInfo,
                 tools: []);
         }
@@ -694,10 +695,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 instructionBundle.DeveloperInstructions,
                 instructionBundle.RuntimeContext);
             await AppendModelSelectionEventAsync(runId, linkedCts.Token).ConfigureAwait(false);
+            // The journal records the whole prompt: the instructions of the session too, which the provider is sent last.
             await AppendSystemPromptEventIfChangedAsync(
                     runId,
                     instructionBundle.SystemMessage,
-                    requestDeveloperInstructions,
+                    CombineDeveloperInstructions(requestDeveloperInstructions, instructionBundle.SessionInstructions ?? string.Empty),
                     instructionBundle.InstructionHash,
                     linkedCts.Token)
                 .ConfigureAwait(false);
@@ -765,6 +767,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     runId,
                     instructionBundle.SystemMessage,
                     requestDeveloperInstructions,
+                    instructionBundle.SessionInstructions,
                     modelInfo,
                     allTools);
                 var response = await ExecuteTurnWithOverflowRecoveryAsync(
@@ -1654,6 +1657,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 new AgentRunId($"provider-compaction:{Guid.CreateVersion7()}"),
                 instructionBundle.SystemMessage,
                 CombineDeveloperInstructions(instructionBundle.DeveloperInstructions, instructionBundle.RuntimeContext),
+                instructionBundle.SessionInstructions,
                 modelInfo,
                 tools: []);
             outcome = await providerCompaction.CompactAsync(request, cancellationToken).ConfigureAwait(false);
@@ -2144,6 +2148,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentRunId runId,
         string? systemMessage,
         string? developerInstructions,
+        string? sessionInstructions,
         AgentModelInfo? modelInfo,
         IReadOnlyList<AgentToolDefinition> tools,
         IReadOnlyList<AgentConversationMessage>? conversation = null)
@@ -2163,6 +2168,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Environment = _options.Environment,
             SystemMessage = systemMessage,
             DeveloperInstructions = developerInstructions,
+            SessionInstructions = sessionInstructions,
             ReasoningEffort = _options.ReasoningEffort,
             // A run has the mode it started with, or the one it was given since (ApplyPermissionModeNowAsync); what
             // runs outside one takes the current mode.

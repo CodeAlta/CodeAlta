@@ -264,9 +264,9 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             messages.Add(ChatMessage.CreateSystemMessage(request.SystemMessage.Trim()));
         }
 
-        if (!string.IsNullOrWhiteSpace(request.DeveloperInstructions))
+        // The instructions of the session come last: what is before them is the same for every session of a prompt.
+        if (AgentInstructionText.DeveloperAndSession(request) is { } developerInstructions)
         {
-            var developerInstructions = request.DeveloperInstructions.Trim();
             if (supportsDeveloperRole)
             {
                 messages.Add(ChatMessage.CreateDeveloperMessage(developerInstructions));

@@ -539,7 +539,7 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
     private string CreateInstructions(AgentTurnRequest request, Connection connection)
         => AcpPrompts.CreateInstructions(
             _options.AgentName,
-            request.DeveloperInstructions,
+            AgentInstructionText.DeveloperAndSession(request),
             hasTools: connection.Endpoint is not null,
             hasGateway: ExposedTools.ContainsKey(AcpPrompts.GatewayTool));
 

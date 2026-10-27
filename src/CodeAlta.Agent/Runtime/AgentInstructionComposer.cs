@@ -64,18 +64,20 @@ internal static class AgentInstructionComposer
             }
         }
 
-        // What the session adds for the state it is in now (how it is titled): the last section, so that a change
-        // of that state changes one paragraph of the instructions and nothing else.
-        if (Normalize(sessionInstructions) is { } sessionSection)
-        {
-            developerSections.Add(sessionSection);
-        }
-
         var developerInstructions = developerSections.Count == 0
             ? null
             : string.Join(Environment.NewLine + Environment.NewLine, developerSections);
-        var hash = ComputeHash(systemMessage, developerInstructions, runtimeContext);
-        return new AgentInstructionBundle(systemMessage, developerInstructions, runtimeContext, hash, instructionFiles.Diagnostics);
+        // What is of this session alone, sent last (AgentTurnRequest.SessionInstructions): what the host says of it (where
+        // it works, its parent), then what the session adds for the state it is in now (how it is titled), so that a
+        // change of that state changes one paragraph of the instructions and nothing else.
+        var session = string.Join(Environment.NewLine + Environment.NewLine,
+            new[] { Normalize(options.SessionInstructions), Normalize(sessionInstructions) }.Where(static part => part is not null));
+        var sessionPart = session.Length == 0 ? null : session;
+        var hash = ComputeHash(systemMessage, developerInstructions, sessionPart is null ? runtimeContext : runtimeContext + "\n" + sessionPart);
+        return new AgentInstructionBundle(systemMessage, developerInstructions, runtimeContext, hash, instructionFiles.Diagnostics)
+        {
+            SessionInstructions = sessionPart,
+        };
     }
 
     private static string? Normalize(string? value)
@@ -285,4 +287,8 @@ internal sealed record AgentInstructionBundle(
     string? DeveloperInstructions,
     string RuntimeContext,
     string InstructionHash,
-    IReadOnlyList<AgentInstructionFileDiagnostic> Diagnostics);
+    IReadOnlyList<AgentInstructionFileDiagnostic> Diagnostics)
+{
+    // What is of this session alone, which a provider sends last (AgentTurnRequest.SessionInstructions); null for none.
+    public string? SessionInstructions { get; init; }
+}

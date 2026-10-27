@@ -61,7 +61,7 @@ public sealed class PromptFeatureTests
                 ModelTiers = "`quick` (fake:small)",
                 DisabledFeatures = off.ToHashSet(StringComparer.Ordinal),
             });
-            return bundle.SystemMessage + "\n" + bundle.DeveloperInstructions;
+            return bundle.SystemMessage + "\n" + bundle.DeveloperInstructions + "\n" + bundle.SessionInstructions;
         }
 
         var all = Prompt("default");
