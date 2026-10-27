@@ -1,5 +1,7 @@
 # CodeAlta on SWE-bench Pro v2 (Harbor)
 
+To run HARD-51 end to end against Claude Code and Codex, with pinned versions, preflights and summaries, use the reproduction kit in [`../swe-bench-pro`](../swe-bench-pro/README.md).
+
 `locked_codealta.py` is a [Harbor](https://github.com/laude-institute/harbor) agent, `codealta-locked`, that runs the CodeAlta harness (`altacli run`) on [SWE-bench Pro v2](https://github.com/scaleapi/SWE-bench_Pro-os/blob/main/v2/README.md) under its locked protocol, like the `locked_codex.py` and `locked_claude_code.py` agents of `v2/tooling`.
 
 ## Build

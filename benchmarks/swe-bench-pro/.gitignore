@@ -1,0 +1,8 @@
+# What setup.ps1 and run-hard51.ps1 create: the benchmark checkout, Harbor's virtual environment, worktrees of
+# requested CodeAlta revisions, the generated dataset, the Harbor jobs and the summaries.
+workspace/
+workspace.json
+datasets/
+jobs/
+results/
+__pycache__/
