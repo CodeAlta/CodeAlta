@@ -515,3 +515,116 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .toast-text { flex: 1; min-width: 0; padding: .5rem 0; overflow-wrap: anywhere; }
 .toast-action { flex: none; min-height: 44px; padding: 0 10px; border: 0; background: transparent; color: #8abbff; font: 700 .875rem/1 var(--font); letter-spacing: .02em; text-transform: uppercase; cursor: pointer; }
 :root[data-theme="light"] .toast-action { color: #8abbff; } :root[data-theme="dark"] .toast-action { color: #215db0; }
+
+/* ---- The timeline of a session: cards of the host, runs of scripts and images (timelineView.ts) ---- */
+/* A message the host sent: one line that says what it is, never the purple card of the user; a tap opens its body. */
+.msg-host { --card-color: var(--muted); padding: 0; border-color: var(--line); border-radius: 8px; background: var(--panel); }
+.msg-host[data-state="succeeded"] { --card-color: var(--green); } .msg-host[data-state="failed"] { --card-color: var(--red); } .msg-host[data-state="stopped"] { --card-color: var(--yellow); }
+.host-row { display: flex; align-items: stretch; min-width: 0; }
+.host-head { display: flex; flex: 1; align-items: center; gap: .5rem; min-width: 0; min-height: 44px; padding: .375rem .25rem .375rem .625rem; border: 0; border-radius: 8px;
+  background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.host-head:focus-visible, .host-source:focus-visible, .wf-head:focus-visible, .wf-session:focus-visible, .thumb:focus-visible, .md-image:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.host-icon { color: var(--card-color); font-size: 1rem; }
+.msg-host[data-host="agent"] .host-icon, .msg-host[data-host="host"] .host-icon { color: var(--accent); }
+.host-text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.host-title { display: flex; align-items: baseline; gap: .375rem; min-width: 0; }
+.host-kind { flex: none; color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.host-kind:empty { display: none; }
+.host-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; font-weight: 600; }
+.host-code { font: 600 .8125rem var(--code-font); }
+.host-preview { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: .8125rem; }
+.msg-host[data-open="true"] .host-preview { display: none; }
+.host-chevron { color: var(--muted); font-size: .875rem; transition: transform .15s; } .msg-host[data-open="true"] .host-chevron { transform: rotate(90deg); }
+.chip { display: inline-flex; flex: none; align-items: center; gap: 4px; max-width: 9rem; padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 600;
+  font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--card-color); background: color-mix(in srgb, var(--card-color) 14%, transparent); }
+.chip > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.chip-succeeded { --card-color: var(--green); } .chip-failed { --card-color: var(--red); } .chip-stopped { --card-color: var(--yellow); }
+/* The session a message of an agent comes from, which a tap opens. */
+.host-source { display: inline-flex; flex: none; align-items: center; gap: 4px; max-width: 46%; min-height: 44px; margin: 0; padding: 0 .625rem; border: 0; border-left: 1px solid var(--line);
+  border-radius: 0 8px 8px 0; background: transparent; color: var(--accent); font: inherit; font-size: .8125rem; cursor: pointer; }
+.host-source > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.host-source .ico:first-child { flex: none; }
+.host-body { padding: .125rem .75rem .5rem; border-top: 1px solid var(--line); }
+.host-result { color: var(--muted); font-size: .8125rem; }
+.msg-host > .thumbs, .msg-host > .msg-files { padding: 0 .75rem .5rem; }
+
+/* Images: a fixed box each, so the timeline does not move while they load. */
+.thumbs { display: flex; flex-wrap: wrap; gap: .375rem; margin-top: .375rem; }
+.thumb { position: relative; display: grid; place-items: center; width: 88px; height: 88px; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel-2); cursor: zoom-in; -webkit-tap-highlight-color: transparent; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.tool-images { margin: 0 0 .25rem; }
+.tool-images .thumb { width: 64px; height: 64px; }
+.thumb-fallback { position: absolute; color: var(--muted); font-size: 1.25rem; opacity: 0; }
+.thumb.failed img, .md-image.failed img { visibility: hidden; } .thumb.failed .thumb-fallback, .md-image.failed .thumb-fallback { opacity: 1; }
+/* A picture of the disk an answer shows: the width of the message at most, in a box of a fixed shape. */
+.md-image { position: relative; display: flex; flex-direction: column; align-items: stretch; width: min(100%, 22rem); margin: .375rem 0; padding: 0; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--muted); font: inherit; text-align: start; cursor: zoom-in; }
+.md-image img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; }
+.md-image .thumb-fallback { top: calc(50% - 1.5rem); left: calc(50% - .625rem); }
+.md-image-alt { padding: .25rem .5rem; border-top: 1px solid var(--line); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* What shows under the line of an activity, folded or not: the runs of its scripts, then the images of its tools. */
+.act-extras { display: flex; flex-direction: column; gap: .375rem; min-width: 0; margin: 0 .5rem .375rem 1.5rem; }
+.wf-only { padding: .25rem 0; }
+.wf-only .wf-card { margin: 0 .5rem; }
+.tool-row { min-height: 1.75rem; }
+.tool-mark { flex: none; color: var(--tool-tone); font-size: .8125rem; }
+.tool-row strong { color: var(--text); font-weight: 500; }
+.tool-row[data-phase="failed"] strong { color: var(--red); }
+.tool-row:not([data-phase="completed"]):not([data-phase="failed"]):not([data-phase="canceled"]) .tool-mark { color: var(--accent); }
+.tool-phase:empty { display: none; }
+
+/* A run of a script of Code Mode: its state, its title, its progress and the step it is at; a tap opens its steps and sessions. */
+.wf-card { --wf-tone: var(--accent); min-width: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--wf-tone) 35%, var(--line)); border-radius: 8px;
+  background: color-mix(in srgb, var(--wf-tone) 6%, var(--panel)); }
+.wf-card[data-state="completed"] { --wf-tone: var(--green); } .wf-card[data-state="failed"] { --wf-tone: var(--red); }
+.wf-card[data-state="waiting"] { --wf-tone: var(--yellow); } .wf-card:is([data-state="canceled"], [data-state="interrupted"]) { --wf-tone: var(--muted); }
+.wf-head { display: flex; align-items: center; gap: .5rem; width: 100%; min-width: 0; min-height: 44px; padding: .375rem .375rem .375rem .625rem; border: 0;
+  background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.wf-mark { color: var(--wf-tone); font-size: 1rem; }
+.wf-text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.wf-title { display: flex; align-items: baseline; gap: .375rem; min-width: 0; }
+.wf-kind { flex: none; color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.wf-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; font-weight: 600; }
+.wf-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: .8125rem; }
+.wf-card[data-state="waiting"] .wf-sub { color: var(--yellow); font-weight: 600; }
+.wf-progress { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); color: var(--muted); font-size: .75rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wf-chevron { color: var(--muted); font-size: .875rem; transition: transform .15s; } .wf-head[aria-expanded="true"] .wf-chevron { transform: rotate(90deg); }
+.wf-bar { height: 3px; margin: 0 .625rem .375rem; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.wf-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--wf-tone); transition: width .3s; }
+.wf-body { display: flex; flex-direction: column; gap: .25rem; padding: .25rem .625rem .5rem; border-top: 1px solid var(--line); }
+.wf-steps, .wf-sessions { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.wf-step, .wf-session { --step-tone: var(--muted); display: flex; align-items: center; gap: .5rem; min-width: 0; min-height: 2rem; font-size: .8125rem; }
+.wf-step[data-state="running"], .wf-session[data-state="running"] { --step-tone: var(--accent); }
+.wf-step[data-state="waiting"] { --step-tone: var(--yellow); }
+.wf-step[data-state="completed"], .wf-session[data-state="completed"] { --step-tone: var(--green); }
+.wf-step[data-state="failed"], .wf-session[data-state="failed"] { --step-tone: var(--red); }
+.wf-step[data-state="pending"] .wf-step-title { color: var(--muted); }
+.wf-step-mark { color: var(--step-tone); font-size: .875rem; }
+.wf-step-title, .wf-session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-step-title small { color: var(--muted); }
+.wf-step-time { flex: none; color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.wf-section { margin-top: .25rem; color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.wf-session { width: 100%; min-height: 44px; padding: 0 .25rem; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: .8125rem; text-align: start; cursor: pointer; }
+.wf-session:active { background: var(--hover); }
+.wf-session-go { color: var(--muted); }
+.wf-message { margin: .25rem 0 0; color: var(--red); font-size: .8125rem; overflow-wrap: anywhere; }
+.wf-empty { margin: .25rem 0; color: var(--muted); font-size: .8125rem; }
+
+/* The images full screen: the browser pinches and pans them; a swipe goes to the next or closes. */
+.img-viewer { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background: #0b0d10; color: #f6f7f9; }
+.img-viewer-bar { display: flex; align-items: center; gap: .5rem; min-height: 56px; padding: calc(6px + env(safe-area-inset-top)) calc(8px + var(--safe-right)) 6px calc(16px + var(--safe-left)); }
+.img-viewer-caption { display: flex; flex: 1; align-items: baseline; gap: .5rem; min-width: 0; font-size: .875rem; }
+.img-viewer-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.img-viewer-count { flex: none; color: #abb3bf; font-variant-numeric: tabular-nums; }
+.img-viewer .icon-btn { color: #f6f7f9; } .img-viewer .icon-btn:hover, .img-viewer .icon-btn:active { background: rgba(255,255,255,.12); }
+.img-viewer-stage { display: flex; flex: 1; align-items: center; justify-content: center; min-height: 0; overflow: auto; padding: 0 calc(8px + var(--safe-right)) calc(12px + env(safe-area-inset-bottom)) calc(8px + var(--safe-left));
+  touch-action: pinch-zoom pan-x pan-y; -webkit-overflow-scrolling: touch; }
+/* The image fills the screen, whatever its own size, without changing its shape. */
+.img-viewer-stage img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.img-viewer-failed { color: #abb3bf; }
+.img-viewer-step { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); background: rgba(255,255,255,.1); border-radius: 999px; }
+.img-viewer-prev { left: calc(16px + var(--safe-left)); } .img-viewer-next { right: calc(16px + var(--safe-right)); }
+/* A table scrolls sideways in its message: its cells keep their words whole, as the rest of the message does not. */
+.markdown-content :is(th, td) { min-width: 4ch; overflow-wrap: normal; word-break: normal; }

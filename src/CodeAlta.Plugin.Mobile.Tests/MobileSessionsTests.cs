@@ -600,6 +600,61 @@ public sealed class MobileSessionsTests
         }
     }
 
+    [TestMethod]
+    public async Task Events_SayWhatTheHostSent_TheImagesAndTheRecordsOfScripts()
+    {
+        JsonObject With(JsonObject record, JsonObject metadata) { record["metadata"] = metadata; return record; }
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session events a", (_, _) => FakeAlta.Transcript(0,
+                With(Event(1, "user.message", "[CodeAlta background job]\nJob: job-1"), new JsonObject { ["provenance"] = "background-job" }),
+                With(Event(2, "user.message", "Done."), new JsonObject { ["provenance"] = "agent-session", ["sourceSessionId"] = "child-1" }),
+                With(Event(3, "user.message", "Odd"), new JsonObject { ["provenance"] = "Not One!", ["sourceSessionId"] = "--help" }),
+                With(Event(4, "activity.toolcall.started", "exec"), new JsonObject { ["activityId"] = "call-1" }),
+                With(Event(5, "activity.toolcall.started", "read_file"), new JsonObject { ["activityId"] = "call-2", ["parentActivityId"] = "call-1" }),
+                With(Event(6, "tool.output", "the text of the tool"), new JsonObject
+                {
+                    ["parentActivityId"] = "call-2",
+                    ["images"] = new JsonArray(new JsonObject { ["title"] = "Shot", ["mediaType"] = "image/png", ["id"] = "20261024-tool-shot.png" }, new JsonObject { ["title"] = "x", ["id"] = "../x.png" }),
+                }),
+                With(Event(7, "workflow.stepsDeclared", "Compare"), new JsonObject
+                {
+                    ["runId"] = "run-1", ["callId"] = "call-1", ["title"] = "Compare", ["steps"] = new JsonArray(new JsonObject { ["id"] = "research", ["title"] = "Research" }),
+                }),
+                With(Event(8, "workflow.stepEnded", ""), new JsonObject { ["runId"] = "run-1", ["callId"] = "call-1", ["stepId"] = "research", ["status"] = "completed", ["durationMs"] = 1200 }),
+                Event(9, "assistant.message", "Here: ![The shot](/tmp/shot.png)\n\n```\n![not](a.png)\n```")));
+        var sessions = new MobileSessions(alta, new FakeSpaces(), new MobileLive());
+
+        var events = (JsonArray)(await sessions.EventsAsync("a", 0, default))!["events"]!;
+
+        CollectionAssert.IsSubsetOf(new[] { "--no-tool-output", "--tool-images", "user,assistant,reasoning,tool,host,workflow" }, alta.CallsOf("session events").First());
+        Assert.AreEqual("background-job", (string?)events[0]!["provenance"]);
+        Assert.AreEqual(("agent-session", "child-1"), ((string?)events[1]!["provenance"], (string?)events[1]!["sourceSessionId"]));
+        Assert.IsNull(events[2]!["provenance"] ?? events[2]!["sourceSessionId"], "What is no provenance, and no id of a session, is left out.");
+        Assert.IsNull(events[3]!["parentId"]);
+        Assert.AreEqual("call-1", (string?)events[4]!["parentId"], "A call of a script names the call that runs the script.");
+        Assert.AreEqual(("", "call-2"), ((string?)events[5]!["text"], (string?)events[5]!["parentId"]), "The output goes for its images, without its text.");
+        Assert.AreEqual(("Shot", "20261024-tool-shot.png", 1), ((string?)events[5]!["images"]![0]!["title"], (string?)events[5]!["images"]![0]!["id"], ((JsonArray)events[5]!["images"]!).Count),
+            "An image whose id names a folder is left out.");
+        Assert.AreEqual(("run-1", "call-1", "research"), ((string?)events[6]!["workflow"]!["runId"], (string?)events[6]!["workflow"]!["callId"], (string?)events[6]!["workflow"]!["steps"]![0]!["id"]));
+        Assert.AreEqual(("completed", 1200L), ((string?)events[7]!["workflow"]!["status"], (long)events[7]!["workflow"]!["durationMs"]!));
+        var linked = (JsonArray)events[8]!["images"]!;
+        Assert.AreEqual(1, linked.Count, "A picture written in code is none.");
+        Assert.AreEqual(("0", "The shot", "/tmp/shot.png"), ((string?)linked[0]!["id"], (string?)linked[0]!["title"], (string?)linked[0]!["src"]));
+    }
+
+    [TestMethod]
+    public void LinkedImages_AreThePicturesOfTheDiskOutsideCode()
+    {
+        var text = "![a](one.png) `![b](two.png)` ![c](<with space.png> \"title\") ![d](https://example.com/x.png) ![e](data:image/png;base64,AA==)\n"
+            + "    ![f](indented.png)\n~~~\n![g](fenced.png)\n~~~\n![h](C:\\shots\\h.png) ![i](file:///tmp/i.png) ![j](my%20shot.png)";
+
+        CollectionAssert.AreEqual(new[] { ("a", "one.png"), ("c", "with space.png"), ("h", @"C:\shots\h.png"), ("i", "file:///tmp/i.png"), ("j", "my shot.png") },
+            MobileTimeline.LinkedImages(text).ToArray());
+        Assert.IsNull(MobileImages.Locate("~/x.png", "/tmp"), "A path of the shell is not resolved.");
+        Assert.IsNull(MobileImages.Locate("x.png", null), "A relative path needs the folder of the session.");
+    }
+
     private static JsonObject Event(int sequence, string kind, string text, string? activity = null)
         => new()
         {

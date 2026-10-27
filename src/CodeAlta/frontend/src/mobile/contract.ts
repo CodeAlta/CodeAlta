@@ -82,8 +82,35 @@ export type SessionPage = Readonly<{
  */
 export type EventAttachment = Readonly<{ title: string; mediaType: string; id: string }>;
 
-/** An event of a session's timeline (`GET /api/sessions/<id>/events`); a user message names its files in `attachments`. */
-export type TimelineEvent = Readonly<{ seq: number; at: string | null; kind: string; text: string | null; activityId: string | null; attachments?: readonly EventAttachment[] | null }>;
+/**
+ * An image of the timeline. A saved copy of the session (an image a tool gave the model) has the `id` the page asks
+ * `GET /api/sessions/<id>/images/<image>` for; a picture of the disk that an answer shows has its position in the answer
+ * (`GET /api/sessions/<id>/linked-images/<seq>/<position>`) and `src`, its target as the Markdown writes it.
+ */
+export type EventImage = Readonly<{ title: string; mediaType?: string | null; id: string; src?: string | null }>;
+
+/** A step a script of Code Mode declares (`meta.steps`). */
+export type WorkflowStepDeclaration = Readonly<{ id: string; title: string }>;
+
+/**
+ * The facts of a record of a run of a script of Code Mode (`workflow.*` events): its run, the tool call that runs it, and
+ * what the record says of a step, of a session the script started, of a wait or of its end.
+ */
+export type WorkflowFacts = Readonly<{
+  runId: string; callId?: string | null; stepId?: string | null; childSessionId?: string | null; status?: string | null; title?: string | null;
+  message?: string | null; durationMs?: number | null; wakeAt?: string | null; steps?: readonly WorkflowStepDeclaration[] | null;
+}>;
+
+/**
+ * An event of a session's timeline (`GET /api/sessions/<id>/events`); a user message names its files in `attachments`. A
+ * message the host sent names what it is (`provenance`) and the session it comes from (`sourceSessionId`); a call of a
+ * script names the call that runs it (`parentId`); a `tool.*` event comes for the `images` a tool gave the model, an answer
+ * lists the pictures of the disk it shows; a `workflow.*` event has the facts of a run of a script.
+ */
+export type TimelineEvent = Readonly<{
+  seq: number; at: string | null; kind: string; text: string | null; activityId: string | null; attachments?: readonly EventAttachment[] | null;
+  provenance?: string | null; sourceSessionId?: string | null; parentId?: string | null; images?: readonly EventImage[] | null; workflow?: WorkflowFacts | null;
+}>;
 
 /** The events of a session after a sequence number. */
 export type EventPage = Readonly<{ since: number; events: readonly TimelineEvent[]; error: string | null }>;

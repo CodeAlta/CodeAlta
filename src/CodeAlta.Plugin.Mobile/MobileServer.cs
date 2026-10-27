@@ -133,6 +133,12 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapGet("/sessions/{id}", async (string id, CancellationToken ct) => Json(await _options.Sessions.GetAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/events", async (string id, long? since, CancellationToken ct) =>
             Json(await _options.Sessions.EventsAsync(id, Math.Max(0, since ?? 0), ct).ConfigureAwait(false)));
+        // The images of a timeline, by an id the server finds in the records of the session, never by a path: a saved copy of
+        // the session, or a picture of the disk that an answer shows. They never change: the phone keeps them.
+        api.MapGet("/sessions/{id}/images/{imageId}", async (string id, string imageId, HttpContext context, CancellationToken ct) =>
+            Image(context, await _options.Sessions.Images.SavedAsync(id, imageId, ct).ConfigureAwait(false)));
+        api.MapGet("/sessions/{id}/linked-images/{seq:long}/{index:int}", async (string id, long seq, int index, HttpContext context, CancellationToken ct) =>
+            Image(context, await _options.Sessions.Images.LinkedAsync(id, seq, index, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/choices", async (string id, CancellationToken ct) => Json(await _options.Api.ChoicesAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/projects", async (CancellationToken ct) => Json(await _options.Api.ProjectsAsync(ct).ConfigureAwait(false)));
         api.MapGet("/options", async (CancellationToken ct) => Json(await _options.Api.OptionsAsync(ct).ConfigureAwait(false)));
@@ -256,6 +262,14 @@ internal sealed partial class MobileServer : IAsyncDisposable
     private static bool IsLoopback(string host) => host is "127.0.0.1" or "localhost" or "[::1]";
 
     // The key of a phone, in its cookie or as a bearer token; the pairing token only signs in.
+    private static IResult Image(HttpContext context, MobileImage? image)
+    {
+        if (image is null) return Results.NotFound();
+        context.Response.Headers.CacheControl = "private, max-age=86400, immutable";
+        context.Response.Headers.ContentSecurityPolicy = "default-src 'none'; sandbox";
+        return Results.Bytes(image.Bytes, image.MediaType);
+    }
+
     private bool Authorized(HttpContext context)
     {
         var header = context.Request.Headers.Authorization.ToString();

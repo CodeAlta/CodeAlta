@@ -23,8 +23,10 @@ import { topLevelCount } from "./sessionTree";
 import { createSheet } from "./sheet";
 import { ago, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
 import {
-  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, stillPending, type ActivityBlock, type PendingPrompt, type TimelineBlock, type ToolRow,
+  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, stillPending, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
+import { createImageViewer } from "./imageViewer";
+import { createTimelineView } from "./timelineView";
 
 /** Starts the phone page in a window whose document is `mobile.html`. */
 export function startMobile(window: Window & typeof globalThis) {
@@ -308,7 +310,7 @@ export function startMobile(window: Window & typeof globalThis) {
     filterSheet.open();
   });
 
-  // ---- The page of a session: its timeline, folded as the desktop folds it, drawn block by block ----
+  // ---- The page of a session: its timeline, folded as the desktop folds it, drawn block by block (timelineView.ts) ----
   type Drawn = { element: HTMLLIElement; version: string; diagram: boolean };
   const timeline = $<HTMLOListElement>("timeline");
   const detail = {
@@ -319,89 +321,25 @@ export function startMobile(window: Window & typeof globalThis) {
   // The prompts each session accepted that its timeline does not hold yet (a steered one reaches the journal later): shown at once.
   const pendingPrompts = new Map<string, PendingPrompt[]>();
   let pendingSeq = 0;
-  const pendingLabels: Readonly<Record<PendingPrompt["mode"], string>> = { send: "You", steer: "You · steering", queue: "You · queued" };
   let working: HTMLLIElement | null = null;
   markdown.handle(timeline);
+  const blocksView = createTimelineView({
+    document, fill: (element, text, redraw) => markdown.fill(element, text, redraw), session: () => detail.id,
+    sessionTitle: id => sessions.view(id)?.title ?? null,
+    openSession: id => { window.location.hash = `#/session/${encodeURIComponent(id)}`; },
+    viewer: createImageViewer({ window }),
+  });
 
   const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 40;
   const toBottom = () => window.scrollTo(0, document.documentElement.scrollHeight);
   function noteHere(text: string) { if (detail.id) detailNote.textContent = text; else showToast(text); }
-
-  function messageBlock(block: Extract<TimelineBlock, { kind: "message" }>, pending?: PendingPrompt): Drawn {
-    const item = make("li", `msg msg-${block.role}${pending ? " pending" : ""}`);
-    item.dataset.key = block.key;
-    item.append(make("div", "msg-label", pending ? pendingLabels[pending.mode] : block.role === "user" ? "You" : block.role === "assistant" ? "Agent" : "Error"));
-    const content = make("div", "markdown-content");
-    const fill = () => markdown.fill(content, block.text, fill);
-    const diagram = fill();
-    item.append(content);
-    if (block.attachments?.length) {
-      const files = make("div", "msg-files");
-      for (const file of block.attachments) files.append(make("span", "attach-chip", file.title));
-      item.append(files);
-    }
-    return { element: item, version: block.key, diagram };
-  }
-
-  function toolRow(tool: ToolRow): HTMLDivElement {
-    const element = make("div", "tool-row");
-    element.dataset.key = tool.key;
-    element.dataset.phase = tool.phase;
-    element.append(make("span", "tool-dot"), make("strong", null, tool.title), make("span", "tool-phase", tool.phase));
-    return element;
-  }
-
-  function activityBody(block: ActivityBlock, body: HTMLElement) {
-    // Rows are kept by key: a thought never changes, a tool changes its phase; new rows are added after.
-    const existing = new Map(Array.from(body.children as HTMLCollectionOf<HTMLElement>).map(child => [child.dataset.key!, child]));
-    let previous: Element | null = null;
-    for (const entry of block.rows) {
-      let element = existing.get(entry.key);
-      if (!element) {
-        if (entry.type === "thought") {
-          element = make("div", "msg msg-reasoning");
-          element.dataset.key = entry.key;
-          const content = make("div", "markdown-content");
-          const fill = () => markdown.fill(content, entry.text, fill);
-          fill();
-          element.append(make("div", "msg-label", "Thinking"), content);
-        } else element = toolRow(entry);
-      } else if (entry.type === "tool" && element.dataset.phase !== entry.phase) {
-        element.dataset.phase = entry.phase;
-        element.querySelector(".tool-phase")!.textContent = entry.phase;
-      }
-      const expected: ChildNode | null = previous ? previous.nextSibling : body.firstChild;
-      if (expected !== element) body.insertBefore(element, expected);
-      previous = element;
-    }
-  }
-
-  function drawActivity(item: HTMLLIElement, block: ActivityBlock, live: boolean, open: boolean) {
-    const facts = activityFacts(block, live);
-    item.dataset.state = facts.state;
-    item.dataset.expanded = String(open);
-    let toggle = item.querySelector<HTMLButtonElement>(":scope > .act-toggle");
-    if (!toggle) {
-      toggle = make("button", "act-toggle");
-      toggle.type = "button";
-      toggle.append(icon(document, "chevron", "act-chevron"));
-      item.append(toggle);
-    }
-    toggle.setAttribute("aria-expanded", String(open));
-    toggle.querySelector(".act-line")?.remove();
-    toggle.append(activityLine(document, facts, live, Date.now()));
-    let body = item.querySelector<HTMLElement>(":scope > .act-body");
-    if (open) {
-      if (!body) { body = make("div", "act-body"); item.append(body); }
-      activityBody(block, body);
-    } else body?.remove();
-  }
 
   function drawTimeline() {
     if (!detail.id) return;
     const view = sessions.view(detail.id);
     const busy = isBusy(view?.live?.live);
     const blocks = detail.blocks = foldEvents(detail.events);
+    blocksView.know(blocks);
     type Entry = { block: TimelineBlock; live: boolean; open: boolean; key: string; version: string; prompt?: PendingPrompt };
     const entries: Entry[] = blocks.map((block, index) => {
       const live = liveBlock(blocks, index, busy), open = detail.expanded.has(block.key);
@@ -418,16 +356,20 @@ export function startMobile(window: Window & typeof globalThis) {
       const entry = all[index];
       let drawn = detail.drawn.get(step.key);
       if (step.action === "create" || !drawn) {
-        if (entry.block.kind === "message") drawn = messageBlock(entry.block, entry.prompt);
+        if (entry.block.kind === "message") drawn = blocksView.messageBlock(entry.block, entry.prompt);
+        else if (entry.block.kind === "workflow") drawn = { ...blocksView.workflowBlock(entry.block), version: entry.version };
         else {
           const item = make("li", "activity");
           item.dataset.key = entry.key;
-          drawActivity(item, entry.block, entry.live, entry.open);
+          blocksView.drawActivity(item, entry.block, entry.live, entry.open);
           drawn = { element: item, version: entry.version, diagram: false };
         }
         detail.drawn.set(step.key, drawn);
       } else if (step.action === "update" && entry.block.kind === "activity") {
-        drawActivity(drawn.element, entry.block, entry.live, entry.open);
+        blocksView.drawActivity(drawn.element, entry.block, entry.live, entry.open);
+        drawn.version = entry.version;
+      } else if (step.action === "update" && entry.block.kind === "workflow") {
+        blocksView.drawWorkflow(drawn.element, entry.block);
         drawn.version = entry.version;
       }
       const expected: ChildNode | null = previous ? previous.nextSibling : timeline.firstChild;
@@ -466,6 +408,7 @@ export function startMobile(window: Window & typeof globalThis) {
   }
 
   timeline.addEventListener("click", event => {
+    if (blocksView.click(event)) return;
     const toggle = (event.target as Element | null)?.closest<HTMLButtonElement>("button.act-toggle");
     const key = toggle?.closest<HTMLElement>("li.activity")?.dataset.key;
     if (!key) return;
@@ -532,6 +475,7 @@ export function startMobile(window: Window & typeof globalThis) {
     detail.expanded = new Set();
     detail.drawn = new Map();
     detail.loaded = false;
+    blocksView.reset();
     timeline.replaceChildren();
     working = null;
     detailNote.textContent = pendingNotes.get(id) ?? "";
@@ -559,7 +503,7 @@ export function startMobile(window: Window & typeof globalThis) {
       const content = drawn.element.querySelector<HTMLElement>(":scope > .markdown-content");
       const key = drawn.element.dataset.key!;
       const block = detail.blocks.find(b => b.key === key);
-      if (content && block?.kind === "message") { const fill = () => markdown.fill(content, block.text, fill); fill(); }
+      if (content && block?.kind === "message") blocksView.fillMessage(content, block, block.text);
     }
   }
 

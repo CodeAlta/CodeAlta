@@ -300,6 +300,64 @@ public sealed class MobileServerTests
         }
     }
 
+    [TestMethod]
+    public async Task Images_AreServedByTheirIdFromTheRecordsOfTheSession_NeverByAPath()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        byte[] png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4];
+        using var folder = new TempFolder();
+        await File.WriteAllBytesAsync(Path.Combine(folder.Path, "shot.png"), png);
+        await File.WriteAllBytesAsync(Path.Combine(folder.Path, "fake.png"), "not a picture"u8.ToArray());
+        var status = FakeAlta.Status("a", "p1", "personal");
+        status["workingDirectory"] = folder.Path;
+        fixture.Alta
+            .Answer("session status a", status)
+            .Answer("session status b", FakeAlta.Status("b", "p1", "personal"))
+            .Answer("session image a shot-1.png", new JsonObject { ["type"] = "alta.session.image", ["mediaType"] = "image/png", ["base64"] = Convert.ToBase64String(png) })
+            .Answer("session image a notes.txt", new JsonObject { ["type"] = "alta.session.image", ["mediaType"] = "image/png", ["base64"] = Convert.ToBase64String("text"u8.ToArray()) })
+            .Answer("session image b", (_, _) => FakeAlta.Transcript(3, new JsonObject { ["type"] = "alta.error", ["code"] = "session.imageNotFound", ["message"] = "No such image." }))
+            .Answer("session events a", new JsonObject
+            {
+                ["type"] = "alta.session.event", ["sequenceNumber"] = 7,
+                ["content"] = new JsonArray(new JsonObject { ["text"] = "See `![code](x.png)`\n\n![The shot](shot.png) and ![fake](fake.png) and ![web](https://example.com/a.png)" }),
+            });
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions/a/images/shot-1.png")).StatusCode, "An image needs a phone that signed in.");
+        await fixture.SignInAsync();
+
+        using var saved = await fixture.Client.GetAsync("/api/sessions/a/images/shot-1.png");
+        Assert.AreEqual(HttpStatusCode.OK, saved.StatusCode);
+        Assert.AreEqual("image/png", saved.Content.Headers.ContentType?.MediaType);
+        CollectionAssert.AreEqual(png, await saved.Content.ReadAsByteArrayAsync());
+        Assert.IsTrue(saved.Headers.CacheControl is { Private: true, MaxAge.TotalSeconds: 86400 }, "The phone keeps an image, which never changes; no proxy does.");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/a/images/notes.txt")).StatusCode, "What is no image by its content is not served.");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/b/images/shot-1.png")).StatusCode, "The image of another session is not one of this one.");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/c/images/shot-1.png")).StatusCode, "A session the phone does not see.");
+        foreach (var path in (string[])["/api/sessions/a/images/..%2Fsecret.png", "/api/sessions/a/images/.hidden.png", "/api/sessions/a/images/C%3A%5Csecret.png", "/api/sessions/a/images/..%5Csecret.png"])
+            Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync(path)).StatusCode, path);
+        Assert.IsFalse(fixture.Alta.CallsOf("session image").Any(static call => call[3].Contains('.') && (call[3].StartsWith('.') || call[3].Contains('/') || call[3].Contains('\\') || call[3].Contains(':'))),
+            "A path is never asked of alta.");
+
+        // A picture of the disk that an answer shows: by the number of the answer and its place among its pictures (code is no picture).
+        using var linked = await fixture.Client.GetAsync("/api/sessions/a/linked-images/7/0");
+        Assert.AreEqual(HttpStatusCode.OK, linked.StatusCode);
+        CollectionAssert.AreEqual(png, await linked.Content.ReadAsByteArrayAsync());
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/a/linked-images/7/1")).StatusCode, "A file named as a picture that is none.");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/a/linked-images/7/2")).StatusCode, "A picture of the web is not one of the disk.");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/a/linked-images/8/0")).StatusCode, "Another record than the answer asked for.");
+    }
+
+    private sealed class TempFolder : IDisposable
+    {
+        internal string Path { get; } = Directory.CreateTempSubdirectory("mobile-images-").FullName;
+
+        public void Dispose()
+        {
+            try { Directory.Delete(Path, recursive: true); }
+            catch (IOException) { } // A file still held by the system: the temp folder keeps it.
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly MobileServer _server;

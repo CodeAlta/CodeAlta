@@ -39,6 +39,11 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     askResult: null as AskResult | null,
     /** What becomes of the ask when the next answer or cancel is refused or still goes; null leaves it as it is. */
     askAfter: null as Ask | null,
+    /**
+     * The images of the sessions, by `<session>/<image id>` for a saved copy and `<session>/linked/<seq>/<position>` for a
+     * picture of the disk an answer shows; any other image is not found.
+     */
+    images: new Map<string, Readonly<{ type: string; body: Buffer }>>(),
   };
   const requests: FixtureRequest[] = [];
   const streams = new Set<ServerResponse>();
@@ -122,6 +127,14 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       const { project, text } = body as { project: string; text: string };
       state.sessions.push(session(id, `New: ${text}`, project, 0));
       return send(response, 200, { id, ...state.createAnswer });
+    }
+    const image = /^\/api\/sessions\/([^/]+)\/(images\/[^/]+|linked-images\/\d+\/[^/]+)$/.exec(path);
+    if (image) {
+      const key = `${decodeURIComponent(image[1])}/${image[2].startsWith("images/") ? decodeURIComponent(image[2].slice("images/".length)) : `linked/${image[2].slice("linked-images/".length)}`}`;
+      const found = state.images.get(key);
+      if (!found) return send(response, 404);
+      response.writeHead(200, { "Content-Type": found.type, "Cache-Control": "private, max-age=86400, immutable", "Content-Security-Policy": "default-src 'none'; sandbox" });
+      return response.end(found.body);
     }
     if (path === "/api/projects") return send(response, 200, { projects: state.projects, default: "p1", error: null });
     if (path === "/api/options") return send(response, 200, state.options);

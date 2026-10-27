@@ -19,12 +19,15 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
 
     private const int EventsPerRead = 400;
     private const int MaximumReads = 40;
-    private const int MaximumText = 20_000;
     private const int MaximumSummary = 300;
     private const int MaximumAncestors = 8;
     private static readonly TimeSpan NamesLife = TimeSpan.FromSeconds(30);
 
     private volatile MobileNames? _names;
+    private MobileImages? _images;
+
+    /// <summary>The images of the timelines the phone sees.</summary>
+    internal MobileImages Images => _images ??= new MobileImages(alta, this);
 
     /// <summary>The ids of the spaces of the plugin; empty when it is in every space.</summary>
     internal IReadOnlyList<string> Spaces => spaces.GetAssignedSpaces();
@@ -149,7 +152,8 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
 
     /// <summary>
     /// The timeline of a session after a sequence number, read with <c>alta session events</c> a page at a time, from the
-    /// journal the desktop timeline is built from. Tool output is left out: the phone shows the calls.
+    /// journal the desktop timeline is built from. The text of tool output is left out: the phone shows the calls, and the
+    /// images an output gave the model; each event is projected by <see cref="MobileTimeline.Entry"/>.
     /// </summary>
     /// <returns>The events, or null when the phone does not see the session.</returns>
     internal async Task<JsonObject?> EventsAsync(string sessionId, long since, CancellationToken cancellationToken)
@@ -160,7 +164,7 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         for (var read = 0; read < MaximumReads; read++)
         {
             var result = await MobileAlta.RunAsync(alta, ["session", "events", sessionId, "--since", since.ToString(CultureInfo.InvariantCulture),
-                "--limit", EventsPerRead.ToString(CultureInfo.InvariantCulture), "--no-tool-output", "--include", "user,assistant,reasoning,tool,host",
+                "--limit", EventsPerRead.ToString(CultureInfo.InvariantCulture), "--no-tool-output", "--tool-images", "--include", "user,assistant,reasoning,tool,host,workflow",
                 "--fields", "sequenceNumber,timestamp,kind,content,metadata"], null, cancellationToken).ConfigureAwait(false);
             if (result.Error is not null)
             {
@@ -176,18 +180,7 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
                 if (sequence > since) since = sequence;
                 var kind = MobileAlta.Text(record, "kind") ?? "";
                 if (kind is "host.usageupdated" or "host.modelchanged") continue;
-                var text = string.Concat((record["content"] as JsonArray ?? []).Select(static part => (string?)part?["text"] ?? ""));
-                var metadata = record["metadata"] as JsonObject;
-                JsonArray? attachments = null;
-                if (kind == "user.message" && metadata?["attachments"] is JsonArray listed && listed.Count > 0) (text, attachments) = WithoutPaths(text, listed);
-                if (text.Length > MaximumText) text = text[..MaximumText] + "…";
-                var entry = new JsonObject
-                {
-                    ["seq"] = sequence, ["at"] = MobileAlta.Text(record, "timestamp"), ["kind"] = kind, ["text"] = text,
-                    ["activityId"] = MobileAlta.Text(metadata, "activityId"),
-                };
-                if (attachments is { Count: > 0 }) entry["attachments"] = attachments;
-                events.Add(entry);
+                events.Add(MobileTimeline.Entry(record, sequence, kind));
             }
 
             // A read that filled its page, or whose output the host cut, says there may be more after the last one read.
