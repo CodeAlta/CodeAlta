@@ -143,11 +143,12 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     const reads = count("GET", "/api/sessions");
     server.state.sessions.push(session("s9", "Started on the computer", "p1", 0, { live: "running" }, { parentId: "s1" }));
     server.push(server.state.sessions.at(-1)!.live!);
-    await waitFor(`document.querySelector('.row[data-id="s9"]')`, "a session started elsewhere joins the list");
+    // A sub-agent joins the list folded under the session that started it.
+    await waitFor(`document.querySelector('.row[data-id="s1"] .subagents')`, "a session started elsewhere joins the list");
     server.push({ ...server.state.sessions.at(-1)!.live!, live: "tools" });
     await new Promise(resolve => setTimeout(resolve, 700));
     assert.equal(count("GET", "/api/sessions"), reads + 1, "one read of the list for it");
-    assert.ok((await texts('.row[data-id="s9"] .meta-item')).includes("Sub-agent"));
+    assert.equal(await evaluate("document.querySelector('.row[data-id=\"s1\"] .subagents').textContent"), "1 sub-agent1 running");
     await shot("01-list-dark.png");
 
     // The theme follows a tap, with the color of the browser's bar.

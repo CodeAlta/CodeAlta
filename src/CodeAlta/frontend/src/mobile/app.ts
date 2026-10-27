@@ -2,7 +2,6 @@ import { hasImages, newSessionReadsImages } from "./attachments";
 import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
 import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
 import { coalesce, composerView } from "./composer";
-import { askWaiting } from "./ask";
 import { createAskPanel } from "./askPanel";
 import { isBusy, type Live, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
 import { activityLine, el, icon, iconSvg, type IconName } from "./dom";
@@ -19,8 +18,10 @@ import {
   appliedSelection, chipText, modeDescription, modeName, pickedChanges, pickSessionModel, providerPermissionMode, queueFirstKey, shownSelection, type Picked,
 } from "./selection";
 import { safeColor, sessionMeta, showSpaces } from "./sessionMeta";
+import { createSessionList } from "./sessionList";
+import { topLevelCount } from "./sessionTree";
 import { createSheet } from "./sheet";
-import { ago, dotLabels, dotOf, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
+import { ago, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
 import {
   activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, stillPending, type ActivityBlock, type PendingPrompt, type TimelineBlock, type ToolRow,
 } from "./timeline";
@@ -137,78 +138,12 @@ export function startMobile(window: Window & typeof globalThis) {
     return line;
   }
 
-  function card(view: SessionView, now: number): { element: HTMLDivElement; version: string } {
-    const state = dotOf(view, now);
-    const live = view.live;
-    const when = live?.at ?? view.lastActivity;
-    const lineText = live?.line ?? view.summary;
-    const space = showSpaces(sessions.spaces);
-    const asking = askWaiting(live);
-    const version = JSON.stringify([state, view.title, ago(when, now), live?.kind, lineText, live?.activity, sessionMeta(view, { space, live: true }), space, asking]);
-    const element = make("div", `card ${state}`);
-    const anchor = make("a", "card-link");
-    anchor.href = `#/session/${encodeURIComponent(view.id)}`;
-    anchor.append(make("div", "title", view.title || "(untitled session)"));
-    const meta = metaLine(view, { space, live: true, dot: true, when, now });
-    meta.title = dotLabels[state];
-    anchor.append(meta);
-    if (asking) {
-      const badge = make("span", "waiting-badge");
-      badge.append(icon(document, "ask"), make("span", null, "Waits for your answer"));
-      anchor.append(badge);
-    }
-    if (live?.kind === "activity" && live.activity) anchor.append(activityLine(document, live.activity, live.activity.state === "running", now));
-    else if (lineText) {
-      const line = make("div", "line", lineText);
-      line.dataset.kind = live?.line ? (live.kind ?? "assistant") : "summary";
-      anchor.append(line);
-    }
-    // The archive of a swipe, for a keyboard and a screen reader: shown when it has the focus.
-    const archive = make("button", "card-archive");
-    archive.type = "button";
-    archive.setAttribute("aria-label", `Archive “${view.title || "untitled session"}”`);
-    archive.append(icon(document, "archive"));
-    element.append(anchor, archive);
-    return { element, version };
-  }
-
-  function row(view: SessionView, now: number): HTMLLIElement {
-    const item = make("li", "row");
-    item.dataset.id = view.id;
-    const under = make("div", "swipe-under");
-    under.setAttribute("aria-hidden", "true");
-    const action = make("span", "swipe-act archive");
-    action.append(icon(document, "archive"), make("span", null, "Archive"));
-    under.append(action);
-    const { element, version } = card(view, now);
-    item.dataset.version = version;
-    item.append(under, element);
-    return item;
-  }
-
-  // Rows are kept by id, and a card is drawn again only when what it shows changed: a state change transitions the
-  // outline color instead of redrawing it, and the focus stays where it is.
+  const sessionList = createSessionList({ window, list, sessions, store, visible: () => !$("home").hidden });
   function renderList() {
     if (signedOut) return;
-    const now = Date.now();
-    const views = sessions.list();
-    const old = new Map(Array.from(list.children as HTMLCollectionOf<HTMLLIElement>).map(item => [item.dataset.id!, item]));
-    const rows = views.map(view => {
-      const item = old.get(view.id);
-      if (!item) return row(view, now);
-      const fresh = card(view, now);
-      if (item.dataset.version !== fresh.version) {
-        const current = item.querySelector<HTMLElement>(".card")!;
-        current.className = fresh.element.className + (current.classList.contains("springing") ? " springing" : "");
-        current.replaceChildren(...Array.from(fresh.element.childNodes));
-        item.dataset.version = fresh.version;
-      }
-      return item;
-    });
-    rows.forEach((item, index) => { if (list.children[index] !== item) list.insertBefore(item, list.children[index] ?? null); });
-    Array.from(list.children).slice(rows.length).forEach(item => item.remove());
+    sessionList.render();
     moreButton.hidden = !sessions.hasMore;
-    if (views.length) note.textContent = "";
+    if (sessions.list().length) note.textContent = "";
   }
 
   let listError: string | null = null;
@@ -228,6 +163,7 @@ export function startMobile(window: Window & typeof globalThis) {
         offset = page.next;
         if (!page.hasMore) break;
       }
+      if (!await readOn(filter, startedAt, pageSize)) return;
       renderList();
       showScope();
       if (!sessions.list().length) note.textContent = listError
@@ -237,6 +173,16 @@ export function startMobile(window: Window & typeof globalThis) {
       note.textContent = `CodeAlta is not reachable: ${failureText(error, host)}`;
     }
   });
+  // Sub-agents folded under their parents take no card of their own: the list reads on, a page at a time and four at most,
+  // until it shows `cards` cards. False when the filter changed meanwhile.
+  async function readOn(filter: readonly string[], startedAt: number, cards: number): Promise<boolean> {
+    for (let read = 0; read < 4 && sessions.hasMore && topLevelCount(sessions.list()) < cards; read++) {
+      const page = await api.sessions(sessions.next, pageSize, filter);
+      if (filter !== sessions.filter) return false;
+      sessions.applyPage(page, startedAt, true);
+    }
+    return true;
+  }
   let reloadTimer = 0;
   function scheduleListRead(ms: number) { window.clearTimeout(reloadTimer); reloadTimer = window.setTimeout(() => void readList(), ms); }
 
@@ -245,8 +191,9 @@ export function startMobile(window: Window & typeof globalThis) {
     moreButton.textContent = "Loading…";
     const filter = sessions.filter, startedAt = sessions.beginRead();
     try {
+      const cards = topLevelCount(sessions.list()) + pageSize;
       const page = await api.sessions(sessions.next, pageSize, filter);
-      if (filter === sessions.filter) { sessions.applyPage(page, startedAt, true); renderList(); }
+      if (filter === sessions.filter) { sessions.applyPage(page, startedAt, true); if (await readOn(filter, startedAt, cards)) renderList(); }
     } catch (error) {
       if (!(error instanceof SignedOutError)) showToast(`Not loaded: ${failureText(error, host)}`);
     } finally {
@@ -314,6 +261,7 @@ export function startMobile(window: Window & typeof globalThis) {
     store.set(projectKey, JSON.stringify(chosen));
     sessions.setFilter(chosen);
     list.replaceChildren();
+    sessionList.settle();
     showFilter();
     void readList();
   }
@@ -1287,6 +1235,7 @@ export function startMobile(window: Window & typeof globalThis) {
     if (found) { try { id = decodeURIComponent(found[1]); } catch { id = null; } }
     const creating = hash === "#/new" && !signedOut;
     if (signedOut) id = null;
+    const returning = !id && !creating && $("home").hidden;
     $("home").hidden = !!id || creating;
     $("detail").hidden = !id;
     $("create").hidden = !creating;
@@ -1303,6 +1252,8 @@ export function startMobile(window: Window & typeof globalThis) {
     if (creating) void openCreate(false);
     if (id && id !== detail.id) openDetail(id);
     if (!id && detail.id) closeDetail();
+    // Back on the list, the cards are in their latest order at once.
+    if (returning) sessionList.settle();
     if (!id) renderList();
     padComposer();
   }
@@ -1334,6 +1285,7 @@ export function startMobile(window: Window & typeof globalThis) {
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden || signedOut) return;
+    if (!$("home").hidden) sessionList.settle();
     if (stream.open) readAgain(); else stream.wake();
   });
   window.addEventListener("online", () => stream.wake());
@@ -1346,6 +1298,7 @@ export function startMobile(window: Window & typeof globalThis) {
     const button = event.currentTarget as HTMLButtonElement;
     button.classList.add("spin");
     if (signedOut) { button.classList.remove("spin"); return; }
+    if (!$("home").hidden) sessionList.settle();
     try { await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null]); } finally { button.classList.remove("spin"); }
   });
 

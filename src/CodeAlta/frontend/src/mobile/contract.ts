@@ -54,6 +54,8 @@ export type Session = Readonly<{
   worktree?: string | null;
   /** The session that started this one: a sub-agent. */
   parentId?: string | null;
+  /** The title of that session, when the phone sees it. */
+  parentTitle?: string | null;
   summary: string | null;
   lastActivity: string | null;
   live: Live | null;
@@ -64,6 +66,8 @@ export type SessionPage = Readonly<{
   sessions: readonly Session[];
   next: number;
   hasMore: boolean;
+  /** The parents of sub-agents of the page that no page gave yet, which the list shows them under; not counted in `next`. */
+  parents?: readonly Session[];
   /** The projects the page keeps to; empty for every project. */
   projects: readonly string[];
   machine: string;

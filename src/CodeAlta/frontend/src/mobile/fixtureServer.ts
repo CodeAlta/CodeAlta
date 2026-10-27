@@ -101,8 +101,21 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       const offset = Number(url.searchParams.get("offset") ?? 0), limit = Math.min(50, Number(url.searchParams.get("limit") ?? 6));
       const projects = url.searchParams.getAll("project");
       const all = state.sessions.filter(s => projects.length === 0 || projects.includes(s.projectId ?? "")).sort((a, b) => Date.parse(b.lastActivity!) - Date.parse(a.lastActivity!));
-      const page = all.slice(offset, offset + limit);
-      return send(response, 200, { sessions: page, next: offset + page.length, hasMore: offset + page.length < all.length, projects, machine: "FIXTURE-PC", spaces: state.spaces, error: null });
+      // As the plugin: the parents of the sub-agents of the page that no page gave yet come with it, and a sub-agent names its parent.
+      const named = (s: Session): Session => s.parentId ? { ...s, parentTitle: sessionOf(s.parentId)?.title ?? s.parentTitle ?? null } : s;
+      const page = all.slice(offset, offset + limit).map(named);
+      const held = new Set(all.slice(0, offset + limit).map(s => s.id)), parents: Session[] = [];
+      for (let children = page; children.length;) {
+        const next: Session[] = [];
+        for (const parent of children.map(s => all.find(p => p.id === s.parentId))) {
+          if (!parent || held.has(parent.id)) continue;
+          held.add(parent.id);
+          next.push(parent);
+          parents.push(named(parent));
+        }
+        children = next;
+      }
+      return send(response, 200, { sessions: page, parents, next: offset + page.length, hasMore: offset + page.length < all.length, projects, machine: "FIXTURE-PC", spaces: state.spaces, error: null });
     }
     if (path === "/api/sessions" && request.method === "POST") {
       const id = `new${++state.created}`;

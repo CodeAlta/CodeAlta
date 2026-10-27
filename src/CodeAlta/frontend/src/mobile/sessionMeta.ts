@@ -42,14 +42,15 @@ export type MetaItem = Readonly<
 /**
  * The facts of a session, compact: what it does now (a card only), its space (when the phone sees several, or always on the page of the
  * session), its project, its worktree, its model and effort and its agent when it is not the default one (unless the composer shows
- * them, `selection: false`), and whether it is a sub-agent.
+ * them, `selection: false`), and whether it is a sub-agent (unless the list shows it under its parent, `child: false`, which
+ * also leaves out the project the parent shows, `project: false`).
  */
-export function sessionMeta(view: SessionView, options: Readonly<{ space: boolean; live: boolean; selection?: boolean }>): MetaItem[] {
+export function sessionMeta(view: SessionView, options: Readonly<{ space: boolean; live: boolean; selection?: boolean; project?: boolean; child?: boolean }>): MetaItem[] {
   const items: MetaItem[] = [];
   const word = options.live ? liveWord(view.live) : null;
   if (word) items.push({ kind: "live", text: word });
   if (options.space && view.space) items.push({ kind: "space", text: view.space.name, color: view.space.color });
-  if (view.project) items.push({ kind: "project", text: view.project });
+  if (view.project && options.project !== false) items.push({ kind: "project", text: view.project });
   if (view.worktree) items.push({ kind: "worktree", text: view.worktree });
   if (options.selection !== false) {
     const model = modelLabel(view.model);
@@ -57,7 +58,7 @@ export function sessionMeta(view: SessionView, options: Readonly<{ space: boolea
     const agent = agentLabel(view.agent);
     if (agent) items.push({ kind: "agent", text: agent });
   }
-  if (view.parentId) items.push({ kind: "child", text: "Sub-agent" });
+  if (view.parentId && options.child !== false) items.push({ kind: "child", text: "Sub-agent" });
   return items;
 }
 

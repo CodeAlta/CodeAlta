@@ -87,9 +87,13 @@ main { min-width: 0; max-width: 720px; margin: 0 auto; padding: .5rem calc(.75re
 .card-archive:focus-visible { opacity: 1; pointer-events: auto; outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (hover: hover) { .card:hover .card-archive { opacity: .85; pointer-events: auto; } }
 .card-archive .ico svg { width: 20px; height: 20px; }
+/* The head of a card: the title (two lines at most) and the time of its last activity. */
+.head { display: flex; align-items: baseline; gap: .5rem; min-width: 0; }
+.head .title { flex: 1; }
+.head .ago { flex: none; color: var(--muted); font-size: .75rem; }
 .title { min-width: 0; font-weight: 600; line-height: 1.3; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-/* The facts of a session: the dot (and a word while it works), space, project, worktree, model · effort, agent, sub-agent; at most
-   two lines, broken between facts, the time on the right. */
+/* The facts of a session: the dot (and a word while it works), space, project, worktree, model · effort, agent, sub-agent. On a
+   card they hold one line, cut with an ellipsis; under the title of a session's page, two lines at most, broken between facts. */
 .meta { display: flex; align-items: baseline; gap: .5rem; min-width: 0; margin-top: .1875rem; color: var(--muted); font-size: .75rem; line-height: 1.4; }
 .meta-facts { flex: 1; min-width: 0; max-height: 2lh; overflow: hidden; }
 .meta-item { white-space: nowrap; }
@@ -99,6 +103,8 @@ main { min-width: 0; max-width: 720px; margin: 0 auto; padding: .5rem calc(.75re
 .meta-project { color: var(--text); }
 .meta-item .ico { display: inline-flex; margin-right: .2em; vertical-align: -.1em; }
 .meta .ago { flex: none; }
+.card .meta { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.card .meta > .dot { display: inline-block; margin-right: .2em; vertical-align: .05em; }
 .space-dot { display: inline-block; width: .5rem; height: .5rem; margin-right: .3em; border-radius: 2px; background: var(--space, var(--muted)); vertical-align: .05em; }
 .dot { flex: none; width: .5rem; height: .5rem; border-radius: 50%; background: var(--muted); }
 .running .dot { background: var(--green); animation: pulse 1.2s infinite; }
@@ -344,7 +350,10 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .ask-actions .ghost { padding: 0 10px; }
 
 /* "Waits for your answer" on the card of a session that asks the user, as on the desktop. */
-.waiting-badge { display: inline-flex; align-items: center; gap: 4px; margin-top: .3125rem; padding: 2px 8px; border-radius: 999px; background: var(--yellow); color: #1c1300; font-size: .75rem; font-weight: 700; }
+.waiting-badge { display: inline-flex; align-items: center; gap: 4px; margin-top: .3125rem; padding: 1px 8px; border-radius: 999px; background: var(--yellow); color: #1c1300; font-size: .75rem; font-weight: 700; }
+/* A card that waits for the user stands out from those that work: a still yellow outline on a faint yellow ground. */
+.card.waiting { --tone: var(--yellow); background: color-mix(in srgb, var(--yellow) 7%, var(--panel)); }
+.card.waiting::before { padding: 2px; }
 .waiting-badge .ico svg { width: 13px; height: 13px; }
 
 /* A confirmation: its text, then its buttons on one line. */
@@ -449,6 +458,44 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .install-panel b { color: var(--text); }
 .sheet-panel .install-head .icon-btn { width: auto; min-height: 44px; align-items: center; }
 .sheet-panel button.link { justify-content: center; align-items: center; color: var(--muted); }
+
+/* A sub-agent shown without its parent names it, over its title. */
+.parent-line { display: flex; align-items: center; gap: .3em; min-width: 0; margin-bottom: .125rem; color: var(--muted); font-size: .75rem; }
+.parent-line > span:last-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* The sub-agents of a session, folded in one row at the bottom of its card: a chevron, how many, a dot each, what they do. */
+.subagents { display: flex; align-items: center; gap: .5rem; width: 100%; min-width: 0; min-height: 44px; padding: 0 .75rem; border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); border-radius: 0 0 10px 10px; background: transparent; color: var(--muted); font: inherit; font-size: .8125rem;
+  text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.subagents:active { background: var(--hover); }
+.subagents:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.subagents-chevron { color: var(--muted); transition: transform .2s ease; }
+.subagents-chevron svg { width: 1rem; height: 1rem; }
+.subagents[aria-expanded="true"] .subagents-chevron { transform: rotate(90deg); }
+.subagents-count { flex: none; color: var(--text); font-weight: 600; }
+.subagents-dots { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+.subagents-dots .dot { width: .4375rem; height: .4375rem; animation: none; }
+/* A dot of each sub-agent, in its own state whatever the state of the card. */
+.subagents-dots .dot.running { background: var(--green); } .subagents-dots .dot.tools { background: var(--yellow); }
+.subagents-dots .dot.thinking { background: var(--thinking); } .subagents-dots .dot.answered { background: var(--accent); opacity: 1; }
+.subagents-dots .dot.inactive { background: var(--muted); opacity: .6; }
+.subagents-dots .dot.waiting { background: transparent; box-shadow: inset 0 0 0 2px var(--yellow); opacity: 1; }
+.subagents-dots .dot:is(.running, .tools, .thinking) { animation: pulse 1.2s infinite; }
+.subagents-more { font-size: .6875rem; }
+.subagents-states { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; }
+.state-waiting { color: var(--yellow); font-weight: 700; } .state-running { color: var(--green); font-weight: 600; }
+
+/* A sub-agent under its parent: indented a little, its row reaching up through the gap so that its line touches the card
+   above; the line comes down from the parent and turns right into the card. A sibling after it continues the line down. */
+.row.sub { --indent: 16px; --gap: .375rem; margin-top: calc(-1 * var(--gap)); padding: var(--gap) 0 0 calc(var(--depth) * var(--indent)); border-radius: 0; }
+.row.sub > .swipe-under { inset: var(--gap) 0 0 calc(var(--depth) * var(--indent)); }
+.rails { position: absolute; inset: 0; pointer-events: none; --rail: color-mix(in srgb, var(--muted) 75%, transparent); }
+.rail, .elbow { position: absolute; left: calc(var(--level) * var(--indent) + 8px); top: 0; }
+.rail { bottom: 0; border-left: 2px solid var(--rail); }
+.elbow { width: calc(var(--indent) - 8px); height: calc(var(--gap) + 1.2rem); border-left: 2px solid var(--rail); border-bottom: 2px solid var(--rail); border-bottom-left-radius: 8px; }
+.elbow.goes-on::after { content: ""; position: absolute; left: -2px; top: 0; height: 100vh; border-left: 2px solid var(--rail); }
+.row.entering { animation: row-in .28s ease-out; } @keyframes row-in { from { opacity: 0; transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .row.entering { animation: none; } .subagents-chevron { transition: none; } }
 
 /* Swipe a card, Gmail-style: under it, the action the drag does: Archive on green (right). */
 .row { position: relative; border-radius: 10px; overflow: hidden; }

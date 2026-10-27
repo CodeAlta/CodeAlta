@@ -24,6 +24,17 @@ test("the first page replaces the list and a later one adds to it, without twice
   assert.deepEqual(store.list().map(v => v.id), ["d"]);
 });
 
+test("the parents of the sub-agents of a page join the list once, and a sub-agent knows the title of its parent", () => {
+  const store = createSessionStore();
+  const kid: Session = { ...session("kid", 1), parentId: "root" };
+  store.applyPage({ ...page([kid], true, 1), parents: [session("root", 90)] }, store.beginRead(), false);
+  assert.deepEqual(store.list().map(v => v.id), ["kid", "root"]);
+  assert.equal(store.next, 1, "a parent does not count in the pages");
+  assert.equal(store.view("kid")?.parentTitle, "Session root");
+  store.applyPage(page([session("root", 90)], false, 2), store.beginRead(), true);
+  assert.deepEqual(store.list().map(v => v.id), ["kid", "root"], "its own page does not list it twice");
+});
+
 test("a read of the whole list asks for what is shown, so the pages already shown stay", () => {
   assert.deepEqual(readSizes(0), [6]);
   assert.deepEqual(readSizes(18), [18]);
