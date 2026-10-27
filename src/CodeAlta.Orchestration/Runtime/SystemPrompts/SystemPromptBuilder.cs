@@ -819,7 +819,7 @@ public sealed class SystemPromptBuilder
 
         if (request.Tools.Any(static tool => string.Equals(tool.Spec.Name, "alta", StringComparison.OrdinalIgnoreCase)))
         {
-            builder.AppendLine("Use the `alta` live tool for finite CodeAlta host/session/catalog operations. Start with args [\"--help\"], then narrower help such as [\"session\",\"--help\"] before invoking mutating commands.");
+            builder.AppendLine("Use the `alta` live tool for finite CodeAlta host/session/catalog operations. Call the commands these instructions give as they give them; read help ([\"--help\"], then narrower help such as [\"session\",\"--help\"]) only for a command or an option they do not give.");
         }
 
         return builder.ToString().Trim();

@@ -394,7 +394,7 @@ public sealed partial class AltaLiveToolTests
         StringAssert.Contains(tool.Spec.Description, "create project/global child sessions");
         StringAssert.Contains(tool.Spec.Description, "send, queue, steer, abort, compact");
         StringAssert.Contains(tool.Spec.Description, "peer-agent requests");
-        StringAssert.Contains(tool.Spec.Description, "args [\"--help\"] for the quick-start");
+        StringAssert.Contains(tool.Spec.Description, "read help only for a command or an option they do not give: args [\"--help\"] for the quick-start");
         StringAssert.Contains(tool.Spec.Description, "compact JSONL headed by alta.result");
     }
 
