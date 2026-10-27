@@ -2182,7 +2182,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Title = title,
             TitleSource = titleSource,
             TitleMode = titleMode,
-            TitleInstructions = SessionTitleGuidance,
+            // A host whose sessions are listed nowhere does not ask for a title.
+            TitleInstructions = _instructionTemplateProvider.DisabledPromptFeatures.Contains(PromptFeatures.SessionTitle) ? null : SessionTitleGuidance,
             // A suggestion is for somebody who reads it and writes the next prompt: not in a host that shows none,
             // and not for a session an agent drives. The setting is read at each prompt.
             PromptSuggestions = ShowsPromptSuggestions && string.IsNullOrWhiteSpace(session.ParentSessionId),

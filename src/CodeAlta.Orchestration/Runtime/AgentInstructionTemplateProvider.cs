@@ -49,6 +49,12 @@ public sealed class AgentInstructionTemplateProvider
     public bool ReadsUserHome { get; init; } = true;
 
     /// <summary>
+    /// Gets or initializes the parts of the workflow the prompts of the sessions leave out
+    /// (<see cref="SystemPrompts.PromptFeatures"/>): none, the default, as in CodeAlta Desktop and TUI.
+    /// </summary>
+    public IReadOnlySet<string> DisabledPromptFeatures { get; init; } = System.Collections.Frozen.FrozenSet<string>.Empty;
+
+    /// <summary>
     /// Gets the home folder whose resources of other tools the sessions read: the one of the discovery scope, else the one
     /// of the user; <see langword="null"/> when the sessions read none (<see cref="ReadsUserHome"/>).
     /// </summary>
@@ -284,6 +290,7 @@ public sealed class AgentInstructionTemplateProvider
             AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project, spaceResources, skills),
             SpaceResources = spaceResources,
             DisabledTools = WithSessionPatterns(HostDisabledTools(space), session.SessionId),
+            DisabledFeatures = DisabledPromptFeatures,
             // The Runtime Context names the space only when there is another one than the default, where it tells something.
             Space = spaces.Count < 2 ? null : space,
             GitIdentity = AppliesSpaceIdentities ? space.Settings.Identity?.Git : null,

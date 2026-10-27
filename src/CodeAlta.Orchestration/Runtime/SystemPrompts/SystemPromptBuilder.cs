@@ -116,7 +116,8 @@ public sealed class SystemPromptBuilder
         }
 
         var parts = new List<SystemPromptManifestPart>();
-        var systemMessage = PromptToolConditions.Apply(systemResolution.Body!, disabledTools).Trim();
+        var disabledFeatures = request.DisabledFeatures;
+        var systemMessage = ApplyConditions(systemResolution.Body!, disabledTools, disabledFeatures).Trim();
         foreach (var applied in systemResolution.Applied)
         {
             parts.Add(CreateResourcePart(applied.Resource, "system", selectedSystemName, "system", 100, applied.Status, applied.Replaces));
@@ -142,7 +143,7 @@ public sealed class SystemPromptBuilder
         }
 
         var agentPromptBody = JoinPromptBodies(inherited.Select(static prompt => prompt.Resolution.Body!).Append(promptResolution.Body!));
-        developerParts.Add(new RenderedPromptPart($"agents/{composition.AgentPromptName}", RenderSection("Agent Prompt", PromptToolConditions.Apply(agentPromptBody, disabledTools))));
+        developerParts.Add(new RenderedPromptPart($"agents/{composition.AgentPromptName}", RenderSection("Agent Prompt", ApplyConditions(agentPromptBody, disabledTools, disabledFeatures))));
         foreach (var skipped in promptResolution.Skipped)
         {
             parts.Add(CreateResourcePart(skipped.Resource, "agent_prompt", composition.AgentPromptName, "developer", 300, skipped.Status, null));
@@ -163,7 +164,8 @@ public sealed class SystemPromptBuilder
                 AddGeneratedPart(developerParts, parts, "tool.codemode", "code_mode", "Code Mode", 510, codeMode);
             }
 
-            var agentPromptGuidance = BuildAgentPromptGuidance(request, projectRoot, composition.AgentPromptName);
+            // The agent prompts are listed for a session that may switch to another one (Mode handoff).
+            var agentPromptGuidance = IsOff(disabledFeatures, PromptFeatures.ModeHandoff) ? null : BuildAgentPromptGuidance(request, projectRoot, composition.AgentPromptName);
             if (!string.IsNullOrWhiteSpace(agentPromptGuidance))
             {
                 AddGeneratedPart(developerParts, parts, "prompt.discovery", "agent_prompts", "Agent Prompts", 525, agentPromptGuidance);
@@ -229,6 +231,14 @@ public sealed class SystemPromptBuilder
             DisabledTools = disabledTools.ToFrozenSet(StringComparer.Ordinal),
         };
     }
+
+    // The text of a prompt file for the tools and the features of the session: the tools first, whose `else` would
+    // otherwise be read as the one of a feature.
+    private static string ApplyConditions(string text, IReadOnlySet<string> disabledTools, IReadOnlySet<string>? disabledFeatures)
+        => PromptFeatureConditions.Apply(PromptToolConditions.Apply(text, disabledTools), disabledFeatures);
+
+    private static bool IsOff(IReadOnlySet<string>? disabledFeatures, string feature)
+        => disabledFeatures?.Contains(feature) == true;
 
     private static void ValidateRoots(SystemPromptContentRoots roots, List<SystemPromptDiagnostic> diagnostics)
     {
@@ -713,7 +723,7 @@ public sealed class SystemPromptBuilder
         }
 
         // The models the user prefers for each kind of work: an agent asks for a tier instead of naming a model.
-        if (!string.IsNullOrWhiteSpace(request.ModelTiers))
+        if (!string.IsNullOrWhiteSpace(request.ModelTiers) && !IsOff(request.DisabledFeatures, PromptFeatures.SubAgents))
         {
             lines.Add($"- Model tiers: {request.ModelTiers}. Give a session one with `alta session create --tier <name>` instead of naming a model."
                 + (request.ModelFallback ? " When its provider fails (quota, outage), a session goes on with the next model of its tier." : string.Empty));
@@ -722,7 +732,7 @@ public sealed class SystemPromptBuilder
         // Where an agent writes down long instructions of the user, so that they outlive a compaction of the context.
         // The agent names the file after the day and the request; the end of the name is a short hash of the session,
         // so that two agents never write the same file.
-        if (ScratchpadFile(request) is { } scratchpad)
+        if (!IsOff(request.DisabledFeatures, PromptFeatures.Scratchpad) && ScratchpadFile(request) is { } scratchpad)
         {
             lines.Add($"- Scratchpad file: {MarkdownCode(scratchpad)}");
         }
@@ -1483,6 +1493,13 @@ public sealed class SystemPromptBuildRequest
     /// prompt adds its own <c>disabled_tools</c>. The text that names a tool turned off is left out. Null for none.
     /// </summary>
     public IReadOnlySet<string>? DisabledTools { get; init; }
+
+    /// <summary>
+    /// Gets the parts of the workflow the host leaves out of the prompt (<see cref="PromptFeatures"/>): the text of the
+    /// prompt files that depends on one of them (<see cref="PromptFeatureConditions"/>) and the generated lines about it.
+    /// Null for none, as in CodeAlta Desktop and TUI.
+    /// </summary>
+    public IReadOnlySet<string>? DisabledFeatures { get; init; }
 }
 
 /// <summary>
