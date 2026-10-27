@@ -67,7 +67,8 @@ internal static class CliCommandLine
             "  1. _codealta/session (no line when the run gets no session): schemaVersion,",
             "     sessionId, created, cwd, provider, providerType (anthropic, codex,",
             "     claude-code...), model, reasoning, agentPrompt, tier, storage,",
-            "     disabledFeatures (the parts of the agent prompt left out).",
+            "     disabledFeatures (the parts of the agent prompt left out), options",
+            "     {{subSessions}} (false with --no-sub-sessions).",
             "  2. session/update, params {{sessionId, update}}; update.sessionUpdate is",
             "     agent_message_chunk, agent_thought_chunk, tool_call (kind, title,",
             "     rawInput), tool_call_update (status, content), plan or usage_update.",
@@ -461,6 +462,7 @@ internal static class CliCommandLine
         command.Add("no-skills", "List and offer no skill to the agents", v => options.NoSkills = v is not null);
         command.Add("code-mode:", "Code Mode {MODE} on|only|off over the settings", v => options.CodeMode = v ?? "on");
         command.Add("sandbox=", "Run the tools in the sandbox {PROFILE} (or off)", v => options.Sandbox = v);
+        command.Add("no-sub-sessions", "Start no session of its own (sub-agents, agent())", v => options.NoSubSessions = v is not null);
         command.Add(_);
     }
 
@@ -470,8 +472,9 @@ internal static class CliCommandLine
         command.Add("Agent prompt:");
         command.Add("  --enable, --disable: parts of the agent prompt, comma separated, or `all`:");
         command.Add("  scratchpad (a copy of a long request), notes (sticky notes), tasks");
-        command.Add("  (follow-up tasks), review (by the user), sub-agents, mode-handoff (Plan");
-        command.Add("  mode, the list of agent prompts), session-title.");
+        command.Add("  (follow-up tasks), review (by the user), mode-handoff (Plan mode, the");
+        command.Add("  list of agent prompts), session-title. The sub-agents follow the");
+        command.Add("  session: --no-sub-sessions removes them, their tools and their text.");
         foreach (var line in defaults) command.Add(line);
         command.Add("enable=", "Keep the prompt parts {NAMES}; repeatable", v => options.EnableFeatures.Add(v!));
         command.Add("disable=", "Leave out the prompt parts {NAMES}; repeatable", v => options.DisableFeatures.Add(v!));

@@ -316,6 +316,13 @@ public sealed class SessionViewLocalState
     public bool? ReviewNoted { get; set; }
 
     /// <summary>
+    /// Gets or sets the options of the session (<see cref="CodeAlta.Agent.AgentSessionOptions"/>), or <see langword="null"/>
+    /// for the defaults, every option on. A journal written before the options existed has none.
+    /// </summary>
+    [JsonPropertyName("options")]
+    public CodeAlta.Agent.AgentSessionOptions? Options { get; set; }
+
+    /// <summary>
     /// Gets or sets what the agent of the session was last told of its sandbox (<c>off</c>, or its profile and the form
     /// of the note), or <see langword="null"/> when it was told nothing yet: the host tells it again only when this differs.
     /// </summary>

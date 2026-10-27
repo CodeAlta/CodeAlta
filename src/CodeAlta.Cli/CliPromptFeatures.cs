@@ -78,6 +78,12 @@ internal static class CliPromptFeatures
             {
                 names.Add(normalized);
             }
+            else if (normalized == PromptFeatures.SubAgents)
+            {
+                // One way only: the sub-agents are an option of the session, which also takes their tools away.
+                error = $"{option} {name}: the sub-agents follow the session; use --no-sub-sessions to start the session without them.";
+                return false;
+            }
             else
             {
                 error = $"{option} {name}: not a part of the agent prompt; use {string.Join(", ", PromptFeatures.All)} or all"

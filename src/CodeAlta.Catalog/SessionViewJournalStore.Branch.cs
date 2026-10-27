@@ -181,6 +181,8 @@ public sealed partial class SessionViewJournalStore
             // A fork keeps the choice of review; what its agent was told is in the conversation it continues.
             ReviewBeforeCommit = sourceLocal?.ReviewBeforeCommit,
             ReviewNoted = sourceLocal?.ReviewNoted,
+            // A fork keeps the options of its source, narrowed by those of the session that forks it, which the runtime gave it.
+            Options = CodeAlta.Agent.AgentSessionOptions.Stored(CodeAlta.Agent.AgentSessionOptions.Of(sourceLocal?.Options).Within(target.Options)),
             // The sandbox of a fork can be another than its source's: its agent is told again at its first prompt.
             SandboxNoted = string.IsNullOrWhiteSpace(target.Sandbox) ? sourceLocal?.SandboxNoted : null,
             Tier = sourceLocal?.Tier,

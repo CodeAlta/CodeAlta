@@ -31,7 +31,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateScriptRunCommand(AltaCommandContext context)
     {
         var options = new ScriptRunOptions();
-        var command = Leaf("run", "Run a script of the library in a new session of the project, as Run… in the Workflows tab does: the session runs it with `exec` and answers with its result. Returns once the session got the prompt, without the result: in `exec`, `workflow(\"name\", args)` runs the script there and gives its result.");
+        var command = AltaSubSessionsGate.Leaf(context, "run", "Run a script of the library in a new session of the project, as Run… in the Workflows tab does: the session runs it with `exec` and answers with its result. Returns once the session got the prompt, without the result: in `exec`, `workflow(\"name\", args)` runs the script there and gives its result.");
         command.Add("<name>", "Script name.", value => options.Name = value);
         command.Add("arg=", "An argument of the script as `<key>=<value>`; repeat for several. A value is JSON (`7`, `true`, `[\"a\",\"b\"]`) unless the parameter is a string.", value => { if (value is not null) options.Arguments.Add(value); });
         command.Add("project=", "Project id, slug or path. Defaults to the project of the calling session, then to the cwd.", value => options.Project = value);

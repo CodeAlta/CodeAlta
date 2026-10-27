@@ -74,7 +74,29 @@ public static class CodeModeToolFactory
     // How often exec looks again at a run whose yield has not passed: its clock stops while the run waits for the user.
     private static readonly TimeSpan YieldCheck = TimeSpan.FromMilliseconds(200);
 
-    private const string ExecDescription = """
+    // The description of exec: the same text for every session that can start sessions of its own, so that prompt caches hold.
+    private const string ExecDescription = ExecDescriptionStart + """
+
+        - `agent(prompt, { tier, model, title, schema })` starts a sub-agent, a child session of its own for a part of the work, and resolves with its final answer once it ended (`alta.session.send` does not wait for one), or with the JSON value it answered when `schema` (a JSON Schema) is given; `worktree: true` has it work in a new git worktree of the project, on a branch of its own, so that sessions that change files in parallel do not collide; `subSessions: false` creates it without sessions of its own, for a part it must do itself. `parallel(thunks, { limit })` runs functions at once and turns a failure into `null`; `pipeline(items, ...stages)` takes each item through the stages on its own; `phase(title)` marks a part of the work. `session({ tier, title, worktree })` keeps a session for several prompts: `const s = await session(); await s.run("..."); await s.close();`, and `s.worktree` gives `{ folder, branch }` of its worktree.
+
+        """ + ExecDescriptionLibrary + """
+
+
+        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "max_output_tokens": 4000, "timeout_ms": 600000, "budget_tokens": 500000}` (`budget_tokens` caps the tokens of the sessions the script starts). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
+        """ + ExecDescriptionEnd;
+
+    // The description of exec for a session without sub-sessions: no agent() nor session(), which it does not have.
+    private const string ExecDescriptionWithoutSubSessions = ExecDescriptionStart + """
+
+        - `parallel(thunks, { limit })` runs functions at once and turns a failure into `null`; `pipeline(items, ...stages)` takes each item through the stages on its own; `phase(title)` marks a part of the work.
+
+        """ + ExecDescriptionLibrary + """
+
+
+        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "max_output_tokens": 4000, "timeout_ms": 600000}`. `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
+        """ + ExecDescriptionEnd;
+
+    private const string ExecDescriptionStart = """
         Run JavaScript in CodeAlta to compose tool calls: loops, filters and parallel calls run without model turns, and only what the script returns comes back to you. Use it when a task needs several calls whose results you would otherwise read one by one; for a single call, call the tool directly.
 
         The script is the body of an async function: use `await` and `return`. It is plain JavaScript in strict mode, not Node.js: no TypeScript syntax, no `import` or `require`. It has no file, network or timer access of its own: every effect is a call of a function below, with this session's permissions.
@@ -84,7 +106,9 @@ public static class CodeModeToolFactory
         - `alta.<group>.<command>(args)`: the commands of `alta` as functions, not a shell, such as `alta.session.list({ limit: 20 })`. Positional arguments and options go by name in camelCase, and `stdin` holds what `--stdin` reads. Resolves to the record the command writes, or to the list of its records; a failure throws an `AltaError` with a `code`.
         - `mcp.<server>.<tool>(args)`: the tools of the MCP servers active in this session. A server that `alta.mcp.activate({ id: ["<server>"] })` activates is in `mcp` from the next `exec`, not in the script that activates it.
         - `codemode.help({ path })`, `codemode.search({ query })`, `codemode.describe({ path })`: find functions and read their TypeScript declarations, results included. Never guess a function or a field of a result: describe it first.
-        - `agent(prompt, { tier, model, title, schema })` starts a sub-agent, a child session of its own for a part of the work, and resolves with its final answer once it ended (`alta.session.send` does not wait for one), or with the JSON value it answered when `schema` (a JSON Schema) is given; `worktree: true` has it work in a new git worktree of the project, on a branch of its own, so that sessions that change files in parallel do not collide. `parallel(thunks, { limit })` runs functions at once and turns a failure into `null`; `pipeline(items, ...stages)` takes each item through the stages on its own; `phase(title)` marks a part of the work. `session({ tier, title, worktree })` keeps a session for several prompts: `const s = await session(); await s.run("..."); await s.close();`, and `s.worktree` gives `{ folder, branch }` of its worktree.
+        """;
+
+    private const string ExecDescriptionLibrary = """
         - `workflow("name", args)` runs a script of the library (the project's `.alta/scripts`, the user's, the samples) and resolves with what it returns: `codemode.search` finds them as `workflow:<name>`, and `codemode.describe({ path: "workflow:<name>" })` gives their arguments. `workflow({ scriptPath }, args)` runs a script file.
         - `ask(question, { choices, default })` asks the user and resolves with the answer; it throws an `AskError` (code `cancelled` or `unavailable`, as in an automation).
         - `sleep(duration)` waits (milliseconds, or "30s", "5m", "2h", "1d"; 7 days at most): a run CodeAlta ended during goes on by itself when it wakes.
@@ -92,8 +116,10 @@ public static class CodeModeToolFactory
         - `store(key, value)` keeps a JSON value for the later scripts of this session, and `load(key)` reads it back (undefined when there is none).
 
         Calls run at the same time under `Promise.all`; tools that change files run one at a time. Await every call whose result matters: calls still pending when the script returns are cancelled. A failed call throws an error you can catch, and the calls made before a failure are not undone.
+        """;
 
-        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "max_output_tokens": 4000, "timeout_ms": 600000, "budget_tokens": 500000}` (`budget_tokens` caps the tokens of the sessions the script starts). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
+    private const string ExecDescriptionEnd = """
+
 
         The result says where the source of the run was kept: to fix a long script, edit that file with your file tools and run it again with `return await workflow({ scriptPath: "<path>" })` instead of sending it whole.
 
@@ -140,7 +166,7 @@ public static class CodeModeToolFactory
         return
         [
             new AgentToolDefinition(
-                new AgentToolSpec(ExecToolName, ExecDescription, Parse(ExecSchema)) { Exposure = AgentToolExposure.Model, ScriptsTakeOver = options.TakesOver },
+                new AgentToolSpec(ExecToolName, caller.SessionOptions.SubSessions ? ExecDescription : ExecDescriptionWithoutSubSessions, Parse(ExecSchema)) { Exposure = AgentToolExposure.Model, ScriptsTakeOver = options.TakesOver },
                 (invocation, cancellationToken) => ExecAsync(dispatcher, caller, options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(WaitToolName, WaitDescription, Parse(WaitSchema)) { Exposure = AgentToolExposure.Model },
@@ -275,13 +301,16 @@ public static class CodeModeToolFactory
             SourceProjectId = caller.SourceProjectIdProvider?.Invoke() ?? caller.SourceProjectId,
             PluginRuntimeKey = caller.PluginRuntimeKey,
             RunTools = invocation.RunTools,
+            SubSessions = caller.SessionOptions.SubSessions,
         };
 
+        // A session without sub-sessions has no agent() nor session(): not in the API its scripts see, so a call is refused.
+        var agentHost = caller.SessionOptions.SubSessions ? options.Agents : null;
         var alta = new AltaScriptBinding(dispatcher.Describe(identity, cwd));
         var tools = invocation.Tools is { } invoker ? new ToolScriptBinding(invoker, ["alta", ExecToolName, WaitToolName]) : null;
         CodeModeApi? api = null;
         api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions,
-            .. options.Agents is null ? [] : CodeModeAgentBinding.Functions, CodeModeAskBinding.Function, .. CodeModeValueBinding.Functions]);
+            .. agentHost is null ? [] : CodeModeAgentBinding.Functions, CodeModeAskBinding.Function, .. CodeModeValueBinding.Functions]);
         // The scripts of the library the run sees: those of its project, and of yours and the samples those its space has.
         var spaces = options.Library is null ? null
             : caller.Spaces ?? (options.SpaceOf is { } spaceOf ? await spaceOf(sessionId, cancellationToken).ConfigureAwait(false) : null);
@@ -303,7 +332,7 @@ public static class CodeModeToolFactory
         var run = options.Runs.TryStart(sessionId, execOptions.Title, maxOutputTokens, invocation.ToolCallId, start, (observer, runCancellation) =>
             {
                 // The observer of a run is its handle: the sessions it starts know its id.
-                var agents = options.Agents is { } sessions ? new CodeModeAgentBinding(sessions, sessionId, () => ((CodeModeRunHandle)observer).Id, execOptions.BudgetTokens) : null;
+                var agents = agentHost is { } sessions ? new CodeModeAgentBinding(sessions, sessionId, () => ((CodeModeRunHandle)observer).Id, execOptions.BudgetTokens) : null;
                 var values = new CodeModeValueBinding(options.Values, sessionId);
                 var handler = new CodeModeCallRouter(
                 [

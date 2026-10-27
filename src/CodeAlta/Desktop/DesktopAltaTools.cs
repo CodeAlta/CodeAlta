@@ -193,6 +193,7 @@ internal static class DesktopAltaTools
                 DefaultMaxOutputBytes = 64 * 1024,
                 DefaultTimeout = TimeSpan.FromSeconds(120),
                 Spaces = request.Spaces,
+                SessionOptions = request.Options,
             };
             var tool = AltaSessionToolFactory.Create(dispatcher, caller);
             AgentToolDefinition[] tools =

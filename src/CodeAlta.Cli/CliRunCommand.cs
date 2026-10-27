@@ -142,6 +142,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
             session.Tier is { } tier ? ModelTiers.NameOf(tier) : null, host.Storage.Name, host.DisabledPromptFeatures)
         {
             ProviderType = host.Host.ModelProviderRegistry.TryGetProvider(new ModelProviderId(session.ProviderKey), out var provider) ? provider.ProviderType : null,
+            Options = await host.Host.RuntimeService.GetSessionOptionsAsync(session.SessionId, processToken).ConfigureAwait(false),
         });
         if (jsonl is null && !options.Quiet) sink = new CliProgressWriter(output, session.SessionId);
         if (sink is not null)
@@ -394,6 +395,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
             SessionId = options.SessionId,
             DisabledToolPatterns = patterns,
             Sandbox = options.Sandbox,
+            SessionOptions = options.NoSubSessions ? new AgentSessionOptions { SubSessions = false } : null,
         };
         error = null;
         return true;

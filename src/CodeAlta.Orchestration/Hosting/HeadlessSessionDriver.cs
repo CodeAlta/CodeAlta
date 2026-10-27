@@ -136,7 +136,7 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             if (existing is null)
             {
                 descriptor = await _host.Commands.CreateDraftSessionAsync(project, model.Provider, request.Title, request.CreatedBy, worktreeDirectory: request.WorktreeDirectory is { } worktreeFolder ? Path.GetFullPath(worktreeFolder) : null,
-                    spaceId: null, bypass, sessionId, request.ParentSessionId).ConfigureAwait(false);
+                    spaceId: null, bypass, sessionId, request.ParentSessionId, request.SessionOptions).ConfigureAwait(false);
             }
             else
             {
@@ -146,6 +146,11 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
                     return switchFailure;
             }
 
+            // A session that exists keeps its options; those asked only narrow them (a run turns sub-sessions off, never on).
+            if (existing is not null && request.SessionOptions is { } askedOptions
+                && AgentSessionOptions.Of(existing.Options) is var kept && kept.Within(askedOptions) is var narrowed && !narrowed.Equals(kept)
+                && await _host.Commands.SetSessionOptionsAsync(sessionId, narrowed, cancellationToken).ConfigureAwait(false) is { Status: not "ok" })
+                return NotReady($"The options of session '{sessionId}' cannot be changed now.");
             if (model.Tier is { } tier) await runtime.SetSessionTierAsync(sessionId, tier, cancellationToken).ConfigureAwait(false);
             // The sandbox asked is the session's own choice: no setting makes the run leave it.
             if (request.Sandbox is { } sandbox && await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false) is { Status: not "ok" } refused)

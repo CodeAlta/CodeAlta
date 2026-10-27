@@ -23,6 +23,12 @@ public sealed record OwnedSessionToolRequest(string? SessionId, string? ProjectI
     /// space limits (the scripts of the library offered as tools) are given only where it has them.
     /// </summary>
     public CodeAlta.Catalog.SpaceFilter? Spaces { get; init; }
+
+    /// <summary>
+    /// Gets the options of the session (<see cref="AgentSessionOptions"/>), read at each send: a session that cannot start
+    /// sessions of its own is not offered the tools that start them, and its tools say nothing of them.
+    /// </summary>
+    public AgentSessionOptions Options { get; init; } = AgentSessionOptions.Default;
 }
 
 /// <summary>Text and optional bounded image admission input; no caller-owned execution objects are accepted.</summary>

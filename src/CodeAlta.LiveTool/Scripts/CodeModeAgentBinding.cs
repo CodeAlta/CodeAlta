@@ -72,6 +72,7 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
               "effort":{"type":"string","enum":["minimal","low","medium","high","xhigh","max"]},
               "agent":{"type":"string","description":"The agent prompt, such as default or plan."},
               "sandbox":{"type":"string","description":"A sandbox profile."},
+              "subSessions":{"type":"boolean","description":"false creates the session without sub-sessions: it cannot start sessions of its own, for a part it must do itself."},
               "worktree":{"type":"boolean","description":"Work in a new git worktree of the project, on a branch of its own, so that sessions that change files in parallel do not collide; the worktree and its branch stay for the work to be merged."},
               "base":{"type":"string","description":"The branch or commit the worktree starts from; the commit the project is on by default."},
               "timeout":{"type":"integer","minimum":1,"description":"Milliseconds the session is given."},
@@ -90,7 +91,7 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
         new(OpenPath)
         {
             Description = "Creates a session of its own that the script keeps for several prompts; scripts call it as session(options), which gives { id, worktree, run(prompt, { schema }), close() }. The options are those of agent(), without the prompt. A session not closed is closed when the script ends.",
-            InputSchemaJson = """{"type":"object","properties":{"title":{"type":"string"},"model":{"type":"string"},"tier":{"type":"string","enum":["complex","standard","quick"]},"effort":{"type":"string"},"agent":{"type":"string"},"sandbox":{"type":"string"},"worktree":{"type":"boolean"},"base":{"type":"string"},"step":{"type":"string"}},"additionalProperties":false}""",
+            InputSchemaJson = """{"type":"object","properties":{"title":{"type":"string"},"model":{"type":"string"},"tier":{"type":"string","enum":["complex","standard","quick"]},"effort":{"type":"string"},"agent":{"type":"string"},"sandbox":{"type":"string"},"subSessions":{"type":"boolean"},"worktree":{"type":"boolean"},"base":{"type":"string"},"step":{"type":"string"}},"additionalProperties":false}""",
             ResultType = "{ sessionId: string; worktree?: { folder: string; branch: string } }",
         },
         new(AskPath)
@@ -156,6 +157,8 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
             Effort = effort,
             AgentPromptId = String(arguments, "agent"),
             Sandbox = String(arguments, "sandbox"),
+            // An agent turns sub-sessions off for a child, never on: a session that has none runs no agent().
+            SubSessions = !(arguments.TryGetProperty("subSessions", out var subSessions) && subSessions.ValueKind == JsonValueKind.False),
             Worktree = arguments.TryGetProperty("worktree", out var worktree) && worktree.ValueKind == JsonValueKind.True,
             WorktreeBase = String(arguments, "base"),
             Timeout = Timeout(arguments),

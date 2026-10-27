@@ -96,7 +96,7 @@ public sealed class AltaCommandRegistry
         }
 
         // An allow-list leaves out the guidance of the roots it removes; without one, the guidance is complete.
-        AddRootGuidance(app, Options.AllowedBuiltInRoots is null ? static _ => true : app.SubCommands.ContainsKey);
+        AddRootGuidance(app, Options.AllowedBuiltInRoots is null ? static _ => true : app.SubCommands.ContainsKey, context.Caller.SubSessions);
 
         return app;
     }
@@ -183,6 +183,9 @@ public sealed class AltaCommandRegistry
         foreach (var child in command.SubCommands.Values) ObserveCommandOriginals(child, context);
     }
 
+    private static bool StartsSession(string line)
+        => line.Contains("alta session create", StringComparison.Ordinal) || line.Contains("alta session fork", StringComparison.Ordinal);
+
     // Each example is written when the tree has its root command.
     private static readonly (string Root, string Line)[] RootGuidanceExamples =
     [
@@ -198,6 +201,7 @@ public sealed class AltaCommandRegistry
         ("session", "  `alta session tail <session-id> --last 10 --include assistant`"),
         ("session", "  `alta session create --project <project> --reasoning low`"),
         ("session", "  `alta session create --project <project> --same-model-as <session-id>`"),
+        ("session", "  `alta session create --project <project> --no-sub-sessions`"),
         ("prompt", "  `alta prompt list`; `alta prompt create <prompt-id> --scope global --stdin`"),
         ("session", "  `alta session send <session-id> --prompt-id <prompt-id> --stdin`"),
         ("session", "  `alta session send <session-id> --stdin`"),
@@ -209,17 +213,23 @@ public sealed class AltaCommandRegistry
         ("tool", "  `alta tool status`; `alta tool capability list`"),
     ];
 
-    private static void AddRootGuidance(CommandApp app, Func<string, bool> hasRoot)
+    // A caller without sub-sessions is shown no example of a command that starts a session.
+    private static void AddRootGuidance(CommandApp app, Func<string, bool> hasRoot, bool subSessions)
     {
         app.Add("");
         app.Add("Guidance: non-help commands return JSONL headed by `alta.result`; help is plain text.");
         app.Add("Use small limits for snapshots. Common examples:");
         foreach (var (root, line) in RootGuidanceExamples)
         {
-            if (hasRoot(root)) app.Add(line);
+            if (hasRoot(root) && (subSessions || !StartsSession(line))) app.Add(line);
         }
 
-        if (hasRoot("session")) app.Add("Coordinate: delegate project-folder work to project sessions; use `session request`/`message` for peer-agent notes and `session steer` only for active runs.");
+        if (hasRoot("session"))
+        {
+            app.Add(subSessions
+                ? "Coordinate: delegate project-folder work to project sessions; use `session request`/`message` for peer-agent notes and `session steer` only for active runs."
+                : "Coordinate: this session starts no session of its own; use `session request`/`message` for peer-agent notes and `session steer` only for active runs.");
+        }
         app.Add("Discover: `alta <command> --help` or `alta <command> <subcommand> --help`.");
     }
 
@@ -239,6 +249,8 @@ public sealed class AltaCommandRegistry
         int commandExitCode;
         try
         {
+            // A session without sub-sessions sees no command that starts a session, in its help as in its calls.
+            context = await AltaSubSessionsGate.ResolveAsync(context).ConfigureAwait(false);
             var parseApp = CreateCommandApp(context);
             var parseResult = parseApp.Parse(args, new CommandRunConfig { Out = TextWriter.Null, Error = TextWriter.Null });
             if (parseResult.HasErrors)
@@ -272,6 +284,13 @@ public sealed class AltaCommandRegistry
                         new CommandRunConfig { Out = context.Stdout, Error = context.Stderr })
                     .ConfigureAwait(false);
                 return CaptureResult(exitCode, context, stopwatch.Elapsed, isHelp: true, error: null);
+            }
+
+            if (!context.Caller.SubSessions && AltaSubSessionsGate.Gates(parseResult.ResolvedCommandPath))
+            {
+                var what = $"run `{parseResult.ResolvedCommandPath}`";
+                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "subSessions.refused", AltaExitCodes.PolicyDenied, AltaSubSessionsGate.Refusal(parseResult.ResolvedCommandPath));
+                return CaptureResult(AltaExitCodes.PolicyDenied, context, stopwatch.Elapsed, isHelp: false, error: what);
             }
 
             // A sandboxed session runs only the commands that keep it in its sandbox: they all run here, outside it.

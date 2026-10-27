@@ -54,6 +54,12 @@ public sealed record HeadlessSessionRequest
     public string? Sandbox { get; init; }
 
     /// <summary>
+    /// Gets the options a new session is created with (<see cref="CodeAlta.Agent.AgentSessionOptions"/>), narrowed by those
+    /// of the session that creates it; null for the defaults. A session that exists keeps the options saved with it.
+    /// </summary>
+    public CodeAlta.Agent.AgentSessionOptions? SessionOptions { get; init; }
+
+    /// <summary>
     /// Gets the session a new session is the child of, or null. The child is in its tree (aborts, retention) and takes
     /// the permission mode a session it creates takes (<see cref="SessionRuntimeService.GetCreatedSessionPermissionMode"/>).
     /// </summary>

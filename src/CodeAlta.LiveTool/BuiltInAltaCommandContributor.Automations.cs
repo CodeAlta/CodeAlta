@@ -94,7 +94,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateAutomationRunCommand(AltaCommandContext context)
     {
         string? id = null;
-        var command = Leaf("run", "Run an automation now, whatever its triggers: it starts a new session and sends it the prompt.");
+        var command = AltaSubSessionsGate.Leaf(context, "run", "Run an automation now, whatever its triggers: it starts a new session and sends it the prompt.");
         command.Add("<automation-id>", "Automation id from `alta automation list`.", value => id = value);
         command.Add(async (_, _) => await HandleAutomationRunAsync(context, id).ConfigureAwait(false));
         AddHelpText(command, "The command returns once the session exists: it does not wait for its answer. Follow it with `alta automation runs <id>`.");
@@ -104,7 +104,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateAutomationCreateCommand(AltaCommandContext context)
     {
         var options = new AutomationCreateOptions();
-        var command = Leaf("create", "Create an automation: a prompt, or a script of the library, that starts a session by itself.");
+        var command = AltaSubSessionsGate.Leaf(context, "create", "Create an automation: a prompt, or a script of the library, that starts a session by itself.");
         command.Add("name=", "Name of the automation, which also names the sessions it starts. Required.", value => options.Name = value);
         command.Add("content=", "The prompt sent at each run. Prefer --stdin for multi-line content.", value => options.Content = value);
         command.Add("stdin", "Read the prompt from stdin.", value => options.UseStdin = value is not null);

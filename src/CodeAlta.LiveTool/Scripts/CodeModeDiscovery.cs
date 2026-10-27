@@ -72,11 +72,11 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
     // send does not wait for the answer. One that needs a function of the host is there only when the run has it.
     private static IReadOnlyList<GlobalFunction> Globals { get; } =
     [
-        new("agent", "Starts a sub-agent: creates a child session for a part of the work, sends it the prompt, waits for it and resolves with its final answer. Several at once with Promise.all or parallel; worktree: true gives each its own git worktree and branch.",
-            "declare function agent(prompt: string, options?: { tier?: \"complex\" | \"standard\" | \"quick\"; model?: string; title?: string; schema?: object; worktree?: boolean; base?: string }): Promise<any>;",
+        new("agent", "Starts a sub-agent: creates a child session for a part of the work, sends it the prompt, waits for it and resolves with its final answer. Several at once with Promise.all or parallel; worktree: true gives each its own git worktree and branch; subSessions: false creates it without sessions of its own.",
+            "declare function agent(prompt: string, options?: { tier?: \"complex\" | \"standard\" | \"quick\"; model?: string; title?: string; schema?: object; worktree?: boolean; base?: string; subSessions?: boolean }): Promise<any>;",
             CodeModeAgentBinding.Path),
         new("session", "Creates a sub-agent session the script keeps for several prompts: run(prompt) sends one and resolves with its answer, close() ends it; with worktree: true it works in its own git worktree, named by worktree.",
-            "declare function session(options?: { tier?: \"complex\" | \"standard\" | \"quick\"; model?: string; title?: string; worktree?: boolean; base?: string }): Promise<{ id: string; worktree: { folder: string; branch: string } | null; run(prompt: string, options?: { schema?: object }): Promise<any>; close(): Promise<void> }>;",
+            "declare function session(options?: { tier?: \"complex\" | \"standard\" | \"quick\"; model?: string; title?: string; worktree?: boolean; base?: string; subSessions?: boolean }): Promise<{ id: string; worktree: { folder: string; branch: string } | null; run(prompt: string, options?: { schema?: object }): Promise<any>; close(): Promise<void> }>;",
             CodeModeAgentBinding.Path),
         new("workflow", "Runs a script of the library by its name (search finds them as workflow:<name>), or a script file, with its arguments, and resolves with what it returns.",
             "declare function workflow(name: string, args?: Record<string, unknown>): Promise<any>;\ndeclare function workflow(file: { scriptPath: string }, args?: Record<string, unknown>): Promise<any>;",

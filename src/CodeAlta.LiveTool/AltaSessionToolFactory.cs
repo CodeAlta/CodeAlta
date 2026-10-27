@@ -14,6 +14,16 @@ public static class AltaSessionToolFactory
         "In-process gateway to the current CodeAlta host. " +
         "Use it to discover the current session identity, projects, sessions, providers/models, skills, plugins, and tool capabilities; " +
         "inspect live or recoverable session status/history; create project/global child sessions; " +
+        ToolDescriptionEnd;
+
+    // The description for a session without sub-sessions: the same, without the sessions it cannot start.
+    private const string ToolDescriptionWithoutSubSessions =
+        "In-process gateway to the current CodeAlta host. " +
+        "Use it to discover the current session identity, projects, sessions, providers/models, skills, plugins, and tool capabilities; " +
+        "inspect live or recoverable session status/history; " +
+        ToolDescriptionEnd;
+
+    private const string ToolDescriptionEnd =
         "send, queue, steer, abort, compact, or coordinate sessions and peer-agent requests; " +
         "create/list/delete delayed prompt reminders; " +
         "start, read or cancel background jobs (commands that run without being waited for, whose result is sent to the session later); " +
@@ -79,7 +89,7 @@ public static class AltaSessionToolFactory
         return new AgentToolDefinition(
             new AgentToolSpec(
                 ToolName,
-                ToolDescription,
+                options.SessionOptions.SubSessions ? ToolDescription : ToolDescriptionWithoutSubSessions,
                 schema),
             (invocation, cancellationToken) => InvokeAsync(dispatcher, options, invocation, cancellationToken));
     }
@@ -139,6 +149,7 @@ public static class AltaSessionToolFactory
             SourceProjectId = options.SourceProjectIdProvider?.Invoke() ?? options.SourceProjectId,
             PluginRuntimeKey = options.PluginRuntimeKey,
             RunTools = invocation.RunTools,
+            SubSessions = options.SessionOptions.SubSessions,
         };
         var result = await dispatcher.InvokeAsync(
                 args,
@@ -378,4 +389,10 @@ public sealed record AltaSessionToolOptions
     /// library a space limits are offered and run only where it has them.
     /// </summary>
     public CodeAlta.Catalog.SpaceFilter? Spaces { get; init; }
+
+    /// <summary>
+    /// Gets the options of the session (<see cref="AgentSessionOptions"/>): a session without sub-sessions gets tools
+    /// whose descriptions say nothing of starting sessions, and whose commands that start them are hidden and refused.
+    /// </summary>
+    public AgentSessionOptions SessionOptions { get; init; } = AgentSessionOptions.Default;
 }

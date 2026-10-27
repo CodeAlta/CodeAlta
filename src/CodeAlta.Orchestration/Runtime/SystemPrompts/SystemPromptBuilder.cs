@@ -861,6 +861,28 @@ public sealed class SystemPromptBuilder
         ```
         """;
 
+    /// <summary>
+    /// What a session that has <c>exec</c> but cannot start sessions of its own is told: scripts batch its tool calls,
+    /// without sub-agents.
+    /// </summary>
+    internal const string CodeModeGuidanceWithoutSubAgents = """
+        `exec` runs a JavaScript program that calls your tools and `alta`; the user watches each run live. It is your way to batch tool calls.
+
+        - **A loop or batch of tool calls goes in one `exec`**, not one call per turn. Items still to find (the files of a folder, the matches of a search) are found by that script (`tools.list_dir`, `tools.grep`), not by a call before it, and independent calls run together under `Promise.all`.
+        - **Show the plan:** start with `export const meta = { title: "…", steps: [{ id: "…", title: "…" }] };`, declaring only the steps the script runs, and wrap each in `step("<id>", fn)` with those ids (`step` is given: never define your own).
+        - **Return a compact result**, it is all you read back: findings, decisions, failures.
+        - Call the tools directly for one or two calls, and for steps that each need the previous result.
+
+        ```js
+        export const meta = { title: "Read the configs", steps: [{ id: "read", title: "Read each config" }] };
+        return step("read", async () => {
+          const files = ["package.json", "tsconfig.json"];
+          const read = await Promise.all(files.map((path) => tools.read_file({ path })));
+          return files.map((path, i) => `${path}: ${read[i].content.length} characters`);
+        });
+        ```
+        """;
+
     /// <summary>The line added for a session where <c>exec</c> takes over the other tools.</summary>
     internal const string CodeModeOnlyGuidance = "The tools of CodeAlta that are not in your tool list are called from scripts, as `tools.<name>(args)` in `exec`: batch them in one script instead of one `exec` per call.";
 
@@ -873,6 +895,12 @@ public sealed class SystemPromptBuilder
         if (request.CodeMode is not ("on" or "only") || disabledTools.Contains("exec"))
         {
             return null;
+        }
+
+        // A session that cannot start sessions of its own is told how scripts batch its calls, and nothing of sub-agents.
+        if (IsOff(request.DisabledFeatures, PromptFeatures.SubAgents))
+        {
+            return request.CodeMode == "only" ? CodeModeGuidanceWithoutSubAgents + "\n\n" + CodeModeOnlyGuidance : CodeModeGuidanceWithoutSubAgents;
         }
 
         var text = request.CodeMode == "only" ? CodeModeGuidance + "\n\n" + CodeModeOnlyGuidance : CodeModeGuidance;

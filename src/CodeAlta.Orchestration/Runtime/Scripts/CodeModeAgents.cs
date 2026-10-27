@@ -32,6 +32,12 @@ public sealed record CodeModeAgentRequest(string Prompt)
     public string? Sandbox { get; init; }
 
     /// <summary>
+    /// Gets whether the session can start sessions of its own; true, the default. False creates it without sub-sessions
+    /// (<see cref="CodeAlta.Agent.AgentSessionOptions.SubSessions"/>); a script never gives a session more than its own has.
+    /// </summary>
+    public bool SubSessions { get; init; } = true;
+
+    /// <summary>
     /// Gets whether the session works in a new git worktree of the project of the script's session, on a branch of its own
     /// (<c>alta/&lt;name&gt;</c>); false for the folder that session works in.
     /// </summary>

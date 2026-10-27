@@ -153,6 +153,8 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         var runtime = _host.RuntimeService;
         var parent = await runtime.TryGetResumableSessionAsync(parentSessionId, cancellationToken).ConfigureAwait(false);
         if (parent is null) return Refused($"The session '{parentSessionId}' that runs the script is not known.");
+        if (!(await runtime.GetSessionOptionsAsync(parentSessionId, cancellationToken).ConfigureAwait(false)).SubSessions)
+            return Refused(SessionRuntimeService.SubSessionsOffMessage);
         if (await DepthAsync(parent, cancellationToken).ConfigureAwait(false) >= MaxDepth)
             return Refused($"A script of a session started by scripts {MaxDepth} levels deep starts no session.");
         if (request.BudgetTokens is { } budget && Interlocked.Read(ref state.SpentTokens) is var spent && spent >= budget)
@@ -259,6 +261,7 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
             AgentPromptId = request.AgentPromptId,
             Title = request.Title,
             Sandbox = request.Sandbox,
+            SessionOptions = request.SubSessions ? null : new AgentSessionOptions { SubSessions = false },
             DisabledToolPatterns = runtime.GetDisabledToolPatterns(parentSessionId),
             ParentSessionId = parentSessionId,
             CreatedBy = new AltaActorProvenance

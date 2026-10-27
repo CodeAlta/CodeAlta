@@ -185,8 +185,11 @@ public sealed class CodeModeToolTests
     {
         public System.Collections.Concurrent.ConcurrentBag<(string Parent, string Prompt, string? Tier, string? StepId, string RunId)> Requests { get; } = [];
 
+        public System.Collections.Concurrent.ConcurrentQueue<CodeModeAgentRequest> All { get; } = new();
+
         public Task<CodeModeAgentResult> RunAsync(string parentSessionId, CodeModeAgentRequest request, CancellationToken cancellationToken)
         {
+            All.Enqueue(request);
             Requests.Add((parentSessionId, request.Prompt, request.Tier, request.StepId, request.RunId));
             return Task.FromResult(request.Prompt == "fail"
                 ? new CodeModeAgentResult("child-x", false, "failed", null, "it broke", Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero)
@@ -197,6 +200,7 @@ public sealed class CodeModeToolTests
 
         public Task<CodeModeAgentResult> OpenAsync(string parentSessionId, CodeModeAgentRequest request, CancellationToken cancellationToken)
         {
+            All.Enqueue(request);
             Kept.Enqueue("open " + request.Title);
             return Task.FromResult(new CodeModeAgentResult("kept-1", true, "opened", null, null, Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero));
         }
@@ -212,6 +216,65 @@ public sealed class CodeModeToolTests
             Kept.Enqueue("close " + sessionId);
             return Task.CompletedTask;
         }
+    }
+
+    [TestMethod]
+    public async Task Agent_AndSession_TakeSubSessionsOff_ForTheirChild()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var agents = new FakeAgents();
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = agents }).Single(static tool => tool.Spec.Name == "exec");
+
+        var result = await InvokeAsync(exec, """
+            await agent("leaf", { subSessions: false });
+            await agent("branch");
+            await session({ title: "kept", subSessions: false });
+            return "ok";
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        var requests = agents.All.ToArray();
+        Assert.IsFalse(requests.Single(static request => request.Prompt == "leaf").SubSessions);
+        Assert.IsTrue(requests.Single(static request => request.Prompt == "branch").SubSessions);
+        Assert.IsFalse(requests.Single(static request => request.Title == "kept").SubSessions);
+        StringAssert.Contains(exec.Spec.Description, "subSessions: false");
+    }
+
+    [TestMethod]
+    public async Task ASessionWithoutSubSessions_HasNoAgentNorSession_InItsScriptsNorInTheDescriptionOfExec()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var agents = new FakeAgents();
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher,
+            new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path, SessionOptions = new AgentSessionOptions { SubSessions = false } },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = agents }).Single(static tool => tool.Spec.Name == "exec");
+
+        Assert.DoesNotContain("agent(", exec.Spec.Description);
+        Assert.DoesNotContain("session(", exec.Spec.Description);
+        Assert.DoesNotContain("sub-agent", exec.Spec.Description);
+        StringAssert.Contains(exec.Spec.Description, "`parallel(thunks, { limit })`");
+
+        var result = await InvokeAsync(exec, """
+            const found = await codemode.search({ query: "agent session sub-agent create child" });
+            const paths = typeof found === "string" ? [] : found.map((hit) => hit.path);
+            const refused = await agent("Review.").then(() => "called", (e) => e.message);
+            const kept = await session({ title: "x" }).then(() => "called", (e) => e.message);
+            return { paths, refused, kept };
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        using var value = ValueOf(result);
+        var paths = value.RootElement.GetProperty("paths").EnumerateArray().Select(static item => item.GetString()!).ToArray();
+        Assert.IsFalse(paths.Any(static path => path is "agent" or "session" || path.StartsWith("alta.session.create", StringComparison.Ordinal)
+            || path.StartsWith("alta.session.fork", StringComparison.Ordinal)), string.Join(", ", paths));
+        StringAssert.Contains(value.RootElement.GetProperty("refused").GetString(), "`codemode.agent` is not a function of this session");
+        StringAssert.Contains(value.RootElement.GetProperty("kept").GetString(), "`codemode.session.open` is not a function of this session");
+        Assert.IsTrue(agents.All.IsEmpty);
     }
 
     [TestMethod]

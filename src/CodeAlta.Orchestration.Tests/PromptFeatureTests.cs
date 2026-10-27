@@ -104,6 +104,49 @@ public sealed class PromptFeatureTests
         }
     }
 
+    [TestMethod]
+    public void TheCodeModeSection_OfASessionWithoutSubAgents_BatchesToolCallsWithoutAgents()
+    {
+        using var temp = new TempFolder();
+        var builder = new SystemPromptBuilder();
+        string Prompt(params string[] off) => builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "fake",
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "fake", ProviderKey = "fake", WorkingDirectory = temp.Path, Kind = SessionViewKind.ProjectSession },
+            UserCodeAltaRoot = Path.Combine(temp.Path, "global"),
+            CodeMode = "on",
+            DisabledFeatures = off.ToHashSet(StringComparer.Ordinal),
+        }).DeveloperInstructions!;
+
+        var full = Prompt();
+        StringAssert.Contains(full, "gives each item an `agent()`");
+        StringAssert.Contains(full, "--no-sub-sessions");
+
+        var lean = Prompt(PromptFeatures.SubAgents);
+        StringAssert.Contains(lean, "# Code Mode");
+        StringAssert.Contains(lean, "A loop or batch of tool calls goes in one `exec`");
+        // What the session is told of being a sub-agent itself stays (the review, the branches): not the sessions it would start.
+        foreach (var part in new[] { "agent(", "## Sub-agents", "your sub-agents", "alta session create", "--no-sub-sessions" })
+        {
+            Assert.DoesNotContain(part, lean, part);
+        }
+    }
+
+    [TestMethod]
+    public void TheSubAgentsOfAPrompt_FollowTheOptionsOfTheSession_WhateverTheHostSays()
+    {
+        var on = new SessionViewDescriptor { SessionId = "a" };
+        var off = new SessionViewDescriptor { SessionId = "b", Options = new CodeAlta.Agent.AgentSessionOptions { SubSessions = false } };
+        var none = new HashSet<string>(StringComparer.Ordinal);
+        var hostOff = new HashSet<string>([PromptFeatures.SubAgents, PromptFeatures.Notes], StringComparer.Ordinal);
+
+        Assert.AreSame(none, Runtime.AgentInstructionTemplateProvider.SessionPromptFeatures(none, on));
+        CollectionAssert.AreEquivalent(new[] { PromptFeatures.SubAgents }, Runtime.AgentInstructionTemplateProvider.SessionPromptFeatures(none, off).ToArray());
+        CollectionAssert.AreEquivalent(new[] { PromptFeatures.Notes }, Runtime.AgentInstructionTemplateProvider.SessionPromptFeatures(hostOff, on).ToArray());
+        Assert.AreSame(hostOff, Runtime.AgentInstructionTemplateProvider.SessionPromptFeatures(hostOff, off));
+        CollectionAssert.DoesNotContain(PromptFeatures.All.ToArray(), PromptFeatures.SubAgents);
+    }
+
     private sealed class TempFolder : IDisposable
     {
         public string Path { get; } = Directory.CreateDirectory(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "codealta-prompt-features-" + Guid.NewGuid().ToString("N"))).FullName;

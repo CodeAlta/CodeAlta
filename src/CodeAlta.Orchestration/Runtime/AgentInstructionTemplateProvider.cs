@@ -55,6 +55,24 @@ public sealed class AgentInstructionTemplateProvider
     public IReadOnlySet<string> DisabledPromptFeatures { get; init; } = System.Collections.Frozen.FrozenSet<string>.Empty;
 
     /// <summary>
+    /// Gets the parts of the workflow the prompt of a session leaves out: those of the host, and those its options turn
+    /// off. The sub-agents (<see cref="PromptFeatures.SubAgents"/>) follow the session alone: a session that cannot start
+    /// sessions of its own is not told about them.
+    /// </summary>
+    /// <param name="host">The parts the host leaves out.</param>
+    /// <param name="session">The session.</param>
+    /// <returns>The parts the prompt of the session leaves out.</returns>
+    internal static IReadOnlySet<string> SessionPromptFeatures(IReadOnlySet<string> host, SessionViewDescriptor session)
+    {
+        var subSessions = CodeAlta.Agent.AgentSessionOptions.Of(session.Options).SubSessions;
+        if (subSessions != host.Contains(PromptFeatures.SubAgents)) return host;
+        var features = new HashSet<string>(host, StringComparer.Ordinal);
+        if (subSessions) features.Remove(PromptFeatures.SubAgents);
+        else features.Add(PromptFeatures.SubAgents);
+        return features;
+    }
+
+    /// <summary>
     /// Gets the home folder whose resources of other tools the sessions read: the one of the discovery scope, else the one
     /// of the user; <see langword="null"/> when the sessions read none (<see cref="ReadsUserHome"/>).
     /// </summary>
@@ -293,7 +311,7 @@ public sealed class AgentInstructionTemplateProvider
             AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project, spaceResources, skills),
             SpaceResources = spaceResources,
             DisabledTools = WithSessionPatterns(HostDisabledTools(space), session.SessionId),
-            DisabledFeatures = DisabledPromptFeatures,
+            DisabledFeatures = SessionPromptFeatures(DisabledPromptFeatures, session),
             // The Runtime Context names the space only when there is another one than the default, where it tells something.
             Space = spaces.Count < 2 ? null : space,
             GitIdentity = AppliesSpaceIdentities ? space.Settings.Identity?.Git : null,

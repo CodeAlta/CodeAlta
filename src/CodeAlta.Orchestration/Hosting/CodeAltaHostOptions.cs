@@ -56,9 +56,10 @@ public sealed class CodeAltaHostOptions
 
     /// <summary>
     /// Gets the parts of the workflow the prompts of the sessions leave out (<see cref="Runtime.SystemPrompts.PromptFeatures"/>):
-    /// the scratchpad, the sticky notes, the follow-up tasks, the review by the user, the sub-agents, the mode handoff and
-    /// the title of a session. Null, the default, keeps them all, as CodeAlta Desktop and TUI do; <c>altacli run</c> leaves
-    /// out those nobody would read.
+    /// the scratchpad, the sticky notes, the follow-up tasks, the review by the user, the mode handoff and the title of a
+    /// session. Null, the default, keeps them all, as CodeAlta Desktop and TUI do; <c>altacli run</c> leaves out those
+    /// nobody would read. The sub-agents are not among them: they follow the options of each session
+    /// (<see cref="CodeAlta.Agent.AgentSessionOptions.SubSessions"/>).
     /// </summary>
     public IReadOnlySet<string>? DisabledPromptFeatures { get; init; }
 

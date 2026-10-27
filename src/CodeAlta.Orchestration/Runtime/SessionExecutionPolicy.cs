@@ -77,11 +77,25 @@ public static class SessionExecutionPolicy
     public static SessionExecutionOptions BuildOptions(
         SessionExecutionRequest request, IReadOnlyList<AgentToolDefinition>? tools,
         AgentPermissionRequestHandler onPermissionRequest, AgentUserInputRequestHandler? onUserInputRequest, string? permissionMode)
+        => BuildOptions(request, tools, onPermissionRequest, onUserInputRequest, permissionMode, sessionOptions: null);
+
+    /// <summary>Assembles options from captured policy and host-specific tools and interaction adapters, for a session created in a permission mode and with options.</summary>
+    /// <param name="request">The captured policy.</param>
+    /// <param name="tools">The tools of the session.</param>
+    /// <param name="onPermissionRequest">The permission request handler.</param>
+    /// <param name="onUserInputRequest">The user-input request handler.</param>
+    /// <param name="permissionMode">The mode a new session is created with (<see cref="SessionExecutionOptions.PermissionMode"/>); null for none.</param>
+    /// <param name="sessionOptions">The options a new session is created with (<see cref="SessionExecutionOptions.SessionOptions"/>); null for the defaults.</param>
+    /// <exception cref="ArgumentNullException">The request or permission handler is null.</exception>
+    public static SessionExecutionOptions BuildOptions(
+        SessionExecutionRequest request, IReadOnlyList<AgentToolDefinition>? tools,
+        AgentPermissionRequestHandler onPermissionRequest, AgentUserInputRequestHandler? onUserInputRequest, string? permissionMode, AgentSessionOptions? sessionOptions)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(onPermissionRequest);
         return new SessionExecutionOptions
         {
+            SessionOptions = sessionOptions,
             ProviderId = request.ProviderId,
             ProviderKey = request.ProviderKey,
             WorkingDirectory = request.WorkingDirectory,

@@ -1152,6 +1152,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // Only the local state says it, and none is a choice too: the mode of the provider.
         session.PermissionMode = NormalizeOptionalText(localState.PermissionMode);
         session.Sandbox = NormalizeOptionalText(localState.Sandbox);
+        session.Options = AgentSessionOptions.Stored(localState.Options);
         session.TitleMode = AgentSessionTitles.ParseMode(localState.TitleMode) is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null;
 
         if (!string.IsNullOrWhiteSpace(localState.AgentPromptId))
@@ -1185,6 +1186,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ReasoningEffort = localState.ReasoningEffort,
             PermissionMode = localState.PermissionMode,
             Sandbox = localState.Sandbox,
+            Options = localState.Options,
             TitleMode = localState.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null,
             AgentPromptId = localState.AgentPromptId,
             Archived = localState.Archived,
@@ -1543,6 +1545,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         using var lineage = ClaimRetentionWork(parentSessionId, createdBy?.SourceSessionId);
         ArgumentNullException.ThrowIfNull(options);
         ValidateDiscoveryPaths(null, options);
+        // A session without sub-sessions creates none; the options of a child are never wider than its creator's.
+        var sessionOptions = await GetCreatedSessionOptionsAsync(options.SessionOptions, createdBy?.SourceSessionId, cancellationToken).ConfigureAwait(false);
         if (requestedSessionId is not null) await ReserveRequestedSessionIdAsync(requestedSessionId, cancellationToken).ConfigureAwait(false);
 
         var now = DateTimeOffset.UtcNow;
@@ -1550,6 +1554,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             SessionId = requestedSessionId ?? string.Empty,
             Kind = SessionViewKind.GlobalSession,
+            Options = sessionOptions,
             ProviderId = options.ProviderId.Value,
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
             SpaceId = spaceId,
@@ -1732,6 +1737,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         using var projectCreation = ClaimProjectCreation(project);
 
         ValidateDiscoveryPaths(null, options, project);
+        // A session without sub-sessions creates none; the options of a child are never wider than its creator's.
+        var sessionOptions = await GetCreatedSessionOptionsAsync(options.SessionOptions, createdBy?.SourceSessionId, cancellationToken).ConfigureAwait(false);
 
         var requestedProjectId = project.Id;
         var previousProject = await _projectCatalog.GetByPathAsync(project.ProjectPath, cancellationToken).ConfigureAwait(false);
@@ -1757,6 +1764,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             SessionId = requestedSessionId ?? string.Empty,
             Kind = SessionViewKind.ProjectSession,
+            Options = sessionOptions,
             ProviderId = options.ProviderId.Value,
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
             ProjectRef = project.Id,
@@ -2078,6 +2086,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             : null;
         var effectiveAgentPromptId = selectedPrompt;
         session.AgentPromptId = effectiveAgentPromptId;
+        // The options of an attached session are those of its attachment, which the owner changes: the instructions follow them.
+        if (previousEntry is not null) session.Options = AgentSessionOptions.Stored(previousEntry.Options);
         // The preparation built them a moment ago, for a session that had no attachment: they are built again only
         // when what they were built from changed since (a worktree that is gone, another project or model).
         AgentInstructionBundle instructions;
@@ -2292,7 +2302,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             // The modes a session is created with are saved with it: the next attachment reads them from there.
             await UpdateSessionLocalStateAsync(session, actorCancellationToken, startNewSession ? permissionMode : null,
                 startNewSession ? session.TitleMode : null, createdReviewBeforeCommit: startNewSession ? session.ReviewBeforeCommit : null,
-                createdSandbox: startNewSession ? ownSandbox : keptSandbox).ConfigureAwait(false);
+                createdSandbox: startNewSession ? ownSandbox : keptSandbox, createdOptions: startNewSession ? session.Options : null).ConfigureAwait(false);
             return true;
         }, CancellationToken.None).ConfigureAwait(false);
         if (startNewSession)
@@ -2347,6 +2357,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderRegistrationVersion = providerVersion,
             PermissionMode = permissionMode,
             OwnSandbox = ownSandbox,
+            Options = AgentSessionOptions.Of(session.Options),
+            ComposedOptions = AgentSessionOptions.Of(session.Options),
             OwnTitleMode = ownTitleMode,
             TitleMode = titleMode,
             OwnReviewBeforeCommit = startNewSession ? session.ReviewBeforeCommit : savedLocalState?.ReviewBeforeCommit,
@@ -5743,12 +5755,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // createdPermissionMode, createdTitleMode: the modes of a session that starts, when it has them. Any other
     // update leaves the saved modes as they are: only the owner of the session changes them.
     private async Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken, string? createdPermissionMode,
-        string? createdTitleMode = null, bool archive = false, bool? createdReviewBeforeCommit = null, string? createdSandbox = null)
+        string? createdTitleMode = null, bool archive = false, bool? createdReviewBeforeCommit = null, string? createdSandbox = null,
+        AgentSessionOptions? createdOptions = null)
     {
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) ?? new SessionViewLocalState();
         if (createdPermissionMode is not null) localState.PermissionMode = createdPermissionMode;
         if (createdSandbox is not null) localState.Sandbox = createdSandbox;
+        if (AgentSessionOptions.Stored(createdOptions) is { } options) localState.Options = options;
         if (createdTitleMode is not null) localState.TitleMode = createdTitleMode;
         if (createdReviewBeforeCommit is not null) localState.ReviewBeforeCommit = createdReviewBeforeCommit;
         localState.ProviderKey = session.ResolvedProviderKey;
@@ -5901,6 +5915,22 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         private string? _ownSandbox;
+
+        /// <summary>
+        /// The options of the session (whether it can start sessions of its own). Read from any thread: the commands that
+        /// create sessions read it at each call. Changed by the owner of the session; the attachment is replaced when the
+        /// tools and instructions they decide change.
+        /// </summary>
+        public AgentSessionOptions Options
+        {
+            get => Volatile.Read(ref _options);
+            set => Volatile.Write(ref _options, value ?? AgentSessionOptions.Default);
+        }
+
+        private AgentSessionOptions _options = AgentSessionOptions.Default;
+
+        /// <summary>The options the instructions and the tools of this attachment were composed with.</summary>
+        public AgentSessionOptions ComposedOptions { get; init; } = AgentSessionOptions.Default;
 
         /// <summary>How the session titles itself when it does not follow the setting. Read and written on the actor of the session.</summary>
         public AgentSessionTitleMode? OwnTitleMode { get; set; }
@@ -6073,7 +6103,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 && string.Equals(AdditionalSystemMessage, options.AdditionalSystemMessage, StringComparison.Ordinal)
                 && string.Equals(AdditionalDeveloperInstructions, options.AdditionalDeveloperInstructions, StringComparison.Ordinal)
                 && (InstructionProcessor is null) == (options.InstructionProcessor is null)
-                && ToolSignatures.SequenceEqual(CreateToolSignatures(options.Tools), StringComparer.Ordinal);
+                && ToolSignatures.SequenceEqual(CreateToolSignatures(options.Tools), StringComparer.Ordinal)
+                // Options changed since the instructions were composed: they are composed again.
+                && ComposedOptions.Equals(Options);
         }
 
         public void ObserveEvent(AgentEvent @event)

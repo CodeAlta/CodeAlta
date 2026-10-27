@@ -21,7 +21,10 @@ public static class PromptFeatures
     /// <summary>The review of the changes by the user before commit (<c>alta review</c>).</summary>
     public const string Review = "review";
 
-    /// <summary>The sub-agents, child sessions the agent creates to work in parallel.</summary>
+    /// <summary>
+    /// The sub-agents, child sessions the agent creates to work in parallel. It is not a part a host turns off: it follows
+    /// the option of the session (<see cref="CodeAlta.Agent.AgentSessionOptions.SubSessions"/>), so it is not in <see cref="All"/>.
+    /// </summary>
     public const string SubAgents = "sub-agents";
 
     /// <summary>The switch to another agent prompt (Plan mode), and the list of the agent prompts.</summary>
@@ -30,8 +33,8 @@ public static class PromptFeatures
     /// <summary>The title the model gives the session.</summary>
     public const string SessionTitle = "session-title";
 
-    /// <summary>Every feature, in the order the help lists them.</summary>
-    public static IReadOnlyList<string> All { get; } = [Scratchpad, Notes, Tasks, Review, SubAgents, ModeHandoff, SessionTitle];
+    /// <summary>Every feature a host turns off, in the order the help lists them; <see cref="SubAgents"/> follows the session.</summary>
+    public static IReadOnlyList<string> All { get; } = [Scratchpad, Notes, Tasks, Review, ModeHandoff, SessionTitle];
 
     private static readonly FrozenSet<string> Known = All.ToFrozenSet(StringComparer.Ordinal);
 

@@ -793,6 +793,23 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionJoinCommand(context));
         group.Add(CreateSessionMessageCommand(context));
         group.Add(CreateSessionRequestCommand(context));
+        if (!context.Caller.SubSessions)
+        {
+            // A session without sub-sessions is shown nothing of the sessions it cannot start.
+            AddHelpText(
+                group,
+                "Common: list by project, send prompts, inspect result/metrics snapshots, and steer active runs.",
+                "A session is a list of turns (`session turns`): `session rewind` removes one and the turns after it.",
+                "`session archive` takes a session out of the lists, `session restore` brings it back.",
+                "Examples:",
+                "  `alta session current`",
+                "  `alta session list --project CodeAlta --state all --limit 20`",
+                "  `alta session send <session-id> --stdin`",
+                "  `alta session result <session-id>`",
+                "  `alta session turns <session-id> --last 5`");
+            return group;
+        }
+
         AddHelpText(
             group,
             "Common: list by project, create child sessions, send prompts, inspect result/metrics snapshots, and steer active runs.",
@@ -991,7 +1008,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static Command CreateSessionCreateCommand(AltaCommandContext context)
     {
         var options = new SessionCreateOptions();
-        var command = Leaf("create", "Create a project or global session using resolved model selection.");
+        var command = AltaSubSessionsGate.Leaf(context, "create", "Create a project or global session using resolved model selection.");
         AddModelSelectionOptions(command, options.Model);
         command.Add("project=", "Target project id, slug, or path.", value => options.Project = value);
         command.Add("global", "Create a global coordinator session.", value => options.Global = value is not null);
@@ -1004,6 +1021,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("space=", "The space the session belongs to: id, start of id, or name. A session creates sessions only in its own space.", value => options.Space = value);
         command.Add("permission-mode=", "The permission mode the session starts in, one its provider offers (default, acceptEdits, bypassPermissions; Claude Code also auto, dontAsk).", value => options.PermissionMode = value);
         command.Add("sandbox=", "The sandbox the session runs in: a profile (workspace, strict, or one of the user's; `alta sandbox list` says what each allows), or `off`. Without it, the settings of the user decide. An agent turns a sandbox on, never off.", value => options.Sandbox = value);
+        command.Add("no-sub-sessions", "Create the session without sub-sessions: it cannot create, fork or start sessions of its own, and its instructions do not mention them. For a child that must do its part itself.", value => options.NoSubSessions = value is not null);
         command.Add(async (_, _) => await HandleSessionCreateAsync(context, options).ConfigureAwait(false));
         AddHelpText(
             command,
@@ -1022,12 +1040,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "first does not create a session that asks less.",
             "A session created by a session runs the `default` agent prompt, whatever its creator runs (Plan included),",
             "unless `--prompt-id` names another one; a session without a creator starts with the prompt of its space.",
+            "A session can start sessions of its own unless it is created with `--no-sub-sessions`; a session created by a",
+            "session without them cannot be created at all, and an agent never gives a session more than it has itself.",
             "Examples:",
             "  `alta session create --project CodeAlta --tier quick`",
             "  `alta session create --project CodeAlta --permission-mode acceptEdits`",
             "  `alta session create --project CodeAlta --prompt-id default --reasoning low`",
             "  `alta session create --project CodeAlta --same-model-as <session-id>`",
             "  `alta session create --project CodeAlta --worktree --base main`",
+            "  `alta session create --project CodeAlta --tier quick --no-sub-sessions`",
             "  `alta session create --global --model-ref codex:gpt-5.5@high`");
         return command;
     }
@@ -1167,7 +1188,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static Command CreateSessionForkCommand(AltaCommandContext context)
     {
         var options = new SessionForkOptions();
-        var command = Leaf("fork", "Create a session that starts with the turns of another one up to a point.");
+        var command = AltaSubSessionsGate.Leaf(context, "fork", "Create a session that starts with the turns of another one up to a point.");
         command.Add("<session-id>?", "CodeAlta session id. Defaults to the calling agent session when omitted.", value => options.SessionId = value);
         command.Add("before=", "The fork stops before this turn: a turn number or a run id from `alta session turns`.", value => options.Before = value);
         command.Add("after=", "The fork keeps the turns up to this one, included: a turn number or a run id.", value => options.After = value);
@@ -2921,7 +2942,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             worktreeDirectory,
             // The mode named, else what the host gives a session that another session creates: by default it does not ask.
             permissionMode ?? runtime.GetCreatedSessionPermissionMode(context.Caller.SourceSessionId, modelSelection.Selection!.ProviderKey),
-            NormalizeOptionalText(options.Sandbox));
+            NormalizeOptionalText(options.Sandbox),
+            options.NoSubSessions ? new AgentSessionOptions { SubSessions = false } : null);
 
         SessionViewDescriptor session;
         try
@@ -2969,6 +2991,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             tier = modelSelection.Tier is { } chosenTier ? ModelTiers.NameOf(chosenTier) : null,
             permissionMode = session.PermissionMode,
             sandbox = SandboxRecord(await runtime.GetSessionSandboxAsync(session.SessionId, context.CancellationToken).ConfigureAwait(false)),
+            options = SessionOptionsRecord(session.Options),
         });
         return AltaExitCodes.Success;
     }
@@ -5192,7 +5215,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         string? promptId = null,
         string? worktreeDirectory = null,
         string? permissionMode = null,
-        string? sandbox = null)
+        string? sandbox = null,
+        AgentSessionOptions? sessionOptions = null)
         => new()
         {
             ProviderId = new ModelProviderId(selection.ProviderKey),
@@ -5203,10 +5227,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ReasoningEffort = selection.ReasoningEffort,
             PermissionMode = permissionMode,
             Sandbox = sandbox,
+            SessionOptions = AgentSessionOptions.Stored(sessionOptions),
             AgentPromptId = NormalizeOptionalText(promptId),
             // The commands of the session resolve paths from the folder it works in.
             Tools = CreateAltaSessionTools(context, selection.ProviderKey, selection.ProviderKey, selection.ModelId, sourceSessionIdProvider, sourceProjectId,
-                worktreeDirectory ?? workingDirectory, workingDirectory),
+                worktreeDirectory ?? workingDirectory, workingDirectory, sessionOptions),
             OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
@@ -5252,7 +5277,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             AgentPromptId = NormalizeOptionalText(promptId) ?? NormalizeOptionalText(info.Session.AgentPromptId),
             // The session works where it records: its worktree while that folder exists, the folder of its project otherwise.
             Tools = CreateAltaSessionTools(context, info.Session.ProviderId, info.Session.ResolvedProviderKey, modelId, () => info.Session.SessionId, info.Session.ProjectRef,
-                info.Session.WorktreeDirectory is { Length: > 0 } worktree && Directory.Exists(worktree) ? worktree : workingDirectory, workingDirectory),
+                info.Session.WorktreeDirectory is { Length: > 0 } worktree && Directory.Exists(worktree) ? worktree : workingDirectory, workingDirectory, info.Session.Options),
             OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
@@ -5283,7 +5308,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Func<string?>? sourceSessionIdProvider,
         string? sourceProjectId,
         string? workingDirectory,
-        string? projectDirectory)
+        string? projectDirectory,
+        AgentSessionOptions? sessionOptions)
     {
         var policy = context.Services.Get<IAltaSessionToolProviderPolicy>();
         if (policy is not null && !policy.SupportsAltaSessionTool(ProviderId))
@@ -5305,6 +5331,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             DefaultMaxOutputRecords = 200,
             DefaultMaxOutputBytes = 64 * 1024,
             DefaultTimeout = TimeSpan.FromSeconds(120),
+            SessionOptions = AgentSessionOptions.Of(sessionOptions),
         };
         IReadOnlyList<AgentToolDefinition> tools = [AltaSessionToolFactory.Create(dispatcher, caller)];
         // A session that an alta command creates gets the tools of Code Mode as the sessions of the window do.
@@ -6524,8 +6551,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             childCount = includeChildren ? children.Length : (int?)null,
             childSessionIds = includeChildren ? children.Select(static child => child.Session.SessionId).ToArray() : null,
             sandbox,
+            options = SessionOptionsRecord(info.Session.Options),
         });
     }
+
+    // The options of a session for its record: each option by its name, whether it is at its default or not.
+    private static object SessionOptionsRecord(AgentSessionOptions? options)
+        => new { subSessions = AgentSessionOptions.Of(options).SubSessions };
 
     // The sandbox of a session for its record; null where the host has no runtime.
     private static async Task<object?> SessionSandboxRecordAsync(AltaCommandContext context, string sessionId)
@@ -7442,6 +7474,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public string? PermissionMode { get; set; }
 
         public string? Sandbox { get; set; }
+
+        public bool NoSubSessions { get; set; }
     }
 
     private sealed class SessionForkOptions

@@ -32,6 +32,7 @@ public sealed class SessionStateRowTests
             ("title", static state => state.TitleMode = "last_message"),
             ("permission", static state => state.PermissionMode = "plan"),
             ("sandbox", static state => state.Sandbox = "strict"),
+            ("options", static state => state.Options = new AgentSessionOptions { SubSessions = false }),
             ("queue", static state => state.QueuedPrompts.Add(Queued("later", "queued"))),
             ("submitting", static state => state.QueuedPrompts.Single(static prompt => prompt.QueueItemId == "later").State = "submitting"),
             ("drained", static state =>
@@ -67,6 +68,30 @@ public sealed class SessionStateRowTests
             BlankJournal(path);
             var read = await new SessionViewCatalog(options).JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt).WaitAsync(Deadline);
             AssertSameJson(expected, Serialize(read!), name + ": the next start reads the state written.");
+        }
+    }
+
+    [TestMethod]
+    public async Task TheListOfSessions_GivesTheOptionsOfASession_AndAForkKeepsThem()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var catalog = new SessionViewCatalog(options);
+        var session = await CreateSessionAsync(options, "session-options");
+        var state = (await catalog.JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt))!;
+        state.Options = new AgentSessionOptions { SubSessions = false };
+        await catalog.JournalStore.AppendStateAsync(session, state);
+        var fork = CreateDescriptor("session-options-fork");
+        await catalog.JournalStore.ForkAsync(session, fork, beforeRunId: null, activeRunId: null);
+
+        // A new catalog, as after a start of the application: the list reads its rows.
+        var listed = await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync();
+
+        foreach (var id in new[] { "session-options", "session-options-fork" })
+        {
+            var kept = listed.Single(item => item.SessionId == id).ViewState?.Options;
+            Assert.IsNotNull(kept, id);
+            Assert.IsFalse(kept.SubSessions, id);
         }
     }
 

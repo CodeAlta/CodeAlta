@@ -697,6 +697,7 @@ public sealed partial class SessionViewJournalStore
             TitleMode = state.TitleMode,
             ReviewBeforeCommit = state.ReviewBeforeCommit,
             ReviewNoted = state.ReviewNoted,
+            Options = state.Options,
             SandboxNoted = state.SandboxNoted,
             Tier = state.Tier,
             AgentPromptId = state.AgentPromptId,

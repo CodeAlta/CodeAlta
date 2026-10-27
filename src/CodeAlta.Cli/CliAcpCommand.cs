@@ -132,6 +132,7 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
             AgentPromptId = options.PromptId,
             DisabledToolPatterns = patterns,
             Sandbox = options.Sandbox,
+            SessionOptions = options.NoSubSessions ? new AgentSessionOptions { SubSessions = false } : null,
         };
         error = null;
         return true;

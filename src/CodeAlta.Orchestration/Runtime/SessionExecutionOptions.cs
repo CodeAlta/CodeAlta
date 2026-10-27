@@ -51,6 +51,13 @@ public sealed class SessionExecutionOptions
     public string? Sandbox { get; init; }
 
     /// <summary>
+    /// Gets or initializes the options a session is created with (<see cref="AgentSessionOptions"/>). Null, the default,
+    /// gives it the defaults, every option on. A session created by another session never has an option its creator
+    /// does not have. A session that exists keeps the options saved with it.
+    /// </summary>
+    public AgentSessionOptions? SessionOptions { get; init; }
+
+    /// <summary>
     /// Gets or initializes the selected agent prompt identifier.
     /// </summary>
     public string? AgentPromptId { get; init; }
