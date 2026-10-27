@@ -32,6 +32,7 @@ import type { MessageKey } from "./localization";
 import { ScriptCalls } from "./scriptCard/ScriptCalls";
 import { ScriptRunView } from "./scriptCard/ScriptRunView";
 import { hasWorkflowBlock } from "./workflows/runFlow";
+import { ScriptResultFacts, ScriptResultShortened } from "./workflows/ScriptResultFacts";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -301,6 +302,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       </div>}
       {toolTile && item.scriptRun && !workflowBlock && <ScriptRunView run={item.scriptRun} title={item.scriptTitle ?? null} />}
       {toolTile && item.scriptCalls && !workflowBlock && <ScriptCalls calls={item.scriptCalls} />}
+      {item.workflowResult && <ScriptResultFacts result={item.workflowResult} run={item.workflowResult} onOpenLink={messageLink} />}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}
@@ -317,6 +319,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : reviewSummary && body ? <ReviewPromptCard summary={reviewSummary} text={body} onOpenLink={messageLink} />
         : body && <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />)}
+      {item.workflowResult && item.truncated && <ScriptResultShortened />}
       {item.images && <TimelineImages images={item.images} source={imageSource} />}
       {item.attachments && <AttachedFileChips attachments={item.attachments} />}
       {item.missingCliProvider && <TimelineClaudeCli providerKey={item.missingCliProvider} />}

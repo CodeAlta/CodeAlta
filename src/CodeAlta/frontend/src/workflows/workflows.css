@@ -264,6 +264,17 @@ button.workflow-session:focus-visible { outline: 2px solid var(--accent); outlin
 .workflow-run-sessions tr[data-state="completed"] td:nth-child(3) { color: var(--green); }
 .workflow-run-text { max-height: 420px; margin: 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
   color: var(--text); font: 12px/1.5 var(--code-font); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The result of a script: how its run ended and the file of a long result in a line, what it wrote folded, the value below. */
+.script-result-facts { display: grid; gap: 4px; margin: 2px 0 6px; font-size: 12px; }
+.script-result-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+.script-result-outcome { color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.script-result-facts[data-phase="failed"] .script-result-outcome { color: var(--red); }
+.script-result-open { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; color: var(--accent); font-size: 12px; }
+.script-result-notes > summary { width: fit-content; color: var(--muted); cursor: pointer; }
+.script-result-notes > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+.script-result-notes .markdown-content { margin-top: 4px; }
+.script-result-shortened { margin: 6px 0 0; color: var(--muted); font-size: 12px; font-style: italic; }
+.workflow-run-result { max-height: 520px; overflow: auto; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 /* The source of a script: its lines numbered and colored, in a frame of its own that scrolls both ways. */
 .workflow-script-source { display: flex; max-height: 420px; min-width: 0; }
 .workflow-script-source .tool-code-lines { border-top: 1px solid var(--line); border-radius: 8px; padding: 6px 0; }
