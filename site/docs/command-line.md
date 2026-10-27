@@ -41,6 +41,22 @@ Nobody is there to answer, so every tool runs without asking, and the agents are
 
 `--disable-tools PATTERN` turns tools off (`web` turns off every tool that reaches the web, `mcp__*` the tools of MCP servers); `--no-mcp`, `--no-plugins` and `--no-skills` start none of them. Only the [plugins](plugins/readme.md) made for the command line run there: Git, Jira, MCP and ACP among the built-in ones.
 
+### What the agent is asked to do
+
+A run uses the same [agent prompt](prompts.md) as CodeAlta Desktop, without the parts that only matter to somebody who watches the session. Each part has a name:
+
+| Part | What the agent is asked | `altacli run` |
+| --- | --- | --- |
+| `scratchpad` | Copy a long request to a file, to keep it through a compaction | off |
+| `notes` | Keep the progress in the sticky notes of the session | off |
+| `tasks` | Propose follow-up tasks for what it notices beside the request | off |
+| `review` | Ask you to review the changes before they are committed | off |
+| `mode-handoff` | Switch to Plan mode; the list of the agent prompts | off |
+| `session-title` | Give the session a title | off with `--ephemeral` |
+| `sub-agents` | Delegate parts of the work to other sessions | on |
+
+`--enable NAMES` keeps parts and `--disable NAMES` leaves them out, as names separated by commas, or `all`: `--enable tasks,notes`, `--enable all` for the prompt of CodeAlta Desktop. The first line of `--format jsonl` lists the parts left out. Git branches, plan files, background jobs, skills and the user guide stay in the prompt.
+
 ## Output and exit codes
 
 By default, standard output holds the final answer only, so `altacli run "..." > answer.md` works; what the agent does goes to standard error (`-q` to hide it). `--output-last-message FILE` also writes the answer to a file; a run whose answer cannot be written there fails (exit code 1). `--output-schema FILE` asks for an answer that is a JSON value matching a JSON Schema, and checks it. The schema can use `type`, `properties`, `required`, `additionalProperties`, `items`, `enum`, `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`, `pattern`, `minItems`, `maxItems`, and annotations such as `title` and `description`; a schema with another keyword (`$ref`, `allOf`, `format`...) is refused with exit code 2.
@@ -49,7 +65,7 @@ By default, standard output holds the final answer only, so `altacli run "..." >
 
 | Line | What it says |
 | --- | --- |
-| `_codealta/session` | First line: the session, its folder, provider, model and storage. |
+| `_codealta/session` | First line: the session, its folder, provider, model, storage, and the parts of the agent prompt left out (`disabledFeatures`). |
 | `session/update` | Messages, thinking, tool calls and their results, plans and token use, as in ACP. The lines of a delegated agent carry its own `sessionId`. |
 | `_codealta/session_started`, `_codealta/compaction`, `_codealta/retry`, `_codealta/fallback`, `_codealta/error` | What ACP has no update for: a delegated agent starts, a compaction, a retry, a [fallback](model-tiers.md) to another model, an error (`events_dropped` when updates were lost: the whole answer is in the result). |
 | `_codealta/result` | Last line: the status, exit code, final answer, tokens and cost when the provider gives them (null otherwise, never 0), and duration. |
@@ -119,3 +135,5 @@ The commands an agent runs get `CODEALTA_SESSION_ID`, `CODEALTA_MODEL` and `AI_A
 ```
 
 The sessions it opens are those of CodeAlta Desktop and TUI, as with `altacli run`; the storage and configuration options above apply. The editor chooses the [agent prompt](prompts.md) as the mode, and the model and reasoning effort as options of the session; it can load an earlier session with its history. The updates are those of `--format jsonl`.
+
+You work with the agent in the editor, so its prompt keeps the [parts](#what-the-agent-is-asked-to-do) of CodeAlta Desktop, except `review`, whose commands `altacli` does not offer, and `session-title` with `--ephemeral`. `--enable` and `--disable` change them as for `altacli run`.

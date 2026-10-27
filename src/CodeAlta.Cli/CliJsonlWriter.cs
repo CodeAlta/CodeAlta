@@ -38,7 +38,7 @@ internal sealed record CliRunReport(string Status, int ExitCode)
 /// <list type="number">
 /// <item>The first line is <see cref="CodeAltaAcpExtensions.SessionMethod"/>, the header of the run: <c>schemaVersion</c> (1), <c>sessionId</c>,
 /// <c>created</c>, <c>cwd</c>, <c>provider</c>, <c>model</c>, <c>reasoning</c>, <c>agentPrompt</c>, <c>tier</c>,
-/// <c>storage</c>. A run that ends before it has a session (invalid usage, a provider not ready, a session in use) has no
+/// <c>storage</c>, <c>disabledFeatures</c>. A run that ends before it has a session (invalid usage, a provider not ready, a session in use) has no
 /// header.</item>
 /// <item>Then the <c>session/update</c> notifications (<c>params</c> is a <see cref="SessionNotification"/>) and the
 /// extension notifications of <see cref="AcpEventProjector"/>, in the order of the events of the run.</item>
@@ -106,6 +106,9 @@ internal sealed class CliJsonlWriter : IAcpEventSink
             writer.WriteString("agentPrompt", header.AgentPrompt);
             AcpEventProjector.WriteStringOrNull(writer, "tier", header.Tier);
             writer.WriteString("storage", header.Storage);
+            writer.WriteStartArray("disabledFeatures");
+            foreach (var feature in header.DisabledFeatures) writer.WriteStringValue(feature);
+            writer.WriteEndArray();
             writer.WriteEndObject();
         });
     }
@@ -211,6 +214,6 @@ internal sealed class CliJsonlWriter : IAcpEventSink
     }
 }
 
-/// <summary>The header of a run: the session and what it runs with.</summary>
+/// <summary>The header of a run: the session and what it runs with, the parts of the agent prompt it leaves out included.</summary>
 internal sealed record CliSessionHeader(string SessionId, bool Created, string Cwd, string Provider, string Model, string? Reasoning,
-    string AgentPrompt, string? Tier, string Storage);
+    string AgentPrompt, string? Tier, string Storage, IReadOnlyList<string> DisabledFeatures);

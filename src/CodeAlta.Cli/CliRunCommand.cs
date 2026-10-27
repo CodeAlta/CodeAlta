@@ -36,6 +36,8 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
         }
 
         if (!TryReadRequest(options, out var request, out var timeout, out var schema, out var error)) return Invalid(jsonl, error!);
+        if (!CliPromptFeatures.TryResolve(CliPromptFeatures.RunDefaults, options.Ephemeral, options.EnableFeatures, options.DisableFeatures,
+                out var disabledFeatures, out error)) return Invalid(jsonl, error!);
         var (prompt, promptError) = await CliPrompt.ReadAsync(options.Prompt, streams, processToken).ConfigureAwait(false);
         if (prompt is null) return Invalid(jsonl, promptError!);
         var (attachments, fileError) = CliPrompt.Attach(options.Files, environment.CurrentDirectory);
@@ -60,6 +62,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
                 CodeMode = options.CodeMode,
                 Offline = options.Offline,
                 ChecksRequired = true,
+                DisabledPromptFeatures = disabledFeatures,
             }, environment, processToken).ConfigureAwait(false);
             environment.HostCreated?.Invoke(host.Host);
             return await RunAsync(host, request, new HeadlessPrompt(prompt) { Attachments = attachments }, timeout, schema, options, jsonl, fallback).ConfigureAwait(false);
@@ -135,7 +138,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
 
         jsonl?.WriteHeader(new CliSessionHeader(session.SessionId, session.Created, session.Descriptor.WorkingDirectory ?? request.ProjectFolder!,
             session.ProviderKey, session.ModelId, ReasoningName(session.ReasoningEffort), session.AgentPromptId,
-            session.Tier is { } tier ? ModelTiers.NameOf(tier) : null, host.Storage.Name));
+            session.Tier is { } tier ? ModelTiers.NameOf(tier) : null, host.Storage.Name, host.DisabledPromptFeatures));
         if (jsonl is null && !options.Quiet) sink = new CliProgressWriter(output, session.SessionId);
         if (sink is not null)
         {

@@ -43,6 +43,11 @@ internal class CliCommonOptions
     // The sandbox profile of the sessions of run and acp, or `off`; null for what the settings decide.
     public string? Sandbox { get; set; }
 
+    // --enable and --disable of run and acp: the parts of the agent prompt kept or left out over the defaults of the command.
+    public List<string> EnableFeatures { get; } = [];
+
+    public List<string> DisableFeatures { get; } = [];
+
     public bool Verbose { get; set; }
 
     public bool Quiet { get; set; }

@@ -66,7 +66,7 @@ internal static class CliCommandLine
             "Output, --format jsonl: stdout has one ACP JSON-RPC notification per line:",
             "  1. _codealta/session (no line when the run gets no session): schemaVersion,",
             "     sessionId, created, cwd, provider, model, reasoning, agentPrompt, tier,",
-            "     storage.",
+            "     storage, disabledFeatures (the parts of the agent prompt left out).",
             "  2. session/update, params {{sessionId, update}}; update.sessionUpdate is",
             "     agent_message_chunk, agent_thought_chunk, tool_call (kind, title,",
             "     rawInput), tool_call_update (status, content), plan or usage_update.",
@@ -127,6 +127,9 @@ internal static class CliCommandLine
             _,
         };
         AddTools(runCommand, run, run.DisableTools);
+        AddFeatures(runCommand, run,
+            "  Off by default: scratchpad, notes, tasks, review, mode-handoff; also",
+            "  session-title with --ephemeral.");
         AddStorage(runCommand, run);
         runCommand.Add("<>", "The words of the prompt");
         runCommand.Add(new HelpOption());
@@ -198,6 +201,9 @@ internal static class CliCommandLine
             _,
         };
         AddTools(acpCommand, acp, acp.DisableTools);
+        AddFeatures(acpCommand, acp,
+            "  Off by default: review (its commands are not offered); also",
+            "  session-title with --ephemeral.");
         AddStorage(acpCommand, acp);
         acpCommand.Add(new HelpOption());
         acpCommand.Add(_);
@@ -452,6 +458,20 @@ internal static class CliCommandLine
         command.Add("no-skills", "List and offer no skill to the agents", v => options.NoSkills = v is not null);
         command.Add("code-mode:", "Code Mode {MODE} on|only|off over the settings", v => options.CodeMode = v ?? "on");
         command.Add("sandbox=", "Run the tools in the sandbox {PROFILE} (or off)", v => options.Sandbox = v);
+        command.Add(_);
+    }
+
+    // The parts of the agent prompt the sessions keep or leave out (CliPromptFeatures): run and acp, with their defaults.
+    private static void AddFeatures(Command command, CliCommonOptions options, params string[] defaults)
+    {
+        command.Add("Agent prompt:");
+        command.Add("  --enable, --disable: parts of the agent prompt, comma separated, or `all`:");
+        command.Add("  scratchpad (a copy of a long request), notes (sticky notes), tasks");
+        command.Add("  (follow-up tasks), review (by the user), sub-agents, mode-handoff (Plan");
+        command.Add("  mode, the list of agent prompts), session-title.");
+        foreach (var line in defaults) command.Add(line);
+        command.Add("enable=", "Keep the prompt parts {NAMES}; repeatable", v => options.EnableFeatures.Add(v!));
+        command.Add("disable=", "Leave out the prompt parts {NAMES}; repeatable", v => options.DisableFeatures.Add(v!));
         command.Add(_);
     }
 
