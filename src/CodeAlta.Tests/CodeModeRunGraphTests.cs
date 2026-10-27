@@ -293,11 +293,25 @@ public sealed class CodeModeRunGraphTests
 
     private static string Text(AgentToolResult result) => string.Join('\n', result.Items.OfType<AgentToolResultItem.Text>().Select(static item => item.Value));
 
+    // The value of a finished run: what follows `Result:`, the end of the text. An object is in a block of JSON, a text is itself.
     private static JsonDocument ValueOf(AgentToolResult result)
     {
-        var lines = Text(result).Split('\n');
-        var index = Array.IndexOf(lines, "Result:");
-        Assert.IsGreaterThanOrEqualTo(0, index, Text(result));
-        return JsonDocument.Parse(lines[index + 1]);
+        var text = Text(result);
+        var index = text.IndexOf("\nResult:\n", StringComparison.Ordinal);
+        Assert.IsGreaterThanOrEqualTo(0, index, text);
+        var value = text[(index + "\nResult:\n".Length)..].TrimEnd('\n');
+        if (value.StartsWith("```json\n", StringComparison.Ordinal))
+        {
+            return JsonDocument.Parse(value["```json\n".Length..^"\n```".Length]);
+        }
+
+        try
+        {
+            return JsonDocument.Parse(value);
+        }
+        catch (JsonException)
+        {
+            return JsonDocument.Parse(JsonSerializer.Serialize(value));
+        }
     }
 }

@@ -274,7 +274,7 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         var result = await run.Completion.ConfigureAwait(false);
         var record = WorkflowRecord(context, "alta.workflow.result", run.Info(), run);
-        record["text"] = CodeModeResultFormatter.Format(result, run.MaxOutputTokens);
+        record["text"] = await runs.FormatResultAsync(run, result).ConfigureAwait(false);
         if (result.ValueJson is { } value) record["valueJson"] = value;
         AltaJsonlWriter.WriteRecord(context.Stdout, record);
         return AltaExitCodes.Success;

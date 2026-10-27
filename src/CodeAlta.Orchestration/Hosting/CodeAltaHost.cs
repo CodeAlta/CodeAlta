@@ -101,6 +101,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
             runtimeService.TryHoldForScript);
         runtimeService.ScriptRuns = CodeModeRuns;
         CodeModeRuns.Journal = (sessionId, record) => runtimeService.AppendScriptRecordAsync(sessionId, record);
+        // A long result is kept whole with the attachments of its session (~/.alta/sessions), where a long output of a command is,
+        // and goes with it.
+        var resultStore = sessionViewCatalog.JournalStore.CreateSessionStore();
+        CodeModeRuns.ResultFolder = async (sessionId, token) => await resultStore.GetAttachmentDirectoryAsync(sessionId, token).ConfigureAwait(false) is { } folder
+            ? Path.Combine(folder, "tool-output")
+            : null;
         // The sessions scripts start go through a headless driver of the host, made when a script first asks for one.
         _codeModeAgents = new Lazy<CodeModeAgents>(() => new CodeModeAgents(this), LazyThreadSafetyMode.ExecutionAndPublication);
         // The sessions a run kept open close with it.

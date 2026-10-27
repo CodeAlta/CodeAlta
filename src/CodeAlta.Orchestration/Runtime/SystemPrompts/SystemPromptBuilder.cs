@@ -850,7 +850,7 @@ public sealed class SystemPromptBuilder
         - **Write the script for the task**, without a library script; `workflow("name")` reuses one that fits (`codemode.search({ query: "workflow:" })`).
         - **Show the plan:** start with `export const meta = { title: "…", steps: [{ id: "…", title: "…" }] };`, declaring only the steps the script runs, and wrap each in `step("<id>", fn)` with those ids (`step`, `agent` and `parallel` are given: never define your own).
         - **Brief each sub-agent fully** (it sees nothing else): what to find or do, when to stop, and a short answer, or a `schema` when code combines the answers. `tier: "quick"` for lookups; `worktree: true` for parts that edit files at the same time. Use their answers as they are: do not redo their work to check it.
-        - **Return a compact result**, it is all you read back: findings, decisions, branches, failures.
+        - **Return a compact result**, it is all you read back: findings, decisions, branches, failures. Return text as Markdown, which the user sees rendered (files as `[name](path)`), and data as an object.
         - Call the tools directly for one or two calls, for items that each take a single call (make those calls together), and for steps that each need the previous result.
 
         ```js

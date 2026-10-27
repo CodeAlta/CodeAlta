@@ -60,6 +60,64 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     public CodeModeRunStore? Store { get; private set; }
 
     /// <summary>
+    /// Gets or sets what gives the folder where a result longer than what its text gives is kept whole, by session: the
+    /// folder of the session's tool output, beside its journal, where <c>shell_command</c> keeps a long output. Null, or a
+    /// null folder, keeps it in the folder of its run in the store, or else in a folder of the session in the temporary folder.
+    /// </summary>
+    public Func<string, CancellationToken, ValueTask<string?>>? ResultFolder { get; set; }
+
+    /// <summary>
+    /// Formats the result of a run as its session reads it (<see cref="CodeModeResultFormatter"/>), keeping the whole result in
+    /// a file the text names when it is longer than the text gives. The file is written once per run.
+    /// </summary>
+    /// <param name="run">The run.</param>
+    /// <param name="result">Its result.</param>
+    /// <param name="maxOutputTokens">The output budget, in tokens, or null for the run's own.</param>
+    /// <returns>The text.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="run"/> or <paramref name="result"/> is null.</exception>
+    public async Task<string> FormatResultAsync(CodeModeRunHandle run, CodeModeRunResult result, int? maxOutputTokens = null)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(result);
+        var tokens = maxOutputTokens ?? run.MaxOutputTokens;
+        var path = CodeModeResultFormatter.ResultToKeep(result, tokens) is { } whole
+            ? await run.KeepResultAsync(() => KeepResultAsync(run, whole)).ConfigureAwait(false)
+            : null;
+        return CodeModeResultFormatter.Format(result, tokens, path);
+    }
+
+    // Writes the whole result in a file: what reads the text reads the rest there. A result that cannot be written keeps
+    // its start and its end alone.
+    private async Task<string?> KeepResultAsync(CodeModeRunHandle run, CodeModeResultText whole)
+    {
+        string? folder = null;
+        if (ResultFolder is { } resolve)
+        {
+            try
+            {
+                folder = await resolve(run.SessionId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+            }
+        }
+
+        folder ??= Store is { } store ? Path.Combine(store.Root, run.Id)
+            : Path.Combine(Path.GetTempPath(), "codealta", "tool-output", string.Concat(run.SessionId.Select(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '_')));
+        try
+        {
+            Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, $"script-{run.Id}-result{whole.FileExtension}");
+            await File.WriteAllTextAsync(path, whole.Text).ConfigureAwait(false);
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The most runs of one session at the same time by default: a run that sleeps for days keeps its place, and a session
     /// may have several going on.
     /// </summary>
@@ -303,7 +361,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
 
         var source = Store?.TryLoad(runId)?.Source;
         var result = FindAny(runId) is { Completion.IsCompletedSuccessfully: true } run
-            ? CodeModeResultFormatter.Format(run.Completion.Result, run.MaxOutputTokens)
+            ? await FormatResultAsync(run, run.Completion.Result).ConfigureAwait(false)
             : Store?.TryReadResult(runId);
         return new CodeModeRunDetail(info, string.IsNullOrEmpty(source) ? null : source, result);
     }
@@ -600,7 +658,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
 
             if (run.Writer is { } writer)
             {
-                await writer.EndAsync(result.Status.ToString().ToLowerInvariant(), CodeModeResultFormatter.Format(result, run.MaxOutputTokens)).ConfigureAwait(false);
+                await writer.EndAsync(result.Status.ToString().ToLowerInvariant(), await FormatResultAsync(run, result).ConfigureAwait(false)).ConfigureAwait(false);
             }
 
             run.Record(AgentWorkflowEventKind.RunEnded, record => record with
@@ -631,7 +689,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             return;
         }
 
-        var prompt = $"Script {run.Id}{(run.Title is null ? string.Empty : $" ({run.Title})")} ended:\n{CodeModeResultFormatter.Format(result, run.MaxOutputTokens)}";
+        var prompt = $"Script {run.Id}{(run.Title is null ? string.Empty : $" ({run.Title})")} ended:\n{await FormatResultAsync(run, result).ConfigureAwait(false)}";
         try
         {
             await _deliver(run.SessionId, prompt, CancellationToken.None).ConfigureAwait(false);
@@ -718,6 +776,39 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     public TimeSpan Elapsed => _clock.Elapsed;
 
     internal int Waiters => Volatile.Read(ref _waiters);
+
+    private Task<string?>? _keptResult;
+
+    // The file of the whole result, written by the first that formats the result: exec, wait, the prompt, the store.
+    internal Task<string?> KeepResultAsync(Func<Task<string?>> keep)
+    {
+        if (Volatile.Read(ref _keptResult) is { } kept)
+        {
+            return kept;
+        }
+
+        var completion = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (Interlocked.CompareExchange(ref _keptResult, completion.Task, null) is { } first)
+        {
+            return first;
+        }
+
+        _ = KeepAsync();
+        return completion.Task;
+
+        async Task KeepAsync()
+        {
+            try
+            {
+                completion.SetResult(await keep().ConfigureAwait(false));
+            }
+            catch (Exception)
+            {
+                // Whatever failed, the result still keeps its start and its end; what waits for the file is never left waiting.
+                completion.SetResult(null);
+            }
+        }
+    }
 
     // The most records of steps a run writes: a step in a loop of a thousand items writes the first ones.
     private const int MaxStepRecords = 200;
