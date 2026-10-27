@@ -4,6 +4,9 @@
     <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Code Mode: the JavaScript engine of scripts, and its parser, whose version Jint 4.17 resolves. -->
+    <PackageVersion Include="Acornima" Version="1.7.0" />
+    <PackageVersion Include="Jint" Version="4.17.0" />
     <PackageVersion Include="Anthropic" Version="13.2.1" />
     <PackageVersion Include="Azure.AI.OpenAI" Version="2.9.0-beta.1" />
     <PackageVersion Include="DiffPlex" Version="1.9.0" />

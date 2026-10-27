@@ -15,7 +15,7 @@ const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): Aut
   ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, ...change });
 const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: "p", projectName: "Alpha", projectFolder: "/p", storeProjectId: null, file: "/home/config.toml",
-  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, ...change,
+  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, ...change,
 });
 const run = (id: string, change: Partial<AutomationRunItem> = {}): AutomationRunItem =>
   ({ id, automationId: "a", name: "Nightly", sessionId: null, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "daily", detail: null, status: "completed", message: null, ...change });
@@ -54,7 +54,7 @@ test("without automations the tab invites to write one, in every language; templ
   }
   assert.doesNotMatch(render({}), /class="automation-template" disabled/);
   const alone = render({}, { projects: [] });
-  assert.equal(alone.split('class="automation-template" disabled=""').length - 1, 7, "Every template but the chat needs a project.");
+  assert.equal(alone.split('class="automation-template" disabled=""').length - 1, 8, "Every template but the chat needs a project.");
   assert.match(alone, /class="automation-template"><span[^>]*data-file-tone="teal"[\s\S]*?Daily brief/);
 });
 

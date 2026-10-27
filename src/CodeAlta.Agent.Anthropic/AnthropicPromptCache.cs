@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Anthropic.Models.Messages;
+using CodeAlta.Agent.Runtime;
 using Microsoft.Extensions.AI;
 
 namespace CodeAlta.Agent.Anthropic;
@@ -13,7 +14,9 @@ namespace CodeAlta.Agent.Anthropic;
 /// A request takes at most four markers. They go on the last tool that is not deferred, on the system prompt, on the last message, and
 /// on the message that ended the previous request: the one before the last assistant message. The marker of the
 /// last message writes the prefix the next request reads, at the place where that request puts its own marker, so
-/// the read does not depend on how many blocks a turn added.
+/// the read does not depend on how many blocks a turn added. When the instructions end with those of the session
+/// (<see cref="AgentTurnRequest.SessionInstructions"/>), these are a second system block, and the marker goes on the first:
+/// the same text for every session of a prompt, whose marker covers the tools before it, which then take none.
 /// </remarks>
 internal static class AnthropicPromptCache
 {
@@ -48,6 +51,28 @@ internal static class AnthropicPromptCache
         IEnumerable<ChatMessage> messages,
         ChatOptions? options,
         TimeSpan lifetime)
+        => MarkBreakpoints(messages, options, lifetime, sessionInstructions: null);
+
+    /// <summary>
+    /// Returns the messages and the options of a request with its breakpoints marked, the instructions of the session
+    /// apart: they end the instructions of the options (<see cref="AgentInstructionText.Compose"/>), and are sent as a
+    /// system block of their own after the one that takes the marker. That block is then the same for every session of a
+    /// prompt, which read it from the cache, and its marker covers the tools before it, which take none.
+    /// </summary>
+    /// <param name="messages">The messages of the request. They belong to it: the marker is set on their content.</param>
+    /// <param name="options">The options of the request, which are left as they are; null for none.</param>
+    /// <param name="lifetime"><see cref="Lifetime"/> or <see cref="LongLifetime"/>, as for <see cref="MarkBreakpoints(IEnumerable{ChatMessage}, ChatOptions?, TimeSpan)"/>.</param>
+    /// <param name="sessionInstructions">
+    /// The instructions of the session as the instructions of the options end with them (<see cref="AgentInstructionText.Session"/>);
+    /// null, or text they do not end with, for one system block.
+    /// </param>
+    /// <returns>The messages, with the instructions of the options as system content, and the options to send.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="messages"/> is null.</exception>
+    public static (IReadOnlyList<ChatMessage> Messages, ChatOptions? Options) MarkBreakpoints(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options,
+        TimeSpan lifetime,
+        string? sessionInstructions)
     {
         ArgumentNullException.ThrowIfNull(messages);
         var longLived = lifetime == LongLifetime;
@@ -59,22 +84,33 @@ internal static class AnthropicPromptCache
             leadingSystemMessages++;
         }
 
+        var sharedMarked = false;
         if (options is not null && (options.Instructions is not null || options.Tools is { Count: > 0 }))
         {
             options = options.Clone();
             if (!string.IsNullOrWhiteSpace(options.Instructions))
             {
                 // The instructions follow the leading system messages, as the Anthropic client orders them, but
-                // as content: only content takes a marker.
-                marked.Insert(leadingSystemMessages, new ChatMessage(ChatRole.System, [new TextContent(options.Instructions)]));
+                // as content: only content takes a marker. Those of the session are a block of their own, after the
+                // marked one.
+                var (shared, session) = SplitSession(options.Instructions, sessionInstructions);
+                var system = new ChatMessage(ChatRole.System, [new TextContent(shared)]);
+                if (session is not null)
+                {
+                    system.Contents.Add(new TextContent(session));
+                    sharedMarked = TryMarkContent(system.Contents[0], longLived);
+                }
+
+                marked.Insert(leadingSystemMessages, system);
                 leadingSystemMessages++;
                 options.Instructions = null;
             }
 
-            MarkLastTool(options, longLived);
+            // The marker of the shared instructions covers the tools, which come before them.
+            if (!sharedMarked) MarkLastTool(options, longLived);
         }
 
-        for (var index = leadingSystemMessages - 1; index >= 0; index--)
+        for (var index = leadingSystemMessages - 1; index >= 0 && !sharedMarked; index--)
         {
             if (TryMark(marked[index], longLived))
             {
@@ -133,15 +169,33 @@ internal static class AnthropicPromptCache
     {
         for (var index = message.Contents.Count - 1; index >= 0; index--)
         {
-            var content = message.Contents[index];
-            if (IsCacheable(content))
+            if (TryMarkContent(message.Contents[index], longLived))
             {
-                content.WithCacheControl(CreateMarker(longLived));
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static bool TryMarkContent(AIContent content, bool longLived)
+    {
+        if (!IsCacheable(content)) return false;
+        content.WithCacheControl(CreateMarker(longLived));
+        return true;
+    }
+
+    // The instructions without those of the session, and those of the session; the whole text and null when the
+    // instructions do not end with them.
+    private static (string Shared, string? Session) SplitSession(string instructions, string? sessionInstructions)
+    {
+        if (string.IsNullOrWhiteSpace(sessionInstructions) || !instructions.EndsWith(sessionInstructions, StringComparison.Ordinal))
+        {
+            return (instructions, null);
+        }
+
+        var shared = instructions[..^sessionInstructions.Length].TrimEnd();
+        return shared.Length == 0 ? (instructions, null) : (shared, sessionInstructions);
     }
 
     private static CacheControlEphemeral CreateMarker(bool longLived)

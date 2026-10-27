@@ -5,6 +5,7 @@ using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Sandbox;
 
 namespace CodeAlta.Orchestration.Hosting;
 
@@ -53,6 +54,15 @@ public sealed class CodeAltaHostOptions
     /// user's home. The skills and prompts of the global root are read either way.
     /// </summary>
     public bool ReadsUserHome { get; init; } = true;
+
+    /// <summary>
+    /// Gets the parts of the workflow the prompts of the sessions leave out (<see cref="Runtime.SystemPrompts.PromptFeatures"/>):
+    /// the scratchpad, the sticky notes, the follow-up tasks, the review by the user, the mode handoff and the title of a
+    /// session. Null, the default, keeps them all, as CodeAlta Desktop and TUI do; <c>altacli run</c> leaves out those
+    /// nobody would read. The sub-agents are not among them: they follow the options of each session
+    /// (<see cref="CodeAlta.Agent.AgentSessionOptions.SubSessions"/>).
+    /// </summary>
+    public IReadOnlySet<string>? DisabledPromptFeatures { get; init; }
 
     /// <summary>
     /// Gets whether the host leaves the shared state of the global root as it is, for a process that runs beside CodeAlta
@@ -231,6 +241,12 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     /// <remarks>A host that enables it must show the pending questions and resolve them; a run waits until it does or ends.</remarks>
     public bool AskWhenConversationHeld { get; init; }
+
+    /// <summary>
+    /// Gets the sandbox the sessions of the host run in when they are sandboxed; null, the default, for the one of this
+    /// computer (<see cref="Runtime.SessionRuntimeService.SandboxBackend"/>). Tests give another.
+    /// </summary>
+    public ISandboxBackend? SandboxBackend { get; init; }
 
     /// <summary>Gets an optional environment map copied for host-created plugin adapter operation options; null preserves the original ambient snapshot.</summary>
     /// <remarks>This does not isolate the process or provider environment.</remarks>

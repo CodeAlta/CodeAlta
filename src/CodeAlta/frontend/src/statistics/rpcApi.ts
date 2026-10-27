@@ -2,7 +2,7 @@ import type { AltaRpc } from "../pluginScript/alta";
 import { retryLimit } from "../pluginScript/retry";
 import type { StatisticsApi, StatisticsEvent } from "./api";
 import type {
-  CalendarResult, DetailsResult, DistributionResult, HealthResult, HistoryChoice, McpToolsResult, ModelsResult, ProjectsResult, RecordsResult, RunsResult, SeriesResult,
+  CalendarResult, DetailsResult, DistributionResult, HealthResult, HistoryChoice, McpToolsResult, ModelsResult, ProjectsResult, RecordsResult, RunsResult, ScriptsResult, SeriesResult,
   SessionDetailResult, SessionsResult, SkillsResult, StatisticsDataChange, StatisticsRequest, StatisticsStatus, SummaryResult, ToolsResult, TopResult, WeekHourResult,
 } from "./types";
 
@@ -97,6 +97,7 @@ export function createRpcApi(rpc: AltaRpc, options: RpcApiOptions = {}): RpcStat
     skills: (request, signal) => question<SkillsResult>("skills", request, {}, signal),
     mcpTools: (request, signal) => question<McpToolsResult>("mcp-tools", request, {}, signal),
     runs: (request, sort, signal) => question<RunsResult>("runs", request, { sort }, signal),
+    scripts: (request, signal) => question<ScriptsResult>("scripts", request, {}, signal),
 
     status: signal => call<StatisticsStatus>("statistics.status", {}, signal),
     chooseHistory: (choice: HistoryChoice) => call<StatisticsStatus>("statistics.choose-history", choice.kind === "days" ? { kind: choice.kind, days: choice.days } : { kind: choice.kind }),

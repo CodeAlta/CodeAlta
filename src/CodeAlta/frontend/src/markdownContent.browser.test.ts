@@ -38,6 +38,7 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       socket!.send(JSON.stringify({ id, method, params }));
     });
     const attempts: string[] = [], blocked: string[] = [], failures: string[] = [], baseDiagnostics: string[] = [], inertParseDiagnostics: string[] = [];
+    let picturesRead = false;
     socket.addEventListener("message", event => {
       const m = JSON.parse(String(event.data));
       if (pending.has(m.id)) { pending.get(m.id)!(m); pending.delete(m.id); }
@@ -51,7 +52,9 @@ test("production MarkdownContent retains useful HTML without resource or app aut
             { name: "Content-Security-Policy", value: config.assets.csp }], body: Buffer.from(body).toString("base64") });
         void action.catch(error => failures.push(String(error)));
       }
-      if (m.method === "Network.requestWillBeSent" && !assets.has(m.params.request.url)) failures.push(`request attempt: ${m.params.request.url}`);
+      // A picture of the disk that the window read is drawn from its `data:` URL, which the policy of the page allows.
+      if (m.method === "Network.requestWillBeSent" && !assets.has(m.params.request.url)
+        && !(picturesRead && m.params.request.url.startsWith("data:image/png;base64,"))) failures.push(`request attempt: ${m.params.request.url}`);
       if (["Page.windowOpen", "Page.frameAttached", "Page.frameRequestedNavigation", "Runtime.exceptionThrown"].includes(m.method)) failures.push(JSON.stringify(m));
       if (m.method === "Page.frameNavigated" && m.params.frame.url !== page) failures.push(JSON.stringify(m));
       if (m.method === "Log.entryAdded" && m.params.entry.source === "security") {
@@ -121,6 +124,14 @@ test("production MarkdownContent retains useful HTML without resource or app aut
         // What the renderer gives its own elements cannot be authored: the classes, the role and the kind are removed.
         assert.equal(await evaluate("document.querySelectorAll('.markdown-content [class], .markdown-content [role], .markdown-content [data-alert]').length"), 0);
       }
+      if (cases[i].id === "file-images") {
+        // A picture of the disk is a link to its file with the image of the renderer in it, not drawn where nothing reads it.
+        // An authored <img>, and a link written in HTML that says it is a picture, are none.
+        assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.markdown-content a[href]'), a => [a.getAttribute('href'), a.textContent, a.querySelectorAll('img').length])"),
+          [["out/chart.png", "chart <b>", 1], ["C:/pics/my%20plot.png", "my plot.png", 1]]);
+        assert.equal(await evaluate("document.querySelectorAll('.markdown-content img').length"), 2);
+        assert.equal(await evaluate("document.querySelectorAll('.markdown-content img[src], .markdown-content [data-file-image], .markdown-content [data-file-link]').length"), 0);
+      }
       if (cases[i].id === "links") {
         // A page of the web, and a file where the Markdown wrote the link: an `<a>` written in HTML only opens a page.
         assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.markdown-content a[href]'), a => a.getAttribute('href'))"),
@@ -174,6 +185,34 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     assert.deepEqual(await evaluate(`markdownFixture.state.copies.slice(${copiesBefore})`), ["linked code", "linked code"], "Mouse and keyboard Copy retain their action once each inside an anchor");
     assert.equal(await evaluate("markdownFixture.state.external.length"), gestures + 1, "Code-copy must not also open its enclosing link");
+    await check();
+    // A window that reads the pictures of the disk draws one in its link, from where the session works; one it cannot read stays a link.
+    picturesRead = true;
+    await evaluate(`markdownFixture.renderPictures(${JSON.stringify("![chart](out/chart.png) ![gone](out/gone.png)")})`);
+    let picture: { x: number; y: number; width: number; height: number } | null = null;
+    for (let i = 0; i < 50 && !picture; i++) {
+      picture = await evaluate("markdownFixture.pictureRect()");
+      if (!picture) await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.ok(picture, "The picture is drawn");
+    assert.deepEqual(await evaluate("markdownFixture.state.pictures"), ["out/chart.png@s1", "out/gone.png@s1"]);
+    assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.markdown-content a[href]'), a => !!a.querySelector('img[src]'))"), [true, false]);
+    await check();
+    // A click opens its window, with the path of its file and the buttons that copy it and show it in the file manager; no link is followed.
+    const clickPicture = async (modifiers = 0) => { for (const type of ["mousePressed", "mouseReleased"]) await command("Input.dispatchMouseEvent", { type, button: "left", modifiers,
+      x: picture!.x + picture!.width / 2, y: picture!.y + picture!.height / 2, clickCount: 1 }); };
+    await clickPicture();
+    assert.deepEqual(await evaluate("markdownFixture.viewer()"), { open: true, title: "chart", path: "C:\\out\\chart.png", image: true, buttons: ["Copy path", "Reveal in File Explorer"] });
+    assert.equal(await evaluate("markdownFixture.state.external.length"), gestures + 1);
+    await evaluate("markdownFixture.revealPicture()");
+    assert.deepEqual(await evaluate("markdownFixture.state.reveals"), ["out/chart.png@s1"], "The file is shown as the link names it");
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    assert.equal(await evaluate("markdownFixture.viewer()"), null);
+    // With a modifier, the link opens the file, as any link to a file does.
+    await clickPicture(8);
+    assert.equal(await evaluate("markdownFixture.viewer()"), null);
+    assert.deepEqual(await evaluate(`markdownFixture.state.external.slice(${gestures + 1})`), ["out/chart.png"]);
     await check();
     // A document is wrapped in its source: its lines follow each other, where a message breaks them.
     await evaluate("markdownFixture.render('one\\ntwo', false)");

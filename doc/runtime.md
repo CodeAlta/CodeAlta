@@ -128,7 +128,7 @@ Each session has one JSONL journal, `<state root>/sessions/yyyy/MM/dd/<session-i
 holds the normalized `AgentEvent` history plus snapshot records: `local.sessionSummary` (title, lineage, fork origin,
 rewind count), `local.sessionState` (provider state, compaction, loaded skills, usage), `local.compactionCheckpoint`,
 and the session-view records `codealta.sessionHeader` (first line: scope, working directory, space) and
-`codealta.sessionState` (local state: selection, queue, tier, archive, permission mode). An append is one write: a
+`codealta.sessionState` (local state: selection, queue, tier, archive, permission mode, options). An append is one write: a
 crash leaves all records of an append or none. A reader tolerates an incomplete final record; a writer refuses to
 append after a malformed one.
 
@@ -193,6 +193,13 @@ registered through `AgentToolInvocation.RunTools` and offered on the next model 
   each call by the `IAgentBuiltInToolRouter` of its attachment, and what it does with `alta`, plugins and MCP servers is
   limited to what keeps it there ([sandbox](sandbox.md)). The permissions above still apply inside the sandbox; the
   sandbox is what holds when a permission was given to a prompt injected into the session.
+- **Calls of scripts.** A tool call may call the other tools of its run through `AgentToolInvocation.Tools`
+  (`IAgentRunToolInvoker`): the call takes the run's own handler, so every rule above applies to it as to a call of the
+  model. It is recorded as an activity of the calling call (`ParentActivityId`), never as a message of the
+  conversation, so resume, forks and compaction see only the call of the model. These records are shown at once and
+  written to the journal together, at most 200 ms later and always before the calling call ends: a journal write
+  refreshes the cache row of the session, and a script can make hundreds of calls a second. `AgentToolSpec.Exposure`
+  keeps a tool from the model (`Scripts`) or from scripts (`Model`). See [Code Mode](codemode.md).
 
 ## System prompt and instructions
 
@@ -203,11 +210,20 @@ it with `mode: append`; an agent prompt can `inherit:` others (depth-first, at m
 (`.github/agents/*.agent.md`) are read-only agent prompts below the built-in ones.
 
 `SystemPromptBuilder` composes the system message and the developer instructions: system prompt, agent prompt body,
-runtime context (working directory, project root, scratchpad file, space, model tiers, commit trailer), tool guidance,
-skills, and project context (instruction files `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, the largest
-per folder, from the instruction boundary to the working directory). Orchestration then appends parent guidance and
-plugin prompt parts, and plugin instruction processors may rewrite the result. An unreadable instruction file is
-skipped with a warning, never a failure.
+runtime context (date, platform, space, model tiers, commit trailer), tool guidance, skills, and project context
+(instruction files `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, the largest per folder, from the
+instruction boundary to the working directory, named from the project root). Orchestration then appends plugin prompt
+parts, and plugin instruction processors may rewrite the result. An unreadable instruction file is skipped with a
+warning, never a failure. A host can leave parts of the agent workflow out (`PromptFeatures`: scratchpad, notes, tasks,
+review, sub-agents, mode handoff, session title) through `<!-- if-feature: x -->` blocks of the prompt files;
+`altacli run` does for what nobody reads in a headless run.
+
+What is of one session alone is the session context, kept apart (`AgentTurnRequest.SessionInstructions`) and sent
+last: working directory, project root, worktree, parent session and its guidance, scratchpad file, title and
+suggestion paragraphs. The text before it is the same for the sessions of a prompt in other folders, so a provider
+serves it to all of them from its prompt cache; Anthropic receives it as a second system block after the cached one,
+and the OpenAI Responses executor as a user message first in the input, since that API shares a prefix only when the
+instructions and the system messages joined to them are the same.
 
 **The instructions stay byte-stable.** Providers cache the prompt prefix; any change of the instructions invalidates
 the cache of every later request. So:
@@ -299,6 +315,22 @@ or journal writer. The parent link gives:
   `<notify-parent>` update) as a host prompt, steered into a running turn or queued (`DeliverHostPromptAsync`);
 - nesting in session lists, and deletion and retention families (`SessionLineage`): a parent is not removed before
   its descendants.
+
+### Session options
+
+`AgentSessionOptions` is what an agent of a session may do beyond its tools and settings; its first option is
+`SubSessions`. Every option is on by default, so the local state records options only when one is off, and a journal
+without them reads as the defaults. The options are recorded state, not a host setting: the runtime is their single
+source, and what follows from them is derived from them at each use.
+
+- Creation narrows them: a session created or forked by another session has an option only when its creator has it
+  (`AgentSessionOptions.Within`), and a creator without sub-sessions creates none (`SubSessionsOffException`), whatever
+  path asks (`alta`, Code Mode, the headless driver).
+- The instructions read them: without sub-sessions the `sub-agents` prompt feature is off, and with it the model tiers
+  line and the fan-out part of the Code Mode section. The attachment records the options it was composed with, and a
+  change replaces it at the next send.
+- The tools read them: the `alta` tool and `exec` describe no session they cannot start, Code Mode binds no `agent()`,
+  and the commands that start sessions are hidden and refused for such a caller (`AltaSubSessionsGate`).
 
 ## Headless runs
 

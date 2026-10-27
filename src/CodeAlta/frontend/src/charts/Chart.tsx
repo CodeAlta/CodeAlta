@@ -157,8 +157,8 @@ export function Chart(props: ChartProps) {
   useLayoutEffect(() => { latest.current = { option, onSelect, onPeriod, group, update, reducedMotion }; });
   const state = useRef<ChartViewState>(emptyViewState);
   const applied = useRef<{ option: ChartOption; reduced: boolean } | null>(null);
-  const activeRef = useRef(active);
-  activeRef.current = active;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   // The theme is read, and the chart rebuilt, only while the chart is shown: a hidden chart keeps what it has until it is shown again.
   const [shownTheme, setShownTheme] = useState(themeVersion);
@@ -250,12 +250,13 @@ export function Chart(props: ChartProps) {
     setHidden(state.current.hidden);
   }, [option, active, created, reducedMotion, update, fail]);
 
-  // The size: the chart follows its box, and is told again when it is shown.
+  // The size: the chart follows its box while its tab or panel is shown, also out of the view (a window that narrows would
+  // otherwise leave a chart scrolled away at its old width, wider than the page), and is told again when it is shown.
   useEffect(() => {
     const element = host.current;
     if (!element) return;
     const fit = () => {
-      if (!activeRef.current || element.clientWidth === 0 || element.clientHeight === 0) return;
+      if (!visibleRef.current || element.clientWidth === 0 || element.clientHeight === 0) return;
       const instance = chart.current;
       try { instance?.resize(); } catch (error) { fail(error, instance); }
     };

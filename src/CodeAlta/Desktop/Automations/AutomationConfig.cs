@@ -75,7 +75,22 @@ internal static class AutomationConfig
         if (!AutomationDefinition.IsId(definition.Id)) return "The identifier of an automation is a GUID.";
         if (string.IsNullOrWhiteSpace(definition.Name)) return "An automation has a name.";
         if (definition.Name.Length > AutomationDefinition.MaximumNameLength || definition.Name.Any(char.IsControl)) return $"The name of an automation is one line of at most {AutomationDefinition.MaximumNameLength} characters.";
-        if (string.IsNullOrWhiteSpace(definition.Prompt)) return "An automation has a prompt.";
+        if (definition.Script is { } script)
+        {
+            if (!CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary.IsName(script))
+                return "The script of an automation is the name of a script of the library: lowercase letters, digits and hyphens.";
+            if (definition.Prompt.Length > 0) return "An automation runs a prompt or a script, not both.";
+            if (definition.ScriptArguments is { } arguments && !IsObject(arguments)) return "The arguments of a script are a JSON object, such as { \"pr\": 42 }.";
+        }
+        else if (definition.ScriptArguments is not null)
+        {
+            return "Arguments are for an automation that runs a script.";
+        }
+        else if (string.IsNullOrWhiteSpace(definition.Prompt))
+        {
+            return "An automation has a prompt.";
+        }
+
         if (definition.Prompt.Length > AutomationDefinition.MaximumPromptLength) return $"The prompt of an automation has at most {AutomationDefinition.MaximumPromptLength} characters.";
         if (definition.Prompt.Any(static character => char.IsControl(character) && character is not ('\n' or '\t')) || !IsWellFormed(definition.Prompt))
             return "The prompt of an automation is plain text.";
@@ -224,7 +239,8 @@ internal static class AutomationConfig
             || !TryText(table, "project", out var project, out problem) || !TryText(table, "model", out var model, out problem)
             || !TryText(table, "agent", out var agent, out problem) || !TryFlag(table, "enabled", true, out var enabled, out problem)
             || !TryFlag(table, "catch_up", false, out var catchUp, out problem) || !TryText(table, "permission_mode", out var permissionMode, out problem)
-            || !TryText(table, "sandbox", out var sandbox, out problem)) return false;
+            || !TryText(table, "sandbox", out var sandbox, out problem) || !TryText(table, "script", out var script, out problem)
+            || !TryText(table, "script_args", out var scriptArguments, out problem) || !TryFlag(table, "sub_sessions", true, out var subSessions, out problem)) return false;
         bool? review = null;
         if (table.ContainsKey("review_before_commit"))
         {
@@ -265,6 +281,8 @@ internal static class AutomationConfig
         {
             Enabled = enabled,
             Prompt = (prompt ?? string.Empty).ReplaceLineEndings("\n").Trim(),
+            Script = Blank(script),
+            ScriptArguments = Blank(scriptArguments),
             // The folder a project automation runs in is the one of its file.
             Project = source.IsGlobal ? Blank(project) : null,
             Model = reference,
@@ -272,6 +290,7 @@ internal static class AutomationConfig
             PermissionMode = Blank(permissionMode),
             ReviewBeforeCommit = review,
             Sandbox = Blank(sandbox),
+            SessionOptions = AgentSessionOptions.Stored(new AgentSessionOptions { SubSessions = subSessions }),
             CatchUp = catchUp,
             Triggers = triggers,
         };
@@ -409,12 +428,21 @@ internal static class AutomationConfig
         if (definition.PermissionMode is { } mode) builder.Append("permission_mode = ").Append(Quote(mode)).Append(newline);
         if (definition.ReviewBeforeCommit is { } review) builder.Append("review_before_commit = ").Append(review ? "true" : "false").Append(newline);
         if (definition.Sandbox is { } sandbox) builder.Append("sandbox = ").Append(Quote(sandbox)).Append(newline);
+        // An option is written only when it is not its default.
+        if (AgentSessionOptions.Stored(definition.SessionOptions) is { SubSessions: false }) builder.Append("sub_sessions = false").Append(newline);
         if (definition.CatchUp) builder.Append("catch_up = true").Append(newline);
         if (definition.Triggers.Count > 0)
         {
             builder.Append("triggers = [").Append(newline);
             foreach (var trigger in definition.Triggers) builder.Append("  ").Append(Format(trigger)).Append(',').Append(newline);
             builder.Append(']').Append(newline);
+        }
+
+        if (definition.Script is { } script)
+        {
+            builder.Append("script = ").Append(Quote(script)).Append(newline);
+            if (definition.ScriptArguments is { } arguments) builder.Append("script_args = ").Append(Quote(arguments.ReplaceLineEndings(" "))).Append(newline);
+            return builder.ToString();
         }
 
         // Without quotes of its own, a prompt is written as it is typed: no character of it needs an escape.
@@ -498,6 +526,20 @@ internal static class AutomationConfig
     }
 
     private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    private static bool IsObject(string json)
+    {
+        if (json.Length > AutomationDefinition.MaximumScriptArgumentsLength) return false;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
 
     private static string FirstLine(string message)
     {

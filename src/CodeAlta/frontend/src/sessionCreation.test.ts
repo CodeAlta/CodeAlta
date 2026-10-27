@@ -53,9 +53,13 @@ test("exact selected project and global requests produce switchable persisted ca
   assert.equal(projectResult.kind, "created");
   const globalResult = await create(epoch, global, null, capability, null, null, "business");
   assert.equal(globalResult.kind, "created");
+  // A session created without sub-sessions says so with its creation.
+  const leafResult = await create(epoch, project, null, capability, null, null, null, "request-3", null, null, { subSessions: false });
+  assert.equal(leafResult.kind, "created");
   assert.deepEqual(calls, [
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1", permissionMode: null, preparedWorktreeId: null },
-    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2", permissionMode: null, preparedWorktreeId: null },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1", permissionMode: null, preparedWorktreeId: null, options: null },
+    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2", permissionMode: null, preparedWorktreeId: null, options: null },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-3", permissionMode: null, preparedWorktreeId: null, options: { subSessions: false } },
   ]);
   if (projectResult.kind !== "created" || globalResult.kind !== "created") throw new Error("Expected created results");
   const snapshot: WorkspaceSnapshot = { ...empty,
@@ -144,7 +148,7 @@ test("a session in a new worktree names its base, waits for git, and a refusal o
   const created = await create(epoch, project, null, capability, null, { worktree: true, base: "main" });
   assert.deepEqual(created, { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree, warning: null });
   assert.deepEqual(calls, [{ request: { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null,
-    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request", permissionMode: null, preparedWorktreeId: null }, timeout: 600_000 }]);
+    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request", permissionMode: null, preparedWorktreeId: null, options: null }, timeout: 600_000 }]);
   // Submodules git could not check out: the session is created in its worktree, with what git said.
   answer = { ...reply("ok"), worktreePath: worktree, warning: " fatal: clone of 'lib' failed " };
   assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null }),

@@ -67,6 +67,7 @@ public sealed class SessionPluginToolService
             ProjectRoots = options.ProjectRoots,
             Model = options.Model,
             ReasoningEffort = options.ReasoningEffort,
+            SessionOptions = options.SessionOptions,
             Tools = tools,
             AdditionalSystemMessage = options.AdditionalSystemMessage,
             AdditionalDeveloperInstructions = options.AdditionalDeveloperInstructions,

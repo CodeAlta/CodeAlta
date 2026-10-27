@@ -1,4 +1,4 @@
-import type { HistoryEntry } from "./timeline";
+import { scriptCallRecords, type HistoryEntry } from "./timeline";
 import type { ReconciledRow } from "./reconcileTimeline";
 
 export type TimelineGroup = { key: string; tools: boolean; rows: ReconciledRow[] };
@@ -19,7 +19,10 @@ export function groupTimelineTools(rows: ReconciledRow[], entries: readonly Hist
   const shown = new Set<string>();
   for (const row of rows) if (row.source === "history" && row.item.category !== "tool") shown.add(row.item.key);
   let previous: string | null = null, segment = 0;
+  // The calls of a script are shown inside the card of their call: they neither join nor end a run of calls.
+  const scriptCalls = scriptCallRecords(entries);
   for (const entry of entries) {
+    if (scriptCalls.has(entry)) continue;
     const identity = entry.eventType === "activity" && entry.activityId && entry.runId && entry.providerId && entry.sessionId
       && entry.kind?.toLowerCase() !== "filechange"
       ? JSON.stringify([entry.sessionId, entry.providerId, entry.runId, entry.parentActivityId]) : null;

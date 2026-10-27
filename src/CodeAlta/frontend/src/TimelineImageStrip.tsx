@@ -5,6 +5,7 @@ import { AppWindowSurface } from "./AppWindow";
 import { isDialogBackdrop } from "./dialogBackdrop";
 import { isSessionContextKey } from "./sessionRowActions";
 import { SessionTabMenu } from "./SessionTabMenu";
+import { SettingsFileLocation } from "./SettingsFileLocation";
 import { useShellLanguage } from "./shellLanguage";
 import { copyTimelineImage, steppedImageIndex, viewerWindowSize, type TimelineImage, type TimelineImageSource, type TimelineImageState } from "./timelineImages";
 import type { WindowSize } from "./windowGeometry";
@@ -130,9 +131,19 @@ function TimelineThumbnail({ image, source, enabled, onOpen }: { image: Timeline
   </>;
 }
 
-// Shows what the page already holds or reads by index: opening it grants no other read.
-function TimelineImageViewer({ images, source, index, initialSize, onIndex, onClose }: { images: ReadonlyArray<TimelineImage>; source?: TimelineImageSource;
-  index: number; initialSize: WindowSize | null; onIndex: (index: number) => void; onClose: () => void }) {
+/** The file of a picture of the disk, shown under it: its path, which can be copied, and a way to show it in the file manager. */
+export type TimelineImageFile = Readonly<{ path: string; platform: string | null; onReveal?: () => void }>;
+
+// The bar of the path of a file, under the picture.
+const fileBarHeight = 38;
+
+/**
+ * The window of an image: the image scaled down to fit, Copy image, and the images of the same list one after the
+ * other. It shows what the page already holds or reads by index: opening it grants no other read. A picture of the
+ * disk also shows its `file`.
+ */
+export function TimelineImageViewer({ images, source, index, initialSize, onIndex, onClose, file }: { images: ReadonlyArray<TimelineImage>; source?: TimelineImageSource;
+  index: number; initialSize: WindowSize | null; onIndex: (index: number) => void; onClose: () => void; file?: TimelineImageFile }) {
   const { t } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
   const close = useRef<HTMLButtonElement>(null);
@@ -167,7 +178,8 @@ function TimelineImageViewer({ images, source, index, initialSize, onIndex, onCl
         && !window.getSelection()?.toString()) { event.preventDefault(); copy(url); }
     }}>
     <AppWindowSurface storageKey="codealta.desktop.window.timeline-image.v1" title={image.title} minimumSize={viewerMinimum}
-      preferredSize={viewport => viewerWindowSize(viewport, shownSize.current, viewerMinimum)}
+      preferredSize={viewport => viewerWindowSize(viewport, file && shownSize.current
+        ? { width: shownSize.current.width, height: shownSize.current.height + fileBarHeight } : shownSize.current, viewerMinimum)}
       onClose={onClose} closeLabel={t("Close")} closeRef={close}
       headerActions={<>
         <Button variant="minimal" size="small" className={`timeline-image-copy copy-${copied}`} disabled={!url} aria-label={copyLabel} title={copyLabel}
@@ -185,6 +197,7 @@ function TimelineImageViewer({ images, source, index, initialSize, onIndex, onCl
             onLoad={event => { const size = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; setSizes(known => new Map(known).set(index, size)); }} />
           : state ? <AppIcon name="imageOff" size={32} /> : <Spinner size={24} />}
       </div>
+      {file && <div className="timeline-image-file"><SettingsFileLocation path={file.path} platform={file.platform} onReveal={file.onReveal} /></div>}
     </AppWindowSurface>
     {/* The menu is placed in the dialog: outside it, it would be under the modal layer. */}
     {menu && url && dialog.current && <SessionTabMenu anchor={menu.anchor} at={menu.at} container={dialog.current} title={t("Image options")} current={() => true}

@@ -177,6 +177,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 requestContext,
                                 transport,
                                 sideChannelEvents,
+                                attemptState,
                                 cancellationToken).ConfigureAwait(false))
                         {
                             if (provider.CodexSubscription is not null)
@@ -468,6 +469,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         AssistantMessage = assistantMessage,
                         AssistantPartContentIds = assistantPartContentIds,
                         Usage = CreateUsage(request, completedResponse, codexMetadata, provider.PromptCacheLifetime),
+                        UsageIsIncremental = attemptState.SentContinuation,
                         ProviderSessionId = string.IsNullOrWhiteSpace(completedResponse.Id) ? null : completedResponse.Id,
                         ProviderState = CreateProviderState(completedResponse, codexMetadata),
                         Summary = ExtractSummary(assistantMessage),
@@ -742,6 +744,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         CodexSubscriptionRequestContext? requestContext,
         OpenAIResponsesTransport transport,
         List<OpenAIResponsesWebSocketSideChannelEvent> sideChannelEvents,
+        CodexStreamAttemptState attemptState,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (transport == OpenAIResponsesTransport.WebSocket)
@@ -755,6 +758,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             var options = entry.Session.HasOpenConnection
                 ? CreateWebSocketContinuationRequestOptions(request, fullOptions)
                 : fullOptions;
+            attemptState.SentContinuation = !string.IsNullOrWhiteSpace(options.PreviousResponseId);
             var previousSideChannelReceived = entry.Session.SideChannelReceived;
             try
             {
@@ -1392,7 +1396,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         var options = new CreateResponseOptions
         {
             Model = request.ModelId,
-            Instructions = ComposeInstructions(request),
+            Instructions = AgentInstructionText.ComposeShared(request),
             ParallelToolCallsEnabled = toolDefinitions.Length > 0,
             StoredOutputEnabled = request.Provider.Profile?.SupportsStore == false ? null : false,
             PreviousResponseId = null,
@@ -1404,6 +1408,16 @@ internal sealed class OpenAIResponsesTurnExecutor(
         if (!SupportsToolResultImages(request))
         {
             conversation = AgentToolResultImages.MoveToUserMessages(conversation);
+        }
+
+        // The instructions of the session alone go first in the input, as a user message, as Codex sends its environment
+        // context: the endpoint reuses a cached prefix only when the instructions, and the system and developer messages
+        // that join them, are the same. Every session of a prompt then shares the instructions and the tools; in the
+        // instructions or in a system message, the folder of a session made two sessions share nothing (live probe of
+        // 2026-10-27).
+        if (AgentInstructionText.Session(request.SessionInstructions) is { } sessionInstructions)
+        {
+            options.InputItems.Add(ResponseItem.CreateUserMessageItem([ResponseContentPart.CreateInputTextPart(sessionInstructions)]));
         }
 
         foreach (var inputItem in CreateConversationItems(conversation))
@@ -1454,6 +1468,20 @@ internal sealed class OpenAIResponsesTurnExecutor(
         if (options.ReasoningOptions is not null && IsOfficialOpenAIResponsesEndpoint(provider))
         {
             options.IncludedProperties.Add(IncludedResponseProperty.ReasoningEncryptedContent);
+        }
+
+        if (provider.CodexSubscription is null)
+        {
+            // No prompt_cache_key: the OpenAI API routes a request by its prefix, so the sessions of a prompt share the
+            // cache of their instructions and tools (a second session read 97% of its first request from the cache). A
+            // key of the session kept apart what two sessions sent the same (live probe of 2026-10-27).
+            SetTextVerbosity(
+                options,
+                OpenAITextVerbosity.ForResponses(
+                    provider.TextVerbosity,
+                    request.ModelId,
+                    request.ModelInfo,
+                    IsOfficialOpenAIResponsesEndpoint(provider)));
         }
 
         var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
@@ -1511,6 +1539,18 @@ internal sealed class OpenAIResponsesTurnExecutor(
         => request.Provider.Profile?.SupportsToolResultImages
            ?? (provider.CodexSubscription is not null || provider.IsAzureOpenAI || IsOfficialOpenAIResponsesEndpoint(provider));
 
+    private static void SetTextVerbosity(CreateResponseOptions options, string? verbosity)
+    {
+        if (verbosity is null)
+        {
+            return;
+        }
+
+        // Avoid the SDK's root-level "$.text.*" propagator, which dereferences null text options.
+        var textOptions = options.TextOptions ??= new ResponseTextOptions();
+        textOptions.Patch.Set("$.verbosity"u8, verbosity);
+    }
+
     private static bool IsOfficialOpenAIResponsesEndpoint(OpenAIProviderOptions provider)
         => provider.CodexSubscription is null &&
            !provider.IsAzureOpenAI &&
@@ -1549,9 +1589,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         options.Patch.Set("$.prompt_cache_key"u8, request.PromptCacheKey ?? request.SessionId);
         if (modelCapabilities.SupportsVerbosity)
         {
-            // Avoid the SDK's root-level "$.text.*" propagator, which dereferences null text options.
-            var textOptions = options.TextOptions ??= new ResponseTextOptions();
-            textOptions.Patch.Set("$.verbosity"u8, codexOptions.TextVerbosity);
+            SetTextVerbosity(options, OpenAITextVerbosity.ForCodexSubscription(codexOptions.TextVerbosity, request.ModelId, request.ModelInfo));
         }
 
         if (codexOptions.EnableSequentialCutoffReasoningSummaries &&
@@ -1609,30 +1647,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
             request.PromptCacheKey);
     }
 
-    private static string? ComposeInstructions(AgentTurnRequest request)
-    {
-        var systemMessage = string.IsNullOrWhiteSpace(request.SystemMessage)
-            ? null
-            : request.SystemMessage.Trim();
-        var developerInstructions = string.IsNullOrWhiteSpace(request.DeveloperInstructions)
-            ? null
-            : request.DeveloperInstructions.Trim();
-
-        if (string.IsNullOrWhiteSpace(developerInstructions))
-        {
-            return systemMessage;
-        }
-
-        return string.IsNullOrWhiteSpace(systemMessage)
-            ? developerInstructions
-            : $"""
-               {systemMessage}
-
-               <developer_instructions>
-               {developerInstructions}
-               </developer_instructions>
-               """;
-    }
+    // The instructions of the session come last: what is before them is the same for every session of a prompt, and the
+    // provider reads it from its prompt cache.
 
     private static IReadOnlyList<ResponseItem> CreateConversationItems(IReadOnlyList<AgentConversationMessage> messages)
     {
@@ -4174,6 +4190,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
         public bool CommittedFinalContent { get; set; }
 
+        // The request continued a response the provider kept (previous_response_id) and sent only the new input.
+        public bool SentContinuation { get; set; }
+
         public bool HasEmittedVisibleDelta => EmittedAssistantDelta || EmittedReasoningDelta;
 
         public bool HasObservedDraftOrOutput =>
@@ -4196,6 +4215,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             ObservedToolCallItem = false;
             DispatchedToolSideEffect = false;
             CommittedFinalContent = false;
+            SentContinuation = false;
         }
     }
 

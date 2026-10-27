@@ -136,6 +136,43 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ToolOfCodeAlta_CalledThroughAProxyToolOfTheAgent_IsRunAsTheCallTheSessionRecords()
+    {
+        // Grok Build calls the tools of MCP servers through its own `use_tool`, which names the tool and its input. A
+        // call taken for one of the agent's own tools was run by itself: without the session's run, a script of `exec`
+        // got no `tools`.
+        var input = new JsonObject { ["args"] = new JsonArray("session", "list") };
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                await prompt.StartToolAsync("call-1", "use_tool", "other",
+                    new JsonObject { ["title"] = "use_tool", ["tool_name"] = "codealta__alta", ["tool_input"] = input.DeepClone() });
+                await prompt.CallMcpToolAsync("alta", (JsonObject)input.DeepClone());
+                await prompt.EndToolAsync("call-1", "two sessions");
+                return "end_turn";
+            },
+        };
+        var runs = new List<string>();
+        await using var fixture = new Fixture(agent)
+        {
+            Tools = [Tool("alta", invocation =>
+            {
+                runs.Add(invocation.ToolCallId);
+                return new AgentToolResult(true, [new AgentToolResultItem.Text("session-1, session-2")]);
+            })],
+        };
+
+        var conversation = await fixture.RunAsync([User("list the sessions")]);
+
+        var call = conversation[1].Parts.OfType<AgentMessagePart.ToolCall>().Single();
+        Assert.AreEqual("alta", call.Name, "the call is the tool of CodeAlta the proxy names");
+        Assert.AreEqual("session", call.Arguments.GetProperty("args")[0].GetString(), "its arguments are the input the proxy gives it");
+        CollectionAssert.AreEqual(new[] { "call-1" }, runs, "the tool runs once, as the call the session records and runs with its run");
+        Assert.AreEqual("session-1, session-2", ToolResult(conversation[2]));
+    }
+
+    [TestMethod]
     public async Task ToolAddedDuringTheRun_IsAnnouncedToTheAgent_ThatListsTheToolsAgain()
     {
         string[]? before = null;

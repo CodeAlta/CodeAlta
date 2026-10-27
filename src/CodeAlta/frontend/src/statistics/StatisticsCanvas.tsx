@@ -17,6 +17,7 @@ import { ModelsPage } from "./pages/ModelsPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { PromptsPage } from "./pages/PromptsPage";
+import { ScriptsPage } from "./pages/ScriptsPage";
 import { SessionsPage } from "./pages/SessionsPage";
 import { ToolsPage } from "./pages/ToolsPage";
 
@@ -24,7 +25,7 @@ import { ToolsPage } from "./pages/ToolsPage";
 
 const pages: Record<PageId, () => ReactNode> = {
   overview: () => <OverviewPage />, activity: () => <ActivityPage />, models: () => <ModelsPage />, cost: () => <CostPage />, tools: () => <ToolsPage />, prompts: () => <PromptsPage />,
-  agents: () => <AgentsPage />, code: () => <CodePage />, projects: () => <ProjectsPage />, sessions: () => <SessionsPage />, health: () => <HealthPage />,
+  agents: () => <AgentsPage />, scripts: () => <ScriptsPage />, code: () => <CodePage />, projects: () => <ProjectsPage />, sessions: () => <SessionsPage />, health: () => <HealthPage />,
 };
 
 /**

@@ -1,11 +1,15 @@
-import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { diagramAppearance, diagrams } from "./diagrams";
 import { translate } from "./localization";
-import { createMarkdownRenderer } from "./markdownBoundary";
+import { createMarkdownRenderer, localImageClass } from "./markdownBoundary";
+import type { MarkdownImage, MarkdownImages } from "./markdownImages";
 import { markdownHrefKind, markdownLinkActivation, type MarkdownLinkScope } from "./markdownLinks";
 import { appearanceKey, subscribeAppearance } from "./shellColors";
 import { useShellLanguage } from "./shellLanguage";
 import { inModalDialog, modalDialogOpen } from "./modalDialogs";
+import { TimelineImageViewer } from "./TimelineImageStrip";
+import { inlineImageSource } from "./timelineImages";
+import type { WindowSize } from "./windowGeometry";
 
 /**
  * Opens the links of the Markdown that the window shows: a page of the web in the system browser, a file of this
@@ -14,6 +18,17 @@ import { inModalDialog, modalDialogOpen } from "./modalDialogs";
 export const MarkdownLinksContext = createContext<((address: string, scope: MarkdownLinkScope | null) => void) | null>(null);
 /** Where the relative links of the texts below start from; null where a relative path names nothing. */
 export const MarkdownLinkScopeContext = createContext<MarkdownLinkScope | null>(null);
+/**
+ * Reads the pictures of the disk that the Markdown names, for the window to draw them in the text. Null where
+ * nothing reads them (a window without a host): such a picture stays a link to its file.
+ */
+export const MarkdownImagesContext = createContext<MarkdownImages | null>(null);
+
+// A drawn picture opens its window by a click or Enter alone; with a modifier, or by the middle button, its link opens the file.
+const opensPicture = (event: MouseEvent | globalThis.KeyboardEvent) => !event.ctrlKey && !event.metaKey && !event.shiftKey
+  && (event.type === "click" || event.type === "keydown");
+
+type ViewedPicture = Readonly<{ address: string; title: string; image: MarkdownImage; size: WindowSize | null; origin: HTMLElement }>;
 
 /**
  * A text of Markdown, rendered through the sanitizing boundary. A message breaks its lines where its text does;
@@ -55,6 +70,39 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   // React compares this prop by identity. Equivalent persisted refreshes must not
   // replace focused code DOM, its selection or its inner scroll position.
   const codeMarkup = useMemo(() => ({ __html: html }), [html]);
+  // The pictures of the disk are drawn in the links the renderer made for them, once read; a text rendered again
+  // draws the ones already read before it is painted. A picture that cannot be read stays a link to its file, and
+  // a text whose links are inert (the preview of a folded row) draws none.
+  const windowImages = useContext(MarkdownImagesContext);
+  const images = onOpenLink === null ? null : windowImages;
+  const content = useRef<HTMLDivElement>(null);
+  const drawnPictures = useRef(new WeakMap<HTMLImageElement, MarkdownImage>());
+  const [viewing, setViewing] = useState<ViewedPicture | null>(null);
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!images || !element) return;
+    let current = true;
+    for (const picture of Array.from(element.querySelectorAll<HTMLImageElement>(`a[href] > img.${localImageClass}`))) {
+      const address = picture.parentElement!.getAttribute("href")!;
+      if (markdownHrefKind(address) !== "file") continue;
+      const draw = (image: MarkdownImage | null) => {
+        if (!current || !image || !picture.isConnected) return;
+        drawnPictures.current.set(picture, image);
+        // An image the browser cannot decode leaves its link as it was.
+        picture.onerror = () => { picture.removeAttribute("src"); drawnPictures.current.delete(picture); };
+        picture.src = image.url;
+      };
+      const known = images.peek(address, scope);
+      if (known !== undefined) draw(known);
+      else void images.load(address, scope).then(draw, () => { /* Not drawn: the link stays. */ });
+    }
+    return () => { current = false; };
+  }, [codeMarkup, images, scope]);
+  function closeViewer() {
+    const origin = viewing?.origin;
+    setViewing(null);
+    if (origin) requestAnimationFrame(() => { if (origin.isConnected && !origin.closest("[inert], [hidden]")) origin.focus(); });
+  }
 
   function scrollCode(event: KeyboardEvent<HTMLDivElement>) {
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -90,10 +138,18 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     const activate = !event.defaultPrevented && markdownLinkActivation(event.nativeEvent);
     event.preventDefault(); // Never navigate the WebView, including ungranted and unsupported gestures.
     // A link of the page under a modal dialog is not followed; one of the dialog is.
-    if (!activate || !openLink || !link.isConnected || link.closest('[inert], [hidden]')
+    if (!activate || !link.isConnected || link.closest('[inert], [hidden]')
       || target?.closest("button") || modalDialogOpen() && !inModalDialog(link)) return;
     const address = link.getAttribute("href"); // Read the sanitized literal, not the browser-resolved property.
-    if (address && markdownHrefKind(address)) openLink(address);
+    if (!address || !markdownHrefKind(address)) return;
+    const picture = link.querySelector<HTMLImageElement>(`:scope > img.${localImageClass}[src]`);
+    const image = picture && drawnPictures.current.get(picture);
+    if (picture && image && opensPicture(event.nativeEvent)) {
+      setViewing({ address, title: picture.alt || image.path, image, origin: link,
+        size: picture.naturalWidth ? { width: picture.naturalWidth, height: picture.naturalHeight } : null });
+      return;
+    }
+    openLink?.(address);
   }
   // The button of a code block copies the text of that block, as it is written, and says so for a moment.
   function copyCode(event: { target: EventTarget }) {
@@ -105,7 +161,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
       window.setTimeout(() => button.removeAttribute("data-copied"), 1400);
     }, () => { /* The clipboard is unavailable: nothing was copied and nothing changes. */ });
   }
-  return <div className="markdown-content" onClick={event => {
+  return <><div className="markdown-content" ref={content} onClick={event => {
     const handled = event.defaultPrevented;
     activateLink(event);
     if (!handled) copyCode(event); // Our navigation suppression must not swallow Copy inside an anchor.
@@ -113,5 +169,10 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     onKeyDown={event => {
       if (event.key === "Enter") activateLink(event);
       if (timelineCodeBlocks) scrollCode(event);
-    }} dangerouslySetInnerHTML={codeMarkup} />;
+    }} dangerouslySetInnerHTML={codeMarkup} />
+    {viewing && <TimelineImageViewer images={[{ index: 0, title: viewing.title, mediaType: null }]}
+      source={inlineImageSource(viewing.image.path, [viewing.image])} index={0} initialSize={viewing.size} onIndex={() => { /* One picture. */ }}
+      onClose={closeViewer} file={{ path: viewing.image.path, platform: images?.platform ?? null,
+        onReveal: images ? () => images.reveal(viewing.address, scope) : undefined }} />}
+  </>;
 }

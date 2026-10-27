@@ -335,7 +335,7 @@ Libraries I maintain and the projects I contribute to.
 
 The spaces of a project are one line of its file, `~/.alta/projects/<name>.md`: `spaces: [work, open-source]`. A project only in Default has no `spaces` line, and an unknown id is ignored. Its sandbox is another line, `sandbox: "strict"`.
 
-The spaces of providers, MCP servers, skills, agent prompts and plugins are in `~/.alta/config.toml`. A resource without a `spaces` list is in every space:
+The spaces of providers, MCP servers, skills, agent prompts, plugins and [scripts of Code Mode](sessions/code-mode.md#scripts-of-the-library) are in `~/.alta/config.toml`. A resource without a `spaces` list is in every space:
 
 ```toml
 [providers.claude-business]
@@ -354,6 +354,9 @@ terraform = ["business", "default"]
 
 [prompts.spaces]
 reviewer = ["business"]
+
+[scripts.spaces]
+review-pr = ["business"]
 ```
 
 Only the global `config.toml` assigns spaces: a `spaces` list in a project's `config.toml` is ignored. The space each window shows, and the tabs of each space, are kept with the window.

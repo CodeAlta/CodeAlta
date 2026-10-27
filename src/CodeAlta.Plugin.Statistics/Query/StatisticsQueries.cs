@@ -428,7 +428,7 @@ public sealed partial class StatisticsQueries
         }
 
         var needsSession = query.ProjectRefs is not null || groups.Contains("project", StringComparer.Ordinal) || groups.Contains("space", StringComparer.Ordinal)
-            || groups.Contains("delegated", StringComparer.Ordinal);
+            || groups.Contains("delegated", StringComparer.Ordinal) || groups.Contains("creator", StringComparer.Ordinal);
         var needsQuarter = needsSession || query.SessionIds is not null || groups.Contains("session", StringComparer.Ordinal);
         var level = ChooseLevel(query, plan, needsQuarter);
         var periodColumn = level == RollupLevel.Quarter ? "f.q" : "f.p";
@@ -581,6 +581,12 @@ public sealed partial class StatisticsQueries
         }
     }
 
+    // Who created a session (`s`): you, another agent, a script of Code Mode, an automation, or another actor. A session of a
+    // journal written before the creator was recorded is yours, or an agent's when it has a parent.
+    private const string CreatorExpression = "CASE WHEN s.created_by_kind = 'workflow' THEN 'script' WHEN s.created_by_kind = 'automation' THEN 'automation' "
+        + "WHEN s.created_by_kind = 'agent' THEN 'agent' WHEN s.created_by_kind IS NULL OR s.created_by_kind = '' OR s.created_by_kind = 'user' "
+        + "THEN (CASE WHEN s.parent_session_id IS NULL THEN 'you' ELSE 'agent' END) ELSE 'other' END";
+
     private string GroupExpression(ResolvedQuery query, FactTable family, string group, Func<object?, string> argument)
     {
         switch (group)
@@ -591,6 +597,10 @@ public sealed partial class StatisticsQueries
                 return "COALESCE(s.space_id, '')";
             case "delegated":
                 return "CASE WHEN s.parent_session_id IS NULL THEN 'direct' ELSE 'sub-agent' END";
+            case "creator":
+                return CreatorExpression;
+            case "script-kind":
+                return $"CASE f.script WHEN '{ScriptLabels.Inline}' THEN 'inline' WHEN '{ScriptLabels.Unknown}' THEN 'unknown' ELSE 'library' END";
             case "session":
                 return "f.session_id";
             case "origin":
@@ -669,6 +679,11 @@ public sealed partial class StatisticsQueries
             if (family.Name == "content" && applyOrigin && TryParseOrigin(origin, out var sender))
             {
                 where.Append(" AND f.sender = ").Append(arg((long)sender));
+            }
+            else if (family.Name == "script" && TryParseOrigin(origin, out var turnSender))
+            {
+                // A run of a script is of the sender of the turn it started in.
+                where.Append(" AND f.origin = ").Append(arg(turnSender.ToString().ToLowerInvariant()));
             }
             else
             {

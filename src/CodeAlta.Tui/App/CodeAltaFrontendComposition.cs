@@ -68,7 +68,9 @@ internal sealed class CodeAltaFrontendComposition
         ProjectDescriptor? currentProject = null,
         PluginHostBridge? pluginHostBridge = null,
         IModelProviderRegistry? modelProviderRegistry = null,
-        IModelProviderInitializationService? modelProviderInitializationService = null)
+        IModelProviderInitializationService? modelProviderInitializationService = null,
+        CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry? codeModeRuns = null,
+        CodeAlta.Orchestration.Runtime.Scripts.ICodeModeAgents? codeModeAgents = null)
     {
         ArgumentNullException.ThrowIfNull(projectCatalog);
         ArgumentNullException.ThrowIfNull(sessionCatalog);
@@ -152,6 +154,14 @@ internal sealed class CodeAltaFrontendComposition
         if (modelProviderRegistry is not null)
         {
             altaServices.Add(modelProviderRegistry);
+        }
+        if (codeModeRuns is not null)
+        {
+            altaServices.Add(codeModeRuns);
+            var library = new CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary(catalogOptions, CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary.ShippedRoot);
+            altaServices.Add(library);
+            altaServices.Add(CodeAlta.LiveTool.Scripts.CodeModeSessionTools.FromSettings(codeModeRuns, catalogOptions, runtimeService.ScratchpadRoot, codeModeAgents, library)
+                .WithSpaces(async (sessionId, token) => await runtimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false)));
         }
         if (pluginHostBridge?.Runtime is { } pluginRuntime)
         {

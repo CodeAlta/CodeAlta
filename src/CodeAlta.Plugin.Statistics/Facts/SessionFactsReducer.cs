@@ -20,6 +20,9 @@ namespace CodeAlta.Plugin.Statistics.Facts;
 internal sealed class SessionFactsReducer : IJournalRecordSink
 {
     private const long MaxToolDurationMs = 7L * 24 * 60 * 60 * 1000;
+
+    // A script may sleep for days: a duration of more than a year is a damaged record.
+    private const long MaxScriptDurationMs = 365L * 24 * 60 * 60 * 1000;
     private static readonly TimeSpan ProvenanceWindow = TimeSpan.FromSeconds(5);
 
     /// <summary>The longest time between two records of a run that still counts as time the run was active.</summary>
@@ -29,6 +32,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
     private readonly SessionFactsState _state;
     private readonly HashSet<ulong> _seenPrompts;
     private readonly HashSet<string> _dirtyRuns = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _dirtyScripts = new(StringComparer.Ordinal);
     private FactBatch _batch;
     private bool _recordsInBatch;
     private readonly HashSet<string> _interrupted = new(StringComparer.Ordinal);
@@ -73,6 +77,15 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         }
 
         _dirtyRuns.Clear();
+        foreach (var runId in _dirtyScripts)
+        {
+            if (FindOpenScript(runId) is { } open)
+            {
+                _batch.ScriptRuns[runId] = BuildScriptRunRow(open, "running", null, null, null, 0);
+            }
+        }
+
+        _dirtyScripts.Clear();
         if (_recordsInBatch && _state.FirstRecord is not null)
         {
             _batch.Session = BuildSessionRow();
@@ -185,6 +198,10 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             case RunEndRecord end:
                 OnRunEnd(end, timestamp, run);
                 break;
+            case WorkflowRecord workflow:
+                OnWorkflow(workflow, timestamp);
+                // A record of a script is written by the host (backendId `codealta`), not by the provider of the session.
+                return;
         }
 
         if (!string.IsNullOrEmpty(record.Provider))
@@ -504,6 +521,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             Model = run.Model,
             Effort = run.Effort,
             PermissionMode = run.PermissionMode,
+            ExecCalls = run.ExecCalls,
         };
 
     private SessionRow BuildSessionRow()
@@ -524,6 +542,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             FirstRecord = _state.FirstRecord,
             LastRecord = _state.LastRecord,
             HasHeader = _state.HasHeader,
+            ScriptRunId = _state.ScriptRunId,
         };
 
     // ----- the identity and the choices of the session -----
@@ -573,6 +592,10 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         _state.CreatedByKind = actor.Kind ?? _state.CreatedByKind;
         _state.CreatedBySessionId = actor.SourceSessionId ?? _state.CreatedBySessionId;
         _state.AutomationId = actor.AutomationId ?? _state.AutomationId;
+        if (string.Equals(actor.Kind, "workflow", StringComparison.OrdinalIgnoreCase))
+        {
+            _state.ScriptRunId = actor.ScriptRunId ?? _state.ScriptRunId;
+        }
     }
 
     private void OnState(StateRecord record)
@@ -1196,9 +1219,18 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
     {
         measures.Calls++;
         measures.BytesIn += record.ArgumentBytes;
+        if (record.IsScriptCall)
+        {
+            measures.ScriptCalls++;
+        }
+
         if (run is not null)
         {
             run.ToolCalls++;
+            if (kind == ToolKind.Script && !record.IsScriptCall && StatisticsToolBuckets.IsExec(record.Name))
+            {
+                run.ExecCalls++;
+            }
         }
 
         switch (kind)
@@ -1277,6 +1309,228 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
 
     private static bool IsAltaTool(string? name)
         => name is not null && (string.Equals(name, "alta", StringComparison.Ordinal) || name.EndsWith("__alta", StringComparison.Ordinal));
+
+    // ----- runs of scripts -----
+
+    // A run of a script belongs to no turn: its records carry no run of the session, only the run of the script. Its start is
+    // counted when it starts; everything else it did is counted when it ends, in the quarter of its end, since a script may sleep for
+    // days and only its end tells what it did.
+    private void OnWorkflow(WorkflowRecord record, DateTimeOffset timestamp)
+    {
+        var runId = record.WorkflowRunId!;
+        if (record.WorkflowKind == AgentWorkflowEventKind.RunStarted)
+        {
+            StartScript(record, runId, timestamp);
+            return;
+        }
+
+        if (FindOpenScript(runId) is not { } open)
+        {
+            // A run that started before the records of this session (a fork), or that was forgotten.
+            Diagnostics.ScriptRecordsWithoutStart++;
+            return;
+        }
+
+        _dirtyScripts.Add(runId);
+        switch (record.WorkflowKind)
+        {
+            case AgentWorkflowEventKind.ScriptLoaded when record.ScriptName is { } name:
+                _batch.CountDetail(new DetailKey(QuarterHour.Of(timestamp), DetailList.ScriptCalled, name));
+                if (!open.Named)
+                {
+                    // The first library script a run loads names it: its start moves from the name it was counted under.
+                    var quarter = QuarterHour.Of(open.Start);
+                    _batch.ScriptFor(new ScriptKey(quarter, open.Provider, open.Model, open.Script, open.Origin)).RunsStarted--;
+                    _batch.ScriptFor(new ScriptKey(quarter, open.Provider, open.Model, name, open.Origin)).RunsStarted++;
+                    open.Script = name;
+                    open.Named = true;
+                }
+
+                break;
+            case AgentWorkflowEventKind.StepEnded:
+                open.Steps++;
+                if (record.Replayed)
+                {
+                    open.StepsReplayed++;
+                }
+
+                if (record.Status == "failed")
+                {
+                    open.StepsFailed++;
+                    if (open.Named && record.StepId is { } step)
+                    {
+                        _batch.CountDetail(new DetailKey(QuarterHour.Of(timestamp), DetailList.ScriptStepFailed, open.Script + "/" + step));
+                    }
+                }
+
+                break;
+            case AgentWorkflowEventKind.SessionStarted:
+                open.Sessions++;
+                break;
+            case AgentWorkflowEventKind.SessionEnded when record.Status == "failed":
+                open.AsksFailed++;
+                break;
+            case AgentWorkflowEventKind.WaitStarted when record.Status == "sleep":
+                open.Sleeps++;
+                break;
+            case AgentWorkflowEventKind.WaitStarted:
+                // A run asks one question at a time: a wait that starts while one goes on is the same wait.
+                open.WaitStart ??= timestamp;
+                break;
+            case AgentWorkflowEventKind.WaitEnded when record.Status != "sleep":
+                EndWait(open, timestamp);
+                break;
+            case AgentWorkflowEventKind.RunEnded:
+                EndScript(open, record, timestamp);
+                break;
+        }
+    }
+
+    private void StartScript(WorkflowRecord record, string runId, DateTimeOffset timestamp)
+    {
+        if (FindOpenScript(runId) is not null)
+        {
+            return;
+        }
+
+        var open = new OpenScriptState
+        {
+            RunId = runId,
+            Start = timestamp,
+            Provider = CurrentProvider(),
+            Model = CurrentModel(),
+            Origin = ScriptOrigin(record),
+            // A run recorded before its library scripts were is of a script that is not known; one recorded since is inline until it loads one.
+            Script = record.RecordsScripts ? ScriptLabels.Inline : ScriptLabels.Unknown,
+            Title = SessionTitles.Clean(record.Title),
+            ResumesRunId = ScriptNames.StepOf(record.ResumesRunId),
+        };
+        _state.OpenScripts.Add(open);
+        if (_state.OpenScripts.Count > SessionFactsState.MaxOpenScripts)
+        {
+            _state.OpenScripts.RemoveAt(0);
+        }
+
+        _batch.ScriptFor(new ScriptKey(QuarterHour.Of(timestamp), open.Provider, open.Model, open.Script, open.Origin)).RunsStarted++;
+        _dirtyScripts.Add(runId);
+    }
+
+    // Who sent the turn the script started in: the sender of the prompt of the run that is going.
+    private string ScriptOrigin(WorkflowRecord record)
+    {
+        if (record.ResumesRunId is not null)
+        {
+            return "resume";
+        }
+
+        var runs = _state.OpenRuns;
+        return runs.Count > 0 && runs[^1].HasPrompt && runs[^1].Sender != PromptSender.None ? SenderName(runs[^1].Sender) : "unknown";
+    }
+
+    private static void EndWait(OpenScriptState open, DateTimeOffset at)
+    {
+        if (open.WaitStart is { } start)
+        {
+            open.WaitMs += Math.Clamp((long)Math.Round((at - start).TotalMilliseconds), 0, MaxToolDurationMs);
+            open.WaitStart = null;
+        }
+    }
+
+    private void EndScript(OpenScriptState open, WorkflowRecord record, DateTimeOffset timestamp)
+    {
+        EndWait(open, timestamp);
+        var status = record.Status is "completed" or "failed" or "cancelled" or "interrupted" ? record.Status : "failed";
+        var quarter = QuarterHour.Of(timestamp);
+        var measures = _batch.ScriptFor(new ScriptKey(quarter, open.Provider, open.Model, open.Script, open.Origin));
+        switch (status)
+        {
+            case "completed":
+                measures.RunsCompleted++;
+                break;
+            case "cancelled":
+                measures.RunsCancelled++;
+                break;
+            case "interrupted":
+                measures.RunsInterrupted++;
+                break;
+            default:
+                measures.RunsFailed++;
+                break;
+        }
+
+        // An interrupted run has no duration: CodeAlta ended while it ran, and its end is written at the next start.
+        var duration = record.DurationMs is { } ms && ms >= 0 ? Math.Min(ms, MaxScriptDurationMs) : (long?)null;
+        var calls = Math.Max(0, record.Calls ?? 0);
+        if (duration is { } known)
+        {
+            measures.DurationCount++;
+            measures.DurationMs += known;
+            _batch.Observe(quarter, HistogramMeasure.ScriptRunDurationMs, open.Script, known);
+            _batch.Offer(quarter, ExtremeMeasure.LongestScriptRunMs, string.Empty, known, open.RunId, timestamp);
+        }
+
+        measures.WaitMs += open.WaitMs;
+        measures.Calls += calls;
+        measures.Steps += open.Steps;
+        measures.StepsFailed += open.StepsFailed;
+        measures.StepsReplayed += open.StepsReplayed;
+        measures.SessionsStarted += open.Sessions;
+        measures.AsksFailed += open.AsksFailed;
+        measures.Sleeps += open.Sleeps;
+        _batch.Observe(quarter, HistogramMeasure.ScriptRunSessions, open.Script, open.Sessions);
+        _batch.Observe(quarter, HistogramMeasure.ScriptRunCalls, open.Script, calls);
+        if (open.Sessions > 0)
+        {
+            _batch.Offer(quarter, ExtremeMeasure.WidestScriptRun, string.Empty, open.Sessions, open.RunId, timestamp);
+        }
+
+        var error = status == "completed" ? null : record.ErrorName;
+        if (error is not null)
+        {
+            _batch.CountDetail(new DetailKey(quarter, DetailList.ScriptError, error));
+        }
+
+        _batch.ScriptRuns[open.RunId] = BuildScriptRunRow(open, status, timestamp, duration, error, calls);
+        _state.OpenScripts.Remove(open);
+        _dirtyScripts.Remove(open.RunId);
+    }
+
+    private OpenScriptState? FindOpenScript(string runId)
+    {
+        var scripts = _state.OpenScripts;
+        for (var index = scripts.Count - 1; index >= 0; index--)
+        {
+            if (string.Equals(scripts[index].RunId, runId, StringComparison.Ordinal))
+            {
+                return scripts[index];
+            }
+        }
+
+        return null;
+    }
+
+    private ScriptRunRow BuildScriptRunRow(OpenScriptState open, string status, DateTimeOffset? end, long? durationMs, string? error, long calls)
+        => new()
+        {
+            SessionId = _sessionId,
+            RunId = open.RunId,
+            Script = open.Script,
+            Origin = open.Origin,
+            Title = open.Title,
+            Status = status,
+            Error = error,
+            Start = open.Start,
+            End = end,
+            DurationMs = durationMs,
+            ResumesRunId = open.ResumesRunId,
+            Provider = open.Provider,
+            Model = open.Model,
+            Calls = calls,
+            Steps = open.Steps,
+            StepsFailed = open.StepsFailed,
+            Sessions = open.Sessions,
+            WaitMs = open.WaitMs,
+        };
 
     // ----- compactions, run ends -----
 
@@ -1362,4 +1616,7 @@ internal sealed class ReducerDiagnostics
 
     /// <summary>Gets or sets the runs that were closed for a session that went quiet and were opened again by a later record.</summary>
     public long RunsReopened { get; set; }
+
+    /// <summary>Gets or sets the records of runs of scripts whose start the reducer did not see (a fork, a forgotten run).</summary>
+    public long ScriptRecordsWithoutStart { get; set; }
 }

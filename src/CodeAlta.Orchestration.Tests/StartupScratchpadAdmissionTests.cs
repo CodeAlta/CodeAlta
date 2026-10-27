@@ -195,7 +195,7 @@ public sealed class StartupScratchpadAdmissionTests
             ? provider.BuildCoordinatorInstructions(session, null, selectedPromptName: "scratchpad-test")
             : provider.BuildGeneralInstructions(session, null, selectedPromptName: "scratchpad-test");
         var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(session.SessionId)), 0, 3);
-        StringAssert.Contains(instructions.DeveloperInstructions!, Path.Combine(profile.StateRoot, "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md"));
+        StringAssert.Contains(instructions.SessionInstructions!, Path.Combine(profile.StateRoot, "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md"));
         StringAssert.Contains(instructions.DeveloperInstructions!, "Shared resource marker.");
         Assert.IsFalse(Directory.Exists(Path.Combine(profile.StateRoot, "scratchpad")), "Prompt composition must not migrate or create scratchpads.");
     }

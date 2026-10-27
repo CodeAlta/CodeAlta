@@ -180,7 +180,67 @@ export function generateFixtureData(options: Readonly<{ today: string; first?: s
   return { today, firstDay: first, projects: fixtureProjects, spaces: fixtureSpaces, models: fixtureModels, sessions, cells };
 }
 
-function makeCell(random: () => number, base: Readonly<{ session: string; day: string; hour: number; project: string; model: FixtureModel; origin: Cell["origin"]; delegated: boolean }>): Cell {
+/** The runs of scripts of Code Mode one cell started, with what they did. */
+export type ScriptCell = Readonly<{
+  cell: Cell;
+  /** A library script, `(inline)` for the code sent to `exec`, `(unknown)` for a run recorded before the script was. */
+  script: string;
+  runs: number; completed: number; failed: number; cancelled: number; interrupted: number;
+  /** The duration of each run that ended with one. */
+  durations: readonly number[];
+  waitMs: number; calls: number; sessions: number; steps: number; stepsFailed: number;
+  /** The step that failed, and the error of a failed run. */
+  failedStep: string | null; error: string | null;
+}>;
+
+/** The library scripts of the fixture, with their steps and how often they run. */
+export const fixtureScripts = [
+  { script: "review-pr", weight: 4, median: 240_000, sessions: 3, steps: ["read", "review", "summarize"] },
+  { script: "fix-failing-tests", weight: 2.5, median: 520_000, sessions: 2, steps: ["find", "fix", "verify"] },
+  { script: "release-notes", weight: 1, median: 90_000, sessions: 0, steps: ["collect", "write"] },
+  { script: "nightly-triage", weight: 1.4, median: 380_000, sessions: 5, steps: ["list", "triage", "report"] },
+  { script: "(inline)", weight: 6, median: 25_000, sessions: 0, steps: [] },
+  { script: "(unknown)", weight: 0.6, median: 30_000, sessions: 0, steps: [] },
+] as const;
+
+/**
+ * A number in [0, 1) from a text: the scripts are derived from the cells without drawing from the generator of the cells, so the
+ * numbers of every other page stay those they were.
+ */
+export function fixtureHash(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+  return (hash >>> 0) / 4294967296;
+}
+
+/** The runs of scripts of the cells: about one cell in six sends scripts, more often late in the period, under the models that have tools. */
+export function scriptCellsOf(cells: readonly Cell[]): readonly ScriptCell[] {
+  const result: ScriptCell[] = [];
+  const weights = fixtureScripts.map(item => item.weight);
+  for (const cell of cells) {
+    const key = `${cell.session}|${cell.day}|${cell.hour}`;
+    const chance = fixtureHash(key);
+    if (chance > (cell.provider === "mistral" ? 0.04 : cell.day >= "2026-08-01" ? 0.24 : 0.12)) continue;
+    const random = createRandom(Math.floor(fixtureHash(key + "|script") * 4294967296));
+    const definition = pick(random, weights, fixtureScripts);
+    const runs = 1 + Math.floor(random() * 3);
+    const failed = random() < 0.12 ? 1 : 0;
+    const cancelled = runs - failed > 1 && random() < 0.08 ? 1 : 0;
+    const interrupted = runs - failed - cancelled > 1 && random() < 0.04 ? 1 : 0;
+    const durations = Array.from({ length: runs - interrupted }, () => Math.round(logNormal(random, definition.median, 0.9)));
+    const sessions = definition.sessions === 0 ? 0 : runs * Math.max(1, Math.round(definition.sessions * (0.5 + random())));
+    const steps = runs * definition.steps.length;
+    const failedStep = failed && definition.steps.length > 0 ? definition.steps[Math.floor(random() * definition.steps.length)] : null;
+    result.push({
+      cell, script: definition.script, runs, completed: runs - failed - cancelled - interrupted, failed, cancelled, interrupted, durations,
+      waitMs: random() < 0.2 ? Math.round(logNormal(random, 45_000, 0.8)) : 0, calls: runs * Math.round(logNormal(random, 18, 0.7)) + sessions, sessions, steps,
+      stepsFailed: failedStep ? 1 : 0, failedStep, error: failed ? (random() < 0.6 ? "TypeError" : random() < 0.5 ? "Stopped" : "RangeError") : null,
+    });
+  }
+  return result;
+}
+
+function makeCell(random: () => number, base:Readonly<{ session: string; day: string; hour: number; project: string; model: FixtureModel; origin: Cell["origin"]; delegated: boolean }>): Cell {
   const { model } = base;
   const effort = model.efforts[Math.floor(random() * model.efforts.length)];
   const runs = 1 + Math.floor(random() * (base.delegated ? 3 : 6));

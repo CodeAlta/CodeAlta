@@ -193,7 +193,7 @@ internal static class McpCommandFactory
                 tools = toolKeys.Count == 0 ? null : requested.Select(static tool => tool.Alias).ToArray(),
                 nextTurnRequired = !availableNow,
                 note = availableNow
-                    ? "The tools are registered for this turn: call them as mcp__<server>__<tool> in your next step. Do not end the turn and do not wait for another message."
+                    ? "The tools are registered for this turn: call them as mcp__<server>__<tool> in your next step, or as mcp.<server>.<tool> in your next exec script. Do not end the turn and do not wait for another message."
                     : "Activated for future runs; tools are available on the next agent run as mcp__<server>__<tool>.",
             });
             return 0;

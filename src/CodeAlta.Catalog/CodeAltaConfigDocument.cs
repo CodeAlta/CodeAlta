@@ -94,6 +94,10 @@ public sealed class CodeAltaConfigDocument
     [JsonPropertyName("tools")]
     public CodeAltaToolSettingsDocument? Tools { get; set; }
 
+    /// <summary>Gets or sets whether sessions get the tools of Code Mode. Read from the user's file only.</summary>
+    [JsonPropertyName("code_mode")]
+    public CodeAltaCodeModeSettingsDocument? CodeMode { get; set; }
+
     /// <summary>
     /// Gets or sets the sandbox of sessions: every session, and the profiles. Read from the user's file only: a
     /// repository would otherwise loosen its own sandbox.
@@ -109,6 +113,17 @@ public sealed class CodeAltaConfigDocument
     /// </summary>
     [JsonPropertyName("identity")]
     public TomlTable? Identity { get; set; }
+}
+
+/// <summary>Represents whether sessions get the tools of Code Mode.</summary>
+public sealed class CodeAltaCodeModeSettingsDocument
+{
+    /// <summary>
+    /// Gets or sets the mode: <c>off</c> (when absent), <c>on</c> for <c>exec</c> and <c>wait</c> beside the other tools, or
+    /// <c>only</c> for them alone (the model calls the other tools through scripts).
+    /// </summary>
+    [JsonPropertyName("mode")]
+    public string? Mode { get; set; }
 }
 
 /// <summary>Represents the tools every session does without.</summary>

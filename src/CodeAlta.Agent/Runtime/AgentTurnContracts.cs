@@ -401,6 +401,14 @@ public sealed record AgentTurnRequest
     public string? DeveloperInstructions { get; init; }
 
     /// <summary>
+    /// Gets or initializes the instructions of this session alone (where it works, its parent, its scratchpad, how it is
+    /// titled), which a provider sends last, after <see cref="SystemMessage"/> and <see cref="DeveloperInstructions"/>:
+    /// those are the same text for every session of a prompt, and the prompt cache of the provider serves them all.
+    /// <see cref="AgentInstructionText"/> composes them. Null for none.
+    /// </summary>
+    public string? SessionInstructions { get; init; }
+
+    /// <summary>
     /// Gets or initializes the requested reasoning effort.
     /// </summary>
     public AgentReasoningEffort? ReasoningEffort { get; init; }
@@ -496,6 +504,14 @@ public sealed record AgentTurnResponse
     /// Gets or initializes the latest usage snapshot.
     /// </summary>
     public AgentSessionUsage? Usage { get; init; }
+
+    /// <summary>
+    /// Gets or initializes a value indicating whether the request sent only what was added to a context the provider
+    /// kept from a previous response (a provider-native continuation), so that <see cref="Usage"/> may count only
+    /// that part. The session then keeps its own count of the whole conversation when the reported one is smaller;
+    /// otherwise the reported count is the size of the context, even when it is smaller than the local estimate.
+    /// </summary>
+    public bool UsageIsIncremental { get; init; }
 
     /// <summary>
     /// Gets or initializes a value indicating whether the provider explicitly requested another inference cycle.

@@ -1,4 +1,4 @@
-import type { WorkspaceCreateSessionOutcomeRequest, WorkspaceCreateSessionRequest, WorkspaceCreateSessionResponse, WorkspaceSnapshot } from "#neoastra";
+import type { SessionOptionsChoice, WorkspaceCreateSessionOutcomeRequest, WorkspaceCreateSessionRequest, WorkspaceCreateSessionResponse, WorkspaceSnapshot } from "#neoastra";
 import type { createMutationCapability } from "./sessionOperations";
 import { sessionsForProject } from "./workspace";
 
@@ -51,11 +51,13 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
    * `spaceId` is the space the window shows: the session belongs to it for its whole life. `requestId` names the
    * request, by which its steps are read while it runs. `permissionMode` is the mode the session starts in, one its
    * provider offers; null for the one its provider is configured with. `preparedWorktreeId` names the worktree made
-   * for the session while its prompt was typed; the host makes another one when it cannot take that one.
+   * for the session while its prompt was typed; the host makes another one when it cannot take that one. `options` are
+   * the options the session is created with (sub-sessions); null for the defaults.
    */
   return async function create(epoch: string | undefined, target: SessionTarget, title: string | null,
     capability: Capability | undefined, providerId: string | null = null, place: SessionPlace = null, spaceId: string | null = null,
-    requestId: string = newRequestId(), permissionMode: string | null = null, preparedWorktreeId: string | null = null): Promise<Result> {
+    requestId: string = newRequestId(), permissionMode: string | null = null, preparedWorktreeId: string | null = null,
+    options: SessionOptionsChoice | null = null): Promise<Result> {
     if (!epoch || !capability?.canMutate()) return { kind: "error", code: "unconfigured" };
     const worktree = place?.worktree === true, base = worktree ? place.base : null;
     if (!["global", "project"].includes(target.scope)
@@ -72,7 +74,7 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
     const request: WorkspaceCreateSessionRequest = Object.freeze({ expectedHostEpoch: epoch, scope: frozen.scope,
       projectId: frozen.scope === "project" ? frozen.projectId : null,
       projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId, requestId, permissionMode,
-      preparedWorktreeId });
+      preparedWorktreeId, options: options ? { subSessions: options.subSessions } : null });
     try {
       let response: WorkspaceCreateSessionResponse;
       try { response = await invoke(request, { timeoutMilliseconds: creationTimeoutMilliseconds }); }

@@ -156,12 +156,17 @@ public sealed partial class SessionRuntimeService
         var source = await ResolveOwnedSessionBodyAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
         if (source is null) return new("session_missing");
         var active = await ReadActiveRunIdAsync(request.SessionId).ConfigureAwait(false);
+        // A session without sub-sessions forks none; a fork has the options of its source, narrowed by those of the session that forks it.
+        var forkOptions = await GetCreatedSessionOptionsAsync(source.Options, request.CreatedBy?.SourceSessionId, cancellationToken).ConfigureAwait(false);
         var target = await CreateBranchDescriptorAsync(source, request.Title, "fork", cancellationToken).ConfigureAwait(false);
         target.ParentSessionId = NormalizeOptionalText(request.ParentSessionId);
         target.CreatedBy = request.CreatedBy;
+        target.Options = forkOptions;
         // A sandboxed session forks only into its sandbox, whatever the source had.
         target.Sandbox = await GetCreatedSessionSandboxAsync(request.CreatedBy?.SourceSessionId, cancellationToken).ConfigureAwait(false) ?? target.Sandbox;
         target.WorktreeDirectory = request.LeaveWorktree ? null : NormalizeOptionalText(request.WorktreeDirectory) ?? source.WorktreeDirectory;
+        // Nor more tools than its source and the session that forks it.
+        InheritForkToolPatterns(target.SessionId, source.SessionId, target.ParentSessionId, request.CreatedBy?.SourceSessionId);
         SessionViewBranchResult result;
         try
         {
@@ -170,6 +175,7 @@ public sealed partial class SessionRuntimeService
         }
         catch (Exception error) when (BranchFailure(error) is { } status)
         {
+            _toolPatterns.TryRemove(target.SessionId, out _);
             return new(status);
         }
 

@@ -125,12 +125,14 @@ Agents of CodeAlta Desktop use the same index through `alta`:
 alta search "why did we change the journal fingerprint" --kind message --project .
 alta search "post a message on slack" --kind tool,mcp,skill
 alta search "worktree cleanup" --kind doc
+alta search "review a pull request" --kind script
 alta search show msg:<session>/<message> --context 2
 alta search load mcp:slack/post_message
 alta search status
 ```
 
 - Each hit gives its `ref`, a snippet, how it was found (`words`, `meaning` or `both`), and `next`: the command that uses it, such as `alta skill activate …` or `alta documentation read …`.
+- `--kind script` finds the [scripts of the library](sessions/code-mode.md#scripts-of-the-library) by their name, their description and when to use them.
 - An agent sees what its space and project can see, never what is excluded, and not its own session unless it asks with `--include-current`.
 - MCP tools are found once CodeAlta has listed them; search starts no server. `alta search reindex --kind mcp` lists every enabled server once.
 - `alta search load` gives the session the MCP tools it found, without the rest of their server, for the same turn and later. It is refused while you review the session's commands.

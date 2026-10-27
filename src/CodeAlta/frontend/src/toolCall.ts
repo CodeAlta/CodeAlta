@@ -82,7 +82,7 @@ export function toolCallFromRecord(record: ToolCallRecord, row: ToolCall): ToolC
 }
 
 /** What kind of view shows a call best. */
-export type ToolFamily = "shell" | "read" | "edit" | "generic";
+export type ToolFamily = "shell" | "read" | "edit" | "script" | "generic";
 
 const editTools = ["write_file", "replace_in_file", "apply_patch", "edit", "write", "multiedit", "create_file", "str_replace_editor", "str_replace_based_edit_tool", "edit_file"];
 const readTools = ["read_file", "read", "view", "cat"];
@@ -95,6 +95,8 @@ export function toolFamily(call: ToolCall): ToolFamily {
   const name = call.name.toLowerCase();
   if (call.diff?.text.trim() || editTools.includes(name)) return "edit";
   if (name === "alta") return "generic";
+  // Code Mode's exec: a script, its console and the calls it made.
+  if (name === "exec") return "script";
   if (call.command !== null || call.kind === "CommandExecution") return "shell";
   if (readTools.includes(name) && call.output && parseNumberedLines(call.output.text)) return "read";
   return "generic";

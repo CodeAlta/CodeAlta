@@ -5,7 +5,7 @@ import { BackgroundCallsContext } from "./BackgroundTaskViews";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent, MarkdownLinkScopeContext, MarkdownLinksContext } from "./MarkdownContent";
 import { PluginHtml } from "./PluginHtml";
-import { externalOriginSubtitles, notSentSubtitle, writeMarkdown, type TimelineItem } from "./timeline";
+import { externalOriginSubtitles, notSentSubtitle, wholeMessageBody, writeMarkdown, type TimelineItem } from "./timeline";
 import { SessionReference } from "./SessionReference";
 import { useShellLanguage } from "./shellLanguage";
 import { timelineTime } from "./sessionTime";
@@ -29,6 +29,12 @@ import { usePromptChange } from "./systemPromptReader";
 import { TimelineClaudeCli } from "./claudeCli/timelineCard";
 import { promptProvenanceTitle } from "./promptProvenance";
 import type { MessageKey } from "./localization";
+import { ScriptCalls } from "./scriptCard/ScriptCalls";
+import { ScriptRunView } from "./scriptCard/ScriptRunView";
+import { hasWorkflowBlock } from "./workflows/runFlow";
+import { ScriptResultFacts } from "./workflows/ScriptResultFacts";
+import { useWholeMessage, WholeMessageNote } from "./WholeMessageNote";
+import { flashTimelineTarget } from "./timelineReveal";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -137,6 +143,11 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const bodyId = useId();
   // A changed record at the same offset must not inherit the previous record's disclosure.
   const body = item.markdown;
+  // A text longer than its share of the history page arrives with its start only: the card says so, and reads the rest
+  // from the journal when asked. A tool call and a job have windows of their own, which read their records whole.
+  const shortened = !!item.textShortened && !!body && !job && item.category !== "tool" && /^\d+$/u.test(item.key);
+  const whole = useWholeMessage(shortened ? item.key : null);
+  const shownBody = whole.state.status === "ok" ? wholeMessageBody(item, whole.state.text) : body;
   // Conversation messages always render their supplied Markdown. Optional
   // disclosure is reserved for long supporting diagnostics, never the conversation.
   const longBody = item.category !== "user" && item.category !== "assistant" && (body?.length ?? 0) > longBodyThreshold;
@@ -176,7 +187,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
     };
   }, [item.key, item.eventType, item.category, item.title, item.timestamp, item.copyMarkdown, item.truncated, item.bodyOmitted]);
   async function copy() {
-    const text = item.copyMarkdown;
+    const text = whole.state.status === "ok" && shownBody ? shownBody : item.copyMarkdown;
     if (!text || !active.current) return;
     const sequence = ++copySequence.current;
     if (reset.current !== undefined) window.clearTimeout(reset.current);
@@ -211,9 +222,13 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   // A tool call has its own window, which the timeline holds: it follows the call while it runs. A row that is
   // no call (an output whose call is not in the window) keeps the details of its record.
   const callWindow = item.category === "tool" && !!item.toolCall && !!onOpenTool && !!rowKey;
+  // The call of a script whose run has its workflow block: the tile stays one line, and goes to the block, which opens the call.
+  const workflowBlock = toolTile && callWindow && !!item.scriptRun && hasWorkflowBlock(item.scriptRun);
   function openDetails(origin: HTMLButtonElement) {
     if (!current() || !origin.isConnected || origin.closest('[inert], [hidden]')
       || modalDialogOpen()) return;
+    const block = workflowBlock ? origin.closest(".timeline-activity")?.querySelector<HTMLElement>(`[data-workflow-row="${CSS.escape(rowKey!)}"]`) : null;
+    if (block) { flashTimelineTarget(block); return; }
     if (callWindow) onOpenTool!(rowKey!, origin);
     else setDetails({ item, origin, current: canInspect });
   }
@@ -231,11 +246,13 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       if (clickableTile && hasDetails && toolTrigger.current && !event.defaultPrevented
         && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
     }}
-    data-tool-phase={job?.phase ?? item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-not-sent={item.notSent ? "true" : undefined} data-job-result={job ? job.succeeded ? "succeeded" : "ended" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
+    data-tool-phase={job?.phase ?? item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-not-sent={item.notSent ? "true" : undefined} data-job-result={job ? job.succeeded ? "succeeded" : "ended" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}
+    // The call, by which a task in the background goes to the tile of the call that started it.
+    data-tool-call={item.category === "tool" ? item.toolCall?.activityId : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
-        <span>{clickableTile && hasDetails ? <button ref={toolTrigger} type="button" className="tool-tile-title" aria-haspopup="dialog"
+        <span>{clickableTile && hasDetails ? <button ref={toolTrigger} type="button" className="tool-tile-title" aria-haspopup={workflowBlock ? undefined : "dialog"}
           aria-label={job ? `${title} · ${item.summary} · ${job.result}` : undefined}
           // Open on Enter's release: opening on its press focuses the window's Blueprint Close button,
           // which would interpret that same release as its own activation and immediately close it.
@@ -287,6 +304,9 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           : item.toolOutputBytes != null && item.toolOutputLines != null && <span className="tool-output-stats">{item.toolOutputLines}L · {(item.toolOutputBytes / 1024).toFixed(1)} KB</span>}
         {toolOutput && <span className="tool-result-preview" title={toolOutput.slice(0, 512)}>{commandPreview(toolOutput)}</span>}
       </div>}
+      {toolTile && item.scriptRun && !workflowBlock && <ScriptRunView run={item.scriptRun} title={item.scriptTitle ?? null} />}
+      {toolTile && item.scriptCalls && !workflowBlock && <ScriptCalls calls={item.scriptCalls} />}
+      {item.workflowResult && <ScriptResultFacts result={item.workflowResult} run={item.workflowResult} onOpenLink={messageLink} />}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}
@@ -299,10 +319,11 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           }}>
           <AppIcon name="chevronDown" size={14} />{t(expanded ? "Collapse message" : "Show full message")}
         </button>
-        <div id={bodyId}>{expanded ? <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />
+        <div id={bodyId}>{expanded ? <MarkdownContent source={shownBody ?? body} timelineCodeBlocks onOpenLink={messageLink} />
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : reviewSummary && body ? <ReviewPromptCard summary={reviewSummary} text={body} onOpenLink={messageLink} />
-        : body && <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />)}
+        : shownBody && <MarkdownContent source={shownBody} timelineCodeBlocks onOpenLink={messageLink} />)}
+      {shortened && !compact && <WholeMessageNote state={whole.state} load={whole.load} />}
       {item.images && <TimelineImages images={item.images} source={imageSource} />}
       {item.attachments && <AttachedFileChips attachments={item.attachments} />}
       {item.missingCliProvider && <TimelineClaudeCli providerKey={item.missingCliProvider} />}

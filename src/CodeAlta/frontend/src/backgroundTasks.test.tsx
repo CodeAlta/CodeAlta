@@ -7,6 +7,7 @@ import { backgroundCalls, backgroundTaskElapsed, backgroundTaskEnd, backgroundTa
 import { createRuntimeObservations, projectRuntimeObservation, sessionBackground, sessionRunning, type RuntimeTarget } from "./runtimeObservations";
 import { TimelineMessage } from "./TimelineMessage";
 import type { TimelineItem } from "./timeline";
+import { revealableTask } from "./timelineReveal";
 
 const task = (taskId: string, state = "running", toolCallId: string | null = null): SessionRuntimeBackgroundTaskResponse =>
   ({ taskId, kind: "command", description: `Does ${taskId}`, toolCallId, startedAt: state === "running" ? "2026-01-01T00:00:00Z" : null, state, isJob: false, exitCode: null, endedAt: null });
@@ -190,4 +191,10 @@ test("a background job is listed with how it ended, for a moment after it ended"
   assert.doesNotMatch(html, /background-tasks-spinner/);
   assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={read.slice(0, 1)} onStop={async () => { }} />), /1 background task running.*background-tasks-spinner/s);
   assert.equal(renderToStaticMarkup(<BackgroundTasksStatus tasks={backgroundTasks(entry([job("job-3", "failed", { exitCode: 3, endedAt: "2026-01-01T00:05:00Z" })]))} onStop={async () => { }} />), "");
+});
+
+test("a run of a script, and a task that names its call, can be gone to in the timeline; a job opens its output instead", () => {
+  const [run, agent, alone, ran] = backgroundTasks(entry([{ ...task("run-1a2b3c"), kind: "workflow" }, { ...task("a1", "running", "toolu_1"), kind: "agent" }, task("c1"),
+    { ...task("job-1"), isJob: true, toolCallId: "toolu_2" }]));
+  assert.deepEqual([run, agent, alone, ran].map(revealableTask), [true, true, false, false]);
 });

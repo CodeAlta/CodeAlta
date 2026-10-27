@@ -212,11 +212,13 @@ public sealed class SessionForkRewindTests
         var sourceRequest = provider.Requests.Last(request => request.SessionId == source.SessionId);
         await SendAsync(host, listedAlone, options, "two");
         var aloneRequest = provider.Requests.Last(request => request.SessionId == alone.Session.SessionId);
-        Assert.AreEqual(sourceRequest.DeveloperInstructions, aloneRequest.DeveloperInstructions);
+        Assert.AreEqual(AgentInstructionText.Compose(sourceRequest), AgentInstructionText.Compose(aloneRequest));
         await SendAsync(host, await ListedAsync(host, child.Session.SessionId), options, "two");
         var childRequest = provider.Requests.Last(request => request.SessionId == child.Session.SessionId);
-        Assert.AreNotEqual(sourceRequest.DeveloperInstructions, childRequest.DeveloperInstructions, "A fork with a parent is told about it.");
-        StringAssert.Contains(childRequest.DeveloperInstructions, agent.SessionId);
+        Assert.AreNotEqual(AgentInstructionText.Compose(sourceRequest), AgentInstructionText.Compose(childRequest), "A fork with a parent is told about it.");
+        // In the instructions of the session alone: what comes before them stays the one of its source.
+        StringAssert.Contains(childRequest.SessionInstructions, agent.SessionId);
+        Assert.AreEqual(sourceRequest.DeveloperInstructions, childRequest.DeveloperInstructions);
     }
 
     [TestMethod]

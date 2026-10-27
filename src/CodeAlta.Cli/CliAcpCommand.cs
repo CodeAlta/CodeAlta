@@ -18,6 +18,10 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
         ArgumentNullException.ThrowIfNull(options);
         if (streams.StdinStream is not { } input) return Invalid("acp reads its client on standard input, which this run has not.");
         if (!TryReadDefaults(options, out var defaults, out var error)) return Invalid(error!);
+        if (!CliPromptFeatures.TryResolve(CliPromptFeatures.AcpDefaults, options.Ephemeral, options.EnableFeatures, options.DisableFeatures,
+                out var disabledFeatures, out error)) return Invalid(error!);
+        if (options.CodeMode is { } codeMode && !CodeAlta.Catalog.CodeAltaConfigStore.CodeModeModes.Contains(codeMode))
+            return Invalid($"'{codeMode}' is not a mode of Code Mode: use on, only or off.");
         var folder = Path.GetFullPath(options.Project ?? environment.CurrentDirectory, environment.CurrentDirectory);
         if (!Directory.Exists(folder)) return Invalid($"The project folder '{folder}' does not exist.");
         if (!CliStorage.TryResolve(options, environment, out var storage, out error)) return Invalid(error!);
@@ -34,8 +38,10 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
                 StartPlugins = !options.NoPlugins,
                 StartMcp = !options.NoMcp,
                 ListsSkills = !options.NoSkills,
+                CodeMode = options.CodeMode,
                 Offline = options.Offline,
                 ChecksRequired = true,
+                DisabledPromptFeatures = disabledFeatures,
             }, environment, processToken).ConfigureAwait(false);
             environment.HostCreated?.Invoke(host.Host);
             CliAcpAgent? agent = null;
@@ -126,6 +132,7 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
             AgentPromptId = options.PromptId,
             DisabledToolPatterns = patterns,
             Sandbox = options.Sandbox,
+            SessionOptions = options.NoSubSessions ? new AgentSessionOptions { SubSessions = false } : null,
         };
         error = null;
         return true;

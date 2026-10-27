@@ -1,0 +1,311 @@
+/* The Workflows tab: the header and the side of the runs are those of the Automations tab; the library is a grid of cards. */
+.workflows { container-type: inline-size; display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; overflow-y: auto; padding: 20px 24px 28px; background: var(--bg); outline: none; }
+.workflows > * { width: 100%; max-width: 1480px; margin-inline: auto; flex: none; }
+.workflows h2, .workflows h3, .workflows h4, .workflows p { margin: 0; }
+.workflows h3 { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.workflows h4 { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.workflows-header { grid-template-columns: auto minmax(0, 1fr) minmax(120px, 220px) auto; }
+.workflows-emblem { background: linear-gradient(135deg, #7ee2c2, #4fa3f5 55%, #9b7cf5); box-shadow: 0 6px 18px -8px #4fa3f5; }
+.workflow-library { align-content: start; gap: 10px; }
+.workflow-library-head { grid-template-columns: minmax(0, 1fr) auto minmax(140px, 220px); }
+/* Under the first runs of the side, the rest on demand. */
+.workflow-runs-more { justify-self: start; margin-top: 6px; font-size: 12px; color: var(--muted) !important; }
+.workflow-runs-more .count { display: inline-grid; margin-left: 6px; vertical-align: middle; }
+/* Discreet: a word beside the search, which shows the samples again or hides them. */
+.workflow-samples-toggle { font-size: 12px; color: var(--muted) !important; }
+.workflow-samples-toggle:hover { color: var(--text) !important; }
+@container (max-width: 980px) {
+  .workflows-header { grid-template-columns: auto minmax(0, 1fr) minmax(100px, 180px) auto; }
+  .workflows-header p { display: none; }
+}
+
+/* How a workflow is made, then the library by where its scripts are: the project's, yours, the samples. */
+.workflow-library-how { font-size: 12px; line-height: 1.45; color: var(--muted); }
+.workflow-scope-section { display: grid; gap: 8px; }
+.workflow-scope-section + .workflow-scope-section:has(.workflow-cards) { margin-top: 6px; }
+/* A part is one line: its name and count, where its scripts are (cut, whole on hover), and that it has none yet. */
+.workflow-scope-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.workflow-scope-section h4 { display: flex; flex: none; align-items: center; gap: 8px; margin: 0; }
+.workflow-scope-section[data-scope="project"] h4 { color: #e0a83a; }
+.workflow-scope-section[data-scope="global"] h4 { color: #58c2a8; }
+.workflow-scope-caption { flex: 0 1 auto; min-width: 0; overflow: hidden; font-size: 12px; line-height: 1.45; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-scope-empty { flex: none; font-size: 12px; font-style: italic; color: var(--muted); opacity: .8; }
+.workflow-card-actions { position: relative; }
+.workflow-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.workflow-card { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  transition: border-color 120ms, box-shadow 120ms; }
+.workflow-card:hover { border-color: var(--line-strong); box-shadow: 0 8px 22px -14px #000; }
+.workflow-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.workflow-card-actions { display: flex; align-items: center; gap: 2px; }
+.workflow-card-glyph { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #4fa3f5; background: color-mix(in srgb, currentColor 16%, transparent); }
+.workflow-card[data-problem] .workflow-card-glyph { color: var(--danger, #e76a6e); }
+.workflow-card-text { display: grid; gap: 2px; min-width: 0; }
+.workflow-card-text strong { font-size: 14px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-card-text > span { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; color: var(--muted); }
+.workflow-card-text code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--code-font); }
+.workflow-scope { flex: none; padding: 0 6px; border-radius: 999px; background: var(--panel-3); }
+.workflow-scope[data-scope="project"] { color: #e0a83a; }
+.workflow-scope[data-scope="global"] { color: #58c2a8; }
+.workflow-card-description { font-size: 12px; line-height: 1.45; color: var(--muted); }
+.workflow-card-problem { font-size: 12px; line-height: 1.45; color: var(--danger, #e76a6e); overflow-wrap: anywhere; }
+.workflow-card-params { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--muted); }
+.workflow-card-params > span { display: inline-flex; align-items: baseline; gap: 3px; }
+.workflow-card-params code { font-family: var(--code-font); color: var(--text); }
+.workflow-card-params b { color: var(--accent); font-weight: 600; }
+
+/* The steps a script declares: stages left to right, the steps of a stage stacked. */
+.workflow-graph { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.workflow-graph-column ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.workflow-graph-step { position: relative; display: inline-flex; align-items: center; gap: 4px; max-width: 160px; padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: 6px;
+  background: var(--panel-2); font-size: 11px; color: var(--text); }
+.workflow-graph-step span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-graph-step small { color: var(--accent); font-weight: 600; }
+/* A step that fans out looks like a stack of boxes. */
+.workflow-graph-step[data-each] { box-shadow: 2px 2px 0 -1px var(--panel-2), 2px 2px 0 0 var(--line-strong); }
+.workflow-graph-edge { display: grid; place-items: center; color: var(--muted); }
+
+/* Run…: the form of the parameters of a script. */
+.workflow-run { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.workflow-run-body { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 16px 18px 6px; }
+.workflow-run-body .bp6-form-group { margin: 0 0 12px; }
+.workflow-run-description { margin: 0 0 12px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.workflow-run-label { display: inline-flex; align-items: baseline; gap: 3px; }
+.workflow-run-label code { font-family: var(--code-font); }
+.workflow-run-required { color: var(--accent); font-weight: 600; }
+.workflow-run-json { min-height: 76px; resize: vertical; font-family: var(--code-font); font-size: 12px; }
+.workflow-run-footer { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--line); }
+
+/* Save as script… on the card of a run that ended. */
+.script-run-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 2px 4px; }
+.script-run-problem { flex-basis: 100%; color: var(--red); font-size: 11.5px; text-align: end; }
+.script-save-form { min-width: 240px; }
+
+/* A run of a script in the timeline: a block of its own, the width of the conversation. Its head says what it is and how it
+   goes; its graph (React Flow) flows left to right, a node per step with the sessions it started inside. */
+.workflow-block { --run-tone: var(--accent); container-type: inline-size; position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 9px 10px 10px;
+  border: 1px solid color-mix(in srgb, var(--run-tone) 24%, var(--line)); border-radius: 12px; outline: none;
+  background: radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--run-tone) 8%, transparent), transparent 52%), var(--panel);
+  box-shadow: 0 12px 30px -24px #000; }
+.workflow-block::before { content: ""; position: absolute; inset: -1px 14px auto; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--run-tone) 75%, transparent), transparent); }
+.workflow-block[data-phase="completed"] { --run-tone: var(--green); }
+.workflow-block[data-phase="failed"] { --run-tone: var(--red); }
+.workflow-block:is([data-phase="waiting"], [data-phase="interrupted"]) { --run-tone: var(--yellow); }
+.workflow-block[data-phase="cancelled"] { --run-tone: var(--muted); }
+.workflow-block:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.workflow-block-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.workflow-block-emblem { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; color: #10161d;
+  background: linear-gradient(135deg, #7ee2c2, #4fa3f5 55%, #9b7cf5); box-shadow: 0 4px 14px -6px #4fa3f5; }
+.workflow-block-title { display: flex; flex: 0 1 auto; align-items: baseline; gap: 8px; min-width: 0; }
+.workflow-block-title strong { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-block-title code { flex: none; color: var(--muted); font: 11px var(--code-font); }
+.workflow-pill { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border: 1px solid color-mix(in srgb, var(--run-tone) 40%, transparent);
+  border-radius: 999px; background: color-mix(in srgb, var(--run-tone) 13%, transparent); color: color-mix(in srgb, var(--run-tone) 78%, var(--text));
+  font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.workflow-pill time { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.workflow-pill-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+.workflow-block:is([data-phase="sleeping"], [data-phase="waiting"]) .workflow-pill-dot { animation: workflow-breathe 2.4s ease-in-out infinite; }
+@keyframes workflow-breathe { 50% { opacity: .35; } }
+.workflow-block-facts { display: flex; align-items: center; gap: 12px; margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.workflow-block-facts > span { display: inline-flex; align-items: center; gap: 4px; }
+.workflow-block-actions { flex: none; display: flex; align-items: center; }
+.workflow-block-actions .bp6-button { min-width: 26px; min-height: 26px; color: var(--muted); }
+.workflow-block-actions .bp6-button:hover { color: var(--text); }
+.workflow-block-more { display: none; flex: none; }
+.workflow-block-more .bp6-button { min-width: 26px; min-height: 26px; color: var(--muted); }
+/* A narrow block keeps its head on one line: the state and the totals stay, the actions go in the `…` menu. */
+@container (max-width: 640px) {
+  .workflow-block-head { flex-wrap: nowrap; gap: 8px; }
+  .workflow-block-title code, .workflow-block-actions { display: none; }
+  .workflow-block-more { display: flex; }
+  .workflow-block-facts { gap: 8px; }
+}
+@container (max-width: 400px) {
+  .workflow-block-facts > span:not(:first-child) { display: none; }
+}
+.workflow-block > .script-run-waiting { margin: 0; }
+.workflow-block-canvas { min-width: 0; overflow-x: auto; overflow-y: hidden; border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 55%, var(--panel)); scrollbar-width: thin; }
+.workflow-block-extra { display: grid; gap: 6px; }
+.workflow-other-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.workflow-other-steps li { --step-tone: var(--muted); display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border: 1px solid color-mix(in srgb, var(--step-tone) 40%, var(--line));
+  border-radius: 10px; font: 11px/16px var(--code-font); }
+.workflow-other-steps li i { width: 6px; height: 6px; border-radius: 50%; background: var(--step-tone); }
+.workflow-block .script-run-problem { margin: 0; }
+
+/* The graph: React Flow, themed by the variables of the page. In the timeline it is still; in the tab of a run it pans and zooms. */
+.workflow-flow { position: relative; }
+.workflow-flow .react-flow { --xy-background-color: transparent; --xy-background-pattern-color: color-mix(in srgb, var(--muted) 24%, transparent);
+  --xy-edge-stroke: var(--line-strong); --xy-node-border-radius: 10px; --xy-handle-background-color: var(--line-strong); --xy-handle-border-color: var(--panel);
+  --xy-controls-button-background-color: var(--panel); --xy-controls-button-background-color-hover: var(--panel-3); --xy-controls-button-color: var(--text);
+  --xy-controls-button-color-hover: var(--text); --xy-controls-button-border-color: var(--line); --xy-controls-box-shadow: 0 8px 20px -12px #000;
+  --xy-minimap-background-color: var(--panel); --xy-minimap-mask-background-color: color-mix(in srgb, var(--bg) 62%, transparent);
+  --xy-minimap-mask-stroke-color: var(--line-strong); --xy-minimap-node-background-color: var(--panel-3); --xy-minimap-node-stroke-color: transparent;
+  color: var(--text); font: inherit; }
+/* A node is not selected nor dragged, so React Flow lets the pointer through it: its sessions and its group are still pressed. */
+.workflow-flow .react-flow__node { pointer-events: all !important; cursor: default; }
+/* The credit of React Flow stays, quiet, and is not a link out of the window. */
+.workflow-flow .react-flow__attribution { padding: 0 4px; background: none; opacity: .45; pointer-events: none; }
+.workflow-flow .react-flow__attribution a { color: var(--muted); font-size: 9px; }
+.workflow-flow .react-flow__controls { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.workflow-flow .react-flow__controls-button svg { fill: currentColor; }
+.workflow-flow .react-flow__minimap { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.workflow-minimap-node { fill: var(--panel-3); }
+.workflow-minimap-completed { fill: color-mix(in srgb, var(--green) 70%, var(--panel)); }
+.workflow-minimap-running { fill: var(--accent); }
+.workflow-minimap-failed { fill: var(--red); }
+.workflow-minimap-waiting, .workflow-minimap-interrupted { fill: var(--yellow); }
+.workflow-flow .workflow-handle { width: 7px; height: 7px; min-width: 0; min-height: 0; border: 1.5px solid var(--panel); background: color-mix(in srgb, var(--step-tone) 85%, var(--line-strong)); }
+.workflow-flow-placeholder { max-width: 100%; }
+
+/* A step: its state as a ring that fills while its sessions end, its title and facts, then its sessions. What has not run yet
+   is there from the start, dim. */
+.workflow-step { --step-tone: var(--muted); position: relative; box-sizing: border-box; display: flex; flex-direction: column; width: 100%; height: 100%; padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--step-tone) 38%, var(--line)); border-radius: 10px; color: var(--text); font-size: 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--step-tone) 10%, var(--panel)), var(--panel) 46px);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent), 0 8px 20px -14px #000; }
+.workflow-step::before { content: ""; position: absolute; inset: -1px 10px auto; height: 2px; border-radius: 2px; pointer-events: none;
+  background: linear-gradient(90deg, var(--step-tone), transparent); }
+.workflow-step[data-state="completed"], .workflow-other-steps li[data-state="completed"] { --step-tone: var(--green); }
+.workflow-step[data-state="failed"], .workflow-other-steps li[data-state="failed"] { --step-tone: var(--red); }
+.workflow-step[data-state="running"], .workflow-other-steps li[data-state="running"] { --step-tone: var(--accent); }
+.workflow-step:is([data-state="waiting"], [data-state="interrupted"]), .workflow-other-steps li:is([data-state="waiting"], [data-state="interrupted"]) { --step-tone: var(--yellow); }
+.workflow-step[data-state="pending"] { border-style: dashed; background: color-mix(in srgb, var(--panel) 50%, transparent); box-shadow: none; opacity: .66; }
+.workflow-step[data-state="pending"]::before { display: none; }
+.workflow-step[data-replayed] { border-style: dashed; }
+.workflow-step[data-state="running"] { animation: workflow-glow 2.2s ease-in-out infinite; }
+@keyframes workflow-glow { 50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), 0 0 24px -6px color-mix(in srgb, var(--accent) 65%, transparent); } }
+.workflow-step-head { flex: none; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.workflow-step-titles { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
+.workflow-step-titles strong { overflow: hidden; font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-step-titles small { overflow: hidden; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-flow[data-mode="tab"] .workflow-step-titles strong { font-size: 13px; }
+/* Rerun from this step: over the end of the head while the pointer is on the step, so the title keeps the whole width. */
+.workflow-step-action { position: absolute; top: 11px; right: 6px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; opacity: 0; transition: opacity 120ms; }
+.workflow-step:hover .workflow-step-action, .workflow-step-action:focus-visible { opacity: 1; }
+.workflow-step-action:hover { background: var(--panel-3); color: var(--text); }
+.workflow-step-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The mark of a state. */
+.workflow-glyph { --glyph-tone: var(--muted); flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--glyph-tone);
+  background: color-mix(in srgb, var(--glyph-tone) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--glyph-tone) 38%, transparent); }
+.workflow-glyph[data-state="completed"] { --glyph-tone: var(--green); }
+.workflow-glyph[data-state="failed"] { --glyph-tone: var(--red); }
+.workflow-glyph[data-state="running"] { --glyph-tone: var(--accent); }
+.workflow-glyph:is([data-state="waiting"], [data-state="interrupted"]) { --glyph-tone: var(--yellow); }
+.workflow-glyph[data-state="pending"] { background: none; box-shadow: none; }
+.workflow-pending-dot { width: 42%; height: 42%; border: 1.5px dashed currentColor; border-radius: 50%; }
+.workflow-glyph:has(.workflow-ring) { background: none; box-shadow: none; }
+.workflow-ring { overflow: visible; transform: rotate(-90deg); }
+.workflow-ring-track { fill: none; stroke: color-mix(in srgb, var(--accent) 22%, transparent); stroke-width: 2.5; }
+.workflow-ring-value { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; transition: stroke-dasharray 400ms ease;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 60%, transparent)); }
+
+/* The sessions of a step: the logo of their provider, their title, model, duration and tokens, their state. */
+.workflow-sessions, .workflow-group-list { display: flex; flex-direction: column; min-width: 0; }
+.workflow-sessions { overflow: hidden; }
+.workflow-group-list { margin-top: 4px; overflow-y: auto; scrollbar-width: thin; }
+.workflow-session { flex: none; box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; margin: 0; padding: 0 7px 0 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--panel-2) 75%, transparent);
+  color: var(--text); font: inherit; text-align: start; }
+button.workflow-session { cursor: pointer; transition: border-color 120ms, background-color 120ms; }
+button.workflow-session:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); }
+button.workflow-session:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.workflow-session[data-state="failed"] { border-color: color-mix(in srgb, var(--red) 42%, var(--line)); }
+.workflow-session[data-state="running"] { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.workflow-session-logo { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--panel-3); color: var(--muted); }
+.workflow-session-text { display: grid; flex: 1; min-width: 0; line-height: 1.25; }
+.workflow-session-text strong { overflow: hidden; font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-session-text small { overflow: hidden; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+
+/* More than six sessions: one group, its counts and a bar of how they are; a click opens their list. */
+.workflow-group { display: flex; flex-direction: column; min-width: 0; }
+.workflow-group-head { box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: 6px; width: 100%; margin: 0; padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--panel-2) 75%, transparent);
+  color: var(--text); font: inherit; text-align: start; cursor: pointer; }
+.workflow-group-head:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.workflow-group-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.workflow-group-line { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 11.5px; }
+.workflow-group-line strong { color: var(--text); font-weight: 600; white-space: nowrap; }
+.workflow-group-counts { display: flex; align-items: center; gap: 8px; margin-left: auto; font-variant-numeric: tabular-nums; }
+.workflow-group-counts > span { display: inline-flex; align-items: center; gap: 3px; }
+.workflow-group-counts [data-state="completed"] { color: var(--green); }
+.workflow-group-counts [data-state="running"] { color: var(--accent); }
+.workflow-group-counts [data-state="failed"] { color: var(--red); }
+.workflow-statusbar { display: flex; gap: 2px; height: 4px; overflow: hidden; border-radius: 2px; }
+.workflow-statusbar i { min-width: 3px; border-radius: 2px; background: var(--line-strong); }
+.workflow-statusbar i[data-state="completed"] { background: var(--green); }
+.workflow-statusbar i[data-state="failed"] { background: var(--red); }
+.workflow-statusbar i[data-state="running"] { background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #fff), var(--accent)); background-size: 200% 100%;
+  animation: workflow-shimmer 1.6s linear infinite; }
+@keyframes workflow-shimmer { to { background-position: -200% 0; } }
+
+/* An edge: a curve of the state of the step it leads to; while that step runs, a glow and a current along it. */
+.workflow-edge { --edge-tone: var(--line-strong); }
+.workflow-edge[data-state="completed"] { --edge-tone: color-mix(in srgb, var(--green) 65%, var(--line)); }
+.workflow-edge[data-state="running"] { --edge-tone: var(--accent); }
+.workflow-edge[data-state="failed"] { --edge-tone: color-mix(in srgb, var(--red) 75%, var(--line)); }
+.workflow-edge:is([data-state="waiting"], [data-state="interrupted"]) { --edge-tone: var(--yellow); }
+.workflow-edge-line { fill: none; stroke: var(--edge-tone); stroke-width: 1.6; }
+.workflow-edge[data-state="pending"] .workflow-edge-line { stroke-dasharray: 4 4; }
+.workflow-edge-glow { fill: none; stroke: var(--edge-tone); stroke-width: 7; opacity: .16; }
+.workflow-edge-current { fill: none; stroke: color-mix(in srgb, var(--edge-tone) 45%, #fff); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 3 14;
+  animation: workflow-current .9s linear infinite; }
+@keyframes workflow-current { to { stroke-dashoffset: -17; } }
+@media (prefers-reduced-motion: reduce) {
+  .workflow-step[data-state="running"], .workflow-edge-current, .workflow-statusbar i, .workflow-pill-dot { animation: none !important; }
+}
+
+/* The graph in the tab of its run: framed, taller, with its controls and minimap. */
+.workflow-run-graph .workflow-flow, .workflow-run-graph .workflow-flow-placeholder { overflow: hidden; border: 1px solid var(--line); border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 55%, var(--panel)); }
+
+/* The tab of a run: its head, its graph large, its sessions, its timeline, its result and its script. */
+.workflow-run-tab { container-type: inline-size; display: flex; flex-direction: column; gap: 16px; height: 100%; min-width: 0; min-height: 0; overflow-y: auto; padding: 20px 24px 28px;
+  background: var(--bg); outline: none; }
+.workflow-run-tab > * { flex: none; width: 100%; max-width: 1480px; margin-inline: auto; }
+.workflow-run-tab h2, .workflow-run-tab h3, .workflow-run-tab p { margin: 0; }
+.workflow-run-tab h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.workflow-run-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.workflow-run-title { display: grid; gap: 3px; min-width: 0; }
+.workflow-run-title h2 { overflow: hidden; font-size: 18px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-run-title p { overflow: hidden; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-run-title code { font-family: var(--code-font); }
+.workflow-run-session { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; text-align: start; }
+.workflow-run-session:hover { text-decoration: underline; }
+.workflow-run-session:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+.workflow-run-sessions { width: 100%; font-size: 12px; }
+.workflow-run-sessions td.numeric { font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.workflow-run-sessions tr[data-state="running"] td:nth-child(3) { color: var(--accent); }
+.workflow-run-sessions tr[data-state="failed"] td:nth-child(3) { color: var(--red); }
+.workflow-run-sessions tr[data-state="completed"] td:nth-child(3) { color: var(--green); }
+.workflow-run-text { max-height: 420px; margin: 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+  color: var(--text); font: 12px/1.5 var(--code-font); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The result of a script: how its run ended and the file of a long result in a line, what it wrote folded, the value below. */
+.script-result-facts { display: grid; gap: 4px; margin: 2px 0 6px; font-size: 12px; }
+.script-result-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+.script-result-outcome { color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.script-result-facts[data-phase="failed"] .script-result-outcome { color: var(--red); }
+.script-result-open { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; color: var(--accent); font-size: 12px; }
+.script-result-notes > summary { width: fit-content; color: var(--muted); cursor: pointer; }
+.script-result-notes > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+.script-result-notes .markdown-content { margin-top: 4px; }
+.workflow-run-result { max-height: 520px; overflow: auto; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+/* The source of a script: its lines numbered and colored, in a frame of its own that scrolls both ways. */
+.workflow-script-source { display: flex; max-height: 420px; min-width: 0; }
+.workflow-script-source .tool-code-lines { border-top: 1px solid var(--line); border-radius: 8px; padding: 6px 0; }
+/* The script of a card, in a window of its own: where it is, then its source over the whole height. */
+.workflow-script-window { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.workflow-script-where { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; padding: 12px 18px 8px; font-size: 12px; color: var(--muted); }
+.workflow-script-where code { font-family: var(--code-font); color: var(--text); }
+.workflow-script-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: start; }
+.workflow-script-facts { display: grid; gap: 8px; flex: none; max-height: 40%; overflow-y: auto; margin: 0 18px 12px; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel); }
+.workflow-script-facts .workflow-card-description { font-size: 13px; }
+.workflow-script-window-source { flex: 1 1 auto; max-height: none; min-height: 0; margin: 0 18px 12px; }
+.workflow-script-window-source .tool-code-lines { flex: 1 1 auto; }
+@container (max-width: 640px) {
+  .workflow-run-tab { padding: 14px 12px 20px; }
+  .workflow-run-sessions th:nth-child(2), .workflow-run-sessions td:nth-child(2) { display: none; }
+}

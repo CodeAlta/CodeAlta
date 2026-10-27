@@ -16,7 +16,9 @@ import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectRefere
 import { IssuePicker } from "./IssuePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
-import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
+import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
+import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
+import { changedSessionOptions, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, sendAvailable, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -69,6 +71,8 @@ import { AttachmentError, composerImageKey, attachmentBytes, attachmentLimits, i
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import { sendDiagnostics } from "./sendDiagnostics";
+import { revealBackgroundTask } from "./timelineReveal";
+import { OpenRunContext } from "./workflows/openRun";
 
 // Sent prompts of this window, for Alt+Up / Alt+Down in the prompt editor.
 const promptHistory = createPromptHistory();
@@ -527,6 +531,13 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     // The answer is not shown: the task leaves the list when its provider stopped it.
     await sessions.stopBackgroundTask({ expectedEpoch: epoch, sessionId, taskId }, { timeoutMilliseconds: 15_000 });
   }, [capability, epoch, sessionId]);
+  // A task of the list goes to its place in the timeline of this session; a run whose block is not there (older than the
+  // history read) opens in its tab.
+  const openRun = useContext(OpenRunContext);
+  const revealBackground = useCallback((task: BackgroundTask, origin: HTMLElement) => {
+    if (revealBackgroundTask(origin.closest(".session-workspace") ?? document, task)) return;
+    if (task.kind === "workflow") openRun?.({ runId: task.id, title: task.description });
+  }, [openRun]);
   const runActivity = useRef(onRunActivity); runActivity.current = onRunActivity;
   useEffect(() => {
     if (!watching) return;
@@ -1174,6 +1185,27 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
 
     setReview({ key: reviewKey, own: result.own ?? null, effective: result.effective, setting: result.setting });
   }
+  // The options of the session (sub-sessions): read with the session, and changed from the form of the Agent chip. Its
+  // tools and its instructions follow them from its next prompt.
+  const [sessionOptions, setSessionOptions] = useState<Readonly<{ key: string; options: SessionOptionsChoice }> | null>(null);
+  useEffect(() => {
+    if (invalidEpoch) return;
+    const controller = new AbortController();
+    void sessions.options({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 8000 }).then(result => {
+      if (!controller.signal.aborted && result.status === "ok" && result.options) setSessionOptions({ key: reviewKey, options: result.options });
+    }).catch(() => { /* The section is shown once the options are known. */ });
+    return () => controller.abort();
+  }, [epoch, sessionId, reviewKey, invalidEpoch]);
+  const shownOptions = sessionOptions?.key === reviewKey ? sessionOptions.options : null;
+  async function applyOptions(value: SessionOptionsChoice | null) {
+    const result = await sessions.setOptions({ expectedEpoch: epoch, sessionId, options: sessionOptionsOf(value) }, { timeoutMilliseconds: 30_000 }).catch(() => null);
+    if (result?.status !== "ok" || !result.options) {
+      showToast({ message: t("The options were not changed ({status}).", { status: result?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
+
+    setSessionOptions({ key: reviewKey, options: result.options });
+  }
   // The sandbox the session runs in: read with the session and again after each turn (the settings may have changed
   // meanwhile), and changed at once from the form of the Agent chip. What the settings give is known while the session
   // follows them, and kept once it has a choice of its own.
@@ -1374,7 +1406,7 @@ ${value}` : value);
       {/* A prompt that waits for a reload offers it: the window would otherwise have no way out. */}
       {invalidEpoch && !composerBusy && !compacting && <Button variant="minimal" size="small" intent="danger" className="composer-reload"
         icon={<AppIcon name="refresh" size={13} />} onClick={() => window.location.reload()}>{t("Reload")}</Button>}
-      <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask}
+      <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask} onReveal={revealBackground}
         renderOutput={props => <BackgroundJobDialog key={props.task.id} {...props} outputs={toolOutputs} readJob={readBackgroundJob} />} />
       {providerState.errors > 0 && <Button variant="minimal" size="small" className="composer-provider-alert" icon={<AppIcon name="warning" size={13} />}
         onClick={() => onOpenCatalog?.("providers")} title={t("Providers")}>{t(providerState.errors === 1 ? "{count} provider error" : "{count} provider errors", { count: providerState.errors })}</Button>}
@@ -1413,7 +1445,7 @@ ${value}` : value);
         provider: selectedProviderName, providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
         reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary, review: shownReview?.effective ?? null,
-        sandbox: sessionSandboxSummary(shownSandbox?.reply),
+        sandbox: sessionSandboxSummary(shownSandbox?.reply), subSessions: shownOptions?.subSessions ?? null,
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })
           : reasoning.note === "unused" ? `${t("Reasoning")}: ${selected?.reasoningEffort} · ${t("Not used")}` : null }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
@@ -1450,6 +1482,8 @@ ${value}` : value);
         disabled={invalidEpoch} onChange={value => void applyReview(value)} />}
       sandbox={shownSandbox && <SessionSandboxSelect id={`composer-sandbox-${sessionId}`} own={shownSandbox.reply.own} inherited={shownSandbox.inherited}
         choices={shownSandbox.reply.choices} disabled={invalidEpoch} onChange={value => void applySandbox(value)} />}
+      options={shownOptions && { changed: changedSessionOptions(shownOptions),
+        content: <SessionOptionsFields id={sessionId} value={shownOptions} disabled={invalidEpoch} onChange={value => void applyOptions(value)} /> }}
       permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
         disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined} /></>}

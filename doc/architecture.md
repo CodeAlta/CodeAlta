@@ -51,9 +51,10 @@ flowchart LR
 | `CodeAlta.Search` | Local search index (words and meaning). |
 | `CodeAlta.NativeEngines` | Pinned native downloads and worker processes (speech, embeddings). |
 | `CodeAlta.Sandbox` | The optional OS sandbox of sessions: profiles, the policy of a session, the mxc backend. See [sandbox](sandbox.md). |
+| `CodeAlta.CodeMode` | The engine of Code Mode: runs the JavaScript of agents (Jint, one engine per run), with the functions its host binds; prepares sources, reads descriptors, renders declarations and results. See [code mode](codemode.md). |
 | `CodeAlta.Acp` | Agent Client Protocol types, the client (ACP agents as providers) and the agent server (`altacli acp`). |
 
-Dependencies point down: frontends → Orchestration/LiveTool/Hosting → Agent, Catalog, Plugins. Nothing below a frontend references a frontend; `CodeAlta.Search`, `CodeAlta.NativeEngines` and `CodeAlta.Sandbox` know neither the host nor a window. `ArchitectureGuardrailTests` checks the main boundaries.
+Dependencies point down: frontends → Orchestration/LiveTool/Hosting → Agent, Catalog, Plugins. Nothing below a frontend references a frontend; `CodeAlta.Search`, `CodeAlta.NativeEngines`, `CodeAlta.Sandbox` and `CodeAlta.CodeMode` know neither the host nor a window. `ArchitectureGuardrailTests` checks the main boundaries.
 
 ## A turn
 

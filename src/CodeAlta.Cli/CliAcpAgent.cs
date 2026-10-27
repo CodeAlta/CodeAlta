@@ -29,6 +29,9 @@ internal sealed record CliAcpDefaults
 
     // The sandbox every session it serves runs in, from `--sandbox`; null for what the settings decide.
     public string? Sandbox { get; init; }
+
+    // The options of the sessions it creates, from `--no-sub-sessions`; null for the defaults. A loaded session keeps its own.
+    public AgentSessionOptions? SessionOptions { get; init; }
 }
 
 /// <summary>
@@ -172,6 +175,7 @@ internal sealed class CliAcpAgent : AcpAgentBase, IAcpEventSink, IAsyncDisposabl
             AgentPromptId = _defaults.AgentPromptId,
             DisabledToolPatterns = _defaults.DisabledToolPatterns,
             Sandbox = _defaults.Sandbox,
+            SessionOptions = _defaults.SessionOptions,
         }, cancellationToken).ConfigureAwait(false);
         var state = await RegisterAsync(opened, cancellationToken).ConfigureAwait(false);
         await AttachMcpServersAsync(state, servers, cwd).ConfigureAwait(false);

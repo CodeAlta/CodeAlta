@@ -68,6 +68,7 @@ internal sealed class DesktopSearchSources
             new ListSearchSource("plugins", [SearchKind.Plugin], _ => ValueTask.FromResult(ReadPlugins())),
             new ListSearchSource("mcp", [SearchKind.Mcp], ReadMcpServersAsync),
             new ListSearchSource("commands", [SearchKind.Command], _ => ValueTask.FromResult(WindowCommands)),
+            new ListSearchSource("scripts", [SearchKind.Script], ReadScriptsAsync),
         ];
         // A plugin built or reloaded changes its tools and its commands: they are read again.
         host.PluginRuntime.Changed += (_, _) =>
@@ -234,6 +235,43 @@ internal sealed class DesktopSearchSources
     private static readonly FrozenSet<SkillScopeKind> ProjectScopes = new[] { SkillScopeKind.Project }.ToFrozenSet();
 
     private static readonly FrozenSet<SkillScopeKind> NonProjectScopes = Enum.GetValues<SkillScopeKind>().Where(static scope => scope != SkillScopeKind.Project).ToFrozenSet();
+
+    // The scripts of the library of Code Mode: yours and the samples once, without a project; the scripts of each project with it.
+    // A script is found by its name, its description and when to use it.
+    private async ValueTask<IReadOnlyList<SearchDocument>> ReadScriptsAsync(CancellationToken cancellationToken)
+    {
+        var documents = new Dictionary<string, SearchDocument>(StringComparer.Ordinal);
+        void Add(SearchProjectInfo? project)
+        {
+            IReadOnlyList<CodeAlta.Orchestration.Runtime.Scripts.CodeModeLibraryScript> scripts;
+            try { scripts = _host.CodeModeScripts.List(project?.Path); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return; }
+            foreach (var script in scripts)
+            {
+                var ofProject = script.Scope == CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptScope.Project;
+                if (ofProject != (project is not null) || script.Problem is not null) continue;
+                var scope = ofProject ? "project" : script.Scope == CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptScope.Global ? "global" : "builtin";
+                var reference = $"script:{(ofProject ? project!.ProjectId : scope)}/{script.Name}";
+                documents[reference] = new SearchDocument(reference, SearchKind.Script, script.Name,
+                    string.Join('\n', new[] { script.Title, script.Description, script.WhenToUse }.Where(static text => !string.IsNullOrWhiteSpace(text))), DateTimeOffset.UnixEpoch)
+                {
+                    ProjectId = project?.ProjectId,
+                    Extra = script.IsTool
+                        ? Extra(("name", script.Name), ("path", script.Path), ("scope", scope), ("tool", CodeAlta.LiveTool.Scripts.CodeModeToolFactory.ScriptToolName(script.Name)))
+                        : Extra(("name", script.Name), ("path", script.Path), ("scope", scope)),
+                    EmbeddingTitle = script.Name + " · " + script.Description,
+                };
+            }
+        }
+
+        Add(null);
+        foreach (var project in await _searchHost.GetProjectsAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (!project.Archived && Directory.Exists(project.Path)) Add(project);
+        }
+
+        return [.. documents.Values];
+    }
 
     private async ValueTask<IReadOnlyList<SearchDocument>> ReadSkillsAsync(CancellationToken cancellationToken)
     {

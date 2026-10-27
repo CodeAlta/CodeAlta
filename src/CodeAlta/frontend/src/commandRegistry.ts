@@ -5,7 +5,7 @@ import type { MessageKey } from "./localization";
  * keyboard dispatcher. Names, labels and key gestures follow the terminal UI so both heads share one key map.
  */
 export type CommandId =
-  | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "externalEditor" | "fileExplorer" | "newTerminal" | "automations" | "workItems" | "reviews" | "issues" | "canvases" | "worktrees" | "documentation" | "bookmarks" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
+  | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "externalEditor" | "fileExplorer" | "newTerminal" | "automations" | "workflows" | "workItems" | "reviews" | "issues" | "canvases" | "worktrees" | "documentation" | "bookmarks" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
   | "attachFiles" | "attachFolder" | "attachIssues"
@@ -48,6 +48,7 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "fileExplorer", name: "file_explorer", label: "File Manager", description: "Show the folder of the session or of the project in the file manager of the system.", category: "General", search: "explorer finder folder reveal show_in_folder files" },
   { id: "newTerminal", name: "terminal", label: "New Terminal", description: "Open a terminal in the folder of the session or of the project.", category: "General", keys: ["Ctrl+G Ctrl+J", "Ctrl+`"], search: "shell console command line powershell bash new_terminal" },
   { id: "automations", name: "automations", label: "Automations", description: "Open the automations: prompts that start a session by themselves.", category: "General", keys: ["Ctrl+G Ctrl+M"], search: "schedule cron trigger daily hourly weekly task routine recurring" },
+  { id: "workflows", name: "workflows", label: "Workflows", description: "Open the workflows: the scripts of the library and their runs.", category: "General", search: "code mode scripts script library workflow runs run steps exec" },
   { id: "workItems", name: "work_items", label: "Work items", description: "Open the work items: the tasks agents proposed and the plans of the projects.", category: "General", keys: ["Ctrl+G Ctrl+I"], search: "tasks plans todo backlog follow-up proposals pending work_items" },
   { id: "issues", name: "issues", label: "Issues", description: "Open the issues and the pull requests of the projects.", category: "General", keys: ["Ctrl+G Ctrl+B"], search: "issues pull requests merge requests prs bugs tickets github gitlab azure devops bitbucket jira" },
   { id: "canvases", name: "canvases", label: "Canvases", description: "Open the canvases that plugins provide: boards, checklists, dashboards.", category: "General", search: "plugin tabs board checklist dashboard canvas" },

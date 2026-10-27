@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Frozen;
 using CodeAlta.Agent;
 using CodeAlta.LiveTool;
+using CodeAlta.LiveTool.Scripts;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Prompts;
@@ -70,10 +71,14 @@ internal static class DesktopAltaTools
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
+        // The tools of Code Mode, for the sessions of the window and those that alta commands create.
+        var codeMode = CodeModeSessionTools.FromSettings(host.CodeModeRuns, host.CatalogOptions, host.RuntimeService.ScratchpadRoot,
+            new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents), host.CodeModeScripts, host.CodeModeQuestions)
+            .WithSpaces(async (sessionId, token) => await host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false));
         var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search,
-            reviews, reviewPolicy, windows);
+            reviews, reviewPolicy, windows, codeMode);
         pluginAlta?.SetDispatcher(dispatcher);
-        host.Commands.SessionTools = CreateSessionTools(dispatcher, search?.Service);
+        host.Commands.SessionTools = CreateSessionTools(dispatcher, search?.Service, codeMode);
         return dispatcher;
     }
 
@@ -84,7 +89,8 @@ internal static class DesktopAltaTools
         IAltaSpaceView? spaces = null, AltaCommandReviewPolicy? commands = null, IAltaCanvasView? canvases = null,
         CodeAlta.Catalog.Documentation.ShippedDocumentation? documentation = null, IAltaDocumentationView? documentationView = null,
         CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null,
-        CodeAlta.Catalog.Reviews.ReviewService? reviews = null, IAltaReviewPolicy? reviewPolicy = null, IAltaWindows? windows = null)
+        CodeAlta.Catalog.Reviews.ReviewService? reviews = null, IAltaReviewPolicy? reviewPolicy = null, IAltaWindows? windows = null,
+        CodeModeSessionTools? codeMode = null)
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
@@ -115,6 +121,9 @@ internal static class DesktopAltaTools
             // The plugins as they are when a command runs; without an active plugin both add nothing.
             .Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(host.PluginRuntime))
             .Add(host.PluginRuntime)
+            // The runs of the scripts of Code Mode, for `alta workflow`.
+            .Add(host.CodeModeRuns)
+            .Add(host.CodeModeScripts)
             // The bridge of the sends of the host: a send through `alta session send` gives the plugins what a send of the window does.
             .AddPluginRuntimeHooks(host.Commands.Plugins ?? new CodeAlta.Orchestration.Runtime.Plugins.PluginOrchestrationBridge(host.PluginRuntime.Adapter, () => host.PluginRuntime.ActivePlugins));
         if (changes is not null) services.Add(changes);
@@ -134,6 +143,7 @@ internal static class DesktopAltaTools
         if (reviews is not null) services.Add(reviews);
         if (reviewPolicy is not null) services.Add(reviewPolicy);
         if (windows is not null) services.Add(windows);
+        if (codeMode is not null) services.Add(codeMode);
         if (search is not null) services.Add(search.Service).Add(search.Indexer).Add(search.Store);
         var registry = new AltaCommandRegistry();
         var dispatcher = new AltaCommandDispatcher(registry, services);
@@ -146,7 +156,7 @@ internal static class DesktopAltaTools
     /// description and schema to the one alta commands give the sessions they create.
     /// </summary>
     internal static Func<OwnedSessionToolRequest, IReadOnlyList<AgentToolDefinition>> CreateSessionTools(AltaCommandDispatcher dispatcher)
-        => CreateSessionTools(dispatcher, search: null);
+        => CreateSessionTools(dispatcher, search: null, codeMode: null);
 
     /// <summary>
     /// Returns the supplier of an owned session's tools: one <c>alta</c> tool per session, and the <c>tool_search</c> tool,
@@ -154,6 +164,14 @@ internal static class DesktopAltaTools
     /// tools, while some are (<see cref="CodeAlta.Agent.Runtime.AgentToolDeferral"/>).
     /// </summary>
     internal static Func<OwnedSessionToolRequest, IReadOnlyList<AgentToolDefinition>> CreateSessionTools(AltaCommandDispatcher dispatcher, CodeAlta.Search.SearchService? search)
+        => CreateSessionTools(dispatcher, search, codeMode: null);
+
+    /// <summary>
+    /// Returns the supplier of an owned session's tools: the <c>alta</c> tool, the <c>tool_search</c> tool, and the
+    /// <c>exec</c> and <c>wait</c> tools of Code Mode while it is on.
+    /// </summary>
+    internal static Func<OwnedSessionToolRequest, IReadOnlyList<AgentToolDefinition>> CreateSessionTools(AltaCommandDispatcher dispatcher, CodeAlta.Search.SearchService? search,
+        CodeModeSessionTools? codeMode)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         // One tool for every session: its name, description and schema never change.
@@ -162,7 +180,7 @@ internal static class DesktopAltaTools
         {
             // A session being created has no id yet: its tool learns it from its first call.
             var session = request.SessionId;
-            var tool = AltaSessionToolFactory.Create(dispatcher, new AltaSessionToolOptions
+            var caller = new AltaSessionToolOptions
             {
                 SourceSessionIdProvider = () => Volatile.Read(ref session),
                 SourceProjectId = request.ProjectId,
@@ -174,8 +192,11 @@ internal static class DesktopAltaTools
                 DefaultMaxOutputRecords = 200,
                 DefaultMaxOutputBytes = 64 * 1024,
                 DefaultTimeout = TimeSpan.FromSeconds(120),
-            });
-            return
+                Spaces = request.Spaces,
+                SessionOptions = request.Options,
+            };
+            var tool = AltaSessionToolFactory.Create(dispatcher, caller);
+            AgentToolDefinition[] tools =
             [
                 tool with
                 {
@@ -187,10 +208,11 @@ internal static class DesktopAltaTools
                 },
                 toolSearch,
             ];
+            return codeMode?.Create(dispatcher, caller, tools, request.ProviderKey, request.ModelId) ?? tools;
         };
     }
 
-    private static readonly IReadOnlySet<CodeAlta.Search.SearchKind> ToolSearchKinds = new HashSet<CodeAlta.Search.SearchKind> { CodeAlta.Search.SearchKind.Tool, CodeAlta.Search.SearchKind.Mcp }.ToFrozenSet();
+    private static readonly IReadOnlySet<CodeAlta.Search.SearchKind> ToolSearchKinds = new HashSet<CodeAlta.Search.SearchKind> { CodeAlta.Search.SearchKind.Tool, CodeAlta.Search.SearchKind.Mcp, CodeAlta.Search.SearchKind.Script }.ToFrozenSet();
 
     // The tools and MCP tools of the index that match, by the name a session has them under: an MCP tool by its alias. The
     // session loads only those of its deferred tools: the space and the policy of the session decided which it has.
@@ -213,7 +235,13 @@ internal static class DesktopAltaTools
             var hits = new List<AgentToolSearchHit>(response.Hits.Count);
             foreach (var hit in response.Hits)
             {
-                var name = hit.Kind == CodeAlta.Search.SearchKind.Mcp ? ReadExtra(hit.Extra, "alias") : hit.Title;
+                // A script of the library is a tool only when its meta says so, under the name of its tool.
+                var name = hit.Kind switch
+                {
+                    CodeAlta.Search.SearchKind.Mcp => ReadExtra(hit.Extra, "alias"),
+                    CodeAlta.Search.SearchKind.Script => ReadExtra(hit.Extra, "tool"),
+                    _ => hit.Title,
+                };
                 if (!string.IsNullOrWhiteSpace(name)) hits.Add(new AgentToolSearchHit(name, string.IsNullOrWhiteSpace(hit.Snippet) ? null : hit.Snippet));
             }
 

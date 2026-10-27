@@ -158,6 +158,21 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Gets or sets what a request that waits for the user goes through first, during a send or after it: the script of Code
+    /// Mode it comes from takes its turn among the questions of its run, its card says it waits, and the <c>exec</c> that waits
+    /// for it does not count that time. It returns what ends that wait, or null for a request of no script. Null for none.
+    /// </summary>
+    internal Func<AgentPermissionRequest, CancellationToken, ValueTask<IDisposable?>>? WaitingForUser { get; set; }
+
+    // Whether a request of a send waits for the user: neither its grants nor the policy of its session answer it.
+    private bool WaitsForUser(OwnedPermissionExecution execution, AgentPermissionRequest request)
+    {
+        var (reviewCommands, autoApprove, approveFileChanges) = Grants(execution);
+        return !((autoApprove || (approveFileChanges && request is AgentFileChangePermissionRequest)) && !AlwaysAsks(request))
+            && (reviewCommands || AlwaysAsks(request));
+    }
+
+    /// <summary>
     /// Asks the user, on the card of a session, a request that a command of that session makes (the load of a skill of
     /// an MCP server): in every permission mode, as no mode answers such a request for the user. The request is given
     /// the session and its provider. It is denied when the session has no live attachment to be reviewed on, and
@@ -372,9 +387,43 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     internal async Task<AgentPermissionDecision> HandleOwnedCommandAsync(OwnedPermissionExecution execution,
         AgentPermissionRequest request, CancellationToken cancellationToken)
     {
+        // The request of a script waits its turn among the questions of its run before it is shown (an execution that has
+        // closed hands the request over below, to one that takes the turn).
+        IDisposable? wait = null;
+        if (!execution.Closed && WaitingForUser is { } waiting && WaitsForUser(execution, request))
+        {
+            try
+            {
+                wait = await waiting(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return new(AgentPermissionDecisionKind.Cancel);
+            }
+        }
+
+        using (wait)
+        {
+            return await HandleOwnedCommandCoreAsync(execution, request, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<AgentPermissionDecision> HandleOwnedCommandCoreAsync(OwnedPermissionExecution execution,
+        AgentPermissionRequest request, CancellationToken cancellationToken)
+    {
         var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var afterSend = false;
         var delivery = await ExecuteAsync<Task<AgentPermissionDecision>?>(() =>
         {
+            // The send has ended, its run with it: the request comes from the script of one of its calls that went on in
+            // the background. It is answered as a request outside a send, never denied for the send being over.
+            if (execution.Closed && ReferenceEquals(execution.Owner, this) && !_stopped && !_ownedAdmissionClosed && !cancellationToken.IsCancellationRequested
+                && Volatile.Read(ref _disposeStarted) == 0)
+            {
+                afterSend = true;
+                return null;
+            }
+
             var (reviewCommands, autoApprove, approveFileChanges) = Grants(execution);
             if ((autoApprove || (approveFileChanges && request is AgentFileChangePermissionRequest)) && !AlwaysAsks(request)
                 && CanUse(execution) && !cancellationToken.IsCancellationRequested
@@ -396,6 +445,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             return pending.Delivery;
         }, null).ConfigureAwait(false);
         launch.TrySetResult();
+        if (afterSend) return await HandleOwnedDefaultAsync(request, cancellationToken).ConfigureAwait(false);
         return delivery is null ? new(AgentPermissionDecisionKind.Deny) : await delivery.ConfigureAwait(false);
     }
 

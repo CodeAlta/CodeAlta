@@ -243,6 +243,77 @@ public sealed class DesktopFileLinksTests
     }
 
     [TestMethod]
+    public async Task APictureOfALink_IsReadForTheWindow_ByItsFullOrRelativePath()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02];
+        var file = fixture.Write(fixture.ProjectPath, "out/chart.png", png);
+        var service = new MarkdownLinksService(Epoch, _ => true, fixture.Links);
+
+        var relative = await service.ImageAsync(new(Epoch, "out/chart.png", "session"), default);
+        Assert.AreEqual(("ok", Epoch, "image/png", Convert.ToBase64String(png), file), (relative.Status, relative.HostEpoch, relative.MediaType, relative.Base64, relative.FullPath));
+        var full = await service.ImageAsync(new(Epoch, file.Replace('\\', '/')), default);
+        Assert.AreEqual(("ok", file), (full.Status, full.FullPath));
+        Assert.AreEqual("ok", (await service.ImageAsync(new(Epoch, "chart.png", ProjectId: fixture.ProjectId, Directory: "out"), default)).Status);
+        // Reading a picture opens nothing.
+        Assert.IsEmpty(fixture.Shown);
+    }
+
+    [TestMethod]
+    public async Task AFileThatIsNoPictureToDraw_IsNotRead_AndOnlyItsStatusIsAnswered()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Write(fixture.ProjectPath, "notes.txt", "some notes");
+        fixture.Write(fixture.ProjectPath, "fake.png", "not a picture");
+        fixture.Write(fixture.ProjectPath, "icon.ico", [0x00, 0x00, 0x01, 0x00, 0x01]);
+        fixture.Write(fixture.ProjectPath, "folder.png/inside.txt", "a folder named as a picture");
+        // A JPEG named as a PNG is still a picture: its content decides its type.
+        fixture.Write(fixture.ProjectPath, "photo.png", [0xFF, 0xD8, 0xFF, 0xE0]);
+        var huge = fixture.Write(fixture.ProjectPath, "huge.bmp", [0x42, 0x4D]);
+        using (var stream = File.OpenWrite(huge)) stream.SetLength(ProjectFilesService.MaximumImageBytes + 1L);
+        var service = new MarkdownLinksService(Epoch, _ => true, fixture.Links);
+
+        foreach (var (address, status) in new[] { ("notes.txt", "not_image"), ("fake.png", "not_image"), ("icon.ico", "not_image"), ("huge.bmp", "too_large"),
+            ("missing.png", "not_found"), ("folder.png", "not_found") })
+        {
+            var reply = await service.ImageAsync(new(Epoch, address, "session"), default);
+            Assert.AreEqual((status, (string?)null, (string?)null, (string?)null), (reply.Status, reply.MediaType, reply.Base64, reply.FullPath), address);
+        }
+
+        Assert.AreEqual("image/jpeg", (await service.ImageAsync(new(Epoch, "photo.png", "session"), default)).MediaType);
+        Assert.AreEqual("not_found", (await service.ImageAsync(new(Epoch, "photo.png"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.ImageAsync(new(Epoch, "https://example.invalid/a.png", "session"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.ImageAsync(new(Epoch, "//server/share/a.png", "session"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await service.ImageAsync(new("4b0a7c1e-52c9-4f0b-8a55-6d0c2f9e1b77", "photo.png", "session"), default)).Status);
+        Assert.AreEqual("invalid_request", (await new MarkdownLinksService(Epoch, _ => true).ImageAsync(new(Epoch, "photo.png", "session"), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task TheFileOfALink_IsShownInTheFileManager_WhenItIsThere()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var file = fixture.Write(fixture.ProjectPath, "out/chart.png", [0x89, 0x50, 0x4E, 0x47]);
+        var revealed = new List<string>();
+        var reveals = true;
+        var service = new MarkdownLinksService(Epoch, _ => true, new DesktopFileLinks(fixture.Projects, new DiskFolders(), new DesktopEditorView(),
+            (sessionId, _) => ValueTask.FromResult(fixture.SessionFolders.GetValueOrDefault(sessionId)), fixture.Files.RootAsync, _ => true, fixture.Root)
+        {
+            Reveal = path => { revealed.Add(path); return reveals; },
+        });
+
+        Assert.AreEqual("ok", (await service.RevealAsync(new(Epoch, "out/chart.png", "session"), default)).Status);
+        CollectionAssert.AreEqual(new[] { file }, revealed);
+        Assert.AreEqual("not_found", (await service.RevealAsync(new(Epoch, "out/missing.png", "session"), default)).Status);
+        Assert.AreEqual("not_found", (await service.RevealAsync(new(Epoch, "out/chart.png"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.RevealAsync(new(Epoch, "mailto:someone@example.invalid", "session"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await service.RevealAsync(new("4b0a7c1e-52c9-4f0b-8a55-6d0c2f9e1b77", "out/chart.png", "session"), default)).Status);
+        Assert.AreEqual(1, revealed.Count);
+
+        reveals = false;
+        Assert.AreEqual("failed", (await service.RevealAsync(new(Epoch, "out/chart.png", "session"), default)).Status);
+    }
+
+    [TestMethod]
     public void AFolderOfTheDisk_KeepsItsId_AndTheOldestIsForgotten()
     {
         var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "CodeAlta-disk-folders-" + Guid.NewGuid().ToString("N"))).FullName;
@@ -274,6 +345,7 @@ public sealed class DesktopFileLinksTests
         private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project)
         {
             Root = root;
+            Projects = projects;
             Project = project;
             var folders = new DiskFolders();
             var view = new DesktopEditorView();
@@ -294,6 +366,7 @@ public sealed class DesktopFileLinksTests
         }
 
         public string Root { get; }
+        public ProjectCatalog Projects { get; }
         public ProjectDescriptor Project { get; }
         public string ProjectId => Project.Id;
         public string ProjectPath => Project.ProjectPath;

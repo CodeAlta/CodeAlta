@@ -77,6 +77,49 @@ public sealed record AgentToolSpec
     public bool SearchesDeferredTools { get; init; }
 
     /// <summary>
+    /// Gets who may call the tool: the model and the scripts of Code Mode (the default), the scripts only, or the model only.
+    /// </summary>
+    public AgentToolExposure Exposure { get; init; }
+
+    /// <summary>
+    /// Gets whether calls of the tool that a script makes may run at the same time as its other calls. Tools that read
+    /// say so; tools that change files or state run one at a time, so that <c>Promise.all</c> over them stays ordered.
+    /// </summary>
+    public bool RunsInParallel { get; init; }
+
+    /// <summary>
+    /// Gets whether a call of the tool may run again with the same effect, as reading, listing and searching do. A resumed
+    /// script of Code Mode runs again a step whose calls were in flight when it stopped only when each of them is idempotent;
+    /// any other call there has an unknown outcome, and the resume asks first. False by default.
+    /// </summary>
+    public bool Idempotent { get; init; }
+
+    /// <summary>
+    /// Gets the JSON Schema of the value a call gives a script (<see cref="AgentToolResult.Structured"/>), or null when a
+    /// script receives the text of the result.
+    /// </summary>
+    public JsonElement? OutputSchema { get; init; }
+
+    /// <summary>
+    /// Gets the name of the tool in the scripts of Code Mode, within its <see cref="Group"/> (the MCP tool's own name, where
+    /// <see cref="Name"/> is an alias), or null to use <see cref="Name"/>.
+    /// </summary>
+    public string? ScriptName { get; init; }
+
+    /// <summary>
+    /// Gets whether the tool takes over the others (Code Mode's <c>only</c> mode): while a run has it, the model is offered
+    /// only the tools of the model (<see cref="AgentToolExposure.Model"/>) and those that stay direct
+    /// (<see cref="StaysDirect"/>); the scripts it runs still call every other tool.
+    /// </summary>
+    public bool ScriptsTakeOver { get; init; }
+
+    /// <summary>
+    /// Gets whether the model keeps the tool when a tool takes over the others (<see cref="ScriptsTakeOver"/>): what it gives
+    /// cannot pass through a script, such as an image the model looks at.
+    /// </summary>
+    public bool StaysDirect { get; init; }
+
+    /// <summary>
     /// Deconstructs this tool specification into its components.
     /// </summary>
     /// <param name="name">The tool name.</param>
@@ -138,6 +181,13 @@ public sealed record AgentToolInvocation(
     /// </summary>
     [JsonIgnore]
     public AgentRunTools? RunTools { get; init; }
+
+    /// <summary>
+    /// Gets the other tools of the run, which a script of Code Mode calls through this tool call; null when the call
+    /// is not a call of the run's own tools that may make nested calls.
+    /// </summary>
+    [JsonIgnore]
+    public IAgentRunToolInvoker? Tools { get; init; }
 }
 
 /// <summary>
@@ -184,6 +234,21 @@ public sealed record AgentToolResult(
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentToolAppResult? App { get; init; }
+
+    /// <summary>
+    /// Gets the value a script of Code Mode receives for the call, as described by <see cref="AgentToolSpec.OutputSchema"/>,
+    /// or null when it receives the text. A script receives it whether or not the call succeeded (a command that exits
+    /// with an error code still gives its output); the model is never sent it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Structured { get; init; }
+
+    /// <summary>
+    /// Gets the text a host shows the user for the call when it is not the text of <see cref="Items"/>, or null: the
+    /// whole output of a command whose result keeps only its head and its tail for the model. The model is never sent it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Display { get; init; }
 }
 
 /// <summary>

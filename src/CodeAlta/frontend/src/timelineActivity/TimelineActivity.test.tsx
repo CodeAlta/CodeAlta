@@ -104,3 +104,28 @@ test("an image read from a file is named by that file in the strip", () => {
   const titles = [...render(read, false, false, true).matchAll(/title="([^"]+\.png)"/g)].map(match => match[1]);
   assert.deepEqual(titles, ["diagram.png", "screen.png"], "a call that names no file keeps the name of the image");
 });
+
+test("a run of a script with steps is a block of its own, folded or not; its call stays one line that goes to it", () => {
+  const exec = (offset: string, phase: string) => entry(offset, { eventType: "activity", kind: "ToolCall", activityId: "call-1", contentId: null, name: "exec", phase, text: null,
+    details: JSON.stringify({ arguments: { code: '// @exec: {"title": "Research a question"}\nreturn 1;' } }) });
+  const run = (offset: string, kind: string, fields: Partial<Entry> = {}, details: object = {}) => entry(offset, { eventType: "workflow", kind, contentId: null, text: null,
+    parentActivityId: "call-1", name: "run-7f3c2a", details: JSON.stringify(details), ...fields });
+  const entries = [entry("1", { kind: "User" }), exec("2", "Started"),
+    run("3", "RunStarted", { text: "Research a question" }),
+    run("4", "StepsDeclared", {}, { steps: [{ id: "split", title: "Split the question" }, { id: "research", title: "Research each sub-question", each: true }] }),
+    run("5", "StepStarted", { activityId: "split" }),
+    run("6", "SessionStarted", { activityId: "child-1", text: "Angle A" }, { stepId: "research" })];
+  const folded = render(entries, false, true), open = render(entries, true, true);
+  for (const html of [folded, open]) {
+    assert.equal([...html.matchAll(/class="workflow-block"/g)].length, 1, "one block, folded or not");
+    assert.match(html, /data-workflow-row="[^"]+"/);
+    assert.match(html, /<strong title="Research a question">Research a question<\/strong><code>run-7f3c2a<\/code>/);
+    assert.match(html, /class="workflow-pill" data-phase="running"/);
+    assert.match(html, /class="workflow-flow-placeholder"/, "the graph waits for the view, in a place of its size");
+  }
+  assert.doesNotMatch(folded, /tool-tile-title/);
+  // Open, the tile of the call is one line: no card of the run and no lines of its calls under it.
+  assert.match(open, /tool-tile-title/);
+  assert.doesNotMatch(open, /class="script-run"|class="script-calls"/);
+  assert.doesNotMatch(open, /class="tool-tile-title" aria-haspopup/, "its title goes to the block, not to a window");
+});

@@ -188,8 +188,8 @@ holds its stream back instead of letting it pile up.
 ## The page
 
 `src/CodeAlta/frontend` is a Vite build of React 19 with Blueprint 6 (components and theme), FlexLayout (the dock of
-tabs and splits), Monaco (prompt, code and diff editors), xterm.js (terminals), markdown-it with DOMPurify, Mermaid
-and ECharts (lazy chunks). It is served from `frontend/dist` on `app://codealta` and runs under `StrictMode`, so
+tabs and splits), Monaco (prompt, code and diff editors), xterm.js (terminals), markdown-it with DOMPurify, Mermaid,
+ECharts, and React Flow with dagre for the graphs of Code Mode runs (lazy chunks). It is served from `frontend/dist` on `app://codealta` and runs under `StrictMode`, so
 effects are idempotent. `npm run demo` runs the page in a browser against `demo-api.ts`, a fake of the services.
 
 ### Sources

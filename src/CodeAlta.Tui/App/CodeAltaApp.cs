@@ -158,6 +158,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             projectCatalog);
         _ownedServices = ownedServices;
         _frontendHost = new ShellFrontendHost(this);
+        // The runs of scripts are kept with the results of their steps, for a resume after a restart.
+        _ = ownedServices?.KeepCodeModeRunsAsync();
         var composition = CodeAltaFrontendComposition.Create(
             providerDescriptors,
             projectCatalog,
@@ -173,7 +175,9 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
             ownedServices?.CurrentProject,
             ownedServices?.PluginHostBridge,
             ownedServices?.ModelProviderRegistry,
-            ownedServices?.ProviderInit);
+            ownedServices?.ProviderInit,
+            ownedServices?.CodeModeRuns,
+            ownedServices is null ? null : new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => ownedServices.CodeModeAgents));
         _modelProviderPreferences = composition.ModelProviderPreferences;
         _shellController = composition.ShellController;
         _runtimeEventPump = composition.RuntimeEventPump;

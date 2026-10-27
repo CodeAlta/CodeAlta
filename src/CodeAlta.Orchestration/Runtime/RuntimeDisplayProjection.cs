@@ -354,6 +354,11 @@ public sealed class RuntimeDisplayProjection
     private static RuntimeDisplaySession ProjectToolActivity(RuntimeDisplaySession session, AgentActivityEvent activity)
     {
         // Only these scalar fields are inspected. In particular, never touch Details, Message or parent/provider graphs.
+        // A call a script made (`<call>/<n>`) is a line of the card of its call, which the journal fills: it takes no
+        // live slot, so it never evicts the call that runs the script.
+        if (activity.ParentActivityId is { Length: > 0 } parent && activity.ActivityId is { } nested
+            && nested.Length > parent.Length + 1 && nested.StartsWith(parent, StringComparison.Ordinal) && nested[parent.Length] == '/')
+            return session;
         var activityId = activity.ActivityId is null ? null : CompactIdentifier(activity.ActivityId);
         if (activity.Kind != AgentActivityKind.ToolCall ||
             activity.Phase is not (AgentActivityPhase.Requested or AgentActivityPhase.Started or AgentActivityPhase.Progressed or

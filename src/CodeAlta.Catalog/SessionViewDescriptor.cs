@@ -174,6 +174,13 @@ public sealed class SessionViewDescriptor
     public bool? ReviewBeforeCommit { get; set; }
 
     /// <summary>
+    /// Gets or sets the options of the session (<see cref="CodeAlta.Agent.AgentSessionOptions"/>), such as whether it can
+    /// start sessions of its own; <see langword="null"/> for the defaults, every option on.
+    /// </summary>
+    [JsonPropertyName("options")]
+    public CodeAlta.Agent.AgentSessionOptions? Options { get; set; }
+
+    /// <summary>
     /// Gets or sets who chose <see cref="Title"/>, as its saved summary says; <see langword="null"/> when that is
     /// not recorded. It is not part of the header of the journal.
     /// </summary>

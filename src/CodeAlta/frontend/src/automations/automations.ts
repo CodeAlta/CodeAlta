@@ -1,10 +1,11 @@
 // What the page knows of an automation without asking the host: how a trigger reads, what a form holds, the
 // templates a new one can start from.
-import type { AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem } from "#neoastra";
+import type { AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
 import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
 import { permissionModeName } from "../permissionModes";
 import { notSandboxed } from "../sandbox/sandboxChoices";
+import { sessionOptionsOf, storedSessionOptions } from "../sessionSettings/sessionOptions";
 import type { SessionSettings } from "../sessionSettings/sessionSettings";
 
 export type Translate = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => string;
@@ -50,7 +51,7 @@ export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !nee
 
 /**
  * Whether an automation waits for the user before its triggers start it: it came with the configuration of its
- * project, which other people write, and was not allowed here as it is now.
+ * project, which other people write, or its script changed, and it was not allowed here as it is now.
  */
 export const waitsToBeAllowed = (item: Readonly<{ allowed: boolean; triggers: readonly unknown[] }>): boolean => !item.allowed && item.triggers.length > 0;
 
@@ -120,6 +121,10 @@ export const runTriggerLabel = (trigger: string): MessageKey => trigger === "man
 /** An automation as its form holds it. */
 export type AutomationForm = Readonly<{
   id: string | null; name: string; enabled: boolean; prompt: string;
+  /** The script of the library it runs in place of a prompt; empty to send its prompt. */
+  script: string;
+  /** The arguments of its script, as the JSON text of an object; empty for none. */
+  scriptArguments: string;
   /** The project it runs in; null for a chat. */
   projectId: string | null;
   /** Whether it is written in the configuration of its project rather than of the user. */
@@ -127,20 +132,22 @@ export type AutomationForm = Readonly<{
   provider: string; model: string; effort: string; agent: string; catchUp: boolean;
   /** The permission mode, the review and the sandbox of its sessions; empty (null for the review) for the defaults. */
   permissionMode: string; reviewBeforeCommit: boolean | null; sandbox: string;
+  /** The options of its sessions (sub-sessions); null for the defaults. */
+  options: SessionOptionsChoice | null;
   triggers: readonly AutomationTriggerItem[];
 }>;
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
-  return { id: null, name: "", enabled: true, prompt: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
-    permissionMode: "", reviewBeforeCommit: null, sandbox: "", triggers: [] };
+  return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
+    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, triggers: [] };
 }
 
 /** The form of an automation that exists. */
 export function formOf(item: AutomationItem): AutomationForm {
-  return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, projectId: item.projectId, storeInProject: item.storeProjectId !== null,
+  return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
-    permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", triggers: item.triggers };
+    permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options), triggers: item.triggers };
 }
 
 /**
@@ -152,7 +159,8 @@ export function runsWithFacts(item: AutomationItem, t: Translate): readonly stri
   return [item.provider, item.model, item.effort, item.agent ? t("agent {name}", { name: item.agent }) : null,
     item.permissionMode ? `${t("Permissions")}: ${permission ? t(permission) : item.permissionMode}` : null,
     item.reviewBeforeCommit !== null ? `${t("Review before commit")}: ${t(item.reviewBeforeCommit ? "On" : "Off")}` : null,
-    item.sandbox ? `${t("Sandbox")}: ${item.sandbox.toLowerCase() === notSandboxed ? t("Off") : item.sandbox}` : null]
+    item.sandbox ? `${t("Sandbox")}: ${item.sandbox.toLowerCase() === notSandboxed ? t("Off") : item.sandbox}` : null,
+    !sessionOptionsOf(item.options).subSessions ? `${t("Sub-sessions")}: ${t("Off")}` : null]
     .filter((fact): fact is string => !!fact);
 }
 
@@ -160,21 +168,25 @@ export function runsWithFacts(item: AutomationItem, t: Translate): readonly stri
 export function sessionSettingsOf(form: AutomationForm): SessionSettings {
   const blank = (text: string) => text.trim() || null;
   return { agentPromptId: blank(form.agent), providerId: blank(form.provider), modelId: blank(form.model), reasoningEffort: blank(form.effort),
-    permissionMode: blank(form.permissionMode), reviewBeforeCommit: form.reviewBeforeCommit, sandbox: blank(form.sandbox) };
+    permissionMode: blank(form.permissionMode), reviewBeforeCommit: form.reviewBeforeCommit, sandbox: blank(form.sandbox), options: form.options };
 }
 
 /** The change of the form for what the form of its Agent chip chose. */
 export function formSettings(settings: SessionSettings): Partial<AutomationForm> {
   return { agent: settings.agentPromptId ?? "", provider: settings.providerId ?? "", model: settings.modelId ?? "", effort: settings.reasoningEffort ?? "",
-    permissionMode: settings.permissionMode ?? "", reviewBeforeCommit: settings.reviewBeforeCommit, sandbox: settings.sandbox ?? "" };
+    permissionMode: settings.permissionMode ?? "", reviewBeforeCommit: settings.reviewBeforeCommit, sandbox: settings.sandbox ?? "", options: storedSessionOptions(settings.options) };
 }
 
 /** What the form misses to be saved, as a message of the page; null when nothing. */
 export function formProblem(form: AutomationForm): MessageKey | null {
   if (!form.name.trim()) return "Give the automation a name.";
   if (form.name.trim().length > maximumNameLength) return "The name is too long.";
-  if (!form.prompt.trim()) return "Write the prompt the automation sends.";
-  if (form.prompt.length > maximumPromptLength) return "The prompt is too long.";
+  if (form.script.trim()) {
+    if (!isScriptArguments(form.scriptArguments)) return "The arguments of the script are a JSON object.";
+  } else {
+    if (!form.prompt.trim()) return "Write the prompt the automation sends.";
+    if (form.prompt.length > maximumPromptLength) return "The prompt is too long.";
+  }
   for (const trigger of form.triggers) {
     if (needsProject(trigger) && !form.projectId) return "A trigger on issues or pull requests needs a project.";
     if ((trigger.type === "daily" || trigger.type === "weekly") && trigger.at.length === 0) return "Add a time to the trigger.";
@@ -189,9 +201,13 @@ export function formProblem(form: AutomationForm): MessageKey | null {
 export function inputOf(form: AutomationForm): AutomationInput {
   const provider = form.provider.trim();
   const model = provider ? form.model.trim() : "";
-  return { id: form.id, name: form.name.trim(), enabled: form.enabled, prompt: form.prompt, projectId: form.projectId,
+  const script = form.script.trim();
+  // An automation that runs a script sends no prompt of its own.
+  return { id: form.id, name: form.name.trim(), enabled: form.enabled, prompt: script ? "" : form.prompt, script: script || null,
+    scriptArguments: script ? form.scriptArguments.trim() || null : null, projectId: form.projectId,
     provider: provider || null, model: model || null, effort: model && form.effort ? form.effort : null, agent: form.agent.trim() || null,
     permissionMode: form.permissionMode.trim() || null, reviewBeforeCommit: form.reviewBeforeCommit, sandbox: form.sandbox.trim() || null,
+    options: storedSessionOptions(form.options),
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,
     triggers: form.triggers.map(trigger => ({ ...trigger, at: [...trigger.at].sort(), expression: trigger.type === "cron" ? (trigger.expression ?? "").trim() : null,
@@ -203,7 +219,27 @@ export type AutomationScope = "all" | "chats" | "projects";
 export function filterAutomations(items: readonly AutomationItem[], query: string, scope: AutomationScope): readonly AutomationItem[] {
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   return items.filter(item => (scope === "all" || (scope === "chats") === (item.projectId === null && !item.projectFolder))
-    && words.every(word => `${item.name}\n${item.projectName ?? ""}\n${item.prompt}`.toLowerCase().includes(word)));
+    && words.every(word => `${item.name}\n${item.projectName ?? ""}\n${item.prompt}\n${item.script ?? ""}`.toLowerCase().includes(word)));
+}
+
+/** Whether the text is the arguments of a script: empty, or the JSON text of an object. */
+export function isScriptArguments(text: string): boolean {
+  if (!text.trim()) return true;
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  } catch {
+    return false;
+  }
+}
+
+/** The arguments a script is shown with in a form: the JSON of an object with its required parameters, empty ones. */
+export function scriptArgumentsTemplate(parameters: readonly Readonly<{ name: string; type: string | null; required: boolean }>[]): string {
+  const required = parameters.filter(parameter => parameter.required);
+  if (required.length === 0) return "";
+  const empty = (type: string | null): unknown => type === "string" ? "" : type === "number" || type === "integer" ? 0 : type === "boolean" ? false
+    : type === "array" ? [] : type === "object" ? {} : null;
+  return JSON.stringify(Object.fromEntries(required.map(parameter => [parameter.name, empty(parameter.type)])), null, 2);
 }
 
 /** Where a time falls between two others, from 0 to 1. */
@@ -243,6 +279,9 @@ export type AutomationTemplate = Readonly<{
   key: string; icon: IconName; tone: string; name: MessageKey; description: MessageKey;
   /** Written in English, like the prompts of the application: the user edits it in the language of their choice. */
   prompt: string;
+  /** The script of the library it runs in place of its prompt, with its arguments as JSON; none for a prompt. */
+  script?: string;
+  scriptArguments?: string;
   triggers: readonly AutomationTriggerItem[];
   /** Whether it only makes sense in the repository of a project. */
   project: boolean;
@@ -259,6 +298,9 @@ export const automationTemplates: readonly AutomationTemplate[] = [
     triggers: [newTrigger("issue")], prompt: "A new issue was opened in this repository: it is named below. Read it, find the code it is about and say whether you can reproduce or confirm it. Report what you found and what a fix would involve. Do not push anything and do not comment on the issue." },
   { key: "pr-review", icon: "pullRequest", tone: "orange", name: "Pull request review", description: "Review each pull request when it is opened.", project: true,
     triggers: [newTrigger("pull_request")], prompt: "A pull request was opened in this repository: it is named below. Fetch it, read the change and review it: correctness first, then tests, then clarity. Report your findings ordered by importance, with the file and line of each one. Do not push anything and do not comment on the pull request." },
+  // The sample script reads the number of the pull request from what started the run.
+  { key: "pr-review-script", icon: "workflow", tone: "orange", name: "Pull request review in parallel", description: "Run the review-pr script on each pull request: one session per angle, then one merged review.",
+    project: true, triggers: [newTrigger("pull_request")], prompt: "", script: "review-pr" },
   { key: "changelog", icon: "notes", tone: "purple", name: "Changelog draft", description: "Draft the changelog of the week from the merged work.", project: true,
     triggers: [weekly("fri", "16:00")], prompt: "Draft the changelog of the last seven days of this repository from its commits and merged pull requests. Group the entries under Added, Changed and Fixed, one line each, written for a user of the project. Report the draft: do not edit any file." },
   { key: "test-health", icon: "checked", tone: "azure", name: "Test health", description: "Run the tests every morning and report what fails.", project: true,

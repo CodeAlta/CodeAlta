@@ -755,7 +755,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             hasGateway = _exposedTools.ContainsKey(ClaudeCodePrompts.GatewayTool);
         }
 
-        return ClaudeCodePrompts.CreateAppendSystemPrompt(request.DeveloperInstructions, hasGateway, request.DisabledTools?.Contains(ShellCommandTool) != true,
+        return ClaudeCodePrompts.CreateAppendSystemPrompt(AgentInstructionText.DeveloperAndSession(request), hasGateway, request.DisabledTools?.Contains(ShellCommandTool) != true,
             ClaudeCodeLauncher.CommandsThroughCodeAlta(request.ProcessHost));
     }
 

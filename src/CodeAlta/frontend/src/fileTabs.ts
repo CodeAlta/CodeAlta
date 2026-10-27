@@ -15,14 +15,14 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * shows before the plugin has started: the title (`name`) and the `icon`, kept up to date by the plugin, and `plugin`, the id
  * of the folder of the plugin package, which says where to rebuild it and open its source when it is not running.
  */
-export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workItems" | "issues" | "canvases" | "canvas" | "documentation" | "bookmarks" | "claudeCode";
+export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workflows" | "workflowRun" | "workItems" | "issues" | "canvases" | "canvas" | "documentation" | "bookmarks" | "claudeCode";
   terminalId?: string; name?: string; pluginKey?: string; canvasId?: string; sessionId?: string; key?: string; icon?: string; plugin?: string; origin?: string }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
 export const fileTabsKey = "codealta.desktop.fileTabs.v1";
 export const fileTabLimit = 32;
 export const emptyFileTabs = (): FileTabs => ({ open: [], active: null, closed: [] });
 export const fileTabKey = (tab: FileTab) => JSON.stringify(tab.view === "terminal" ? [tab.projectId, tab.view, tab.terminalId]
-  : tab.view === "claudeCode" ? [tab.projectId, tab.view, tab.key]
+  : tab.view === "claudeCode" || tab.view === "workflowRun" ? [tab.projectId, tab.view, tab.key]
   : tab.view === "canvas" ? [tab.sessionId ? "" : tab.projectId, tab.view, tab.pluginKey, tab.canvasId, tab.sessionId ?? "", tab.key ?? ""] : [tab.projectId, tab.view]);
 export const isChangesTab = (tab: FileTab) => tab.view === "changes";
 export const isEditorTab = (tab: FileTab) => tab.view === "editor";
@@ -30,6 +30,14 @@ export const isTerminalTab = (tab: FileTab) => tab.view === "terminal";
 export const isAutomationsTab = (tab: FileTab) => tab.view === "automations";
 /** The tab of the automations: there is one, whatever the project. */
 export const automationsTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "automations" });
+/** The tab of the scripts of the library and of their runs: there is one, whatever the project. */
+export const isWorkflowsTab = (tab: FileTab) => tab.view === "workflows";
+export const workflowsTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "workflows" });
+/** The tab of one run of a script (`view: "workflowRun"`): `key` the run, `name` its title. It is restored while the host still knows the run. */
+export const isWorkflowRunTab = (tab: FileTab) => tab.view === "workflowRun";
+export const runIdPattern = /^[A-Za-z0-9_-]{1,64}$/;
+export const workflowRunTab = (run: Readonly<{ runId: string; title?: string | null }>): FileTab =>
+  ({ projectId: "", projectPath: "", view: "workflowRun", key: run.runId, ...run.title ? { name: run.title } : {} });
 /** The tab of the work items: there is one, whatever the project. */
 export const isWorkItemsTab = (tab: FileTab) => tab.view === "workItems";
 export const workItemsTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "workItems" });
@@ -196,7 +204,7 @@ export function reconcileFileTabs(state: FileTabs, snapshot: WorkspaceSnapshot):
   // The folder of a plugin or of a skill is not a project of the workspace: its editor says so itself when the folder is gone.
   // A canvas of the application lasts; one of a project or of a session lasts as long as they are in the space.
   const canvas = (tab: FileTab) => (tab.projectId === "" || resolveFileTab(snapshot, tab)) && (tab.sessionId === undefined || snapshot.sessions.some(session => session.id === tab.sessionId));
-  const lasting = (tab: FileTab) => isClaudeCodeTab(tab) ? !!resolveFileTab(snapshot, tab) : isTerminalTab(tab) || isAutomationsTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isCanvasesTab(tab) || isDocumentationTab(tab) || isBookmarksTab(tab) || isFolderTab(tab) || (isCanvasTab(tab) ? canvas(tab) : resolveFileTab(snapshot, tab));
+  const lasting = (tab: FileTab) => isClaudeCodeTab(tab) ? !!resolveFileTab(snapshot, tab) : isTerminalTab(tab) || isAutomationsTab(tab) || isWorkflowsTab(tab) || isWorkflowRunTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isCanvasesTab(tab) || isDocumentationTab(tab) || isBookmarksTab(tab) || isFolderTab(tab) || (isCanvasTab(tab) ? canvas(tab) : resolveFileTab(snapshot, tab));
   const open = state.open.filter(lasting);
   const closed = state.closed.filter(lasting);
   const active = open.find(tab => sameFileTab(tab, state.active)) ?? null;
@@ -237,6 +245,9 @@ function storedTab(value: unknown): { tab: FileTab; file: string | null } | null
   if (!value || typeof value !== "object") return null;
   const stored = value as StoredTab;
   if (stored.view === "automations") return stored.projectId === "" && stored.projectPath === "" ? { tab: automationsTab, file: null } : null;
+  if (stored.view === "workflows") return stored.projectId === "" && stored.projectPath === "" ? { tab: workflowsTab, file: null } : null;
+  if (stored.view === "workflowRun") return stored.projectId === "" && stored.projectPath === "" && typeof stored.key === "string" && runIdPattern.test(stored.key)
+    ? { tab: workflowRunTab({ runId: stored.key, title: text(stored.name, 200) ? stored.name : null }), file: null } : null;
   if (stored.view === "workItems") return stored.projectId === "" && stored.projectPath === "" ? { tab: workItemsTab, file: null } : null;
   if (stored.view === "issues") return stored.projectId === "" && stored.projectPath === "" ? { tab: issuesTab, file: null } : null;
   if (stored.view === "canvases") return stored.projectId === "" && stored.projectPath === "" ? { tab: canvasesTab, file: null } : null;

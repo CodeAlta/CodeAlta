@@ -149,6 +149,7 @@ import {
   type LucideIcon,
   AppWindow,
   PictureInPicture2,
+  Workflow,
 } from "lucide-react";
 
 const icons = {
@@ -281,6 +282,7 @@ const icons = {
   themeSystem: Monitor,
   user: UserRound,
   automation: Zap,
+  workflow: Workflow,
   play: Play,
   pause: Pause,
   repeat: Repeat,

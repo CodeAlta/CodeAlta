@@ -6,7 +6,7 @@ import { edge, withCanvas, type Page } from "./browserHarness";
 // production content security policy and React StrictMode. Each test ends by checking that the page raised no error.
 
 type Call = { method: string; request: any; args: unknown[]; aborted: boolean };
-const tabTitles = ["Overview", "Activity", "Models", "Cost", "Tools", "Prompts", "Agents", "Code", "Projects", "Sessions", "Health"];
+const tabTitles = ["Overview", "Activity", "Models", "Cost", "Tools", "Prompts", "Agents", "Scripts", "Code", "Projects", "Sessions", "Health"];
 const settled = `document.querySelector('.statistics-canvas') && !document.querySelector('.stats-block[data-state="loading"]') && !document.querySelector('.stats-tile-skeleton') && document.querySelectorAll('.stats-block').length > 0`;
 const controls = ["status", "chooseHistory", "pause", "resume", "stopHere", "forgetDeleted", "resetStatistics"];
 const questions = (calls: Call[]) => calls.filter(call => !controls.includes(call.method));
@@ -60,7 +60,7 @@ test("the canvas of a session asks every page for that session and its sub-agent
       assert.ok(call, `${name} is asked`);
       assert.deepEqual({ session: call.request.filter.session, withChildren: call.request.filter.withChildren }, { session: session.id, withChildren: true }, name);
     }
-    assert.deepEqual([...new Set(asked.map(call => call.method))].filter(method => !["summary", "series", "top", "tools", "models", "projects", "sessions", "distribution", "calendar", "weekHour", "records", "health", "details", "skills", "mcpTools", "runs", "costEstimate"].includes(method)), []);
+    assert.deepEqual([...new Set(asked.map(call => call.method))].filter(method => !["summary", "series", "top", "tools", "models", "projects", "sessions", "distribution", "calendar", "weekHour", "records", "health", "details", "skills", "mcpTools", "runs", "scripts", "costEstimate"].includes(method)), []);
 
     // The table of sessions lists the session and its sub-agents, and each row opens its chat.
     await openPage(page, "Sessions");

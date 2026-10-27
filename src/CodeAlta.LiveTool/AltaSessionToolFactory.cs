@@ -14,13 +14,24 @@ public static class AltaSessionToolFactory
         "In-process gateway to the current CodeAlta host. " +
         "Use it to discover the current session identity, projects, sessions, providers/models, skills, plugins, and tool capabilities; " +
         "inspect live or recoverable session status/history; create project/global child sessions; " +
+        ToolDescriptionEnd;
+
+    // The description for a session without sub-sessions: the same, without the sessions it cannot start.
+    private const string ToolDescriptionWithoutSubSessions =
+        "In-process gateway to the current CodeAlta host. " +
+        "Use it to discover the current session identity, projects, sessions, providers/models, skills, plugins, and tool capabilities; " +
+        "inspect live or recoverable session status/history; " +
+        ToolDescriptionEnd;
+
+    private const string ToolDescriptionEnd =
         "send, queue, steer, abort, compact, or coordinate sessions and peer-agent requests; " +
         "create/list/delete delayed prompt reminders; " +
         "start, read or cancel background jobs (commands that run without being waited for, whose result is sent to the session later); " +
         "list, read, add or remove the bookmarks of sessions and of their messages; " +
         "in CodeAlta Desktop, search earlier conversations, skills, tools, MCP servers and the user guide by purpose (`alta search`); " +
         "and activate CodeAlta-managed skills. Pass CLI-style args excluding `alta`. " +
-        "Start with args [\"--help\"] for the quick-start, then narrower help such as [\"session\",\"send\",\"--help\"] for options. " +
+        "Call a command your instructions already give (such as `alta job start --command ...`) directly, without reading help first; " +
+        "read help only for a command or an option they do not give: args [\"--help\"] for the quick-start and the list of commands, then narrower help such as [\"session\",\"send\",\"--help\"]. " +
         "Calls are finite/non-streaming; non-help results are compact JSONL headed by alta.result.";
     private const string InputSchemaJson = """
         {
@@ -28,7 +39,7 @@ public static class AltaSessionToolFactory
           "properties": {
             "args": {
               "type": "array",
-              "description": "Arguments to pass to alta, excluding the executable name. Start with [\"--help\"] for discovery.",
+              "description": "Arguments to pass to alta, excluding the executable name, such as [\"job\",\"list\"]; [\"--help\"] lists the commands.",
               "items": { "type": "string" },
               "minItems": 1
             },
@@ -78,7 +89,7 @@ public static class AltaSessionToolFactory
         return new AgentToolDefinition(
             new AgentToolSpec(
                 ToolName,
-                ToolDescription,
+                options.SessionOptions.SubSessions ? ToolDescription : ToolDescriptionWithoutSubSessions,
                 schema),
             (invocation, cancellationToken) => InvokeAsync(dispatcher, options, invocation, cancellationToken));
     }
@@ -138,6 +149,7 @@ public static class AltaSessionToolFactory
             SourceProjectId = options.SourceProjectIdProvider?.Invoke() ?? options.SourceProjectId,
             PluginRuntimeKey = options.PluginRuntimeKey,
             RunTools = invocation.RunTools,
+            SubSessions = options.SessionOptions.SubSessions,
         };
         var result = await dispatcher.InvokeAsync(
                 args,
@@ -371,4 +383,16 @@ public sealed record AltaSessionToolOptions
 
     /// <summary>Gets the default command timeout, when any.</summary>
     public TimeSpan? DefaultTimeout { get; init; }
+
+    /// <summary>
+    /// Gets what the space of the session has, when the host read it for this send; null when not known. The scripts of the
+    /// library a space limits are offered and run only where it has them.
+    /// </summary>
+    public CodeAlta.Catalog.SpaceFilter? Spaces { get; init; }
+
+    /// <summary>
+    /// Gets the options of the session (<see cref="AgentSessionOptions"/>): a session without sub-sessions gets tools
+    /// whose descriptions say nothing of starting sessions, and whose commands that start them are hidden and refused.
+    /// </summary>
+    public AgentSessionOptions SessionOptions { get; init; } = AgentSessionOptions.Default;
 }

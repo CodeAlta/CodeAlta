@@ -97,6 +97,7 @@ public sealed class CliRunTests
         Assert.IsTrue(header.GetProperty("params").GetProperty("created").GetBoolean());
         Assert.AreEqual(root.ProjectRoot, header.GetProperty("params").GetProperty("cwd").GetString());
         Assert.AreEqual("fake", header.GetProperty("params").GetProperty("provider").GetString());
+        Assert.AreEqual("fake", header.GetProperty("params").GetProperty("providerType").GetString(), "the type of the provider, which is its id unless it says one");
         Assert.AreEqual("fake-model", header.GetProperty("params").GetProperty("model").GetString());
         Assert.AreEqual("high", header.GetProperty("params").GetProperty("reasoning").GetString());
         Assert.AreEqual("default", header.GetProperty("params").GetProperty("agentPrompt").GetString());
@@ -179,6 +180,49 @@ public sealed class CliRunTests
         {
             Assert.IsTrue(!usage.TryGetProperty(unknown, out var value) || value.ValueKind == JsonValueKind.Null, $"{unknown} was not reported: {usage}");
         }
+    }
+
+    [TestMethod]
+    public async Task Jsonl_ACostTheProviderDoesNotReport_IsEstimatedFromThePublicPriceOfTheModel_AndMarkedSo()
+    {
+        using var root = new CliTestRoot();
+        // A million tokens of input, of which 400k read from the cache and 100k written to it, and 50k of output.
+        static FakeTurn Unpriced(string model) => (_, _, _) => Task.FromResult(FakeProvider.Answer("Done.") with
+        {
+            Usage = new AgentSessionUsage(LastOperation: new AgentOperationUsageSnapshot(Model: model, InputTokens: 1_000_000, OutputTokens: 50_000,
+                CachedInputTokens: 400_000, CacheWriteTokens: 100_000)),
+        });
+
+        // The prices of the bundled models.dev catalog: $4, $0.20, $5, $20 a million tokens for Claude Opus 5.5, and
+        // $10, $1, $12.50, $50 for GPT-6 Astra below 272k tokens.
+        foreach (var (model, expected) in new[] { ("claude-opus-5-5", 2.0m + 0.08m + 0.5m + 1.0m), ("gpt-6-astra", 5.0m + 0.4m + 1.25m + 2.5m) })
+        {
+            var provider = new FakeProvider(model: model);
+            provider.Turns.Enqueue(Unpriced(model));
+            var run = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "--model", "fake:" + model, "hello"]);
+
+            Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
+            var cost = Result(run).GetProperty("cost");
+            Assert.AreEqual(expected, cost.GetProperty("amount").GetDecimal(), model);
+            Assert.AreEqual("USD", cost.GetProperty("currency").GetString());
+            Assert.IsTrue(cost.GetProperty("_meta").GetProperty(CodeAltaAcpExtensions.MetaKey).GetProperty("estimated").GetBoolean(), "an estimate says so");
+        }
+
+        // The price a provider gives its model comes first; input of the cache is priced as input when it has no price of its own.
+        var priced = new FakeProvider(models: [new AgentModelInfo("fake-model", Capabilities: new Dictionary<string, object?>
+        {
+            ["inputCostPerMillionTokens"] = 2m, ["outputCostPerMillionTokens"] = 10m,
+        })]);
+        priced.Turns.Enqueue(Unpriced("fake-model"));
+        var own = await root.RunAsync(priced, ["run", Plain, "--format", "jsonl", "hello"]);
+        Assert.AreEqual(2.0m + 0.5m, Result(own).GetProperty("cost").GetProperty("amount").GetDecimal());
+
+        // A cost the provider reports is never replaced, nor marked.
+        var reported = new FakeProvider(model: "claude-opus-5-5");
+        var run2 = await root.RunAsync(reported, ["run", Plain, "--format", "jsonl", "--model", "fake:claude-opus-5-5", "hello"]);
+        var cost2 = Result(run2).GetProperty("cost");
+        Assert.AreEqual(0.25, cost2.GetProperty("amount").GetDouble(), 1e-9);
+        Assert.IsFalse(cost2.TryGetProperty("_meta", out _));
     }
 
     [TestMethod]

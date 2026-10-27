@@ -385,6 +385,7 @@ internal sealed class SessionViewStateCoordinator
             Kind = prompt.Kind,
             Prompt = prompt.Prompt,
             PromptPreview = prompt.PromptPreview,
+            Images = prompt.Images,
             State = prompt.State,
             RunId = prompt.RunId,
             SubmittedBy = prompt.SubmittedBy,

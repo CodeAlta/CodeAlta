@@ -65,13 +65,14 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
 - **Model options**, for a model whose provider offers some, such as **Context** and **Fast** for Cursor's models: a list or a switch under the reasoning effort. An option belongs to the model: it applies to every session of the provider that uses this model.
 - **Review before commit**: **On**, **Off**, or **Default** (the setting of **Settings > Sessions**). See [Review before commit](../reviews.md#review-before-commit).
 - **Sandbox**: a profile, **Off**, or **Default** (what the settings choose for this provider, project or space). A small mark on the chip shows a sandboxed session. See [Sandbox](../sessions/sandbox.md).
+- **More options**, at the end of the picker: options that are rarely changed. **Sub-sessions**, on by default, lets the agent [delegate](../sessions/delegation.md) to sessions of its own; off, it does all the work itself, is not told about sub-agents and has no tool to start them. A change applies from the next prompt. The section opens by itself when an option is not its default, and a struck-through mark on the chip shows a session without sub-sessions.
 
 <figure class="alta-figure my-4" style="max-width: 24rem;">
   <img src="{{site.basepath}}/img/alta-desktop-model-search.webp" alt="The model list of the picker of CodeAlta Desktop filtered by a search box" loading="lazy">
   <figcaption class="small text-secondary mt-2">Type in the search box of the model list to find a model.</figcaption>
 </figure>
 
-The picker of a new session has the same rows, except the model options: the session starts with your choices, and the next new session of the project starts from them.
+The picker of a new session has the same rows, except the model options: the session starts with your choices, and the next new session of the project starts from them, except **More options**, which are for that session only.
 
 Agents use the same choices: `alta session choices <session-id>` lists the models, efforts, agent prompts, permission modes and sandboxes of a session, and `alta session send` and `alta session queue` take `--model`, `--reasoning`, `--prompt-id`, `--permission-mode` and `--sandbox`.
 
@@ -131,7 +132,7 @@ Remote Control needs Claude Code signed in with your claude.ai account, not an A
 
 The timeline shows:
 
-- messages in Markdown; in CodeAlta Desktop a code block has a copy button and a `mermaid` block is drawn as a diagram (or stays code, with the reason, when Mermaid cannot read it);
+- messages in Markdown; in CodeAlta Desktop a code block has a copy button and a `mermaid` block is drawn as a diagram (or stays code, with the reason, when Mermaid cannot read it). A picture on disk that a message shows (`![chart](out/chart.png)`, a PNG, JPEG, GIF, WebP or BMP file) is drawn in the message: click it to open it in a window with **Copy image**, its path with **Copy path**, and a button that shows the file in its folder. `Ctrl`+click (`Cmd`+click on macOS) opens the file in the code editor;
 - reasoning and status messages;
 - [tool calls](#tool-calls) as compact tiles;
 - the modified-files card, with the lines added and removed per file and their diffs;
@@ -144,6 +145,8 @@ The timeline shows:
 | Arrows, `Page Up`, `Page Down`, `Home`, `End` | Scroll, after a click in the timeline (desktop) |
 
 CodeAlta Desktop opens a session on its latest messages; earlier turns load as you scroll up. **Load all messages**, at the top, loads them all; **Stop** keeps what was loaded.
+
+A very long message shows its start, with a line that says the rest is too long to show there: **Show the whole message** reads the rest.
 
 ### Focused timeline
 
@@ -184,6 +187,14 @@ A tool call has one tile showing the tool, what it works on, its state and its o
 - **a search**: its matches by file; **another tool**: its arguments and result.
 
 The line under the title gives the duration, the exit code and the lines changed. **Details** shows the raw arguments and result. In CodeAlta TUI, a tile opens a dialog with the details and output.
+
+The agent gets a bounded part of a long result, which stays in every later request:
+
+- **a command** that prints more than 30,000 characters: the start and the end of its output, and the path of a file of the session that holds all of it, for the agent to read;
+- **a file read**: lines cut at 2,000 characters, and at most 100,000 characters, with the line to read on from;
+- **a search**: matching lines cut at 500 characters around the match, and at most 30,000 characters.
+
+The window of a command still shows you its whole output.
 
 ## System prompts
 

@@ -320,6 +320,42 @@ public sealed partial class AltaAskService : IAltaAskService
         return new AltaAskRemovalResult { Accepted = true, NotificationErrors = NotifyQueueChanged(sessionId) };
     }
 
+    /// <summary>
+    /// Removes a pending ask of a session wherever it is in the queue, as long as no answer is being submitted for it.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="askId">The ask.</param>
+    /// <returns>Whether it was removed.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> or <paramref name="askId"/> is blank.</exception>
+    public AltaAskRemovalResult TryRemove(string sessionId, string askId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(askId);
+        lock (_gate)
+        {
+            if (!_queues.TryGetValue(sessionId, out var queue)
+                || queue.FirstOrDefault(entry => string.Equals(entry.Snapshot.AskId, askId, StringComparison.Ordinal)) is not { } found
+                || found.Snapshot.ResponseState != AltaAskResponseState.Pending)
+            {
+                return new AltaAskRemovalResult { Accepted = false };
+            }
+
+            var kept = queue.Where(entry => !ReferenceEquals(entry, found)).ToArray();
+            queue.Clear();
+            foreach (var entry in kept)
+            {
+                queue.Enqueue(entry);
+            }
+
+            if (queue.Count == 0)
+            {
+                _queues.Remove(sessionId);
+            }
+        }
+
+        return new AltaAskRemovalResult { Accepted = true, NotificationErrors = NotifyQueueChanged(sessionId) };
+    }
+
     private IReadOnlyList<string> NotifyQueueChanged(string sessionId)
     {
         var observers = QueueChanged;

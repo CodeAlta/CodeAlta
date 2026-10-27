@@ -136,7 +136,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Assistant && e.Content == "Inspection complete."));
         var usageEvent = history.OfType<AgentSessionUpdateEvent>().Last(static e => e.Kind == AgentSessionUpdateKind.UsageUpdated);
         Assert.IsNotNull(usageEvent.Usage);
-        Assert.IsTrue(usageEvent.Usage.CurrentTokens > 33L);
+        // The request carried the whole conversation: its count is the size of the context, below the local estimate.
+        Assert.AreEqual(33L, usageEvent.Usage.CurrentTokens);
         Assert.AreEqual(33L, usageEvent.Usage.LastOperation?.InputTokens + usageEvent.Usage.LastOperation?.OutputTokens);
         Assert.AreEqual(200000L, usageEvent.Usage.TokenLimit);
         Assert.AreEqual(4, usageEvent.Usage.MessageCount);
@@ -226,7 +227,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Assistant && e.Content == "OpenAI chat answer."));
         var usageEvent = history.OfType<AgentSessionUpdateEvent>().Single(static e => e.Kind == AgentSessionUpdateKind.UsageUpdated);
         Assert.IsNotNull(usageEvent.Usage);
-        Assert.IsTrue(usageEvent.Usage.CurrentTokens > 18L);
+        Assert.AreEqual(18L, usageEvent.Usage.CurrentTokens);
         Assert.AreEqual(18L, usageEvent.Usage.LastOperation?.InputTokens + usageEvent.Usage.LastOperation?.OutputTokens);
         Assert.AreEqual(128000L, usageEvent.Usage.TokenLimit);
         Assert.AreEqual(2, usageEvent.Usage.MessageCount);
@@ -3004,6 +3005,137 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    // The OpenAI API: the model's own default, the setting where the model takes one, nothing to an older model.
+    [DataRow(null, null, "gpt-6-astra", "low")]
+    [DataRow(null, null, "gpt-5.4-mini", "medium")]
+    [DataRow(null, null, "gpt-5.5-2026-04-23", "low")]
+    [DataRow(null, null, "gpt-test", null)]
+    [DataRow(null, "high", "gpt-6-astra", "high")]
+    [DataRow(null, "high", "gpt-test", "high")]
+    [DataRow(null, "low", "gpt-4.1", null)]
+    [DataRow(null, "low", "o3", null)]
+    // Another endpoint: no default it may not take; the setting is sent.
+    [DataRow("https://responses.example.test/v1", null, "gpt-6-astra", null)]
+    [DataRow("https://responses.example.test/v1", "low", "gpt-6-astra", "low")]
+    public async Task OpenAIResponsesTurnExecutor_SendsTheModelVerbosity_AndNoSessionCacheKey(
+        string? baseUri,
+        string? configuredVerbosity,
+        string modelId,
+        string? expectedVerbosity)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-verbosity", modelId, "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            BaseUri = baseUri is null ? null : new Uri(baseUri),
+            TextVerbosity = configuredVerbosity,
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var request = CreateTurnRequest() with
+        {
+            ModelId = modelId,
+            ModelInfo = new AgentModelInfo(modelId),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        var verbosity = document.RootElement.TryGetProperty("text", out var text) && text.TryGetProperty("verbosity", out var value)
+            ? value.GetString()
+            : null;
+        Assert.AreEqual(expectedVerbosity, verbosity);
+        // A key of the session would keep apart the caches of sessions that send the same instructions and tools.
+        Assert.IsFalse(document.RootElement.TryGetProperty("prompt_cache_key", out _));
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_SendsTheSessionInstructionsFirstInTheInput_NotInTheInstructions()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-session", "gpt-6-astra", "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+
+        _ = await executor.ExecuteTurnAsync(
+            CreateTurnRequest() with
+            {
+                SystemMessage = "Shared rules.",
+                DeveloperInstructions = "Shared agent prompt.",
+                SessionInstructions = "- Current working directory: `C:\\work\\a`",
+            },
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        var instructions = document.RootElement.GetProperty("instructions").GetString()!;
+        StringAssert.Contains(instructions, "Shared agent prompt.");
+        Assert.IsFalse(instructions.Contains("C:\\work\\a", StringComparison.Ordinal), "the instructions are the same for every session");
+        var first = document.RootElement.GetProperty("input")[0];
+        Assert.AreEqual("user", first.GetProperty("role").GetString());
+        StringAssert.Contains(first.GetRawText(), "session_context");
+        StringAssert.Contains(first.GetProperty("content")[0].GetProperty("text").GetString(), "C:\\work\\a");
+    }
+
+    [TestMethod]
+    // The default of the model list, the provider's setting over it, nothing when neither is known.
+    [DataRow(null, "medium", "gpt-5.3-codex", "medium")]
+    [DataRow("high", "medium", "gpt-5.3-codex", "high")]
+    [DataRow(null, null, "gpt-6-astra", "low")]
+    [DataRow(null, null, "gpt-codex-next", null)]
+    public async Task OpenAIResponsesTurnExecutor_CodexSendsTheModelDefaultVerbosity(
+        string? configuredVerbosity,
+        string? listedDefault,
+        string modelId,
+        string? expectedVerbosity)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-codex-verbosity", modelId, "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ResponseTransport = "http",
+                TextVerbosity = configuredVerbosity,
+            },
+        });
+        var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["source"] = "codex-endpoint",
+            ["supportVerbosity"] = true,
+        };
+        if (listedDefault is not null)
+        {
+            capabilities["defaultTextVerbosity"] = listedDefault;
+        }
+
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = modelId,
+            ModelInfo = new AgentModelInfo(modelId, Capabilities: capabilities),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        var verbosity = document.RootElement.TryGetProperty("text", out var text) && text.TryGetProperty("verbosity", out var value)
+            ? value.GetString()
+            : null;
+        Assert.AreEqual(expectedVerbosity, verbosity);
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_CanNegotiateSequentialCutoffThroughInternalSeam()
     {
         var responsesClient = new RecordingOpenAIResponseClient(
@@ -4588,11 +4720,14 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ],
         };
 
-        _ = await executor.ExecuteTurnAsync(
+        var secondResponse = await executor.ExecuteTurnAsync(
                 secondRequest,
                 static (_, _) => ValueTask.CompletedTask)
             .ConfigureAwait(false);
 
+        // Only the continuation sent no more than the new input: its usage may count no more than that.
+        Assert.IsFalse(firstResponse.UsageIsIncremental);
+        Assert.IsTrue(secondResponse.UsageIsIncremental);
         Assert.AreEqual(2, webSocketSession.Requests.Count);
         Assert.IsNull(webSocketSession.Requests[0].PreviousResponseId);
         Assert.IsNull(webSocketSession.Requests[0].ReconnectPreviousResponseId);
@@ -4668,11 +4803,12 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ],
         };
 
-        _ = await executor.ExecuteTurnAsync(
+        var secondResponse = await executor.ExecuteTurnAsync(
                 secondRequest,
                 static (_, _) => ValueTask.CompletedTask)
             .ConfigureAwait(false);
 
+        Assert.IsFalse(secondResponse.UsageIsIncremental);
         Assert.AreEqual(7, webSocketSession.Requests.Count);
         Assert.AreEqual("response-ws-fallback-live-1", webSocketSession.Requests[1].PreviousResponseId);
         Assert.AreEqual(1, responsesClient.Requests.Count);

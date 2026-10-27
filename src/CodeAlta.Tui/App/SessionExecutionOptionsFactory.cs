@@ -76,7 +76,7 @@ internal sealed class SessionExecutionOptionsFactory
         var sessionKey = context.SessionId ?? CreateTransientSessionKey(context.ProviderId, context.WorkingDirectory);
         return SessionExecutionPolicy.BuildOptions(
             context,
-            CreateAltaTools(sourceSessionIdProvider, () => context.ProjectId, workFolder ?? (() => context.WorkingDirectory)),
+            CreateAltaTools(sourceSessionIdProvider, () => context.ProjectId, workFolder ?? (() => context.WorkingDirectory), context.ProviderKey, context.Model),
             CreatePermissionHandler(sessionKey),
             (request, cancellationToken) => _userInputRequests.HandleAsync(sessionKey, request, cancellationToken));
     }
@@ -99,7 +99,9 @@ internal sealed class SessionExecutionOptionsFactory
     private IReadOnlyList<AgentToolDefinition>? CreateAltaTools(
         Func<string?>? sourceSessionIdProvider,
         Func<string?>? sourceProjectIdProvider,
-        Func<string?>? workingDirectoryProvider)
+        Func<string?>? workingDirectoryProvider,
+        string providerKey,
+        string? modelId)
     {
         if (_altaServices is null)
         {
@@ -108,19 +110,17 @@ internal sealed class SessionExecutionOptionsFactory
 
         var dispatcher = _altaServices.GetService(typeof(AltaCommandDispatcher)) as AltaCommandDispatcher
             ?? new AltaCommandDispatcher(new AltaCommandRegistry(), _altaServices);
-        return
-        [
-            AltaSessionToolFactory.Create(
-                dispatcher,
-                new AltaSessionToolOptions
-                {
-                    SourceSessionIdProvider = sourceSessionIdProvider,
-                    SourceProjectIdProvider = sourceProjectIdProvider,
-                    WorkingDirectoryProvider = workingDirectoryProvider,
-                    DefaultMaxOutputRecords = 200,
-                    DefaultMaxOutputBytes = 64 * 1024,
-                    DefaultTimeout = TimeSpan.FromSeconds(120),
-                }),
-        ];
+        var caller = new AltaSessionToolOptions
+        {
+            SourceSessionIdProvider = sourceSessionIdProvider,
+            SourceProjectIdProvider = sourceProjectIdProvider,
+            WorkingDirectoryProvider = workingDirectoryProvider,
+            DefaultMaxOutputRecords = 200,
+            DefaultMaxOutputBytes = 64 * 1024,
+            DefaultTimeout = TimeSpan.FromSeconds(120),
+        };
+        IReadOnlyList<AgentToolDefinition> tools = [AltaSessionToolFactory.Create(dispatcher, caller)];
+        // The tools of Code Mode, while the settings turn it on for the provider and the model.
+        return (_altaServices.GetService(typeof(CodeAlta.LiveTool.Scripts.CodeModeSessionTools)) as CodeAlta.LiveTool.Scripts.CodeModeSessionTools)?.Create(dispatcher, caller, tools, providerKey, modelId) ?? tools;
     }
 }

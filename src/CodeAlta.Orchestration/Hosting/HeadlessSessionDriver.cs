@@ -24,6 +24,9 @@ namespace CodeAlta.Orchestration.Hosting;
 /// </remarks>
 public sealed class HeadlessSessionDriver : IAsyncDisposable
 {
+    // The times a run waits for its tree to settle again when the outcome it read says a run is still in flight.
+    private const int SettledRereads = 5;
+
     private readonly CodeAltaHost _host;
     private readonly HeadlessSessionDriverOptions _options;
     private readonly HeadlessPromptAttachmentService _attachments = new();
@@ -103,6 +106,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
                 return Invalid("A new session needs the absolute path of the folder it works in.");
             folder = Path.GetFullPath(request.ProjectFolder);
             if (!Directory.Exists(folder)) return Invalid($"The folder '{folder}' does not exist.");
+            if (request.WorktreeDirectory is { } worktree && (!Path.IsPathFullyQualified(worktree) || !Directory.Exists(worktree)))
+                return Invalid($"The worktree '{worktree}' is not an existing folder named by its absolute path.");
         }
 
         var sessionId = existing?.SessionId ?? existingId ?? Guid.CreateVersion7().ToString();
@@ -124,14 +129,17 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             var project = existing is not null ? null : await ResolveProjectAsync(folder!, cancellationToken).ConfigureAwait(false);
             var model = await ResolveModelAsync(request, existing, project, cancellationToken).ConfigureAwait(false);
             if (model.Failure is { } failure) return failure;
-            var bypass = BypassModeOf(model.Provider!.ProviderId.Value);
+            // The child of a session takes the mode its creator gives the sessions it creates; the driver's own, full trust.
+            var bypass = request.ParentSessionId is { } parent
+                ? runtime.GetCreatedSessionPermissionMode(parent, model.Provider!.ProviderId.Value) ?? BypassModeOf(model.Provider!.ProviderId.Value)
+                : BypassModeOf(model.Provider!.ProviderId.Value);
             // The tools the session does without are known before it attaches: a new session is created with them.
             runtime.SetDisabledToolPatterns(sessionId, request.DisabledToolPatterns.Count > 0 ? request.DisabledToolPatterns : null);
             SessionViewDescriptor descriptor;
             if (existing is null)
             {
-                descriptor = await _host.Commands.CreateDraftSessionAsync(project, model.Provider, request.Title, createdBy: null, worktreeDirectory: null,
-                    spaceId: null, bypass, sessionId).ConfigureAwait(false);
+                descriptor = await _host.Commands.CreateDraftSessionAsync(project, model.Provider, request.Title, request.CreatedBy, worktreeDirectory: request.WorktreeDirectory is { } worktreeFolder ? Path.GetFullPath(worktreeFolder) : null,
+                    spaceId: null, bypass, sessionId, request.ParentSessionId, request.SessionOptions).ConfigureAwait(false);
             }
             else
             {
@@ -141,6 +149,11 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
                     return switchFailure;
             }
 
+            // A session that exists keeps its options; those asked only narrow them (a run turns sub-sessions off, never on).
+            if (existing is not null && request.SessionOptions is { } askedOptions
+                && AgentSessionOptions.Of(existing.Options) is var kept && kept.Within(askedOptions) is var narrowed && !narrowed.Equals(kept)
+                && await _host.Commands.SetSessionOptionsAsync(sessionId, narrowed, cancellationToken).ConfigureAwait(false) is { Status: not "ok" })
+                return NotReady($"The options of session '{sessionId}' cannot be changed now.");
             if (model.Tier is { } tier) await runtime.SetSessionTierAsync(sessionId, tier, cancellationToken).ConfigureAwait(false);
             // The sandbox asked is the session's own choice: no setting makes the run leave it.
             if (request.Sandbox is { } sandbox && await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false) is { Status: not "ok" } refused)
@@ -286,6 +299,7 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         {
             Selection = session.Selection,
             Attachments = attachments,
+            Provenance = prompt.Provenance,
         }, CancellationToken.None);
         if (admission is not { Kind: OwnedSessionCommandAdmissionKind.Accepted, Receipt: { } receipt })
             return Result(HeadlessRunStatus.Failed, null, null, null, null, $"The prompt was not admitted ({admission.Kind.ToString().ToLowerInvariant()}): the session is busy or the host is closing.");
@@ -308,9 +322,26 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
 
         var runId = sent?.RunId;
         // A run aborted before its send returned has no known run: the events since the prompt are read instead.
-        var outcome = runId is { } run
-            ? await runtime.ReadOutcomeAsync(session.Descriptor, run, CancellationToken.None).ConfigureAwait(false)
-            : await runtime.ReadOutcomeSinceAsync(session.Descriptor, startedAt, CancellationToken.None).ConfigureAwait(false);
+        var outcome = await ReadOutcomeAsync().ConfigureAwait(false);
+        // A turn that starts as the tree is found settled (the answer to the result of a script that ended in the background)
+        // is still running when its outcome is read, and a read that races the journal finds nothing: the run waits for the
+        // tree to settle again and reads again, rather than ending without its answer.
+        for (var again = 0; abortReason is null && again < SettledRereads
+            && (outcome.Status == SessionOutcomeStatus.Running || outcome is { Status: SessionOutcomeStatus.Unknown, EventCount: 0 }); again++)
+        {
+            try
+            {
+                await runtime.WhenSettledAsync(session.SessionId, stop.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                abortReason = timer.IsCancellationRequested ? "timeout" : aborts.Reason ?? "cancelled";
+                await AbortAndWaitAsync(session.SessionId, abortReason, CancellationToken.None).ConfigureAwait(false);
+                aborts.End();
+            }
+
+            outcome = await ReadOutcomeAsync().ConfigureAwait(false);
+        }
         var usage = await ReadTreeUsageAsync(session.SessionId, outcome.Usage, startedAt).ConfigureAwait(false);
         // A send the driver admitted is cancelled by an abort of its tree (CancelAsync) before its run started, or by the host closing.
         abortReason ??= outcome.AbortReason ?? runtime.GetAbortReason(session.SessionId)
@@ -335,6 +366,10 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             SessionOutcomeStatus.Failed => Result(HeadlessRunStatus.Failed, runId, outcome, usage, null, outcome.FailureMessage),
             _ => Result(HeadlessRunStatus.Failed, runId, outcome, usage, null, "The run ended without an answer."),
         };
+
+        Task<SessionOutcome> ReadOutcomeAsync() => runId is { } run
+            ? runtime.ReadOutcomeAsync(session.Descriptor, run, CancellationToken.None)
+            : runtime.ReadOutcomeSinceAsync(session.Descriptor, startedAt, CancellationToken.None);
 
         HeadlessRunResult Result(HeadlessRunStatus status, AgentRunId? run, SessionOutcome? read, SessionUsageTotals? totals, string? reason, string? message)
             => new(status, session.SessionId, run, read?.FinalMessage, reason, read?.FailureKind, message ?? read?.FailureMessage,
