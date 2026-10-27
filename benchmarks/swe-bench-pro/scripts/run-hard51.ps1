@@ -29,6 +29,10 @@ param(
     # Skips the install preflights, for example to add a job to a run whose preflight already passed.
     [switch]$SkipPreflight,
 
+    # Goes on when a model job has errored trials (a harness that failed after its patch was captured): they are
+    # listed, and the regrade grades their captured patch. A job still running or pending trials stops the run.
+    [switch]$AllowErroredTrials,
+
     [switch]$ConfirmPaidRun,
 
     [switch]$DryRun
@@ -83,12 +87,15 @@ function Format-CommandArgument {
 
 # Harbor can exit with 0 while its trials failed: the job's result.json says whether it completed cleanly.
 function Assert-HarborJobSucceeded {
-    param([string]$JobName)
+    param([string]$JobName, [switch]$AllowErrored)
     $resultPath = Join-Path (Join-Path $jobsRoot $JobName) "result.json"
     Assert-File $resultPath "Harbor result for $JobName"
     $result = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json
+    if ($AllowErrored -and [int]$result.stats.n_errored_trials -ne 0) {
+        Write-Warning "Harbor job $JobName has $($result.stats.n_errored_trials) errored trials: the regrade grades their captured patch."
+    }
     if ($null -eq $result.finished_at -or
-        [int]$result.stats.n_errored_trials -ne 0 -or
+        (-not $AllowErrored -and [int]$result.stats.n_errored_trials -ne 0) -or
         [int]$result.stats.n_running_trials -ne 0 -or
         [int]$result.stats.n_pending_trials -ne 0) {
         throw "Harbor job $JobName did not complete cleanly: completed=$($result.stats.n_completed_trials), errors=$($result.stats.n_errored_trials), running=$($result.stats.n_running_trials), pending=$($result.stats.n_pending_trials)."
@@ -230,6 +237,7 @@ function Invoke-HarborJob {
         [string[]]$AgentKwargs = @(),
         [string]$SourceJob,
         [switch]$InstallOnly,
+        [switch]$AllowErrored,
         [int]$MaxRetries
     )
 
@@ -273,7 +281,7 @@ function Invoke-HarborJob {
 
     & $harbor @arguments
     Assert-ExitCode "Harbor job $JobName"
-    Assert-HarborJobSucceeded $JobName
+    Assert-HarborJobSucceeded $JobName -AllowErrored:$AllowErrored
     Show-JobSummary $JobName
 }
 
@@ -324,6 +332,7 @@ $manifest = [ordered]@{
     codealta_dirty = $config.codealta_dirty
     codealta_requested_revision = $config.codealta_requested_revision
     codealta_args = if ([string]::IsNullOrWhiteSpace($CodeAltaArgs)) { $null } else { $CodeAltaArgs }
+    allow_errored_trials = [bool]$AllowErroredTrials
     altacli_sha256 = if ($config.PSObject.Properties["altacli_sha256"]) { $config.altacli_sha256 } else { $null }
     harbor_version = $config.harbor_version
     jobs_root = $jobsRoot
@@ -347,7 +356,7 @@ foreach ($key in $selectedRuns) {
     if ($run.Agent -eq "locked_codealta:LockedCodeAlta" -and -not [string]::IsNullOrWhiteSpace($CodeAltaArgs)) {
         $kwargs += "extra_args=$CodeAltaArgs"
     }
-    Invoke-HarborJob -JobName $jobName -Agent $run.Agent -Model $run.Model -AllowedHost $run.Host -AgentKwargs $kwargs
+    Invoke-HarborJob -JobName $jobName -Agent $run.Agent -Model $run.Model -AllowedHost $run.Host -AgentKwargs $kwargs -AllowErrored:$AllowErroredTrials
     Invoke-HarborJob -JobName "$jobName-regrade" -Agent "patch_replay:PatchReplayAgent" -Model "replay" -SourceJob (Join-Path $jobsRoot $jobName)
 }
 

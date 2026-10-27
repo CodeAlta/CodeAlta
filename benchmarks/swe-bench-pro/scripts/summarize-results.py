@@ -83,12 +83,12 @@ def task_repo(task: str) -> str:
     return f"{owner}/{repository}"
 
 
-def assert_job_complete(path: Path) -> None:
+def assert_job_complete(path: Path, allow_errored: bool = False) -> None:
     job_result = load_json(path)
     stats = job_result["stats"]
     if (
         job_result.get("finished_at") is None
-        or stats["n_errored_trials"] != 0
+        or (stats["n_errored_trials"] != 0 and not allow_errored)
         or stats["n_running_trials"] != 0
         or stats["n_pending_trials"] != 0
     ):
@@ -114,6 +114,8 @@ parser.add_argument("--bundle-root", type=Path, default=Path(__file__).resolve()
 parser.add_argument("--run-id")
 parser.add_argument("--baseline-run-id", help="takes the jobs the run lacks from this run")
 parser.add_argument("--baseline-jobs-root", type=Path, help="the jobs root of the baseline run, when it is not the jobs root")
+parser.add_argument("--allow-errored", action="store_true",
+                    help="accepts model jobs with errored trials (run-hard51.ps1 -AllowErroredTrials): their captured patch is graded, and they are listed")
 parser.add_argument("--jobs-root", type=Path)
 parser.add_argument("--benchmark-root", type=Path)
 parser.add_argument("--output-root", type=Path)
@@ -152,13 +154,16 @@ for label, (suffix, kind, model) in RUNS.items():
     for path in (model_job / "result.json", regrade_job / "result.json"):
         if not path.exists():
             raise RuntimeError(f"Missing job result: {path}")
-        assert_job_complete(path)
+        assert_job_complete(path, allow_errored=args.allow_errored and path.parent == model_job)
     sources[label] = source_run
 
     model_rows = {}
+    errored = []
     for directory in model_job.glob("instance_*"):
         record = load_json(directory / "result.json")
         task = record["task_name"].split("/")[-1]
+        if record.get("exception_info"):
+            errored.append({"task": task, "error": (record["exception_info"].get("exception_type") or "")})
         agent = record.get("agent_result") or {}
         phase = record.get("agent_execution") or {}
         model_rows[task] = {
@@ -237,6 +242,7 @@ for label, (suffix, kind, model) in RUNS.items():
         "required": required,
         "selected": selected,
         "failures": failures,
+        "errored_trials": errored,
         "input_tokens": input_tokens,
         "cache_read_tokens": cache_read,
         "cache_write_tokens": cache_write,
@@ -329,6 +335,13 @@ lines.append("| Reported cost (Harbor) | " + " | ".join(
     f"${summary[label]['reported_cost_usd']:.2f}" if summary[label]["reported_cost_usd"] is not None else "n/a"
     for label in labels
 ) + " |")
+
+errored_labels = [label for label in labels if summary[label]["errored_trials"]]
+if errored_labels:
+    lines.extend(["", "## Errored trials", "",
+                  "The harness failed in these trials after its patch was captured; the replay graded that patch.", ""])
+    for label in errored_labels:
+        lines.append(f"- {label}: " + ", ".join(f"`{item['task']}` ({item['error']})" for item in summary[label]["errored_trials"]))
 
 if pairs:
     lines.extend(["", "## Pairwise outcomes", "", "| Model | Both pass | CodeAlta only | Native only | Both fail |", "|---|---:|---:|---:|---:|"])
