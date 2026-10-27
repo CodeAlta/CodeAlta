@@ -249,11 +249,11 @@ public sealed class MobileSessionsTests
         await api.PromptAsync("a", new JsonObject { ["text"] = "Hi", ["model"] = "--global", ["permissionMode"] = "provider" }, default);
 
         var options = new[] { "--model", "opus", "--reasoning", "high", "--prompt-id", "plan", "--permission-mode", "acceptEdits" };
-        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin" }.Concat(options).Append("--queue-if-busy").ToArray(), alta.CallsOf("session send")[0],
+        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin" }.Concat(options).Concat(["--queue-if-busy", "--no-wait"]).ToArray(), alta.CallsOf("session send")[0],
             "A send that meets a turn started on the computer waits in the queue: it is never steered into it.");
         CollectionAssert.AreEqual(new[] { "session", "queue", "a", "--stdin" }.Concat(options).ToArray(), alta.CallsOf("session queue").Single());
         CollectionAssert.AreEqual(new[] { "session", "steer", "a", "--stdin" }, alta.CallsOf("session steer").Single(), "A steer joins the running turn: it takes no selection.");
-        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin", "--permission-mode", "provider", "--queue-if-busy" }, alta.CallsOf("session send")[1], "A value that looks like an option is not passed.");
+        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin", "--permission-mode", "provider", "--queue-if-busy", "--no-wait" }, alta.CallsOf("session send")[1], "A value that looks like an option is not passed.");
         Assert.AreEqual("Go on", alta.Calls.First(static call => call.Args[1] == "queue").Stdin);
     }
 
@@ -289,43 +289,111 @@ public sealed class MobileSessionsTests
     }
 
     [TestMethod]
-    public async Task Prompt_SendsFilesWithThePrompt_AndRefusesThemOnASteerOrAQueue()
+    public async Task Prompt_SendsOrQueuesFilesWithThePrompt_AndNeverSteersThem()
     {
-        string? saved = null;
+        var saved = new List<string>();
         var alta = new FakeAlta()
-            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
-            .Answer("session send", (args, stdin) =>
+            .Answer("session", (args, stdin) =>
             {
                 var list = args.ToArray();
                 var at = Array.IndexOf(list, "--attachments");
-                saved = at < 0 ? null : File.ReadAllText(list[at + 1]);
+                if (at > 0) saved.Add(File.ReadAllText(list[at + 1]));
                 Assert.AreEqual("Read this", stdin);
                 return FakeAlta.Transcript(0, new JsonObject { ["type"] = "alta.session.submitted" });
-            });
+            })
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"));
         var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()));
-        JsonObject Attachment(string name) => new() { ["title"] = name, ["mediaType"] = "text/plain", ["base64"] = "aGk=" };
+        JsonObject Attachment(string name, string base64 = "aGk+") => new() { ["title"] = name, ["mediaType"] = "text/plain", ["base64"] = base64 };
 
         var sent = await api.PromptAsync("a", new JsonObject { ["text"] = "Read this", ["attachments"] = new JsonArray(Attachment("notes.txt")) }, default);
 
         Assert.AreEqual((true, null), ((bool)sent!["ok"]!, (string?)sent["error"]));
         var send = alta.CallsOf("session send").Single();
-        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin", "--attachments" }, send.Take(5).ToArray());
-        Assert.IsFalse(send.Contains("--queue-if-busy"), "Files cannot wait in the text queue.");
-        StringAssert.Contains(saved, "notes.txt");
+        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin", "--queue-if-busy", "--no-wait", "--attachments" }, send.Take(7).ToArray(),
+            "A turn that started on the computer meanwhile gets the prompt in its queue, with its files; the answer comes once alta handed it over.");
+        Assert.AreEqual(@"[{""title"":""notes.txt"",""mediaType"":""text/plain"",""base64"":""aGk+""}]", saved[0], "The base64 is written as the phone sent it, without escaping its '+'.");
+        StringAssert.StartsWith(Path.GetFileName(send[^1]), MobileApi.AttachmentFilePrefix + Environment.ProcessId + "-", "The file names the process it waits for.");
         var path = send[^1];
         for (var wait = 0; File.Exists(path) && wait < 50; wait++) await Task.Delay(20);
         Assert.IsFalse(File.Exists(path), "The file of the command is removed when the command ends.");
 
+        var queued = await api.PromptAsync("a", new JsonObject { ["text"] = "Read this", ["mode"] = "queue", ["attachments"] = new JsonArray(Attachment("later.txt")) }, default);
+        Assert.AreEqual(true, (bool?)queued!["ok"]);
+        CollectionAssert.AreEqual(new[] { "session", "queue", "a", "--stdin", "--attachments" }, alta.CallsOf("session queue").Single().Take(5).ToArray(), "A queued prompt keeps its files.");
+
         var before = alta.Calls.Count;
-        Assert.AreEqual("Attachments go with the next prompt, once the session is idle.",
+        Assert.AreEqual("Files are not steered into a turn: they go with Send or Queue.",
             (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["mode"] = "steer", ["attachments"] = new JsonArray(Attachment("a.txt")) }, default))!["error"]);
-        Assert.AreEqual("Attachments go with the next prompt, once the session is idle.",
-            (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["mode"] = "queue", ["attachments"] = new JsonArray(Attachment("a.txt")) }, default))!["error"]);
-        Assert.AreEqual(before, alta.Calls.Count, "A steer or a queue with files is refused before alta is asked.");
-        Assert.AreEqual("An attachment needs a name, a type and its content.",
-            (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["attachments"] = new JsonArray(new JsonObject { ["title"] = "../x", ["mediaType"] = "text/plain", ["base64"] = "aGk=" }) }, default))!["error"]);
-        Assert.AreEqual("A file can be from 1 byte to 20 MB.",
-            (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["attachments"] = new JsonArray(new JsonObject { ["title"] = "empty.txt", ["mediaType"] = "text/plain", ["base64"] = "" }) }, default))!["error"]);
+        Assert.AreEqual(before, alta.Calls.Count, "A steer with files is refused before alta is asked.");
+    }
+
+    [TestMethod]
+    public async Task Prompt_RefusesWhatTheHostWouldRefuse_BeforeAltaIsAsked()
+    {
+        var alta = new FakeAlta().Answer("session status a", FakeAlta.Status("a", "p1", "personal"));
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()));
+        async Task<string?> RefusalAsync(string? text, params JsonObject[] files)
+        {
+            var body = new JsonObject { ["text"] = text, ["attachments"] = new JsonArray([.. files]) };
+            return (string?)(await api.PromptAsync("a", body, default))!["error"];
+        }
+
+        JsonObject File(string title, string base64, string mediaType = "application/octet-stream") => new() { ["title"] = title, ["mediaType"] = mediaType, ["base64"] = base64 };
+        // The canonical base64 of zeros of a size.
+        static string Of(long bytes) => new string('A', (int)(bytes / 3 * 4)) + (bytes % 3) switch { 1 => "AA==", 2 => "AAA=", _ => "" };
+
+        Assert.AreEqual("A prompt has at most 100,000 characters.", await RefusalAsync(new string('x', MobileApi.MaximumPrompt + 1), File("a.bin", "aGk=")),
+            "A long prompt with files is refused, never sent without its text.");
+        Assert.AreEqual("A prompt has at most 100,000 characters.", await RefusalAsync(new string('x', MobileApi.MaximumPrompt + 1)));
+        Assert.AreEqual("A prompt has at most 64 attachments.", await RefusalAsync("x", [.. Enumerable.Range(0, 65).Select(index => File($"f{index}.bin", "aGk="))]));
+        Assert.AreEqual("A file can be from 1 byte to 20 MB.", await RefusalAsync("x", File("big.bin", Of(20L * 1024 * 1024 + 1))));
+        Assert.AreEqual("A file can be from 1 byte to 20 MB.", await RefusalAsync("x", File("empty.bin", "")));
+        Assert.AreEqual("A prompt's files are limited to 64 MB in all.", await RefusalAsync("x", [.. Enumerable.Range(0, 4).Select(index => File($"f{index}.bin", Of(17L * 1024 * 1024)))]));
+        foreach (var invalid in new[] { "aG=k", "a===", "aGk", "aG!=", "aGl=", "aGk=aGk=" })
+            Assert.AreEqual("The content of bad.bin is not valid base64.", await RefusalAsync("x", File("bad.bin", invalid)), invalid);
+        Assert.AreEqual("An attachment needs a name, a type and its content.", await RefusalAsync("x", File("../x", "aGk=")));
+        Assert.AreEqual("An attachment needs a name, a type and its content.", await RefusalAsync("x", File("x.txt", "aGk=", "text/plain; charset=utf-8")));
+        // An image is a PNG the host reads: a JPEG named as one, or an interlaced PNG, is refused on the server too.
+        Assert.AreEqual("photo.png is not an image the host reads: an 8-bit RGB or RGBA PNG, not interlaced.",
+            await RefusalAsync("x", File("photo.png", Convert.ToBase64String([0xFF, 0xD8, 0xFF, 0xE0, .. new byte[60]]), "image/png")));
+        Assert.AreEqual("photo.png is not an image the host reads: an 8-bit RGB or RGBA PNG, not interlaced.",
+            await RefusalAsync("x", File("photo.png", Convert.ToBase64String(Png(interlaced: true)), "image/png")));
+        Assert.IsEmpty(alta.CallsOf("session send"));
+
+        alta.Answer("session send", new JsonObject { ["type"] = "alta.session.submitted" });
+        Assert.IsNull(await RefusalAsync(null, File("photo.png", Convert.ToBase64String(Png(interlaced: false)), "image/png")), "Files alone are a prompt.");
+        Assert.AreEqual("", alta.Calls.Last().Stdin);
+    }
+
+    [TestMethod]
+    public async Task Prompt_WaitsUntilAltaHandedThePromptOver_NotAFixedTime()
+    {
+        var clock = new ManualClock();
+        var handedOver = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session send", (_, _) => handedOver.Task);
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()), clock: clock, promptPatience: TimeSpan.FromMinutes(1));
+
+        var prompt = api.PromptAsync("a", new JsonObject { ["text"] = "Convert these", ["attachments"] = new JsonArray(new JsonObject { ["title"] = "a.docx", ["mediaType"] = "application/octet-stream", ["base64"] = "aGk=" }) }, default);
+        await clock.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        // The files take long to prepare (a document converted, a model checked): well after the old three seconds, the phone still waits.
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.IsFalse(prompt.IsCompleted, "The request waits for alta, not for a fixed time.");
+        handedOver.SetResult(FakeAlta.Transcript(1, new JsonObject { ["type"] = "alta.error", ["message"] = "This model does not read images." }));
+
+        var answer = await prompt.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.AreEqual((false, "This model does not read images."), ((bool?)answer!["ok"], (string?)answer["error"]), "A refusal after the files were prepared reaches the phone.");
+
+        // Only a command that hangs ends the wait, at the bound the phone and Tailscale Serve would give up at.
+        var hanging = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        alta.Answer("session send", (_, _) => hanging.Task);
+        clock.TimerCreated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiting = api.PromptAsync("a", new JsonObject { ["text"] = "Go on" }, default);
+        await clock.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.AreEqual(true, (bool?)(await waiting.WaitAsync(TimeSpan.FromSeconds(30)))!["pending"]);
+        hanging.SetResult(FakeAlta.Transcript(0));
     }
 
     [TestMethod]
@@ -371,8 +439,7 @@ public sealed class MobileSessionsTests
             Assert.AreEqual("new-1", (string?)created["id"]);
             Assert.IsNull((string?)created["sendError"]);
             var send = alta.CallsOf("session send").Single();
-            CollectionAssert.AreEqual(new[] { "session", "send", "new-1", "--stdin", "--attachments" }, send.Take(5).ToArray());
-            Assert.IsFalse(send.Contains("--queue-if-busy"));
+            CollectionAssert.AreEqual(new[] { "session", "send", "new-1", "--stdin", "--no-wait", "--attachments" }, send.Take(6).ToArray());
             for (var wait = 0; File.Exists(send[^1]) && wait < 50; wait++) await Task.Delay(20);
             Assert.IsFalse(File.Exists(send[^1]));
         }
@@ -383,44 +450,121 @@ public sealed class MobileSessionsTests
     }
 
     [TestMethod]
-    public void RemoveStaleAttachments_DeletesFilesLeftFromAnEarlierRun()
+    public void RemoveStaleAttachments_DeletesFilesLeftFromAnEarlierRun_NotThoseOfAnotherInstanceThatRuns()
     {
         var directory = Path.Combine(Path.GetTempPath(), "alta-mobile-stale-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try
         {
-            var stale = Path.Combine(directory, "alta-attach-old.json");
-            File.WriteAllText(stale, "[]");
-            var kept = Path.Combine(directory, "mobile.json");
-            File.WriteAllText(kept, "{}");
+            using var other = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("sleep", "30") { UseShellExecute = false })!;
+            string Write(string name)
+            {
+                var path = Path.Combine(directory, name);
+                File.WriteAllText(path, "[]");
+                return path;
+            }
+
+            var ended = Write($"{MobileApi.AttachmentFilePrefix}{ExitedProcessId()}-1.json");
+            var legacy = Write(MobileApi.AttachmentFilePrefix + "old.json");
+            var running = Write($"{MobileApi.AttachmentFilePrefix}{other.Id}-2.json");
+            var mine = Write($"{MobileApi.AttachmentFilePrefix}{Environment.ProcessId}-3.json");
+            var forgotten = Write($"{MobileApi.AttachmentFilePrefix}{other.Id}-4.json");
+            File.SetLastWriteTimeUtc(forgotten, DateTime.UtcNow - TimeSpan.FromDays(2));
+            var kept = Write("mobile.json");
+
             MobileApi.RemoveStaleAttachments(directory);
-            Assert.IsFalse(File.Exists(stale));
+
+            Assert.IsFalse(File.Exists(ended), "A file of a CodeAlta that ended.");
+            Assert.IsFalse(File.Exists(legacy));
+            Assert.IsTrue(File.Exists(running), "A file of the other instance (the developer one, or the normal one) waits for its command.");
+            Assert.IsTrue(File.Exists(mine), "A file of this process: the plugin restarted while a prompt was handed over.");
+            Assert.IsFalse(File.Exists(forgotten), "A day old: no command waits that long.");
             Assert.IsTrue(File.Exists(kept));
+            other.Kill();
         }
         finally
         {
             Directory.Delete(directory, recursive: true);
         }
+
+        static int ExitedProcessId()
+        {
+            using var ended = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("true") { UseShellExecute = false })!;
+            ended.WaitForExit();
+            return ended.Id;
+        }
     }
 
     [TestMethod]
-    public async Task Events_CarryTheFileNamesTheHostNamed()
+    public async Task Events_NameTheFilesWithoutTheirPaths()
     {
         var alta = new FakeAlta()
             .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
             .Answer("session events", new JsonObject
             {
                 ["type"] = "alta.session.event", ["sequenceNumber"] = 3, ["timestamp"] = "2026-10-24T10:00:00Z", ["kind"] = "user.message",
-                ["content"] = new JsonArray(new JsonObject { ["text"] = "Read these" }),
-                ["metadata"] = new JsonObject { ["attachments"] = new JsonArray("photo.png", "notes.txt") },
+                ["content"] = new JsonArray(new JsonObject
+                {
+                    ["text"] = "Read these\nLocal image (photo.png): /Users/me/.alta/sessions/2026/10/24/a.attachments/20261024-01-photo-1a2b3c4d.png"
+                        + "\r\nAttached file (notes.txt): C:\\Users\\me\\.alta\\sessions\\a.attachments\\20261024-02-notes-1a2b3c4d.txt",
+                }),
+                ["metadata"] = new JsonObject
+                {
+                    ["attachments"] = new JsonArray(
+                        new JsonObject { ["title"] = "photo.png", ["mediaType"] = "image/png", ["id"] = "20261024-01-photo-1a2b3c4d.png" },
+                        new JsonObject { ["title"] = "notes.txt", ["mediaType"] = "text/plain", ["id"] = "20261024-02-notes-1a2b3c4d.txt" },
+                        new JsonObject { ["title"] = "odd", ["mediaType"] = "text/plain", ["id"] = "../x" }),
+                },
             });
         var api = new MobileSessions(alta, new FakeSpaces(), new MobileLive());
 
         var page = await api.EventsAsync("a", 0, default);
 
         var events = (JsonArray)page!["events"]!;
-        Assert.AreEqual("Read these", (string?)events[0]!["text"]);
-        CollectionAssert.AreEqual(new[] { "photo.png", "notes.txt" }, ((JsonArray)events[0]!["attachments"]!).Select(static name => (string?)name).ToArray());
+        Assert.AreEqual("Read these", (string?)events[0]!["text"], "The phone gets the words, never the paths of this computer.");
+        CollectionAssert.AreEqual(new[] { ("photo.png", "image/png", "20261024-01-photo-1a2b3c4d.png"), ("notes.txt", "text/plain", "20261024-02-notes-1a2b3c4d.txt") },
+            ((JsonArray)events[0]!["attachments"]!).Select(static file => ((string?)file!["title"], (string?)file["mediaType"], (string?)file["id"])).ToArray(),
+            "Each file has its title, its type and an id without a folder; an id with one is left out.");
+        Assert.AreEqual("Just words\nAttached file (x): typed by the user", MobileSessions.WithoutPaths("Just words\nAttached file (x): typed by the user",
+            new JsonArray(new JsonObject { ["title"] = "x", ["id"] = "y.txt" })).Text, "A line that does not name the copy of a file stays.");
+    }
+
+    private static byte[] Png(bool interlaced)
+    {
+        using var output = new MemoryStream();
+        output.Write([137, 80, 78, 71, 13, 10, 26, 10]);
+        var header = new byte[13];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header, 1);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(4), 1);
+        header[8] = 8;
+        header[9] = 6;
+        header[12] = interlaced ? (byte)1 : (byte)0;
+        Chunk("IHDR", header);
+        using var compressed = new MemoryStream();
+        using (var zlib = new System.IO.Compression.ZLibStream(compressed, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+            zlib.Write([0, 0, 0, 0, 0]);
+        Chunk("IDAT", compressed.ToArray());
+        Chunk("IEND", []);
+        return output.ToArray();
+
+        void Chunk(string name, byte[] bytes)
+        {
+            Span<byte> length = stackalloc byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(length, bytes.Length);
+            output.Write(length);
+            var type = System.Text.Encoding.ASCII.GetBytes(name);
+            output.Write(type);
+            output.Write(bytes);
+            var crc = uint.MaxValue;
+            foreach (var b in type.Concat(bytes))
+            {
+                crc ^= b;
+                for (var bit = 0; bit < 8; bit++) crc = (crc >> 1) ^ ((crc & 1) != 0 ? 0xedb88320u : 0);
+            }
+
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(length, ~crc);
+            output.Write(length);
+        }
     }
 
     private static JsonObject Event(int sequence, string kind, string text, string? activity = null)

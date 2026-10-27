@@ -131,22 +131,16 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
                 var kind = MobileAlta.Text(record, "kind") ?? "";
                 if (kind is "host.usageupdated" or "host.modelchanged") continue;
                 var text = string.Concat((record["content"] as JsonArray ?? []).Select(static part => (string?)part?["text"] ?? ""));
-                if (text.Length > MaximumText) text = text[..MaximumText] + "…";
                 var metadata = record["metadata"] as JsonObject;
+                JsonArray? attachments = null;
+                if (kind == "user.message" && metadata?["attachments"] is JsonArray listed && listed.Count > 0) (text, attachments) = WithoutPaths(text, listed);
+                if (text.Length > MaximumText) text = text[..MaximumText] + "…";
                 var entry = new JsonObject
                 {
                     ["seq"] = sequence, ["at"] = MobileAlta.Text(record, "timestamp"), ["kind"] = kind, ["text"] = text,
                     ["activityId"] = MobileAlta.Text(metadata, "activityId"),
                 };
-                // The host already took the path lines out of the text and named the files.
-                if (kind == "user.message" && metadata?["attachments"] is JsonArray names && names.Count > 0)
-                {
-                    var attachments = new JsonArray();
-                    foreach (var name in names)
-                        if (name is JsonValue node && node.TryGetValue<string>(out var title) && title.Length > 0) attachments.Add(title);
-                    if (attachments.Count > 0) entry["attachments"] = attachments;
-                }
-
+                if (attachments is { Count: > 0 }) entry["attachments"] = attachments;
                 events.Add(entry);
             }
 
@@ -156,6 +150,36 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         }
 
         return new JsonObject { ["since"] = since, ["events"] = events, ["error"] = error };
+    }
+
+    /// <summary>
+    /// The text of a user message without the lines that name its files with their paths on this computer
+    /// (<c>Local image (title): path</c>, <c>Attached file (title): path</c>), and its files as the phone sees them: a title, a
+    /// type and the id of the saved copy (its name, without a folder), which alta lists in the metadata of the message.
+    /// </summary>
+    internal static (string Text, JsonArray Attachments) WithoutPaths(string text, JsonArray listed)
+    {
+        var attachments = new JsonArray();
+        var lines = new List<string>(text.Split('\n'));
+        var removed = false;
+        foreach (var item in listed.OfType<JsonObject>())
+        {
+            if (MobileAlta.Text(item, "title") is not { } title || MobileAlta.Text(item, "id") is not { } id || id.Contains('/') || id.Contains('\\')) continue;
+            attachments.Add(new JsonObject { ["title"] = title, ["mediaType"] = MobileAlta.Text(item, "mediaType") ?? "application/octet-stream", ["id"] = id });
+            // The last line that names it, as the host writes them.
+            for (var index = lines.Count - 1; index >= 0; index--)
+            {
+                var line = lines[index].AsSpan().TrimEnd('\r');
+                var named = line.StartsWith($"Local image ({title}): ", StringComparison.Ordinal) || line.StartsWith("Local image: ", StringComparison.Ordinal)
+                    || line.StartsWith($"Attached file ({title}): ", StringComparison.Ordinal) || line.StartsWith($"Attached file ({id}): ", StringComparison.Ordinal);
+                if (!named || !(line.EndsWith("/" + id, StringComparison.Ordinal) || line.EndsWith("\\" + id, StringComparison.Ordinal))) continue;
+                lines.RemoveAt(index);
+                removed = true;
+                break;
+            }
+        }
+
+        return (removed ? string.Join('\n', lines).TrimEnd('\r', '\n') : text, attachments);
     }
 
     // The names of the projects, the spaces, the models and the agent prompts, read at most every half minute: a page of the

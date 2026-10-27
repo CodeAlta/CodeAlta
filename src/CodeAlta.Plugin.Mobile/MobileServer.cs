@@ -64,6 +64,7 @@ internal sealed partial class MobileServer : IAsyncDisposable
 
     private readonly MobileServerOptions _options;
     private readonly MobileDiagrams _diagrams = new();
+    private readonly SemaphoreSlim _uploads = new(1, 1);
     private WebApplication? _app;
 
     internal MobileServer(MobileServerOptions options)
@@ -131,10 +132,10 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapGet("/sessions/{id}/choices", async (string id, CancellationToken ct) => Json(await _options.Api.ChoicesAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/projects", async (CancellationToken ct) => Json(await _options.Api.ProjectsAsync(ct).ConfigureAwait(false)));
         api.MapGet("/options", async (CancellationToken ct) => Json(await _options.Api.OptionsAsync(ct).ConfigureAwait(false)));
-        api.MapPost("/sessions", async (HttpRequest request, CancellationToken ct) =>
-            await BodyAsync(request, ct, MaximumPromptBody).ConfigureAwait(false) is { } body ? Json(await _options.Api.CreateAsync(body, ct).ConfigureAwait(false)) : Invalid());
-        api.MapPost("/sessions/{id}/prompt", async (string id, HttpRequest request, CancellationToken ct) =>
-            await BodyAsync(request, ct, MaximumPromptBody).ConfigureAwait(false) is { } body ? Json(await _options.Api.PromptAsync(id, body, ct).ConfigureAwait(false)) : Invalid());
+        api.MapPost("/sessions", (HttpRequest request, CancellationToken ct) =>
+            PromptBodyAsync(request, async body => await _options.Api.CreateAsync(body, ct).ConfigureAwait(false), ct));
+        api.MapPost("/sessions/{id}/prompt", (string id, HttpRequest request, CancellationToken ct) =>
+            PromptBodyAsync(request, body => _options.Api.PromptAsync(id, body, ct), ct));
         api.MapPost("/sessions/{id}/abort", async (string id, CancellationToken ct) => Json(await _options.Api.AbortAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/archive", async (string id, CancellationToken ct) => Json(await _options.Api.ArchiveAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/restore", async (string id, CancellationToken ct) => Json(await _options.Api.RestoreAsync(id, ct).ConfigureAwait(false)));
@@ -180,6 +181,23 @@ internal sealed partial class MobileServer : IAsyncDisposable
                 _options.Live.Unsubscribe(channel);
             }
         });
+    }
+
+    // A body larger than the small limit carries files: one such prompt at a time is read, written for alta and handed over,
+    // which bounds what the uploads hold in memory. A prompt of text never waits for one.
+    private async Task<IResult> PromptBodyAsync(HttpRequest request, Func<MobilePromptBody, Task<JsonObject?>> handle, CancellationToken cancellationToken)
+    {
+        var large = request.ContentLength is not { } length || length > MaximumBody;
+        if (large) await _uploads.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var body = await MobilePromptBody.ReadAsync(request, MaximumPromptBody, cancellationToken).ConfigureAwait(false);
+            return body is null ? Invalid() : Json(await handle(body).ConfigureAwait(false));
+        }
+        finally
+        {
+            if (large) _uploads.Release();
+        }
     }
 
     // The two routes that carry a prompt's files. Every other route keeps the server's small limit.

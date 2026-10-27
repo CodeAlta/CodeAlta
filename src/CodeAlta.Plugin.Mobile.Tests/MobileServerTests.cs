@@ -119,6 +119,49 @@ public sealed class MobileServerTests
         Assert.AreEqual(HttpStatusCode.BadRequest, (await fixture.PostAsync("/api/diagrams", new JsonObject { ["svg"] = "<script>alert(1)</script>" })).StatusCode);
     }
 
+    [TestMethod]
+    public async Task APromptWithFiles_MayBeLargerThanOtherRequests_AndOneIsHandledAtATime()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        await fixture.SignInAsync();
+        var first = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sends = 0;
+        fixture.Alta.Answer("session status known", FakeAlta.Status("known", "p1", "personal"))
+            .Answer("session send", (_, stdin) => Interlocked.Increment(ref sends) == 1 && stdin == "first" ? first.Task : Task.FromResult(FakeAlta.Transcript(0)));
+        JsonObject Prompt(string text, int bytes) => new()
+        {
+            ["text"] = text, ["attachments"] = new JsonArray(new JsonObject { ["title"] = "big.bin", ["mediaType"] = "application/octet-stream", ["base64"] = new string('A', bytes / 3 * 4) }),
+        };
+
+        // Two megabytes: a prompt and its files pass, the other routes keep their small limit.
+        var large = fixture.PostAsync("/api/sessions/known/prompt", Prompt("first", 2 * 1024 * 1024));
+        await WaitUntilAsync(() => fixture.Alta.CallsOf("session send").Length == 1);
+        var waiting = fixture.PostAsync("/api/sessions/known/prompt", Prompt("second", 2 * 1024 * 1024));
+        using var text = await fixture.PostAsync("/api/sessions/known/prompt", new JsonObject { ["text"] = "words" });
+        Assert.AreEqual(HttpStatusCode.OK, text.StatusCode, "A prompt of text does not wait for the files of another.");
+        Assert.AreEqual(2, fixture.Alta.CallsOf("session send").Length, "The second prompt with files waits for the first to be handed over.");
+        Assert.IsFalse(waiting.IsCompleted);
+
+        first.SetResult(FakeAlta.Transcript(0));
+        using (var answered = await large) Assert.AreEqual(HttpStatusCode.OK, answered.StatusCode);
+        using (var answered = await waiting) Assert.AreEqual(HttpStatusCode.OK, answered.StatusCode);
+        Assert.AreEqual(3, fixture.Alta.CallsOf("session send").Length);
+        Assert.AreEqual("second", fixture.Alta.Calls.Last(static call => call.Args[1] == "send").Stdin);
+
+        var login = new JsonObject { ["token"] = Token, ["padding"] = new string('x', 2 * 1024 * 1024) };
+        using var refused = await fixture.PostAsync("/api/login", login);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, refused.StatusCode, "Any other route refuses a body over 1 MB.");
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; !condition(); attempt++)
+        {
+            if (attempt > 1500) throw new TimeoutException("The condition never held.");
+            await Task.Delay(20);
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly MobileServer _server;
