@@ -126,6 +126,17 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         return Task.Run(async () =>
         {
             store.Prune();
+            // The runs that stopped while they slept wake on time, also those of an earlier start: the store is the schedule.
+            var wakes = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+            foreach (var sleeping in store.ListSleepingInterrupted())
+            {
+                if (CodeModeResume.AutoResumeTime(store, sleeping, out _) is { } wakeAt)
+                {
+                    wakes[sleeping.Id] = wakeAt;
+                    _ = ResumeAtAsync(store, sleeping.Id, wakeAt, _lifetime.Token);
+                }
+            }
+
             if (Journal is not { } journal)
             {
                 return;
@@ -133,13 +144,15 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
 
             foreach (var run in interrupted)
             {
+                var wakeAt = wakes.TryGetValue(run.Id, out var at) ? at : (DateTimeOffset?)null;
                 try
                 {
                     await journal(run.SessionId, new AgentWorkflowEvent(new ModelProviderId("codealta"), run.SessionId, DateTimeOffset.UtcNow, null, AgentWorkflowEventKind.RunEnded, run.Id)
                     {
                         CallId = run.CallId,
                         Status = "interrupted",
-                        Message = "CodeAlta ended while the script ran. It can be resumed.",
+                        Message = wakeAt is null ? "CodeAlta ended while the script ran. It can be resumed." : "CodeAlta ended while the script slept: it resumes by itself when it wakes.",
+                        WakeAt = wakeAt,
                     }).ConfigureAwait(false);
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
@@ -148,6 +161,35 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             }
         });
     }
+
+    // The one automatic resume: at the wake time of the sleep a run stopped in, its session is asked to resume it, as Resume
+    // asks, once, unless it no longer qualifies (a resume of the user took it over, its script or its calls forbid it).
+    private async Task ResumeAtAsync(CodeModeRunStore store, string runId, DateTimeOffset wakeAt, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var left = wakeAt - DateTimeOffset.UtcNow;
+            if (left > TimeSpan.Zero)
+            {
+                await Task.Delay(left, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (store.ListSleepingInterrupted().FirstOrDefault(run => run.Id == runId) is not { } run
+                || CodeModeResume.AutoResumeTime(store, run, out _) is null || _deliver is null || !store.MarkAutoResumed(runId))
+            {
+                return;
+            }
+
+            await _deliver(run.SessionId, CodeModeResume.Prompt(runId, null, all: false), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or InvalidOperationException or ObjectDisposedException or IOException)
+        {
+            // CodeAlta closes, or the session is gone: the run stays interrupted, with Resume.
+        }
+    }
+
+    // Ends the timers of the automatic resumes when the host closes.
+    private readonly CancellationTokenSource _lifetime = new();
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> ListSessionsWithRunningScripts()
@@ -448,6 +490,13 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         ForgetLater(run);
         try
         {
+            // CodeAlta closes: a run it stops is not over but interrupted. Its end is left to the next start, which marks
+            // it so, and resumes it by itself when it slept.
+            if (Volatile.Read(ref _disposed) && Store is not null && result.Status == CodeModeRunStatus.Cancelled)
+            {
+                return;
+            }
+
             if (run.Writer is { } writer)
             {
                 await writer.EndAsync(result.Status.ToString().ToLowerInvariant()).ConfigureAwait(false);
@@ -508,6 +557,8 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             _disposed = true;
             runs = [.. _runs.Values];
         }
+
+        await _lifetime.CancelAsync().ConfigureAwait(false);
 
         foreach (var run in runs)
         {
@@ -746,6 +797,18 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
             Message = record.ErrorMessage,
             DurationMs = (long)record.Duration.TotalMilliseconds,
         });
+    }
+
+    void ICodeModeRunObserver.SleepStarted(CodeModeSleep sleep)
+    {
+        Writer?.SleepStarted(sleep);
+        Record(AgentWorkflowEventKind.WaitStarted, record => record with { Status = "sleep", StepId = sleep.StepId, WakeAt = sleep.WakeAt });
+    }
+
+    void ICodeModeRunObserver.SleepEnded(CodeModeSleep sleep)
+    {
+        Writer?.SleepEnded(sleep);
+        Record(AgentWorkflowEventKind.WaitEnded, record => record with { Status = "sleep", StepId = sleep.StepId });
     }
 
     void ICodeModeRunObserver.Output(CodeModeOutputEntry entry)

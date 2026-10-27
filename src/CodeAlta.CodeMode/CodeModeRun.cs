@@ -28,6 +28,10 @@ internal sealed partial class CodeModeRun
     // The function behind workflow(): not part of the API, so no namespace shows it.
     private static readonly CodeModeFunction WorkflowFunction = new(WorkflowPath) { Parallel = true };
 
+    // The function behind sleep(): a timer of the engine, recorded so that a resume wakes when the run that slept would have.
+    private const string SleepPath = "codemode.sleep";
+    private static readonly CodeModeFunction SleepFunction = new(SleepPath) { Parallel = true };
+
     private readonly CodeModeApi _api;
     private readonly CodeModeScriptCache _cache;
     private readonly CodeModeSource _source;
@@ -243,7 +247,7 @@ internal sealed partial class CodeModeRun
     {
         Interlocked.Increment(ref _inFlight);
         var queuedAt = _clock.Elapsed;
-        var function = call.Path == WorkflowPath ? WorkflowFunction : _api.Find(call.Path);
+        var function = call.Path == WorkflowPath ? WorkflowFunction : call.Path == SleepPath ? SleepFunction : _api.Find(call.Path);
         if (function is null)
         {
             return Finish(call, queuedAt, queuedAt, CodeModeCallStatus.Failed, CodeModeCallResult.Failure(new("TypeError", $"`{call.Path}` is not a function of this session.")));
@@ -276,8 +280,9 @@ internal sealed partial class CodeModeRun
                     var running = Interlocked.Increment(ref _running);
                     UpdateMax(running);
                     startedAt = _clock.Elapsed;
-                    // The time the user takes to answer is not the script's: its time limit stops meanwhile.
-                    if (function.WaitsForUser)
+                    // The time the user takes to answer is not the script's, nor the time it sleeps: its time limit stops meanwhile.
+                    var pauses = function.WaitsForUser || ReferenceEquals(function, SleepFunction);
+                    if (pauses)
                     {
                         PauseLimit(true);
                     }
@@ -286,12 +291,13 @@ internal sealed partial class CodeModeRun
                     {
                         var result = call.Path == WorkflowPath
                             ? await RunWorkflowAsync(call, cancellation.Token).ConfigureAwait(false)
+                            : call.Path == SleepPath ? await SleepAsync(call, cancellation.Token).ConfigureAwait(false)
                             : await Task.Run(() => _handler.InvokeAsync(call, cancellation.Token).AsTask(), cancellation.Token).ConfigureAwait(false);
                         return Finish(call, queuedAt, startedAt, result.Succeeded ? CodeModeCallStatus.Succeeded : CodeModeCallStatus.Failed, result);
                     }
                     finally
                     {
-                        if (function.WaitsForUser)
+                        if (pauses)
                         {
                             PauseLimit(false);
                         }
@@ -403,6 +409,32 @@ internal sealed partial class CodeModeRun
 
             writer.WriteEndObject();
         }
+    }
+
+    // sleep(duration): a timer, which wakes when the run it resumes recorded it would. It is recorded when it starts and
+    // when it wakes: a sleep the run stopped during has no end, and a resume of the run wakes at its time.
+    private async Task<CodeModeCallResult> SleepAsync(CodeModeCall call, CancellationToken cancellationToken)
+    {
+        TimeSpan duration;
+        string? error = null;
+        using (var document = JsonDocument.Parse(call.ArgumentsJson))
+        {
+            if (!document.RootElement.TryGetProperty("duration", out var value) || !CodeModeSleep.TryParse(value, out duration, out error))
+            {
+                return CodeModeCallResult.Failure(new CodeModeCallError("TypeError", error ?? "sleep(duration): the duration is missing."));
+            }
+        }
+
+        var sleep = _space.Sleep(call.Step?.Key, call.Step?.Id, duration, DateTimeOffset.UtcNow);
+        _observer?.SleepStarted(sleep);
+        var left = sleep.WakeAt - DateTimeOffset.UtcNow;
+        if (left > TimeSpan.Zero)
+        {
+            await Task.Delay(left, cancellationToken).ConfigureAwait(false);
+        }
+
+        _observer?.SleepEnded(sleep);
+        return CodeModeCallResult.Success(null);
     }
 
     // workflow(name | { scriptPath }, args): the script runs in an engine of its own, with the same functions and the

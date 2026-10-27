@@ -84,7 +84,8 @@ public static class CodeModeResume
         }
 
         var mode = from is not null ? CodeModeReplayMode.UntilStep : options.Replay == "all" ? CodeModeReplayMode.All : CodeModeReplayMode.Resume;
-        var replay = new CodeModeReplay(run.Steps, mode, from);
+        // A sleep the run started wakes when it would have: at once when that time has passed.
+        var replay = new CodeModeReplay(run.Steps, mode, from) { Sleeps = run.Sleeps };
 
         var source = run.Source;
         if (CodeModeSource.BodyOf(code).Length > 0)
@@ -106,6 +107,42 @@ public static class CodeModeResume
         }
 
         return new CodeModeResumePlan(source, replay, run);
+    }
+
+    /// <summary>
+    /// Says whether CodeAlta resumes a run by itself: the one automatic resume, of a run that stopped while it slept, as the
+    /// script asked to go on later. It does when the run is interrupted in a sleep, its kept script is the one that ran, and no
+    /// call that may not run twice was in flight; a resume of the user, or an earlier automatic one, takes it over.
+    /// </summary>
+    /// <param name="store">The store.</param>
+    /// <param name="run">The run, as the store has it.</param>
+    /// <param name="refusal">Why it does not.</param>
+    /// <returns>When it resumes it: the wake time of its sleep; null when <paramref name="refusal"/> is set.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="store"/> or <paramref name="run"/> is null.</exception>
+    public static DateTimeOffset? AutoResumeTime(CodeModeRunStore store, CodeModeStoredRun run, out string? refusal)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(run);
+        refusal = null;
+        if (run.Status != "interrupted" || run.SleepingUntil is not { } wakeAt)
+        {
+            refusal = $"Run `{run.Id}` did not stop while it slept.";
+            return null;
+        }
+
+        if (run.AutoResumedAt is not null)
+        {
+            refusal = $"Run `{run.Id}` was already resumed by itself.";
+            return null;
+        }
+
+        if (run.Source.Length == 0 || CodeModeSource.BodyHashOf(run.Source) != run.SourceHash)
+        {
+            refusal = $"The script kept for run `{run.Id}` is not the one that ran.";
+            return null;
+        }
+
+        return TryPlan(store, run.SessionId, $"// @exec: {{\"resume\": \"{run.Id}\"}}", new CodeModeExecOptions { Resume = run.Id }, out refusal) is null ? null : wakeAt;
     }
 
     /// <summary>

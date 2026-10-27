@@ -40,6 +40,7 @@ A script is the body of an async function: it uses `await` and `return`, in plai
 | `agent(prompt, { tier, model, title, schema })` | Start a session of its own for a part of the work, and get its final answer, or the JSON value it answered with `schema`. It is a sub-agent of the session, which you can open; 8 run at once, 50 per script |
 | `session({ tier, title })` | Keep a session for several prompts: `run(prompt)` sends one, `close()` ends it |
 | `ask(question, { choices, default })` | Ask you a question and get your answer. It shows at once where the session asks its questions, also while the turn runs, one question of a script at a time. The time you take counts neither toward the script's time limit nor toward its `yield_ms`: the turn waits for your answer. In an automation, nobody is asked: the script gets an `AskError` |
+| `sleep(duration)` | Wait: milliseconds, or `"30s"`, `"5m"`, `"2h"`, `"1d"`, up to 7 days. A sleeping script goes on in the background, and the time it sleeps does not count toward its time limit. If CodeAlta closes meanwhile, the script goes on by itself when it wakes |
 | `parallel(functions, { limit })`, `pipeline(items, ...stages)` | Run work at once: a failure is `null`, and a warning in the output |
 | `workflow("name", args)`, `workflow({ scriptPath }, args)` | Run a [script of the library](#scripts-of-the-library), or a script file read with the session's own `read_file` |
 
@@ -81,6 +82,8 @@ CodeAlta Desktop and CodeAlta TUI keep each run with the result of each `step()`
 - **Rerun from this step**, in the menu of a step mark: the steps before it give their results, and that step and what follows run again.
 
 Each one asks the session of the run to call `exec` again: it runs with that session's tools and permissions. From a terminal or another session, `alta workflow resume <run-id>` does the same, with `--all` or `--from <step>`.
+
+A run that CodeAlta closed during a `sleep()` resumes by itself when it wakes, and its card says when. This is the only resume that happens without you, and only when nothing below stops it; otherwise the run waits for **Resume**. A resumed run sleeps only the rest of its sleep.
 
 A run does not resume:
 

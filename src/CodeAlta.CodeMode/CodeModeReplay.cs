@@ -136,6 +136,12 @@ public sealed class CodeModeReplay
     /// <summary>Gets the recorded steps, in the order they started.</summary>
     public IReadOnlyList<CodeModeReplayStep> Steps { get; }
 
+    /// <summary>
+    /// Gets the wake times the sleeps of the previous run recorded, by their key (<see cref="CodeModeSleep.KeyOf"/>): a sleep
+    /// of this run with one of these keys wakes at the recorded time, at once when it has passed.
+    /// </summary>
+    public IReadOnlyDictionary<string, DateTimeOffset> Sleeps { get; init; } = new Dictionary<string, DateTimeOffset>();
+
     /// <summary>Gets how steps are matched.</summary>
     public CodeModeReplayMode Mode { get; }
 

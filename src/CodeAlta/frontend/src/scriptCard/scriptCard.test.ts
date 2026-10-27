@@ -5,7 +5,7 @@ import { buildTimelineItems, execTitle, type HistoryEntry } from "../timeline";
 import { toolFamily, toolCallFromItem } from "../toolCall";
 import { groupTimelineTools } from "../toolGroups";
 import { scriptCallCounts } from "./ScriptCalls";
-import { scriptMarkState, scriptRunOffers, scriptWaitTarget } from "./scriptRunOffers";
+import { scriptMarkState, scriptRunOffers, scriptWaitTarget, wakeTime } from "./scriptRunOffers";
 
 const entry = (offset: string, changes: Partial<HistoryEntry> = {}): HistoryEntry => ({ offset,
   eventType: "activity", kind: "ToolCall", providerId: "provider", runId: "run", sessionId: "session",
@@ -146,6 +146,35 @@ test("a run that waits for the user says for what, and its step waits", () => {
   assert.equal(ended.waiting, undefined, "a run that ended waits for nothing");
   assert.equal(scriptWaitTarget("question"), ".ask-form, .ask-panel");
   assert.equal(scriptWaitTarget("approval"), ".command-permission-panel");
+});
+
+test("a sleeping run says until when, and one CodeAlta ended during a sleep says when it resumes by itself", () => {
+  const entries = [
+    ...scriptEntries().slice(0, 1),
+    record("r1", "RunStarted"),
+    record("r2", "StepStarted", { activityId: "poll" }),
+    record("r3", "WaitStarted", { activityId: "poll", phase: "sleep" }, { wakeAt: "2026-10-27T14:05:00+00:00" }),
+  ];
+  const sleeping = buildTimelineItems(entries)[0].scriptRun!;
+  const awake = buildTimelineItems([...entries, record("r4", "WaitEnded", { activityId: "poll", phase: "sleep" })])[0].scriptRun!;
+  const interrupted = buildTimelineItems([...entries, record("r4", "RunEnded", { phase: "interrupted" }, { wakeAt: "2026-10-27T14:05:00+00:00" })])[0].scriptRun!;
+  const plain = buildTimelineItems([...entries, record("r4", "RunEnded", { phase: "interrupted" })])[0].scriptRun!;
+
+  assert.deepEqual(sleeping.waiting, { kind: "sleep", stepId: "poll", text: null, until: "2026-10-27T14:05:00+00:00" });
+  assert.equal(sleeping.steps[0].status, "waiting");
+  assert.equal(awake.waiting, undefined);
+  assert.equal(interrupted.waiting, undefined);
+  assert.equal(interrupted.resumesAt, "2026-10-27T14:05:00+00:00");
+  assert.equal(plain.resumesAt, undefined, "an interrupted run that does not resume by itself waits for Resume");
+  assert.deepEqual(scriptRunOffers(interrupted), { resume: true, rerun: false, rerunFromStep: false, saveAsScript: true });
+
+  const now = new Date(2026, 9, 27, 9, 0);
+  const today = wakeTime(new Date(2026, 9, 27, 14, 5).toISOString(), now)!;
+  const later = wakeTime(new Date(2026, 9, 29, 14, 5).toISOString(), now)!;
+  assert.match(today, /14|2/u);
+  assert.ok(later.length > today.length, "another day gives its date too");
+  assert.equal(wakeTime("not a time", now), null);
+  assert.equal(wakeTime(null, now), null);
 });
 
 test("a run that ended offers a rerun with its recorded results, and a rerun from a step it recorded", () => {

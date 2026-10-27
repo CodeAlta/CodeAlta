@@ -172,6 +172,111 @@ public sealed class CodeModeRunStoreTests
         Assert.ThrowsExactly<ArgumentException>(() => CodeModeResume.Prompt("../x", null, all: false));
     }
 
+    [TestMethod]
+    public async Task ARunCodeAltaClosesWhileItSleeps_IsInterrupted_AndResumesByItselfOnceItWakes_Once()
+    {
+        using var folder = new TemporaryFolder();
+        const string Code = """await sleep("3s"); return 1;""";
+        string runId;
+        await using (var before = new CodeModeRunRegistry(null))
+        {
+            await before.UseStoreAsync(new CodeModeRunStore(folder.Path));
+            var run = before.TryStart("session-1", "Poll", 1000, "call-3", new CodeModeRunStart(Code), (observer, token) =>
+                new CodeModeHost(CodeModeApi.Empty, new CodeModeScriptCache()).RunAsync(CodeModeSource.Prepare(Code), new NoCalls(), null, observer, token), out var refusal);
+            Assert.IsNotNull(run, refusal);
+            runId = run.Id;
+            await WaitForAsync(() => new CodeModeRunStore(folder.Path).TryLoad(runId)?.SleepingUntil is not null);
+        }
+
+        // CodeAlta closed while the script slept: the run is not over, and the next start schedules its resume.
+        var kept = new CodeModeRunStore(folder.Path).TryLoad(runId)!;
+        Assert.IsNull(kept.EndedAt, "a run CodeAlta closes during has no end");
+        Assert.AreEqual(kept.SleepingUntil, kept.Sleeps["sleep#0"]);
+        var told = new List<AgentWorkflowEvent>();
+        var resumed = new TaskCompletionSource<(string Session, string Prompt)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using (var after = new CodeModeRunRegistry((session, prompt, _) => { resumed.TrySetResult((session, prompt)); return Task.CompletedTask; })
+                     { Journal = (_, record) => { lock (told) told.Add(record); return Task.CompletedTask; } })
+        {
+            await after.UseStoreAsync(new CodeModeRunStore(folder.Path)).WaitAsync(Hang);
+            var ended = told.Single();
+            Assert.AreEqual(("interrupted", kept.SleepingUntil), (ended.Status, ended.WakeAt), "its card says when it resumes by itself");
+
+            var (session, prompt) = await resumed.Task.WaitAsync(Hang);
+
+            Assert.AreEqual("session-1", session);
+            StringAssert.Contains(prompt, $"\"resume\": \"{runId}\"");
+            Assert.IsNotNull(after.Store!.TryLoad(runId)!.AutoResumedAt);
+        }
+
+        // A later start resumes it no more.
+        await using var third = new CodeModeRunRegistry((_, _, _) => throw new InvalidOperationException("resumed twice"));
+        await third.UseStoreAsync(new CodeModeRunStore(folder.Path)).WaitAsync(Hang);
+        Assert.IsEmpty(third.Store!.ListSleepingInterrupted());
+    }
+
+    [TestMethod]
+    public void AnAutomaticResume_IsRefused_ForAChangedScript_AnUnfinishedCall_OrARunThatDidNotSleep()
+    {
+        using var folder = new TemporaryFolder();
+        var now = DateTimeOffset.UtcNow;
+        var wakeAt = now.AddHours(1);
+        string[] sleeping = [$$"""{"key":"sleep#0","wakeAt":"{{wakeAt:O}}"}"""];
+        WriteRun(folder.Path, "run-ok", endedAt: now, status: "interrupted", sleeps: sleeping);
+        WriteRun(folder.Path, "run-changed", endedAt: now, status: "interrupted", sleeps: sleeping);
+        File.WriteAllText(Path.Combine(folder.Path, "run-changed", "source.js"), "return 2;");
+        WriteRun(folder.Path, "run-call", endedAt: now, status: "interrupted", sleeps: sleeping,
+            calls: ["""{"event":"started","call":"0:0","path":"tools.shell_command","args":"{\"command\":\"deploy\"}"}"""]);
+        WriteRun(folder.Path, "run-woke", endedAt: now, status: "interrupted", sleeps: [.. sleeping, """{"key":"sleep#0","ended":true}"""]);
+        var store = new CodeModeRunStore(folder.Path);
+
+        Assert.AreEqual(wakeAt, CodeModeResume.AutoResumeTime(store, store.TryLoad("run-ok")!, out _));
+        Assert.IsNull(CodeModeResume.AutoResumeTime(store, store.TryLoad("run-changed")!, out var changed));
+        StringAssert.Contains(changed, "not the one that ran");
+        Assert.IsNull(CodeModeResume.AutoResumeTime(store, store.TryLoad("run-call")!, out var call));
+        StringAssert.Contains(call, "`tools.shell_command` outside any step");
+        Assert.IsNull(CodeModeResume.AutoResumeTime(store, store.TryLoad("run-woke")!, out var woke));
+        StringAssert.Contains(woke, "did not stop while it slept");
+        CollectionAssert.AreEquivalent(new[] { "run-ok", "run-changed", "run-call" }, store.ListSleepingInterrupted().Select(static run => run.Id).ToArray());
+        // A resume of the user wakes the sleep when it would have.
+        Assert.AreEqual(wakeAt, CodeModeResume.TryPlan(store, "session-1", Resume("run-ok"), Options("run-ok"), out _)!.Replay.Sleeps["sleep#0"]);
+        Assert.IsTrue(store.MarkAutoResumed("run-ok"));
+        Assert.IsFalse(store.MarkAutoResumed("run-ok"), "once");
+        Assert.IsNull(CodeModeResume.AutoResumeTime(store, store.TryLoad("run-ok")!, out _));
+    }
+
+    [TestMethod]
+    public void Prune_KeepsARunThatWaitsToResumeByItself_UntilItResumed()
+    {
+        using var folder = new TemporaryFolder();
+        var now = new DateTimeOffset(2026, 10, 27, 12, 0, 0, TimeSpan.Zero);
+        // Older than the 14 days and than the 100 runs after it: it slept, and wakes in an hour.
+        WriteRun(folder.Path, "run-sleeping", endedAt: now.AddDays(-20), status: "interrupted",
+            sleeps: [$$"""{"key":"sleep#0","wakeAt":"{{now.AddHours(1):O}}"}"""]);
+        for (var index = 0; index <= 100; index++)
+        {
+            WriteRun(folder.Path, $"run-{index:D3}", endedAt: now.AddMinutes(-index));
+        }
+
+        var store = new CodeModeRunStore(folder.Path, maxEndedRuns: 100, maxAge: TimeSpan.FromDays(14), new FixedTime(now));
+
+        Assert.AreEqual(1, store.Prune(), "the oldest of the 101 newer runs goes");
+        Assert.IsTrue(Directory.Exists(Path.Combine(folder.Path, "run-sleeping")), "the run that resumes by itself stays, whatever its age and rank");
+        Assert.IsFalse(Directory.Exists(Path.Combine(folder.Path, "run-100")));
+        Assert.AreEqual(101, Directory.GetDirectories(folder.Path).Length);
+
+        // Once it resumed by itself, the usual retention applies.
+        Assert.IsTrue(store.MarkAutoResumed("run-sleeping"));
+        Assert.AreEqual(1, store.Prune());
+        Assert.IsFalse(Directory.Exists(Path.Combine(folder.Path, "run-sleeping")));
+        Assert.AreEqual(100, Directory.GetDirectories(folder.Path).Length);
+    }
+
+    private sealed class NoCalls : ICodeModeCallHandler
+    {
+        public ValueTask<CodeModeCallResult> InvokeAsync(CodeModeCall call, CancellationToken cancellationToken)
+            => ValueTask.FromResult(CodeModeCallResult.Failure(new CodeModeCallError("TypeError", "no call")));
+    }
+
     private static string Resume(string runId) => $"// @exec: {{\"resume\": \"{runId}\"}}";
 
     private static CodeModeExecOptions Options(string runId) => new() { Resume = runId };
@@ -181,7 +286,8 @@ public sealed class CodeModeRunStoreTests
             StoreTestJson.Default.DictionaryStringObject);
 
     // A run as a store of an earlier CodeAlta wrote it.
-    private static void WriteRun(string root, string id, DateTimeOffset? endedAt, string source = "return 1;", string[]? steps = null, string[]? calls = null)
+    private static void WriteRun(string root, string id, DateTimeOffset? endedAt, string source = "return 1;", string[]? steps = null, string[]? calls = null,
+        string? status = null, string[]? sleeps = null)
     {
         var folder = Directory.CreateDirectory(Path.Combine(root, id)).FullName;
         var info = new Dictionary<string, object>
@@ -190,13 +296,14 @@ public sealed class CodeModeRunStoreTests
             ["sessionId"] = "session-1",
             ["sourceHash"] = CodeModeSource.BodyHashOf(source),
             ["startedAt"] = (endedAt ?? DateTimeOffset.UtcNow).AddMinutes(-1).ToString("O"),
-            ["status"] = endedAt is null ? "running" : "completed",
+            ["status"] = status ?? (endedAt is null ? "running" : "completed"),
         };
         if (endedAt is { } ended) info["endedAt"] = ended.ToString("O");
         File.WriteAllText(Path.Combine(folder, "run.json"), JsonSerializer.Serialize(info, StoreTestJson.Default.DictionaryStringObject));
         File.WriteAllText(Path.Combine(folder, "source.js"), source);
         if (steps is not null) File.WriteAllLines(Path.Combine(folder, "steps.jsonl"), steps);
         if (calls is not null) File.WriteAllLines(Path.Combine(folder, "calls.jsonl"), calls);
+        if (sleeps is not null) File.WriteAllLines(Path.Combine(folder, "sleeps.jsonl"), sleeps);
     }
 
     private static async Task WaitForAsync(Func<bool> condition)

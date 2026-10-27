@@ -46,3 +46,5 @@ button.script-session:focus-visible { outline: 2px solid var(--accent); outline-
 .script-session-text strong { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .script-session-text small { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .tool-panel .script-run { margin: 0 0 12px; }
+.script-run-waiting[data-kind="sleep"] { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--accent); }
+.script-run-resumes { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11.5px; }

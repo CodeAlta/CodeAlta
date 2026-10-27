@@ -686,6 +686,12 @@ public sealed record AgentWorkflowEvent(
 
     /// <summary>Gets the run this one resumes or reruns over its recorded steps, for the start of a run.</summary>
     public string? ResumesRunId { get; init; }
+
+    /// <summary>
+    /// Gets when the run wakes: for the wait of a sleep (<see cref="AgentWorkflowEventKind.WaitStarted"/> with the status
+    /// <c>sleep</c>), and for the end of an interrupted run that resumes by itself then.
+    /// </summary>
+    public DateTimeOffset? WakeAt { get; init; }
 }
 
 /// <summary>

@@ -92,10 +92,13 @@ export type TimelineItem = Readonly<{
 
 /** A run of a script of Code Mode, from its records (`workflow` entries of the journal). */
 export type ScriptRun = Readonly<{ runId: string; status: string | null; steps: ReadonlyArray<ScriptStep>; sessions: ReadonlyArray<ScriptSession>;
-  waiting?: ScriptWait | null }>;
+  waiting?: ScriptWait | null; resumesAt?: string | null }>;
 
-/** What a running script waits for from the user: the answer of an `ask()`, or the approval of one of its calls. */
-export type ScriptWait = Readonly<{ kind: "question" | "approval"; stepId: string | null; text: string | null }>;
+/**
+ * What a running script waits for: the answer of an `ask()`, the approval of one of its calls, or the end of a `sleep()`
+ * (`until`, its wake time). A run CodeAlta ended during a sleep says in `resumesAt` when it resumes by itself.
+ */
+export type ScriptWait = Readonly<{ kind: "question" | "approval" | "sleep"; stepId: string | null; text: string | null; until?: string | null }>;
 
 /**
  * A step of a run: its state, and how long it took once ended. `key` is what a rerun from it names (`merge#1`), once ended;
@@ -312,6 +315,7 @@ function scriptRunOf(records: ReadonlyArray<HistoryEntry>): ScriptRun {
   if (known && known.count === records.length) return known.run;
   let status: string | null = "running";
   let waiting: ScriptWait | null = null;
+  let resumesAt: string | null = null;
   const steps: ScriptStep[] = [];
   const sessions: ScriptSession[] = [];
   for (const record of records) {
@@ -340,9 +344,12 @@ function scriptRunOf(records: ReadonlyArray<HistoryEntry>): ScriptRun {
       }
       case "RunEnded":
         status = record.phase ?? "completed";
+        resumesAt = status === "interrupted" ? stringAt(details, "wakeAt") : null;
         break;
       case "WaitStarted":
-        waiting = { kind: record.phase === "approval" ? "approval" : "question", stepId: record.activityId ?? null, text: record.text ?? null };
+        waiting = record.phase === "sleep"
+          ? { kind: "sleep", stepId: record.activityId ?? null, text: null, until: stringAt(details, "wakeAt") }
+          : { kind: record.phase === "approval" ? "approval" : "question", stepId: record.activityId ?? null, text: record.text ?? null };
         break;
       case "WaitEnded":
         waiting = null;
@@ -360,7 +367,7 @@ function scriptRunOf(records: ReadonlyArray<HistoryEntry>): ScriptRun {
     for (let index = 0; index < steps.length; index++) if (steps[index].status === "running") steps[index] = { ...steps[index], status: "interrupted" };
     for (let index = 0; index < sessions.length; index++) if (sessions[index].status === "running") sessions[index] = { ...sessions[index], status: "interrupted" };
   }
-  const run: ScriptRun = { runId: last.name ?? "", status, steps, sessions, ...waiting ? { waiting } : {} };
+  const run: ScriptRun = { runId: last.name ?? "", status, steps, sessions, ...waiting ? { waiting } : {}, ...resumesAt ? { resumesAt } : {} };
   scriptRuns.set(last, { count: records.length, run });
   return run;
 }

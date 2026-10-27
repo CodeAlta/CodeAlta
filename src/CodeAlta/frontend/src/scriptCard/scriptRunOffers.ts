@@ -16,6 +16,19 @@ export function scriptWaitTarget(kind: "question" | "approval"): string {
 }
 
 /**
+ * The wake time of a sleep, as the card writes it: the time alone on the day it is, the date and the time otherwise; null
+ * for a time that does not read.
+ */
+export function wakeTime(iso: string | null | undefined, now: Date = new Date()): string | null {
+  if (!iso) return null;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  const today = at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth() && at.getDate() === now.getDate();
+  return today ? at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    : at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/**
  * What the card of a run offers, once it no longer runs: Resume for a run CodeAlta ended during, Rerun with recorded results
  * for one that ended, Rerun from this step on each step it recorded, and Save as script.
  */

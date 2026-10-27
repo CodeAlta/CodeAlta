@@ -15,7 +15,7 @@ public sealed class CodeModeApi
     /// <summary>The global names of the helpers, which no namespace of an API may take.</summary>
     public static IReadOnlySet<string> ReservedNames { get; } = new[]
     {
-        "args", "console", "log", "text", "step", "meta", "workflow", "agent", "ask", "session", "parallel",
+        "args", "console", "log", "text", "step", "meta", "workflow", "agent", "ask", "sleep", "session", "parallel",
         "pipeline", "phase", "budget", "store", "load", "exit", "globalThis", "Math", "JSON", "Promise",
     }.ToFrozenSet(StringComparer.Ordinal);
 
@@ -160,6 +160,10 @@ public sealed class CodeModeApi
                 return Promise.reject(new TypeError('agent(prompt, options): options is an object, such as { tier: "quick" }.'));
               }
               return host("codemode.agent", stringify(Object.assign({}, options, { prompt }))).then(unwrap).then((reply) => reply.value !== undefined ? reply.value : reply.answer);
+            });
+            // sleep(duration): waits, in milliseconds or "30s", "5m", "2h", "1d"; a run CodeAlta ended during wakes on time.
+            global("sleep", function (duration) {
+              return host("codemode.sleep", stringify({ duration: duration === undefined ? null : duration })).then(unwrap).then(() => undefined);
             });
             // ask(question, { choices, default }): a question to the user, where the session asks; resolves with the answer.
             global("ask", function (question, options) {

@@ -112,4 +112,12 @@ public interface ICodeModeRunObserver
     /// <summary>The script wrote output.</summary>
     /// <param name="entry">The output.</param>
     void Output(CodeModeOutputEntry entry) { }
+
+    /// <summary>The script started a sleep (<c>sleep(duration)</c>), which wakes at <see cref="CodeModeSleep.WakeAt"/>.</summary>
+    /// <param name="sleep">The sleep.</param>
+    void SleepStarted(CodeModeSleep sleep) { }
+
+    /// <summary>A sleep woke. A sleep the run stopped during does not end.</summary>
+    /// <param name="sleep">The sleep.</param>
+    void SleepEnded(CodeModeSleep sleep) { }
 }

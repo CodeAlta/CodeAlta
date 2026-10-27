@@ -66,6 +66,15 @@ public sealed record CodeModeStoredRun(string Id, string SessionId)
 
     /// <summary>Gets the calls that started and did not end, of functions that are not idempotent.</summary>
     public IReadOnlyList<CodeModeStoredCall> InFlightCalls { get; init; } = [];
+
+    /// <summary>Gets the wake times of the sleeps the run started, by their key (<see cref="CodeModeSleep.KeyOf"/>).</summary>
+    public IReadOnlyDictionary<string, DateTimeOffset> Sleeps { get; init; } = new Dictionary<string, DateTimeOffset>();
+
+    /// <summary>Gets when the run wakes, when it slept as it stopped: the latest wake time of its sleeps that did not end; null otherwise.</summary>
+    public DateTimeOffset? SleepingUntil { get; init; }
+
+    /// <summary>Gets when CodeAlta resumed the run by itself, at the end of the sleep it stopped in; null when it did not.</summary>
+    public DateTimeOffset? AutoResumedAt { get; init; }
 }
 
 /// <summary>
@@ -73,7 +82,8 @@ public sealed record CodeModeStoredRun(string Id, string SessionId)
 /// <c>codemode/runs/&lt;run-id&gt;/</c> of the state root, <c>run.json</c>, <c>source.js</c>, <c>steps.jsonl</c> (one line per
 /// step that ended, with its result) and <c>calls.jsonl</c> (the start and the end of each call that is not idempotent).
 /// A run writes as it goes, in order, off the thread of its script. The store keeps the 100 most recent runs that ended,
-/// for 14 days at most. A host whose state is thrown away (<c>altacli</c>) keeps none.
+/// for 14 days at most, and a run that waits to resume by itself after a sleep until it did. A host whose state is thrown
+/// away (<c>altacli</c>) keeps none.
 /// </summary>
 public sealed class CodeModeRunStore
 {
@@ -81,6 +91,7 @@ public sealed class CodeModeRunStore
     private const string SourceFile = "source.js";
     private const string StepsFile = "steps.jsonl";
     private const string CallsFile = "calls.jsonl";
+    private const string SleepsFile = "sleeps.jsonl";
     private const int MaxArgumentCharacters = 160;
 
     private readonly int _maxEndedRuns;
@@ -157,6 +168,8 @@ public sealed class CodeModeRunStore
                 Source = File.Exists(sourcePath) ? File.ReadAllText(sourcePath) : string.Empty,
                 Steps = ReadSteps(Path.Combine(folder, StepsFile)),
                 InFlightCalls = ReadInFlightCalls(Path.Combine(folder, CallsFile)),
+                Sleeps = ReadSleeps(Path.Combine(folder, SleepsFile), out var sleepingUntil),
+                SleepingUntil = sleepingUntil,
             };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -185,7 +198,7 @@ public sealed class CodeModeRunStore
                 }
 
                 // It ended when it last wrote.
-                var endedAt = new[] { RunFile, StepsFile, CallsFile }.Select(name => Path.Combine(folder, name)).Where(File.Exists)
+                var endedAt = new[] { RunFile, StepsFile, CallsFile, SleepsFile }.Select(name => Path.Combine(folder, name)).Where(File.Exists)
                     .Select(static path => new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero)).DefaultIfEmpty(_time.GetUtcNow()).Max();
                 var ended = info with { EndedAt = endedAt, Status = "interrupted" };
                 WriteInfo(folder, ended);
@@ -199,16 +212,23 @@ public sealed class CodeModeRunStore
         return marked;
     }
 
-    /// <summary>Removes the runs that ended beyond the retention: past the most recent ones it keeps, or too old.</summary>
+    /// <summary>
+    /// Removes the runs that ended beyond the retention: past the most recent ones it keeps, or too old. A run that waits to
+    /// resume by itself after a sleep (<see cref="CodeModeResume.AutoResumeTime"/>) is kept until it resumed or no longer qualifies.
+    /// </summary>
     /// <returns>How many runs it removed.</returns>
     public int Prune()
     {
+        // A run that waits to resume by itself after its sleep is kept, whatever its age and rank, until it resumed or no
+        // longer qualifies; it does not take the place of another run meanwhile.
+        var waking = ListSleepingInterrupted().Where(run => CodeModeResume.AutoResumeTime(this, run, out _) is not null)
+            .Select(static run => run.Id).ToHashSet(StringComparer.Ordinal);
         var ended = new List<(string Folder, DateTimeOffset EndedAt)>();
         foreach (var folder in Folders())
         {
             try
             {
-                if (ReadInfo(folder) is { EndedAt: { } endedAt })
+                if (ReadInfo(folder) is { EndedAt: { } endedAt } info && !waking.Contains(info.Id))
                 {
                     ended.Add((folder, endedAt));
                 }
@@ -298,6 +318,7 @@ public sealed class CodeModeRunStore
                 StartedAt = Time(root, "startedAt") ?? DateTimeOffset.MinValue,
                 EndedAt = Time(root, "endedAt"),
                 Status = Text(root, "status") ?? "running",
+                AutoResumedAt = Time(root, "autoResumedAt"),
             };
         }
         catch (JsonException)
@@ -326,6 +347,10 @@ public sealed class CodeModeRunStore
             }
 
             writer.WriteString("status", info.Status);
+            if (info.AutoResumedAt is { } resumedAt)
+            {
+                writer.WriteString("autoResumedAt", resumedAt);
+            }
             writer.WriteEndObject();
         }
 
@@ -361,6 +386,88 @@ public sealed class CodeModeRunStore
         }
 
         return [.. steps.Values.OrderBy(static step => step.Index)];
+    }
+
+    /// <summary>
+    /// Lists the interrupted runs that resume by themselves: they stopped while they slept, and CodeAlta has not resumed them
+    /// yet, by itself or because a run resumes them.
+    /// </summary>
+    /// <returns>The runs, the soonest to wake first.</returns>
+    public IReadOnlyList<CodeModeStoredRun> ListSleepingInterrupted()
+    {
+        var infos = new List<CodeModeStoredRun>();
+        foreach (var folder in Folders())
+        {
+            try
+            {
+                if (ReadInfo(folder) is { } info)
+                {
+                    infos.Add(info);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+
+        var resumed = infos.Select(static info => info.ResumesRunId).OfType<string>().ToHashSet(StringComparer.Ordinal);
+        return [.. infos.Where(info => info.Status == "interrupted" && info.AutoResumedAt is null && !resumed.Contains(info.Id))
+            .Select(info => TryLoad(info.Id)).OfType<CodeModeStoredRun>().Where(static run => run.SleepingUntil is not null)
+            .OrderBy(static run => run.SleepingUntil)];
+    }
+
+    /// <summary>Records that CodeAlta resumed a run by itself, so that it never does it twice.</summary>
+    /// <param name="runId">The run.</param>
+    /// <returns>True when it was recorded now; false when the run is unknown or was already resumed.</returns>
+    public bool MarkAutoResumed(string runId)
+    {
+        if (!IsRunId(runId))
+        {
+            return false;
+        }
+
+        var folder = Path.Combine(Root, runId);
+        try
+        {
+            if (ReadInfo(folder) is not { AutoResumedAt: null } info)
+            {
+                return false;
+            }
+
+            WriteInfo(folder, info with { AutoResumedAt = _time.GetUtcNow() });
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    // The sleeps of a run: a line when one starts, with its wake time, and one when it wakes.
+    private static Dictionary<string, DateTimeOffset> ReadSleeps(string path, out DateTimeOffset? sleepingUntil)
+    {
+        var sleeps = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        var open = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        foreach (var line in Lines(path))
+        {
+            if (Parse(line) is not { } root || Text(root, "key") is not { } key)
+            {
+                continue;
+            }
+
+            if (Time(root, "wakeAt") is { } wakeAt)
+            {
+                sleeps[key] = wakeAt;
+                open[key] = wakeAt;
+            }
+            else if (root.TryGetProperty("ended", out var ended) && ended.ValueKind == JsonValueKind.True)
+            {
+                open.Remove(key);
+            }
+        }
+
+        sleepingUntil = open.Count == 0 ? null : open.Values.Max();
+        return sleeps;
     }
 
     private static List<CodeModeStoredCall> ReadInFlightCalls(string path)
@@ -522,6 +629,20 @@ public sealed class CodeModeRunStore
                 writer.WriteString("args", Shorten(call.ArgumentsJson));
             })));
         }
+
+        public void SleepStarted(CodeModeSleep sleep)
+            => Enqueue(() => File.AppendAllText(Path.Combine(_folder, SleepsFile), Line(writer =>
+            {
+                writer.WriteString("key", sleep.Key);
+                writer.WriteString("wakeAt", sleep.WakeAt);
+            })));
+
+        public void SleepEnded(CodeModeSleep sleep)
+            => Enqueue(() => File.AppendAllText(Path.Combine(_folder, SleepsFile), Line(writer =>
+            {
+                writer.WriteString("key", sleep.Key);
+                writer.WriteBoolean("ended", true);
+            })));
 
         public void CallEnded(CodeModeCallRecord record)
         {

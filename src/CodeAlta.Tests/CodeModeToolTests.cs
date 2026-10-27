@@ -644,6 +644,28 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task ASleepingScript_GoesToTheBackground_AtTheYieldOfExec()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var (exec, _) = Create(root.Path, runs);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await InvokeAsync(exec, """
+            // @exec: {"yield_ms": 1500}
+            await sleep("1h");
+            return 1;
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        Assert.IsLessThan(TimeSpan.FromSeconds(30), clock.Elapsed, "the turn does not wait for the sleep");
+        var run = runs.FindAny(runs.List("session-1").Single().Id)!;
+        Assert.IsTrue(run.Running);
+        Assert.IsTrue(run.Backgrounded, "a sleeping script goes on in the background");
+        run.Stop();
+    }
+
+    [TestMethod]
     public async Task AltaWorkflowResume_ChecksTheRunAndTheCaller_BeforeItAsksTheSession()
     {
         using var root = TestTempDirectory.Create();

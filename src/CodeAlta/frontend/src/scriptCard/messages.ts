@@ -19,6 +19,9 @@ export const scriptCardMessages = {
     "Das Skript erneut ausführen: Jeder aufgezeichnete Schritt liefert sein Ergebnis, nur der übrige Code läuft.",
     "スクリプトを再実行します。記録された各ステップは結果を返し、残りのコードだけが実行されます。",
     "重新运行脚本：每个已记录的步骤返回其结果，只运行其余代码。"],
+  "Sleeps until {time}": ["Duerme hasta las {time}", "Dort jusqu’à {time}", "Schläft bis {time}", "{time} まで待機中", "休眠至 {time}"],
+  "Sleeps": ["Duerme", "Dort", "Schläft", "待機中", "休眠中"],
+  "Resumes by itself at {time}": ["Se reanuda sola a las {time}", "Reprend d’elle-même à {time}", "Wird um {time} von selbst fortgesetzt", "{time} に自動で再開します", "将于 {time} 自动继续"],
   "Waits for your approval": ["Espera tu aprobación", "Attend votre approbation", "Wartet auf Ihre Freigabe", "承認を待っています", "等待你的批准"],
   "Recorded result": ["Resultado registrado", "Résultat enregistré", "Aufgezeichnetes Ergebnis", "記録された結果", "已记录的结果"],
 } as const;

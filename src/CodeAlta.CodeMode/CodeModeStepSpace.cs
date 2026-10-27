@@ -12,7 +12,34 @@ internal sealed class CodeModeStepSpace
     private readonly CodeModeReplay.Cursor? _cursor;
     private int _count;
 
-    public CodeModeStepSpace(CodeModeReplay? replay) => _cursor = replay?.Start();
+    private readonly Dictionary<string, int> _sleeps = new(StringComparer.Ordinal);
+    private readonly IReadOnlyDictionary<string, DateTimeOffset>? _recordedSleeps;
+
+    public CodeModeStepSpace(CodeModeReplay? replay)
+    {
+        _cursor = replay?.Start();
+        _recordedSleeps = replay?.Sleeps;
+    }
+
+    /// <summary>
+    /// A sleep starts: its key counts the sleeps of its step path before it, and it wakes when the replayed run recorded it
+    /// would, or after its duration.
+    /// </summary>
+    /// <param name="stepKey">The key of the step it sleeps in, or null.</param>
+    /// <param name="stepId">The id of that step, or null.</param>
+    /// <param name="duration">How long it sleeps when the replay recorded nothing for it.</param>
+    /// <param name="now">The time now.</param>
+    public CodeModeSleep Sleep(string? stepKey, string? stepId, TimeSpan duration, DateTimeOffset now)
+    {
+        lock (_gate)
+        {
+            var context = stepKey ?? string.Empty;
+            var occurrence = _sleeps.GetValueOrDefault(context);
+            _sleeps[context] = occurrence + 1;
+            var key = CodeModeSleep.KeyOf(stepKey, occurrence);
+            return new CodeModeSleep(key, stepId, _recordedSleeps?.TryGetValue(key, out var recorded) == true ? recorded : now + duration);
+        }
+    }
 
     /// <summary>
     /// A step starts: its key counts the steps of its full id (<c>lib#0/read</c>) started before it. It runs, or the replay
