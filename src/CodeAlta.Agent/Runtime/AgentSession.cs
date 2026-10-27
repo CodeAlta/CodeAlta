@@ -1102,8 +1102,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             var toolDiff = toolFileChangeTracker?.CreateUnifiedDiff();
 
             // An image the tool returned is checked, resized when needed and saved beside the journal. The value meant for
-            // scripts is neither sent to the model nor journaled: a direct call of the model has no use for it.
-            result = await _toolImages.PrepareAsync(result with { Structured = null }, run.ModelInfo, cancellationToken).ConfigureAwait(false);
+            // scripts is neither sent to the model nor journaled: a direct call of the model has no use for it. The text
+            // meant for the user (the whole output of a command the model has the head and tail of) is its output alone.
+            var display = result.Display;
+            result = await _toolImages.PrepareAsync(result with { Structured = null, Display = null }, run.ModelInfo, cancellationToken).ConfigureAwait(false);
             var modelVisibleResult = CreateModelVisibleToolResult(
                 toolCall,
                 result,
@@ -1165,7 +1167,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 AgentContentKind.ToolOutput,
                 toolOutputContentId,
                 toolCall.CallId,
-                RenderToolResult(result),
+                display ?? RenderToolResult(result),
                 CreateToolResultDetails(toolCall, withoutApp, _summary.ExecutionDirectory, toolDiff));
             // The tools the call loaded into the session are journaled with it, in a form no provider owns, so that a
             // resumed session, whatever its provider, loads them again.
@@ -1315,7 +1317,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         string? diff,
         string outputContentId)
     {
-        var recorded = BoundNestedResult(result with { Structured = null, App = null });
+        var recorded = BoundNestedResult(result with { Structured = null, App = null, Display = null });
         var details = NestedDetails(CreateToolResultDetails(toolCall, recorded, _summary.ExecutionDirectory, diff), call);
         var completed = new AgentActivityEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentActivityKind.ToolCall,
             result.Success ? AgentActivityPhase.Completed : AgentActivityPhase.Failed, toolCall.CallId, parent.CallId, name, result.Error, details);
@@ -2076,6 +2078,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DisabledTools = _options.DisabledBuiltInTools,
             WriteGuard = _options.WriteGuard,
             CommandGuard = _options.CommandGuard,
+            // The whole of a long output goes beside the journal, and goes with the session.
+            ResolveToolOutputDirectoryAsync = _store is IAgentSessionAttachmentStore attachments
+                ? async cancellationToken => await attachments.GetAttachmentDirectoryAsync(SessionId, cancellationToken).ConfigureAwait(false) is { } folder
+                    ? Path.Combine(folder, "tool-output")
+                    : null
+                : null,
         };
         var builtIns = AgentBuiltInToolFactory.CreateDefaultTools(toolOptions);
         if (_options.BuiltInToolRouter is { } router) builtIns = router.Route(toolOptions, builtIns);
@@ -2218,7 +2226,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         IReadOnlyList<AgentConversationMessage> conversation,
         AgentSessionUsage? previousUsage,
         AgentSessionUsage? usage,
-        bool providerKeepsContext)
+        bool providerKeepsContext,
+        bool usageIsIncremental)
     {
         if (usage is null)
         {
@@ -2231,8 +2240,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
 
         // A provider that keeps the context counts all of it with each request, and trims it by itself (it clears
-        // old tool results, it compacts): a count smaller than the one before is what it holds now.
-        var usageForEstimate = providerKeepsContext ? usage : SelectUsageForConversationEstimate(previousUsage, usage, conversation.Count);
+        // old tool results, it compacts): a count smaller than the one before is what it holds now. A request that
+        // carried the whole conversation is counted whole too, even below the local estimate made before it (which
+        // over-counts on some models). Only a request that continued a response the provider kept may count no more
+        // than its tail: the larger count of the conversation stands then.
+        var usageForEstimate = providerKeepsContext || !usageIsIncremental
+            ? usage
+            : SelectUsageForConversationEstimate(previousUsage, usage, conversation.Count);
         var estimate = AgentTokenEstimator.EstimatePromptTokens(
             systemMessage,
             developerInstructions,
@@ -2515,7 +2529,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             providerConversation.Messages,
             _state.Usage,
             response.Usage,
-            providerKeepsContext: _turnExecutor is IAgentProviderCompaction);
+            providerKeepsContext: _turnExecutor is IAgentProviderCompaction,
+            usageIsIncremental: response.UsageIsIncremental);
 
         _state = _state with
         {

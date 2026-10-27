@@ -57,6 +57,8 @@ A script is the body of an async function: it uses `await` and `return`, in plai
 | `workflow("name", args)`, `workflow({ scriptPath }, args)` | Run a [script of the library](#scripts-of-the-library), or a script file read with the session's own `read_file` |
 | `store(key, value)`, `load(key)` | Keep a JSON value for the later scripts of the session, and read it back (`undefined` when there is none; `store(key, undefined)` removes it). A value takes at most 64 KB, the values of a session 1 MB. A step that a rerun replays does not store again. In `altacli`, a value lasts as long as its run |
 
+A script receives the whole result of a call, such as all the output of a command or every line of a read, not the [part an agent is given](../workspace/prompt.md#tool-calls).
+
 A call has the permissions of the session: a tool turned off is missing, a command that needs your approval asks, and a [sandboxed session](sandbox.md) runs its calls in its sandbox. Commands that wait for your answer, such as `alta ask`, are not available to scripts: they use `ask()`.
 
 A script that went on in the background still asks for its approvals in its session, as during the turn. Its card says that it waits for your answer or your approval, and **Open** shows where to give it.

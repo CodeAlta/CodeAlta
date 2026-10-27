@@ -185,6 +185,14 @@ A tool call has one tile showing the tool, what it works on, its state and its o
 
 The line under the title gives the duration, the exit code and the lines changed. **Details** shows the raw arguments and result. In CodeAlta TUI, a tile opens a dialog with the details and output.
 
+The agent gets a bounded part of a long result, which stays in every later request:
+
+- **a command** that prints more than 30,000 characters: the start and the end of its output, and the path of a file of the session that holds all of it, for the agent to read;
+- **a file read**: lines cut at 2,000 characters, and at most 100,000 characters, with the line to read on from;
+- **a search**: matching lines cut at 500 characters around the match, and at most 30,000 characters.
+
+The window of a command still shows you its whole output.
+
 ## System prompts
 
 The timeline has a line for the system prompt of the session, and one each time it changes, with the agent prompt, its size in tokens and the lines changed. In CodeAlta Desktop, click it: **Changes** compares it with the one before, and **Prompt** shows what was sent, with a button to copy it as Markdown.

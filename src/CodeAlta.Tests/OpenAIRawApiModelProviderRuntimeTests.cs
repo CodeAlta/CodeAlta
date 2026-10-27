@@ -136,7 +136,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Assistant && e.Content == "Inspection complete."));
         var usageEvent = history.OfType<AgentSessionUpdateEvent>().Last(static e => e.Kind == AgentSessionUpdateKind.UsageUpdated);
         Assert.IsNotNull(usageEvent.Usage);
-        Assert.IsTrue(usageEvent.Usage.CurrentTokens > 33L);
+        // The request carried the whole conversation: its count is the size of the context, below the local estimate.
+        Assert.AreEqual(33L, usageEvent.Usage.CurrentTokens);
         Assert.AreEqual(33L, usageEvent.Usage.LastOperation?.InputTokens + usageEvent.Usage.LastOperation?.OutputTokens);
         Assert.AreEqual(200000L, usageEvent.Usage.TokenLimit);
         Assert.AreEqual(4, usageEvent.Usage.MessageCount);
@@ -226,7 +227,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Assistant && e.Content == "OpenAI chat answer."));
         var usageEvent = history.OfType<AgentSessionUpdateEvent>().Single(static e => e.Kind == AgentSessionUpdateKind.UsageUpdated);
         Assert.IsNotNull(usageEvent.Usage);
-        Assert.IsTrue(usageEvent.Usage.CurrentTokens > 18L);
+        Assert.AreEqual(18L, usageEvent.Usage.CurrentTokens);
         Assert.AreEqual(18L, usageEvent.Usage.LastOperation?.InputTokens + usageEvent.Usage.LastOperation?.OutputTokens);
         Assert.AreEqual(128000L, usageEvent.Usage.TokenLimit);
         Assert.AreEqual(2, usageEvent.Usage.MessageCount);
@@ -4588,11 +4589,14 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ],
         };
 
-        _ = await executor.ExecuteTurnAsync(
+        var secondResponse = await executor.ExecuteTurnAsync(
                 secondRequest,
                 static (_, _) => ValueTask.CompletedTask)
             .ConfigureAwait(false);
 
+        // Only the continuation sent no more than the new input: its usage may count no more than that.
+        Assert.IsFalse(firstResponse.UsageIsIncremental);
+        Assert.IsTrue(secondResponse.UsageIsIncremental);
         Assert.AreEqual(2, webSocketSession.Requests.Count);
         Assert.IsNull(webSocketSession.Requests[0].PreviousResponseId);
         Assert.IsNull(webSocketSession.Requests[0].ReconnectPreviousResponseId);
@@ -4668,11 +4672,12 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ],
         };
 
-        _ = await executor.ExecuteTurnAsync(
+        var secondResponse = await executor.ExecuteTurnAsync(
                 secondRequest,
                 static (_, _) => ValueTask.CompletedTask)
             .ConfigureAwait(false);
 
+        Assert.IsFalse(secondResponse.UsageIsIncremental);
         Assert.AreEqual(7, webSocketSession.Requests.Count);
         Assert.AreEqual("response-ws-fallback-live-1", webSocketSession.Requests[1].PreviousResponseId);
         Assert.AreEqual(1, responsesClient.Requests.Count);
