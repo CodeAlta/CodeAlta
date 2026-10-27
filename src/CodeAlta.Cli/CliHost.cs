@@ -85,6 +85,9 @@ internal sealed class CliHost : IAsyncDisposable
 
     public CodeAltaHost Host { get; }
 
+    /// <summary>Gets what models.dev knows of the models: their limits and their public prices.</summary>
+    public ModelsDevCatalogService ModelsDev => _modelsDev;
+
     /// <summary>Gets the dispatcher of the <c>alta</c> commands, the one of the <c>alta</c> tool of the sessions.</summary>
     public AltaCommandDispatcher Alta { get; }
 
