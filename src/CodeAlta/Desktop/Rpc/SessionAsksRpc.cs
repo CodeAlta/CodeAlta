@@ -139,7 +139,7 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
     {
         if (reviews is null || projects is null || target.ProjectId is not { } projectId) return null;
         var project = await projects.GetByIdAsync(projectId, token).ConfigureAwait(false);
-        return project is null ? null : new ReviewScope(project, target.Checkout);
+        return project is null ? null : ReviewService.ScopeOf(project, target.Checkout);
     }
 
     // A round the session did not get is undone; a cancelled request is forgotten. A dispatch whose outcome is not

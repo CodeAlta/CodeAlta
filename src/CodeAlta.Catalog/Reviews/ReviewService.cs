@@ -660,17 +660,74 @@ public sealed class ReviewService
     /// <param name="scope">The checkout.</param>
     /// <param name="cancellationToken">Stops the work.</param>
     /// <returns>True when the last diff round approved and its snapshot is the work tree now.</returns>
+    /// <exception cref="ReviewException">The checkout is not one of the project.</exception>
     public async Task<bool> IsApprovedAsync(ReviewScope scope, CancellationToken cancellationToken)
+        => await GetApprovalAsync(scope, cancellationToken).ConfigureAwait(false) is { Current: true };
+
+    /// <summary>
+    /// Gets the last approval of the changes of a checkout, with the work tree as it is now: an approval holds until
+    /// a file of the work tree changes, whatever is committed meanwhile.
+    /// </summary>
+    /// <param name="scope">The checkout.</param>
+    /// <param name="cancellationToken">Stops the work.</param>
+    /// <returns>The approval, or null when the last round of a diff of the checkout did not approve (or there was none).</returns>
+    /// <exception cref="ReviewException">The checkout is not one of the project.</exception>
+    public async Task<ReviewApproval?> GetApprovalAsync(ReviewScope scope, CancellationToken cancellationToken)
     {
         var (data, _) = Load(Store(scope));
         var last = data.Rounds.LastOrDefault(static round => ReviewTargets.IsDiff(round.Target));
-        if (last is not { Verdict: ReviewVerdicts.Approved, Snapshot: { } approved })
+        if (last is not { Verdict: ReviewVerdicts.Approved, Snapshot: not null })
         {
-            return false;
+            return null;
         }
 
-        var now = await _text.SnapshotAsync(scope, cancellationToken).ConfigureAwait(false);
-        return string.Equals(now, approved, StringComparison.Ordinal);
+        return new(last, await _text.SnapshotAsync(scope, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>Lists the files of a checkout that changed since an approval that no longer holds.</summary>
+    /// <param name="scope">The checkout.</param>
+    /// <param name="approval">What <see cref="GetApprovalAsync"/> returned.</param>
+    /// <param name="cancellationToken">Stops the work.</param>
+    /// <returns>The paths, relative to the root of the checkout; empty when the approval holds or they cannot be listed.</returns>
+    public Task<IReadOnlyList<string>> ChangedSinceApprovalAsync(ReviewScope scope, ReviewApproval approval, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(approval);
+        return approval.Current || approval.WorkTree is not { } now || approval.Round.Snapshot is not { } approved
+            ? Task.FromResult<IReadOnlyList<string>>([])
+            : _text.ChangedPathsAsync(scope, approved, now, cancellationToken);
+    }
+
+    /// <summary>
+    /// Gets the scope of the checkout a folder is in: the project folder for a folder of the project's own checkout,
+    /// else the root of the worktree it is in. A session, an agent and the window may name a folder below the root
+    /// of a worktree; all of them then read and write the same reviews.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <param name="folder">The folder; null for the project folder.</param>
+    /// <returns>The scope. A folder that does not exist, or is in no checkout, is kept as it is named.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
+    public static ReviewScope ScopeOf(ProjectDescriptor project, string? folder)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        if (folder is null || SameFolder(folder, project.ProjectPath)) return new(project, null);
+        try
+        {
+            // A folder that is gone is in no checkout any more: the nearest one above it would be another one.
+            if (!Path.IsPathFullyQualified(folder) || !Directory.Exists(folder) || GitWorktreeService.FindCheckoutRoot(folder) is not { } root)
+            {
+                return new(project, folder);
+            }
+
+            var home = GitWorktreeService.FindCheckoutRoot(project.ProjectPath);
+            return SameFolder(root, project.ProjectPath) || home is not null && SameFolder(root, home)
+                ? new(project, null)
+                : new(project, Path.TrimEndingDirectorySeparator(root));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException)
+        {
+            return new(project, folder);
+        }
     }
 
     /// <summary>Lists the checkouts of a project that keep reviews, and whether their folder still exists.</summary>

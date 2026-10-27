@@ -315,7 +315,7 @@ internal sealed class AskModeCoordinator : IDisposable
             return (null, null);
         }
 
-        var scope = new ReviewScope(project, target.Checkout);
+        var scope = ReviewService.ScopeOf(project, target.Checkout);
         foreach (var comment in snapshot?.Comments ?? [])
         {
             await _reviews.AddThreadAsync(scope, new ReviewThreadDraft(ReviewTargets.File, target.Path, ReviewSides.New, comment.Line, comment.Line, comment.Text), CancellationToken.None);

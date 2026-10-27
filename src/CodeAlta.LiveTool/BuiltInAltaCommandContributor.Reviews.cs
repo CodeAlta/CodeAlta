@@ -69,7 +69,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add(async (_, _) => await HandleReviewStatusAsync(context, project).ConfigureAwait(false));
         AddHelpText(
             command,
-            "`beforeCommit` is true when the user reviews the changes before they are committed: then do not commit before a review approved them. `approvedSnapshotMatches` says whether the work tree is still the one the last review approved: only then may it be committed.",
+            "`beforeCommit` is true when the user reviews the changes before they are committed: then do not commit before a review approved them. `approvedSnapshotMatches` says whether the work tree is still the one the last review approved: only then may it be committed; otherwise `changedSinceApproval` lists the files that changed since.",
             "Example: `alta review status`.");
         return command;
     }
@@ -131,8 +131,10 @@ internal sealed partial class BuiltInAltaCommandContributor
             return (null, exitCode);
         }
 
+        // The root of the worktree the caller works in, also from a folder below it: the commit guard and the window
+        // name the same checkout.
         var checkout = NormalizeOptionalText(projectRef) is null ? CallerWorktree(context, project) : null;
-        return (new ReviewScope(project, checkout), AltaExitCodes.Success);
+        return (ReviewService.ScopeOf(project, checkout), AltaExitCodes.Success);
     }
 
     private static int ReviewError(AltaCommandContext context, ReviewException exception, string command)
@@ -330,9 +332,15 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         var last = reviews.LastRound(scope, null);
         var lastDiff = state.Rounds.LastOrDefault(static round => ReviewTargets.IsDiff(round.Target));
+        var approval = lastDiff is { Verdict: ReviewVerdicts.Approved } && (policy?.On ?? false)
+            ? await reviews.GetApprovalAsync(scope, context.CancellationToken).ConfigureAwait(false)
+            : null;
         bool? matches = lastDiff is { Verdict: ReviewVerdicts.Approved } && (policy?.On ?? false)
-            ? await reviews.IsApprovedAsync(scope, context.CancellationToken).ConfigureAwait(false)
+            ? approval is { Current: true }
             : lastDiff is { Verdict: ReviewVerdicts.Approved } ? null : false;
+        var changedSince = approval is { Current: false }
+            ? await reviews.ChangedSinceApprovalAsync(scope, approval, context.CancellationToken).ConfigureAwait(false)
+            : null;
         var request = state.Request;
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
@@ -351,6 +359,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             lastTarget = last?.Target,
             lastFile = last?.Path,
             approvedSnapshotMatches = matches,
+            changedSinceApproval = changedSince?.Take(50).ToArray(),
             nextStep = policy?.On == true
                 ? matches == true
                     ? "The work tree is the one the user approved: commit it, and only it."

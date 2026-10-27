@@ -3805,9 +3805,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             {
                 try
                 {
-                    if (await reviews.IsApprovedAsync(new CodeAlta.Catalog.Reviews.ReviewScope(project, entry.WorktreeDirectory), cancellationToken).ConfigureAwait(false))
+                    // The reviews of the checkout the session works in, as the agent's `alta review` and the window name it.
+                    var scope = CodeAlta.Catalog.Reviews.ReviewService.ScopeOf(project, entry.WorktreeDirectory);
+                    if (await reviews.GetApprovalAsync(scope, cancellationToken).ConfigureAwait(false) is { } approval)
                     {
-                        return null;
+                        if (approval.Current) return null;
+                        return CommitRefusalSinceApproval(await reviews.ChangedSinceApprovalAsync(scope, approval, cancellationToken).ConfigureAwait(false));
                     }
                 }
                 catch (CodeAlta.Catalog.Reviews.ReviewException)
@@ -3818,6 +3821,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
             return CommitRefusal;
         };
+
+    // The refusal of a commit after an approval that no longer holds: the files that changed since say why, so that the
+    // agent tells the user, or undoes a change it made by mistake, instead of asking again for a review of the same work.
+    internal static string CommitRefusalSinceApproval(IReadOnlyList<string> changed)
+    {
+        const int Shown = 20;
+        var files = changed.Count == 0 ? "" : ": " + string.Join(", ", changed.Take(Shown).Select(static path => "`" + path + "`"))
+            + (changed.Count > Shown ? $" and {changed.Count - Shown} more" : "");
+        return "The user reviews the changes of this session before they are committed. They approved the work tree, but it changed since" + files + ". "
+            + "Commit only the work tree the user approved: undo a change since the approval that you made and that is not meant to be committed, and never undo a change of the user; "
+            + "otherwise, run `alta review request changes` and end your turn.";
+    }
 
     // The note a run carries about the review before commit: what applies, when the agent was told something else,
     // or nothing yet while the review applies. Null when there is nothing to tell.

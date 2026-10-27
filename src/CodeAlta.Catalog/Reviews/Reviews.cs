@@ -236,6 +236,15 @@ public sealed record ReviewScope(ProjectDescriptor Project, string? Checkout)
     public string Folder => Checkout ?? Project.ProjectPath;
 }
 
+/// <summary>The last approval of the changes of a checkout, and the work tree it is compared with.</summary>
+/// <param name="Round">The last round of a diff of the checkout; its verdict approved.</param>
+/// <param name="WorkTree">The git tree of the work tree now; null when git could not write it.</param>
+public sealed record ReviewApproval(ReviewRound Round, string? WorkTree)
+{
+    /// <summary>Gets whether the work tree is still the one the round approved: what may be committed.</summary>
+    public bool Current => WorkTree is not null && string.Equals(WorkTree, Round.Snapshot, StringComparison.Ordinal);
+}
+
 /// <summary>A new comment, as the user writes it.</summary>
 /// <param name="Target">One of <see cref="ReviewTargets"/>.</param>
 /// <param name="Path">The file, as for <see cref="ReviewThread.Path"/>.</param>

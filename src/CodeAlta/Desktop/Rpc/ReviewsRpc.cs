@@ -398,6 +398,27 @@ internal sealed class ReviewsService
         return new("ok", rows);
     }
 
+    /// <summary>
+    /// The last approval of the changes of a checkout, and whether its work tree is still the one approved: then
+    /// nothing of it waits for a review, committed or not.
+    /// </summary>
+    [NeoRpcMethod("approval", TimeoutMilliseconds = 60_000)]
+    public async Task<ReviewsApprovalResponse> ApprovalAsync(ReviewsScopeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var (scope, refused) = await ScopeAsync(request.ExpectedEpoch, request.ProjectId, request.Checkout, cancellationToken).ConfigureAwait(false);
+        if (scope is null) return new(refused!, null, false);
+        try
+        {
+            var approval = await _reviews!.GetApprovalAsync(scope, cancellationToken).ConfigureAwait(false);
+            return new("ok", approval is null ? null : Round(approval.Round), approval?.Current == true);
+        }
+        catch (ReviewException exception)
+        {
+            return new(Status(exception), null, false);
+        }
+    }
+
     /// <summary>Deletes the reviews of a checkout that is gone.</summary>
     [NeoRpcMethod("forgetCheckout")]
     public async Task<ReviewsStatusResponse> ForgetCheckoutAsync(ReviewsScopeRequest request, CancellationToken cancellationToken)
@@ -442,8 +463,8 @@ internal sealed class ReviewsService
         if (!Identifier(projectId) || checkout is not null && (checkout.Length is 0 or > MaximumCheckoutLength || checkout.Any(char.IsControl) || !Path.IsPathFullyQualified(checkout)))
             return (null, "invalid_request");
         if (await ProjectAsync(projectId!, cancellationToken).ConfigureAwait(false) is not { } project) return (null, "not_found");
-        // The project folder named as a checkout is the project folder.
-        return (new ReviewScope(project, checkout is not null && SameCheckout(checkout, project.ProjectPath) ? null : checkout), null);
+        // The project folder named as a checkout is the project folder; a folder below the root of a worktree is that worktree.
+        return (ReviewService.ScopeOf(project, checkout), null);
     }
 
     private async Task<ProjectDescriptor?> ProjectAsync(string projectId, CancellationToken cancellationToken)
@@ -599,6 +620,11 @@ internal sealed record ReviewCheckoutCounts(string? Checkout, int Drafts, int Op
 internal sealed record ReviewsCountsResponse(string Status, IReadOnlyList<ReviewCheckoutCounts> Checkouts);
 
 internal sealed record ReviewsWatchRequest(string? ExpectedEpoch);
+
+/// <param name="Status"><c>ok</c>, <c>not_found</c>, <c>invalid_request</c>, <c>invalid_checkout</c>, <c>unavailable</c> or <c>stale_epoch</c>.</param>
+/// <param name="Round">The last round of a diff of the checkout when it approved; null otherwise.</param>
+/// <param name="Current">Whether the work tree is the one that round approved.</param>
+internal sealed record ReviewsApprovalResponse(string Status, ReviewRoundDto? Round, bool Current);
 
 /// <param name="SpaceId">The space whose projects are listed; null for every project.</param>
 /// <param name="IncludeFinished">Whether reviews with nothing waiting are listed too.</param>

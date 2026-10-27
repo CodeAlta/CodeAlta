@@ -527,6 +527,68 @@ public sealed class ReviewServiceTests
         Assert.IsFalse(await service.IsApprovedAsync(scope, default));
     }
 
+    [TestMethod]
+    public async Task AnApproval_HoldsForWhatIsLeftUncommitted_AndSaysWhatChangedSince()
+    {
+        // #238: approved, then committed in part (other files were already dirty): nothing waits for another review.
+        using var repository = GitRepository.Create();
+        var project = new ProjectDescriptor { Id = "project-1", Slug = "p", Name = "P", DisplayName = "P", ProjectPath = repository.Root };
+        File.WriteAllText(Path.Combine(repository.Root, "readme.md"), "one\ntwo\n");
+        File.WriteAllText(Path.Combine(repository.Root, "notes.txt"), "mine\n");
+        var service = new ReviewService(Path.Combine(repository.Home, "state"));
+        var scope = new ReviewScope(project, null);
+        Assert.IsNull(await service.GetApprovalAsync(scope, default), "Nothing was approved yet.");
+
+        service.CommitRound(scope, await service.PrepareRoundAsync(scope, new(ReviewTargets.Changes, null, ReviewVerdicts.Commented, "Why?", "s1"), default));
+        Assert.IsNull(await service.GetApprovalAsync(scope, default), "A comment approves nothing.");
+        var round = service.CommitRound(scope, await service.PrepareRoundAsync(scope, new(ReviewTargets.Changes, null, ReviewVerdicts.Approved, null, "s1"), default));
+
+        repository.Git("add", "readme.md");
+        repository.Git("commit", "-q", "-m", "the agent's part");
+        var approval = await service.GetApprovalAsync(scope, default);
+        Assert.IsNotNull(approval);
+        Assert.AreEqual(round.Id, approval.Round.Id);
+        Assert.IsTrue(approval.Current, "notes.txt is still uncommitted, as it was approved.");
+        Assert.IsEmpty(await service.ChangedSinceApprovalAsync(scope, approval, default));
+
+        File.WriteAllText(Path.Combine(repository.Root, "notes.txt"), "mine, edited\n");
+        File.WriteAllText(Path.Combine(repository.Root, "build.log"), "output\n");
+        approval = await service.GetApprovalAsync(scope, default);
+        Assert.IsNotNull(approval);
+        Assert.IsFalse(approval.Current);
+        CollectionAssert.AreEqual(new[] { "build.log", "notes.txt" }, (await service.ChangedSinceApprovalAsync(scope, approval, default)).Order(StringComparer.Ordinal).ToArray());
+
+        // A new round that does not approve ends the approval.
+        service.CommitRound(scope, await service.PrepareRoundAsync(scope, new(ReviewTargets.Changes, null, ReviewVerdicts.ChangesRequested, "No log.", "s1"), default));
+        Assert.IsNull(await service.GetApprovalAsync(scope, default));
+    }
+
+    [TestMethod]
+    public async Task AFolderBelowTheRootOfACheckout_IsThatCheckout()
+    {
+        // #238: an agent that works in a sub-folder, or a session recorded there, reads and writes the reviews the
+        // window and the commit guard read.
+        using var repository = GitRepository.Create();
+        var project = new ProjectDescriptor { Id = "project-1", Slug = "p", Name = "P", DisplayName = "P", ProjectPath = repository.Root };
+        var worktree = Path.Combine(repository.Home, "wt");
+        repository.Git("worktree", "add", "-q", "-b", "feature", worktree);
+        var below = Directory.CreateDirectory(Path.Combine(worktree, "src", "app")).FullName;
+        var inProject = Directory.CreateDirectory(Path.Combine(repository.Root, "src")).FullName;
+
+        Assert.IsNull(ReviewService.ScopeOf(project, null).Checkout);
+        Assert.IsNull(ReviewService.ScopeOf(project, repository.Root + Path.DirectorySeparatorChar).Checkout);
+        Assert.IsNull(ReviewService.ScopeOf(project, inProject).Checkout, "A folder of the project's own checkout is the project folder.");
+        Assert.AreEqual(worktree, ReviewService.ScopeOf(project, worktree).Checkout);
+        Assert.AreEqual(worktree, ReviewService.ScopeOf(project, below).Checkout);
+        var gone = Path.Combine(repository.Root, "gone-worktree");
+        Assert.AreEqual(gone, ReviewService.ScopeOf(project, gone).Checkout, "A folder that is gone is kept as it is named, not taken for the checkout above it.");
+
+        var service = new ReviewService(Path.Combine(repository.Home, "state"));
+        File.WriteAllText(Path.Combine(worktree, "readme.md"), "one\nother\n");
+        await service.AddThreadAsync(ReviewService.ScopeOf(project, below), new(ReviewTargets.Changes, "readme.md", ReviewSides.New, 2, 2, "b"), default);
+        Assert.AreEqual("b", (await service.ListAsync(new ReviewScope(project, worktree), null, null, false, default)).Threads.Single().Body);
+    }
+
     private sealed class FakeText : IReviewTextSource
     {
         private readonly Dictionary<(string Side, string Path), string?> _texts = [];
