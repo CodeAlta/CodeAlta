@@ -158,7 +158,8 @@ A session sends its whole conversation with every request. A provider bills the 
 {.table}
 | Requests | What CodeAlta sends | What the usage reports |
 |---|---|---|
-| Anthropic Messages: the `anthropic` provider and the Claude models of Copilot | `cache_control` markers on the tools, the system prompt, the last message and the message that ended the previous request; nothing is cached without them | Cached input and cache write tokens |
+| Anthropic Messages: the `anthropic` provider and the Claude models of Copilot | `cache_control` markers on the system prompt (its part that every session of the project shares), the last message and the message that ended the previous request; nothing is cached without them | Cached input and cache write tokens |
+| OpenAI API: the `openai-responses` provider | Nothing: the API caches a repeated start by itself. The lines of the session alone (its folder, its scratchpad) come after the instructions and the tools, so the sessions of a project share their cache | Cached input and cache write tokens |
 | OpenAI Responses of Copilot (GPT, Grok and other models) | The session id as `prompt_cache_key`, so its requests reach the cache that holds its conversation | Cached input, and cache write tokens for the models that bill them |
 | Codex | The session id as `prompt_cache_key` | Cached input |
 | Other OpenAI-compatible and Google endpoints | Nothing: the endpoint caches a repeated start by itself when it can | Cached input when the endpoint reports it |

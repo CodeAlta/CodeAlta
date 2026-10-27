@@ -3006,23 +3006,22 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
     [TestMethod]
     // The OpenAI API: the model's own default, the setting where the model takes one, nothing to an older model.
-    [DataRow(null, null, "gpt-6-astra", "low", true)]
-    [DataRow(null, null, "gpt-5.4-mini", "medium", true)]
-    [DataRow(null, null, "gpt-5.5-2026-04-23", "low", true)]
-    [DataRow(null, null, "gpt-test", null, true)]
-    [DataRow(null, "high", "gpt-6-astra", "high", true)]
-    [DataRow(null, "high", "gpt-test", "high", true)]
-    [DataRow(null, "low", "gpt-4.1", null, true)]
-    [DataRow(null, "low", "o3", null, true)]
-    // Another endpoint: neither a default it may not take, nor a cache key; the setting is sent.
-    [DataRow("https://responses.example.test/v1", null, "gpt-6-astra", null, false)]
-    [DataRow("https://responses.example.test/v1", "low", "gpt-6-astra", "low", false)]
-    public async Task OpenAIResponsesTurnExecutor_SendsVerbosityAndPromptCacheKey(
+    [DataRow(null, null, "gpt-6-astra", "low")]
+    [DataRow(null, null, "gpt-5.4-mini", "medium")]
+    [DataRow(null, null, "gpt-5.5-2026-04-23", "low")]
+    [DataRow(null, null, "gpt-test", null)]
+    [DataRow(null, "high", "gpt-6-astra", "high")]
+    [DataRow(null, "high", "gpt-test", "high")]
+    [DataRow(null, "low", "gpt-4.1", null)]
+    [DataRow(null, "low", "o3", null)]
+    // Another endpoint: no default it may not take; the setting is sent.
+    [DataRow("https://responses.example.test/v1", null, "gpt-6-astra", null)]
+    [DataRow("https://responses.example.test/v1", "low", "gpt-6-astra", "low")]
+    public async Task OpenAIResponsesTurnExecutor_SendsTheModelVerbosity_AndNoSessionCacheKey(
         string? baseUri,
         string? configuredVerbosity,
         string modelId,
-        string? expectedVerbosity,
-        bool expectsPromptCacheKey)
+        string? expectedVerbosity)
     {
         var responsesClient = new RecordingOpenAIResponseClient(
         [
@@ -3048,17 +3047,16 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ? value.GetString()
             : null;
         Assert.AreEqual(expectedVerbosity, verbosity);
-        Assert.AreEqual(
-            expectsPromptCacheKey ? "session-1" : null,
-            document.RootElement.TryGetProperty("prompt_cache_key", out var key) ? key.GetString() : null);
+        // A key of the session would keep apart the caches of sessions that send the same instructions and tools.
+        Assert.IsFalse(document.RootElement.TryGetProperty("prompt_cache_key", out _));
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_ForkedSessionSendsTheCacheKeyOfItsOrigin()
+    public async Task OpenAIResponsesTurnExecutor_SendsTheSessionInstructionsFirstInTheInput_NotInTheInstructions()
     {
         var responsesClient = new RecordingOpenAIResponseClient(
         [
-            [CreateTextOnlyAssistantResponseUpdate("response-fork", "gpt-6-astra", "Answer.")],
+            [CreateTextOnlyAssistantResponseUpdate("response-session", "gpt-6-astra", "Answer.")],
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
@@ -3067,11 +3065,22 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         });
 
         _ = await executor.ExecuteTurnAsync(
-            CreateTurnRequest() with { PromptCacheKey = "root-session" },
+            CreateTurnRequest() with
+            {
+                SystemMessage = "Shared rules.",
+                DeveloperInstructions = "Shared agent prompt.",
+                SessionInstructions = "- Current working directory: `C:\\work\\a`",
+            },
             static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
         using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
-        Assert.AreEqual("root-session", document.RootElement.GetProperty("prompt_cache_key").GetString());
+        var instructions = document.RootElement.GetProperty("instructions").GetString()!;
+        StringAssert.Contains(instructions, "Shared agent prompt.");
+        Assert.IsFalse(instructions.Contains("C:\\work\\a", StringComparison.Ordinal), "the instructions are the same for every session");
+        var first = document.RootElement.GetProperty("input")[0];
+        Assert.AreEqual("user", first.GetProperty("role").GetString());
+        StringAssert.Contains(first.GetRawText(), "session_context");
+        StringAssert.Contains(first.GetProperty("content")[0].GetProperty("text").GetString(), "C:\\work\\a");
     }
 
     [TestMethod]

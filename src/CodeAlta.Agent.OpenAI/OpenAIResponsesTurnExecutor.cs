@@ -1396,7 +1396,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         var options = new CreateResponseOptions
         {
             Model = request.ModelId,
-            Instructions = ComposeInstructions(request),
+            Instructions = AgentInstructionText.ComposeShared(request),
             ParallelToolCallsEnabled = toolDefinitions.Length > 0,
             StoredOutputEnabled = request.Provider.Profile?.SupportsStore == false ? null : false,
             PreviousResponseId = null,
@@ -1408,6 +1408,16 @@ internal sealed class OpenAIResponsesTurnExecutor(
         if (!SupportsToolResultImages(request))
         {
             conversation = AgentToolResultImages.MoveToUserMessages(conversation);
+        }
+
+        // The instructions of the session alone go first in the input, as a user message, as Codex sends its environment
+        // context: the endpoint reuses a cached prefix only when the instructions, and the system and developer messages
+        // that join them, are the same. Every session of a prompt then shares the instructions and the tools; in the
+        // instructions or in a system message, the folder of a session made two sessions share nothing (live probe of
+        // 2026-10-27).
+        if (AgentInstructionText.Session(request.SessionInstructions) is { } sessionInstructions)
+        {
+            options.InputItems.Add(ResponseItem.CreateUserMessageItem([ResponseContentPart.CreateInputTextPart(sessionInstructions)]));
         }
 
         foreach (var inputItem in CreateConversationItems(conversation))
@@ -1462,13 +1472,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
         if (provider.CodexSubscription is null)
         {
-            if (IsOfficialOpenAIResponsesEndpoint(provider))
-            {
-                // As for the Codex provider: the requests of a session, and of its forks, go to the same cache. Another
-                // endpoint that speaks the protocol may reject a field it does not know; its extra_body can add it.
-                options.Patch.Set("$.prompt_cache_key"u8, request.PromptCacheKey ?? request.SessionId);
-            }
-
+            // No prompt_cache_key: the OpenAI API routes a request by its prefix, so the sessions of a prompt share the
+            // cache of their instructions and tools (a second session read 97% of its first request from the cache). A
+            // key of the session kept apart what two sessions sent the same (live probe of 2026-10-27).
             SetTextVerbosity(
                 options,
                 OpenAITextVerbosity.ForResponses(
@@ -1643,7 +1649,6 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
     // The instructions of the session come last: what is before them is the same for every session of a prompt, and the
     // provider reads it from its prompt cache.
-    private static string? ComposeInstructions(AgentTurnRequest request) => AgentInstructionText.Compose(request);
 
     private static IReadOnlyList<ResponseItem> CreateConversationItems(IReadOnlyList<AgentConversationMessage> messages)
     {

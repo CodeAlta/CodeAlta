@@ -221,7 +221,9 @@ review, sub-agents, mode handoff, session title) through `<!-- if-feature: x -->
 What is of one session alone is the session context, kept apart (`AgentTurnRequest.SessionInstructions`) and sent
 last: working directory, project root, worktree, parent session and its guidance, scratchpad file, title and
 suggestion paragraphs. The text before it is the same for the sessions of a prompt in other folders, so a provider
-serves it to all of them from its prompt cache; Anthropic receives it as a second system block after the cached one.
+serves it to all of them from its prompt cache; Anthropic receives it as a second system block after the cached one,
+and the OpenAI Responses executor as a user message first in the input, since that API shares a prefix only when the
+instructions and the system messages joined to them are the same.
 
 **The instructions stay byte-stable.** Providers cache the prompt prefix; any change of the instructions invalidates
 the cache of every later request. So:
