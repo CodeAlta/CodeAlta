@@ -146,6 +146,8 @@ The timeline shows:
 
 CodeAlta Desktop opens a session on its latest messages; earlier turns load as you scroll up. **Load all messages**, at the top, loads them all; **Stop** keeps what was loaded.
 
+A very long message shows its start, with a line that says the rest is too long to show there: **Show the whole message** reads the rest.
+
 ### Focused timeline
 
 In CodeAlta Desktop, the work between two messages (reasoning, tool calls, jobs) takes one line, with the latest thought of the model and counts of thoughts, calls, failures, lines changed and time. While the agent works, it shows the last three steps. Images the model read show under it as thumbnails. Click the line to unfold it. **Settings > Appearance** turns off **Focused timeline** and **Images under folded lines**.

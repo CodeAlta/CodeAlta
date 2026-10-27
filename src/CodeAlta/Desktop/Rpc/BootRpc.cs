@@ -650,6 +650,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(ToolCallResponse))]
 [JsonSerializable(typeof(SystemPromptRequest))]
 [JsonSerializable(typeof(SystemPromptResponse))]
+[JsonSerializable(typeof(MessageTextRequest))]
+[JsonSerializable(typeof(MessageTextResponse))]
 [JsonSerializable(typeof(ToolCallObserveRequest))]
 [JsonSerializable(typeof(ToolCallOutputItem))]
 [JsonSerializable(typeof(BackgroundJobDetailsRequest))]

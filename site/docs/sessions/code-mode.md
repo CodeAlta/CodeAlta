@@ -98,6 +98,15 @@ Another session, or you from a terminal, reads a run with `alta workflow list`, 
 
 The source of each script is kept in the scratchpad of the session, and its result says where. An agent fixes a long script by editing that file and running it again with `workflow({ scriptPath })`.
 
+## The result
+
+What a script returns is what the agent reads, and you read it too: in the **Workflow** message of a script that ended in the background, and in the tab of its run.
+
+- A text is shown as Markdown: headings, lists, tables, code. A link to a file opens it in CodeAlta, a picture too (`![chart](chart.png)`).
+- An object or an array is shown as JSON. A list of texts of several lines, such as the answers of sub-agents, is shown as sections.
+- A result longer than the budget of the script (`max_output_tokens`, 4,000 tokens by default) is saved whole in a file of the session, with its attachments under `~/.alta/sessions`, and goes with it. The agent and the card get a preview of its start and its end with the path of that file: the agent reads the rest there when it needs it, and **Open the full result** opens it.
+- **Run details** shows what the run wrote besides its result: its output, where its time went, an error.
+
 ## Resume a run
 
 CodeAlta Desktop and CodeAlta TUI keep each run with the result of each `step()`. A script that ran when CodeAlta ended shows as **interrupted** in the timeline. Its card, or its block, then offers:

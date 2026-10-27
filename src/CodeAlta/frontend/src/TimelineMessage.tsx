@@ -5,7 +5,7 @@ import { BackgroundCallsContext } from "./BackgroundTaskViews";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent, MarkdownLinkScopeContext, MarkdownLinksContext } from "./MarkdownContent";
 import { PluginHtml } from "./PluginHtml";
-import { externalOriginSubtitles, notSentSubtitle, writeMarkdown, type TimelineItem } from "./timeline";
+import { externalOriginSubtitles, notSentSubtitle, wholeMessageBody, writeMarkdown, type TimelineItem } from "./timeline";
 import { SessionReference } from "./SessionReference";
 import { useShellLanguage } from "./shellLanguage";
 import { timelineTime } from "./sessionTime";
@@ -32,6 +32,8 @@ import type { MessageKey } from "./localization";
 import { ScriptCalls } from "./scriptCard/ScriptCalls";
 import { ScriptRunView } from "./scriptCard/ScriptRunView";
 import { hasWorkflowBlock } from "./workflows/runFlow";
+import { ScriptResultFacts } from "./workflows/ScriptResultFacts";
+import { useWholeMessage, WholeMessageNote } from "./WholeMessageNote";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -140,6 +142,11 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const bodyId = useId();
   // A changed record at the same offset must not inherit the previous record's disclosure.
   const body = item.markdown;
+  // A text longer than its share of the history page arrives with its start only: the card says so, and reads the rest
+  // from the journal when asked. A tool call and a job have windows of their own, which read their records whole.
+  const shortened = !!item.textShortened && !!body && !job && item.category !== "tool" && /^\d+$/u.test(item.key);
+  const whole = useWholeMessage(shortened ? item.key : null);
+  const shownBody = whole.state.status === "ok" ? wholeMessageBody(item, whole.state.text) : body;
   // Conversation messages always render their supplied Markdown. Optional
   // disclosure is reserved for long supporting diagnostics, never the conversation.
   const longBody = item.category !== "user" && item.category !== "assistant" && (body?.length ?? 0) > longBodyThreshold;
@@ -179,7 +186,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
     };
   }, [item.key, item.eventType, item.category, item.title, item.timestamp, item.copyMarkdown, item.truncated, item.bodyOmitted]);
   async function copy() {
-    const text = item.copyMarkdown;
+    const text = whole.state.status === "ok" && shownBody ? shownBody : item.copyMarkdown;
     if (!text || !active.current) return;
     const sequence = ++copySequence.current;
     if (reset.current !== undefined) window.clearTimeout(reset.current);
@@ -301,6 +308,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       </div>}
       {toolTile && item.scriptRun && !workflowBlock && <ScriptRunView run={item.scriptRun} title={item.scriptTitle ?? null} />}
       {toolTile && item.scriptCalls && !workflowBlock && <ScriptCalls calls={item.scriptCalls} />}
+      {item.workflowResult && <ScriptResultFacts result={item.workflowResult} run={item.workflowResult} onOpenLink={messageLink} />}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}
@@ -313,10 +321,11 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           }}>
           <AppIcon name="chevronDown" size={14} />{t(expanded ? "Collapse message" : "Show full message")}
         </button>
-        <div id={bodyId}>{expanded ? <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />
+        <div id={bodyId}>{expanded ? <MarkdownContent source={shownBody ?? body} timelineCodeBlocks onOpenLink={messageLink} />
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : reviewSummary && body ? <ReviewPromptCard summary={reviewSummary} text={body} onOpenLink={messageLink} />
-        : body && <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />)}
+        : shownBody && <MarkdownContent source={shownBody} timelineCodeBlocks onOpenLink={messageLink} />)}
+      {shortened && !compact && <WholeMessageNote state={whole.state} load={whole.load} />}
       {item.images && <TimelineImages images={item.images} source={imageSource} />}
       {item.attachments && <AttachedFileChips attachments={item.attachments} />}
       {item.missingCliProvider && <TimelineClaudeCli providerKey={item.missingCliProvider} />}

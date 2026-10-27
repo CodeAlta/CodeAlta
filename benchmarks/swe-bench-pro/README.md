@@ -103,7 +103,10 @@ A run that has only Opus jobs needs only `ANTHROPIC_API_KEY`, and one with only 
 pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun                                    # all four jobs
 pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-opus,codealta-astra # CodeAlta only
 pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-cc-opus            # CodeAlta on the Claude Code CLI
+pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-opus,codealta-astra -CodeAltaArgs "--code-mode=off"
 ```
+
+- **CodeAlta arguments:** `-CodeAltaArgs` passes more `altacli run` arguments to every CodeAlta job (the adapter's `extra_args`), such as `--code-mode=off` to compare with a run made before Code Mode. The run manifest records them.
 
 - **Order:** the jobs run one after the other, in the order of the table above, each followed by its replay. `codealta-cc-opus` needs `ANTHROPIC_API_KEY`.
 - **Concurrency:** 8 task sandboxes at a time (`-Concurrency`).

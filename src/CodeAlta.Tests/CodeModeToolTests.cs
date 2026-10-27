@@ -40,6 +40,38 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task Exec_KeepsALongResultWhole_InTheFolderOfItsSession()
+    {
+        using var root = TestTempDirectory.Create();
+        var folder = Path.Combine(root.Path, "tool-output");
+        await using var runs = new CodeModeRunRegistry(null) { ResultFolder = (_, _) => ValueTask.FromResult<string?>(folder) };
+        var (exec, _) = Create(root.Path, runs, sourceFolder: Path.Combine(root.Path, "sources"));
+
+        var result = await InvokeAsync(exec, """
+            // @exec: {"max_output_tokens": 300}
+            return Array.from({ length: 400 }, (_, i) => `- line ${i} with \`code\``).join("\n");
+            """, new FakeTools());
+
+        var text = Text(result);
+        Assert.IsTrue(result.Success, text);
+        var line = text.Split('\n').Single(static line => line.StartsWith(CodeModeResultFormatter.FullResultPrefix, StringComparison.Ordinal));
+        var path = line[CodeModeResultFormatter.FullResultPrefix.Length..line.LastIndexOf(" (", StringComparison.Ordinal)];
+        Assert.AreEqual(folder, Path.GetDirectoryName(path));
+        var whole = File.ReadAllText(path);
+        StringAssert.StartsWith(whole, "- line 0 with `code`\n");
+        StringAssert.EndsWith(whole, "- line 399 with `code`");
+        StringAssert.Contains(text, "characters left out: they are in the full result …");
+        StringAssert.EndsWith(text, "- line 399 with `code`\n");
+        Assert.IsFalse(text.Contains("\\u0060", StringComparison.Ordinal), text);
+        // The source is named under the header: the result is the end of the text.
+        Assert.IsLessThan(text.IndexOf("\nResult:\n", StringComparison.Ordinal), text.IndexOf("\nSource: ", StringComparison.Ordinal));
+        // Formatted again (the prompt, the store), the result names the same file, written once.
+        var run = runs.FindAny(runs.List("session-1").Single().Id)!;
+        StringAssert.Contains(await runs.FormatResultAsync(run, await run.Completion), line + "\n");
+        Assert.HasCount(1, Directory.GetFiles(folder));
+    }
+
+    [TestMethod]
     public async Task Exec_LeavesOutTheToolsOfTheModelAndItself()
     {
         using var root = TestTempDirectory.Create();
@@ -536,7 +568,7 @@ public sealed class CodeModeToolTests
         var result = await InvokeAsync(exec, Script, new FakeTools());
         // A run without sessions to start has no agent().
         var (bare, _) = Create(project, runs, library: library);
-        var without = await InvokeAsync(bare, "return [await codemode.help(), await codemode.describe({ path: 'agent' }).catch(e => e.message)];", new FakeTools());
+        var without = await InvokeAsync(bare, "return { help: await codemode.help(), agent: await codemode.describe({ path: 'agent' }).catch(e => e.message) };", new FakeTools());
 
         Assert.IsTrue(result.Success, Text(result));
         using var value = ValueOf(result);
@@ -553,8 +585,8 @@ public sealed class CodeModeToolTests
         StringAssert.Contains(root0.GetProperty("load").GetString(), "declare function load(key: string)");
         Assert.IsTrue(without.Success, Text(without));
         using var bareValue = ValueOf(without);
-        Assert.IsFalse(bareValue.RootElement[0].GetString()!.Contains("agent", StringComparison.Ordinal), "no agent() without sessions to start");
-        StringAssert.Contains(bareValue.RootElement[1].GetString(), "not a function");
+        Assert.IsFalse(bareValue.RootElement.GetProperty("help").GetString()!.Contains("agent", StringComparison.Ordinal), "no agent() without sessions to start");
+        StringAssert.Contains(bareValue.RootElement.GetProperty("agent").GetString(), "not a function");
     }
 
     [TestMethod]
@@ -999,13 +1031,26 @@ public sealed class CodeModeToolTests
 
     private static string Text(AgentToolResult result) => string.Join('\n', result.Items.OfType<AgentToolResultItem.Text>().Select(static item => item.Value));
 
-    // The value of a finished run: the line after `Result:`.
+    // The value of a finished run: what follows `Result:`, the end of the text. An object is in a block of JSON, a text is itself.
     private static JsonDocument ValueOf(AgentToolResult result)
     {
-        var lines = Text(result).Split('\n');
-        var index = Array.IndexOf(lines, "Result:");
-        Assert.IsGreaterThanOrEqualTo(0, index, Text(result));
-        return JsonDocument.Parse(lines[index + 1]);
+        var text = Text(result);
+        var index = text.IndexOf("\nResult:\n", StringComparison.Ordinal);
+        Assert.IsGreaterThanOrEqualTo(0, index, text);
+        var value = text[(index + "\nResult:\n".Length)..].TrimEnd('\n');
+        if (value.StartsWith("```json\n", StringComparison.Ordinal))
+        {
+            return JsonDocument.Parse(value["```json\n".Length..^"\n```".Length]);
+        }
+
+        try
+        {
+            return JsonDocument.Parse(value);
+        }
+        catch (JsonException)
+        {
+            return JsonDocument.Parse(JsonSerializer.Serialize(value));
+        }
     }
 
     private static JsonElement Schema(string json)

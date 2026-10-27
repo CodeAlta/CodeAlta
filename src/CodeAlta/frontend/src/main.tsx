@@ -178,6 +178,7 @@ import { sessionOrigin } from "./automations/automations";
 import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
 import { RunTab } from "./workflows/RunTab";
 import { OpenRunContext } from "./workflows/openRun";
+import { createMessageReader, MessageReaderContext } from "./wholeMessage";
 import { createWorkflowsHub } from "./workflows/workflowsHub";
 import { ScriptRunActionsContext } from "./scriptCard/SaveAsScript";
 import { IssuesPanel } from "./issues/IssuesPanel";
@@ -6146,6 +6147,9 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     [toolRecords, pluginEpoch, session.id, rewinds]);
   const readPrompt = useMemo(() => pluginEpoch === null ? undefined : toolRecords.prompts.reader(pluginEpoch, session.id, rewinds),
     [toolRecords, pluginEpoch, session.id, rewinds]);
+  // The whole text of a message the history page shows the start of, read when its card asks for it.
+  const readMessage = useMemo(() => pluginEpoch === null ? null : createMessageReader(toolCalls.readMessage, pluginEpoch, session.id),
+    [pluginEpoch, session.id]);
   // The window of a fork or a rewind of this session: a command, a prompt of the timeline or the menu of its row
   // asks for it, and the pane that has the session shows it.
   const branchRequest = useSyncExternalStore(branch ? branch.requests.subscribe : noSubscription, () => branch?.requests.forSession(session.id) ?? null);
@@ -6225,7 +6229,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
       return outcome.ok ? null : outcome.message ?? "";
     },
   } : null, [cliEpoch, session.id]);
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><MessageReaderContext.Provider value={readMessage}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       // The conversation of the Claude Code CLI the session continues: read when the window opens; another provider has none.
       conversation={ownedSession && !demoMode && session.providerConversation === true
@@ -6314,7 +6318,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></ScriptRunActionsContext.Provider></MarkdownLinkScopeContext.Provider>;
+  </div></MessageReaderContext.Provider></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></ScriptRunActionsContext.Provider></MarkdownLinkScopeContext.Provider>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

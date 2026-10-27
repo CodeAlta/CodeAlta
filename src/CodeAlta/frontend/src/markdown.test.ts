@@ -71,6 +71,13 @@ test("the entries of a front matter are its keys with their text, their items, o
   assert.deepEqual(frontMatterEntries(""), []);
 });
 
+test("a picture of the disk is a link to open it, never an image", () => {
+  const html = createMarkdownParser({ fileLinkMark: "m1" })("![Chart <b>](charts/run.png) and ![web](https://example.invalid/a.png)");
+  assert.match(html, /<a href="charts\/run.png" data-file-link="m1">Chart &lt;b&gt;<\/a>/);
+  assert.match(html, / and web<\/p>/);
+  assert.doesNotMatch(html, /<img/);
+});
+
 test("deliberate policy differences: escaped image alt, tasks left to the boundary, no fuzzy links or grid/footnote plugins", () => {
   const html = createMarkdownParser()('![alt <b>](https://example.invalid/a)\n\n- [x] task\n\nwww.example.invalid x@y.invalid\n\n[^note]\n\n[^note]: text');
   assert.match(html, /alt &lt;b&gt;/); assert.match(html, /\[x\] task/);

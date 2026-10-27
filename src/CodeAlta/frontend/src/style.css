@@ -386,6 +386,10 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .long-message-toggle { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; }
 .long-message-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 .long-message-preview { overflow-wrap: anywhere; color: var(--muted) !important; font-size: 12px; }
+/* A message the history page gives the start of: what the card says under it, and its button that reads the rest. */
+.message-shortened { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.message-shortened-load { display: inline-flex; align-items: center; gap: 5px; padding: 1px 6px; color: var(--accent); font-size: 12px; }
+.message-shortened-failed { color: var(--red); }
 .event-details { margin-top: 6px; color: var(--muted); font-size: 10px; }
 .message-tool .event-details, .message-file .event-details { min-width: 0; }
 .event-details summary { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; list-style: none; }

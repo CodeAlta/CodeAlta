@@ -121,6 +121,8 @@ public static class CodeModeToolFactory
     private const string ExecDescriptionEnd = """
 
 
+        A string the script returns is its result as it is, Markdown the user sees rendered; another value comes back as JSON. A result longer than `max_output_tokens` keeps its start and its end, and names the file that keeps the whole of it.
+
         The result says where the source of the run was kept: to fix a long script, edit that file with your file tools and run it again with `return await workflow({ scriptPath: "<path>" })` instead of sending it whole.
 
         A run is kept with the results of its steps: `// @exec: {"resume": "<run-id>"}` alone resumes one that stopped, its completed steps giving their recorded results; `"replay": "all"` runs changed code over those results, and `"from": "<step>"` runs again from a step.
@@ -255,7 +257,7 @@ public static class CodeModeToolFactory
         var source = CodeModeSource.Prepare(code);
         if (source.Error is not null)
         {
-            return Finished(new CodeModeRunResult(CodeModeRunStatus.Failed, TimeSpan.Zero) { Error = source.Error, Source = source }, source.Options, null);
+            return NotStarted(new CodeModeRunResult(CodeModeRunStatus.Failed, TimeSpan.Zero) { Error = source.Error, Source = source }, source.Options);
         }
 
         var sessionId = invocation.SessionId;
@@ -275,7 +277,7 @@ public static class CodeModeToolFactory
                 var kept = CodeModeSource.Prepare(plan.Source);
                 if (kept.Error is not null)
                 {
-                    return Finished(new CodeModeRunResult(CodeModeRunStatus.Failed, TimeSpan.Zero) { Error = kept.Error, Source = kept }, kept.Options, null);
+                    return NotStarted(new CodeModeRunResult(CodeModeRunStatus.Failed, TimeSpan.Zero) { Error = kept.Error, Source = kept }, kept.Options);
                 }
 
                 // The options line of the resume says how to wait for it; the kept script says the rest.
@@ -395,7 +397,7 @@ public static class CodeModeToolFactory
 
         if (run.Completion.IsCompleted && run.TryCollect())
         {
-            return Finished(await run.Completion.ConfigureAwait(false), execOptions, sourcePath);
+            return await FinishedAsync(options.Runs, run, await run.Completion.ConfigureAwait(false), execOptions, sourcePath).ConfigureAwait(false);
         }
 
         return new AgentToolResult(true, [new AgentToolResultItem.Text(
@@ -430,7 +432,7 @@ public static class CodeModeToolFactory
         {
             return result is null
                 ? new AgentToolResult(true, [new AgentToolResultItem.Text($"Script {run.Id} ended; its result was already given to this session.")])
-                : new AgentToolResult(result.Status == CodeModeRunStatus.Completed, [new AgentToolResultItem.Text(CodeModeResultFormatter.Format(result, run.MaxOutputTokens))]);
+                : new AgentToolResult(result.Status == CodeModeRunStatus.Completed, [new AgentToolResultItem.Text(await options.Runs.FormatResultAsync(run, result).ConfigureAwait(false))]);
         }
 
         return new AgentToolResult(true, [new AgentToolResultItem.Text(CodeModeResultFormatter.FormatRunning(run.Id, run.Elapsed, run.Calls, run.RecentOutput()))]);
@@ -492,9 +494,17 @@ public static class CodeModeToolFactory
             return CodeModeSource.Prepare(value.GetProperty("content").GetString() ?? string.Empty, Path.GetFileName(path));
         };
 
-    private static AgentToolResult Finished(CodeModeRunResult result, CodeModeExecOptions execOptions, string? sourcePath)
+    // A script that could not start, such as one that does not parse: there is no run, and no value to keep.
+    private static AgentToolResult NotStarted(CodeModeRunResult result, CodeModeExecOptions execOptions)
+        => new(false, [new AgentToolResultItem.Text(CodeModeResultFormatter.Format(result, execOptions.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens))],
+            result.Error is { } error ? $"{error.Name}: {error.Message}" : null);
+
+    private static async Task<AgentToolResult> FinishedAsync(CodeModeRunRegistry runs, CodeModeRunHandle run, CodeModeRunResult result, CodeModeExecOptions execOptions, string? sourcePath)
     {
-        var text = CodeModeResultFormatter.Format(result, execOptions.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens) + SourceLine(sourcePath);
+        // The line of the source goes under the header: the result is the end of the text.
+        var text = await runs.FormatResultAsync(run, result, execOptions.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens).ConfigureAwait(false);
+        var header = text.IndexOf('\n') + 1;
+        text = text[..header] + SourceLine(sourcePath) + text[header..];
         return new AgentToolResult(result.Status == CodeModeRunStatus.Completed, [new AgentToolResultItem.Text(text)], result.Error is { } error ? $"{error.Name}: {error.Message}" : null);
     }
 

@@ -62,6 +62,10 @@ Runs belong to the host (`CodeModeRunRegistry`, owned by `CodeAltaHost`), not to
 - `exec` waits for its run until the yield time; the run then goes on in the background, and the turn may end.
 - Its result is taken once: by the `exec` that waited, by a `wait` that waits when it ends, or else delivered to its
   session as a prompt of provenance `workflow`.
+- That result is one text for the model and the window (`CodeModeResultFormatter`), the value last: a text as Markdown,
+  which the timeline renders. A value over the output budget is written whole once per run with the attachments of its
+  session (`tool-output/`, as a long command output is), and the text is a short preview of its start and its end that
+  names the file.
 - Limits count runs (per session, per host) and refuse a run over them, never queue it.
 - The host stops every run before its sessions close.
 

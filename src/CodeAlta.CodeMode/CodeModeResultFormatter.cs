@@ -5,16 +5,104 @@ using System.Text.Json.Nodes;
 
 namespace CodeAlta.CodeMode;
 
+/// <summary>How the value a script returned reads.</summary>
+public enum CodeModeResultKind
+{
+    /// <summary>A text, read as Markdown: what a script returns for a person to read.</summary>
+    Markdown,
+
+    /// <summary>An object or an array, written as JSON.</summary>
+    Json,
+
+    /// <summary>A number, a boolean or null, written as JSON.</summary>
+    Scalar,
+}
+
+/// <summary>The value a script returned as it is read: its text and how it reads.</summary>
+/// <param name="Text">The text.</param>
+/// <param name="Kind">How it reads.</param>
+public sealed record CodeModeResultText(string Text, CodeModeResultKind Kind)
+{
+    /// <summary>Gets the extension of a file that keeps the whole of it: <c>.md</c> or <c>.json</c>.</summary>
+    public string FileExtension => Kind == CodeModeResultKind.Markdown ? ".md" : ".json";
+}
+
 /// <summary>
-/// Writes what a run did as the text the model reads: a header with the status, the time and the calls, then the
-/// result, the output, and for a failure the source line and the calls already made, which are not undone.
+/// Writes what a run did as the text the model reads, which the user is shown too: a header with the status, the time
+/// and the calls; for a failure the source line and the calls already made, which are not undone; the output; and the
+/// result last. A text the script returns is written as it is, Markdown; a longer result than the budget is a preview of
+/// its start and its end, and names the file beside the session that keeps the whole of it.
 /// </summary>
 public static class CodeModeResultFormatter
 {
     /// <summary>The output budget of a result, in tokens, when the script sets none.</summary>
     public const int DefaultMaxOutputTokens = 4_000;
 
+    /// <summary>The line that names the file that keeps the whole of a result, before the result: <c>Full result: &lt;path&gt; (…)</c>.</summary>
+    public const string FullResultPrefix = "Full result: ";
+
+    /// <summary>
+    /// The characters of the preview of a result kept whole in a file: about 2,000 of its start and 1,000 of its end, at
+    /// whole lines.
+    /// </summary>
+    public const int PreviewCharacters = 3_000;
+
     private const int CharactersPerToken = 4;
+
+    private static readonly JsonSerializerOptions s_relaxedJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    /// <summary>Reads the JSON of the value a script returned as the text the result shows.</summary>
+    /// <param name="valueJson">The JSON of the value.</param>
+    /// <returns>
+    /// A string as it is; an array of texts of several lines, such as the answers of sub-agents, as Markdown sections
+    /// separated by rules; any other value as its JSON.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="valueJson"/> is null.</exception>
+    public static CodeModeResultText Present(string valueJson)
+    {
+        ArgumentNullException.ThrowIfNull(valueJson);
+        try
+        {
+            using var document = JsonDocument.Parse(valueJson);
+            var root = document.RootElement;
+            switch (root.ValueKind)
+            {
+                case JsonValueKind.String:
+                    return new CodeModeResultText(root.GetString()!, CodeModeResultKind.Markdown);
+                case JsonValueKind.Array when root.GetArrayLength() > 0
+                    && root.EnumerateArray().All(static item => item.ValueKind == JsonValueKind.String)
+                    && root.EnumerateArray().Any(static item => item.GetString()!.Contains('\n')):
+                    return new CodeModeResultText(string.Join("\n\n---\n\n", root.EnumerateArray().Select(static item => item.GetString()!.Trim())), CodeModeResultKind.Markdown);
+                case JsonValueKind.Object or JsonValueKind.Array:
+                    // A backtick or an accent reads as itself, not as an escape of six characters.
+                    return new CodeModeResultText(valueJson.Contains("\\u", StringComparison.Ordinal)
+                        ? JsonNode.Parse(valueJson)!.ToJsonString(s_relaxedJson) : valueJson, CodeModeResultKind.Json);
+                default:
+                    return new CodeModeResultText(valueJson, CodeModeResultKind.Scalar);
+            }
+        }
+        catch (JsonException)
+        {
+            return new CodeModeResultText(valueJson, CodeModeResultKind.Scalar);
+        }
+    }
+
+    /// <summary>Gives the result of a run to keep whole in a file, when it is longer than what its text gives.</summary>
+    /// <param name="result">The result of the run.</param>
+    /// <param name="maxOutputTokens">The output budget, in tokens.</param>
+    /// <returns>The result, or null when the text gives all of it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="result"/> is null.</exception>
+    public static CodeModeResultText? ResultToKeep(CodeModeRunResult result, int maxOutputTokens)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (result.ValueJson is not { } value)
+        {
+            return null;
+        }
+
+        var text = Present(value);
+        return Shown(text).Length > ResultBudget(result, Budget(maxOutputTokens)) ? text : null;
+    }
 
     /// <summary>Formats a finished run.</summary>
     /// <param name="result">The result of the run.</param>
@@ -22,9 +110,18 @@ public static class CodeModeResultFormatter
     /// <returns>The text for the model.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="result"/> is null.</exception>
     public static string Format(CodeModeRunResult result, int maxOutputTokens = DefaultMaxOutputTokens)
+        => Format(result, maxOutputTokens, null);
+
+    /// <summary>Formats a finished run whose whole result may be kept in a file (<see cref="ResultToKeep"/>).</summary>
+    /// <param name="result">The result of the run.</param>
+    /// <param name="maxOutputTokens">The output budget, in tokens.</param>
+    /// <param name="fullResultPath">The file that keeps the whole result, or null when none does.</param>
+    /// <returns>The text for the model.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="result"/> is null.</exception>
+    public static string Format(CodeModeRunResult result, int maxOutputTokens, string? fullResultPath)
     {
         ArgumentNullException.ThrowIfNull(result);
-        var budget = Math.Max(1_000, maxOutputTokens * CharactersPerToken);
+        var budget = Budget(maxOutputTokens);
         var builder = new StringBuilder();
         var status = result.Status switch
         {
@@ -50,16 +147,10 @@ public static class CodeModeResultFormatter
             }
         }
 
-        var outputBudget = budget / 3;
-        if (result.ValueJson is { } value)
-        {
-            builder.Append("Result:\n").Append(CodeModeJsonTruncation.Truncate(value, budget - Math.Min(outputBudget, OutputLength(result)))).Append('\n');
-        }
-
         if (result.Output.Count > 0)
         {
             builder.Append("Output:\n");
-            AppendOutput(builder, result, result.ValueJson is null ? budget : outputBudget);
+            AppendOutput(builder, result, result.ValueJson is null ? budget : budget / 3);
         }
 
         var notAwaited = result.Calls.Where(static call => call.Status == CodeModeCallStatus.Cancelled && call.ErrorMessage?.StartsWith("Not awaited", StringComparison.Ordinal) == true).ToList();
@@ -79,7 +170,54 @@ public static class CodeModeResultFormatter
             builder.Append(Profile(result)).Append('\n');
         }
 
+        // The result comes last: everything after its line is the value, which the window shows as Markdown.
+        if (result.ValueJson is { } value)
+        {
+            AppendResult(builder, Present(value), ResultBudget(result, budget), fullResultPath);
+        }
+
         return builder.ToString().TrimEnd() + "\n";
+    }
+
+    private static int Budget(int maxOutputTokens) => Math.Max(1_000, maxOutputTokens * CharactersPerToken);
+
+    // The result has the budget the output leaves it: the output takes at most a third.
+    private static int ResultBudget(CodeModeRunResult result, int budget)
+        => result.Output.Count > 0 ? budget - Math.Min(budget / 3, OutputLength(result)) : budget;
+
+    // The text of a value as the result writes it whole: an object or an array in a block of JSON.
+    private static string Shown(CodeModeResultText text) => text.Kind == CodeModeResultKind.Json ? "```json\n" + text.Text + "\n```" : text.Text;
+
+    private static void AppendResult(StringBuilder builder, CodeModeResultText text, int budget, string? fullResultPath)
+    {
+        var shown = Shown(text);
+        if (shown.Length <= budget)
+        {
+            builder.Append("Result:\n").Append(shown).Append('\n');
+            return;
+        }
+
+        // A result kept whole in a file gives a preview of its start and its end, as Claude Code does with a long output: the
+        // session reads the file for the rest. Without a file, the excerpt has the whole budget.
+        if (fullResultPath is not null)
+        {
+            budget = Math.Min(budget, PreviewCharacters);
+            builder.Append(FullResultPrefix).Append(fullResultPath).Append(" (")
+                .Append(text.Text.Length.ToString("N0", CultureInfo.InvariantCulture))
+                .Append(" characters; a preview of its start and its end is below, read the file for the rest)\n");
+        }
+
+        builder.Append("Result:\n");
+        if (text.Kind == CodeModeResultKind.Markdown)
+        {
+            builder.Append(CodeModeMarkdownExcerpt.Cut(text.Text, budget, fullResultPath is null ? null : "they are in the full result")).Append('\n');
+        }
+        else
+        {
+            // JSON keeps its shape: the longest values lose their end, and the model still reads valid JSON.
+            var json = CodeModeJsonTruncation.Truncate(text.Text, Math.Max(200, budget - 12));
+            builder.Append(text.Kind == CodeModeResultKind.Json ? "```json\n" + json + "\n```" : json).Append('\n');
+        }
     }
 
     /// <summary>Formats a run that goes on in the background after <c>exec</c> stopped waiting for it.</summary>
@@ -169,7 +307,9 @@ public static class CodeModeResultFormatter
             text = text[..head] + $"\n… {text.Length - budget:N0} characters of output left out …\n" + text[^tail..];
         }
 
-        builder.Append(text).Append('\n');
+        // In a block, so that the window shows it as written and the result after it is not taken for a part of it.
+        var fence = CodeModeMarkdownExcerpt.FenceFor(text);
+        builder.Append(fence).Append('\n').Append(text).Append('\n').Append(fence).Append('\n');
         if (result.DroppedOutputCharacters > 0)
         {
             builder.Append("… ").Append(result.DroppedOutputCharacters.ToString("N0", CultureInfo.InvariantCulture)).Append(" more characters of output were not kept: the log of a run is bounded.\n");
@@ -219,6 +359,8 @@ public static class CodeModeResultFormatter
 /// </summary>
 public static class CodeModeJsonTruncation
 {
+    private static readonly JsonSerializerOptions s_relaxed = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     /// <summary>Cuts a JSON text to at most about <paramref name="maxCharacters"/> characters.</summary>
     /// <param name="json">The JSON text.</param>
     /// <param name="maxCharacters">The budget.</param>
@@ -247,9 +389,10 @@ public static class CodeModeJsonTruncation
             return json;
         }
 
+        // Written back as the script wrote it: a backtick or an accent stays one character, not an escape of six.
         for (var round = 0; round < 64; round++)
         {
-            var text = node.ToJsonString();
+            var text = node.ToJsonString(s_relaxed);
             if (text.Length <= maxCharacters)
             {
                 return text;
@@ -262,7 +405,7 @@ public static class CodeModeJsonTruncation
             }
         }
 
-        var last = node.ToJsonString();
+        var last = node.ToJsonString(s_relaxed);
         return last.Length <= maxCharacters ? last : CutText(last, maxCharacters);
     }
 
