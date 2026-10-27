@@ -85,7 +85,8 @@ test("empty owned startup opens usable provider settings and a guide without Res
           .map(element=>{const box=element.getBoundingClientRect();return [box.x,box.y,box.width,box.height].map(value=>Math.round(value*100)/100)});
         samples.push({boxes,errors:startupErrors.length});if(samples.length===12)resolve(samples);else requestAnimationFrame(sample)};requestAnimationFrame(sample)})`) as { boxes: number[][]; errors: number }[];
       for (const sample of samples) assert.deepEqual(sample, samples[0], `${stage}: layout must settle without recurrent error notifications`);
-      assert.equal(await evaluate("(()=>{const bars=[...document.querySelectorAll('.flexlayout__tabset_tabbar_outer[data-titlebar-start]')];return bars.length>0&&bars.every(element=>element.getBoundingClientRect().height===38)})()"), true, stage);
+      // A bar in the title row is as high as it; one too narrow for its tabs beside the brand and the actions goes below it.
+      assert.equal(await evaluate("(()=>{const bars=[...document.querySelectorAll('.flexlayout__tabset_tabbar_outer[data-titlebar-start],.flexlayout__tabset_tabbar_outer[data-titlebar-crowded]')];return bars.length>0&&bars.every(element=>element.getBoundingClientRect().height===(element.hasAttribute('data-titlebar-crowded')?72:38))})()"), true, stage);
       t.diagnostic(`${stage}: stable across ${samples.length} frames; captured errors=${samples[0].errors}`);
     };
     const guide = async () => {

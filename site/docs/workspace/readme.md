@@ -114,7 +114,7 @@ In CodeAlta Desktop, a session you click opens in one tab whose title is in *ita
   <figcaption class="small text-secondary mt-2">Kept tabs, and the tab with the italic title that the next session or project you click takes over.</figcaption>
 </figure>
 
-A session you create is kept from the start. Closing a tab never deletes a session. `Ctrl+W` (`Cmd+W` on macOS) or a middle click closes a tab, and `Ctrl+Shift+T` reopens the last closed one.
+A session you create is kept from the start. Closing a tab never deletes a session. `Ctrl+W` (`Cmd+W` on macOS) or a middle click closes a tab: `Ctrl+W` closes the tab of the pane you last clicked in, such as a pane docked on the right. `Ctrl+Shift+T` reopens the last closed one. A pane at the top too narrow for its tabs beside the buttons of the title bar shows them below it.
 
 Right-click a tab, or press `Shift+F10` on it, for **Close**, **Close others**, **Close to the right** and **Close all** (in the same pane), **Keep open** on an italic tab, and **Move to window** (see [Windows](#windows)). The `…` menu of a pane has **Close others**, **Close all** and **Reopen closed tab**. A code editor with unsaved changes asks before it closes.
 

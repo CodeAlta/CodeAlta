@@ -26,16 +26,45 @@ import { takeKeyContextMenu } from "./keyContextMenu";
 
 export type SessionTabDrafts = Readonly<{ indicators: DraftIndicators; selectedId: string | null }>;
 
+/** The room the tabs of a pane need in the title row, beside the controls of the title bar; with less, they go below them. */
+export const titleBarTabsRoom = 200;
+
+type Edges = Readonly<{ left: number; right: number; top: number; width: number }>;
+
+/**
+ * Where the tab bar of a pane goes: in the title row when the pane is at the top of the window, padded at the start
+ * under the brand and at the end under the window actions; below the title row, crowded, when what is left between
+ * them is too narrow for its tabs (a narrow pane docked on the right would show a tab without its close button).
+ * @param brandRight The right edge of the brand when it lies over the title row, else null.
+ * @param actionsLeft The left edge of the window actions and controls, else null.
+ */
+export function titleBarPlace(box: Edges, bounds: Edges, brandRight: number | null, actionsLeft: number | null) {
+  const top = box.width > 0 && Math.abs(box.top - bounds.top) < 2;
+  const start = top && Math.abs(box.left - bounds.left) < 2;
+  const end = top && Math.abs(box.right - bounds.right) < 2;
+  const covered = (start && brandRight !== null ? Math.max(0, brandRight - box.left) : 0) + (end && actionsLeft !== null ? Math.max(0, box.right - actionsLeft) : 0);
+  const crowded = top && box.width - covered < titleBarTabsRoom;
+  return { top, start: start && !crowded, end: end && !crowded, crowded };
+}
+
 function markTitleBars(host: HTMLElement) {
   const bounds = host.getBoundingClientRect();
+  const shell = host.closest(".workspace-shell");
+  const over = (element: Element | null | undefined) => {
+    const box = element?.getBoundingClientRect();
+    return box && box.width > 0 && Math.abs(box.top - bounds.top) < 2 ? box : null;
+  };
+  const brand = over(shell?.querySelector(":scope > .window-brand"));
+  const actions = [over(shell?.querySelector(":scope > .window-actions")), over(shell?.querySelector(":scope > .window-controls"))].filter(box => !!box);
   host.querySelectorAll<HTMLElement>(".flexlayout__tabset_tabbar_outer").forEach(bar => {
     // Reserved title-bar padding can exceed a narrow pane. Its stable bounds, not the padded bar's,
     // determine the edges; otherwise the end marker repeatedly removes and reapplies its own padding.
     const box = (bar.closest(".flexlayout__tabset") ?? bar).getBoundingClientRect();
-    const top = box.width > 0 && Math.abs(box.top - bounds.top) < 2;
-    bar.toggleAttribute("data-neoastra-drag-region", top);
-    bar.toggleAttribute("data-titlebar-start", top && Math.abs(box.left - bounds.left) < 2);
-    bar.toggleAttribute("data-titlebar-end", top && Math.abs(box.right - bounds.right) < 2);
+    const place = titleBarPlace(box, bounds, brand ? brand.right : null, actions.length ? Math.min(...actions.map(value => value.left)) : null);
+    bar.toggleAttribute("data-neoastra-drag-region", place.top);
+    bar.toggleAttribute("data-titlebar-start", place.start);
+    bar.toggleAttribute("data-titlebar-end", place.end);
+    bar.toggleAttribute("data-titlebar-crowded", place.crowded);
   });
 }
 
