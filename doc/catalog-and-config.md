@@ -40,7 +40,7 @@ per-project provider preferences.
 | `data/alta.sqlite3`, `data/backups/`, `data/search.sqlite3` | `ApplicationDatabase` and its copies; the desktop search index (derived). |
 | `saved_statistics_after_deleted_sessions/` | `StatisticsArchiveStore`: statistics of retired sessions (see below). |
 | `ui-state.yaml`, `saved_prompts/` | `SessionViewCatalog` view state, `PromptDraftStore` unsent drafts. |
-| `scratchpad/` | Files where agents write down long instructions; named in the runtime context, cleared at startup. |
+| `scratchpad/` | Files where agents write down long instructions; named in the session context, cleared at startup. |
 | `automations.json`, `work_items.json` | Desktop automation state; links of tasks and plans to sessions. |
 | `alta.lock`, `mcp_url.txt` | The instance lock, the address of the desktop MCP server while it runs. |
 

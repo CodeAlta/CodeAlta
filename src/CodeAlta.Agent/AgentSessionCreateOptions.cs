@@ -146,6 +146,14 @@ public class AgentSessionCreateOptions
     public string? DeveloperInstructions { get; init; }
 
     /// <summary>
+    /// Gets or initializes what the instructions say of this session alone: where it works, its parent, its scratchpad.
+    /// They are sent after <see cref="SystemMessage"/> and <see cref="DeveloperInstructions"/>, which are then the same
+    /// text for the sessions of a prompt, so that the prompt cache of a provider serves them all
+    /// (<see cref="Runtime.AgentTurnRequest.SessionInstructions"/>). Null for none.
+    /// </summary>
+    public string? SessionInstructions { get; init; }
+
+    /// <summary>
     /// Gets or initializes whether the supplied system/developer instructions are already fully composed.
     /// </summary>
     /// <remarks>

@@ -210,11 +210,18 @@ it with `mode: append`; an agent prompt can `inherit:` others (depth-first, at m
 (`.github/agents/*.agent.md`) are read-only agent prompts below the built-in ones.
 
 `SystemPromptBuilder` composes the system message and the developer instructions: system prompt, agent prompt body,
-runtime context (working directory, project root, scratchpad file, space, model tiers, commit trailer), tool guidance,
-skills, and project context (instruction files `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, the largest
-per folder, from the instruction boundary to the working directory). Orchestration then appends parent guidance and
-plugin prompt parts, and plugin instruction processors may rewrite the result. An unreadable instruction file is
-skipped with a warning, never a failure.
+runtime context (date, platform, space, model tiers, commit trailer), tool guidance, skills, and project context
+(instruction files `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, the largest per folder, from the
+instruction boundary to the working directory, named from the project root). Orchestration then appends plugin prompt
+parts, and plugin instruction processors may rewrite the result. An unreadable instruction file is skipped with a
+warning, never a failure. A host can leave parts of the agent workflow out (`PromptFeatures`: scratchpad, notes, tasks,
+review, sub-agents, mode handoff, session title) through `<!-- if-feature: x -->` blocks of the prompt files;
+`altacli run` does for what nobody reads in a headless run.
+
+What is of one session alone is the session context, kept apart (`AgentTurnRequest.SessionInstructions`) and sent
+last: working directory, project root, worktree, parent session and its guidance, scratchpad file, title and
+suggestion paragraphs. The text before it is the same for the sessions of a prompt in other folders, so a provider
+serves it to all of them from its prompt cache; Anthropic receives it as a second system block after the cached one.
 
 **The instructions stay byte-stable.** Providers cache the prompt prefix; any change of the instructions invalidates
 the cache of every later request. So:

@@ -1641,30 +1641,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
             request.PromptCacheKey);
     }
 
-    private static string? ComposeInstructions(AgentTurnRequest request)
-    {
-        var systemMessage = string.IsNullOrWhiteSpace(request.SystemMessage)
-            ? null
-            : request.SystemMessage.Trim();
-        var developerInstructions = string.IsNullOrWhiteSpace(request.DeveloperInstructions)
-            ? null
-            : request.DeveloperInstructions.Trim();
-
-        if (string.IsNullOrWhiteSpace(developerInstructions))
-        {
-            return systemMessage;
-        }
-
-        return string.IsNullOrWhiteSpace(systemMessage)
-            ? developerInstructions
-            : $"""
-               {systemMessage}
-
-               <developer_instructions>
-               {developerInstructions}
-               </developer_instructions>
-               """;
-    }
+    // The instructions of the session come last: what is before them is the same for every session of a prompt, and the
+    // provider reads it from its prompt cache.
+    private static string? ComposeInstructions(AgentTurnRequest request) => AgentInstructionText.Compose(request);
 
     private static IReadOnlyList<ResponseItem> CreateConversationItems(IReadOnlyList<AgentConversationMessage> messages)
     {

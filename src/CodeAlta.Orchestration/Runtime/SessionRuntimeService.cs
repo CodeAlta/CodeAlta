@@ -193,7 +193,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         + "No user is available while this run goes on: nobody reads a question, approves a plan or reviews a change before it ends. "
         + "Decide by yourself instead of asking: choose the narrowest safe interpretation of the request, go on, and say in your final answer what you assumed. "
         + "The commands `alta ask`, `alta review`, `alta reminder` and the commands of the windows and of the user interface (`alta ui`, `alta window`) are not available here. "
-        + "Your final answer is the result of the run, read by a script or a program: make it complete and self-contained.";
+        + "Your final answer is the result of the run, read by a script or a program: make it complete and self-contained. "
+        + "Nobody reads what you write between tool calls: do not narrate your steps, and keep what matters for the final answer.\n\n"
+        + "Run builds and tests in the foreground with the shell tool when they fit its timeout. "
+        + "A job you start with `alta job start` must have ended before your final answer: one that ends after it starts this session again, with the whole context, and the answer is given twice. "
+        + "While a job runs, go on with other work; when only the job is left, end your turn with one line that names it, not with your answer: its result comes back to you as a prompt, and you give the final answer then.";
 
     /// <summary>
     /// Gets or initializes whether the host shows the prompts the model suggests. False, the default: no session
@@ -2098,8 +2102,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var developerInstructions = instructions.DeveloperInstructions;
         // A session moved to another project is told so once, by the first attachment after the move.
         var movedNotice = TakeMovedNotice(session.SessionId);
-        var additionalDeveloperInstructions = AppendPromptPart(AppendPromptPart(AppendPromptPart(BuildParentNotificationGuidance(session), worktreeGone), movedNotice),
-            options.AdditionalDeveloperInstructions);
+        // What is of this session alone is sent last, apart from what the sessions of the prompt share, which the prompt
+        // cache of the provider then serves to them all.
+        var sessionInstructions = AppendPromptPart(AppendPromptPart(AppendPromptPart(instructions.SessionInstructions, BuildParentNotificationGuidance(session)),
+            worktreeGone), movedNotice);
+        var additionalDeveloperInstructions = options.AdditionalDeveloperInstructions;
         var tools = options.Tools;
         // The identity of the space of the session as it is now: the session keeps it until it attaches again,
         // whatever the window shows and whatever is changed in the space meanwhile.
@@ -2126,6 +2133,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var instructionsAlreadyComposed = false;
         if (options.InstructionProcessor is not null)
         {
+            // The plugins read and change the whole text; one they changed is sent as it is, in one part.
+            var processedDeveloperInstructions = AppendPromptPart(finalDeveloperInstructions, sessionInstructions);
             var processing = await options.InstructionProcessor(
                     new SessionInstructionProcessingRequest
                     {
@@ -2135,7 +2144,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         ProviderId = options.ProviderId.Value,
                         Model = options.Model,
                         SystemMessage = systemMessage,
-                        DeveloperInstructions = finalDeveloperInstructions,
+                        DeveloperInstructions = processedDeveloperInstructions,
                         ActiveToolNames = (tools ?? []).Select(static tool => tool.Spec.Name).ToArray(),
                         Manifest = new Dictionary<string, string>
                         {
@@ -2150,7 +2159,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }
 
             systemMessage = processing.SystemMessage;
-            finalDeveloperInstructions = processing.DeveloperInstructions;
+            if (!string.Equals(processing.DeveloperInstructions, processedDeveloperInstructions, StringComparison.Ordinal))
+            {
+                finalDeveloperInstructions = processing.DeveloperInstructions;
+                sessionInstructions = null;
+            }
+
             instructionTransformations = processing.Transformations;
             instructionsAlreadyComposed = instructionTransformations.Count > 0;
         }
@@ -2182,7 +2196,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Title = title,
             TitleSource = titleSource,
             TitleMode = titleMode,
-            TitleInstructions = SessionTitleGuidance,
+            // A host whose sessions are listed nowhere does not ask for a title.
+            TitleInstructions = _instructionTemplateProvider.DisabledPromptFeatures.Contains(PromptFeatures.SessionTitle) ? null : SessionTitleGuidance,
             // A suggestion is for somebody who reads it and writes the next prompt: not in a host that shows none,
             // and not for a session an agent drives. The setting is read at each prompt.
             PromptSuggestions = ShowsPromptSuggestions && string.IsNullOrWhiteSpace(session.ParentSessionId),
@@ -2200,6 +2215,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Environment = processEnvironment,
             SystemMessage = systemMessage,
             DeveloperInstructions = finalDeveloperInstructions,
+            SessionInstructions = sessionInstructions,
             InstructionsAlreadyComposed = instructionsAlreadyComposed,
             InstructionTransformations = instructionTransformations,
             AgentPromptId = NormalizeOptionalText(session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,

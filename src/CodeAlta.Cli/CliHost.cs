@@ -44,6 +44,9 @@ internal sealed record CliHostRequest
     /// started (<c>run</c> and <c>acp</c>); a failure is a <see cref="CliStartupException"/>.
     /// </summary>
     public bool ChecksRequired { get; init; }
+
+    /// <summary>Gets the parts of the agent prompt the sessions leave out (<see cref="CliPromptFeatures"/>); empty for none.</summary>
+    public IReadOnlyList<string> DisabledPromptFeatures { get; init; } = [];
 }
 
 /// <summary>A host that cannot run as it was set up: a required plugin or MCP server did not start. Exit code 2.</summary>
@@ -96,6 +99,9 @@ internal sealed class CliHost : IAsyncDisposable
 
     /// <summary>Gets the folder the host was started for, whose required plugins and MCP servers it checked as it started.</summary>
     public string ProjectFolder => Request.ProjectFolder;
+
+    /// <summary>Gets the parts of the agent prompt the sessions of the host leave out.</summary>
+    public IReadOnlyList<string> DisabledPromptFeatures => Request.DisabledPromptFeatures;
 
     // What the host was composed with, for the checks of the folders of later sessions.
     private CliHostRequest Request { get; init; } = null!;
@@ -157,6 +163,7 @@ internal sealed class CliHost : IAsyncDisposable
                 ListsSkills = request.ListsSkills,
                 // A separate profile reads none of the user's home: not the skills and agents other tools keep there.
                 ReadsUserHome = storage.Mode != CliStorageMode.Profile,
+                DisabledPromptFeatures = request.DisabledPromptFeatures.ToHashSet(StringComparer.Ordinal),
                 IsHeadless = true,
                 HasInteractiveUi = false,
                 OwnsLogging = false,

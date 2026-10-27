@@ -359,7 +359,8 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             return (messages, options);
         }
 
-        var marked = AnthropicPromptCache.MarkBreakpoints(messages, options, lifetime);
+        // The instructions of the session are a system block of their own, after the one that takes the marker.
+        var marked = AnthropicPromptCache.MarkBreakpoints(messages, options, lifetime, AgentInstructionText.Session(request.SessionInstructions));
         return (marked.Messages, marked.Options ?? options);
     }
 

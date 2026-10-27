@@ -394,7 +394,7 @@ public sealed partial class AltaLiveToolTests
         StringAssert.Contains(tool.Spec.Description, "create project/global child sessions");
         StringAssert.Contains(tool.Spec.Description, "send, queue, steer, abort, compact");
         StringAssert.Contains(tool.Spec.Description, "peer-agent requests");
-        StringAssert.Contains(tool.Spec.Description, "args [\"--help\"] for the quick-start");
+        StringAssert.Contains(tool.Spec.Description, "read help only for a command or an option they do not give: args [\"--help\"] for the quick-start");
         StringAssert.Contains(tool.Spec.Description, "compact JSONL headed by alta.result");
     }
 
@@ -3233,8 +3233,9 @@ public sealed partial class AltaLiveToolTests
             line.GetProperty("type").GetString() == "alta.session.item" &&
             line.GetProperty("sessionId").GetString() == childSessionId &&
             line.GetProperty("parentSessionId").GetString() == canonicalParentSessionId));
-        Assert.IsNotNull(providerRuntime.CreatedOptions.Last().DeveloperInstructions);
-        StringAssert.Contains(providerRuntime.CreatedOptions.Last().DeveloperInstructions!, $"Parent session: `{canonicalParentSessionId}`");
+        // The parent is of this session alone: it is told in the instructions of the session.
+        Assert.IsNotNull(providerRuntime.CreatedOptions.Last().SessionInstructions);
+        StringAssert.Contains(providerRuntime.CreatedOptions.Last().SessionInstructions!, $"Parent session: `{canonicalParentSessionId}`");
         await WaitUntilAsync(() => providerRuntime.SteeredOptions.Count == 1).ConfigureAwait(false);
         var parentNotification = ExtractText(providerRuntime.SteeredOptions.Single().Input);
         StringAssert.Contains(parentNotification, $"Source session: {childSessionId}");
@@ -4827,10 +4828,11 @@ public sealed partial class AltaLiveToolTests
                 new AltaActorProvenance { Kind = "agent", SourceSessionId = parent.SessionId, CreatedAt = DateTimeOffset.UtcNow })
             .ConfigureAwait(false);
 
-        Assert.IsNotNull(providerRuntime.CreatedOptions[1].DeveloperInstructions);
-        StringAssert.Contains(providerRuntime.CreatedOptions[1].DeveloperInstructions!, $"Parent session: {parent.SessionId}");
-        StringAssert.Contains(providerRuntime.CreatedOptions[1].DeveloperInstructions!, "CodeAlta auto-forwards your final assistant reply");
-        StringAssert.Contains(providerRuntime.CreatedOptions[1].DeveloperInstructions!, "<notify-parent>update text</notify-parent>");
+        // The parent is of this session alone: it is told in the instructions of the session.
+        Assert.IsNotNull(providerRuntime.CreatedOptions[1].SessionInstructions);
+        StringAssert.Contains(providerRuntime.CreatedOptions[1].SessionInstructions!, $"Parent session: {parent.SessionId}");
+        StringAssert.Contains(providerRuntime.CreatedOptions[1].SessionInstructions!, "CodeAlta auto-forwards your final assistant reply");
+        StringAssert.Contains(providerRuntime.CreatedOptions[1].SessionInstructions!, "<notify-parent>update text</notify-parent>");
 
         await runtime.SendAsync(parent, executionOptions, new AgentSendOptions { Input = AgentInput.Text("parent running") }).ConfigureAwait(false);
         var childRunId = await runtime.SendAsync(child, executionOptions, new AgentSendOptions { Input = AgentInput.Text("child work") }).ConfigureAwait(false);

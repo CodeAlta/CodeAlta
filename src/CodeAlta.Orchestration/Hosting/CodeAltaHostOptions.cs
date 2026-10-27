@@ -55,6 +55,14 @@ public sealed class CodeAltaHostOptions
     public bool ReadsUserHome { get; init; } = true;
 
     /// <summary>
+    /// Gets the parts of the workflow the prompts of the sessions leave out (<see cref="Runtime.SystemPrompts.PromptFeatures"/>):
+    /// the scratchpad, the sticky notes, the follow-up tasks, the review by the user, the sub-agents, the mode handoff and
+    /// the title of a session. Null, the default, keeps them all, as CodeAlta Desktop and TUI do; <c>altacli run</c> leaves
+    /// out those nobody would read.
+    /// </summary>
+    public IReadOnlySet<string>? DisabledPromptFeatures { get; init; }
+
+    /// <summary>
     /// Gets whether the host leaves the shared state of the global root as it is, for a process that runs beside CodeAlta
     /// Desktop or TUI on the same profile (a headless run). Default false.
     /// </summary>

@@ -387,7 +387,7 @@ public sealed class SessionGivenTitleTests
 
         public async Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
         {
-            lock (Instructions) Instructions.Add(request.DeveloperInstructions);
+            lock (Instructions) Instructions.Add(AgentInstructionText.DeveloperAndSession(request));
             Started?.TrySetResult();
             if (Release is { } release) await release.Task.WaitAsync(cancellationToken);
             return new AgentTurnResponse

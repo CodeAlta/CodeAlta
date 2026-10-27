@@ -70,8 +70,9 @@ public sealed class AgentInstructionFileTests
         Assert.AreEqual(string.Join(Environment.NewLine + Environment.NewLine,
             "# Agent Prompt" + Environment.NewLine + Environment.NewLine + "Fixture prompt.",
             "# Project Context" + Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine + Environment.NewLine,
+                // A file of the project is named from its root, which the Session Context names; one above it, whole.
                 new[] { fixture.Ancestor, fixture.Blocked, fixture.Child }.Select(path =>
-                    $"File: `{path}`{Environment.NewLine}{Environment.NewLine}<INSTRUCTIONS>{Environment.NewLine}{Environment.NewLine}{fixture.Content[path].Trim()}{Environment.NewLine}{Environment.NewLine}</INSTRUCTIONS>"))), bundle.DeveloperInstructions);
+                    $"File: `{(path == fixture.Child ? "AGENTS.md" : path)}`{Environment.NewLine}{Environment.NewLine}<INSTRUCTIONS>{Environment.NewLine}{Environment.NewLine}{fixture.Content[path].Trim()}{Environment.NewLine}{Environment.NewLine}</INSTRUCTIONS>"))), bundle.DeveloperInstructions);
         CollectionAssert.AreEqual(new[] { fixture.Ancestor, fixture.Blocked, fixture.Child }, bundle.Manifest.Parts.Single(part => part.Key == "project.context").SourcePaths!.ToArray());
         Assert.AreEqual(0, bundle.Diagnostics.Count);
         Assert.AreEqual(bundle.EffectivePromptHash, fixture.Builder.Build(fixture.Request, fixture.Reader()).EffectivePromptHash);

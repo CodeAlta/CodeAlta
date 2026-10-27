@@ -232,6 +232,61 @@ public sealed class AnthropicPromptCachingTests
     }
 
     [TestMethod]
+    public void MarkBreakpoints_SendsTheInstructionsOfTheSessionAsABlockAfterTheMarkedOne_AndFreesTheMarkerOfTheTools()
+    {
+        var session = AgentInstructionText.Session("# Session Context\n\n- Current working directory: `C:/work`")!;
+        var options = new ChatOptions { Instructions = "Shared instructions.\n\n" + session, Tools = [Declare("list_dir"), Declare("read_file")] };
+
+        var (marked, markedOptions) = AnthropicPromptCache.MarkBreakpoints([new ChatMessage(ChatRole.User, [new TextContent("Hello")])], options,
+            AnthropicPromptCache.Lifetime, session);
+
+        Assert.AreEqual(ChatRole.System, marked[0].Role);
+        CollectionAssert.AreEqual(new[] { "Shared instructions.", session }, marked[0].Contents.Cast<TextContent>().Select(static content => content.Text).ToArray());
+        Assert.IsTrue(IsMarked(marked[0].Contents[0]), "The shared block takes the marker: the same text for every session of the prompt.");
+        Assert.IsFalse(IsMarked(marked[0].Contents[1]));
+        Assert.IsFalse(markedOptions!.Tools!.Cast<AIFunctionDeclaration>().Any(static tool => tool.AdditionalProperties.ContainsKey(nameof(Tool.CacheControl))),
+            "The marker of the system covers the tools before it.");
+
+        // Instructions that do not end with those of the session are one block, as before.
+        var (whole, wholeOptions) = AnthropicPromptCache.MarkBreakpoints([new ChatMessage(ChatRole.User, [new TextContent("Hello")])],
+            new ChatOptions { Instructions = "Other instructions.", Tools = [Declare("read_file")] }, AnthropicPromptCache.Lifetime, session);
+        Assert.AreEqual("Other instructions.", ((TextContent)whole[0].Contents.Single()).Text);
+        Assert.IsTrue(IsMarked(whole[0].Contents[0]));
+        Assert.IsTrue(wholeOptions!.Tools!.Cast<AIFunctionDeclaration>().Single().AdditionalProperties.ContainsKey(nameof(Tool.CacheControl)));
+    }
+
+    [TestMethod]
+    public async Task AnthropicRequest_SendsTheSystemAsTwoBlocks_TheSharedOneMarked()
+    {
+        var body = await SendRequestAsync(TimeSpan.FromMinutes(5), request => request with
+        {
+            DeveloperInstructions = "Developer instructions.",
+            SessionInstructions = "# Session Context\n\n- Current working directory: `C:/work`",
+        }).ConfigureAwait(false);
+
+        var system = body.RootElement.GetProperty("system").EnumerateArray().ToArray();
+        Assert.AreEqual(2, system.Length, body.RootElement.GetProperty("system").GetRawText());
+        Assert.AreEqual("You are a test agent.\n\n<developer_instructions>\nDeveloper instructions.\n</developer_instructions>", system[0].GetProperty("text").GetString());
+        Assert.IsTrue(system[0].TryGetProperty("cache_control", out _));
+        Assert.AreEqual("<session_context>\n# Session Context\n\n- Current working directory: `C:/work`\n</session_context>", system[1].GetProperty("text").GetString());
+        Assert.IsFalse(system[1].TryGetProperty("cache_control", out _));
+        Assert.IsFalse(FindCacheControls(body.RootElement.GetProperty("tools")).Any());
+        Assert.AreEqual(3, FindCacheControls(body.RootElement).Count(), "The shared system block, the last message and the message before the last answer.");
+    }
+
+    [TestMethod]
+    public void AgentInstructionText_PutsTheInstructionsOfTheSessionLast()
+    {
+        var request = CreateRequest(profile: null) with { DeveloperInstructions = "Developer.", SessionInstructions = "Session." };
+
+        Assert.AreEqual("You are a test agent.\n\n<developer_instructions>\nDeveloper.\n</developer_instructions>\n\n<session_context>\nSession.\n</session_context>",
+            AgentInstructionText.Compose(request));
+        Assert.AreEqual("Developer.\n\nSession.", AgentInstructionText.DeveloperAndSession(request));
+        Assert.AreEqual("You are a test agent.", AgentInstructionText.Compose(CreateRequest(profile: null)));
+        StringAssert.StartsWith(AgentInstructionText.Compose(request), AgentInstructionText.ComposeShared(request)!);
+    }
+
+    [TestMethod]
     public void AnthropicProvider_TakesOnlyTheTtlsOfTheApi()
     {
         var provider = new AnthropicProviderOptions { ProviderKey = "anthropic" };
@@ -239,7 +294,7 @@ public sealed class AnthropicPromptCachingTests
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => provider.PromptCacheTtl = TimeSpan.FromMinutes(30));
     }
 
-    private static async Task<JsonDocument> SendRequestAsync(TimeSpan ttl)
+    private static async Task<JsonDocument> SendRequestAsync(TimeSpan ttl, Func<AgentTurnRequest, AgentTurnRequest>? change = null)
     {
         string? body = null;
         var stream = AnthropicStopReasonTests.Stream(
@@ -273,7 +328,7 @@ public sealed class AnthropicPromptCachingTests
             ],
         };
 
-        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+        _ = await executor.ExecuteTurnAsync(change?.Invoke(request) ?? request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
         return JsonDocument.Parse(body!);
     }

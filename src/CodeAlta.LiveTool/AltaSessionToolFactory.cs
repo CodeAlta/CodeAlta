@@ -20,7 +20,8 @@ public static class AltaSessionToolFactory
         "list, read, add or remove the bookmarks of sessions and of their messages; " +
         "in CodeAlta Desktop, search earlier conversations, skills, tools, MCP servers and the user guide by purpose (`alta search`); " +
         "and activate CodeAlta-managed skills. Pass CLI-style args excluding `alta`. " +
-        "Start with args [\"--help\"] for the quick-start, then narrower help such as [\"session\",\"send\",\"--help\"] for options. " +
+        "Call a command your instructions already give (such as `alta job start --command ...`) directly, without reading help first; " +
+        "read help only for a command or an option they do not give: args [\"--help\"] for the quick-start and the list of commands, then narrower help such as [\"session\",\"send\",\"--help\"]. " +
         "Calls are finite/non-streaming; non-help results are compact JSONL headed by alta.result.";
     private const string InputSchemaJson = """
         {
@@ -28,7 +29,7 @@ public static class AltaSessionToolFactory
           "properties": {
             "args": {
               "type": "array",
-              "description": "Arguments to pass to alta, excluding the executable name. Start with [\"--help\"] for discovery.",
+              "description": "Arguments to pass to alta, excluding the executable name, such as [\"job\",\"list\"]; [\"--help\"] lists the commands.",
               "items": { "type": "string" },
               "minItems": 1
             },
