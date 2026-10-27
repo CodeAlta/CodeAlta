@@ -3028,6 +3028,120 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionEvents_SayWhatTheHostSent_TheImagesOfTools_AndTheRecordsOfScripts()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("openai");
+        var sessionId = "session-host";
+        var timestamp = new DateTimeOffset(2026, 10, 26, 12, 0, 0, TimeSpan.Zero);
+        using var toolDetails = JsonDocument.Parse(
+            "{\"result\":{\"items\":[{\"$type\":\"localImage\",\"path\":" + JsonSerializer.Serialize(Path.Combine(root.Path, "shot.png")) + ",\"displayName\":\"Screenshot\",\"mediaType\":\"image/png\"}]}}");
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(root.Path));
+        await store.UpsertSessionAsync(new AgentSessionSummary
+        {
+            SessionId = sessionId, ProviderId = providerId, ProtocolFamily = "openai", ProviderKey = providerId.Value,
+            ModelId = "gpt", WorkingDirectory = root.Path, Title = "Host", Summary = "Host", CreatedAt = timestamp, UpdatedAt = timestamp,
+        }).ConfigureAwait(false);
+        await store.AppendEventsAsync(providerId.Value, providerId.Value, sessionId,
+        [
+            new AgentContentCompletedEvent(providerId, sessionId, timestamp, new AgentRunId("run"), AgentContentKind.User, "user-1", null, "[CodeAlta background job]\nJob: job-1\nResult: succeeded (exit code 0) after 2 s",
+                Provenance: AgentPromptProvenance.BackgroundJob),
+            new AgentContentCompletedEvent(providerId, sessionId, timestamp, new AgentRunId("run"), AgentContentKind.User, "user-2", null, "Done.",
+                SourceSessionId: "child-1", Provenance: AgentPromptProvenance.AgentSession),
+            new AgentActivityEvent(providerId, sessionId, timestamp, new AgentRunId("run"), AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "call-1", null, "view_image", null),
+            new AgentContentCompletedEvent(providerId, sessionId, timestamp, new AgentRunId("run"), AgentContentKind.ToolOutput, "out-1", "call-1", "the text of the tool", toolDetails.RootElement.Clone()),
+            new AgentContentCompletedEvent(providerId, sessionId, timestamp, new AgentRunId("run"), AgentContentKind.ToolOutput, "out-2", "call-1", "no image here"),
+            new AgentWorkflowEvent(providerId, sessionId, timestamp, null, AgentWorkflowEventKind.StepsDeclared, "run-7f3c2a")
+            {
+                CallId = "call-1", Title = "Compare", Steps = [new AgentWorkflowStep("research", "Research")],
+            },
+            new AgentWorkflowEvent(providerId, sessionId, timestamp, null, AgentWorkflowEventKind.SessionEnded, "run-7f3c2a")
+            {
+                CallId = "call-1", ChildSessionId = "child-1", StepId = "research", Status = "completed", DurationMs = 1200,
+            },
+        ]).ConfigureAwait(false);
+        var runtime = CreateRuntime(options, providerId);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+
+        var events = await dispatcher.InvokeAsync(["session", "events", sessionId, "--include", "user,tool,workflow", "--no-tool-output", "--tool-images"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, events.ExitCode, events.Stderr);
+        var records = ReadJsonLines(events.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.event").ToArray();
+        CollectionAssert.AreEqual(new[] { "user.message", "user.message", "tool.output", "workflow.stepsDeclared", "workflow.sessionEnded" },
+            records.Select(static record => record.GetProperty("kind").GetString()).ToArray(), "The output without an image is left out; the records of the script are there.");
+        Assert.AreEqual("background-job", records[0].GetProperty("metadata").GetProperty("provenance").GetString());
+        Assert.AreEqual("agent-session", records[1].GetProperty("metadata").GetProperty("provenance").GetString());
+        Assert.AreEqual("child-1", records[1].GetProperty("metadata").GetProperty("sourceSessionId").GetString());
+        Assert.AreEqual(0, records[2].GetProperty("content").GetArrayLength(), "The output kept for its image goes without its text.");
+        var image = records[2].GetProperty("metadata").GetProperty("images")[0];
+        Assert.AreEqual(("Screenshot", "image/png", "shot.png"), (image.GetProperty("title").GetString(), image.GetProperty("mediaType").GetString(), image.GetProperty("id").GetString()));
+        Assert.AreEqual("call-1", records[2].GetProperty("metadata").GetProperty("parentActivityId").GetString());
+        var declared = records[3].GetProperty("metadata");
+        Assert.AreEqual(("run-7f3c2a", "call-1", "research"), (declared.GetProperty("runId").GetString(), declared.GetProperty("callId").GetString(), declared.GetProperty("steps")[0].GetProperty("id").GetString()));
+        var ended = records[4].GetProperty("metadata");
+        Assert.AreEqual(("child-1", "completed", 1200L), (ended.GetProperty("childSessionId").GetString(), ended.GetProperty("status").GetString(), ended.GetProperty("durationMs").GetInt64()));
+    }
+
+    [TestMethod]
+    public async Task SessionImage_ReadsAnImageOfTheFilesOfItsSessionOnly()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("openai");
+        var timestamp = new DateTimeOffset(2026, 10, 26, 12, 0, 0, TimeSpan.Zero);
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(root.Path));
+        foreach (var id in (string[])["session-a", "session-b"])
+        {
+            await store.UpsertSessionAsync(new AgentSessionSummary
+            {
+                SessionId = id, ProviderId = providerId, ProtocolFamily = "openai", ProviderKey = providerId.Value,
+                ModelId = "gpt", WorkingDirectory = root.Path, Title = id, Summary = id, CreatedAt = timestamp, UpdatedAt = timestamp,
+            }).ConfigureAwait(false);
+            await store.AppendEventsAsync(providerId.Value, providerId.Value, id,
+                [new AgentContentCompletedEvent(providerId, id, timestamp, new AgentRunId("run"), AgentContentKind.User, "user-1", null, "Hello")]).ConfigureAwait(false);
+        }
+
+        byte[] png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4];
+        var folder = (await store.GetAttachmentDirectoryAsync("session-a", CancellationToken.None).ConfigureAwait(false))!;
+        Directory.CreateDirectory(folder);
+        await File.WriteAllBytesAsync(Path.Combine(folder, "shot.png"), png).ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Combine(folder, "notes.txt"), "not an image").ConfigureAwait(false);
+        await File.WriteAllBytesAsync(Path.Combine(root.Path, "outside.png"), png).ConfigureAwait(false);
+        var runtime = CreateRuntime(options, providerId);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+
+        var read = await dispatcher.InvokeAsync(["session", "image", "session-a", "shot.png"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, read.ExitCode, read.Stderr);
+        var record = ReadJsonLines(read.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.image");
+        Assert.AreEqual("image/png", record.GetProperty("mediaType").GetString());
+        Assert.AreEqual(png.Length, record.GetProperty("bytes").GetInt32());
+        CollectionAssert.AreEqual(png, Convert.FromBase64String(record.GetProperty("base64").GetString()!));
+
+        var otherSession = await dispatcher.InvokeAsync(["session", "image", "session-b", "shot.png"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.NotFound, otherSession.ExitCode, "An image of another session is not one of this session.");
+        foreach (var traversal in (string[])["../outside.png", "..", "sub/shot.png", @"..\outside.png", Path.Combine(root.Path, "outside.png")])
+        {
+            var refused = await dispatcher.InvokeAsync(["session", "image", "session-a", traversal], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreNotEqual(AltaExitCodes.Success, refused.ExitCode, traversal);
+            Assert.IsFalse(refused.Stdout.Contains("alta.session.image", StringComparison.Ordinal), traversal);
+        }
+
+        var notImage = await dispatcher.InvokeAsync(["session", "image", "session-a", "notes.txt"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreNotEqual(AltaExitCodes.Success, notImage.ExitCode, "A file that is no image is not served.");
+    }
+
+    [TestMethod]
     public async Task SessionSend_QueueIfBusy_QueuesTheAttachments_WhenATurnStartsWhileTheyArePrepared()
     {
         using var root = TempDirectory.Create();

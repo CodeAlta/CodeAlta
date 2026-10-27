@@ -76,6 +76,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("session tail"),
         Read("session events"),
         Read("session turns"),
+        Read("session image"),
         Mutating("session create"),
         Mutating("session send"),
         Mutating("session steer"),
@@ -777,6 +778,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionMetricsCommand(context));
         group.Add(CreateSessionTailCommand(context));
         group.Add(CreateSessionEventsCommand(context));
+        group.Add(CreateSessionImageCommand(context));
         group.Add(CreateSessionTurnsCommand(context));
         group.Add(CreateSessionCreateCommand(context));
         group.Add(CreateSessionSendCommand(context));
@@ -978,6 +980,81 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return command;
     }
 
+    private static Command CreateSessionImageCommand(AltaCommandContext context)
+    {
+        string? sessionId = null;
+        string? imageId = null;
+        var command = Leaf("image", "Return an image a session keeps (a file of a prompt, an image a tool gave the model) as base64.");
+        command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
+        command.Add("<image-id>", "The id of the image: the name of its saved copy, as the metadata of `session events` lists it.", value => imageId = value);
+        command.Add(async (_, _) => await HandleSessionImageAsync(context, sessionId, imageId).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "The image is read from the files of the session only: an id is a file name, never a path, and an image of another",
+            "session is not found. The `alta.session.image` record has its `mediaType`, read from the file itself (PNG, JPEG,",
+            "GIF, WebP or BMP), its size in `bytes` (8 MB at most) and its `base64`.",
+            "Example: `alta session events <session-id> --fields metadata` lists the ids; `alta session image <session-id> <image-id>`.");
+        return command;
+    }
+
+    private static async ValueTask<int> HandleSessionImageAsync(AltaCommandContext context, string? sessionId, string? imageId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return UsageError(context, "usage.missingSession", "Session id is required.", "alta session image");
+        }
+
+        if (!IsSavedCopyName(imageId))
+        {
+            return UsageError(context, "usage.invalidImage", "The image id is the name of a saved copy, without a folder.", "alta session image");
+        }
+
+        if (!context.TryGetRequired<SessionViewCatalog>(nameof(SessionViewCatalog), out var catalog))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var infoResult = await ResolveSessionInfoAsync(context, sessionId).ConfigureAwait(false);
+        if (infoResult.ExitCode != AltaExitCodes.Success)
+        {
+            return infoResult.ExitCode;
+        }
+
+        // The folder of the files of this session, beside its journal: the session gives the authority, the id names a file in it.
+        var session = infoResult.Info!.Session;
+        var folder = await catalog.JournalStore.CreateSessionStore().GetAttachmentDirectoryAsync(session.SessionId, context.CancellationToken).ConfigureAwait(false);
+        var read = folder is null
+            ? new PromptImageReadResult(PromptImageReadStatus.MissingFile)
+            : await PromptImageHistory.ReadFileAsync(folder, Path.Combine(folder, imageId!), PromptImageHistory.MaximumImageBytes, context.CancellationToken).ConfigureAwait(false);
+        if (read.Status != PromptImageReadStatus.Ok)
+        {
+            return read.Status switch
+            {
+                PromptImageReadStatus.TooLarge => Unsupported(context, "session.imageTooLarge", $"The image is larger than {PromptImageHistory.MaximumImageBytes / (1024 * 1024)} MB."),
+                PromptImageReadStatus.UnsupportedType => Unsupported(context, "session.notImage", "The file is not a PNG, JPEG, GIF, WebP or BMP image."),
+                _ => NotFound(context, "session.imageNotFound", $"Session '{session.SessionId}' has no image '{imageId}'."),
+            };
+        }
+
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.session.image",
+            version = 1,
+            correlationId = context.CorrelationId,
+            sessionId = session.SessionId,
+            id = imageId,
+            mediaType = read.MediaType,
+            bytes = read.Bytes!.Length,
+            base64 = Convert.ToBase64String(read.Bytes),
+        });
+        return AltaExitCodes.Success;
+    }
+
+    // The name of a file a session saved: no folder, no parent, nothing hidden, no character a name of a file cannot have.
+    private static bool IsSavedCopyName(string? value)
+        => value is { Length: > 0 and <= 200 } && value[0] != '.' && value.IndexOfAny(['/', '\\', ':', '\0']) < 0
+           && !value.Any(char.IsControl) && value.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+
     private static Command CreateSessionTurnsCommand(AltaCommandContext context)
     {
         string? sessionId = null;
@@ -999,10 +1076,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static void AddSessionEventOptions(Command command, SessionEventsOptions options)
     {
-        command.Add("include=", "Comma-separated categories: user,assistant,reasoning,tool,host,event.", value => options.Include = value);
+        command.Add("include=", "Comma-separated categories: user,assistant,reasoning,tool,host,workflow,event.", value => options.Include = value);
         command.Add("kind=", "Comma-separated exact event kinds, e.g. assistant.message or tool.output.", value => options.Kind = value);
         command.Add("fields=", "Comma-separated output fields. Always includes type/version/correlationId. Supported: sessionId,sequenceNumber,timestamp,kind,role,source,content,text,metadata.", value => options.Fields = value);
         command.Add("no-tool-output", "Suppress tool output content records while keeping non-output events.", value => options.NoToolOutput = value is not null);
+        command.Add("tool-images", "With --no-tool-output, keep the tool outputs that gave the model images, without their text: their metadata lists the images.", value => options.ToolImages = value is not null);
     }
 
     private static Command CreateSessionCreateCommand(AltaCommandContext context)
@@ -2487,12 +2565,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var fields = ParseSet(options.Fields);
         // The turns the window spans are read, not the whole journal; the whole history only when that cannot be done.
         var window = await runtime.TryReadStoredHistoryWindowAsync(info.Session, since, limit, fromTail,
-            agentEvent => IncludesEvent(agentEvent, includes, kinds, options.NoToolOutput), context.CancellationToken).ConfigureAwait(false);
+            agentEvent => IncludesEvent(agentEvent, includes, kinds, options.NoToolOutput, options.ToolImages), context.CancellationToken).ConfigureAwait(false);
         if (window is not null)
         {
             foreach (var item in window.Events)
             {
-                WriteAgentEvent(context, info.Session, item.Event, item.Sequence, fields);
+                WriteAgentEvent(context, info.Session, item.Event, item.Sequence, fields, options.NoToolOutput);
             }
 
             WriteSummary(context, fromTail ? "alta.session.tail.summary" : "alta.session.events.summary", window.Events.Count, window.Truncated);
@@ -2510,7 +2588,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var records = history
             .Select((agentEvent, index) => (Event: agentEvent, Sequence: (long)index + 1))
             .Where(item => since is null || item.Sequence > since.Value)
-            .Where(item => IncludesEvent(item.Event, includes, kinds, options.NoToolOutput))
+            .Where(item => IncludesEvent(item.Event, includes, kinds, options.NoToolOutput, options.ToolImages))
             .ToArray();
         var selected = fromTail
             ? records.TakeLast(limit + 1).ToArray()
@@ -2522,7 +2600,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         foreach (var item in emitted)
         {
-            WriteAgentEvent(context, info.Session, item.Event, item.Sequence, fields);
+            WriteAgentEvent(context, info.Session, item.Event, item.Sequence, fields, options.NoToolOutput);
         }
 
         WriteSummary(context, fromTail ? "alta.session.tail.summary" : "alta.session.events.summary", emitted.Length, truncated);
@@ -6856,9 +6934,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             agentPromptId = NormalizeOptionalText(promptId) ?? AgentPromptCatalog.DefaultPromptName,
         };
 
-    private static void WriteAgentEvent(AltaCommandContext context, SessionViewDescriptor session, AgentEvent agentEvent, long sequenceNumber, IReadOnlySet<string>? fields = null)
+    private static void WriteAgentEvent(AltaCommandContext context, SessionViewDescriptor session, AgentEvent agentEvent, long sequenceNumber, IReadOnlySet<string>? fields = null, bool noToolOutput = false)
     {
         var mapped = MapAgentEvent(agentEvent);
+        // The output kept for its images (--tool-images) goes without its text.
+        if (noToolOutput && mapped.Role == "tool") mapped = mapped with { Text = null };
         if (fields is { Count: > 0 })
         {
             AltaJsonlWriter.WriteRecord(context.Stdout, CreateAgentEventFieldsRecord(context, session, agentEvent, sequenceNumber, mapped, fields));
@@ -6960,25 +7040,53 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         => fields.Contains(field);
 
     // A user message names its files in its text, with their paths, and its metadata lists them: their titles, their types and
-    // the names of their saved copies, an id without a folder that a caller which must not see paths (the phone) can use.
+    // the names of their saved copies, an id without a folder that a caller which must not see paths (the phone) can use. A
+    // message the host sent says what it is (its provenance) and the session it comes from; the output of a tool lists the
+    // images it gave the model the same way, with the call it belongs to.
     private static MappedEvent MapCompletedContent(AgentContentCompletedEvent content)
     {
-        object? metadata = null;
-        if (content.Kind == AgentContentKind.User && content.Details is { } details)
+        var metadata = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (content.Kind == AgentContentKind.User)
         {
-            var images = PromptImageHistory.ReadImages(details);
-            var files = PromptImageHistory.ReadFiles(details);
-            if (images.Count + files.Count > 0)
-            {
-                var attachments = new object[images.Count + files.Count];
-                var index = 0;
-                foreach (var attachment in images.Concat(files))
-                    attachments[index++] = new { title = attachment.Title, mediaType = attachment.MediaType, id = attachment.Path[(attachment.Path.LastIndexOfAny(['/', '\\']) + 1)..] };
-                metadata = new { attachments };
-            }
+            var images = PromptImageHistory.ReadImages(content.Details);
+            var files = PromptImageHistory.ReadFiles(content.Details);
+            if (images.Count + files.Count > 0) metadata["attachments"] = SavedCopies(images.Concat(files));
+            if (AgentPromptProvenance.Normalize(content.Provenance) is { } provenance) metadata["provenance"] = provenance;
+            if (!string.IsNullOrWhiteSpace(content.SourceSessionId)) metadata["sourceSessionId"] = content.SourceSessionId;
+        }
+        else if (content.Kind is AgentContentKind.ToolOutput or AgentContentKind.CommandOutput && PromptImageHistory.ReadImages(content.Details) is { Count: > 0 } images)
+        {
+            metadata["images"] = SavedCopies(images);
+            if (!string.IsNullOrWhiteSpace(content.ParentActivityId)) metadata["parentActivityId"] = content.ParentActivityId;
         }
 
-        return new MappedEvent(ContentKindToEventKind(content.Kind), ContentKindToRole(content.Kind), content.Content, metadata);
+        return new MappedEvent(ContentKindToEventKind(content.Kind), ContentKindToRole(content.Kind), content.Content, metadata.Count == 0 ? null : metadata);
+    }
+
+    private static object[] SavedCopies(IEnumerable<PromptImageAttachmentReference> attachments)
+        => attachments.Select(static attachment => (object)new { title = attachment.Title, mediaType = attachment.MediaType, id = attachment.Path[(attachment.Path.LastIndexOfAny(['/', '\\']) + 1)..] }).ToArray();
+
+    // A record of a run of a script of Code Mode, which the timeline shows on the call that runs it (callId).
+    private static MappedEvent MapWorkflow(AgentWorkflowEvent workflow)
+    {
+        var metadata = new Dictionary<string, object?>(StringComparer.Ordinal) { ["runId"] = workflow.WorkflowRunId };
+        void Add(string name, object? value) { if (value is not null) metadata[name] = value; }
+        Add("callId", workflow.CallId);
+        Add("title", workflow.Title);
+        Add("stepId", workflow.StepId);
+        Add("childSessionId", workflow.ChildSessionId);
+        Add("providerKey", workflow.ProviderKey);
+        Add("modelId", workflow.ModelId);
+        Add("status", workflow.Status);
+        Add("message", workflow.Message);
+        Add("durationMs", workflow.DurationMs);
+        Add("calls", workflow.Calls);
+        Add("inputTokens", workflow.InputTokens);
+        Add("outputTokens", workflow.OutputTokens);
+        Add("wakeAt", workflow.WakeAt);
+        Add("steps", workflow.Steps?.Select(static step => new { id = step.Id, title = step.Title, after = step.After, each = step.Each }).ToArray());
+        var kind = workflow.Kind.ToString();
+        return new MappedEvent($"workflow.{char.ToLowerInvariant(kind[0])}{kind[1..]}", "workflow", workflow.Title ?? workflow.Message, metadata);
     }
 
     private static MappedEvent MapAgentEvent(AgentEvent agentEvent)
@@ -6991,6 +7099,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             AgentPlanSnapshotEvent plan => new MappedEvent("assistant.plan", "assistant", plan.Snapshot.Explanation, new { plan.Snapshot.ChangeKind, steps = plan.Snapshot.Steps }),
             AgentInteractionEvent interaction => new MappedEvent($"interaction.{interaction.Kind.ToString().ToLowerInvariant()}", "host", interaction.Message, new { interaction.InteractionId }),
             AgentErrorEvent error => new MappedEvent("error", "host", error.Message, error.ExceptionInfo is null ? null : new { failureKind = error.Failure?.Kind.ToString(), exceptionType = error.ExceptionInfo.Type, details = CreateErrorDetails(error), causes = CreateErrorCauses(error) }),
+            AgentWorkflowEvent workflow => MapWorkflow(workflow),
             AgentRawEvent raw => new MappedEvent("event.raw", "event", raw.BackendEventType, null),
             AgentPermissionRequest permission => new MappedEvent("host.permissionRequest", "host", permission.Kind, new { permission.InteractionId }),
             AgentUserInputRequest request => new MappedEvent("host.userInputRequest", "host", "User input requested.", new { request.InteractionId }),
@@ -7022,10 +7131,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             _ => "event",
         };
 
-    private static bool IncludesEvent(AgentEvent agentEvent, IReadOnlySet<string> includes, IReadOnlySet<string> kinds, bool noToolOutput)
+    private static bool IncludesEvent(AgentEvent agentEvent, IReadOnlySet<string> includes, IReadOnlySet<string> kinds, bool noToolOutput, bool toolImages = false)
     {
         var mapped = MapAgentEvent(agentEvent);
-        if (noToolOutput && mapped.Role == "tool")
+        // An output that gave the model images stays with --tool-images, its text left out when it is written.
+        if (noToolOutput && mapped.Role == "tool" && !(toolImages && HasToolImages(mapped)))
         {
             return false;
         }
@@ -7044,6 +7154,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                mapped.Kind.Split('.', 2)[0] is { } prefix && includes.Contains(prefix) ||
                (mapped.Role == "host" && includes.Contains("event"));
     }
+
+    private static bool HasToolImages(MappedEvent mapped)
+        => mapped.Role == "tool" && mapped.Metadata is Dictionary<string, object?> metadata && metadata.ContainsKey("images");
 
     private static IReadOnlySet<string> ParseSet(string? value)
     {
@@ -7613,6 +7726,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public string? Fields { get; set; }
 
         public bool NoToolOutput { get; set; }
+
+        public bool ToolImages { get; set; }
     }
 
     private sealed class ModelListOptions
