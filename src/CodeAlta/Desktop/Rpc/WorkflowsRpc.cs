@@ -84,6 +84,27 @@ internal sealed class WorkflowsService
     /// The source of a script of the library, to show it: the one of its scope that a project sees, or yours and the samples
     /// without a project.
     /// </summary>
+    /// <summary>
+    /// Deletes a script of a project or one of yours (<b>Delete</b> on its card). A sample of CodeAlta is not deleted; a
+    /// script of yours or a sample of the same name is then the one the project runs.
+    /// </summary>
+    [NeoRpcMethod("delete")]
+    public async Task<WorkflowMutationResponse> DeleteAsync(WorkflowDeleteRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null);
+        if (!CodeModeScriptLibrary.IsName(request.Name) || request.Scope is not ("project" or "global")
+            || (request.ProjectId is { } projectId && !Identifier(projectId)) || request.Scope == "project" && request.ProjectId is null)
+            return new("invalid_request", null);
+        var project = request.ProjectId is null ? null : await _projects!.GetByIdAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
+        if (request.Scope == "project" && (project is null || project.Archived)) return new("refused", "The project is no longer one of the projects of CodeAlta.");
+        var scope = request.Scope == "project" ? CodeModeScriptScope.Project : CodeModeScriptScope.Global;
+        bool deleted;
+        try { deleted = await Task.Run(() => _scripts!.Delete(request.Name, scope, project?.ProjectPath), cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { deleted = false; }
+        return deleted ? new("ok", null) : new("refused", $"The script '{request.Name}' could not be deleted: it is no longer there, or its file is in use.");
+    }
+
     [NeoRpcMethod("source")]
     public async Task<WorkflowSourceResponse> SourceAsync(WorkflowSourceRequest request, CancellationToken cancellationToken)
     {
@@ -345,3 +366,8 @@ internal sealed record WorkflowSourceResponse(string Status, string? Source);
 
 /// <param name="Message">Why the request was refused.</param>
 internal sealed record WorkflowMutationResponse(string Status, string? Message);
+
+/// <summary>Deletes a script of the library.</summary>
+/// <param name="Scope"><c>project</c> or <c>global</c>: a sample is never deleted.</param>
+/// <param name="ProjectId">The project of a script of a project; null for one of yours.</param>
+internal sealed record WorkflowDeleteRequest(string? ExpectedEpoch, string Name, string Scope, string? ProjectId);

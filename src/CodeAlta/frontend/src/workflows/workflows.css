@@ -13,6 +13,14 @@
   .workflows-header p { display: none; }
 }
 
+/* How a workflow is made, then the library by where its scripts are: the project's, yours, the samples. */
+.workflow-library-how { font-size: 12px; line-height: 1.45; color: var(--muted); }
+.workflow-scope-section { display: grid; gap: 6px; margin-top: 8px; }
+.workflow-scope-section h4 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.workflow-scope-section[data-scope="project"] h4 { color: #e0a83a; }
+.workflow-scope-section[data-scope="global"] h4 { color: #58c2a8; }
+.workflow-scope-caption { margin-bottom: 4px !important; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.workflow-card-actions { position: relative; }
 .workflow-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
 .workflow-card { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
   transition: border-color 120ms, box-shadow 120ms; }
@@ -277,7 +285,16 @@ button.workflow-session:focus-visible { outline: 2px solid var(--accent); outlin
 /* The source of a script: its lines numbered and colored, in a frame of its own that scrolls both ways. */
 .workflow-script-source { display: flex; max-height: 420px; min-width: 0; }
 .workflow-script-source .tool-code-lines { border-top: 1px solid var(--line); border-radius: 8px; padding: 6px 0; }
-.workflow-card-source { max-height: 320px; }
+/* The script of a card, in a window of its own: where it is, then its source over the whole height. */
+.workflow-script-window { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.workflow-script-where { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; padding: 12px 18px 8px; font-size: 12px; color: var(--muted); }
+.workflow-script-where code { font-family: var(--code-font); color: var(--text); }
+.workflow-script-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: start; }
+.workflow-script-facts { display: grid; gap: 8px; flex: none; max-height: 40%; overflow-y: auto; margin: 0 18px 12px; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel); }
+.workflow-script-facts .workflow-card-description { font-size: 13px; }
+.workflow-script-window-source { flex: 1 1 auto; max-height: none; min-height: 0; margin: 0 18px 12px; }
+.workflow-script-window-source .tool-code-lines { flex: 1 1 auto; }
 @container (max-width: 640px) {
   .workflow-run-tab { padding: 14px 12px 20px; }
   .workflow-run-sessions th:nth-child(2), .workflow-run-sessions td:nth-child(2) { display: none; }

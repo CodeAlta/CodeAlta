@@ -2,7 +2,7 @@
 import type { workflows, WorkflowRunDetailResponse, WorkflowRunItem, WorkflowScriptItem } from "#neoastra";
 import { defaultSessionSettings, type SessionStartRequest } from "../sessionSettings/sessionSettings";
 
-export type WorkflowsApi = Pick<typeof workflows, "scripts" | "source" | "runs" | "run" | "saveAsScript" | "resume" | "stop" | "runDetail">;
+export type WorkflowsApi = Pick<typeof workflows, "scripts" | "source" | "runs" | "run" | "saveAsScript" | "resume" | "stop" | "runDetail" | "delete">;
 
 /** What the host said of a list; `available` is false in a window without a host of its own. A request that failed gives null. */
 export type WorkflowsList<T> = Readonly<{ available: boolean; items: readonly T[] }>;
@@ -54,6 +54,13 @@ export function createWorkflowsHub(api: WorkflowsApi, epoch: string) {
       try {
         const reply = await api.run({ expectedEpoch: epoch, name, projectId, arguments: args, ...start }, { timeoutMilliseconds: 120_000 });
         return { ok: reply.status === "ok", sessionId: reply.sessionId ?? null, message: reply.message ?? null };
+      } catch { return { ok: false }; }
+    },
+    /** Deletes a script of a project (`project`) or one of yours (`global`); a sample is never deleted. */
+    async delete(name: string, scope: "project" | "global", projectId: string | null): Promise<WorkflowsOutcome> {
+      try {
+        const reply = await api.delete({ expectedEpoch: epoch, name, scope, projectId }, { timeoutMilliseconds: 30_000 });
+        return { ok: reply.status === "ok", message: reply.message ?? null };
       } catch { return { ok: false }; }
     },
     /** Asks the session of a run to turn it into the script of a name. */

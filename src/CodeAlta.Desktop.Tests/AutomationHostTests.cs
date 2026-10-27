@@ -1029,6 +1029,20 @@ public sealed class AutomationHostTests
             Assert.AreEqual(sessionId, asked[^1].SessionId);
             StringAssert.Contains(asked[^1].Text, $"// @exec: {{\"resume\": \"{kept.Id}\", \"replay\": \"all\", \"yield_ms\": 600000}}");
             Assert.IsTrue(File.Exists(Path.Combine(CodeModeRunStore.RootOf(host.CatalogOptions), kept.Id, "run.json")), "the record is under the state root");
+
+            // Delete on a card: a script of the project or one of yours; a sample never.
+            Assert.AreEqual("invalid_request", (await rpc.DeleteAsync(new(Epoch, "review-pr", "builtin", null), default)).Status);
+            Assert.AreEqual("invalid_request", (await rpc.DeleteAsync(new(Epoch, "triage", "project", null), default)).Status, "a script of a project names its project");
+            Assert.AreEqual("stale_epoch", (await rpc.DeleteAsync(new("other", "triage", "project", project.Id), default)).Status);
+            Assert.IsNull(host.CodeModeScripts.Save("mine", CodeModeScriptScope.Global, "return 1;", null, null).Refusal);
+            Assert.AreEqual("ok", (await rpc.DeleteAsync(new(Epoch, "triage", "project", project.Id), default)).Status);
+            Assert.AreEqual("ok", (await rpc.DeleteAsync(new(Epoch, "mine", "global", null), default)).Status);
+            var left = (await rpc.ScriptsAsync(new(Epoch, project.Id), default)).Scripts;
+            Assert.IsFalse(left.Any(static script => script.Name is "triage" or "mine"), "both are gone from the library");
+            Assert.IsTrue(left.Any(static script => script.Name == "review-pr"), "the samples stay");
+            var again = await rpc.DeleteAsync(new(Epoch, "mine", "global", null), default);
+            Assert.AreEqual("refused", again.Status);
+            StringAssert.Contains(again.Message, "could not be deleted");
             await workspace.CloseSessionsAsync();
             await workspace.CloseImportsAsync();
         }

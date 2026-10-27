@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useContext, useEffect, useMemo, useState } from "react";
 import { Button, HTMLSelect, InputGroup } from "@blueprintjs/core";
 import type { WorkflowRunItem, WorkflowScriptItem, WorkflowStepItem, WorkspaceProject, WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -6,8 +6,10 @@ import { AppIcon } from "../AppIcon";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { formatDuration } from "../toolCall";
+import { ConfirmPopover } from "../ConfirmPopover";
+import { MarkdownLinksContext } from "../MarkdownContent";
 import { RunScriptWindow } from "./RunScriptWindow";
-import { ScriptSource } from "./ScriptSource";
+import { ScriptWindow } from "./ScriptWindow";
 import { filterScripts, projectScriptPath, runDuration, runStateLabel, runTone, runsRefreshMilliseconds, scopeLabel, sortRuns, stepColumns } from "./workflows";
 import { createWorkflowsHub, type WorkflowsApi, type WorkflowsHub, type WorkflowsList } from "./workflowsHub";
 import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
@@ -33,26 +35,28 @@ function StepGraph({ steps }: { steps: readonly WorkflowStepItem[] }) {
 }
 
 /**
- * A script of the library: its name, scope, description, steps and parameters, with Run…. Its source shows on demand, in the
- * colors of JavaScript; a script of the project opens in the code editor of the project, to edit it there.
+ * A script of the library: its name, scope, description, steps and parameters, with Run…. Show the script opens its source
+ * in a window; a script of the project or of yours opens in the code editor (Edit), and is deleted after a question (Delete).
  */
-function ScriptCard({ script, hub, projectId, onRun, onEdit }: {
-  script: WorkflowScriptItem; hub: WorkflowsHub; projectId: string | null; onRun: () => void;
-  /** Opens the script in the code editor of its project; null for a script outside the project (yours, the samples). */
+function ScriptCard({ script, onShow, onRun, onEdit, onDelete }: {
+  script: WorkflowScriptItem; onShow: () => void; onRun: () => void;
+  /** Opens the script in the code editor; null for a sample. */
   onEdit: (() => void) | null;
+  /** Deletes the script and says why it could not, or null; null for a sample, which is never deleted. */
+  onDelete: (() => Promise<string | null>) | null;
 }) {
   const { t } = useShellLanguage();
-  const [open, setOpen] = useState(false);
-  // Undefined until it is read; null when it cannot be read.
-  const [source, setSource] = useState<string | null | undefined>(undefined);
-  useEffect(() => setSource(undefined), [script.path]);
-  useEffect(() => {
-    if (!open || source !== undefined) return;
-    const abort = new AbortController();
-    void hub.source(script.name, script.scope, projectId, abort.signal).then(value => { if (!abort.signal.aborted) setSource(value); });
-    return () => abort.abort();
-  }, [open, source, hub, script.name, script.scope, projectId]);
-  const sourceLabel = t(open ? "Hide the script" : "Show the script");
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  async function remove() {
+    if (!onDelete) return;
+    setBusy(true);
+    const failure = await onDelete();
+    setBusy(false);
+    if (failure === null) setAsking(false);
+    else setProblem(failure || t("The script could not be deleted."));
+  }
   return <li className="workflow-card" data-problem={script.problem ? true : undefined}>
     <div className="workflow-card-head">
       <span className="workflow-card-glyph"><AppIcon name="workflow" size={17} /></span>
@@ -61,22 +65,38 @@ function ScriptCard({ script, hub, projectId, onRun, onEdit }: {
         <span>{script.title && <code>{script.name}</code>}<span className="workflow-scope" data-scope={script.scope}>{t(scopeLabel(script.scope))}</span></span>
       </span>
       <span className="workflow-card-actions">
-        <Button size="small" variant="minimal" icon={<AppIcon name="code" size={14} />} active={open} aria-expanded={open} aria-label={sourceLabel} title={sourceLabel}
-          onClick={() => setOpen(value => !value)} />
+        <Button size="small" variant="minimal" icon={<AppIcon name="code" size={14} />} aria-label={t("Show the script")} title={t("Show the script")} aria-haspopup="dialog" onClick={onShow} />
         {onEdit && <Button size="small" variant="minimal" icon={<AppIcon name="edit" size={14} />} aria-label={t("Edit")} title={t("Edit")} onClick={onEdit} />}
+        {onDelete && <Button size="small" variant="minimal" icon={<AppIcon name="trash" size={14} />} aria-label={t("Delete")} title={t("Delete")} aria-haspopup="dialog"
+          onClick={() => { setProblem(null); setAsking(true); }} />}
         <Button size="small" intent="primary" variant="minimal" disabled={!!script.problem} icon={<AppIcon name="play" size={14} />} onClick={onRun}>{t("Run…")}</Button>
+        {asking && <ConfirmPopover always placement="bottom-end" title={t("Delete this script?")} subject={script.title ?? script.name} intent="danger" confirmLabel={t("Delete")}
+          detail={t(script.scope === "project" ? "Its file is deleted from the .alta/scripts folder of the project." : "Its file is deleted from your ~/.alta/scripts folder.")}
+          busy={busy} error={problem} onConfirm={() => void remove()} onCancel={() => setAsking(false)} />}
       </span>
     </div>
+    <ScriptFacts script={script} />
+  </li>;
+}
+
+/** What a script does, from its `meta`: its description (or why it does not parse), its steps drawn small and its parameters. */
+function ScriptFacts({ script }: { script: WorkflowScriptItem }) {
+  const { t } = useShellLanguage();
+  return <>
     {script.problem ? <p className="workflow-card-problem" role="alert">{script.problem}</p>
       : script.description && <p className="workflow-card-description">{script.description}</p>}
     <StepGraph steps={script.steps} />
     {script.parameters.length > 0 && <p className="workflow-card-params">{script.parameters.map(parameter =>
       <span key={parameter.name} title={parameter.description ?? undefined}><code>{parameter.name}</code>{parameter.type && <small>{parameter.type}</small>}{parameter.required && <b aria-label={t("Required")}>*</b>}</span>)}</p>}
-    {open && (source === undefined ? <p className="automation-empty"><ActivitySpinner size={13} /></p>
-      : source === null ? <p className="workflow-card-problem" role="alert">{t("The script cannot be read.")}</p>
-      : <ScriptSource source={source} className="workflow-card-source" />)}
-  </li>;
+  </>;
 }
+
+// The parts of the library, in the order a project finds a name: its own scripts, yours, then the samples.
+const libraryScopes = [
+  { scope: "project", title: "This project", caption: "In the .alta/scripts folder of {project}, shared with it. They replace one of yours or a sample of the same name." },
+  { scope: "global", title: "My scripts", caption: "In your ~/.alta/scripts folder: every project can run them, in the spaces that have them." },
+  { scope: "builtin", title: "Samples", caption: "They come with CodeAlta, to run or to start from." },
+] as const;
 
 function RunMark({ state }: { state: string }) {
   const { t } = useShellLanguage();
@@ -171,6 +191,24 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
   const [query, setQuery] = useState("");
   const [reading, setReading] = useState(0);
   const [running, setRunning] = useState<WorkflowScriptItem | null>(null);
+  const [showing, setShowing] = useState<WorkflowScriptItem | null>(null);
+  const openFile = useContext(MarkdownLinksContext);
+  const chosen = projects.find(candidate => candidate.id === project) ?? null;
+  // A script of the project opens in the code editor of the project; one of yours, as a file of this computer. A sample is not edited.
+  const editOf = (script: WorkflowScriptItem): (() => void) | null => {
+    if (script.scope === "project") {
+      const path = chosen && onEditScript ? projectScriptPath(script, chosen.path) : null;
+      return chosen && path ? () => onEditScript!(chosen, path) : null;
+    }
+    return script.scope === "global" && openFile ? () => openFile(script.path, null) : null;
+  };
+  const deleteOf = (script: WorkflowScriptItem): (() => Promise<string | null>) | null => script.scope !== "project" && script.scope !== "global" || !hub ? null
+    : async () => {
+      const outcome = await hub.delete(script.name, script.scope as "project" | "global", script.scope === "project" ? project : null);
+      if (!outcome.ok) return outcome.message ?? "";
+      setReading(value => value + 1);
+      return null;
+    };
   const runs = useRuns(hub, visible, reading);
   const ordered = useMemo(() => sortRuns(runs?.items ?? []), [runs]);
   const now = Math.max(useNow(visible, ordered.some(run => run.state === "running")), Date.now());
@@ -203,14 +241,20 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
           <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={query} placeholder={t("Search scripts")}
             aria-label={t("Search scripts")} onChange={event => setQuery(event.target.value)} />
         </div>
-        {scripts.items.length === 0 ? <p className="automation-empty">{t("No script in the library yet.")}</p>
-          : shown.length === 0 ? <p className="automation-empty">{t("No script matches.")}</p>
-          : <ul className="workflow-cards">{shown.map(script => {
-            const chosen = projects.find(candidate => candidate.id === project) ?? null;
-            const path = chosen && onEditScript ? projectScriptPath(script, chosen.path) : null;
-            return <ScriptCard key={`${script.scope}:${script.name}`} script={script} hub={hub!} projectId={project} onRun={() => setRunning(script)}
-              onEdit={chosen && path ? () => onEditScript!(chosen, path) : null} />;
-          })}</ul>}
+        {/* Workflows are written by agents, not by hand: how to get one. */}
+        <p className="workflow-library-how">{t("Agents write workflows: ask for one in a session, or click Save as script… on the card of a run that went well.")}</p>
+        {query && shown.length === 0 ? <p className="automation-empty">{t("No script matches.")}</p>
+          : libraryScopes.filter(part => part.scope !== "project" || chosen).map(part => {
+            const items = shown.filter(script => script.scope === part.scope);
+            if (query && items.length === 0) return null;
+            return <section key={part.scope} className="workflow-scope-section" data-scope={part.scope} aria-label={t(part.title)}>
+              <h4>{t(part.title)}<span className="count">{items.length}</span></h4>
+              <p className="workflow-scope-caption">{t(part.caption, { project: chosen?.name ?? "" })}</p>
+              {items.length === 0 ? <p className="automation-empty">{t("None yet.")}</p>
+                : <ul className="workflow-cards">{items.map(script => <ScriptCard key={`${script.scope}:${script.name}`} script={script}
+                  onShow={() => setShowing(script)} onRun={() => setRunning(script)} onEdit={editOf(script)} onDelete={deleteOf(script)} />)}</ul>}
+            </section>;
+          })}
       </section>
       <aside className="automations-side">
         <section className="automation-detail" aria-label={t("Runs")}>
@@ -220,6 +264,8 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
         </section>
       </aside>
     </div>
+    {showing && hub && <ScriptWindow hub={hub} script={showing} projectId={project} facts={<ScriptFacts script={showing} />} onClose={() => setShowing(null)} onEdit={editOf(showing)}
+      onRun={showing.problem ? null : () => { setRunning(showing); setShowing(null); }} />}
     {running && hub && <RunScriptWindow hub={hub} script={running} projects={projects} projectId={project} providers={providers} sessionSettings={sessionSettings} onClose={() => setRunning(null)}
       onStarted={sessionId => { setRunning(null); setReading(value => value + 1); onOpenSession(sessionId); }} />}
   </div>;

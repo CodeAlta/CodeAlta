@@ -185,7 +185,10 @@ review-pr = ["work"]
 
 In CodeAlta Desktop, the **Workflows** button of the title bar (or **Workflows** in the command palette) opens a tab with the library and the runs:
 
-- **Library**: the scripts the project chosen at the top sees in the space the window shows, the project's, yours and the samples, each with its description, its parameters (`*` for a required one) and its steps drawn small. A step that runs once per item shows `×`. Click **Show the script** to read its code, highlighted; a script of the project has **Edit**, which opens it in the code editor of the project. Agents usually write and save the scripts (`alta script save`).
+- **Library**: the scripts the project chosen at the top sees in the space the window shows, in three parts: **This project** (its `.alta/scripts` folder, shared with it), **My scripts** (your `~/.alta/scripts` folder, for every project) and **Samples** (they come with CodeAlta). A script of the project replaces one of yours or a sample of the same name. Each card has the description of its script, its parameters (`*` for a required one) and its steps drawn small; a step that runs once per item shows `×`.
+  - **Show the script** opens it in a window of its own: what it does (its description, its steps and its parameters), then its code, highlighted.
+  - **Edit** opens a script of the project or of yours in the code editor; **Delete** deletes its file, after a question. A sample is neither edited nor deleted.
+  - Agents write the scripts: ask for one in a session, or click **Save as script…** on the card of a run that went well.
 - **Runs**: the scripts running in CodeAlta and those it keeps that ended, the running ones first. Click a run to open its tab.
 
 To run a script, click **Run…** on it, fill in its parameters, choose the project it runs in, then click **Run**. A list or an object is written as JSON. The script runs in a new session of that project, which opens. That session has `exec` even when Code Mode is off.
