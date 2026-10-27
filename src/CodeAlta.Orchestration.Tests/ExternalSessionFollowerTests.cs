@@ -126,20 +126,25 @@ public sealed class ExternalSessionFollowerTests
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         provider.Turns.Enqueue(ScriptedTurnProvider.WaitThenReply(gate.Task, "done.", started));
         var send = cli.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("run") });
+        long? length;
         try
         {
             await started.Task.WaitAsync(Hang);
-            // Well within the period of the listing: the watchers and the follow cadence tell it.
+            // Well within the period of the listing: the watchers and the follow cadence tell it. A session is followed once
+            // its journal was projected, which a pass does after it listed the session and found its lease.
             var listed = false;
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
             while (DateTime.UtcNow < deadline && !(listed = await ListsAsync(desktop, session.SessionId) && markers.List().Count == 0
-                && follower.GetHold(session.SessionId) is not null))
+                && follower.GetHold(session.SessionId)?.JournalLength is not null))
                 await Task.Delay(50);
 
             Assert.IsTrue(listed, $"The running session is listed while it runs (listed: {await ListsAsync(desktop, session.SessionId)}, "
-                + $"markers left: {markers.List().Count}, followed: {follower.GetHold(session.SessionId) is not null}, "
+                + $"markers left: {markers.List().Count}, followed: {follower.GetHold(session.SessionId)}, "
                 + $"changes: {string.Join(", ", changes.Select(static change => change.Kind))}).");
             Assert.AreEqual(SessionLeaseOwner.CliKind, follower.GetHold(session.SessionId)?.HolderKind, "The running session is followed.");
+            // Before the turn may end: the follower can tell its end as soon as it is written.
+            length = follower.GetHold(session.SessionId)!.JournalLength;
+            changes.Clear();
         }
         finally
         {
@@ -147,8 +152,6 @@ public sealed class ExternalSessionFollowerTests
         }
 
         // The end of the turn grows the journal while the command line still holds the session: the change is told.
-        var length = follower.GetHold(session.SessionId)!.JournalLength;
-        changes.Clear();
         await send.WaitAsync(Hang);
         await cli.RuntimeService.WhenSettledAsync(session.SessionId).WaitAsync(Hang);
         await WaitUntilAsync(() => changes.Any(static change => change.Kind == ExternalSessionChangeKind.Updated)
