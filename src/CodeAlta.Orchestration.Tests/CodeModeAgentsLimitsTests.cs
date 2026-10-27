@@ -6,6 +6,7 @@ using CodeAlta.CodeMode;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Scripts;
+using CodeAlta.Sandbox;
 
 namespace CodeAlta.Orchestration.Tests;
 
@@ -19,12 +20,12 @@ public sealed class CodeModeAgentsLimitsTests
     private static readonly TimeSpan Hang = TestDeadlines.Hang;
 
     private static async Task<(HeadlessTestRoot Root, ScriptedTurnProvider Provider, CodeAltaHost Host, HeadlessSessionDriver Driver, HeadlessSession Parent)> CreateAsync(
-        bool permissionModes = false)
+        bool permissionModes = false, ISandboxBackend? sandboxBackend = null)
     {
         var root = new HeadlessTestRoot();
         var provider = new ScriptedTurnProvider();
         var host = await root.CreateHostAsync(provider, readOnlyGlobalState: true, headlessInstructions: true,
-            sessionPermissionModes: permissionModes, inheritPermissionMode: permissionModes);
+            sessionPermissionModes: permissionModes, inheritPermissionMode: permissionModes, sandboxBackend: sandboxBackend);
         var driver = new HeadlessSessionDriver(host);
         var opened = await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" });
         Assert.AreEqual(HeadlessOpenStatus.Created, opened.Status, opened.Message);
@@ -56,7 +57,8 @@ public sealed class CodeModeAgentsLimitsTests
     [TestMethod]
     public async Task TheSessionsAScriptStarts_HaveAtMostTheToolsOfTheirCreator_AndAtLeastItsRestrictions()
     {
-        var (root, provider, host, driver, parent) = await CreateAsync(permissionModes: true);
+        // A sandboxed session runs only where a sandbox can start: the test's starts none, what is inherited is checked, not the sandbox.
+        var (root, provider, host, driver, parent) = await CreateAsync(permissionModes: true, sandboxBackend: new AvailableSandbox());
         await using var scope = root;
         await using var closing = driver;
         Assert.AreEqual("ok", (await host.Commands.SetPermissionModeAsync(parent.SessionId, SessionPermissionModes.Ask)).Status);
@@ -268,6 +270,16 @@ public sealed class CodeModeAgentsLimitsTests
 
             return CodeModeCallResult.Success(Encoding.UTF8.GetString(stream.ToArray()));
         }
+    }
+
+    // A sandbox available on every computer, which starts nothing: no tool of these tests runs in it.
+    private sealed class AvailableSandbox : ISandboxBackend
+    {
+        public SandboxAvailability GetAvailability()
+            => new(true, "test", null, null, new HashSet<SandboxNetwork> { SandboxNetwork.Off, SandboxNetwork.Hosts, SandboxNetwork.On });
+
+        public Task<ISandboxProcess> StartAsync(SandboxPolicy policy, string commandLine, string? proxyEndpoint, CancellationToken cancellationToken)
+            => throw new SandboxUnavailableException("The sandbox of the test starts nothing.");
     }
 }
 

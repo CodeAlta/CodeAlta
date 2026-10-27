@@ -563,6 +563,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog), projectProfiles: new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles)
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
+                SandboxBackend = options.SandboxBackend,
                 ScratchpadRoot = instructionTemplateProvider.ScratchpadRoot,
                 Leases = options.SessionLeaseOwner is { } leaseOwner
                     ? new SessionLeaseRegistry(new SessionLeaseStore(catalogOptions), new SessionLeaseOwner(leaseOwner, Guid.NewGuid().ToString("D")))

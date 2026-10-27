@@ -6,6 +6,7 @@ using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Sandbox;
 
 namespace CodeAlta.Orchestration.Tests;
 
@@ -195,7 +196,7 @@ internal sealed class HeadlessTestRoot : IAsyncDisposable
     internal async Task<CodeAltaHost> CreateHostAsync(ScriptedTurnProvider provider, bool readOnlyGlobalState = false, bool separateStateRoot = false,
         string? scratchpadRoot = null, string? currentProject = null, bool fullTrust = false, bool headlessInstructions = false,
         CodeAltaConfigOptions? config = null, bool listsSkills = true, string? sessionLeaseOwner = null, bool followExternalSessions = false,
-        bool enableOwnedAsks = false, bool sessionPermissionModes = false, bool inheritPermissionMode = false)
+        bool enableOwnedAsks = false, bool sessionPermissionModes = false, bool inheritPermissionMode = false, ISandboxBackend? sandboxBackend = null)
     {
         var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
         {
@@ -220,6 +221,7 @@ internal sealed class HeadlessTestRoot : IAsyncDisposable
             EnableOwnedAsks = enableOwnedAsks,
             SessionPermissionModes = sessionPermissionModes,
             InheritPermissionModePolicy = inheritPermissionMode ? static () => true : null,
+            SandboxBackend = sandboxBackend,
             ConfigureModelProviders = provider.Register,
         }, CancellationToken.None);
         _hosts.Add(host);

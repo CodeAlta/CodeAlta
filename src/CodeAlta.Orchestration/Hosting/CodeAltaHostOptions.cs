@@ -5,6 +5,7 @@ using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Sandbox;
 
 namespace CodeAlta.Orchestration.Hosting;
 
@@ -240,6 +241,12 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     /// <remarks>A host that enables it must show the pending questions and resolve them; a run waits until it does or ends.</remarks>
     public bool AskWhenConversationHeld { get; init; }
+
+    /// <summary>
+    /// Gets the sandbox the sessions of the host run in when they are sandboxed; null, the default, for the one of this
+    /// computer (<see cref="Runtime.SessionRuntimeService.SandboxBackend"/>). Tests give another.
+    /// </summary>
+    public ISandboxBackend? SandboxBackend { get; init; }
 
     /// <summary>Gets an optional environment map copied for host-created plugin adapter operation options; null preserves the original ambient snapshot.</summary>
     /// <remarks>This does not isolate the process or provider environment.</remarks>
