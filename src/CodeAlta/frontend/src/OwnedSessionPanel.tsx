@@ -24,7 +24,7 @@ import { captureSubmission, captureSubmissionAbort, createMutationCapability, ou
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, compactControlBlock, compactControlBlockMessages, compactionAdmissionFailure, hasPendingCompaction, watchCompaction, watchedCompactionFailure,
   type CompactionFailure, type CompactionWatch, type createCompactionSubmissions } from "./sessionCompaction";
-import { captureAbortRun, type createAbortRunSubmissions } from "./sessionAbortRun";
+import { abortRunAdmissionFailure, captureAbortRun, watchedStopFailure, type createAbortRunSubmissions, type StopFailure } from "./sessionAbortRun";
 import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancellationStatus, type createQueueSubmissions } from "./sessionQueue";
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
@@ -306,6 +306,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // A compaction asked here that did not complete: the status line says so until the next prompt or compaction.
   const [compactFailure, setCompactFailure] = useState<CompactionFailure | null>(null);
   const [abortRunMessage, setAbortRunMessage] = useState("Refresh runtime state explicitly before targeting cancellation.");
+  // A Stop that did not stop the run says so in the status line, while the run goes on; its key, while its receipt waits.
+  const [stopFailure, setStopFailure] = useState<StopFailure | null>(null);
+  const [submittedStop, setSubmittedStop] = useState<string | null>(null);
   const [queueText, setQueueText] = useState(() => queue.draft(epoch, sessionId));
   function editQueueText(value: string) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted) return;
@@ -392,6 +395,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       : "Refresh runtime state explicitly before targeting a run.");
     setPage(undefined);
     setCompactFailure(null);
+    setStopFailure(null);
+    setSubmittedStop(null);
     setAbortRunMessage(abortRuns.pending(sessionId)
       ? "A retained exact cancellation request exists. Refresh submissions or explicitly retry its original key and run after the previous wait settles."
       : "Refresh runtime state explicitly before targeting cancellation.");
@@ -484,6 +489,17 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (!invalidEpoch) setCompactFailure(watchedCompactionFailure(submittedCompact, sessionId, page));
     setSubmittedCompact(next);
   }, [page, invalidEpoch, sessionId, submittedCompact]);
+  useEffect(() => {
+    if (!submittedStop) return;
+    if (invalidEpoch) { setSubmittedStop(null); return; }
+    const row = page?.status === "ok" ? page.rows.find(item => item.kind === "AbortRun" && item.sessionId === sessionId && item.clientRequestId === submittedStop) : undefined;
+    if (row?.state !== "terminal") return;
+    setStopFailure(watchedStopFailure(submittedStop, sessionId, page));
+    setSubmittedStop(null);
+  }, [page, invalidEpoch, sessionId, submittedStop]);
+  // A Stop that failed matters while the run goes on: once it ended, there is nothing left to stop.
+  useEffect(() => { if (!runActive) setStopFailure(null); }, [runActive]);
+  const stopShown = invalidEpoch ? null : stopFailure;
   // Presentation only, like the run above: the host decides what a compaction refuses.
   const compacting = !invalidEpoch && (!!pendingCompact?.inFlight || !!submittedCompact || hasPendingCompaction(sessionId, page));
   const thinkingSeconds = useThinkingElapsed(composerBusy);
@@ -954,8 +970,13 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const request = retained?.request ?? captureAbortRun(epoch, sessionId, observedTarget, crypto.randomUUID());
     if (!request || !capability.canSubmit(request)) return;
     setAbortRunMessage("Exact cancellation admission pending…");
+    setStopFailure(null);
+    setSubmittedStop(request.clientRequestId);
     void abortRuns.submit(request, signal, capability, result => {
       observeEpoch(result);
+      setStopFailure(abortRunAdmissionFailure(result));
+      if (result.status !== "accepted" && result.status !== "replay" || result.receipt?.state === "terminal")
+        setSubmittedStop(current => current === request.clientRequestId ? null : current);
       setAbortRunMessage(result.status === "accepted" || result.status === "replay"
         ? "Cancellation request accepted. Refresh submissions for signalling outcome; run completion is not confirmed."
         : `Exact cancellation: ${result.status}. Uncertain requests retain their original run and key. No automatic retry.`);
@@ -1399,9 +1420,9 @@ ${value}` : value);
     <ClaudeCliFirstUse epoch={epoch} providerKey={selected?.providerKey ?? observedProvider} />
     {!expanded && attachmentStrip}
     <ComposerSurface busy={composerBusy || compacting} status={<>
-      <span className="composer-foreground-status" data-tone={!composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem) ? "danger" : undefined}>
-        {composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem ? "error" : "prompt"} size={14} />}
-        <span className="composer-foreground-text">{composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
+      <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem) ? "danger" : undefined}>
+        {stopShown ? <AppIcon name="error" size={14} /> : composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem ? "error" : "prompt"} size={14} />}
+        <span className="composer-foreground-text">{stopShown ? t(stopShown.key, stopShown.parameters) : composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
           : compacting ? t("Compacting…")
           : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem
           : !invalidEpoch && compactFailure ? t(compactFailure.key, compactFailure.parameters) : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span></span>

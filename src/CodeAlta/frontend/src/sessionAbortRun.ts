@@ -1,6 +1,7 @@
 import type { SessionAbortRunRequest, SessionAdmission, SessionReceiptPage, SessionReceiptView, SessionRuntimeStateResponse } from "#neoastra";
 import type { createMutationCapability, SubmissionResult } from "./sessionOperations";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
+import type { MessageKey } from "./localization";
 
 type Capability = ReturnType<typeof createMutationCapability>;
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
@@ -17,6 +18,36 @@ export function captureAbortRun(epoch: string, sessionId: string, observation: S
     || !entry || entry.isRetiring || entry.isTerminated || !entry.activeRunId?.trim()) return null;
   return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, expectedRuntimeInstanceId: observation.runtimeInstanceId,
     expectedAttachmentGeneration: entry.attachmentGeneration, expectedRunId: entry.activeRunId });
+}
+
+/** What the composer says of a Stop that did not stop the run: a message and its parameters. */
+export type StopFailure = Readonly<{ key: MessageKey; parameters?: Readonly<Record<string, string>> }>;
+
+/** The end of a Stop whose receipt settled without stopping the run; null when it stopped it, or when there was no run left to stop. */
+export function settledStopFailure(row: Pick<SessionReceiptView, "state" | "outcome" | "code">): StopFailure | null {
+  if (row.state !== "terminal" || row.outcome === "Completed" || row.outcome === "Cancelled") return null;
+  // A run that ended before the Stop reached it needs no Stop.
+  if (row.code === "abort_run_not_active") return null;
+  return { key: row.code === "abort_run_unsupported" ? "This provider cannot stop a run."
+    : row.code === "abort_run_target_unavailable" ? "The run to stop is no longer known. Refresh the session and try again."
+    : "The Stop failed: the run may still be going on." };
+}
+
+/** What the composer says when the host did not take a Stop, or took it and ended it without stopping the run; null otherwise. */
+export function abortRunAdmissionFailure(result: SubmissionResult): StopFailure | null {
+  if (result.status === "accepted" || result.status === "replay") return result.receipt ? settledStopFailure(result.receipt) : null;
+  switch (result.status) {
+    case "uncertain": return { key: "CodeAlta did not confirm the Stop. Check whether the run still goes on." };
+    case "closed": case "stale_epoch": return { key: "CodeAlta restarted. Reload the window to continue." };
+    default: return { key: "The Stop was not accepted ({status}).", parameters: { status: result.status } };
+  }
+}
+
+/** The end of a Stop, once a page lists its settled receipt: null while it waits, or when it stopped the run. */
+export function watchedStopFailure(key: string, sessionId: string, page: SessionReceiptPage | undefined): StopFailure | null {
+  if (page?.status !== "ok") return null;
+  const row = page.rows.find(item => item.kind === "AbortRun" && item.sessionId === sessionId && item.clientRequestId === key);
+  return row ? settledStopFailure(row) : null;
 }
 
 function matches(request: SessionAbortRunRequest, row: SessionReceiptView): boolean {

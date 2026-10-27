@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionAbortRunRequest, SessionAdmission, SessionReceiptPage, SessionRuntimeStateResponse } from "#neoastra";
 import { createMutationCapability } from "./sessionOperations";
-import { captureAbortRun, createAbortRunSubmissions } from "./sessionAbortRun";
+import { abortRunAdmissionFailure, captureAbortRun, createAbortRunSubmissions, settledStopFailure, watchedStopFailure } from "./sessionAbortRun";
 
 const observation: SessionRuntimeStateResponse = {
   status: "ok", hostEpoch: "epoch", sessionId: "session", runtimeInstanceId: "runtime", coordinatorTransitionInProgress: false,
@@ -130,4 +130,24 @@ test("a cancellation key whose receipt the host no longer keeps is a definite an
   await store.submit(original, signal, capability, value => published.push(value.status));
   assert.deepEqual(published, ["expired"]);
   assert.equal(store.pending("session"), undefined);
+});
+
+test("a Stop that did not stop the run says why, and one that stopped it, or found no run, says nothing", () => {
+  const row = (outcome: string, code: string | null) => ({ state: "terminal", outcome, code });
+  assert.equal(settledStopFailure(row("Completed", null)), null);
+  assert.equal(settledStopFailure(row("Cancelled", null)), null);
+  assert.equal(settledStopFailure(row("Failed", "abort_run_not_active")), null, "the run had ended before the Stop reached it");
+  assert.equal(settledStopFailure({ state: "pending", outcome: null, code: null } as never), null);
+  assert.equal(settledStopFailure(row("Failed", "abort_run_unsupported"))?.key, "This provider cannot stop a run.");
+  assert.equal(settledStopFailure(row("Failed", "abort_run_target_unavailable"))?.key, "The run to stop is no longer known. Refresh the session and try again.");
+  assert.equal(settledStopFailure(row("Failed", "abort_run_failed"))?.key, "The Stop failed: the run may still be going on.");
+
+  assert.equal(abortRunAdmissionFailure({ status: "uncertain", epoch: "e", receipt: null })?.key, "CodeAlta did not confirm the Stop. Check whether the run still goes on.");
+  assert.equal(abortRunAdmissionFailure({ status: "stale_epoch", epoch: "e", receipt: null } as never)?.key, "CodeAlta restarted. Reload the window to continue.");
+  assert.deepEqual(abortRunAdmissionFailure({ status: "busy", epoch: "e", receipt: null } as never), { key: "The Stop was not accepted ({status}).", parameters: { status: "busy" } });
+  assert.equal(abortRunAdmissionFailure({ status: "accepted", epoch: "e", receipt: null } as never), null, "an accepted Stop waits for its receipt");
+
+  const page = { status: "ok", rows: [{ kind: "AbortRun", sessionId: "s", clientRequestId: "k", state: "terminal", outcome: "Failed", code: "abort_run_failed" }] } as never;
+  assert.equal(watchedStopFailure("k", "s", page)?.key, "The Stop failed: the run may still be going on.");
+  assert.equal(watchedStopFailure("other", "s", page), null);
 });
