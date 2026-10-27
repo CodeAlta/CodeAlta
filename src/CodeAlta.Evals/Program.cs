@@ -43,7 +43,8 @@ internal static class Program
         if (!options.TryGetValue("models", out var modelList)) { Console.Error.WriteLine(Usage); return 2; }
         var repository = FindRepository();
         var configuration = AppContext.BaseDirectory.Contains($"{Path.DirectorySeparatorChar}Debug{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ? "Debug" : "Release";
-        var altacli = options.GetValueOrDefault("altacli") ?? Path.Combine(repository, "src", "CodeAlta.Cli", "bin", configuration, "net10.0", OperatingSystem.IsWindows() ? "altacli.exe" : "altacli");
+        // Absolute: each run starts altacli in the folder of its fixture.
+        var altacli = options.TryGetValue("altacli", out var given) ? Path.GetFullPath(given) : Path.Combine(repository, "src", "CodeAlta.Cli", "bin", configuration, "net10.0", OperatingSystem.IsWindows() ? "altacli.exe" : "altacli");
         if (!File.Exists(altacli)) { Console.Error.WriteLine($"{altacli} does not exist: build the solution in {configuration} first, or name one with --altacli."); return 2; }
         var tiny = Path.Combine(repository, "src", "CodeAlta.Tests.TinyMcpServer", "bin", configuration, "net10.0", "CodeAlta.Tests.TinyMcpServer.dll");
         var models = Split(modelList);

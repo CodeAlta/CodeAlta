@@ -15,12 +15,16 @@ internal sealed record EvalRun
     public bool Succeeded { get; init; }
     public string Status { get; init; } = "unknown";
     public string? FailureKind { get; init; }
+    /// <summary>Why the run failed, as the run's result says it, for the judge.</summary>
+    public string? FailureMessage { get; init; }
     public string? FinalMessage { get; init; }
     /// <summary>The calls of the model, by tool, and the calls scripts made.</summary>
     public Dictionary<string, int> ToolCalls { get; init; } = new(StringComparer.Ordinal);
     public int ScriptCalls { get; init; }
     public int Scripts { get; init; }
-    /// <summary>The scripts that failed, by kind: syntax, typescript, unknown-function, wrong-arguments, unawaited, timeout, stalled, other.</summary>
+    /// <summary>The sessions the run started (with <c>agent()</c>, <c>alta session create</c> or a library script), whose events share its stream.</summary>
+    public int ChildSessions { get; init; }
+    /// <summary>The scripts that failed, by kind: syntax, typescript, node-api, unknown-function, wrong-arguments, unawaited, timeout, stalled, other.</summary>
     public Dictionary<string, int> ScriptFailures { get; init; } = new(StringComparer.Ordinal);
     public long? InputTokens { get; init; }
     public long? OutputTokens { get; init; }
@@ -76,8 +80,8 @@ internal sealed class EvalRunner(string altacli, EvalContext context, TimeSpan t
             return new EvalRun
             {
                 Task = task.Id, Family = task.Family, Model = model, Mode = mode, Repeat = repeat,
-                Succeeded = succeeded, Status = reading.Status ?? $"exit {process.ExitCode}", FailureKind = reading.FailureKind,
-                FinalMessage = reading.FinalMessage, ToolCalls = reading.ToolCalls, ScriptCalls = reading.ScriptCalls, Scripts = reading.Scripts,
+                Succeeded = succeeded, Status = reading.Status ?? $"exit {process.ExitCode}", FailureKind = reading.FailureKind, FailureMessage = reading.FailureMessage,
+                FinalMessage = reading.FinalMessage, ToolCalls = reading.ToolCalls, ScriptCalls = reading.ScriptCalls, Scripts = reading.Scripts, ChildSessions = reading.ChildSessions,
                 ScriptFailures = reading.ScriptFailures, InputTokens = reading.InputTokens, OutputTokens = reading.OutputTokens,
                 Cost = reading.Cost, CostCurrency = reading.CostCurrency, DurationMs = reading.DurationMs ?? clock.ElapsedMilliseconds,
                 TranscriptPath = transcript,
@@ -132,13 +136,18 @@ internal sealed class EvalRunner(string altacli, EvalContext context, TimeSpan t
         private readonly HashSet<string> _execCalls = new(StringComparer.Ordinal);
         private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
         private readonly HashSet<string> _judged = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _children = new(StringComparer.Ordinal);
+        // The session of the run: the first one of the stream. The events of the sessions it starts come in the same stream.
+        private string? _root;
 
         public Dictionary<string, int> ToolCalls { get; } = new(StringComparer.Ordinal);
+        public int ChildSessions => _children.Count;
         public Dictionary<string, int> ScriptFailures { get; } = new(StringComparer.Ordinal);
         public int ScriptCalls { get; private set; }
         public int Scripts => _execCalls.Count;
         public string? Status { get; private set; }
         public string? FailureKind { get; private set; }
+        public string? FailureMessage { get; private set; }
         public string? FinalMessage { get; private set; }
         public long? InputTokens { get; private set; }
         public long? OutputTokens { get; private set; }
@@ -165,7 +174,10 @@ internal sealed class EvalRunner(string altacli, EvalContext context, TimeSpan t
                 switch (method.GetString())
                 {
                     case "session/update" when parameters.TryGetProperty("update", out var update):
-                        ReadUpdate(update);
+                        var session = String(parameters, "sessionId");
+                        _root ??= session;
+                        if (session is null || session == _root) ReadUpdate(update);
+                        else _children.Add(session);
                         break;
                     case "_codealta/result":
                         ReadResult(parameters);
@@ -211,7 +223,11 @@ internal sealed class EvalRunner(string altacli, EvalContext context, TimeSpan t
         {
             Status = String(result, "status");
             FinalMessage = String(result, "finalMessage");
-            if (result.TryGetProperty("failure", out var failure) && failure.ValueKind == JsonValueKind.Object) FailureKind = String(failure, "kind");
+            if (result.TryGetProperty("failure", out var failure) && failure.ValueKind == JsonValueKind.Object)
+            {
+                FailureKind = String(failure, "kind");
+                FailureMessage = String(failure, "message");
+            }
             if (result.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
             {
                 InputTokens = Number(usage, "inputTokens");
@@ -235,6 +251,7 @@ internal sealed class EvalRunner(string altacli, EvalContext context, TimeSpan t
             var message = text.Split('\n').Skip(1).FirstOrDefault() ?? string.Empty;
             if (message.Contains("TypeScript", StringComparison.Ordinal)) return "typescript";
             if (message.StartsWith("SyntaxError", StringComparison.Ordinal)) return message.Contains("\\n", StringComparison.Ordinal) ? "literal-newline" : "syntax";
+            if (message.Contains("not Node.js", StringComparison.Ordinal) || message.Contains("require is not defined", StringComparison.Ordinal)) return "node-api";
             if (message.Contains("is not a function", StringComparison.Ordinal) || message.Contains("is not a tool", StringComparison.Ordinal)
                 || message.Contains("is not defined", StringComparison.Ordinal)) return "unknown-function";
             if (message.Contains("Did you mean", StringComparison.Ordinal) || message.Contains("missing `", StringComparison.Ordinal)

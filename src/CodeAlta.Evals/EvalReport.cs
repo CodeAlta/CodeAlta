@@ -13,15 +13,15 @@ internal static class EvalReport
         var builder = new StringBuilder();
         builder.AppendLine(CultureInfo.InvariantCulture, $"# Code Mode evaluation, {DateTime.Now:yyyy-MM-dd HH:mm}");
         builder.AppendLine();
-        builder.AppendLine("| Task | Model | Mode | Success | Tokens in/out | Cost | Time | Calls | Scripts | Script calls | No tool | Script failures |");
-        builder.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+        builder.AppendLine("| Task | Model | Mode | Success | Tokens in/out | Cost | Time | Calls | Scripts | Script calls | Sessions | No tool | Script failures |");
+        builder.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
         foreach (var group in runs.GroupBy(static run => (run.Task, run.Model, run.Mode)))
         {
             var list = group.ToList();
             var failures = list.SelectMany(static run => run.ScriptFailures).GroupBy(static pair => pair.Key)
                 .Select(static pair => $"{pair.Key} {pair.Sum(static item => item.Value)}");
             builder.AppendLine(CultureInfo.InvariantCulture,
-                $"| {group.Key.Task} | {group.Key.Model} | {group.Key.Mode} | {list.Count(static run => run.Succeeded)}/{list.Count} | {Average(list, static run => run.InputTokens):0}/{Average(list, static run => run.OutputTokens):0} | {Cost(list)} | {list.Average(static run => run.DurationMs) / 1000:0.0} s | {list.Average(static run => run.ToolCalls.Values.Sum()):0.0} | {list.Average(static run => run.Scripts):0.0} | {list.Average(static run => run.ScriptCalls):0.0} | {list.Count(static run => run.NoTool)} | {string.Join(", ", failures)} |");
+                $"| {group.Key.Task} | {group.Key.Model} | {group.Key.Mode} | {list.Count(static run => run.Succeeded)}/{list.Count} | {Average(list, static run => run.InputTokens):0}/{Average(list, static run => run.OutputTokens):0} | {Cost(list)} | {list.Average(static run => run.DurationMs) / 1000:0.0} s | {list.Average(static run => run.ToolCalls.Values.Sum()):0.0} | {list.Average(static run => run.Scripts):0.0} | {list.Average(static run => run.ScriptCalls):0.0} | {list.Average(static run => run.ChildSessions):0.0} | {list.Count(static run => run.NoTool)} | {string.Join(", ", failures)} |");
         }
 
         builder.AppendLine();
@@ -80,6 +80,7 @@ internal static class EvalJudge
             prompt.AppendLine(CultureInfo.InvariantCulture, $"## Run {run.Task} · {run.Model} · {run.Mode} · {(run.Succeeded ? "succeeded" : "failed")} · {run.Status}");
             prompt.AppendLine(CultureInfo.InvariantCulture, $"Task: {EvalTasks.All.First(task => task.Id == run.Task).Prompt}");
             prompt.AppendLine(CultureInfo.InvariantCulture, $"Final answer: {Bound(run.FinalMessage, 600)}");
+            if (run.FailureMessage is { } failure) prompt.AppendLine(CultureInfo.InvariantCulture, $"Failure: {Bound(failure, 600)}");
             if (run.TranscriptPath is { } path && File.Exists(path)) prompt.AppendLine(Scripts(path));
             prompt.AppendLine();
         }
