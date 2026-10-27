@@ -46,7 +46,9 @@ paths of the functions, their schemas) and an `ICodeModeCallHandler` (what runs 
 ## Hosts
 
 `exec` and `wait` (`CodeModeToolFactory`, in `CodeAlta.LiveTool`) are tools of the session, given by the host beside
-`alta` while `[code_mode] mode` is `on` (`CodeModeSessionTools`, read at each send). Each `exec` binds the functions of
+`alta` while `[code_mode] mode` is `on` or `only` (`CodeModeSessionTools`, read at each send). In `only`, `exec` takes
+over (`AgentToolSpec.ScriptsTakeOver`): the model is offered only the tools of exposure `Model` and those that stay
+direct (`view_image`), and calls the others from scripts. Each `exec` binds the functions of
 its run: the session's tools through `AgentToolInvocation.Tools` (`ToolScriptBinding`: `tools.*`, `mcp.<server>.*`), the
 typed `alta` commands for its caller (`AltaScriptBinding`), and discovery over that same API (`CodeModeDiscovery`).
 A tool's structured value (`AgentToolResult.Structured`) is what a script receives; the model reads its text.
@@ -58,6 +60,66 @@ Runs belong to the host (`CodeModeRunRegistry`, owned by `CodeAltaHost`), not to
   session as a prompt of provenance `workflow`.
 - Limits count runs (per session, per host) and refuse a run over them, never queue it.
 - The host stops every run before its sessions close.
+
+## Sessions of a script
+
+`agent()` and `session()` start sessions of their own (`CodeModeAgents`, in `CodeAlta.Orchestration/Hosting`, through
+the host's `HeadlessSessionDriver`). They are children of the script's session, created by kind `workflow`, and their
+answers go back to the script, never to the parent: `TakeParentNotifications` gives nothing for a session created by
+that kind, on every path, because `CreatedBy` is durable. A child has at most the tools of its creator and at least
+its restrictions (review, permission mode, sandbox: a script turns a sandbox on, never off), as a session the model
+creates with `alta session create`. A run caps its sessions (8 at work, 50 in all, 3 levels deep) and its tokens
+(`budget_tokens`). A tier the script asks for that is not set up gives the parent's model, with a warning: scripts are
+examples copied into any profile.
+
+## Records
+
+A run writes `AgentWorkflowEvent` records in the journal of its session (`RunStarted`, `StepsDeclared`, steps,
+sessions, waits, `RunEnded`), all before its result is given, so what reads the journal after the result sees the
+whole run. Their `RunId` is null: a run outlives the turn that started it. The card of the run and its tab read these
+records; they keep no state of their own.
+
+Desktop and TUI also keep each run in a store under the state root (`CodeModeRunStore`): its source, arguments, the
+value of each step, the calls of tools that are not idempotent, its sleeps and its result. Writes are queued off the
+script's thread. The store is the index of runs after a restart (listing reads `run.json` files, never a journal) and
+the memory of resume. `altacli` keeps none: its state root is thrown away.
+
+## Resume
+
+Jint cannot save a suspended script, so a resume runs the script again over what the store recorded. A step has a key,
+its id and occurrence under the path of the `workflow()` calls that reach it (`lib#0/read#0`), and a run with the
+scripts it calls shares one step space (indexes, occurrences, the replay cursor, under one lock) so that parallel
+scripts keep their keys. A replayed step gives its recorded value without running; a resume replays the longest
+unchanged prefix, a rerun every matching step or the steps before one. A step that would repeat a call of a tool that
+is not idempotent and was in flight is refused unless the user agrees: its outcome is unknown. Closing CodeAlta leaves
+its runs without an end, and the next start marks them interrupted. Only a run cut during `sleep()` resumes by itself,
+at its wake time: a sleep is the script's own request to go on later.
+
+## Runs started outside a turn
+
+A script needs the tools of its session, which exist only inside a model turn (`AgentToolInvocation.Tools`), and a
+provider that runs its own tools (Claude Code, the ACP agents) holds its conversation. So whatever starts a run without
+a turn (an automation, **Run…** of the Workflows tab, `alta script run`, **Resume**) sends the session a short prompt
+asking it to call `exec` (`CodeModeScriptRunPrompt`), and gives that session `exec` whatever the setting says
+(`CodeModeRunRegistry.RequireCodeMode`). The run then has the permissions, the sandbox and the timeline of an ordinary
+call.
+
+## The library
+
+`CodeModeScriptLibrary` reads the samples shipped with CodeAlta, the user's scripts (`~/.alta/scripts`) and the
+project's (`.alta/scripts`), the project's winning on a name. Agents publish through `alta script save`, which checks
+the script and refuses a copy changed since it was edited; they never write `.alta` with their file tools, which the
+write guard and the sandbox keep out of their reach, because a library script later runs with the tools of whoever runs
+it, an automation at night included. An automation that runs a script is allowed with the script's hash, so a change
+brought by an agent or a pull waits for the user.
+
+## Questions and time
+
+`ask()` goes through the questions of `alta ask` and resolves the script's promise with the answer; a script's question
+shows at once, also during its turn, because the turn's `exec` is the one waiting for it. Waiting for the user stops the
+run's clocks (its time limit and `exec`'s yield), and the questions and approvals of a run come one at a time. A session
+nobody watches (an automation's, `altacli`) gets `unavailable`. `sleep()` counts toward the yield, so a sleeping script
+goes to the background, but not toward the time limit, and its wake time is recorded for a resume.
 
 ## Limits
 
@@ -80,7 +142,7 @@ opened on its first line, so errors point at the line the model wrote.
 
 ## Determinism
 
-`Date` reads the run's clock and `Math.random` its source, both given by the host. A replayed run gives back what it
+`Date` reads the run's clock and `Math.random` its source, both given by the host. A replayed step gives back what it
 recorded. Built-in prototypes stay writable: freezing them breaks common code (`this.name = …` in an `Error` subclass),
 and each run has its own engine, so a script can only break its own globals. The bridge itself is frozen and its
 globals are read-only.
