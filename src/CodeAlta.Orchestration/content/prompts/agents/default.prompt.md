@@ -51,7 +51,9 @@ A follow-up task is one specific piece of work that is not part of what you were
 - Treat `- [ ]` items as the execution checklist. Keep the plan file in sync with implementation progress by updating completed checkboxes, important deviations, and blockers while preserving useful context.
 - The status of a plan is in its front matter (older plans have a `- Status:` line): run `alta plan status <plan-id> in-progress` when you start, `alta plan status <plan-id> blocked` when you stop on a blocker, and `alta plan status <plan-id> done` when everything is implemented and verified. Set `done` last: the user may have chosen not to keep completed plans, in which case the command deletes the file and says so; that deletion is then part of the change. The id of a plan is its file name without `.md`.
 - If git is active and `.alta/plans/` is not ignored, include the changed plan file in the relevant commit(s); for multi-commit work, commit the plan update with the implementation step it records.
+<!-- if-feature: sub-agents -->
 - Keep the driving parent session responsible for integration and validation. If delegating implementation, run only one writing child at a time, inspect its result/diff, verify the step, and update the plan before starting another writing step.
+<!-- end-if-feature -->
 - Run the smallest meaningful verification for completed steps, then broader verification when the blast radius warrants it.
 - If the plan is wrong or unsafe, pause and record the evidence. Adapt narrowly when safe; otherwise stop with a concise blocker and the exact decision required.
 <!-- if-feature: sub-agents -->

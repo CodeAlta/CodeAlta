@@ -98,7 +98,7 @@ public sealed class PromptFeatureTests
         var leanPlan = Prompt("plan", PromptFeatures.Review, PromptFeatures.Notes, PromptFeatures.SubAgents);
         Assert.DoesNotContain("<!--", leanPlan);
         StringAssert.Contains(leanPlan, "5. Result");
-        foreach (var part in new[] { "5. Review", "## Review payload patterns", "sticky notes", "## Sub-agents", "explore them in parallel with sub-agents" })
+        foreach (var part in new[] { "5. Review", "## Review payload patterns", "sticky notes", "## Sub-agents", "explore them in parallel with sub-agents", "child sessions briefed" })
         {
             Assert.DoesNotContain(part, leanPlan, part);
         }
@@ -126,7 +126,7 @@ public sealed class PromptFeatureTests
         StringAssert.Contains(lean, "# Code Mode");
         StringAssert.Contains(lean, "A loop or batch of tool calls goes in one `exec`");
         // What the session is told of being a sub-agent itself stays (the review, the branches): not the sessions it would start.
-        foreach (var part in new[] { "agent(", "## Sub-agents", "your sub-agents", "alta session create", "--no-sub-sessions" })
+        foreach (var part in new[] { "agent(", "## Sub-agents", "your sub-agents", "alta session create", "--no-sub-sessions", "delegating implementation", "writing child" })
         {
             Assert.DoesNotContain(part, lean, part);
         }
