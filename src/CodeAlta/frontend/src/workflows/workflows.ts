@@ -125,6 +125,18 @@ export function sortRuns(runs: readonly WorkflowRunItem[]): readonly WorkflowRun
   return [...runs].sort((a, b) => Number(b.state === "running") - Number(a.state === "running") || Date.parse(b.startedAt) - Date.parse(a.startedAt));
 }
 
+/** How many runs the side lists at first, and how many more each Show more adds. */
+export const runsPage = 20;
+
+/**
+ * The runs the side lists: as many as were asked for, and every running one, which come first, whatever their number;
+ * with how many more there are.
+ */
+export function shownRuns(runs: readonly WorkflowRunItem[], count: number): Readonly<{ runs: readonly WorkflowRunItem[]; more: number }> {
+  const length = Math.max(count, runs.filter(run => run.state === "running").length);
+  return length >= runs.length ? { runs, more: 0 } : { runs: runs.slice(0, length), more: runs.length - length };
+}
+
 /** The tone of a run, for its mark. */
 export const runTone = (state: string) => state === "running" ? "running" : state === "completed" ? "ok" : state === "failed" ? "failed" : "muted";
 

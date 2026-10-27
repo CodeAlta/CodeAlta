@@ -10,7 +10,7 @@ import { ConfirmPopover } from "../ConfirmPopover";
 import { MarkdownLinksContext } from "../MarkdownContent";
 import { RunScriptWindow } from "./RunScriptWindow";
 import { ScriptWindow } from "./ScriptWindow";
-import { filterScripts, projectScriptPath, restoreSamplesShown, runDuration, runStateLabel, runTone, runsRefreshMilliseconds, samplesShownKey, scopeLabel, sortRuns, stepColumns } from "./workflows";
+import { filterScripts, projectScriptPath, restoreSamplesShown, runDuration, runStateLabel, runTone, runsPage, runsRefreshMilliseconds, samplesShownKey, scopeLabel, shownRuns, sortRuns, stepColumns } from "./workflows";
 import { createWorkflowsHub, type WorkflowsApi, type WorkflowsHub, type WorkflowsList } from "./workflowsHub";
 import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import type { RunProvider } from "../workItems/runsWith";
@@ -110,9 +110,12 @@ function RunList({ runs, sessions, now, onOpen }: {
   runs: readonly WorkflowRunItem[]; sessions: ReadonlyMap<string, WorkspaceSession>; now: number; onOpen: (run: WorkflowRunItem) => void;
 }) {
   const { t, locale } = useShellLanguage();
+  // The first runs, then more on demand: the side stays short whatever the number of runs.
+  const [count, setCount] = useState(runsPage);
+  const listed = shownRuns(runs, count);
   if (runs.length === 0) return <p className="automation-empty">{t("No run yet.")}</p>;
-  return <ul className="automation-runs">
-    {runs.map(run => {
+  return <><ul className="automation-runs">
+    {listed.runs.map(run => {
       const session = sessions.get(run.sessionId);
       const when = sessionTime(run.startedAt, locale, now);
       const facts = [session?.title ?? null, t(runStateLabel(run.state)), formatDuration(runDuration(run, now)),
@@ -126,7 +129,10 @@ function RunList({ runs, sessions, now, onOpen }: {
         </button>
       </li>;
     })}
-  </ul>;
+  </ul>
+    {listed.more > 0 && <Button size="small" variant="minimal" className="workflow-runs-more" onClick={() => setCount(listed.runs.length + runsPage)}>
+      {t("Show more…")}<span className="count">{listed.more}</span></Button>}
+  </>;
 }
 
 // The runs, read again while the tab shows: often while one runs, else now and then.

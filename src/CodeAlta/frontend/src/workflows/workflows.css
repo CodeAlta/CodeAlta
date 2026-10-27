@@ -8,6 +8,9 @@
 .workflows-emblem { background: linear-gradient(135deg, #7ee2c2, #4fa3f5 55%, #9b7cf5); box-shadow: 0 6px 18px -8px #4fa3f5; }
 .workflow-library { align-content: start; gap: 10px; }
 .workflow-library-head { grid-template-columns: minmax(0, 1fr) auto minmax(140px, 220px); }
+/* Under the first runs of the side, the rest on demand. */
+.workflow-runs-more { justify-self: start; margin-top: 6px; font-size: 12px; color: var(--muted) !important; }
+.workflow-runs-more .count { display: inline-grid; margin-left: 6px; vertical-align: middle; }
 /* Discreet: a word beside the search, which shows the samples again or hides them. */
 .workflow-samples-toggle { font-size: 12px; color: var(--muted) !important; }
 .workflow-samples-toggle:hover { color: var(--text) !important; }

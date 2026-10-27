@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkflowRunItem, WorkflowScriptItem, WorkflowScriptParameter, WorkflowStepItem } from "#neoastra";
-import { argumentsOf, fieldKind, fieldsOf, filterScripts, initialValues, projectScriptPath, restoreSamplesShown, runDuration, runsRefreshMilliseconds, sortRuns, stepColumns } from "./workflows";
+import { argumentsOf, fieldKind, fieldsOf, filterScripts, initialValues, projectScriptPath, restoreSamplesShown, runDuration, runsPage, runsRefreshMilliseconds, shownRuns, sortRuns, stepColumns } from "./workflows";
 
 test("the library shows the samples until they are hidden, a choice kept as written", () => {
   assert.equal(restoreSamplesShown(() => null), true);
@@ -61,6 +61,16 @@ test("the runs list the running ones first, then the newest, and read again ofte
   assert.equal(runDuration(runs[1], Date.parse("2026-10-27T07:00:05Z")), 5000);
   assert.equal(runsRefreshMilliseconds(runs), 2000);
   assert.equal(runsRefreshMilliseconds([runs[0]]), 10_000);
+});
+
+test("the side lists a page of runs, then more on demand, and never leaves a running one out", () => {
+  const ended = Array.from({ length: 130 }, (_, index) => run(`run-${index}`, "completed", "2026-10-27T08:00:00Z", "2026-10-27T08:01:00Z"));
+  const first = shownRuns(ended, runsPage);
+  assert.deepEqual([first.runs.length, first.more], [20, 110]);
+  assert.deepEqual([shownRuns(ended, 140).runs.length, shownRuns(ended, 140).more], [130, 0]);
+  assert.equal(shownRuns(ended.slice(0, 5), runsPage).runs.length, 5);
+  const running = [...Array.from({ length: 25 }, (_, index) => run(`going-${index}`, "running", "2026-10-27T09:00:00Z")), ...ended];
+  assert.deepEqual([shownRuns(running, runsPage).runs.length, shownRuns(running, runsPage).more], [25, 130]);
 });
 
 test("the library is searched by name, title and description", () => {
