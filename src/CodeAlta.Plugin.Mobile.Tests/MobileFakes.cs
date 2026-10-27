@@ -97,6 +97,47 @@ internal sealed class FakeFiles : IPluginAppFileService
         => ValueTask.FromResult(Files.GetValueOrDefault(path));
 }
 
+/// <summary>The asks of the sessions a test gives, and the answers and cancels they received.</summary>
+internal sealed class FakeAsks : IPluginAskService
+{
+    internal Dictionary<string, PluginAsk> Pending { get; } = new(StringComparer.Ordinal);
+
+    internal ConcurrentQueue<(PluginAskReference Ask, IReadOnlyList<PluginAskAnswer> Answers, PluginAskReviewAnswer? Review)> Answers { get; } = new();
+
+    internal ConcurrentQueue<PluginAskReference> Cancels { get; } = new();
+
+    /// <summary>The outcome of the next answer or cancel; <c>admitted</c> or <c>cancelled</c> when null.</summary>
+    internal string? Outcome { get; set; }
+
+    /// <summary>Holds the outcome until a test releases it.</summary>
+    internal TaskCompletionSource? Hold { get; set; }
+
+    internal static PluginAsk Ask(string sessionId, string askId = "ask-1", string revision = "0", PluginAskReview? review = null, params PluginAskQuestion[] questions)
+        => new() { SessionId = sessionId, AskId = askId, Revision = revision, State = "pending", Questions = questions, Review = review };
+
+    public bool HasAsks => true;
+
+    public ValueTask<IReadOnlyList<PluginAskSummary>> ListAskingAsync(CancellationToken cancellationToken = default)
+        => ValueTask.FromResult<IReadOnlyList<PluginAskSummary>>([.. Pending.Values.Select(static ask => new PluginAskSummary(ask.SessionId, ask.AskId, ask.Revision, ask.State, ask.Immediate))]);
+
+    public ValueTask<PluginAsk?> GetPendingAsync(string sessionId, CancellationToken cancellationToken = default)
+        => ValueTask.FromResult(Pending.GetValueOrDefault(sessionId));
+
+    public async ValueTask<PluginAskOutcome> AnswerAsync(PluginAskReference ask, IReadOnlyList<PluginAskAnswer> answers, PluginAskReviewAnswer? review, CancellationToken cancellationToken = default)
+    {
+        Answers.Enqueue((ask, answers, review));
+        if (Hold is { } hold) await hold.Task;
+        return new(Outcome ?? "admitted");
+    }
+
+    public async ValueTask<PluginAskOutcome> CancelAsync(PluginAskReference ask, CancellationToken cancellationToken = default)
+    {
+        Cancels.Enqueue(ask);
+        if (Hold is { } hold) await hold.Task;
+        return new(Outcome ?? "cancelled");
+    }
+}
+
 /// <summary>A Tailscale command line whose answers a test gives.</summary>
 internal sealed class FakeTailscaleCli(bool installed = true) : IMobileTailscaleCli
 {

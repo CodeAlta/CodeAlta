@@ -1,6 +1,8 @@
 import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
 import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
 import { coalesce, composerView } from "./composer";
+import { askWaiting } from "./ask";
+import { createAskPanel } from "./askPanel";
 import { isBusy, type Live, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
 import { activityLine, el, icon, iconSvg, type IconName } from "./dom";
 import { createDrafts, newSessionDraft } from "./drafts";
@@ -139,7 +141,8 @@ export function startMobile(window: Window & typeof globalThis) {
     const when = live?.at ?? view.lastActivity;
     const lineText = live?.line ?? view.summary;
     const space = showSpaces(sessions.spaces);
-    const version = JSON.stringify([state, view.title, ago(when, now), live?.kind, lineText, live?.activity, sessionMeta(view, { space, live: true }), space]);
+    const asking = askWaiting(live);
+    const version = JSON.stringify([state, view.title, ago(when, now), live?.kind, lineText, live?.activity, sessionMeta(view, { space, live: true }), space, asking]);
     const element = make("div", `card ${state}`);
     const anchor = make("a", "card-link");
     anchor.href = `#/session/${encodeURIComponent(view.id)}`;
@@ -147,6 +150,11 @@ export function startMobile(window: Window & typeof globalThis) {
     const meta = metaLine(view, { space, live: true, dot: true, when, now });
     meta.title = dotLabels[state];
     anchor.append(meta);
+    if (asking) {
+      const badge = make("span", "waiting-badge");
+      badge.append(icon(document, "ask"), make("span", null, "Waits for your answer"));
+      anchor.append(badge);
+    }
     if (live?.kind === "activity" && live.activity) anchor.append(activityLine(document, live.activity, live.activity.state === "running", now));
     else if (lineText) {
       const line = make("div", "line", lineText);
@@ -576,6 +584,7 @@ export function startMobile(window: Window & typeof globalThis) {
     bindComposer(id);
     showDetailHead();
     void readChoices(id);
+    void askPanel.read(id);
     if (!sessions.listed(id) || !sessions.view(id)?.title) void readSessionAlone(id);
     void readDetail().then(() => { if (detail.id === id) toBottom(); });
   }
@@ -605,6 +614,19 @@ export function startMobile(window: Window & typeof globalThis) {
   const hint = $("composer-hint");
   let composerFor: string | null = null;
   const stopping = new Map<string, number>(), stoppedAt = new Map<string, number>();
+
+  // ---- The ask a session waits on: in place of the composer once the run that asked ended, as on the desktop ----
+  const askBar = $("ask");
+  const askPanel = createAskPanel({
+    document, window, root: askBar, cancelSheet: $("ask-cancel-sheet"), api, host,
+    current: () => detail.id,
+    live: id => sessions.view(id)?.live,
+    markdown: (element, text) => { const fill = () => markdown.fill(element, text, fill); fill(); },
+    onChange: () => showComposer(),
+    onSent: () => scheduleDetailRead(0),
+    onResize: () => padComposer(),
+  });
+  const bottomBar = () => askBar.hidden ? composer : askBar;
 
   function bindComposer(id: string | null) {
     if (composerFor) drafts.set(composerFor, promptBox.value);
@@ -643,6 +665,15 @@ export function startMobile(window: Window & typeof globalThis) {
     promptBox.placeholder = busy && !typed ? state.hint : "Ask for more…";
     composer.dataset.submit = state.submit;
     showSelection();
+    showAsk();
+  }
+
+  function showAsk() {
+    const was = !askBar.hidden;
+    const shown = askPanel.show();
+    composer.hidden = shown;
+    if (detail.id && foot.parentElement !== bottomBar()) bottomBar().append(foot);
+    if (shown !== was) padComposer();
   }
 
   // ---- The selection of the composer: the chip (model and effort) and "⋯" (agent prompt, permissions, queue first) ----
@@ -853,10 +884,12 @@ export function startMobile(window: Window & typeof globalThis) {
     const page = !$("detail").hidden ? $("detail") : creating ? document.body : null;
     if (!creating) document.body.style.paddingBottom = "";
     if (!page) return;
-    const bar = creating ? $("create-bar") : composer;
+    const bar = creating ? $("create-bar") : bottomBar();
     const viewport = window.visualViewport;
     const covered = viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0;
     bar.style.bottom = `${covered}px`;
+    // The ask scrolls in the bar, which leaves the top of the screen to the timeline.
+    if (bar === askBar) askBar.style.maxHeight = `${Math.round((viewport?.height ?? window.innerHeight) * 0.72)}px`;
     page.style.paddingBottom = `${bar.offsetHeight + covered + (creating ? 0 : 16)}px`;
   }
   window.visualViewport?.addEventListener("resize", padComposer);
@@ -1223,7 +1256,7 @@ export function startMobile(window: Window & typeof globalThis) {
     if (creating) plus.setAttribute("aria-current", "page"); else plus.removeAttribute("aria-current");
     document.body.classList.toggle("with-composer", !!id);
     // One footer: under the composer on the page of a session, under Start on the new-session screen, at the bottom of the list.
-    if (id) composer.append(foot);
+    if (id) bottomBar().append(foot);
     else if (creating) $("create-bar").append(foot);
     else if (foot.parentElement !== document.body) document.body.insertBefore(foot, toastElement);
     if (creating) void openCreate(false);
@@ -1242,9 +1275,10 @@ export function startMobile(window: Window & typeof globalThis) {
     const decision = sessions.applyLive(update);
     if (decision === "reload") scheduleListRead(500);
     else if (decision === "listed" && !$("home").hidden) renderList();
+    askPanel.onLive(update);
     if (detail.id === update.id) { showDetailHead(); drawTimeline(); scheduleDetailRead(400); }
   }
-  function readAgain() { void readList(); if (detail.id) void readDetail(); }
+  function readAgain() { void readList(); if (detail.id) { void readDetail(); void askPanel.read(detail.id); } }
   const stream = createLiveStream({
     create: () => new window.EventSource("/api/events"),
     onSession,
@@ -1271,7 +1305,7 @@ export function startMobile(window: Window & typeof globalThis) {
     const button = event.currentTarget as HTMLButtonElement;
     button.classList.add("spin");
     if (signedOut) { button.classList.remove("spin"); return; }
-    try { await Promise.all([readList(), refreshDetail()]); } finally { button.classList.remove("spin"); }
+    try { await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null]); } finally { button.classList.remove("spin"); }
   });
 
   // ---- Sign-in: the token of the QR link (#k=) gets the cookie; without it, the cookie or the kept token is used ----

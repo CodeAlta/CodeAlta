@@ -1,9 +1,9 @@
-import type { ActionResult, EventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
+import type { ActionResult, AskAnswerRequest, AskPage, AskResult, EventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
 
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
 
-/** The key of the kept token: an installed app does not share the browser's cookies, so it signs in again with it. */
+/** The key of the kept key of this phone: an installed app does not share the browser's cookies, so it signs in again with it. */
 export const tokenKey = "alta.token";
 
 /** The part of `Storage` the page uses; reads and writes never throw (a private window may refuse them). */
@@ -84,11 +84,15 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     return (data ?? {}) as T;
   }
 
-  /** Signs in with a token: true when the server set its cookie, false when it refused the token. */
+  /**
+   * Signs in with the pairing token of the QR code, or the key this phone kept: true when the server set its cookie, false
+   * when it refused. The server gives the phone a key of its own, which is kept in place of the token to sign in again.
+   */
   async function login(token: string): Promise<boolean> {
     const response = await request("POST", "/api/login", { token });
     if (response.status === 401 || response.status === 403) return false;
-    await read<unknown>(response);
+    const answer = await read<{ key?: unknown }>(response);
+    if (typeof answer.key === "string" && answer.key) store.set(tokenKey, answer.key);
     options.onSignedIn?.();
     return true;
   }
@@ -153,6 +157,10 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     abort: (id: string) => command<ActionResult>(`${session(id)}/abort`),
     archive: (id: string) => command<ActionResult>(`${session(id)}/archive`),
     restore: (id: string) => command<ActionResult>(`${session(id)}/restore`),
+    /** The ask the session waits on; an answer that did not reach it says why in its result, not as an error. */
+    ask: (id: string) => call<AskPage>("GET", `${session(id)}/ask`),
+    answerAsk: (id: string, request: AskAnswerRequest) => call<AskResult>("POST", `${session(id)}/ask/answer`, request),
+    cancelAsk: (id: string, request: Pick<AskAnswerRequest, "actionId" | "askId" | "revision">) => call<AskResult>("POST", `${session(id)}/ask/cancel`, request),
     diagram: (body: Readonly<{ svg: string; background?: string; text?: string; dark?: boolean }>) => call<{ url?: string }>("POST", "/api/diagrams", body),
   };
 }

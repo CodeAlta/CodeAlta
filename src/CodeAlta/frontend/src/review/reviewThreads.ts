@@ -175,6 +175,9 @@ export function suggestionDiff(original: string, suggestion: string): Suggestion
   ];
 }
 
+/** The verdict a new round starts with: changes asked when there are comments to send, approval otherwise. */
+export const defaultVerdict = (comments: number): ReviewVerdict => comments > 0 ? "changes_requested" : "approved";
+
 /** Whether a round can be sent: a comment-only verdict needs something to say. */
 export function canSubmitReview(counts: Pick<ReviewCounts, "draft" | "open">, verdict: ReviewVerdict, overall: string): boolean {
   return verdict !== "commented" || counts.draft + counts.open > 0 || overall.trim().length > 0;

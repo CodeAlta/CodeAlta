@@ -26,12 +26,14 @@ test("the token of the QR link is taken from the fragment and the address is cle
   assert.equal(cleared, 2, "an empty token still leaves the address");
 });
 
-test("signIn keeps an accepted token and forgets a refused one", async () => {
+test("signIn keeps the key the computer gives in place of the token, and forgets a refused one", async () => {
   const store = memoryStore();
-  const { fetch, calls } = server({ "/api/login": [[204], [401]] });
+  const { fetch, calls } = server({ "/api/login": [[200, JSON.stringify({ key: "phone-key" })], [204], [401]] });
   const api = createApi({ fetch, store, onSignedOut: () => assert.fail("signIn reports itself") });
   assert.equal(await api.signIn("good"), true);
-  assert.equal(store.values[tokenKey], "good");
+  assert.equal(store.values[tokenKey], "phone-key", "the pairing token is not kept");
+  assert.equal(await api.signIn("good"), true);
+  assert.equal(store.values[tokenKey], "good", "a computer that gives no key: the token is kept");
   assert.deepEqual(calls[0], { url: "/api/login", method: "POST", body: { token: "good" } });
   assert.equal(await api.signIn("bad"), false);
   assert.equal(store.values[tokenKey], undefined);
