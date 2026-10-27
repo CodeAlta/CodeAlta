@@ -25,6 +25,12 @@
 .script-run-steps li[data-state="failed"], .script-session[data-state="failed"] { --step-tone: var(--red); }
 .script-run-steps li[data-state="running"], .script-session[data-state="running"] { --step-tone: var(--accent); }
 .script-run-steps li[data-state="interrupted"], .script-session[data-state="interrupted"] { --step-tone: var(--yellow); }
+.script-run-steps li[data-state="waiting"] { --step-tone: var(--yellow); color: var(--yellow); }
+/* The run waits for the user: what for, and where it is answered. */
+.script-run-waiting { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 4px 6px 4px 8px; border: 1px solid color-mix(in srgb, var(--yellow) 45%, var(--line));
+  border-radius: 5px; background: color-mix(in srgb, var(--yellow) 8%, transparent); color: var(--yellow); }
+.script-run-waiting-text { display: flex; flex: 1; gap: 6px; min-width: 0; color: var(--text); font-size: 12px; }
+.script-run-waiting-text span { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 /* A step that gave the result a previous run recorded, without running. */
 .script-run-steps li[data-replayed] { border-style: dashed; color: var(--muted); }
 /* The mark of a step that offers Rerun from this step: the whole mark opens its menu. */

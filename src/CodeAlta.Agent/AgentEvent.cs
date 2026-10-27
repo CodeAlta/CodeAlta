@@ -618,6 +618,15 @@ public enum AgentWorkflowEventKind
 
     /// <summary>The run ended: its status, its duration and its calls.</summary>
     RunEnded,
+
+    /// <summary>
+    /// The run waits for the user: <see cref="AgentWorkflowEvent.Status"/> says for what (<c>question</c> for <c>ask()</c>,
+    /// <c>approval</c> for a call of the script to approve), with its step and the question.
+    /// </summary>
+    WaitStarted,
+
+    /// <summary>The run no longer waits for the user: the question was answered, dismissed or withdrawn.</summary>
+    WaitEnded,
 }
 
 /// <summary>

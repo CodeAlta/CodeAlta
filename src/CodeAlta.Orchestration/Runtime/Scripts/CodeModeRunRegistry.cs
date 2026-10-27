@@ -323,6 +323,73 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     public Task WhenKeptAsync(string runId)
         => runId is not null && _runs.TryGetValue(runId, out var run) && run.Writer is { } writer ? writer.FlushAsync() : Task.CompletedTask;
 
+    /// <summary>Finds the run that runs a script whose call a tool call is (<c>&lt;exec call&gt;/&lt;n&gt;</c>), while it runs.</summary>
+    /// <param name="sessionId">The session of the tool call.</param>
+    /// <param name="toolCallId">The tool call, such as <c>call_7/3</c>.</param>
+    /// <returns>The run, or null for a tool call of no running script.</returns>
+    public CodeModeRunHandle? FindByToolCall(string? sessionId, string? toolCallId)
+    {
+        var slash = toolCallId?.LastIndexOf('/') ?? -1;
+        if (sessionId is null || slash <= 0)
+        {
+            return null;
+        }
+
+        var callId = toolCallId![..slash];
+        return _runs.Values.FirstOrDefault(run => run.Running && string.Equals(run.CallId, callId, StringComparison.Ordinal)
+            && string.Equals(run.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Waits for the turn of a question of a run to the user (an <c>ask()</c> of its script, or the approval of one of its
+    /// calls): one at a time per run. Its card then says that the run waits, until the returned value is disposed.
+    /// </summary>
+    /// <param name="run">The run.</param>
+    /// <param name="kind">What it waits for: <c>question</c> or <c>approval</c>.</param>
+    /// <param name="stepId">The step that asks, or null.</param>
+    /// <param name="message">The question, or null.</param>
+    /// <param name="cancellationToken">Stops waiting for the turn.</param>
+    /// <returns>What ends the wait and gives the turn to the next question.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="run"/> or <paramref name="kind"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The wait for the turn was cancelled.</exception>
+    public async Task<IDisposable> WaitForUserAsync(CodeModeRunHandle run, string kind, string? stepId, string? message, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(kind);
+        // From now on the run waits for the user, its turn among the questions included: exec does not count that time.
+        run.WaitForUser(true);
+        try
+        {
+            await run.Questions.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            run.WaitForUser(false);
+            throw;
+        }
+
+        run.Record(AgentWorkflowEventKind.WaitStarted, record => record with { Status = kind, StepId = stepId, Message = message });
+        return new WaitEnd(() =>
+        {
+            run.Record(AgentWorkflowEventKind.WaitEnded, record => record with { Status = kind, StepId = stepId });
+            run.Questions.Release();
+            run.WaitForUser(false);
+        });
+    }
+
+    private sealed class WaitEnd(Action end) : IDisposable
+    {
+        private int _ended;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _ended, 1) == 0)
+            {
+                end();
+            }
+        }
+    }
+
     /// <summary>Finds a run of any session, running or ended a short while ago.</summary>
     /// <param name="runId">The id of the run.</param>
     /// <returns>The run, or null.</returns>
@@ -562,6 +629,50 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
 
     // What keeps the run for a resume, or null.
     internal CodeModeRunStore.Writer? Writer { get; set; }
+
+    // The questions of the run to the user come one at a time: ask() and the approvals of its calls.
+    internal SemaphoreSlim Questions { get; } = new(1, 1);
+
+    private readonly Lock _userGate = new();
+    private readonly Stopwatch _notWaitingForUser = Stopwatch.StartNew();
+    private int _userWaits;
+
+    /// <summary>Gets whether the run waits for the user: an answer of <c>ask()</c>, or the approval of one of its calls.</summary>
+    public bool WaitingForUser => Volatile.Read(ref _userWaits) > 0;
+
+    /// <summary>
+    /// Gets how long the run has run without waiting for the user: what <c>exec</c> counts against its <c>yield_ms</c>, so
+    /// that a turn does not send a script to the background because the user takes time to answer it.
+    /// </summary>
+    public TimeSpan TimeNotWaitingForUser
+    {
+        get
+        {
+            lock (_userGate)
+            {
+                return _notWaitingForUser.Elapsed;
+            }
+        }
+    }
+
+    // The first wait stops the clock of the time not waiting for the user, the last one to end starts it again.
+    internal void WaitForUser(bool waiting)
+    {
+        lock (_userGate)
+        {
+            if (waiting ? _userWaits++ == 0 : --_userWaits == 0)
+            {
+                if (waiting)
+                {
+                    _notWaitingForUser.Stop();
+                }
+                else
+                {
+                    _notWaitingForUser.Start();
+                }
+            }
+        }
+    }
 
     internal void AddWaiter(int delta) => Interlocked.Add(ref _waiters, delta);
 

@@ -78,7 +78,9 @@ public sealed class OwnedSessionAskService
         return null;
     }
 
-    internal AltaAskQueueResult? Queue(OwnedAskHandle origin, AltaAskRequest request)
+    internal AltaAskQueueResult? Queue(OwnedAskHandle origin, AltaAskRequest request) => Queue(origin, request, script: null);
+
+    private AltaAskQueueResult? Queue(OwnedAskHandle origin, AltaAskRequest request, TaskCompletionSource<IReadOnlyList<AltaAskAnswer>?>? script)
     {
         lock (_gate)
         {
@@ -88,8 +90,50 @@ public sealed class OwnedSessionAskService
             var original = _queue.QueueAsync(request, origin.SessionId, new() { Kind = "agent", SourceSessionId = origin.SessionId });
             var queued = original.GetAwaiter().GetResult();
             var snapshot = _queue.GetPending(origin.SessionId).Single(value => value.AskId == queued.AskId);
-            _asks.Add(queued.AskId, new(origin with { AskId = queued.AskId }, snapshot.Request, original));
+            _asks.Add(queued.AskId, new(origin with { AskId = queued.AskId }, snapshot.Request, original) { Script = script });
             return queued;
+        }
+    }
+
+    /// <summary>
+    /// Asks the user a question of a script of Code Mode that a session runs (<c>ask()</c>): it waits in the ask panel of the
+    /// session as an <c>alta ask</c> does, and its answer goes back to the script instead of being sent to the session.
+    /// </summary>
+    /// <param name="origin">Where the ask is answered: the runtime, the attachment and the provider of the session, and the run of the script as <see cref="OwnedAskHandle.RunId"/>.</param>
+    /// <param name="request">The questions.</param>
+    /// <param name="cancellationToken">Withdraws the question that is not answered yet: the script was stopped.</param>
+    /// <returns>The answers, one per question; null when the user dismissed the question.</returns>
+    /// <exception cref="ArgumentException">The origin or the request is invalid.</exception>
+    /// <exception cref="InvalidOperationException">This host asks nothing, or has too many questions waiting.</exception>
+    /// <exception cref="OperationCanceledException">The question was withdrawn, or the host is closing.</exception>
+    public async Task<IReadOnlyList<AltaAskAnswer>?> AskForScriptAsync(OwnedAskHandle origin, AltaAskRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        ArgumentNullException.ThrowIfNull(request);
+        if (!OwnedSessionAskTool.Identity(origin.SessionId) || !OwnedSessionAskTool.Identity(origin.RunId) || !OwnedSessionAskTool.Identity(origin.ProviderId)
+            || origin.RuntimeInstanceId == Guid.Empty || origin.AttachmentGeneration is <= 0 or > 9007199254740991)
+            throw new ArgumentException("Invalid origin.", nameof(origin));
+        var restricted = OwnedSessionAskTool.Restrict(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        var answered = new TaskCompletionSource<IReadOnlyList<AltaAskAnswer>?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queued = Queue(origin with { OperationId = Guid.NewGuid(), AskId = "", ResponseGeneration = 0 }, restricted, answered)
+            ?? throw new InvalidOperationException(Enabled ? "Too many questions wait for the user." : "This CodeAlta asks the user nothing.");
+        using (cancellationToken.Register(() => Withdraw(origin.SessionId, queued.AskId, answered)))
+        {
+            return await answered.Task.ConfigureAwait(false);
+        }
+    }
+
+    // The script stopped before the user answered: its question leaves the panel, unless the user is answering it.
+    private void Withdraw(string sessionId, string askId, TaskCompletionSource<IReadOnlyList<AltaAskAnswer>?> answered)
+    {
+        lock (_gate)
+        {
+            if (_asks.TryGetValue(askId, out var ask) && ReferenceEquals(ask.Script, answered) && _queue.TryRemove(sessionId, askId).Accepted)
+            {
+                _asks.Remove(askId);
+                answered.TrySetCanceled();
+            }
         }
     }
 
@@ -186,7 +230,7 @@ public sealed class OwnedSessionAskService
             var head = _queue.Peek(request.Handle.SessionId);
             if (head?.ResponseHandle is null || head.AskId != request.Handle.AskId || head.ResponseHandle.Generation != request.Handle.ResponseGeneration)
                 return Task.FromResult(new OwnedAskDisposition(request.ActionId, request.Handle, "rejected"));
-            work = new(request with { Answers = answers, Review = review }, cancel, text, head.ResponseHandle);
+            work = new(request with { Answers = answers, Review = review }, cancel, text, head.ResponseHandle) { Script = ask.Script };
             _actions.Add(request.ActionId, work);
             work.Work = RunAsync(work); // First await is the unreleased launch gate.
         }
@@ -204,7 +248,8 @@ public sealed class OwnedSessionAskService
             if (work.Cancel) status = _queue.TryCancelResponse(work.Handle).Accepted ? "cancelled" : "rejected";
             else
             {
-                try { work.Response = _queue.RespondAsync(work.Handle, () => DispatchAsync(work)); }
+                // The answer of a question of a script goes back to the script: no prompt is sent.
+                try { work.Response = _queue.RespondAsync(work.Handle, () => work.Script is null ? DispatchAsync(work) : AnswerScript(work)); }
                 finally { work.DispatchLaunch.TrySetResult(); } // Retain the response before launching Commands.
                 var result = await work.Response.ConfigureAwait(false);
                 runId = result.DispatchResult?.RunId;
@@ -225,6 +270,7 @@ public sealed class OwnedSessionAskService
             // The actions of an ask still pending are all kept: a repeat of one gets its outcome.
             if (status is "admitted" or "cancelled")
             {
+                if (status == "cancelled") work.Script?.TrySetResult(null);
                 _asks.Remove(work.Request.Handle.AskId);
                 foreach (var (id, action) in _actions)
                 {
@@ -235,6 +281,12 @@ public sealed class OwnedSessionAskService
             while (_settled.Count > MaximumSettledActions && _settled.TryDequeue(out var oldest)) _actions.Remove(oldest);
             return work.Disposition;
         }
+    }
+
+    private static Task<SessionPromptResponseResult> AnswerScript(ActionWork work)
+    {
+        work.Script!.TrySetResult(work.Request.Answers);
+        return Task.FromResult(SessionPromptResponseResult.Admitted(work.Request.Handle.RunId));
     }
 
     /// <summary>The longest review round an answer carries, in UTF-16 units.</summary>
@@ -270,8 +322,16 @@ public sealed class OwnedSessionAskService
     public void CloseAdmission()
     {
         OwnedSessionAskExecution[] executions;
-        lock (_gate) { _closed = true; executions = [.. _executions]; }
+        TaskCompletionSource<IReadOnlyList<AltaAskAnswer>?>[] scripts;
+        lock (_gate)
+        {
+            _closed = true;
+            executions = [.. _executions];
+            scripts = [.. _asks.Values.Select(static ask => ask.Script).OfType<TaskCompletionSource<IReadOnlyList<AltaAskAnswer>?>>()];
+        }
         foreach (var execution in executions) execution.Close();
+        // The scripts that wait for an answer stop waiting: nobody answers them now.
+        foreach (var script in scripts) script.TrySetCanceled();
     }
 
     /// <summary>Joins original action dispatch after command sends/control have settled; does not cancel a wait.</summary>
@@ -286,9 +346,16 @@ public sealed class OwnedSessionAskService
     }
 
     private OwnedAskHead Head(AltaQueuedAsk head) => new(_asks[head.AskId].Origin with { ResponseGeneration = head.ResponseHandle!.Generation },
-        head.Request, head.ResponseState switch { AltaAskResponseState.Pending => "pending", AltaAskResponseState.Submitting => "submitting", _ => "indeterminate" });
+        head.Request, head.ResponseState switch { AltaAskResponseState.Pending => "pending", AltaAskResponseState.Submitting => "submitting", _ => "indeterminate" })
+    {
+        Immediate = _asks[head.AskId].Script is not null,
+    };
     private static bool SameOrigin(OwnedAskHandle original, OwnedAskHandle handle) => original == (handle with { ResponseGeneration = original.ResponseGeneration });
-    private sealed record Ask(OwnedAskHandle Origin, AltaAskRequest Request, Task<AltaAskQueueResult> OriginalQueue);
+    private sealed record Ask(OwnedAskHandle Origin, AltaAskRequest Request, Task<AltaAskQueueResult> OriginalQueue)
+    {
+        // The script that waits for the answer of a question of Code Mode; null for an ask whose answer is sent to the session.
+        internal TaskCompletionSource<IReadOnlyList<AltaAskAnswer>?>? Script { get; init; }
+    }
     private sealed class ActionWork(OwnedAskAction request, bool cancel, string text, AltaAskResponseHandle handle)
     {
         internal OwnedAskAction Request { get; } = request;
@@ -302,5 +369,6 @@ public sealed class OwnedSessionAskService
         internal Task<AltaAskResponseResult>? Response { get; set; }
         internal OwnedSessionCommandReceipt? Receipt { get; set; }
         internal OwnedAskDisposition Disposition { get; set; } = new(request.ActionId, request.Handle, "submitting");
+        internal TaskCompletionSource<IReadOnlyList<AltaAskAnswer>?>? Script { get; init; }
     }
 }

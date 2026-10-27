@@ -596,6 +596,54 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task Ask_ReachesTheQuestionsOfTheHost_WithItsStepAndChoices_AndIsUnavailableWithoutThem()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var questions = new FakeQuestions();
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Questions = questions }).Single(static tool => tool.Spec.Name == "exec");
+        var (withoutQuestions, _) = Create(root.Path, runs);
+
+        var answered = await InvokeAsync(exec, """
+            const tag = await step("tag", () => ask("Which tag?", { choices: ["v1", "v2"], default: "v1" }));
+            const go = await ask("Go?").catch((e) => `${e.name}:${e.code}`);
+            return [tag, go];
+            """, new FakeTools());
+        var unavailable = await InvokeAsync(withoutQuestions, """return await ask("Go?").catch((e) => `${e.code}: ${e.message}`);""", new FakeTools());
+
+        Assert.IsTrue(answered.Success, Text(answered));
+        using (var value = ValueOf(answered))
+        {
+            Assert.AreEqual("""["v2","AskError:cancelled"]""", value.RootElement.GetRawText());
+        }
+
+        var first = questions.Requests.First();
+        Assert.AreEqual(("session-1", "Which tag?", "tag", "v1"), (first.SessionId, first.Question, first.StepId, first.Default));
+        CollectionAssert.AreEqual(new[] { "v1", "v2" }, first.Choices.ToArray());
+        CollectionAssert.Contains(runs.List("session-1").Select(static run => run.Id).ToArray(), first.RunId);
+        using (var value = ValueOf(unavailable))
+        {
+            StringAssert.StartsWith(value.RootElement.GetString(), "unavailable: Nobody can be asked here");
+        }
+    }
+
+    // The user of the tests: the second choice of a question with choices, a dismissal otherwise.
+    private sealed class FakeQuestions : ICodeModeQuestions
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<CodeModeQuestionRequest> Requests { get; } = new();
+
+        public Task<CodeModeQuestionAnswer> AskAsync(CodeModeQuestionRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Enqueue(request);
+            return Task.FromResult(request.Choices.Count > 1
+                ? new CodeModeQuestionAnswer(CodeModeQuestionOutcome.Answered, request.Choices[1], null)
+                : new CodeModeQuestionAnswer(CodeModeQuestionOutcome.Cancelled, null, "The user dismissed the question."));
+        }
+    }
+
+    [TestMethod]
     public async Task AltaWorkflowResume_ChecksTheRunAndTheCaller_BeforeItAsksTheSession()
     {
         using var root = TestTempDirectory.Create();

@@ -5,7 +5,7 @@ import { buildTimelineItems, execTitle, type HistoryEntry } from "../timeline";
 import { toolFamily, toolCallFromItem } from "../toolCall";
 import { groupTimelineTools } from "../toolGroups";
 import { scriptCallCounts } from "./ScriptCalls";
-import { scriptMarkState, scriptRunOffers } from "./scriptRunOffers";
+import { scriptMarkState, scriptRunOffers, scriptWaitTarget } from "./scriptRunOffers";
 
 const entry = (offset: string, changes: Partial<HistoryEntry> = {}): HistoryEntry => ({ offset,
   eventType: "activity", kind: "ToolCall", providerId: "provider", runId: "run", sessionId: "session",
@@ -123,6 +123,29 @@ test("a step says its key and whether it was replayed; what ran when CodeAlta en
   assert.equal(scriptMarkState("interrupted"), "interrupted");
   assert.equal(scriptMarkState("cancelled"), "failed");
   assert.deepEqual(scriptRunOffers(interrupted), { resume: true, rerun: false, rerunFromStep: true, saveAsScript: true });
+});
+
+test("a run that waits for the user says for what, and its step waits", () => {
+  const entries = [
+    ...scriptEntries().slice(0, 1),
+    record("r1", "RunStarted"),
+    record("r2", "StepStarted", { activityId: "deploy" }),
+    record("r3", "WaitStarted", { activityId: "deploy", phase: "question", text: "Deploy to production?" }),
+  ];
+  const asking = buildTimelineItems(entries)[0].scriptRun!;
+  const answered = buildTimelineItems([...entries, record("r4", "WaitEnded", { activityId: "deploy", phase: "question" })])[0].scriptRun!;
+  const approving = buildTimelineItems([...entries, record("r4", "WaitEnded", { phase: "question" }), record("r5", "WaitStarted", { phase: "approval" })])[0].scriptRun!;
+  const ended = buildTimelineItems([...entries, record("r4", "RunEnded", { phase: "cancelled" })])[0].scriptRun!;
+
+  assert.deepEqual(asking.waiting, { kind: "question", stepId: "deploy", text: "Deploy to production?" });
+  assert.equal(asking.steps[0].status, "waiting");
+  assert.equal(scriptMarkState(asking.steps[0].status), "waiting");
+  assert.equal(answered.waiting, undefined);
+  assert.equal(answered.steps[0].status, "running");
+  assert.deepEqual(approving.waiting, { kind: "approval", stepId: null, text: null });
+  assert.equal(ended.waiting, undefined, "a run that ended waits for nothing");
+  assert.equal(scriptWaitTarget("question"), ".ask-form, .ask-panel");
+  assert.equal(scriptWaitTarget("approval"), ".command-permission-panel");
 });
 
 test("a run that ended offers a rerun with its recorded results, and a rerun from a step it recorded", () => {

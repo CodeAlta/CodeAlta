@@ -105,6 +105,13 @@ public sealed class CodeAltaHost : IAsyncDisposable
         _codeModeAgents = new Lazy<CodeModeAgents>(() => new CodeModeAgents(this), LazyThreadSafetyMode.ExecutionAndPublication);
         // The sessions a run kept open close with it.
         CodeModeRuns.RunEnded += runId => { if (_codeModeAgents.IsValueCreated) _ = _codeModeAgents.Value.ForgetRunAsync(runId); };
+        CodeModeQuestions = new CodeModeQuestions(this);
+        // The approval of a call of a script, in its turn or in the background, takes its turn among the questions of its run;
+        // its card says that the run waits for it, and the exec that waits for the run does not count that time.
+        runtimeService.Permissions.WaitingForUser = async (request, token) =>
+            CodeModeRuns.FindByToolCall(request.SessionId, request.InteractionId) is { } run
+                ? await CodeModeRuns.WaitForUserAsync(run, "approval", null, null, token).ConfigureAwait(false)
+                : null;
         ExternalSessions = followExternalSessions
             ? new ExternalSessionFollower(catalogOptions, sessionViewCatalog.JournalStore.CreateSessionStore(), agentSessionCatalog, runtimeService)
             : null;
@@ -263,6 +270,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
     public Runtime.Scripts.CodeModeScriptLibrary CodeModeScripts => _codeModeScripts ??= new Runtime.Scripts.CodeModeScriptLibrary(CatalogOptions);
 
     private Runtime.Scripts.CodeModeScriptLibrary? _codeModeScripts;
+
+    /// <summary>Gets where the questions of the scripts of Code Mode (<c>ask()</c>) reach the user.</summary>
+    public Runtime.Scripts.ICodeModeQuestions CodeModeQuestions { get; }
 
     /// <summary>Gets the sessions the scripts of Code Mode start (<c>agent()</c>).</summary>
     public Runtime.Scripts.ICodeModeAgents CodeModeAgents => _codeModeAgents.Value;

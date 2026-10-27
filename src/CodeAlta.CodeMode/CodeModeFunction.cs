@@ -29,6 +29,12 @@ public sealed record CodeModeFunction(string Path)
     /// </summary>
     public bool Parallel { get; init; } = true;
 
+    /// <summary>
+    /// Gets whether a call of this function waits for the user, as <c>ask()</c> does: the time it waits does not count
+    /// toward the time limit of the run.
+    /// </summary>
+    public bool WaitsForUser { get; init; }
+
     /// <summary>Gets annotations shown in the declaration, such as <c>mutating</c>.</summary>
     public IReadOnlyList<string> Annotations { get; init; } = [];
 }

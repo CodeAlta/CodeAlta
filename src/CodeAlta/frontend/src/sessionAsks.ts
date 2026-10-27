@@ -17,7 +17,12 @@ export type AskQuestion = Readonly<{ title: string; question: string; descriptio
  */
 export type AskReviewTarget = Readonly<{ kind: "file" | "changes" | "branch"; path: string | null; title: string | null; message: string | null;
   projectId: string | null; checkout: string | null }>;
-export type AskPage = Readonly<{ head: Readonly<{ handle: AskHandle; request: Readonly<{ review: AskReviewTarget | null; questions: readonly AskQuestion[] }>; state: string }> | null;
+/**
+ * The pending ask of a session, and the outcome of the last action. `immediate` marks a question of a script (`ask()`),
+ * which the running turn waits for: it is shown at once, while another ask waits for the turn that asked to end.
+ */
+export type AskPage = Readonly<{ head: Readonly<{ handle: AskHandle; request: Readonly<{ review: AskReviewTarget | null; questions: readonly AskQuestion[] }>; state: string;
+  immediate: boolean }> | null;
   latest: AskDisposition | null; hasMore: boolean }>;
 type Rpc = (request: AskActionRequest) => Promise<unknown>;
 type Observation = { waiter?: Promise<unknown>; work?: Promise<void>; finished: boolean };
@@ -178,7 +183,8 @@ export function parseAskPage(value: unknown, epoch: string, session: string): As
       if (!choices.length && !freeform) throw new Error("No answer route");
       return Object.freeze({ title, question, description, choices: Object.freeze(choices), freeform });
     });
-    head = Object.freeze({ handle: Object.freeze(askWireHandle(h.handle)), request: Object.freeze({ review, questions: Object.freeze(questions) }), state: h.state as string });
+    head = Object.freeze({ handle: Object.freeze(askWireHandle(h.handle)), request: Object.freeze({ review, questions: Object.freeze(questions) }), state: h.state as string,
+      immediate: h.immediate === true });
   }
   const latest = value.latest === null ? null : disposition(value.latest);
   if (value.latest !== null && (!latest || latest.handle.sessionId !== session)) throw new Error("Invalid disposition");

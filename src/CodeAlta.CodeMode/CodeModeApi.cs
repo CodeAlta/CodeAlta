@@ -15,7 +15,7 @@ public sealed class CodeModeApi
     /// <summary>The global names of the helpers, which no namespace of an API may take.</summary>
     public static IReadOnlySet<string> ReservedNames { get; } = new[]
     {
-        "args", "console", "log", "text", "step", "meta", "workflow", "agent", "session", "parallel",
+        "args", "console", "log", "text", "step", "meta", "workflow", "agent", "ask", "session", "parallel",
         "pipeline", "phase", "budget", "store", "load", "exit", "globalThis", "Math", "JSON", "Promise",
     }.ToFrozenSet(StringComparer.Ordinal);
 
@@ -160,6 +160,14 @@ public sealed class CodeModeApi
                 return Promise.reject(new TypeError('agent(prompt, options): options is an object, such as { tier: "quick" }.'));
               }
               return host("codemode.agent", stringify(Object.assign({}, options, { prompt }))).then(unwrap).then((reply) => reply.value !== undefined ? reply.value : reply.answer);
+            });
+            // ask(question, { choices, default }): a question to the user, where the session asks; resolves with the answer.
+            global("ask", function (question, options) {
+              if (typeof question !== "string" || question.length === 0) return Promise.reject(new TypeError("ask(question, options): the question is a non-empty string."));
+              if (options !== undefined && (options === null || typeof options !== "object" || Array.isArray(options))) {
+                return Promise.reject(new TypeError('ask(question, options): options is an object, such as { choices: ["yes", "no"] }.'));
+              }
+              return host("codemode.ask", stringify(Object.assign({}, options, { question }))).then(unwrap).then((reply) => reply.answer);
             });
             // session(options): a session of its own the script keeps for several prompts; closed when the script ends.
             global("session", function (options) {

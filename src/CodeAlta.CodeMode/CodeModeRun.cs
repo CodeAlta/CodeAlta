@@ -50,6 +50,9 @@ internal sealed partial class CodeModeRun
     private readonly CodeModeStepSpace _space;
     private readonly System.Runtime.CompilerServices.StrongBox<int> _scopes;
     private readonly Dictionary<string, int> _workflowCalls = new(StringComparer.Ordinal);
+    // The time the limit counts: the run's, less the time it waits for the user.
+    private readonly Stopwatch _limitClock = new();
+    private int _userWaits;
     private readonly List<CodeModeOutputEntry> _output = [];
     private int _outputCharacters;
     private int _droppedOutput;
@@ -83,6 +86,7 @@ internal sealed partial class CodeModeRun
     public async Task<CodeModeRunResult> ExecuteAsync(CancellationToken cancellationToken)
     {
         _clock.Start();
+        _limitClock.Start();
         Touch();
         using var run = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _timeout.Token, _stall.Token);
         string? valueJson = null;
@@ -272,6 +276,12 @@ internal sealed partial class CodeModeRun
                     var running = Interlocked.Increment(ref _running);
                     UpdateMax(running);
                     startedAt = _clock.Elapsed;
+                    // The time the user takes to answer is not the script's: its time limit stops meanwhile.
+                    if (function.WaitsForUser)
+                    {
+                        PauseLimit(true);
+                    }
+
                     try
                     {
                         var result = call.Path == WorkflowPath
@@ -281,6 +291,11 @@ internal sealed partial class CodeModeRun
                     }
                     finally
                     {
+                        if (function.WaitsForUser)
+                        {
+                            PauseLimit(false);
+                        }
+
                         Interlocked.Decrement(ref _running);
                     }
                 }
@@ -447,6 +462,7 @@ internal sealed partial class CodeModeRun
             Scopes = _scopes,
             Scope = Interlocked.Increment(ref _scopes.Value),
             OuterStep = call.Step,
+            ParentRun = this,
         }, _observer);
         var result = await nested.ExecuteAsync(cancellationToken).ConfigureAwait(false);
         // Its steps are steps of this run: they share its keys and its replay.
@@ -855,6 +871,40 @@ internal sealed partial class CodeModeRun
     }
 
     private void Touch() => Interlocked.Exchange(ref _lastActivity, Stopwatch.GetTimestamp());
+
+    // The time limit counts the time of the run less the time it waits for the user: the first wait stops it, the last
+    // one to end starts it again with what is left. A script that workflow() started stops the limit of its parent too.
+    internal void PauseLimit(bool waiting)
+    {
+        lock (_gate)
+        {
+            if (waiting ? _userWaits++ > 0 : --_userWaits > 0)
+            {
+                return;
+            }
+
+            try
+            {
+                if (waiting)
+                {
+                    _limitClock.Stop();
+                    _timeout.CancelAfter(Timeout.InfiniteTimeSpan);
+                }
+                else if (_limits.Timeout != Timeout.InfiniteTimeSpan)
+                {
+                    _limitClock.Start();
+                    var left = _limits.Timeout - _limitClock.Elapsed;
+                    _timeout.CancelAfter(left > TimeSpan.Zero ? left : TimeSpan.FromMilliseconds(1));
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // The run ended while the user was asked.
+            }
+        }
+
+        _options.ParentRun?.PauseLimit(waiting);
+    }
 
     // Called on the engine's thread while JavaScript runs: the run is busy, and the time between two close checks
     // is the script's own time. A longer gap is time the script waited (an await): it starts a new slice, and a slice

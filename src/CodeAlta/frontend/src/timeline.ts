@@ -91,7 +91,11 @@ export type TimelineItem = Readonly<{
 }>;
 
 /** A run of a script of Code Mode, from its records (`workflow` entries of the journal). */
-export type ScriptRun = Readonly<{ runId: string; status: string | null; steps: ReadonlyArray<ScriptStep>; sessions: ReadonlyArray<ScriptSession> }>;
+export type ScriptRun = Readonly<{ runId: string; status: string | null; steps: ReadonlyArray<ScriptStep>; sessions: ReadonlyArray<ScriptSession>;
+  waiting?: ScriptWait | null }>;
+
+/** What a running script waits for from the user: the answer of an `ask()`, or the approval of one of its calls. */
+export type ScriptWait = Readonly<{ kind: "question" | "approval"; stepId: string | null; text: string | null }>;
 
 /**
  * A step of a run: its state, and how long it took once ended. `key` is what a rerun from it names (`merge#1`), once ended;
@@ -307,6 +311,7 @@ function scriptRunOf(records: ReadonlyArray<HistoryEntry>): ScriptRun {
   const known = scriptRuns.get(last);
   if (known && known.count === records.length) return known.run;
   let status: string | null = "running";
+  let waiting: ScriptWait | null = null;
   const steps: ScriptStep[] = [];
   const sessions: ScriptSession[] = [];
   for (const record of records) {
@@ -336,14 +341,26 @@ function scriptRunOf(records: ReadonlyArray<HistoryEntry>): ScriptRun {
       case "RunEnded":
         status = record.phase ?? "completed";
         break;
+      case "WaitStarted":
+        waiting = { kind: record.phase === "approval" ? "approval" : "question", stepId: record.activityId ?? null, text: record.text ?? null };
+        break;
+      case "WaitEnded":
+        waiting = null;
+        break;
     }
+  }
+  // A step that waits for the user says so while the run goes on.
+  if (status !== "running") waiting = null;
+  else if (waiting?.stepId) {
+    const index = lastIndex(steps, step => step.id === waiting!.stepId && step.status === "running");
+    if (index >= 0) steps[index] = { ...steps[index], status: "waiting" };
   }
   // CodeAlta ended while the run ran: what still ran then stopped with it.
   if (status === "interrupted") {
     for (let index = 0; index < steps.length; index++) if (steps[index].status === "running") steps[index] = { ...steps[index], status: "interrupted" };
     for (let index = 0; index < sessions.length; index++) if (sessions[index].status === "running") sessions[index] = { ...sessions[index], status: "interrupted" };
   }
-  const run: ScriptRun = { runId: last.name ?? "", status, steps, sessions };
+  const run: ScriptRun = { runId: last.name ?? "", status, steps, sessions, ...waiting ? { waiting } : {} };
   scriptRuns.set(last, { count: records.length, run });
   return run;
 }

@@ -4,10 +4,10 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { SessionLinksContext } from "../SessionReference";
 import { useShellLanguage } from "../shellLanguage";
-import type { ScriptRun, ScriptSession, ScriptStep } from "../timeline";
+import type { ScriptRun, ScriptSession, ScriptStep, ScriptWait } from "../timeline";
 import { formatDuration } from "../toolCall";
 import { SaveAsScript, ScriptRunActionsContext } from "./SaveAsScript";
-import { scriptMarkState as state, scriptRunOffers } from "./scriptRunOffers";
+import { scriptMarkState as state, scriptRunOffers, scriptWaitTarget } from "./scriptRunOffers";
 
 type Rerun = Readonly<{ from?: string; all?: boolean }>;
 
@@ -23,7 +23,7 @@ export const ScriptRunView = memo(function ScriptRunView({ run }: { run: ScriptR
   const offers = actions ? scriptRunOffers(run) : null;
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  if (run.steps.length === 0 && run.sessions.length === 0 && !offers?.saveAsScript) return null;
+  if (run.steps.length === 0 && run.sessions.length === 0 && !offers?.saveAsScript && !run.waiting) return null;
   async function rerun(how: Rerun) {
     setBusy(true);
     setProblem(null);
@@ -32,6 +32,7 @@ export const ScriptRunView = memo(function ScriptRunView({ run }: { run: ScriptR
     if (failure !== null) setProblem(failure || t("The session could not be asked."));
   }
   return <div className="script-run" role="group" aria-label={t("Steps and sessions of the script")}>
+    {run.waiting && <ScriptWaitLine wait={run.waiting} />}
     {run.steps.length > 0 && <ol className="script-run-steps">
       {run.steps.map((step, index) => <li key={`${step.id}:${index}`} data-state={state(step.status)} data-replayed={step.replayed || undefined}
         title={stepTitle(step, t("Recorded result"))}>
@@ -60,7 +61,25 @@ export const ScriptRunView = memo(function ScriptRunView({ run }: { run: ScriptR
 });
 
 function StepMark({ step }: { step: ScriptStep }) {
-  return <>{state(step.status) === "running" ? <ActivitySpinner size={9} /> : <span className="script-call-dot" aria-hidden="true" />}<span>{step.id}</span></>;
+  const mark = state(step.status);
+  return <>{mark === "running" ? <ActivitySpinner size={9} /> : mark === "waiting" ? <AppIcon name="hand" size={11} /> : <span className="script-call-dot" aria-hidden="true" />}
+    <span>{step.id}</span></>;
+}
+
+// The run waits for the user: the line says for what, and Open shows where it is answered in the pane of the session.
+function ScriptWaitLine({ wait }: { wait: ScriptWait }) {
+  const { t } = useShellLanguage();
+  const label = wait.kind === "question" ? t("Waits for your answer") : t("Waits for your approval");
+  return <div className="script-run-waiting" role="status">
+    <AppIcon name={wait.kind === "question" ? "ask" : "shield"} size={13} />
+    <span className="script-run-waiting-text"><strong>{label}</strong>{wait.kind === "question" && wait.text && <span>{wait.text}</span>}</span>
+    <Button size="small" variant="minimal" text={t("Open")} onClick={event => {
+      event.stopPropagation();
+      const target = event.currentTarget.closest(".session-workspace")?.querySelector<HTMLElement>(scriptWaitTarget(wait.kind));
+      target?.scrollIntoView({ block: "nearest" });
+      target?.querySelector<HTMLElement>("textarea, input, button")?.focus();
+    }} />
+  </div>;
 }
 
 // A replayed step says so; another one says how long it took.

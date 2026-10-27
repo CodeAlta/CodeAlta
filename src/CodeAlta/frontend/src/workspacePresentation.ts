@@ -15,6 +15,15 @@ export function showLiveDisplay(state: DisplayState | null): boolean {
 }
 
 // Observation errors are rendered separately; only actual ask evidence opens these details.
+/**
+ * Whether the questions of an ask are answered in the timeline, where the ask panel is, rather than in place of the prompt:
+ * always without a place for them, and for a question of a script (`ask()`) while the turn that waits for it runs, so that
+ * the prompt, and its Stop, stay.
+ */
+export function askInPlace(hasFormSlot: boolean, immediate: boolean, idle: boolean): boolean {
+  return !hasFormSlot || (immediate && !idle);
+}
+
 export function showAskDetails(page: AskPage | undefined, unsettledCount: number): boolean {
   return !!page?.head || unsettledCount > 0;
 }

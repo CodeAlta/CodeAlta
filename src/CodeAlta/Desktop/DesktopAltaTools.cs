@@ -73,7 +73,7 @@ internal static class DesktopAltaTools
         ArgumentNullException.ThrowIfNull(reminders);
         // The tools of Code Mode, for the sessions of the window and those that alta commands create.
         var codeMode = CodeModeSessionTools.FromSettings(host.CodeModeRuns, host.CatalogOptions, host.RuntimeService.ScratchpadRoot,
-            new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents), host.CodeModeScripts);
+            new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents), host.CodeModeScripts, host.CodeModeQuestions);
         var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search,
             reviews, reviewPolicy, windows, codeMode);
         pluginAlta?.SetDispatcher(dispatcher);

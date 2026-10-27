@@ -19,5 +19,6 @@ export const scriptCardMessages = {
     "Das Skript erneut ausführen: Jeder aufgezeichnete Schritt liefert sein Ergebnis, nur der übrige Code läuft.",
     "スクリプトを再実行します。記録された各ステップは結果を返し、残りのコードだけが実行されます。",
     "重新运行脚本：每个已记录的步骤返回其结果，只运行其余代码。"],
+  "Waits for your approval": ["Espera tu aprobación", "Attend votre approbation", "Wartet auf Ihre Freigabe", "承認を待っています", "等待你的批准"],
   "Recorded result": ["Resultado registrado", "Résultat enregistré", "Aufgezeichnetes Ergebnis", "記録された結果", "已记录的结果"],
 } as const;

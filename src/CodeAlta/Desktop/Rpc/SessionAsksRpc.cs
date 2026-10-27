@@ -165,7 +165,7 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
         handle.AskId, handle.ResponseGeneration.ToString(CultureInfo.InvariantCulture));
 
     internal static SessionAskHead? ToWire(OwnedAskHead? head)
-        => head is null ? null : new(ToWire(head.Handle), head.Request, head.State);
+        => head is null ? null : new(ToWire(head.Handle), head.Request, head.State, head.Immediate);
 
     internal static SessionAskDisposition? ToWire(OwnedAskDisposition? disposition)
         => disposition is null ? null : new(disposition.ActionId, ToWire(disposition.Handle), disposition.Status, disposition.RunId);
@@ -195,7 +195,8 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
 // Desktop wire DTOs deliberately do not expose domain Int64 properties to the RPC generator.
 internal sealed record SessionAskHandle(Guid OperationId, Guid RuntimeInstanceId, string AttachmentGeneration,
     string ProviderId, string SessionId, string RunId, string AskId, string ResponseGeneration);
-internal sealed record SessionAskHead(SessionAskHandle Handle, AltaAskRequest Request, string State);
+/// <param name="Immediate">Whether the ask is shown at once, while the turn of its session runs: a question of a script (<c>ask()</c>).</param>
+internal sealed record SessionAskHead(SessionAskHandle Handle, AltaAskRequest Request, string State, bool Immediate);
 internal sealed record SessionAskDisposition(Guid ActionId, SessionAskHandle Handle, string Status, string? RunId);
 /// <summary>An answer or a cancel of the pending ask. <paramref name="Review"/> is the verdict of a review request.</summary>
 internal sealed record SessionAskAction(Guid ActionId, SessionAskHandle Handle, IReadOnlyList<AltaAskAnswer> Answers, SessionAskReview? Review = null);

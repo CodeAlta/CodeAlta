@@ -3,6 +3,7 @@ import test from "node:test";
 import { setTimeout as deadlineTimer, clearTimeout as clearDeadlineTimer } from "node:timers";
 import { askActionUnconfirmed, askWireHandle, askWireRequest, captureAskAction, createAskActions, parseAskPage, validAskHandle } from "./sessionAsks";
 import { createMutationCapability } from "./sessionOperations";
+import { askInPlace } from "./workspacePresentation";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const handle = Object.freeze({ operationId: epoch, runtimeInstanceId: epoch, attachmentGeneration: "1",
@@ -130,6 +131,20 @@ test("only a failed or unknown outcome of a settled action is unconfirmed", () =
   assert.equal(askActionUnconfirmed(view("uncertain", null, "submitting")), true);
   assert.equal(askActionUnconfirmed(view("uncertain", null, "admitted")), false);
   assert.equal(askActionUnconfirmed(view("uncertain", null, "rejected")), true);
+});
+
+test("a question of a script is shown at once, in the timeline while its turn runs; another ask waits for the turn", () => {
+  const page = (immediate?: boolean) => parseAskPage({ status: "ok", hostEpoch: epoch, sessionId: "session", latest: null, hasMore: false,
+    head: { handle, state: "pending", ...immediate === undefined ? {} : { immediate },
+      request: { review: null, questions: [{ title: "Deploy", question: "Go?", description: null, choices: [], freeform: { title: null, placeholder: null } }] } } }, epoch, "session");
+
+  assert.equal(page(true).head?.immediate, true);
+  assert.equal(page(false).head?.immediate, false);
+  assert.equal(page().head?.immediate, false, "a host that says nothing of it asks as before");
+  assert.equal(askInPlace(true, true, false), true, "a question of a script while its turn runs: in the timeline, the prompt and its Stop stay");
+  assert.equal(askInPlace(true, true, true), false, "once the turn is idle it takes the place of the prompt, as any ask");
+  assert.equal(askInPlace(true, false, false), false, "an ask of alta waits for the turn, in the place of the prompt");
+  assert.equal(askInPlace(false, false, false), true);
 });
 
 test("reload recovers only same-epoch backend facts, not missing-action acknowledgment", () => {

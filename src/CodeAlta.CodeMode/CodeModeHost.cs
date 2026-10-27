@@ -42,6 +42,9 @@ public sealed record CodeModeRunOptions
     /// <summary>Gets the step of the <c>workflow()</c> call that started this run: the parent of its steps, and of its calls made outside them.</summary>
     internal CodeModeRun.ActiveStep? OuterStep { get; init; }
 
+    /// <summary>Gets the run whose <c>workflow()</c> call started this run: its time limit stops too while this one waits for the user.</summary>
+    internal CodeModeRun? ParentRun { get; init; }
+
     /// <summary>Gets the steps of the run <c>exec</c> runs and of the scripts it starts, shared by them all; null for a run that starts them.</summary>
     internal CodeModeStepSpace? Steps { get; init; }
 

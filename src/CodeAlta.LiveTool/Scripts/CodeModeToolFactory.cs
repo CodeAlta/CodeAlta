@@ -30,6 +30,9 @@ public sealed record CodeModeToolOptions
     /// <summary>Gets the sessions scripts start with <c>agent()</c>, or null for a host whose scripts start none.</summary>
     public ICodeModeAgents? Agents { get; init; }
 
+    /// <summary>Gets where the questions of scripts (<c>ask()</c>) reach the user, or null for a host where nobody can be asked.</summary>
+    public ICodeModeQuestions? Questions { get; init; }
+
     /// <summary>Gets the library of scripts that <c>workflow("name")</c> runs, or null for none.</summary>
     public CodeModeScriptLibrary? Library { get; init; }
 }
@@ -49,6 +52,9 @@ public static class CodeModeToolFactory
 
     private const int MaxWaitMilliseconds = 600_000;
 
+    // How often exec looks again at a run whose yield has not passed: its clock stops while the run waits for the user.
+    private static readonly TimeSpan YieldCheck = TimeSpan.FromMilliseconds(200);
+
     private const string ExecDescription = """
         Run JavaScript in CodeAlta to compose tool calls: loops, filters and parallel calls run without model turns, and only what the script returns comes back to you. Use it when a task needs several calls whose results you would otherwise read one by one; for a single call, call the tool directly.
 
@@ -60,6 +66,7 @@ public static class CodeModeToolFactory
         - `mcp.<server>.<tool>(args)`: the tools of the MCP servers active in this session. A server that `alta.mcp.activate({ id: ["<server>"] })` activates is in `mcp` from the next `exec`, not in the script that activates it.
         - `codemode.help({ path })`, `codemode.search({ query })`, `codemode.describe({ path })`: find functions and read their TypeScript declarations, results included. Never guess a function or a field of a result: describe it first.
         - `agent(prompt, { tier, model, title, schema })` starts a session of its own for a part of the work and resolves with its final answer, or with the JSON value it answered when `schema` (a JSON Schema) is given. `parallel(thunks, { limit })` runs functions at once and turns a failure into `null`; `pipeline(items, ...stages)` takes each item through the stages on its own; `phase(title)` marks a part of the work. `session({ tier, title })` keeps a session for several prompts: `const s = await session(); await s.run("..."); await s.close();`.
+        - `ask(question, { choices, default })` asks the user and resolves with the answer; it throws an `AskError` (code `cancelled` or `unavailable`, as in an automation).
         - `step(id, fn)` groups the calls of one part of the work; `log(...)`, `console.log(...)` and `text(...)` write output; `args` holds the arguments of the run.
 
         Calls run at the same time under `Promise.all`; tools that change files run one at a time. Await every call whose result matters: calls still pending when the script returns are cancelled. A failed call throws an error you can catch, and the calls made before a failure are not undone.
@@ -182,7 +189,7 @@ public static class CodeModeToolFactory
         var tools = invocation.Tools is { } invoker ? new ToolScriptBinding(invoker, ["alta", ExecToolName, WaitToolName]) : null;
         CodeModeApi? api = null;
         api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions,
-            .. options.Agents is null ? [] : CodeModeAgentBinding.Functions]);
+            .. options.Agents is null ? [] : CodeModeAgentBinding.Functions, CodeModeAskBinding.Function]);
         var discovery = new CodeModeDiscovery(() => api);
         var limits = execOptions.TimeoutMilliseconds is { } timeout ? options.Limits with { Timeout = TimeSpan.FromMilliseconds(timeout) } : options.Limits;
         var maxOutputTokens = execOptions.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens;
@@ -204,6 +211,7 @@ public static class CodeModeToolFactory
                 var handler = new CodeModeCallRouter(
                 [
                     .. agents is null ? [] : CodeModeAgentBinding.Paths.Select(path => (path, (ICodeModeCallHandler)agents)),
+                    (CodeModeAskBinding.Path, new CodeModeAskBinding(options.Questions, sessionId, () => ((CodeModeRunHandle)observer).Id)),
                     (AltaScriptBinding.Namespace, new AltaScriptCallHandler(dispatcher, alta, identity, cwd)),
                     (ToolScriptBinding.ToolsNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),
                     (ToolScriptBinding.McpNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),
@@ -230,10 +238,20 @@ public static class CodeModeToolFactory
         {
             try
             {
-                await run.Completion.WaitAsync(yieldTime, cancellationToken).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
+                // The time the script waits for the user (an answer, an approval) does not count: the turn keeps waiting for
+                // it rather than sending it to the background because the user takes time. Stopping the turn still stops it.
+                while (!run.Completion.IsCompleted)
+                {
+                    var left = yieldTime - run.TimeNotWaitingForUser;
+                    if (left <= TimeSpan.Zero && !run.WaitingForUser)
+                    {
+                        break;
+                    }
+
+                    var check = left > TimeSpan.Zero && left < YieldCheck ? left : YieldCheck;
+                    await Task.WhenAny(run.Completion, Task.Delay(check, cancellationToken)).ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
