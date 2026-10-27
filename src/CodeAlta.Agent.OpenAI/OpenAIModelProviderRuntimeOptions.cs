@@ -170,6 +170,14 @@ public sealed class OpenAIProviderOptions
     public TimeSpan? PromptCacheLifetime { get; set; }
 
     /// <summary>
+    /// Gets or sets the <c>text.verbosity</c> (<c>low</c>, <c>medium</c> or <c>high</c>) sent to an OpenAI Responses
+    /// endpoint, to every model not known to reject it. Null sends the model's own default to the OpenAI API, for the
+    /// models whose default is known, and no verbosity to another endpoint. The Codex subscription uses
+    /// <see cref="OpenAICodexSubscriptionOptions.TextVerbosity"/> instead.
+    /// </summary>
+    public string? TextVerbosity { get; set; }
+
+    /// <summary>
     /// Gets the lifetime of the prompt cache of the OpenAI API with its default retention: GPT-5.6 and later keep a
     /// cached prefix 30 minutes after its last write or reuse, and the models of the 24-hour retention typically as long.
     /// </summary>
@@ -273,9 +281,10 @@ public sealed class OpenAICodexSubscriptionOptions
     public int MaxConcurrentRequests { get; set; } = 16;
 
     /// <summary>
-    /// Gets or sets the configured text verbosity.
+    /// Gets or sets the configured text verbosity (<c>low</c>, <c>medium</c> or <c>high</c>). Null, the default, sends
+    /// the model's own default from the model list, and no verbosity when the list gives none.
     /// </summary>
-    public string TextVerbosity { get; set; } = "medium";
+    public string? TextVerbosity { get; set; }
 
     /// <summary>
     /// Gets or sets the provider-wide subscription routing tier. <c>priority</c> (alias <c>fast</c>)

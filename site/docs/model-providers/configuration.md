@@ -45,7 +45,7 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 
 | Type | Credentials and endpoint | Other fields |
 | --- | --- | --- |
-| `openai-chat`, `openai-responses` | `api_key` or `api_key_env`; optional `api_url`, `organization_id`, `project_id` | `network_timeout_seconds`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `extra_body`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
+| `openai-chat`, `openai-responses` | `api_key` or `api_key_env`; optional `api_url`, `organization_id`, `project_id` | `network_timeout_seconds`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `extra_body`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace`; `text_verbosity` for `openai-responses` only |
 | `azure-openai` | `api_key` or `api_key_env`; the `api_url` of the Azure resource | `network_timeout_seconds`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `anthropic` | `api_key` or `api_key_env`; optional `api_url` | `prompt_cache_ttl`, `refusal_fallback`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `google-genai`, `mistral` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
@@ -56,6 +56,12 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 | `claude-code` | none: `api_key`, `api_key_env` and `api_url` are refused | `config_dir`, `command`, `args`, `permission_mode`, `anthropic_api_key`, `single_model_id`, `models_include_regex` (see [Claude Code settings](setup.md#claude-code-settings)) |
 | `acp` | none: the agent signs in by itself | `command`, `arguments`, `env`, `permission_mode`, and `agent` and `agent_version` for an agent of the registry (see [Write one by hand](acp-agents.md#write-one-by-hand)) |
 
+`text_verbosity` (`low`, `medium` or `high`) sets how long the answers of the models of an `openai-responses` or `codex` provider are:
+
+- Not set, each model gets its own default: `low` for most GPT-5 and GPT-6 models, as in Codex.
+- On `openai-responses`, that default goes to the OpenAI API only. An endpoint at another `api_url` gets `text_verbosity` only when you set it.
+- A model that takes no verbosity, such as GPT-4.1 or o3, gets none.
+
 ## Codex, Copilot and xAI
 
 The fields of the subscriptions take these values:
@@ -65,7 +71,7 @@ The fields of the subscriptions take these values:
 | Codex | `auth_source` | `codealta_oauth` only |
 | Codex | `model_discovery` | `codex_endpoint_with_static_fallback` (default), `codex_endpoint`, `static` |
 | Codex | `response_transport` | `http` (default), `websocket_with_http_fallback` |
-| Codex | `text_verbosity` | `low`, `medium`, `high` |
+| Codex | `text_verbosity` | `low`, `medium`, `high`; not set: the model's default |
 | Codex | `web_search` | `cached` (default), `live`, `disabled` |
 | Codex | `service_tier` | `priority` (or `fast`), `default` |
 | Codex | `installation_id_source` | `codealta_state`, `codex_home_import`, `codex_home_readonly` |

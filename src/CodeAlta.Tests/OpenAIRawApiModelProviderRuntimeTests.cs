@@ -3004,6 +3004,128 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    // The OpenAI API: the model's own default, the setting where the model takes one, nothing to an older model.
+    [DataRow(null, null, "gpt-6-astra", "low", true)]
+    [DataRow(null, null, "gpt-5.4-mini", "medium", true)]
+    [DataRow(null, null, "gpt-5.5-2026-04-23", "low", true)]
+    [DataRow(null, null, "gpt-test", null, true)]
+    [DataRow(null, "high", "gpt-6-astra", "high", true)]
+    [DataRow(null, "high", "gpt-test", "high", true)]
+    [DataRow(null, "low", "gpt-4.1", null, true)]
+    [DataRow(null, "low", "o3", null, true)]
+    // Another endpoint: neither a default it may not take, nor a cache key; the setting is sent.
+    [DataRow("https://responses.example.test/v1", null, "gpt-6-astra", null, false)]
+    [DataRow("https://responses.example.test/v1", "low", "gpt-6-astra", "low", false)]
+    public async Task OpenAIResponsesTurnExecutor_SendsVerbosityAndPromptCacheKey(
+        string? baseUri,
+        string? configuredVerbosity,
+        string modelId,
+        string? expectedVerbosity,
+        bool expectsPromptCacheKey)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-verbosity", modelId, "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            BaseUri = baseUri is null ? null : new Uri(baseUri),
+            TextVerbosity = configuredVerbosity,
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var request = CreateTurnRequest() with
+        {
+            ModelId = modelId,
+            ModelInfo = new AgentModelInfo(modelId),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        var verbosity = document.RootElement.TryGetProperty("text", out var text) && text.TryGetProperty("verbosity", out var value)
+            ? value.GetString()
+            : null;
+        Assert.AreEqual(expectedVerbosity, verbosity);
+        Assert.AreEqual(
+            expectsPromptCacheKey ? "session-1" : null,
+            document.RootElement.TryGetProperty("prompt_cache_key", out var key) ? key.GetString() : null);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_ForkedSessionSendsTheCacheKeyOfItsOrigin()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-fork", "gpt-6-astra", "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+
+        _ = await executor.ExecuteTurnAsync(
+            CreateTurnRequest() with { PromptCacheKey = "root-session" },
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.AreEqual("root-session", document.RootElement.GetProperty("prompt_cache_key").GetString());
+    }
+
+    [TestMethod]
+    // The default of the model list, the provider's setting over it, nothing when neither is known.
+    [DataRow(null, "medium", "gpt-5.3-codex", "medium")]
+    [DataRow("high", "medium", "gpt-5.3-codex", "high")]
+    [DataRow(null, null, "gpt-6-astra", "low")]
+    [DataRow(null, null, "gpt-codex-next", null)]
+    public async Task OpenAIResponsesTurnExecutor_CodexSendsTheModelDefaultVerbosity(
+        string? configuredVerbosity,
+        string? listedDefault,
+        string modelId,
+        string? expectedVerbosity)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-codex-verbosity", modelId, "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ResponseTransport = "http",
+                TextVerbosity = configuredVerbosity,
+            },
+        });
+        var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["source"] = "codex-endpoint",
+            ["supportVerbosity"] = true,
+        };
+        if (listedDefault is not null)
+        {
+            capabilities["defaultTextVerbosity"] = listedDefault;
+        }
+
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = modelId,
+            ModelInfo = new AgentModelInfo(modelId, Capabilities: capabilities),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        var verbosity = document.RootElement.TryGetProperty("text", out var text) && text.TryGetProperty("verbosity", out var value)
+            ? value.GetString()
+            : null;
+        Assert.AreEqual(expectedVerbosity, verbosity);
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_CanNegotiateSequentialCutoffThroughInternalSeam()
     {
         var responsesClient = new RecordingOpenAIResponseClient(
