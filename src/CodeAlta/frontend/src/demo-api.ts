@@ -134,6 +134,8 @@ export const sessionOperations = Object.freeze({
   queue: unavailable, receipts: emptyPage, send: unavailable, steer: unavailable,
   // The demo has no session whose changes are reviewed before commit.
   reviewBeforeCommit: unavailable, setReviewBeforeCommit: unavailable,
+  // Nor options of a session: the defaults.
+  options: unavailable, setOptions: unavailable,
   claudeCodeConversation: noClaudeCodeConversation, releaseClaudeCodeConversation: noClaudeCodeConversation,
   openInVsCode: async (request: SessionClaudeCodeRequest) => ({ status: "unconfigured", epoch: null, sessionId: request.sessionId }),
 });

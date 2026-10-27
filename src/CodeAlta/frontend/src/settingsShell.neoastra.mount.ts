@@ -348,7 +348,7 @@ export const conversationHeld = {
   resolve: unavailable,
 };
 export const sessionOperations = { observeReferences: (request: { text: string }) => new Promise(resolve => referenceObservations.push({ request, resolve })),
-  reviewBeforeCommit: unavailable, setReviewBeforeCommit: unavailable,
+  reviewBeforeCommit: unavailable, setReviewBeforeCommit: unavailable, options: unavailable, setOptions: unavailable,
   ...(localStorage.getItem("retainedQueueFixture") === "true" ? {
     receipts: (request: SessionReceiptRequest) => new Promise<SessionReceiptPage>(resolve => queueReceiptReads.push({ request, resolve })),
   } : {}),
