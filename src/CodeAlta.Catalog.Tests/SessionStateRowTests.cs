@@ -96,6 +96,26 @@ public sealed class SessionStateRowTests
     }
 
     [TestMethod]
+    public async Task ACacheOfVersion9_WithoutTheColumnOfTheOptions_IsMigrated_AndListsItsSessions()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var session = await CreateSessionAsync(options, "session-v9");
+
+        // A cache written by a build that had no options: version 9, and no column for them.
+        await ExecuteAsync(options, """
+            ALTER TABLE session_projection_cache DROP COLUMN local_options;
+            UPDATE app_meta SET version = 9 WHERE owner = 'session_cache';
+            """);
+
+        var listed = await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync();
+
+        Assert.AreEqual(session.SessionId, listed.Single().SessionId);
+        await using var database = ApplicationDatabase.Create(options);
+        Assert.AreEqual(10, await database.GetVersionAsync("session_cache"));
+    }
+
+    [TestMethod]
     public async Task TheRow_HoldsTheLastStateRecordOfTheJournal_AfterEachKindOfWrite()
     {
         using var root = TempDirectory.Create();
@@ -148,7 +168,7 @@ public sealed class SessionStateRowTests
         Assert.AreEqual(1, first.JournalStateReadCount, "The first read takes the state from the journal.");
         await using (var database = ApplicationDatabase.Create(options))
         {
-            Assert.AreEqual(9, await database.GetVersionAsync("session_cache"));
+            Assert.AreEqual(10, await database.GetVersionAsync("session_cache"));
         }
 
         AssertSameJson(expected, ReadRowState(options, session.SessionId), "The state read is written to the row.");
