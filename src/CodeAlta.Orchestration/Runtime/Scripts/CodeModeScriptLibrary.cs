@@ -25,7 +25,24 @@ public enum CodeModeScriptScope
 /// <param name="Path">Its file.</param>
 /// <param name="Hash">The SHA-256 of its content: a save names it to refuse a copy that changed since it was edited.</param>
 /// <param name="Source">The script, read and prepared.</param>
-public sealed record CodeModeLibraryScript(string Name, CodeModeScriptScope Scope, string Path, string Hash, CodeModeSource Source);
+public sealed record CodeModeLibraryScript(string Name, CodeModeScriptScope Scope, string Path, string Hash, CodeModeSource Source)
+{
+    /// <summary>Gets why the script does not parse, or null when it does.</summary>
+    public string? Problem => Source.Error?.Message;
+
+    /// <summary>Gets the one-line description its <c>meta</c> gives, or null.</summary>
+    public string? Description => Source.Descriptor?.Description;
+
+    /// <summary>Gets the JSON Schema of its arguments, built from <c>meta.params</c>, or null when it takes none.</summary>
+    public string? ParametersSchemaJson => Source.Descriptor?.ParametersSchemaJson;
+
+    /// <summary>Checks arguments against its parameters, as <c>workflow("name", args)</c> does before it runs it.</summary>
+    /// <param name="argumentsJson">The arguments, a JSON object.</param>
+    /// <returns>What is wrong with them, or null when they fit.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="argumentsJson"/> is null.</exception>
+    /// <exception cref="System.Text.Json.JsonException"><paramref name="argumentsJson"/> is not JSON.</exception>
+    public string? CheckArguments(string argumentsJson) => Source.Descriptor?.CheckArguments(argumentsJson);
+}
 
 /// <summary>
 /// The library of scripts of Code Mode: the samples of CodeAlta, then your scripts (<c>~/.alta/scripts/&lt;name&gt;.js</c>), then the
@@ -92,6 +109,29 @@ public sealed partial class CodeModeScriptLibrary
         {
             var file = System.IO.Path.Combine(folder, name + ".js");
             if (File.Exists(file) && Read(name, scope, file) is { } script) return script;
+        }
+
+        return null;
+    }
+
+    /// <summary>Gets the hash of the script a project runs under a name, without preparing it: what an automation was allowed with.</summary>
+    /// <param name="name">The name.</param>
+    /// <param name="projectRoot">The folder of the project, or null.</param>
+    /// <returns>The hash, or null when there is no such script.</returns>
+    public string? FindHash(string name, string? projectRoot)
+    {
+        if (!IsName(name)) return null;
+        foreach (var (_, folder) in Folders(projectRoot).Reverse())
+        {
+            var file = System.IO.Path.Combine(folder, name + ".js");
+            try
+            {
+                if (File.Exists(file)) return HashOf(File.ReadAllText(file));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
         }
 
         return null;

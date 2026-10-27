@@ -10,6 +10,7 @@ using CodeAlta.Desktop.Rpc;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Scripts;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -780,6 +781,69 @@ public sealed class AutomationHostTests
             Assert.AreEqual("default", started.SpaceId);
             Assert.AreEqual("Triage", AutomationRunner.SessionTitle("Triage", " "));
             Assert.AreEqual(8 + 3 + 80, AutomationRunner.SessionTitle("Triage 1", "#7 " + new string('x', 200)).Length, "A long title of an issue is cut.");
+            await workspace.CloseSessionsAsync();
+            await workspace.CloseImportsAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
+    public async Task Runner_RunsTheScriptOfAnAutomation_WithItsArgumentsAndTheEventThatStartedIt()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-automation-script-").FullName;
+        try
+        {
+            var global = Path.Combine(root, "global");
+            var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            var provider = new RunnerProvider();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => new RunnerRuntime(provider)),
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            Assert.IsNull(host.CodeModeScripts.Save("triage", CodeModeScriptScope.Project, """
+                export const meta = { name: "triage", description: "Triage.", params: { days: { type: "integer" }, event: { type: "string", default: "" } } };
+                return args.days;
+                """, project.ProjectPath, null).Refusal);
+            var runner = new AutomationRunner(host);
+            var source = new AutomationSource(Path.Combine(global, "config.toml"), null, null);
+            const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d78";
+            AutomationEntry Entry(AutomationDefinition definition) => new(definition, source, project.Id, project.ProjectPath, null);
+
+            // A script that is not in the library, or arguments it refuses, start no session.
+            foreach (var (definition, expected) in new (AutomationDefinition, string)[]
+                     {
+                         (new(Id, "x") { Script = "missing" }, "There is no script 'missing' in the library of its project."),
+                         (new(Id, "x") { Script = "triage" }, "The script 'triage' refuses its arguments: the argument `days` is missing."),
+                         (new(Id, "x") { Script = "triage", ScriptArguments = "{\"days\": \"one\"}" }, "The script 'triage' refuses its arguments: the argument `days` must be integer, not string."),
+                     })
+            {
+                var refused = await runner.StartAsync(Entry(definition), "run-refused", string.Empty, null, default);
+                Assert.AreEqual((null, expected, null), (refused.SessionId, refused.Problem, refused.Completion));
+            }
+
+            var start = await runner.StartAsync(Entry(new(Id, "Triage") { Script = "triage", ScriptArguments = "{\"days\": 1}" }), "run-1",
+                "\n\n---\nThis automation was started by its command.", null, default);
+            Assert.IsNull(start.Problem);
+            var (sessionId, sent) = await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            Assert.AreEqual(start.SessionId, sessionId);
+            var text = string.Concat(sent.Input.Items.OfType<AgentInputItem.Text>().Select(static item => item.Value));
+            StringAssert.Contains(text, "Run the script `triage` of the library with `exec`");
+            StringAssert.Contains(text, "return await workflow(\"triage\", {\"days\":1,\"event\":\"This automation was started by its command.\"});");
+            Assert.IsTrue(host.CodeModeRuns.RequiresCodeMode(sessionId), "Its session has exec whatever the setting of Code Mode says.");
+            provider.Release.SetResult();
+            Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WaitAsync(Patience)).Status);
+            var workspace = new WorkspaceService(host, Epoch);
             await workspace.CloseSessionsAsync();
             await workspace.CloseImportsAsync();
         }

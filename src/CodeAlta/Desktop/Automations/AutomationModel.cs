@@ -229,8 +229,17 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// <summary>Whether its triggers start it. A disabled automation can still be run by hand.</summary>
     public bool Enabled { get; init; } = true;
 
-    /// <summary>What is sent to the session the automation starts.</summary>
+    /// <summary>The longest arguments of a script kept, as JSON.</summary>
+    internal const int MaximumScriptArgumentsLength = 32768;
+
+    /// <summary>What is sent to the session the automation starts; empty for an automation that runs a script.</summary>
     public string Prompt { get; init; } = string.Empty;
+
+    /// <summary>The script of the library the automation runs in place of a prompt; null when it sends its prompt.</summary>
+    public string? Script { get; init; }
+
+    /// <summary>The arguments of its script, a JSON object; null for none.</summary>
+    public string? ScriptArguments { get; init; }
 
     /// <summary>In the configuration of the user only: the folder of the project it runs in. Without one it runs as a chat.</summary>
     public string? Project { get; init; }
@@ -260,7 +269,7 @@ internal sealed record AutomationDefinition(string Id, string Name)
     public IReadOnlyList<AutomationTrigger> Triggers { get; init; } = [];
 
     /// <summary>
-    /// A value that changes with what the automation runs and with when it runs: its name, prompt, model, agent
+    /// A value that changes with what the automation runs and with when it runs: its name, prompt or script, model, agent
     /// prompt, permission mode, review, sandbox, project and triggers, the command and the folder of a command
     /// trigger included. It does not change with <see cref="Enabled"/>.
     /// </summary>
@@ -271,6 +280,7 @@ internal sealed record AutomationDefinition(string Id, string Name)
         // An automation without them keeps the fingerprint it was allowed with.
         if (PermissionMode is not null || ReviewBeforeCommit is not null || Sandbox is not null)
             text += "\n" + string.Join('\n', PermissionMode ?? string.Empty, ReviewBeforeCommit switch { true => "1", false => "0", null => string.Empty }, Sandbox ?? string.Empty);
+        if (Script is not null) text += "\nscript\n" + Script + "\n" + (ScriptArguments ?? string.Empty);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 

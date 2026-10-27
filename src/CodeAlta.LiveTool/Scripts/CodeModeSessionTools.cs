@@ -93,8 +93,16 @@ public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<strin
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     public IReadOnlyList<AgentToolDefinition> Create(AltaCommandDispatcher dispatcher, AltaSessionToolOptions caller, IReadOnlyList<AgentToolDefinition> tools)
     {
+        ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(tools);
-        return _mode() switch
+        var mode = _mode();
+        // The session of an automation that runs a script has exec, whatever the setting says.
+        if (mode is not ("on" or "only") && _options.Runs.RequiresCodeMode(caller.SourceSessionIdProvider?.Invoke() ?? caller.SourceSessionId))
+        {
+            mode = "on";
+        }
+
+        return mode switch
         {
             "on" => [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options)],
             "only" => [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options with { TakesOver = true })],

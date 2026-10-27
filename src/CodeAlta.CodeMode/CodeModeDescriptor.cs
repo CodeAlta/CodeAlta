@@ -56,6 +56,20 @@ public sealed record CodeModeDescriptor(string Json)
     /// <summary>Gets whether the script asks to be offered to sessions as a tool.</summary>
     public bool Tool { get; init; }
 
+    /// <summary>
+    /// Checks arguments against the parameters of the script, as <c>workflow("name", args)</c> does before it runs it: a
+    /// missing argument, an unknown one, or one of the wrong type.
+    /// </summary>
+    /// <param name="argumentsJson">The arguments, a JSON object.</param>
+    /// <returns>What is wrong with them, or null when they fit.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="argumentsJson"/> is null.</exception>
+    /// <exception cref="JsonException"><paramref name="argumentsJson"/> is not JSON.</exception>
+    public string? CheckArguments(string argumentsJson)
+    {
+        ArgumentNullException.ThrowIfNull(argumentsJson);
+        return ParametersSchemaJson is { } parameters ? CodeModeRun.CheckArguments(parameters, argumentsJson) : null;
+    }
+
     /// <summary>Reads a descriptor from the object literal of <c>meta</c>.</summary>
     /// <param name="literal">The literal.</param>
     /// <param name="error">Why it could not be read.</param>

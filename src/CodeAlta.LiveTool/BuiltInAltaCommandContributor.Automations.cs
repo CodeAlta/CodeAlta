@@ -554,7 +554,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         allowed = automation.Allowed,
         problem = automation.Problem,
         file = automation.File,
-        prompt = prompt ? automation.Prompt : null,
+        script = automation.Script,
+        prompt = prompt && automation.Script is null ? automation.Prompt : null,
     };
 
     private static object AutomationRunRecord(AltaCommandContext context, AltaAutomationRun run) => new

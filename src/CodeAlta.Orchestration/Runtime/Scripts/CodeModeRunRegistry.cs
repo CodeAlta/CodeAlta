@@ -26,6 +26,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     private readonly ConcurrentDictionary<string, CodeModeRunHandle> _runs = new(StringComparer.Ordinal);
     private readonly Func<string, string, CancellationToken, Task>? _deliver;
     private readonly Func<string, IDisposable?>? _hold;
+    private readonly ConcurrentDictionary<string, byte> _codeModeSessions = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Occurs when a run ended and its result was given, with the id of the run.</summary>
     public event Action<string>? RunEnded;
@@ -63,6 +64,23 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         _maxPerSession = maxPerSession;
         _maxPerHost = maxPerHost;
     }
+
+    /// <summary>
+    /// Gives a session the tools of Code Mode whatever the setting says, for as long as the host runs: the session of an
+    /// automation that runs a script.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is null or blank.</exception>
+    public void RequireCodeMode(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        _codeModeSessions.TryAdd(sessionId, 0);
+    }
+
+    /// <summary>Gets whether a session has the tools of Code Mode whatever the setting says (<see cref="RequireCodeMode"/>).</summary>
+    /// <param name="sessionId">The session, or null.</param>
+    /// <returns>True when it has them.</returns>
+    public bool RequiresCodeMode(string? sessionId) => sessionId is not null && _codeModeSessions.ContainsKey(sessionId);
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> ListSessionsWithRunningScripts()

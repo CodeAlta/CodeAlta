@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.Automations;
+using CodeAlta.Orchestration.Runtime.Scripts;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
@@ -25,6 +26,7 @@ internal sealed class AutomationsService
 
     private readonly AutomationService? _automations;
     private readonly ProjectCatalog? _projects;
+    private readonly CodeModeScriptLibrary? _scripts;
     private readonly string? _epoch;
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
@@ -36,12 +38,41 @@ internal sealed class AutomationsService
     /// <param name="automations">The automations of the application.</param>
     /// <param name="projects">The host's project catalog, for the names of the projects.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
-    internal AutomationsService(AutomationService automations, ProjectCatalog projects, string epoch)
+    /// <param name="scripts">The library of scripts an automation may run in place of a prompt; null for none.</param>
+    internal AutomationsService(AutomationService automations, ProjectCatalog projects, string epoch, CodeModeScriptLibrary? scripts = null)
     {
         ArgumentNullException.ThrowIfNull(automations);
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
-        (_automations, _projects, _epoch) = (automations, projects, epoch);
+        (_automations, _projects, _epoch, _scripts) = (automations, projects, epoch, scripts);
+    }
+
+    /// <summary>The scripts of the library an automation of a project, or of the user, can run, with their parameters.</summary>
+    [NeoRpcMethod("scripts")]
+    public async Task<AutomationScriptsResponse> ScriptsAsync(AutomationScriptsRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, []);
+        if (request.ProjectId is { } projectId && !Identifier(projectId)) return new("invalid_request", []);
+        if (_scripts is null) return new("ok", []);
+        var project = request.ProjectId is null ? null : await _projects!.GetByIdAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
+        var scripts = await Task.Run(() => _scripts.List(project?.ProjectPath), cancellationToken).ConfigureAwait(false);
+        return new("ok", [.. scripts.Where(static script => script.Problem is null).Select(static script => new AutomationScriptItem(script.Name,
+            script.Scope.ToString().ToLowerInvariant(), script.Description, Parameters(script.ParametersSchemaJson)))]);
+
+        static IReadOnlyList<AutomationScriptParameter> Parameters(string? schema)
+        {
+            if (schema is null) return [];
+            using var document = System.Text.Json.JsonDocument.Parse(schema);
+            var root = document.RootElement;
+            var required = root.TryGetProperty("required", out var names) ? names.EnumerateArray().Select(static name => name.GetString()).ToHashSet(StringComparer.Ordinal) : [];
+            return root.TryGetProperty("properties", out var properties) && properties.ValueKind == System.Text.Json.JsonValueKind.Object
+                ? [.. properties.EnumerateObject().Select(property => new AutomationScriptParameter(property.Name,
+                    property.Value.TryGetProperty("type", out var type) && type.ValueKind == System.Text.Json.JsonValueKind.String ? type.GetString() : null,
+                    required.Contains(property.Name),
+                    property.Value.TryGetProperty("description", out var description) && description.ValueKind == System.Text.Json.JsonValueKind.String ? description.GetString() : null))]
+                : [];
+        }
     }
 
     /// <summary>The automations as they were last read, their state and the latest runs.</summary>
@@ -208,7 +239,11 @@ internal sealed class AutomationsService
                 entry.ProjectPath ?? definition.Project, entry.Source.ProjectId, entry.Source.FilePath, definition.Model.Provider, definition.Model.Model,
                 definition.Model.Effort?.ToString(), definition.Agent, definition.PermissionMode, definition.ReviewBeforeCommit, definition.Sandbox, definition.CatchUp, [.. definition.Triggers.Select(Trigger)], entry.Problem,
                 _automations.NextDue(entry.Id), _automations.IsRunning(entry.Id), runs.Count > 0 ? Run(runs[0]) : null,
-                _automations.Repository(entry.Id), definition.Enabled ? _automations.WatchProblem(entry.Id) : null, _automations.IsAllowed(entry));
+                _automations.Repository(entry.Id), definition.Enabled ? _automations.WatchProblem(entry.Id) : null, _automations.IsAllowed(entry))
+            {
+                Script = definition.Script,
+                ScriptArguments = definition.ScriptArguments,
+            };
         }).ToArray();
         return new(status, _automations.Paused, snapshot.Scanned, items,
             [.. snapshot.Faults.Select(static fault => new AutomationFaultItem(fault.Source.FilePath, fault.Source.ProjectId, fault.Key, fault.Message))],
@@ -235,7 +270,8 @@ internal sealed class AutomationsService
         (definition, problem) = (null, null);
         if (input.Name is null || input.Prompt is null || input.Triggers is null || input.Triggers.Count > AutomationDefinition.MaximumTriggers
             || input.Id is { } id && !AutomationDefinition.IsId(id) || input.ProjectId is { } project && !Identifier(project)
-            || input.Name.Length > 4096 || input.Prompt.Length > AutomationDefinition.MaximumPromptLength * 2) return false;
+            || input.Name.Length > 4096 || input.Prompt.Length > AutomationDefinition.MaximumPromptLength * 2
+            || input.Script is { Length: > 256 } || input.ScriptArguments is { Length: > AutomationDefinition.MaximumScriptArgumentsLength * 2 }) return false;
         AgentReasoningEffort? effort = null;
         if (input.Effort is { Length: > 0 } text)
         {
@@ -261,7 +297,10 @@ internal sealed class AutomationsService
         definition = new AutomationDefinition(input.Id ?? AutomationDefinition.NewId(), input.Name.Trim())
         {
             Enabled = input.Enabled,
-            Prompt = input.Prompt,
+            // An automation that runs a script sends no prompt of its own.
+            Prompt = Blank(input.Script) is null ? input.Prompt : string.Empty,
+            Script = Blank(input.Script),
+            ScriptArguments = Blank(input.Script) is null ? null : Blank(input.ScriptArguments),
             Model = new(provider, model, effort),
             Agent = Blank(input.Agent),
             PermissionMode = Blank(input.PermissionMode),
@@ -270,7 +309,7 @@ internal sealed class AutomationsService
             CatchUp = input.CatchUp,
             Triggers = triggers,
         };
-        problem = AutomationConfig.Validate(definition with { Prompt = input.Prompt.ReplaceLineEndings("\n").Trim() });
+        problem = AutomationConfig.Validate(definition with { Prompt = definition.Prompt.ReplaceLineEndings("\n").Trim() });
         return true;
     }
 
@@ -350,7 +389,29 @@ internal sealed record AutomationTriggerItem(string Type, int Minute, int Every,
 internal sealed record AutomationItem(string Id, string Name, bool Enabled, string Prompt, string? ProjectId, string? ProjectName, string? ProjectFolder,
     string? StoreProjectId, string File, string? Provider, string? Model, string? Effort, string? Agent, string? PermissionMode, bool? ReviewBeforeCommit, string? Sandbox, bool CatchUp,
     IReadOnlyList<AutomationTriggerItem> Triggers, string? Problem, DateTimeOffset? NextRunAt, bool Running, AutomationRunItem? LastRun,
-    string? Repository, string? WatchProblem, bool Allowed);
+    string? Repository, string? WatchProblem, bool Allowed)
+{
+    /// <summary>The script of the library it runs in place of a prompt; null when it sends its prompt.</summary>
+    public string? Script { get; init; }
+
+    /// <summary>The arguments of its script, a JSON object; null for none.</summary>
+    public string? ScriptArguments { get; init; }
+}
+
+/// <summary>Asks for the scripts an automation can run.</summary>
+/// <param name="ProjectId">The project it runs in, whose scripts come first; null for a chat.</param>
+internal sealed record AutomationScriptsRequest(string? ExpectedEpoch, string? ProjectId);
+
+/// <summary>The scripts an automation can run.</summary>
+internal sealed record AutomationScriptsResponse(string Status, IReadOnlyList<AutomationScriptItem> Scripts);
+
+/// <summary>A script of the library, as the editor of an automation offers it.</summary>
+/// <param name="Scope"><c>project</c>, <c>global</c> or <c>builtin</c>.</param>
+internal sealed record AutomationScriptItem(string Name, string Scope, string? Description, IReadOnlyList<AutomationScriptParameter> Parameters);
+
+/// <summary>A parameter of a script.</summary>
+/// <param name="Type">Its JSON type, such as <c>integer</c>; null for any.</param>
+internal sealed record AutomationScriptParameter(string Name, string? Type, bool Required, string? Description);
 
 /// <summary>One run of an automation.</summary>
 /// <param name="Trigger"><c>manual</c>, or the type of the trigger that started it.</param>
@@ -377,7 +438,14 @@ internal sealed record AutomationUpcomingItem(string AutomationId, DateTimeOffse
 /// <param name="ReviewBeforeCommit">Whether the user reviews the changes of its sessions before a commit; null follows the setting.</param>
 /// <param name="Sandbox">The sandbox its sessions run in, a profile or <c>off</c>; null for what the settings give.</param>
 internal sealed record AutomationInput(string? Id, string Name, bool Enabled, string Prompt, string? ProjectId, string? Provider, string? Model,
-    string? Effort, string? Agent, string? PermissionMode, bool? ReviewBeforeCommit, string? Sandbox, bool CatchUp, IReadOnlyList<AutomationTriggerItem> Triggers);
+    string? Effort, string? Agent, string? PermissionMode, bool? ReviewBeforeCommit, string? Sandbox, bool CatchUp, IReadOnlyList<AutomationTriggerItem> Triggers)
+{
+    /// <summary>The script of the library it runs in place of its prompt; null to send its prompt.</summary>
+    public string? Script { get; init; }
+
+    /// <summary>The arguments of its script, a JSON object; null for none.</summary>
+    public string? ScriptArguments { get; init; }
+}
 
 /// <param name="StoreProjectId">The project whose configuration holds it; null for the configuration of the user.</param>
 internal sealed record AutomationSaveRequest(string? ExpectedEpoch, AutomationInput Automation, string? StoreProjectId);

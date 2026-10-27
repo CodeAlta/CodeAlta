@@ -50,7 +50,7 @@ export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !nee
 
 /**
  * Whether an automation waits for the user before its triggers start it: it came with the configuration of its
- * project, which other people write, and was not allowed here as it is now.
+ * project, which other people write, or its script changed, and it was not allowed here as it is now.
  */
 export const waitsToBeAllowed = (item: Readonly<{ allowed: boolean; triggers: readonly unknown[] }>): boolean => !item.allowed && item.triggers.length > 0;
 
@@ -120,6 +120,10 @@ export const runTriggerLabel = (trigger: string): MessageKey => trigger === "man
 /** An automation as its form holds it. */
 export type AutomationForm = Readonly<{
   id: string | null; name: string; enabled: boolean; prompt: string;
+  /** The script of the library it runs in place of a prompt; empty to send its prompt. */
+  script: string;
+  /** The arguments of its script, as the JSON text of an object; empty for none. */
+  scriptArguments: string;
   /** The project it runs in; null for a chat. */
   projectId: string | null;
   /** Whether it is written in the configuration of its project rather than of the user. */
@@ -132,13 +136,13 @@ export type AutomationForm = Readonly<{
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
-  return { id: null, name: "", enabled: true, prompt: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
+  return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
     permissionMode: "", reviewBeforeCommit: null, sandbox: "", triggers: [] };
 }
 
 /** The form of an automation that exists. */
 export function formOf(item: AutomationItem): AutomationForm {
-  return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, projectId: item.projectId, storeInProject: item.storeProjectId !== null,
+  return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
     permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", triggers: item.triggers };
 }
@@ -173,8 +177,12 @@ export function formSettings(settings: SessionSettings): Partial<AutomationForm>
 export function formProblem(form: AutomationForm): MessageKey | null {
   if (!form.name.trim()) return "Give the automation a name.";
   if (form.name.trim().length > maximumNameLength) return "The name is too long.";
-  if (!form.prompt.trim()) return "Write the prompt the automation sends.";
-  if (form.prompt.length > maximumPromptLength) return "The prompt is too long.";
+  if (form.script.trim()) {
+    if (!isScriptArguments(form.scriptArguments)) return "The arguments of the script are a JSON object.";
+  } else {
+    if (!form.prompt.trim()) return "Write the prompt the automation sends.";
+    if (form.prompt.length > maximumPromptLength) return "The prompt is too long.";
+  }
   for (const trigger of form.triggers) {
     if (needsProject(trigger) && !form.projectId) return "A trigger on issues or pull requests needs a project.";
     if ((trigger.type === "daily" || trigger.type === "weekly") && trigger.at.length === 0) return "Add a time to the trigger.";
@@ -189,7 +197,10 @@ export function formProblem(form: AutomationForm): MessageKey | null {
 export function inputOf(form: AutomationForm): AutomationInput {
   const provider = form.provider.trim();
   const model = provider ? form.model.trim() : "";
-  return { id: form.id, name: form.name.trim(), enabled: form.enabled, prompt: form.prompt, projectId: form.projectId,
+  const script = form.script.trim();
+  // An automation that runs a script sends no prompt of its own.
+  return { id: form.id, name: form.name.trim(), enabled: form.enabled, prompt: script ? "" : form.prompt, script: script || null,
+    scriptArguments: script ? form.scriptArguments.trim() || null : null, projectId: form.projectId,
     provider: provider || null, model: model || null, effort: model && form.effort ? form.effort : null, agent: form.agent.trim() || null,
     permissionMode: form.permissionMode.trim() || null, reviewBeforeCommit: form.reviewBeforeCommit, sandbox: form.sandbox.trim() || null,
     // An automation that is run by hand misses nothing.
@@ -203,7 +214,27 @@ export type AutomationScope = "all" | "chats" | "projects";
 export function filterAutomations(items: readonly AutomationItem[], query: string, scope: AutomationScope): readonly AutomationItem[] {
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   return items.filter(item => (scope === "all" || (scope === "chats") === (item.projectId === null && !item.projectFolder))
-    && words.every(word => `${item.name}\n${item.projectName ?? ""}\n${item.prompt}`.toLowerCase().includes(word)));
+    && words.every(word => `${item.name}\n${item.projectName ?? ""}\n${item.prompt}\n${item.script ?? ""}`.toLowerCase().includes(word)));
+}
+
+/** Whether the text is the arguments of a script: empty, or the JSON text of an object. */
+export function isScriptArguments(text: string): boolean {
+  if (!text.trim()) return true;
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  } catch {
+    return false;
+  }
+}
+
+/** The arguments a script is shown with in a form: the JSON of an object with its required parameters, empty ones. */
+export function scriptArgumentsTemplate(parameters: readonly Readonly<{ name: string; type: string | null; required: boolean }>[]): string {
+  const required = parameters.filter(parameter => parameter.required);
+  if (required.length === 0) return "";
+  const empty = (type: string | null): unknown => type === "string" ? "" : type === "number" || type === "integer" ? 0 : type === "boolean" ? false
+    : type === "array" ? [] : type === "object" ? {} : null;
+  return JSON.stringify(Object.fromEntries(required.map(parameter => [parameter.name, empty(parameter.type)])), null, 2);
 }
 
 /** Where a time falls between two others, from 0 to 1. */

@@ -1,7 +1,9 @@
 // The page's link to the automations of the application: what they are now, and the calls that change them.
-import type { automations, AutomationInput, AutomationItem, AutomationRunItem, AutomationsListResponse, AutomationTriggerItem } from "#neoastra";
+import type { automations, AutomationInput, AutomationItem, AutomationRunItem, AutomationScriptItem, AutomationsListResponse, AutomationTriggerItem } from "#neoastra";
 
-export type AutomationsApi = Pick<typeof automations, "list" | "refresh" | "save" | "delete" | "setEnabled" | "allow" | "setPaused" | "run" | "runs" | "preview" | "watch">;
+/** The calls of the host; `scripts` is missing from a host that has no library of scripts. */
+export type AutomationsApi = Pick<typeof automations, "list" | "refresh" | "save" | "delete" | "setEnabled" | "allow" | "setPaused" | "run" | "runs" | "preview" | "watch">
+  & Partial<Pick<typeof automations, "scripts">>;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
 /** What the page shows of the automations. `loaded` is false until the host answered once. */
@@ -126,6 +128,15 @@ export function createAutomationsHub(api: AutomationsApi, timers: Timers = { set
       try {
         const reply = await api.runs({ expectedEpoch: host, id, limit: 100 }, { timeoutMilliseconds: 15_000 });
         return reply.status === "ok" ? reply.runs : [];
+      } catch { return []; }
+    },
+    /** The scripts of the library an automation of a project, or a chat, can run in place of a prompt. */
+    async scripts(projectId: string | null, signal: AbortSignal): Promise<readonly AutomationScriptItem[]> {
+      const host = epoch;
+      if (!host || !api.scripts) return [];
+      try {
+        const reply = await api.scripts({ expectedEpoch: host, projectId }, { signal, timeoutMilliseconds: 15_000 });
+        return reply.status === "ok" ? reply.scripts : [];
       } catch { return []; }
     },
     /** The next times a trigger being written is due, or what is wrong with it. */

@@ -78,7 +78,11 @@ public interface IAltaAutomations
 /// start it once the user allowed it in the application, as it is now. Running it when asked needs no allowance.
 /// </param>
 public sealed record AltaAutomation(string Id, string Name, bool Enabled, string Prompt, string? ProjectId, string? ProjectPath, string File,
-    string? Model, string? Agent, IReadOnlyList<string> Triggers, string? Problem, DateTimeOffset? NextRunAt, bool Running, bool Allowed = true);
+    string? Model, string? Agent, IReadOnlyList<string> Triggers, string? Problem, DateTimeOffset? NextRunAt, bool Running, bool Allowed = true)
+{
+    /// <summary>Gets the script of the library it runs in place of a prompt; null when it sends its prompt.</summary>
+    public string? Script { get; init; }
+}
 
 /// <summary>One time an automation was started.</summary>
 /// <param name="Id">The identifier of the run.</param>

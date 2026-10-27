@@ -419,6 +419,7 @@ internal sealed partial class CodeModeRun
     {
         using var schema = JsonDocument.Parse(parametersSchemaJson);
         using var arguments = JsonDocument.Parse(argumentsJson);
+        if (arguments.RootElement.ValueKind != JsonValueKind.Object) return "the arguments are an object.";
         var root = schema.RootElement;
         var properties = root.TryGetProperty("properties", out var declared) && declared.ValueKind == JsonValueKind.Object ? declared : default;
         if (root.TryGetProperty("required", out var required) && required.ValueKind == JsonValueKind.Array)

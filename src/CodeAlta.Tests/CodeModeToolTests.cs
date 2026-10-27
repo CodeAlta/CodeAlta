@@ -374,10 +374,16 @@ public sealed class CodeModeToolTests
         using var root = TestTempDirectory.Create();
         var (dispatcher, _) = Dispatcher(root.Path);
         var mode = "off";
-        var codeMode = new CodeModeSessionTools(new CodeModeToolOptions { Runs = new CodeModeRunRegistry(null), Cache = new CodeModeScriptCache() }, () => mode);
+        var runs = new CodeModeRunRegistry(null);
+        var codeMode = new CodeModeSessionTools(new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache() }, () => mode);
         AgentToolDefinition[] others = [new(new AgentToolSpec("alta", "alta", Schema("{}")), static (_, _) => Task.FromResult(new AgentToolResult(true, [])))];
 
         var off = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
+        // The session of an automation that runs a script has exec while the setting is off.
+        runs.RequireCodeMode("automation-session");
+        CollectionAssert.AreEqual(new[] { "alta", "exec", "wait" },
+            codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionIdProvider = static () => "automation-session" }, others).Select(static tool => tool.Spec.Name).ToArray());
+        CollectionAssert.AreEqual(new[] { "alta" }, codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionId = "other" }, others).Select(static tool => tool.Spec.Name).ToArray());
         mode = "on";
         var with = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
         mode = "only";

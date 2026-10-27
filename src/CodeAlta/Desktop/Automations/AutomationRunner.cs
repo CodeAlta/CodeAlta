@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
@@ -55,7 +57,9 @@ internal sealed class AutomationRunner : IAutomationRunner
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(prompt);
+        // An automation that runs a script has no prompt of its own: what started it may still say something.
+        if (entry.Definition.Script is null) ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         string? sessionId = null;
         try
         {
@@ -68,6 +72,12 @@ internal sealed class AutomationRunner : IAutomationRunner
             }
 
             var definition = entry.Definition;
+            if (definition.Script is { } scriptName)
+            {
+                if (ScriptPrompt(scriptName, definition.ScriptArguments, prompt, project?.ProjectPath, out var problem) is not { } scriptPrompt) return Refuse(problem!);
+                prompt = scriptPrompt;
+            }
+
             // Nothing of the window decides where a run goes: the space of its project when the project is in
             // exactly one, the default space otherwise.
             var spaceId = SpaceCatalog.ResolveSessionSpace(null, project, await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
@@ -133,6 +143,8 @@ internal sealed class AutomationRunner : IAutomationRunner
                 && (await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false)).Status is var sandboxed and not "ok")
                 return new(sessionId, $"The sandbox '{sandbox}' could not be chosen ({sandboxed}).", null);
 
+            // A script runs through exec, which its session has whatever the setting of Code Mode says.
+            if (definition.Script is not null) _host.CodeModeRuns.RequireCodeMode(sessionId);
             // The effort of a model that reports its efforts is completed by the host when the automation names none.
             var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, model.Id, definition.Model.Effort);
             var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest("automation:" + runId, sessionId, prompt)
@@ -164,6 +176,56 @@ internal sealed class AutomationRunner : IAutomationRunner
     /// </summary>
     internal static string SessionTitle(string name, string? detail)
         => AutomationText.Line(detail, MaximumDetailInTitle) is { Length: > 0 } about ? name + " · " + about : name;
+
+    /// <summary>
+    /// The prompt that runs a script of the library: one call of <c>exec</c> that runs it with its arguments, then a short
+    /// answer with its result. What started the automation (an issue, the output of a command) is its <c>event</c>
+    /// argument when the script declares one.
+    /// </summary>
+    /// <returns>The prompt, or null with the reason when the script cannot run so.</returns>
+    private string? ScriptPrompt(string name, string? arguments, string trigger, string? projectPath, out string? problem)
+    {
+        problem = null;
+        if (_host.CodeModeScripts.Find(name, projectPath) is not { } script)
+        {
+            problem = $"There is no script '{name}' in the library{(projectPath is null ? string.Empty : " of its project")}.";
+            return null;
+        }
+
+        if (script.Problem is { } error)
+        {
+            problem = $"The script '{name}' does not parse: {FirstLine(error)}";
+            return null;
+        }
+
+        var values = (arguments is null ? null : JsonNode.Parse(arguments)) as JsonObject ?? [];
+        var started = trigger.Trim();
+        if (started.StartsWith("---", StringComparison.Ordinal)) started = started[3..].Trim();
+        if (started.Length > 0 && !values.ContainsKey("event") && Declares(script.ParametersSchemaJson, "event")) values["event"] = started;
+        var json = values.ToJsonString();
+        if (script.CheckArguments(json) is { } invalid)
+        {
+            problem = $"The script '{name}' refuses its arguments: {invalid}";
+            return null;
+        }
+
+        return $"""
+            Run the script `{name}` of the library with `exec`, as it is written below, and wait for it to end. Then answer with its result in a few lines: do nothing else.
+
+            ```js
+            // @exec: {"{"}"title": "{name}", "yield_ms": 600000{"}"}
+            return await workflow("{name}", {json});
+            ```
+            """;
+
+        static bool Declares(string? schema, string parameter)
+        {
+            if (schema is null) return false;
+            using var document = JsonDocument.Parse(schema);
+            return document.RootElement.TryGetProperty("properties", out var properties) && properties.ValueKind == JsonValueKind.Object
+                && properties.TryGetProperty(parameter, out _);
+        }
+    }
 
     private static async Task<AutomationOutcome> ObserveAsync(OwnedSessionCommandReceipt receipt)
     {

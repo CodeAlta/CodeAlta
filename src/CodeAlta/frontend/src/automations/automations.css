@@ -128,6 +128,12 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-prompt-group { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 150px; }
 .automation-prompt-group .bp6-form-content { flex: 1 1 auto; display: flex; }
 .automation-prompt-group textarea { flex: 1 1 auto; min-height: 130px; resize: none; line-height: 1.5; }
+.automation-kind { align-self: flex-start; margin-bottom: 10px; }
+.automation-script-group .bp6-form-content { display: flex; flex-direction: column; gap: 6px; }
+.automation-script-description { margin: 0; font-size: 12px; color: var(--muted); }
+.automation-script-description[data-problem] { color: var(--danger, #e76a6e); }
+.automation-script-arguments { min-height: 90px; resize: vertical; font-family: var(--bp-typography-family-mono); font-size: 12px; }
+.automation-script-parameters { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; font-size: 11px; color: var(--muted); }
 .automation-triggers { display: grid; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
 .automation-trigger { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 8px 8px 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
 .automation-trigger-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: color-mix(in srgb, currentColor 16%, transparent); }
