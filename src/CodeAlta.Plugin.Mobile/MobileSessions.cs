@@ -21,6 +21,7 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
     private const int MaximumReads = 40;
     private const int MaximumText = 20_000;
     private const int MaximumSummary = 300;
+    private const int MaximumAncestors = 8;
     private static readonly TimeSpan NamesLife = TimeSpan.FromSeconds(30);
 
     private volatile MobileNames? _names;
@@ -62,14 +63,59 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
 
         var ordered = sessions.OrderByDescending(LastActivity).ThenBy(static item => MobileAlta.Text(item, "title"), StringComparer.OrdinalIgnoreCase).ToList();
         var names = await NamesAsync(cancellationToken).ConfigureAwait(false);
-        var page = ordered.Skip(offset).Take(limit).Select(item => (JsonNode)Describe(item, names)).ToArray();
+        var items = ordered.Skip(offset).Take(limit).ToArray();
+        var (parents, titles) = await ParentsAsync(ordered, offset + items.Length, items, projects, cancellationToken).ConfigureAwait(false);
+        var page = items.Select(item => (JsonNode)Describe(item, names, titles)).ToArray();
         return new JsonObject
         {
             ["sessions"] = new JsonArray(page), ["next"] = offset + page.Length, ["hasMore"] = ordered.Count > offset + page.Length,
+            // The parents of its sub-agents that no page gave yet: the phone shows a sub-agent under its parent.
+            ["parents"] = new JsonArray([.. parents.Select(item => (JsonNode)Describe(item, names, titles))]),
             ["projects"] = new JsonArray([.. projects.Select(static project => (JsonNode)project)]), ["machine"] = Environment.MachineName, ["error"] = error,
             // The spaces the phone sees; empty when it sees every space.
             ["spaces"] = new JsonArray([.. assigned.Select(space => (JsonNode)names.Space(space))]),
         };
+    }
+
+    /// <summary>
+    /// The parents, grandparents and further ancestors of the sessions of a page that the pages up to this one do not hold: a
+    /// parent is often less recently active than the sub-agents it started, so the phone would have it only pages later. Only
+    /// those the phone sees (its spaces, not archived) and of the projects it keeps to are given; the title of every parent
+    /// found is kept for the line of a sub-agent shown without it.
+    /// </summary>
+    private async Task<(List<JsonObject> Parents, Dictionary<string, string?> Titles)> ParentsAsync(List<JsonObject> ordered, int paged,
+        IReadOnlyList<JsonObject> items, IReadOnlyList<string> projects, CancellationToken cancellationToken)
+    {
+        var read = new Dictionary<string, JsonObject?>(StringComparer.Ordinal);
+        foreach (var item in ordered)
+            if (MobileAlta.Text(item, "sessionId") is { } id) read.TryAdd(id, item);
+        var held = new HashSet<string>(ordered.Take(paged).Select(static item => MobileAlta.Text(item, "sessionId")!), StringComparer.Ordinal);
+        var parents = new List<JsonObject>();
+        var titles = new Dictionary<string, string?>(StringComparer.Ordinal);
+        IReadOnlyList<JsonObject> children = items;
+        for (var depth = 0; depth < MaximumAncestors && children.Count > 0; depth++)
+        {
+            var wanted = children.Select(static child => MobileAlta.Text(child, "parentSessionId")).OfType<string>().Where(MobileApi.IsId)
+                .Where(id => !titles.ContainsKey(id)).Distinct(StringComparer.Ordinal).ToArray();
+            var missing = wanted.Where(id => !read.ContainsKey(id)).ToArray();
+            var found = await Task.WhenAll(missing.Select(id => FindAsync(id, cancellationToken))).ConfigureAwait(false);
+            for (var index = 0; index < missing.Length; index++) read[missing[index]] = found[index];
+            var next = new List<JsonObject>();
+            foreach (var id in wanted)
+            {
+                if (read[id] is not { } parent) continue;
+                titles[id] = MobileAlta.Text(parent, "title");
+                if (IsArchived(parent) || held.Contains(id)) continue;
+                if (projects.Count > 0 && !projects.Contains(MobileAlta.Text(parent, "projectId") ?? "", StringComparer.Ordinal)) continue;
+                held.Add(id);
+                parents.Add(parent);
+                next.Add(parent);
+            }
+
+            children = next;
+        }
+
+        return (parents, titles);
     }
 
     /// <summary>A space as the phone shows it: its id, its name, its color and its icon.</summary>
@@ -214,8 +260,9 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         return _names = names;
     }
 
-    private JsonObject Describe(JsonObject item, MobileNames names)
+    private JsonObject Describe(JsonObject item, MobileNames names, IReadOnlyDictionary<string, string?>? parentTitles = null)
     {
+        var parentId = MobileAlta.Text(item, "parentSessionId");
         var id = MobileAlta.Text(item, "sessionId")!;
         var projectId = MobileAlta.Text(item, "projectId");
         var at = LastActivity(item);
@@ -240,7 +287,9 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
             ["agent"] = agent is null ? null : new JsonObject { ["id"] = agent, ["name"] = names.Prompts.GetValueOrDefault(agent) ?? agent },
             // The last folder of the path, whatever the system that wrote it.
             ["worktree"] = MobileAlta.Text(item, "worktreeDirectory") is { } worktree ? worktree.TrimEnd('\\', '/').Split('\\', '/')[^1] : null,
-            ["parentId"] = MobileAlta.Text(item, "parentSessionId"),
+            ["parentId"] = parentId,
+            // The title of the parent, which a sub-agent shown without it names.
+            ["parentTitle"] = parentId is not null && parentTitles?.GetValueOrDefault(parentId) is { } parentTitle ? parentTitle : null,
             ["summary"] = PlainSummary(MobileAlta.Text(item, "latestSummary")),
             ["lastActivity"] = at == DateTimeOffset.MinValue ? null : at.ToString("O", CultureInfo.InvariantCulture),
             // What the plugin saw of the session since it started; else what alta says of it now.

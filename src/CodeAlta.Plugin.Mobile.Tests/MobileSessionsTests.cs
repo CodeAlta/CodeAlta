@@ -63,6 +63,39 @@ public sealed class MobileSessionsTests
     }
 
     [TestMethod]
+    public async Task List_GivesTheParentsOfItsSubAgents_ThatNoPageGaveYet()
+    {
+        // A root that started a sub-agent that started another: the sub-agents are the latest active, the root is older
+        // than the page; a sub-agent of a session of another space is shown without it, named by nothing.
+        static JsonObject Child(JsonObject item, string parent) { item["parentSessionId"] = parent; return item; }
+        var list = FakeAlta.Transcript(0,
+            Child(FakeAlta.Session("grand", "p1", "work", "2026-10-24T10:00:00Z", "Grandchild"), "kid"),
+            Child(FakeAlta.Session("kid", "p1", "work", "2026-10-24T09:00:00Z", "Kid"), "root"),
+            Child(FakeAlta.Session("stray", "p1", "work", "2026-10-24T08:00:00Z", "Stray"), "theirs"),
+            FakeAlta.Session("other", "p1", "work", "2026-10-24T07:00:00Z", "Other"));
+        var alta = new FakeAlta()
+            .Answer("session list", (_, _) => list)
+            .Answer("session status root", FakeAlta.Status("root", "p1", "work"))
+            .Answer("session status theirs", FakeAlta.Status("theirs", "p1", "home"));
+        var sessions = new MobileSessions(alta, new FakeSpaces("work"), new MobileLive());
+
+        var page = await sessions.ListAsync(0, 2, null, default);
+
+        CollectionAssert.AreEqual(new[] { "grand", "kid" }, Ids(page));
+        CollectionAssert.AreEqual(new[] { "root" }, page["parents"]!.AsArray().Select(static item => (string?)item!["id"]).ToArray(), "The page holds the kid: the root only is added.");
+        Assert.AreEqual(("Kid", "Title of root"), ((string?)page["sessions"]![0]!["parentTitle"], (string?)page["sessions"]![1]!["parentTitle"]));
+        Assert.AreEqual(2, (int)page["next"]!, "The parents do not count in the pages.");
+
+        var next = await sessions.ListAsync(2, 2, null, default);
+        CollectionAssert.AreEqual(new[] { "stray", "other" }, Ids(next));
+        Assert.AreEqual(0, next["parents"]!.AsArray().Count, "A parent of another space is not given.");
+        Assert.IsNull((string?)next["sessions"]![0]!["parentTitle"], "Nor named.");
+
+        var filtered = await sessions.ListAsync(0, 2, ["p2"], default);
+        Assert.AreEqual(0, filtered["parents"]!.AsArray().Count, "A parent out of the projects the phone keeps to is not given.");
+    }
+
+    [TestMethod]
     public void TheSummary_IsOneLineOfPlainText()
     {
         Assert.AreEqual("Quick Setup 1. Open your phone. Done", MobileSessions.PlainSummary("## Quick Setup\n\n1. Open your **phone**.\n```cs\nvar x = 1;\n```\n- Done"));
