@@ -128,7 +128,7 @@ Each session has one JSONL journal, `<state root>/sessions/yyyy/MM/dd/<session-i
 holds the normalized `AgentEvent` history plus snapshot records: `local.sessionSummary` (title, lineage, fork origin,
 rewind count), `local.sessionState` (provider state, compaction, loaded skills, usage), `local.compactionCheckpoint`,
 and the session-view records `codealta.sessionHeader` (first line: scope, working directory, space) and
-`codealta.sessionState` (local state: selection, queue, tier, archive, permission mode). An append is one write: a
+`codealta.sessionState` (local state: selection, queue, tier, archive, permission mode, options). An append is one write: a
 crash leaves all records of an append or none. A reader tolerates an incomplete final record; a writer refuses to
 append after a malformed one.
 
@@ -315,6 +315,22 @@ or journal writer. The parent link gives:
   `<notify-parent>` update) as a host prompt, steered into a running turn or queued (`DeliverHostPromptAsync`);
 - nesting in session lists, and deletion and retention families (`SessionLineage`): a parent is not removed before
   its descendants.
+
+### Session options
+
+`AgentSessionOptions` is what an agent of a session may do beyond its tools and settings; its first option is
+`SubSessions`. Every option is on by default, so the local state records options only when one is off, and a journal
+without them reads as the defaults. The options are recorded state, not a host setting: the runtime is their single
+source, and what follows from them is derived from them at each use.
+
+- Creation narrows them: a session created or forked by another session has an option only when its creator has it
+  (`AgentSessionOptions.Within`), and a creator without sub-sessions creates none (`SubSessionsOffException`), whatever
+  path asks (`alta`, Code Mode, the headless driver).
+- The instructions read them: without sub-sessions the `sub-agents` prompt feature is off, and with it the model tiers
+  line and the fan-out part of the Code Mode section. The attachment records the options it was composed with, and a
+  change replaces it at the next send.
+- The tools read them: the `alta` tool and `exec` describe no session they cannot start, Code Mode binds no `agent()`,
+  and the commands that start sessions are hidden and refused for such a caller (`AltaSubSessionsGate`).
 
 ## Headless runs
 

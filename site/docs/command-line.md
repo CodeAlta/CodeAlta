@@ -53,9 +53,10 @@ A run uses the same [agent prompt](prompts.md) as CodeAlta Desktop, without the 
 | `review` | Ask you to review the changes before they are committed | off |
 | `mode-handoff` | Switch to Plan mode; the list of the agent prompts | off |
 | `session-title` | Give the session a title | off with `--ephemeral` |
-| `sub-agents` | Delegate parts of the work to other sessions | on |
 
 `--enable NAMES` keeps parts and `--disable NAMES` leaves them out, as names separated by commas, or `all`: `--enable tasks,notes`, `--enable all` for the prompt of CodeAlta Desktop. The first line of `--format jsonl` lists the parts left out. Git branches, plan files, background jobs, skills and the user guide stay in the prompt.
+
+The agent can [delegate](sessions/delegation.md) parts of the work to sessions of its own. `--no-sub-sessions` creates the session without them: it is not told about them, and the tools that start them (`alta session create`, `agent()` in [Code Mode](sessions/code-mode.md)) are not offered. A session resumed with it loses them; one resumed without it keeps what it was created with.
 
 ## Output and exit codes
 
@@ -65,7 +66,7 @@ By default, standard output holds the final answer only, so `altacli run "..." >
 
 | Line | What it says |
 | --- | --- |
-| `_codealta/session` | First line: the session, its folder, provider and its type (`anthropic`, `codex`, `claude-code`...), model, storage, and the parts of the agent prompt left out (`disabledFeatures`). |
+| `_codealta/session` | First line: the session, its folder, provider and its type (`anthropic`, `codex`, `claude-code`...), model, storage, the parts of the agent prompt left out (`disabledFeatures`), and its options (`options.subSessions`, false with `--no-sub-sessions`). |
 | `session/update` | Messages, thinking, tool calls and their results, plans and token use, as in ACP. The lines of a delegated agent carry its own `sessionId`. |
 | `_codealta/session_started`, `_codealta/compaction`, `_codealta/retry`, `_codealta/fallback`, `_codealta/error` | What ACP has no update for: a delegated agent starts, a compaction, a retry, a [fallback](model-tiers.md) to another model, an error (`events_dropped` when updates were lost: the whole answer is in the result). |
 | `_codealta/result` | Last line: the status, exit code, final answer, tokens, cost, and duration. Tokens and cost the provider does not give are null, never 0; a cost it does not give is estimated in US dollars from the public price of the model, at its base rate, and marked `"_meta": {"codealta": {"estimated": true}}`. |
@@ -136,4 +137,4 @@ The commands an agent runs get `CODEALTA_SESSION_ID`, `CODEALTA_MODEL` and `AI_A
 
 The sessions it opens are those of CodeAlta Desktop and TUI, as with `altacli run`; the storage and configuration options above apply. The editor chooses the [agent prompt](prompts.md) as the mode, and the model and reasoning effort as options of the session; it can load an earlier session with its history. The updates are those of `--format jsonl`.
 
-You work with the agent in the editor, so its prompt keeps the [parts](#what-the-agent-is-asked-to-do) of CodeAlta Desktop, except `review`, whose commands `altacli` does not offer, and `session-title` with `--ephemeral`. `--enable` and `--disable` change them as for `altacli run`.
+You work with the agent in the editor, so its prompt keeps the [parts](#what-the-agent-is-asked-to-do) of CodeAlta Desktop, except `review`, whose commands `altacli` does not offer, and `session-title` with `--ephemeral`. `--enable` and `--disable` change them as for `altacli run`, and `--no-sub-sessions` creates its sessions without sub-sessions.

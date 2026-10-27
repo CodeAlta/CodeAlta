@@ -47,7 +47,7 @@ Once you approve it, the session shows the plan as a card with the same choices 
 Open it with **Work items** in the title bar (in its **…** menu when the window is narrow), with `Ctrl+G Ctrl+I`, or with the mark of a project in the Explorer.
 
 - **To do**, **In progress**, **Later** and **Closed** separate what waits from what is done.
-- **Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it runs with the provider, model and reasoning effort of the session that proposed the item, else the [default provider](model-providers/readme.md) and its model. Turn it off to choose them, the agent prompt, the permission mode, review before commit and the sandbox, before you start.
+- **Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it runs with the provider, model and reasoning effort of the session that proposed the item, else the [default provider](model-providers/readme.md) and its model. Turn it off to choose them, the agent prompt, the permission mode, review before commit and the sandbox, before you start. **More options** turns [sub-sessions](sessions/delegation.md#sessions-without-sub-sessions) off for the new session.
 - Filter by tasks, plans or [reviews](reviews.md#all-your-reviews), by project, or by text. **All projects** are those of the [space](spaces.md) the window shows.
 - Select an item to read it, start it, mark it done, open its file, or remove it.
 - Start several items at once: a spinner marks each while its worktree is made. A ready session opens if you still read its item; otherwise a notification offers it with **Show**.

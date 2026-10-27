@@ -49,12 +49,14 @@ An agent creates one with `alta automation create --name "PR review" --trigger p
 - **Use the defaults**, at the top of the form, is on for a new automation. The rows then show what a run takes, grayed: the [default provider](model-providers/readme.md), its model and effort, and the defaults of your settings. A provider marked **(first enabled)** means no default provider is set.
 - Turn it off to choose. What the defaults gave becomes your choice, and you change it from there.
 - A provider, model or permission mode that is no longer offered stops the run, which says why.
+- **More options**, at the end of the form, has **Sub-sessions**: off, the sessions of the automation do all the work themselves and start no [sub-agents](sessions/delegation.md#sessions-without-sub-sessions).
 
 ```toml
 model = "codex:gpt-6.1-sol@high"
 permission_mode = "acceptEdits"
 review_before_commit = true
 sandbox = "off"
+sub_sessions = false
 ```
 
 ## What starts an automation

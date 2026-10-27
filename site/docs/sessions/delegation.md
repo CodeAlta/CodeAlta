@@ -20,6 +20,17 @@ A sub-agent is a child session with a context of its own, which works in paralle
 
 Say so when you want it otherwise: "do not use sub-agents", or "use a sub-agent for each folder".
 
+### Sessions without sub-sessions
+
+A session can be created without sub-sessions: it does all the work itself, its instructions say nothing of sub-agents, and the tools that start sessions (`alta session create` and `fork`, `alta script run`, `alta automation run` and `create`, `agent()` and `session()` in [Code Mode](code-mode.md)) are not offered and are refused.
+
+- In CodeAlta Desktop, turn off **Sub-sessions** under **More options** in the [Agent chip](../workspace/prompt.md#agent-and-model), for a new session or one that exists (from its next prompt); the same chip of [automations](../automations.md), [tasks and plans](../work-items.md) and [issues](../issues.md) chooses it for the sessions they start.
+- An agent creates such a child with `alta session create --no-sub-sessions`, or `agent(prompt, { subSessions: false })` in a script, for a part that must be done by that child itself.
+- A session created by another one never has sub-sessions its creator has not: an agent turns them off for a child, never on.
+- `altacli run` and `altacli acp` take `--no-sub-sessions` (see [Command line](../command-line.md)).
+
+The session keeps the choice when it is resumed, forked or restarted. `alta session info` and `alta session list` say it as `options.subSessions`.
+
 In CodeAlta Desktop:
 
 - The sub-agents of a session are listed under it in the Explorer, and the session shows how many it started. Click its arrow to hide or show them.
