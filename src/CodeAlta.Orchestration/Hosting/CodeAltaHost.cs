@@ -247,6 +247,18 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     private readonly Lazy<CodeModeAgents> _codeModeAgents;
 
+    /// <summary>
+    /// Keeps the runs of scripts under the state root (<c>codemode/runs</c>) with the results of their steps, so that a run
+    /// CodeAlta ended during is resumed and a run is rerun over what it recorded. The runs that had no end are marked
+    /// interrupted now. Called once by a frontend whose state lasts (CodeAlta Desktop, the TUI), before a script runs; a
+    /// second call does nothing. <c>altacli</c> keeps none: its database is thrown away.
+    /// </summary>
+    /// <returns>A task that completes when the sessions of the interrupted runs were told.</returns>
+    public Task KeepCodeModeRunsAsync()
+        => CodeModeRuns.Store is not null
+            ? Task.CompletedTask
+            : CodeModeRuns.UseStoreAsync(new Runtime.Scripts.CodeModeRunStore(Runtime.Scripts.CodeModeRunStore.RootOf(CatalogOptions)));
+
     /// <summary>Gets the library of the scripts of Code Mode: the user's scripts, and those of the projects.</summary>
     public Runtime.Scripts.CodeModeScriptLibrary CodeModeScripts => _codeModeScripts ??= new Runtime.Scripts.CodeModeScriptLibrary(CatalogOptions);
 

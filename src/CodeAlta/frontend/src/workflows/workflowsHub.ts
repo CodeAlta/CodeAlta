@@ -1,7 +1,7 @@
 // The page's link to the scripts of the library and to their runs, for the host of one epoch.
 import type { workflows, WorkflowRunItem, WorkflowScriptItem } from "#neoastra";
 
-export type WorkflowsApi = Pick<typeof workflows, "scripts" | "runs" | "run" | "saveAsScript">;
+export type WorkflowsApi = Pick<typeof workflows, "scripts" | "runs" | "run" | "saveAsScript" | "resume">;
 
 /** What the host said of a list; `available` is false in a window without a host of its own. A request that failed gives null. */
 export type WorkflowsList<T> = Readonly<{ available: boolean; items: readonly T[] }>;
@@ -9,6 +9,8 @@ export type WorkflowsList<T> = Readonly<{ available: boolean; items: readonly T[
 export type WorkflowsOutcome = Readonly<{ ok: boolean; sessionId?: string | null; message?: string | null }>;
 
 export type WorkflowsHub = ReturnType<typeof createWorkflowsHub>;
+/** How a run runs again: resumed (neither), over every recorded result (`all`), or from a step (`from`, its key). */
+export type ScriptRerun = Readonly<{ from?: string; all?: boolean }>;
 
 export function createWorkflowsHub(api: WorkflowsApi, epoch: string) {
   return {
@@ -37,6 +39,13 @@ export function createWorkflowsHub(api: WorkflowsApi, epoch: string) {
     async saveAsScript(sessionId: string, runId: string, name: string): Promise<WorkflowsOutcome> {
       try {
         const reply = await api.saveAsScript({ expectedEpoch: epoch, sessionId, runId, name }, { timeoutMilliseconds: 30_000 });
+        return { ok: reply.status === "ok", message: reply.message ?? null };
+      } catch { return { ok: false }; }
+    },
+    /** Asks the session of a run to resume it, to rerun it over its recorded results (`all`), or from one of its steps (`from`). */
+    async resume(sessionId: string, runId: string, how: ScriptRerun): Promise<WorkflowsOutcome> {
+      try {
+        const reply = await api.resume({ expectedEpoch: epoch, sessionId, runId, from: how.from ?? null, all: how.all ?? false }, { timeoutMilliseconds: 30_000 });
         return { ok: reply.status === "ok", message: reply.message ?? null };
       } catch { return { ok: false }; }
     },

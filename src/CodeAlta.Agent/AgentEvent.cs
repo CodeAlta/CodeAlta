@@ -668,6 +668,15 @@ public sealed record AgentWorkflowEvent(
 
     /// <summary>Gets the output tokens of a session the script started, for its end.</summary>
     public long? OutputTokens { get; init; }
+
+    /// <summary>Gets the key a resume matches the step by, such as <c>merge#1</c>, for the records of a step.</summary>
+    public string? StepKey { get; init; }
+
+    /// <summary>Gets whether the step gave the result a previous run recorded instead of running, for the end of a step.</summary>
+    public bool? Replayed { get; init; }
+
+    /// <summary>Gets the run this one resumes or reruns over its recorded steps, for the start of a run.</summary>
+    public string? ResumesRunId { get; init; }
 }
 
 /// <summary>

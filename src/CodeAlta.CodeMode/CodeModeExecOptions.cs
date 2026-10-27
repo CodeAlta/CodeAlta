@@ -26,6 +26,21 @@ public sealed record CodeModeExecOptions
     /// <summary>Gets the tokens the sessions the run starts may spend in all; once spent, no session starts.</summary>
     public int? BudgetTokens { get; init; }
 
+    /// <summary>Gets the run this one resumes or reruns over its recorded steps (<c>"resume": "run-7f3c2a"</c>), or null.</summary>
+    public string? Resume { get; init; }
+
+    /// <summary>Gets which recorded steps replay: <c>resume</c> (the unchanged prefix, the default) or <c>all</c>.</summary>
+    public string? Replay { get; init; }
+
+    /// <summary>Gets the step from which a rerun runs live (<c>"from": "merge#1"</c>), or null.</summary>
+    public string? From { get; init; }
+
+    /// <summary>Gets whether a resume may run again a step during which a call that is not idempotent was in flight.</summary>
+    public bool RerunInFlight { get; init; }
+
+    /// <summary>The names of the options, for the message of an unknown one.</summary>
+    private const string KnownOptions = "title, yield_ms, max_output_tokens, timeout_ms, budget_tokens, resume, replay, from, rerun_in_flight";
+
     /// <summary>
     /// Parses the JSON object of a pragma. Unknown keys and values of the wrong type are refused, so that a typo
     /// is reported instead of being ignored.
@@ -75,13 +90,40 @@ public sealed record CodeModeExecOptions
                     case "budget_tokens" when TryGetPositive(property.Value, out var budget):
                         options = options with { BudgetTokens = budget };
                         break;
-                    case "title" or "yield_ms" or "yield_time_ms" or "max_output_tokens" or "max_tokens" or "timeout_ms" or "budget_tokens":
+                    case "resume" when property.Value.ValueKind == JsonValueKind.String && property.Value.GetString() is { Length: > 0 } run:
+                        options = options with { Resume = run };
+                        break;
+                    case "replay" when property.Value.ValueKind == JsonValueKind.String && property.Value.GetString() is "resume" or "all":
+                        options = options with { Replay = property.Value.GetString() };
+                        break;
+                    case "from" when property.Value.ValueKind == JsonValueKind.String && property.Value.GetString() is { Length: > 0 } from:
+                        options = options with { From = from };
+                        break;
+                    case "rerun_in_flight" when property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                        options = options with { RerunInFlight = property.Value.GetBoolean() };
+                        break;
+                    case "replay" when property.Value.ValueKind == JsonValueKind.String:
+                        error = "The option `replay` of `// @exec:` is \"resume\" or \"all\".";
+                        return null;
+                    case "title" or "yield_ms" or "yield_time_ms" or "max_output_tokens" or "max_tokens" or "timeout_ms" or "budget_tokens" or "resume" or "replay" or "from" or "rerun_in_flight":
                         error = $"The option `{property.Name}` of `// @exec:` has a value of the wrong type.";
                         return null;
                     default:
-                        error = $"Unknown option `{property.Name}` in `// @exec:`. Known options: title, yield_ms, max_output_tokens, timeout_ms, budget_tokens.";
+                        error = $"Unknown option `{property.Name}` in `// @exec:`. Known options: {KnownOptions}.";
                         return null;
                 }
+            }
+
+            if (options.Resume is null && (options.Replay is not null || options.From is not null || options.RerunInFlight))
+            {
+                error = "The options `replay`, `from` and `rerun_in_flight` of `// @exec:` go with `resume`, which names the run.";
+                return null;
+            }
+
+            if (options.From is not null && options.Replay == "all")
+            {
+                error = "The option `from` of `// @exec:` reruns the steps before it: it does not go with `\"replay\": \"all\"`.";
+                return null;
             }
 
             return options;

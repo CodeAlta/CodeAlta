@@ -69,6 +69,25 @@ Another session, or you from a terminal, reads a run with `alta workflow list`, 
 
 The source of each script is kept in the scratchpad of the session, and its result says where. An agent fixes a long script by editing that file and running it again with `workflow({ scriptPath })`.
 
+## Resume a run
+
+CodeAlta Desktop and CodeAlta TUI keep each run with the result of each `step()`. A script that ran when CodeAlta ended shows as **interrupted** on its card. The card of a run then offers:
+
+- **Resume**, on an interrupted run: the script runs again, and the steps it completed give their recorded results without running. A step that changed, and everything after it, runs again.
+- **Rerun with recorded results**, on a run that ended: every recorded step gives its result, and only the rest of the code runs. This fixes the end of a script without paying again for the sessions its steps started.
+- **Rerun from this step**, in the menu of a step mark: the steps before it give their results, and that step and what follows run again.
+
+Each one asks the session of the run to call `exec` again: it runs with that session's tools and permissions. From a terminal or another session, `alta workflow resume <run-id>` does the same, with `--all` or `--from <step>`.
+
+A run does not resume:
+
+- when the script changed: rerun it with recorded results instead;
+- when a call that may not run twice, such as a command, was in flight when it stopped: the agent asks you first, because its outcome is unknown.
+
+Reads, listings and searches are run again without asking. A step whose value is not JSON, or is larger than 256 KB, always runs again.
+
+The steps of a library script, such as those **Run…** and the automations start, are kept and replayed like the others. Their names start with the name of the script and the number of its call, from 0: `count-steps#0/count`. `alta workflow resume <run-id> --from count-steps/count` names it while the script was called once, and `--from count` while no other step has that name; a name that fits several steps is refused with their names.
+
 ## Scripts of the library
 
 A script worth keeping goes in the library, where any session runs it by its name with `workflow("name", args)`:

@@ -34,6 +34,7 @@ public sealed class ToolScriptBinding : ICodeModeCallHandler
         var skip = excluded.ToHashSet(StringComparer.Ordinal);
         var byPath = new Dictionary<string, string>(StringComparer.Ordinal);
         var functions = new List<CodeModeFunction>();
+        var idempotent = new HashSet<string>(StringComparer.Ordinal);
         foreach (var spec in invoker.ListTools())
         {
             if (skip.Contains(spec.Name) || spec.SearchesDeferredTools)
@@ -49,6 +50,11 @@ public sealed class ToolScriptBinding : ICodeModeCallHandler
                 continue;
             }
 
+            if (spec.Idempotent)
+            {
+                idempotent.Add(path);
+            }
+
             functions.Add(new CodeModeFunction(path)
             {
                 Description = spec.Description,
@@ -61,8 +67,16 @@ public sealed class ToolScriptBinding : ICodeModeCallHandler
         }
 
         _toolByPath = byPath.ToFrozenDictionary(StringComparer.Ordinal);
+        _idempotent = idempotent.ToFrozenSet(StringComparer.Ordinal);
         Functions = functions;
     }
+
+    private readonly FrozenSet<string> _idempotent;
+
+    /// <summary>Gets whether a path is a tool that declares its calls idempotent (<see cref="AgentToolSpec.Idempotent"/>).</summary>
+    /// <param name="path">The path of a function.</param>
+    /// <returns>True when it is one.</returns>
+    public bool IsIdempotent(string path) => _idempotent.Contains(path);
 
     /// <summary>Gets the functions, one per tool.</summary>
     public IReadOnlyList<CodeModeFunction> Functions { get; }

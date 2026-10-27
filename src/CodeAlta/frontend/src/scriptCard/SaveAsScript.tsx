@@ -4,10 +4,14 @@ import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
 
 /**
- * What the card of a run can ask of the session it is in: to turn the run into a script of the library. It gives why
- * the request was not sent, or null; the context is null where the session cannot be asked, such as a session of another host.
+ * What the card of a run can ask of the session it is in: to turn the run into a script of the library, or to run it again
+ * (resumed, over its recorded results, or from a step). Each gives why the request was not sent, or null; the context is
+ * null where the session cannot be asked, such as a session of another host.
  */
-export type ScriptRunActions = Readonly<{ saveAsScript(runId: string, name: string): Promise<string | null> }>;
+export type ScriptRunActions = Readonly<{
+  saveAsScript(runId: string, name: string): Promise<string | null>;
+  resume(runId: string, how: Readonly<{ from?: string; all?: boolean }>): Promise<string | null>;
+}>;
 export const ScriptRunActionsContext = createContext<ScriptRunActions | null>(null);
 
 /** The name a script is saved under: lowercase letters, digits and hyphens, starting with a letter, as the library names them. */

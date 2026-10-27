@@ -67,6 +67,8 @@ public static class CodeModeToolFactory
         Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "max_output_tokens": 4000, "timeout_ms": 600000, "budget_tokens": 500000}` (`budget_tokens` caps the tokens of the sessions the script starts). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
 
         The result says where the source of the run was kept: to fix a long script, edit that file with your file tools and run it again with `return await workflow({ scriptPath: "<path>" })` instead of sending it whole.
+
+        A run is kept with the results of its steps: `// @exec: {"resume": "<run-id>"}` alone resumes one that stopped, its completed steps giving their recorded results; `"replay": "all"` runs changed code over those results, and `"from": "<step>"` runs again from a step.
         """;
 
     private const string ExecSchema = """
@@ -124,13 +126,46 @@ public static class CodeModeToolFactory
             return Failure("exec needs `code`: the JavaScript to run.");
         }
 
-        var source = CodeModeSource.Prepare(codeElement.GetString() ?? string.Empty);
+        var code = codeElement.GetString() ?? string.Empty;
+        var source = CodeModeSource.Prepare(code);
         if (source.Error is not null)
         {
-            return Finished(new CodeModeRunResult(CodeModeRunStatus.Failed, TimeSpan.Zero) { Error = source.Error, Source = source }, source, null);
+            return Finished(new CodeModeRunResult(CodeModeRunStatus.Failed, TimeSpan.Zero) { Error = source.Error, Source = source }, source.Options, null);
         }
 
         var sessionId = invocation.SessionId;
+        // A resume or a rerun runs the script a run kept, or changed code over its recorded results.
+        var execOptions = source.Options;
+        CodeModeResumePlan? plan = null;
+        if (execOptions.Resume is not null)
+        {
+            (plan, var refusedResume) = await options.Runs.PlanResumeAsync(sessionId, code, execOptions).ConfigureAwait(false);
+            if (plan is null)
+            {
+                return Failure(refusedResume!);
+            }
+
+            if (!ReferenceEquals(plan.Source, code))
+            {
+                var kept = CodeModeSource.Prepare(plan.Source);
+                if (kept.Error is not null)
+                {
+                    return Finished(new CodeModeRunResult(CodeModeRunStatus.Failed, TimeSpan.Zero) { Error = kept.Error, Source = kept }, kept.Options, null);
+                }
+
+                // The options line of the resume says how to wait for it; the kept script says the rest.
+                execOptions = kept.Options with
+                {
+                    Title = execOptions.Title ?? kept.Options.Title,
+                    YieldMilliseconds = execOptions.YieldMilliseconds ?? kept.Options.YieldMilliseconds,
+                    MaxOutputTokens = execOptions.MaxOutputTokens ?? kept.Options.MaxOutputTokens,
+                    TimeoutMilliseconds = execOptions.TimeoutMilliseconds ?? kept.Options.TimeoutMilliseconds,
+                    BudgetTokens = execOptions.BudgetTokens ?? kept.Options.BudgetTokens,
+                };
+                source = kept;
+            }
+        }
+
         var cwd = caller.WorkingDirectoryProvider?.Invoke() ?? caller.WorkingDirectory;
         var identity = new AltaCallerIdentity
         {
@@ -149,14 +184,23 @@ public static class CodeModeToolFactory
         api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions,
             .. options.Agents is null ? [] : CodeModeAgentBinding.Functions]);
         var discovery = new CodeModeDiscovery(() => api);
-        var limits = source.Options.TimeoutMilliseconds is { } timeout ? options.Limits with { Timeout = TimeSpan.FromMilliseconds(timeout) } : options.Limits;
-        var maxOutputTokens = source.Options.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens;
+        var limits = execOptions.TimeoutMilliseconds is { } timeout ? options.Limits with { Timeout = TimeSpan.FromMilliseconds(timeout) } : options.Limits;
+        var maxOutputTokens = execOptions.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens;
         var host = new CodeModeHost(api, options.Cache);
+        // What the record of runs keeps for a resume; the calls that may run again with the same effect are not recorded.
+        var start = new CodeModeRunStart(plan?.Source ?? code)
+        {
+            ArgumentsJson = plan?.Run.ArgumentsJson,
+            ResumesRunId = plan?.Run.Id,
+            IsIdempotent = path => path.StartsWith(AltaScriptBinding.Namespace + ".", StringComparison.Ordinal) ? alta.IsReadOnly(path)
+                : path.StartsWith(CodeModeDiscovery.Namespace + ".", StringComparison.Ordinal) ? !CodeModeAgentBinding.Paths.Contains(path) || path == CodeModeAgentBinding.ClosePath
+                : tools?.IsIdempotent(path) == true,
+        };
 
-        var run = options.Runs.TryStart(sessionId, source.Options.Title, maxOutputTokens, invocation.ToolCallId, (observer, runCancellation) =>
+        var run = options.Runs.TryStart(sessionId, execOptions.Title, maxOutputTokens, invocation.ToolCallId, start, (observer, runCancellation) =>
             {
                 // The observer of a run is its handle: the sessions it starts know its id.
-                var agents = options.Agents is { } sessions ? new CodeModeAgentBinding(sessions, sessionId, () => ((CodeModeRunHandle)observer).Id, source.Options.BudgetTokens) : null;
+                var agents = options.Agents is { } sessions ? new CodeModeAgentBinding(sessions, sessionId, () => ((CodeModeRunHandle)observer).Id, execOptions.BudgetTokens) : null;
                 var handler = new CodeModeCallRouter(
                 [
                     .. agents is null ? [] : CodeModeAgentBinding.Paths.Select(path => (path, (ICodeModeCallHandler)agents)),
@@ -165,7 +209,13 @@ public static class CodeModeToolFactory
                     (ToolScriptBinding.McpNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),
                     (CodeModeDiscovery.Namespace, discovery),
                 ]);
-                return host.RunAsync(source, handler, new CodeModeRunOptions { Limits = limits, ResolveScript = ResolveWith(invocation.Tools, options.Library, cwd) }, observer, runCancellation);
+                return host.RunAsync(source, handler, new CodeModeRunOptions
+                {
+                    Limits = limits,
+                    ResolveScript = ResolveWith(invocation.Tools, options.Library, cwd),
+                    ArgumentsJson = plan?.Run.ArgumentsJson,
+                    Replay = plan?.Replay,
+                }, observer, runCancellation);
             }, out var refusal);
         if (run is null)
         {
@@ -175,7 +225,7 @@ public static class CodeModeToolFactory
         var sourcePath = KeepSource(options, sessionId, run.Id, source);
 
         // While the turn waits for the run, stopping the turn stops it; once it goes on in the background, it no longer does.
-        var yieldTime = source.Options.YieldMilliseconds is { } yieldMs ? TimeSpan.FromMilliseconds(yieldMs) : options.DefaultYield;
+        var yieldTime = execOptions.YieldMilliseconds is { } yieldMs ? TimeSpan.FromMilliseconds(yieldMs) : options.DefaultYield;
         using (cancellationToken.Register(static state => ((CodeModeRunHandle)state!).Stop(), run))
         {
             try
@@ -199,7 +249,7 @@ public static class CodeModeToolFactory
 
         if (run.Completion.IsCompleted && run.TryCollect())
         {
-            return Finished(await run.Completion.ConfigureAwait(false), source, sourcePath);
+            return Finished(await run.Completion.ConfigureAwait(false), execOptions, sourcePath);
         }
 
         return new AgentToolResult(true, [new AgentToolResultItem.Text(
@@ -285,9 +335,9 @@ public static class CodeModeToolFactory
             return CodeModeSource.Prepare(value.GetProperty("content").GetString() ?? string.Empty, Path.GetFileName(path));
         };
 
-    private static AgentToolResult Finished(CodeModeRunResult result, CodeModeSource source, string? sourcePath)
+    private static AgentToolResult Finished(CodeModeRunResult result, CodeModeExecOptions execOptions, string? sourcePath)
     {
-        var text = CodeModeResultFormatter.Format(result, source.Options.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens) + SourceLine(sourcePath);
+        var text = CodeModeResultFormatter.Format(result, execOptions.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens) + SourceLine(sourcePath);
         return new AgentToolResult(result.Status == CodeModeRunStatus.Completed, [new AgentToolResultItem.Text(text)], result.Error is { } error ? $"{error.Name}: {error.Message}" : null);
     }
 

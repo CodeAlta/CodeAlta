@@ -16,11 +16,94 @@ internal sealed partial class BuiltInAltaCommandContributor
         group.Add(CreateWorkflowShowCommand(context));
         group.Add(CreateWorkflowResultCommand(context));
         group.Add(CreateWorkflowCancelCommand(context));
+        group.Add(CreateWorkflowResumeCommand(context));
         AddHelpText(
             group,
-            "A run is a script a session ran with `exec`. It runs while its turn waits for it, then in the background: its result comes back to its session as a prompt. CodeAlta keeps a run that ended for a while; its records (start, steps, the sessions it started, end) stay in the journal of its session.",
-            "Examples: `alta workflow list`; `alta workflow list --session <session-id>`; `alta workflow show <run-id>`; `alta workflow result <run-id>`; `alta workflow cancel <run-id>`.");
+            "A run is a script a session ran with `exec`. It runs while its turn waits for it, then in the background: its result comes back to its session as a prompt. CodeAlta keeps a run that ended for a while; its records (start, steps, the sessions it started, end) stay in the journal of its session. CodeAlta Desktop and the TUI also keep the results of its steps, so that a run CodeAlta ended during is resumed, and a run is run again over what it recorded.",
+            "Examples: `alta workflow list`; `alta workflow list --session <session-id>`; `alta workflow show <run-id>`; `alta workflow result <run-id>`; `alta workflow cancel <run-id>`; `alta workflow resume <run-id>`; `alta workflow resume <run-id> --from merge`.");
         return group;
+    }
+
+    private static Command CreateWorkflowResumeCommand(AltaCommandContext context)
+    {
+        string? id = null;
+        string? from = null;
+        var all = false;
+        var command = Leaf("resume", "Ask the session of a run to resume it, or to run it again over the results its steps recorded.");
+        command.Add("<run-id>", "Run id, such as run-7f3c2a, from the card of the run or `alta workflow list`.", value => id = value);
+        command.Add("from=", "Run again from this step (`merge`, `merge#1` for its second occurrence, `lib/merge` for a step of the script `lib` that `workflow()` started, `lib#1/merge` for its second call): the steps before it give their recorded results.", value => from = value);
+        command.Add("all", "Replay every step the run recorded, wherever it is: only the rest of the code runs (a rerun with recorded results).", value => all = value is not null);
+        command.Add(async (_, _) => await HandleWorkflowResumeAsync(context, id, from, all).ConfigureAwait(false));
+        AddHelpText(command,
+            "The session of the run gets a prompt that calls `exec` with `// @exec: {\"resume\": \"<run-id>\"}`: never automatic, the run goes with the tools and the permissions of that session. "
+            + "A changed script does not resume; a call that was in flight when the run stopped and may not run twice runs again only once the user agrees.");
+        return command;
+    }
+
+    private static async ValueTask<int> HandleWorkflowResumeAsync(AltaCommandContext context, string? id, string? from, bool all)
+    {
+        const string path = "alta workflow resume";
+        if (context.Services.Get<CodeModeRunRegistry>() is not { } runs) return WorkflowsUnavailable(context);
+        if (NormalizeOptionalText(id) is not { } runId) return UsageError(context, "usage.missingRun", "A run id is required.", path);
+        if (NormalizeOptionalText(from) is not null && all) return UsageError(context, "usage.fromAll", "Use either --from or --all, not both.", path);
+        if (await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is { } sandbox)
+            return PermissionDenied(context, "sandbox.workflowResume", AltaSandboxGate.Refusal(sandbox, "resume a run of a script"));
+        if (runs.Store is not { } store)
+        {
+            AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "service.unavailable", AltaExitCodes.ServiceUnavailable,
+                "This CodeAlta keeps no record of runs: a run cannot be resumed here.");
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        await runs.WhenKeptAsync(runId).ConfigureAwait(false);
+        if (store.TryLoad(runId) is not { } run) return WorkflowNotFound(context, runId);
+        // A run that ended here a moment ago may not have its end written yet.
+        if (runs.FindAny(runId)?.Running ?? run.EndedAt is null)
+        {
+            AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "workflow.running", AltaExitCodes.Failure,
+                $"Run '{runId}' still runs: wait for it, or stop it with `alta workflow cancel {runId}`, before running it again.");
+            return AltaExitCodes.Failure;
+        }
+
+        // A step of a workflow() script is named by its path (`lib/merge`), or by its id alone when no other step has it.
+        string? step = null;
+        if (NormalizeOptionalText(from) is { } named && (step = CodeModeResume.ResolveStep(run, named, out var problem)) is null)
+            return UsageError(context, "workflow.unknownStep", problem!, path);
+
+        // A session resumes its own runs and those of the sessions below it; a caller that is no session (the user), any.
+        if (NormalizeOptionalText(context.Caller.SourceSessionId) is { } caller && !await IsAtOrBelowAsync(context, run.SessionId, caller).ConfigureAwait(false))
+            return PermissionDenied(context, "workflow.notOwnRun", $"Run '{runId}' belongs to a session that is neither this session nor one it started: it cannot resume it.");
+        if (context.Services.Get<SessionRuntimeService>() is not { } runtime) return WorkflowsUnavailable(context);
+
+        string delivery;
+        try
+        {
+            delivery = await runtime.DeliverHostPromptAsync(run.SessionId, CodeModeResume.Prompt(runId, step, all), CodeAlta.Agent.AgentPromptProvenance.Workflow, context.CancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException)
+        {
+            AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "workflow.sessionUnavailable", AltaExitCodes.Failure,
+                $"The session of run '{runId}' cannot take a prompt: {exception.Message}");
+            return AltaExitCodes.Failure;
+        }
+
+        if (delivery == "missing_session")
+            return NotFound(context, "session.notFound", $"The session '{run.SessionId}' of run '{runId}' is no longer known.");
+
+        var record = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["type"] = "alta.workflow.resume",
+            ["version"] = 1,
+            ["correlationId"] = context.CorrelationId,
+            ["id"] = runId,
+            ["sessionId"] = run.SessionId,
+            ["mode"] = step is not null ? "from" : all ? "all" : "resume",
+            ["delivery"] = delivery,
+        };
+        if (step is not null) record["from"] = step;
+        if (run.Title is not null) record["title"] = run.Title;
+        AltaJsonlWriter.WriteRecord(context.Stdout, record);
+        return AltaExitCodes.Success;
     }
 
     private static Command CreateWorkflowListCommand(AltaCommandContext context)

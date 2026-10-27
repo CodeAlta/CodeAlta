@@ -5,6 +5,7 @@ import { buildTimelineItems, execTitle, type HistoryEntry } from "../timeline";
 import { toolFamily, toolCallFromItem } from "../toolCall";
 import { groupTimelineTools } from "../toolGroups";
 import { scriptCallCounts } from "./ScriptCalls";
+import { scriptMarkState, scriptRunOffers } from "./scriptRunOffers";
 
 const entry = (offset: string, changes: Partial<HistoryEntry> = {}): HistoryEntry => ({ offset,
   eventType: "activity", kind: "ToolCall", providerId: "provider", runId: "run", sessionId: "session",
@@ -93,11 +94,41 @@ test("the records of a run give its card its steps and the sessions it started, 
 
   assert.equal(run.runId, "run-1");
   assert.equal(run.status, "running", "no RunEnded record yet");
-  assert.deepEqual(run.steps, [{ id: "review", status: "completed", durationMs: 1500 }]);
+  assert.deepEqual(run.steps, [{ id: "review", status: "completed", durationMs: 1500, key: null, replayed: false }]);
   assert.deepEqual(run.sessions.map(session => [session.sessionId, session.title, session.stepId, session.status, session.inputTokens, session.message]),
     [["child-a", "Security", "review", "completed", 900, null], ["child-b", "Tests", "review", "failed", null, "It broke."]]);
   assert.equal(buildTimelineItems(entries)[0], buildTimelineItems(entries)[0], "the card keeps its identity while its records stay the same");
   const ended = buildTimelineItems([...entries, record("r8", "RunEnded", { phase: "completed" })])[0];
   assert.equal(ended.scriptRun?.status, "completed");
   assert.equal(buildTimelineItems(entries).length, 1, "the records are no rows of their own");
+});
+
+test("a step says its key and whether it was replayed; what ran when CodeAlta ended is interrupted", () => {
+  const entries = [
+    ...scriptEntries().slice(0, 1),
+    record("r1", "RunStarted"),
+    record("r2", "StepStarted", { activityId: "fetch" }),
+    record("r3", "StepEnded", { activityId: "fetch", phase: "completed" }, { stepKey: "count-steps#0/fetch#0", replayed: true, durationMs: 0 }),
+    record("r4", "StepStarted", { activityId: "merge" }),
+    record("r5", "SessionStarted", { activityId: "child-a", text: "Merge" }, { stepId: "merge" }),
+  ];
+  const running = buildTimelineItems(entries)[0].scriptRun!;
+  const interrupted = buildTimelineItems([...entries, record("r6", "RunEnded", { phase: "interrupted" })])[0].scriptRun!;
+
+  assert.deepEqual(running.steps.map(step => [step.id, step.status, step.key, step.replayed]), [["fetch", "completed", "count-steps#0/fetch#0", true], ["merge", "running", null, false]]);
+  assert.deepEqual(scriptRunOffers(running), { resume: false, rerun: false, rerunFromStep: false, saveAsScript: false }, "a run that runs offers nothing");
+  assert.equal(interrupted.status, "interrupted");
+  assert.deepEqual(interrupted.steps.map(step => step.status), ["completed", "interrupted"]);
+  assert.equal(interrupted.sessions[0].status, "interrupted");
+  assert.equal(scriptMarkState("interrupted"), "interrupted");
+  assert.equal(scriptMarkState("cancelled"), "failed");
+  assert.deepEqual(scriptRunOffers(interrupted), { resume: true, rerun: false, rerunFromStep: true, saveAsScript: true });
+});
+
+test("a run that ended offers a rerun with its recorded results, and a rerun from a step it recorded", () => {
+  const steps = [{ id: "fetch", status: "completed", durationMs: 4, key: "fetch#0", replayed: false }];
+  assert.deepEqual(scriptRunOffers({ runId: "run-1", status: "failed", steps, sessions: [] }), { resume: false, rerun: true, rerunFromStep: true, saveAsScript: true });
+  assert.deepEqual(scriptRunOffers({ runId: "run-1", status: "completed", steps: [], sessions: [] }), { resume: false, rerun: true, rerunFromStep: false, saveAsScript: true },
+    "no step was recorded: no rerun from a step");
+  assert.equal(scriptRunOffers({ runId: "", status: "completed", steps, sessions: [] }).rerun, false, "a run without its id offers nothing");
 });

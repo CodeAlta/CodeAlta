@@ -131,13 +131,20 @@ public sealed class CodeModeApi
             }));
             global("log", (...v) => writeOutput(1, format(v)));
             global("text", (...v) => writeOutput(0, format(v)));
+            // The value of a step as the host records it for a resume: its JSON, "" for undefined, null when it is not JSON.
+            const recordOf = (v) => {
+              if (v === undefined) return "";
+              try { const s = stringify(v); return s === undefined ? null : s; } catch { return null; }
+            };
             global("step", (id, body) => {
               if (typeof id !== "string" || id.length === 0) throw new TypeError("step(id, fn): id must be a non-empty string.");
               if (typeof body !== "function") throw new TypeError("step(id, fn): fn must be a function.");
               const handle = stepBegin(id);
+              // A step a resume replays: the host gives the value a previous run recorded, and its function does not run.
+              if (typeof handle === "string") return Promise.resolve(handle === "" ? undefined : parse(handle));
               let result;
-              try { result = stepRun(id, body); } catch (e) { stepEnd(handle, false, message(e)); throw e; }
-              return Promise.resolve(result).then((v) => { stepEnd(handle, true, null); return v; }, (e) => { stepEnd(handle, false, message(e)); throw e; });
+              try { result = stepRun(handle, body); } catch (e) { stepEnd(handle, false, message(e), null); throw e; }
+              return Promise.resolve(result).then((v) => { stepEnd(handle, true, null, recordOf(v)); return v; }, (e) => { stepEnd(handle, false, message(e), null); throw e; });
             });
             global("workflow", function (reference, workflowArgs) {
               const target = typeof reference === "string" ? { name: reference } : reference;

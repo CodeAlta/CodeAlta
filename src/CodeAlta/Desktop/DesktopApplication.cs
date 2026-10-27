@@ -863,6 +863,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                             return worker;
                         }, load), searchLog));
                 }
+                // The runs of scripts are kept with the results of their steps: one CodeAlta ended during is resumed from its card.
+                _ = host.KeepCodeModeRunsAsync();
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
                     new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,

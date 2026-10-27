@@ -1,39 +1,73 @@
-import { memo, useContext } from "react";
+import { memo, useContext, useState } from "react";
+import { Button, Menu, MenuItem, PopoverNext } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { SessionLinksContext } from "../SessionReference";
 import { useShellLanguage } from "../shellLanguage";
-import type { ScriptRun, ScriptSession } from "../timeline";
+import type { ScriptRun, ScriptSession, ScriptStep } from "../timeline";
 import { formatDuration } from "../toolCall";
 import { SaveAsScript, ScriptRunActionsContext } from "./SaveAsScript";
+import { scriptMarkState as state, scriptRunOffers } from "./scriptRunOffers";
 
-// The state of a step or a session, as the marks of the card show it.
-function state(status: string): "running" | "completed" | "failed" {
-  return status === "running" ? "running" : status === "completed" ? "completed" : "failed";
-}
+type Rerun = Readonly<{ from?: string; all?: boolean }>;
 
 /**
  * The run of a script, under its tile: its steps in order, then a box for each session it started, which opens the
- * session. What the boxes say comes from the records of the run in the journal of the session. A run that ended offers
- * Save as script…, where the session can be asked.
+ * session. What the boxes say comes from the records of the run in the journal of the session. A run that ended offers,
+ * where the session can be asked, Rerun with recorded results (Resume for a run CodeAlta ended during), Rerun from a step
+ * on the menu of its mark, and Save as script….
  */
 export const ScriptRunView = memo(function ScriptRunView({ run }: { run: ScriptRun }) {
   const { t } = useShellLanguage();
   const actions = useContext(ScriptRunActionsContext);
-  const ended = run.status !== null && run.status !== "running" && run.runId !== "";
-  if (run.steps.length === 0 && run.sessions.length === 0 && !(ended && actions)) return null;
+  const offers = actions ? scriptRunOffers(run) : null;
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  if (run.steps.length === 0 && run.sessions.length === 0 && !offers?.saveAsScript) return null;
+  async function rerun(how: Rerun) {
+    setBusy(true);
+    setProblem(null);
+    const failure = await actions!.resume(run.runId, how);
+    setBusy(false);
+    if (failure !== null) setProblem(failure || t("The session could not be asked."));
+  }
   return <div className="script-run" role="group" aria-label={t("Steps and sessions of the script")}>
     {run.steps.length > 0 && <ol className="script-run-steps">
-      {run.steps.map((step, index) => <li key={`${step.id}:${index}`} data-state={state(step.status)} title={step.durationMs !== null ? formatDuration(step.durationMs) : undefined}>
-        {state(step.status) === "running" ? <ActivitySpinner size={9} /> : <span className="script-call-dot" aria-hidden="true" />}<span>{step.id}</span>
+      {run.steps.map((step, index) => <li key={`${step.id}:${index}`} data-state={state(step.status)} data-replayed={step.replayed || undefined}
+        title={stepTitle(step, t("Recorded result"))}>
+        {offers?.rerunFromStep && step.key
+          // What is done in the menu stays there: the tile of the call it is under does not react to it.
+          ? <PopoverNext placement="bottom-start" content={<Menu onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+            <MenuItem icon={<AppIcon name="rewind" size={14} />} text={t("Rerun from this step")} disabled={busy} onClick={() => void rerun({ from: step.key! })} />
+          </Menu>}>
+            <button type="button" className="script-step-button" aria-haspopup="menu" onClick={event => event.stopPropagation()}><StepMark step={step} /></button>
+          </PopoverNext>
+          : <StepMark step={step} />}
       </li>)}
     </ol>}
     {run.sessions.length > 0 && <ul className="script-run-sessions">
       {run.sessions.map(session => <li key={session.sessionId}><ScriptSessionBox session={session} /></li>)}
     </ul>}
-    {ended && <div className="script-run-actions"><SaveAsScript runId={run.runId} /></div>}
+    {offers?.saveAsScript && <div className="script-run-actions">
+      {offers.resume && <Button size="small" variant="minimal" icon={<AppIcon name="play" size={13} />} text={t("Resume")} loading={busy}
+        title={t("Run the script again: the steps it completed give their recorded results.")} onClick={event => { event.stopPropagation(); void rerun({}); }} />}
+      {offers.rerun && <Button size="small" variant="minimal" icon={<AppIcon name="repeat" size={13} />} text={t("Rerun with recorded results")} loading={busy}
+        title={t("Run the script again: every step it recorded gives its result, only the rest of the code runs.")} onClick={event => { event.stopPropagation(); void rerun({ all: true }); }} />}
+      <SaveAsScript runId={run.runId} />
+      {problem && <span role="alert" className="script-run-problem">{problem}</span>}
+    </div>}
   </div>;
 });
+
+function StepMark({ step }: { step: ScriptStep }) {
+  return <>{state(step.status) === "running" ? <ActivitySpinner size={9} /> : <span className="script-call-dot" aria-hidden="true" />}<span>{step.id}</span></>;
+}
+
+// A replayed step says so; another one says how long it took.
+function stepTitle(step: ScriptStep, recorded: string): string | undefined {
+  const parts = [step.replayed ? recorded : null, step.durationMs !== null && !step.replayed ? formatDuration(step.durationMs) : null].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
 
 function ScriptSessionBox({ session }: { session: ScriptSession }) {
   const { t } = useShellLanguage();

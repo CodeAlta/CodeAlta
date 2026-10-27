@@ -63,6 +63,27 @@ public sealed partial class CodeModeSource
         return line >= 1 && line <= lines.Length ? lines[line - 1].TrimEnd('\r') : null;
     }
 
+    /// <summary>
+    /// Gives the code of a source without its first-line options, its line ends as <c>\n</c> and trimmed: two sources with the
+    /// same body run the same script, whatever their options say.
+    /// </summary>
+    /// <param name="code">The source.</param>
+    /// <returns>The body; empty for a source that is only its options.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="code"/> is null.</exception>
+    public static string BodyOf(string code)
+    {
+        ArgumentNullException.ThrowIfNull(code);
+        var text = BlankFences(code.Replace("\r\n", "\n", StringComparison.Ordinal));
+        var pragma = PragmaPattern().Match(text);
+        return (pragma.Success ? text[(pragma.Index + pragma.Length)..] : text).Trim();
+    }
+
+    /// <summary>Gives the SHA-256 of the body of a source (<see cref="BodyOf"/>), in hexadecimal.</summary>
+    /// <param name="code">The source.</param>
+    /// <returns>The hash.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="code"/> is null.</exception>
+    public static string BodyHashOf(string code) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(BodyOf(code))));
+
     /// <summary>Prepares a source. It never throws: a source that cannot run has an <see cref="Error"/>.</summary>
     /// <param name="code">The source.</param>
     /// <param name="name">The name of the source in stacks and errors.</param>

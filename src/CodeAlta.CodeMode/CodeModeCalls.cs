@@ -11,7 +11,23 @@ public readonly record struct CodeModeSourceLocation(int Line, int Column);
 /// <param name="ArgumentsJson">The argument object as JSON.</param>
 /// <param name="StepId">The step the call belongs to, or null.</param>
 /// <param name="Location">Where the script made the call, when the engine could tell.</param>
-public sealed record CodeModeCall(int Index, string Path, string ArgumentsJson, string? StepId, CodeModeSourceLocation? Location);
+public sealed record CodeModeCall(int Index, string Path, string ArgumentsJson, string? StepId, CodeModeSourceLocation? Location)
+{
+    /// <summary>
+    /// Gets the key of the step of the call (<see cref="CodeModeStepRecord.Key"/>), or null. A call that a script
+    /// <c>workflow()</c> started makes outside its steps has the key of the step of that <c>workflow()</c> call.
+    /// </summary>
+    public string? StepKey { get; init; }
+
+    /// <summary>Gets the script of the call: 0 for the script <c>exec</c> runs, another number for each script <c>workflow()</c> starts in it.</summary>
+    public int Scope { get; init; }
+
+    /// <summary>Gets the step of the call, for the script a <c>workflow()</c> call starts.</summary>
+    internal CodeModeRun.ActiveStep? Step { get; init; }
+
+    /// <summary>Gets the segment a <c>workflow()</c> call gives the keys of its steps, such as <c>lib#1</c>; null for another call.</summary>
+    internal string? ScriptSegment { get; init; }
+}
 
 /// <summary>An error a call gives back to the script, which throws it as an <c>Error</c> it can catch.</summary>
 /// <param name="Name">The name of the error in JavaScript, such as <c>ToolError</c>, <c>AltaError</c> or <c>TypeError</c>.</param>

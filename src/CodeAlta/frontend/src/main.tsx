@@ -6190,10 +6190,14 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   // The error of a Claude Code provider without its CLI proposes the download in an owned host only.
   const cliEpoch = ownedSession && !demoMode ? status?.hostEpoch ?? null : null;
   const cliHost = useMemo(() => cliEpoch ? { epoch: cliEpoch, composerProvider: session.providerKey ?? null, Card: ClaudeCliFirstUse } : null, [cliEpoch, session.providerKey]);
-  // Save as script… on the card of a run that ended asks this session, in an owned host only.
+  // Save as script…, Resume and the reruns on the card of a run that ended ask this session, in an owned host only.
   const scriptActions = useMemo(() => cliEpoch ? {
     saveAsScript: async (runId: string, name: string) => {
       const outcome = await createWorkflowsHub(workflowsApi, cliEpoch).saveAsScript(session.id, runId, name);
+      return outcome.ok ? null : outcome.message ?? "";
+    },
+    resume: async (runId: string, how: Readonly<{ from?: string; all?: boolean }>) => {
+      const outcome = await createWorkflowsHub(workflowsApi, cliEpoch).resume(session.id, runId, how);
       return outcome.ok ? null : outcome.message ?? "";
     },
   } : null, [cliEpoch, session.id]);

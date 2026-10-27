@@ -406,6 +406,220 @@ public sealed class CodeModeToolTests
         Assert.AreEqual("\"a\\nb\"", ToolScriptBinding.Read(text, "x").ValueJson);
     }
 
+    private const string TwoReads = """
+        // @exec: {"title": "Two reads"}
+        const a = await step("a", async () => (await tools.read_file({ path: "a.txt" })).content);
+        const b = await step("b", async () => (await tools.read_file({ path: "b.txt" })).content);
+        return a + " " + b;
+        """;
+
+    [TestMethod]
+    public async Task Resume_ReplaysTheStepsThatCompleted_WithoutCallingTheirTools()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        await runs.UseStoreAsync(new CodeModeRunStore(Path.Combine(root.Path, "runs")));
+        var (exec, _) = Create(root.Path, runs);
+        var first = new FakeTools();
+
+        var failed = await InvokeAsync(exec, TwoReads, first);
+        var runId = runs.List("session-1").Single().Id;
+        var fixedTools = new FakeTools();
+        fixedTools.Files["b.txt"] = "world";
+        var resumed = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}"}""", fixedTools);
+
+        Assert.IsFalse(failed.Success, "b.txt does not exist in the first run");
+        Assert.IsTrue(resumed.Success, Text(resumed));
+        using (var value = ValueOf(resumed))
+        {
+            Assert.AreEqual("hello world", value.RootElement.GetString());
+        }
+
+        CollectionAssert.AreEqual(new[] { "read_file" }, fixedTools.Calls.ToArray(), "step a gives its recorded result: only b reads");
+        StringAssert.Contains(Text(resumed), "Resume: step `b` has no recorded result");
+        var second = runs.List("session-1").Single(run => run.Id != runId);
+        Assert.AreEqual("Two reads", second.Title, "the kept script runs with its own options");
+        Assert.AreEqual(runId, runs.Store!.TryLoad(second.Id)?.ResumesRunId);
+    }
+
+    [TestMethod]
+    public async Task Resume_IsRefused_ForAnUnknownRun_AndForAChangedScript()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        await runs.UseStoreAsync(new CodeModeRunStore(Path.Combine(root.Path, "runs")));
+        var (exec, _) = Create(root.Path, runs);
+        await InvokeAsync(exec, TwoReads, new FakeTools());
+        var runId = runs.List("session-1").Single().Id;
+
+        var unknown = await InvokeAsync(exec, """// @exec: {"resume": "run-000000"}""", new FakeTools());
+        var changed = await InvokeAsync(exec, $$"""
+            // @exec: {"resume": "{{runId}}"}
+            return await step("a", async () => 1);
+            """, new FakeTools());
+        var rerun = await InvokeAsync(exec, $$"""
+            // @exec: {"resume": "{{runId}}", "replay": "all"}
+            return "changed: " + await step("a", async () => 1);
+            """, new FakeTools());
+
+        Assert.IsFalse(unknown.Success);
+        StringAssert.Contains(Text(unknown), "No run `run-000000` of this session");
+        Assert.IsFalse(changed.Success);
+        StringAssert.Contains(Text(changed), "a changed script does not resume");
+        Assert.IsTrue(rerun.Success, Text(rerun));
+        using var value = ValueOf(rerun);
+        Assert.AreEqual("changed: hello", value.RootElement.GetString(), "a rerun runs the changed code over the recorded result of a");
+    }
+
+    [TestMethod]
+    public async Task Resume_RefusesToRunAgainACallThatWasInFlight_UntilTheOptionsSaySo()
+    {
+        using var root = TestTempDirectory.Create();
+        var store = Path.Combine(root.Path, "runs");
+        await using var before = new CodeModeRunRegistry(null);
+        await before.UseStoreAsync(new CodeModeRunStore(store));
+        var (execBefore, _) = Create(root.Path, before);
+        var hanging = new FakeTools { Gate = new TaskCompletionSource() };
+        const string code = """
+            // @exec: {"yield_ms": 50}
+            return await step("issues", async () => await mcp.github.list_issues({ state: "open" }));
+            """;
+        await InvokeAsync(execBefore, code, hanging);
+        var runId = before.List("session-1").Single().Id;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (before.Store!.TryLoad(runId)?.InFlightCalls.Count is not 1)
+        {
+            Assert.IsLessThan(deadline, DateTime.UtcNow, "the call in flight was not recorded");
+            await Task.Delay(20);
+        }
+
+        // CodeAlta starts again: the run is interrupted, with its call in flight.
+        await using var after = new CodeModeRunRegistry(null);
+        await after.UseStoreAsync(new CodeModeRunStore(store));
+        var (exec, _) = Create(root.Path, after);
+        var tools = new FakeTools();
+        var refused = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}"}""", tools);
+        var agreed = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}", "rerun_in_flight": true}""", tools);
+        hanging.Gate.SetResult();
+
+        Assert.IsFalse(refused.Success);
+        StringAssert.Contains(Text(refused), "`mcp.github.list_issues` in step `issues` with {\"state\":\"open\"}");
+        Assert.IsTrue(agreed.Success, Text(agreed));
+        CollectionAssert.AreEqual(new[] { "github_list_issues" }, tools.Calls.ToArray());
+    }
+
+    // A library of one project with the scripts Run… and the automations start with `return await workflow("name", args)`.
+    private static (string Project, CodeModeScriptLibrary Library) LibraryOf(string root)
+    {
+        var project = Path.Combine(root, "project");
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        var library = new CodeModeScriptLibrary(new CatalogOptions { GlobalRoot = Path.Combine(root, "home") });
+        Assert.IsNull(library.Save("count-steps", CodeModeScriptScope.Project, """
+            export const meta = { name: "count-steps", description: "Reads two files, then counts." };
+            const read = await step("read", async () => [(await tools.read_file({ path: "a.txt" })).content, (await tools.read_file({ path: "a.txt" })).content]);
+            return await step("count", async () => (await tools.read_file({ path: "a.txt" })).content + ":" + read.length);
+            """, project, null).Refusal);
+        Assert.IsNull(library.Save("slow-steps", CodeModeScriptScope.Project, """
+            export const meta = { name: "slow-steps", description: "Reads a file, then lists the issues." };
+            const read = await step("read", async () => (await tools.read_file({ path: "a.txt" })).content);
+            return read + " " + await step("issues", async () => await mcp.github.list_issues({ state: "open" }));
+            """, project, null).Refusal);
+        return (project, library);
+    }
+
+    [TestMethod]
+    public async Task Rerun_OfALibraryScript_GivesTheRecordedResultsOfItsSteps_WithoutAnyCall()
+    {
+        using var root = TestTempDirectory.Create();
+        var (project, library) = LibraryOf(root.Path);
+        await using var runs = new CodeModeRunRegistry(null);
+        await runs.UseStoreAsync(new CodeModeRunStore(Path.Combine(root.Path, "runs")));
+        var (exec, _) = Create(project, runs, library: library);
+        var first = new FakeTools();
+
+        var ran = await InvokeAsync(exec, """return await workflow("count-steps", {});""", first);
+        var runId = runs.List("session-1").Single().Id;
+        var tools = new FakeTools();
+        var rerun = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}", "replay": "all"}""", tools);
+        var fromCount = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}", "from": "count-steps/count"}""", tools);
+
+        Assert.IsTrue(ran.Success, Text(ran));
+        Assert.AreEqual(3, first.Calls.Count);
+        CollectionAssert.AreEqual(new[] { "count-steps#0/read#0", "count-steps#0/count#0" }, runs.Store!.TryLoad(runId)!.Steps.Select(static step => step.Key).ToArray());
+        Assert.IsTrue(rerun.Success, Text(rerun));
+        using (var value = ValueOf(rerun))
+        {
+            Assert.AreEqual("hello:2", value.RootElement.GetString());
+        }
+
+        Assert.IsTrue(fromCount.Success, Text(fromCount));
+        CollectionAssert.AreEqual(new[] { "read_file" }, tools.Calls.ToArray(), "the rerun calls nothing; the rerun from count calls only count's read");
+    }
+
+    [TestMethod]
+    public async Task Resume_OfARunInterruptedInsideALibraryScript_ReplaysItsStepsBefore_AndChecksTheCallsInFlight()
+    {
+        using var root = TestTempDirectory.Create();
+        var (project, library) = LibraryOf(root.Path);
+        var store = Path.Combine(root.Path, "runs");
+        await using var before = new CodeModeRunRegistry(null);
+        await before.UseStoreAsync(new CodeModeRunStore(store));
+        var (execBefore, _) = Create(project, before, library: library);
+        var hanging = new FakeTools { Gate = new TaskCompletionSource(), GatedTool = "github_list_issues" };
+        await InvokeAsync(execBefore, """
+            // @exec: {"yield_ms": 50}
+            return await workflow("slow-steps", {});
+            """, hanging);
+        var runId = before.List("session-1").Single().Id;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (before.Store!.TryLoad(runId) is not { Steps.Count: 1, InFlightCalls.Count: 1 })
+        {
+            Assert.IsLessThan(deadline, DateTime.UtcNow, "the step and the call in flight were not recorded");
+            await Task.Delay(20);
+        }
+
+        // CodeAlta starts again while the run waited for the issues.
+        await using var after = new CodeModeRunRegistry(null);
+        await after.UseStoreAsync(new CodeModeRunStore(store));
+        var (exec, _) = Create(project, after, library: library);
+        var tools = new FakeTools();
+        var refused = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}"}""", tools);
+        var resumed = await InvokeAsync(exec, $$"""// @exec: {"resume": "{{runId}}", "rerun_in_flight": true}""", tools);
+        hanging.Gate.SetResult();
+
+        Assert.IsFalse(refused.Success);
+        StringAssert.Contains(Text(refused), "`mcp.github.list_issues` in step `slow-steps#0/issues`");
+        Assert.IsTrue(resumed.Success, Text(resumed));
+        using var value = ValueOf(resumed);
+        Assert.AreEqual("hello 2 open issues", value.RootElement.GetString());
+        CollectionAssert.AreEqual(new[] { "github_list_issues" }, tools.Calls.ToArray(), "the step read gives its recorded result");
+    }
+
+    [TestMethod]
+    public async Task AltaWorkflowResume_ChecksTheRunAndTheCaller_BeforeItAsksTheSession()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var registry = new AltaCommandRegistry();
+        var dispatcher = new AltaCommandDispatcher(registry, new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root.Path }).Add(registry).Add(runs));
+        var noStore = await dispatcher.InvokeAsync(["workflow", "resume", "run-1"]);
+        await runs.UseStoreAsync(new CodeModeRunStore(Path.Combine(root.Path, "runs")));
+        var (exec, _) = Create(root.Path, runs);
+        await InvokeAsync(exec, TwoReads, new FakeTools());
+        var runId = runs.List("session-1").Single().Id;
+
+        var missing = await dispatcher.InvokeAsync(["workflow", "resume", "run-000000"]);
+        var both = await dispatcher.InvokeAsync(["workflow", "resume", runId, "--from", "a", "--all"]);
+        var unknownStep = await dispatcher.InvokeAsync(["workflow", "resume", runId, "--from", "zz"]);
+        var other = await dispatcher.InvokeAsync(["workflow", "resume", runId], caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-2" });
+
+        StringAssert.Contains(noStore.Transcript, "keeps no record of runs");
+        StringAssert.Contains(missing.Transcript, "workflow.notFound");
+        StringAssert.Contains(both.Transcript, "usage.fromAll");
+        StringAssert.Contains(unknownStep.Transcript, "recorded no step `zz#0`. Its steps: a#0, b#0.");
+        StringAssert.Contains(other.Transcript, "workflow.notOwnRun");
+    }
+
     private static (AltaCommandDispatcher Dispatcher, AltaCommandRegistry Registry) Dispatcher(string root)
     {
         var registry = new AltaCommandRegistry();
@@ -468,9 +682,12 @@ public sealed class CodeModeToolTests
 
         public TaskCompletionSource? Gate { get; init; }
 
+        // The tool the gate holds; null holds every tool.
+        public string? GatedTool { get; init; }
+
         public IReadOnlyList<AgentToolSpec> ListTools() =>
         [
-            new("read_file", "Reads a file.", Schema("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""")) { RunsInParallel = true },
+            new("read_file", "Reads a file.", Schema("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""")) { RunsInParallel = true, Idempotent = true },
             new("github_list_issues", "Lists the issues of a repository.", Schema("""{"type":"object","properties":{"state":{"type":"string"}}}""")) { Group = "github", ScriptName = "list_issues" },
             new("alta", "alta", Schema("""{"type":"object"}""")),
         ];
@@ -478,7 +695,7 @@ public sealed class CodeModeToolTests
         public async Task<AgentToolResult> InvokeAsync(AgentNestedToolCall call, CancellationToken cancellationToken)
         {
             lock (Calls) Calls.Add(call.ToolName);
-            if (Gate is not null) await Gate.Task.WaitAsync(cancellationToken);
+            if (Gate is not null && (GatedTool is null || GatedTool == call.ToolName)) await Gate.Task.WaitAsync(cancellationToken);
             if (call.ToolName == "read_file")
             {
                 var path = call.Arguments.GetProperty("path").GetString()!;

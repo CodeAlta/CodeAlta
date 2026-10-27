@@ -955,6 +955,20 @@ public sealed class AutomationHostTests
             StringAssert.Contains(asked[0].Text, $"alta script save first-run --from-run {ended.Id}");
             StringAssert.Contains(asked[0].Text, "meta.params");
             StringAssert.Contains(asked[0].Text, "alta script check");
+
+            // Resume and the reruns of the card ask the session of the run too, for a run the record of runs keeps.
+            Assert.AreEqual("refused", (await rpc.ResumeAsync(new(Epoch, sessionId, ended.Id, null, false), default)).Status, "No record of runs is kept yet.");
+            await host.KeepCodeModeRunsAsync();
+            var kept = host.CodeModeRuns.TryStart(sessionId, "kept", 1000, "call-3", new CodeModeRunStart("return 1;"),
+                (_, _) => Task.FromResult(new CodeAlta.CodeMode.CodeModeRunResult(CodeAlta.CodeMode.CodeModeRunStatus.Completed, TimeSpan.Zero)), out noRefusal);
+            Assert.IsNull(noRefusal);
+            await kept!.Completion.WaitAsync(Patience);
+            Assert.AreEqual("invalid_request", (await rpc.ResumeAsync(new(Epoch, sessionId, kept.Id, "a", true), default)).Status);
+            Assert.AreEqual("refused", (await rpc.ResumeAsync(new(Epoch, "other-session", kept.Id, null, false), default)).Status);
+            Assert.AreEqual("ok", (await rpc.ResumeAsync(new(Epoch, sessionId, kept.Id, null, true), default)).Status);
+            Assert.AreEqual(sessionId, asked[^1].SessionId);
+            StringAssert.Contains(asked[^1].Text, $"// @exec: {{\"resume\": \"{kept.Id}\", \"replay\": \"all\", \"yield_ms\": 600000}}");
+            Assert.IsTrue(File.Exists(Path.Combine(CodeModeRunStore.RootOf(host.CatalogOptions), kept.Id, "run.json")), "the record is under the state root");
             await workspace.CloseSessionsAsync();
             await workspace.CloseImportsAsync();
         }

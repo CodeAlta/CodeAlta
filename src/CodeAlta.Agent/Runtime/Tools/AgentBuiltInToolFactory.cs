@@ -183,32 +183,32 @@ public static class AgentBuiltInToolFactory
                 new AgentToolSpec(
                     "read_file",
                     $"Read a local text file by line number. Offsets are 1-based; use a negative offset to count from the end (-1 is the last line). Offsets past EOF return an empty text result, and oversized negative offsets clamp to line 1. Omitting limit returns up to {options.DefaultReadFileLineLimit} lines by default.",
-                    CreateReadFileSchema(options)) { RunsInParallel = true, OutputSchema = ReadFileOutputSchema },
+                    CreateReadFileSchema(options)) { RunsInParallel = true, Idempotent = true, OutputSchema = ReadFileOutputSchema },
                 (invocation, cancellationToken) => ReadFileAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
                     ViewImageToolName,
                     ViewImageToolDescription,
                     // The model looks at the image itself: a script would receive only its description.
-                    ViewImageSchema) { RunsInParallel = true, StaysDirect = true },
+                    ViewImageSchema) { RunsInParallel = true, Idempotent = true, StaysDirect = true },
                 (invocation, cancellationToken) => ViewImageAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "list_dir",
                     "List the direct children of a directory as [dir] and [file] entries.",
-                    CreateListDirSchema()) { RunsInParallel = true },
+                    CreateListDirSchema()) { RunsInParallel = true, Idempotent = true },
                 (invocation, cancellationToken) => ListDirectoryAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "grep",
                     $"Search one or more files or directories for line-based matches using a .NET regular expression. Recurses into directories, defaults to case-insensitive matching, skips likely-binary files, accepts one or more optional globs, and returns '(no matches)' when nothing matches.",
-                    CreateGrepSchema(options)) { RunsInParallel = true },
+                    CreateGrepSchema(options)) { RunsInParallel = true, Idempotent = true },
                 (invocation, cancellationToken) => GrepAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "webget",
                     $"Fetch text-like web content from a known absolute URL. On success, returns a text result containing the fetched body. By default, HTML responses are simplified to plain text; set rawHtml=true to return raw HTML markup. Set includeHttpStatus=true to prefix the HTTP status line and response content type before the body. JSON and XML are returned as text bodies. Applies content-type checks and a {options.MaxWebGetBytes.ToString(CultureInfo.InvariantCulture)}-byte limit; default timeout is {FormatSeconds(options.WebGetTimeout)} seconds.",
-                    CreateWebGetSchema(options)) { RunsInParallel = true },
+                    CreateWebGetSchema(options)) { RunsInParallel = true, Idempotent = true },
                 (invocation, cancellationToken) => WebGetAsync(options, httpClient, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(

@@ -87,6 +87,15 @@ public sealed class AltaScriptBinding
     /// <returns>True when it is one.</returns>
     public bool Contains(string functionPath) => _byFunction.ContainsKey(functionPath);
 
+    /// <summary>
+    /// Gets whether a function is a command that only reads (a policy that does not mutate): it may run again with the same
+    /// effect, so a resumed script reruns it without asking. A command without a policy is not.
+    /// </summary>
+    /// <param name="functionPath">The path, such as <c>alta.session.list</c>.</param>
+    /// <returns>True when it only reads.</returns>
+    public bool IsReadOnly(string functionPath)
+        => _byFunction.TryGetValue(functionPath, out var entry) && entry.Command.Policy is { IsMutating: false };
+
     /// <summary>Builds the command line of a call of a script.</summary>
     /// <param name="functionPath">The path of the function.</param>
     /// <param name="argumentsJson">The argument object, as JSON.</param>
@@ -260,6 +269,8 @@ public sealed class AltaScriptBinding
         private readonly AltaCommandAnnotation? _annotation;
         private readonly List<Parameter> _parameters = [];
         private readonly Dictionary<string, Parameter> _byName = new(StringComparer.Ordinal);
+
+        public AltaCommandDescriptor Command => _command;
 
         public Entry(AltaCommandDescriptor command, AltaCommandAnnotation? annotation)
         {

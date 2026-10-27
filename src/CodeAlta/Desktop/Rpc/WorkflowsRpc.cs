@@ -10,7 +10,8 @@ namespace CodeAlta.Desktop.Rpc;
 /// <summary>
 /// The page's side of the Workflows tab: the scripts of the library a project sees, with their parameters and their
 /// declared steps; the runs of scripts of the host; <b>Run…</b>, which starts a script in a new session of a project;
-/// and <b>Save as script…</b>, which asks the session of a run to turn it into a script of the library.
+/// <b>Save as script…</b>, which asks the session of a run to turn it into a script of the library; and the resumes and
+/// reruns of the card of a run, which ask its session too.
 /// </summary>
 [NeoRpcService("workflows", Version = 1)]
 internal sealed class WorkflowsService
@@ -106,6 +107,27 @@ internal sealed class WorkflowsService
         return failure is null ? new("ok", null) : new("refused", failure);
     }
 
+    /// <summary>
+    /// Asks the session of a run to resume it (<b>Resume</b> on the card of an interrupted run), to run it again over its
+    /// recorded results (<b>Rerun with recorded results</b>), or from one of its steps (<b>Rerun from this step</b>).
+    /// </summary>
+    [NeoRpcMethod("resume")]
+    public async Task<WorkflowMutationResponse> ResumeAsync(WorkflowResumeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null);
+        if (!Identifier(request.SessionId) || !RunId(request.RunId) || request.From is { Length: 0 or > 256 } || (request.From is not null && request.All))
+            return new("invalid_request", null);
+        if (_runs!.Store is not { } store) return new("refused", "This CodeAlta keeps no record of runs.");
+        await _runs.WhenKeptAsync(request.RunId).WaitAsync(cancellationToken).ConfigureAwait(false);
+        var run = await Task.Run(() => store.TryLoad(request.RunId), cancellationToken).ConfigureAwait(false);
+        if (run is null || !string.Equals(run.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase))
+            return new("refused", "CodeAlta no longer keeps this run.");
+        if (_runs.FindAny(request.RunId)?.Running ?? run.EndedAt is null) return new("refused", "The run still runs.");
+        var failure = await _send!(request.SessionId, CodeModeResume.Prompt(request.RunId, request.From, request.All), cancellationToken).ConfigureAwait(false);
+        return failure is null ? new("ok", null) : new("refused", failure);
+    }
+
     private string? Refuse(string? expectedEpoch)
         => _scripts is null ? "unavailable" : string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
 
@@ -184,6 +206,11 @@ internal sealed record WorkflowRunResponse(string Status, string? SessionId, str
 
 /// <summary>Asks the session of a run to save it as a script of the library.</summary>
 internal sealed record WorkflowSaveAsScriptRequest(string? ExpectedEpoch, string SessionId, string RunId, string Name);
+
+/// <summary>Asks the session of a run to resume it, or to run it again over its recorded results.</summary>
+/// <param name="From">The step from which it runs again, such as <c>merge#1</c>; null to resume, or with <paramref name="All"/>.</param>
+/// <param name="All">Whether every recorded step gives its result again (a rerun with recorded results).</param>
+internal sealed record WorkflowResumeRequest(string? ExpectedEpoch, string SessionId, string RunId, string? From, bool All);
 
 /// <param name="Message">Why the request was refused.</param>
 internal sealed record WorkflowMutationResponse(string Status, string? Message);

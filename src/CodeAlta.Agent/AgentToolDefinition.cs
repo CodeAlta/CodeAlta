@@ -88,6 +88,13 @@ public sealed record AgentToolSpec
     public bool RunsInParallel { get; init; }
 
     /// <summary>
+    /// Gets whether a call of the tool may run again with the same effect, as reading, listing and searching do. A resumed
+    /// script of Code Mode runs again a step whose calls were in flight when it stopped only when each of them is idempotent;
+    /// any other call there has an unknown outcome, and the resume asks first. False by default.
+    /// </summary>
+    public bool Idempotent { get; init; }
+
+    /// <summary>
     /// Gets the JSON Schema of the value a call gives a script (<see cref="AgentToolResult.Structured"/>), or null when a
     /// script receives the text of the result.
     /// </summary>

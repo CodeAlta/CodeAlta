@@ -113,6 +113,10 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
     /// <summary>Gets the runs of the Code Mode scripts of the sessions.</summary>
     public CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry CodeModeRuns => _host.CodeModeRuns;
 
+    /// <summary>Keeps the runs of the scripts with the results of their steps, for a resume (<see cref="CodeAltaHost.KeepCodeModeRunsAsync"/>).</summary>
+    /// <returns>A task that completes when the sessions of the interrupted runs were told.</returns>
+    public Task KeepCodeModeRunsAsync() => _host.KeepCodeModeRunsAsync();
+
     /// <summary>Gets the sessions the scripts of Code Mode start, made when a script first starts one.</summary>
     public CodeAlta.Orchestration.Runtime.Scripts.ICodeModeAgents CodeModeAgents => _host.CodeModeAgents;
 

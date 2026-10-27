@@ -93,8 +93,11 @@ export type TimelineItem = Readonly<{
 /** A run of a script of Code Mode, from its records (`workflow` entries of the journal). */
 export type ScriptRun = Readonly<{ runId: string; status: string | null; steps: ReadonlyArray<ScriptStep>; sessions: ReadonlyArray<ScriptSession> }>;
 
-/** A step of a run: its state, and how long it took once ended. */
-export type ScriptStep = Readonly<{ id: string; status: string; durationMs: number | null }>;
+/**
+ * A step of a run: its state, and how long it took once ended. `key` is what a rerun from it names (`merge#1`), once ended;
+ * `replayed` says it gave the result a previous run recorded instead of running.
+ */
+export type ScriptStep = Readonly<{ id: string; status: string; durationMs: number | null; key: string | null; replayed: boolean }>;
 
 /** A session a run started: its state, and what it spent once ended. */
 export type ScriptSession = Readonly<{ sessionId: string; title: string | null; stepId: string | null; status: string; durationMs: number | null;
@@ -311,11 +314,12 @@ function scriptRunOf(records: ReadonlyArray<HistoryEntry>): ScriptRun {
     const number = (name: string) => { const value = details?.[name]; return typeof value === "number" ? value : null; };
     switch (record.kind) {
       case "StepStarted":
-        if (record.activityId) steps.push({ id: record.activityId, status: "running", durationMs: null });
+        if (record.activityId) steps.push({ id: record.activityId, status: "running", durationMs: null, key: null, replayed: false });
         break;
       case "StepEnded": {
         const index = lastIndex(steps, step => step.id === record.activityId && step.status === "running");
-        const ended: ScriptStep = { id: record.activityId ?? "", status: record.phase ?? "completed", durationMs: number("durationMs") };
+        const ended: ScriptStep = { id: record.activityId ?? "", status: record.phase ?? "completed", durationMs: number("durationMs"),
+          key: stringAt(details, "stepKey"), replayed: details?.replayed === true };
         if (index >= 0) steps[index] = ended; else steps.push(ended);
         break;
       }
@@ -333,6 +337,11 @@ function scriptRunOf(records: ReadonlyArray<HistoryEntry>): ScriptRun {
         status = record.phase ?? "completed";
         break;
     }
+  }
+  // CodeAlta ended while the run ran: what still ran then stopped with it.
+  if (status === "interrupted") {
+    for (let index = 0; index < steps.length; index++) if (steps[index].status === "running") steps[index] = { ...steps[index], status: "interrupted" };
+    for (let index = 0; index < sessions.length; index++) if (sessions[index].status === "running") sessions[index] = { ...sessions[index], status: "interrupted" };
   }
   const run: ScriptRun = { runId: last.name ?? "", status, steps, sessions };
   scriptRuns.set(last, { count: records.length, run });

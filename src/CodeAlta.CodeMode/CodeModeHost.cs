@@ -21,11 +21,32 @@ public sealed record CodeModeRunOptions
     /// </summary>
     public Func<CodeModeScriptReference, CancellationToken, ValueTask<CodeModeSource>>? ResolveScript { get; init; }
 
+    /// <summary>
+    /// Gets the steps the run replays from a previous run of the script, or null to run every step. The steps of the
+    /// scripts that <c>workflow()</c> starts are replayed too: their keys start with the path of those scripts, each with the number of its call (<c>lib#0/read#0</c>).
+    /// </summary>
+    public CodeModeReplay? Replay { get; init; }
+
     /// <summary>Gets how deep scripts may start scripts: a nested run of this depth cannot start another one.</summary>
     public int MaxWorkflowDepth { get; init; } = 3;
 
     /// <summary>Gets the depth of this run: 0 for the script <c>exec</c> runs.</summary>
     internal int Depth { get; init; }
+
+    /// <summary>Gets the scope of the calls of this run (<see cref="CodeModeCall.Scope"/>).</summary>
+    internal int Scope { get; init; }
+
+    /// <summary>Gets what numbers the scripts <c>workflow()</c> starts in the run <c>exec</c> runs, shared by them all.</summary>
+    internal System.Runtime.CompilerServices.StrongBox<int>? Scopes { get; init; }
+
+    /// <summary>Gets the step of the <c>workflow()</c> call that started this run: the parent of its steps, and of its calls made outside them.</summary>
+    internal CodeModeRun.ActiveStep? OuterStep { get; init; }
+
+    /// <summary>Gets the steps of the run <c>exec</c> runs and of the scripts it starts, shared by them all; null for a run that starts them.</summary>
+    internal CodeModeStepSpace? Steps { get; init; }
+
+    /// <summary>Gets the path of the scripts that start this run, before the ids of its steps: empty for the run <c>exec</c> runs, <c>lib#0/</c> below.</summary>
+    internal string StepPrefix { get; init; } = string.Empty;
 }
 
 /// <summary>The script that <c>workflow()</c> names: a script of the library by its name, or a file by its path.</summary>

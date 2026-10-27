@@ -91,6 +91,9 @@ public sealed record CodeModeCallRecord(int Index, string Path, string? StepId, 
 
     /// <summary>Gets how long the call waited for a slot before it ran.</summary>
     public TimeSpan Queued { get; init; }
+
+    /// <summary>Gets the script of the call, as <see cref="CodeModeCall.Scope"/> says it.</summary>
+    public int Scope { get; init; }
 }
 
 /// <summary>What one step did.</summary>
@@ -102,6 +105,31 @@ public sealed record CodeModeStepRecord(string StepId, TimeSpan StartedAt, TimeS
 {
     /// <summary>Gets the error of a failed step.</summary>
     public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// Gets the key a resume matches the step by, <c>&lt;id&gt;#&lt;occurrence&gt;</c> (<see cref="CodeModeReplay.KeyOf"/>); the
+    /// id of a step of a script that <c>workflow()</c> started has the path of the scripts before it, each with the number of its call (<c>lib#0/read#0</c>).
+    /// Null only for a record made by hand.
+    /// </summary>
+    public string? Key { get; init; }
+
+    /// <summary>Gets the order in which the step started in its run, from 0.</summary>
+    public int Index { get; init; }
+
+    /// <summary>Gets the <see cref="Index"/> of the step it started in, or null for a step started outside any step.</summary>
+    public int? ParentIndex { get; init; }
+
+    /// <summary>
+    /// Gets whether the value its function resolved with was recorded: false for a failed step, a value that is not JSON
+    /// or one over <see cref="CodeModeReplay.MaxResultBytes"/>, which a resume never replays.
+    /// </summary>
+    public bool HasResult { get; init; }
+
+    /// <summary>Gets the JSON of the value its function resolved with; null with <see cref="HasResult"/> for <c>undefined</c>.</summary>
+    public string? ResultJson { get; init; }
+
+    /// <summary>Gets whether the step gave the result a previous run recorded instead of running its function.</summary>
+    public bool Replayed { get; init; }
 }
 
 /// <summary>The kind of an output entry.</summary>

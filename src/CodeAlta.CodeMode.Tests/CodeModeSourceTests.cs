@@ -39,6 +39,23 @@ public sealed class CodeModeSourceTests
     }
 
     [TestMethod]
+    public void Pragma_ResumeOptions_GoWithTheRunTheyName()
+    {
+        var resume = CodeModeSource.Prepare("// @exec: {\"resume\": \"run-1a2b3c\", \"from\": \"merge#1\", \"rerun_in_flight\": true}");
+
+        Assert.IsNull(resume.Error, resume.Error?.Message);
+        Assert.AreEqual("run-1a2b3c", resume.Options.Resume);
+        Assert.AreEqual("merge#1", resume.Options.From);
+        Assert.IsTrue(resume.Options.RerunInFlight);
+        Assert.AreEqual(string.Empty, CodeModeSource.BodyOf("// @exec: {\"resume\": \"run-1a2b3c\"}\n"), "only the options line: no body");
+        Assert.AreEqual(CodeModeSource.BodyHashOf("// @exec: {\"title\": \"A\"}\r\nreturn 1;\r\n"), CodeModeSource.BodyHashOf("// @exec: {\"resume\": \"run-1\"}\nreturn 1;"),
+            "the body leaves out the options and the line ends");
+        StringAssert.Contains(CodeModeSource.Prepare("// @exec: {\"replay\": \"all\"}").Error?.Message, "go with `resume`");
+        StringAssert.Contains(CodeModeSource.Prepare("// @exec: {\"resume\": \"run-1\", \"replay\": \"some\"}").Error?.Message, "\"resume\" or \"all\"");
+        StringAssert.Contains(CodeModeSource.Prepare("// @exec: {\"resume\": \"run-1\", \"replay\": \"all\", \"from\": \"b\"}").Error?.Message, "does not go with");
+    }
+
+    [TestMethod]
     public void TypeScript_IsRefusedWithTheFix()
     {
         var source = CodeModeSource.Prepare("const a = 1;\nconst names: string[] = [];\nreturn names;");

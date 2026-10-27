@@ -102,6 +102,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("workflow show"),
         Read("workflow result"),
         Disruptive("workflow cancel"),
+        Mutating("workflow resume"),
         Read("script list"),
         Read("script show"),
         Read("script check"),

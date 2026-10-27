@@ -49,6 +49,10 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// session, the record. Null writes none. The records of a run are written in their order, before its result is given.
     /// </summary>
     public Func<string, AgentWorkflowEvent, Task>? Journal { get; set; }
+
+    /// <summary>Gets the durable record of the runs, for a resume after a restart; null for a host that keeps none (<c>altacli</c>).</summary>
+    public CodeModeRunStore? Store { get; private set; }
+
     private readonly int _maxPerSession;
     private readonly int _maxPerHost;
     private readonly Lock _gate = new();
@@ -94,6 +98,56 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// <param name="sessionId">The session, or null.</param>
     /// <returns>True when it has them.</returns>
     public bool RequiresCodeMode(string? sessionId) => sessionId is not null && _codeModeSessions.ContainsKey(sessionId);
+
+    /// <summary>
+    /// Keeps the runs in a store from now on, for a resume after a restart. The runs the store has without an end ran when
+    /// CodeAlta ended: they are marked interrupted at once, and their sessions get the end of each in their journal, so that
+    /// its card offers <b>Resume</b>. Called once, while the host starts and before a script runs.
+    /// </summary>
+    /// <param name="store">The store.</param>
+    /// <returns>A task that completes when the journals were written.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="store"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The registry already has a store.</exception>
+    public Task UseStoreAsync(CodeModeRunStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        IReadOnlyList<CodeModeStoredRun> interrupted;
+        lock (_gate)
+        {
+            if (Store is not null)
+            {
+                throw new InvalidOperationException("The runs already have a store.");
+            }
+
+            Store = store;
+            interrupted = store.MarkInterrupted(_runs.ContainsKey);
+        }
+
+        return Task.Run(async () =>
+        {
+            store.Prune();
+            if (Journal is not { } journal)
+            {
+                return;
+            }
+
+            foreach (var run in interrupted)
+            {
+                try
+                {
+                    await journal(run.SessionId, new AgentWorkflowEvent(new ModelProviderId("codealta"), run.SessionId, DateTimeOffset.UtcNow, null, AgentWorkflowEventKind.RunEnded, run.Id)
+                    {
+                        CallId = run.CallId,
+                        Status = "interrupted",
+                        Message = "CodeAlta ended while the script ran. It can be resumed.",
+                    }).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
+                {
+                }
+            }
+        });
+    }
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> ListSessionsWithRunningScripts()
@@ -157,6 +211,27 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         string? callId,
         Func<ICodeModeRunObserver, CancellationToken, Task<CodeModeRunResult>> run,
         out string? refusal)
+        => TryStart(sessionId, title, maxOutputTokens, callId, start: null, run, out refusal);
+
+    /// <summary>
+    /// Starts a run of a tool call that the store keeps for a resume (<see cref="Store"/>), unless a limit refuses it.
+    /// </summary>
+    /// <param name="sessionId">The session that runs it.</param>
+    /// <param name="title">Its title, or null.</param>
+    /// <param name="maxOutputTokens">The output budget of its result.</param>
+    /// <param name="callId">The tool call that runs it (<c>exec</c>), or null.</param>
+    /// <param name="start">What the store keeps of it, or null for a run it does not keep.</param>
+    /// <param name="run">Runs the script, with the observer of the run and its token.</param>
+    /// <param name="refusal">Why it was refused.</param>
+    /// <returns>The run, or null when <paramref name="refusal"/> is set.</returns>
+    public CodeModeRunHandle? TryStart(
+        string sessionId,
+        string? title,
+        int maxOutputTokens,
+        string? callId,
+        CodeModeRunStart? start,
+        Func<ICodeModeRunObserver, CancellationToken, Task<CodeModeRunResult>> run,
+        out string? refusal)
     {
         CodeModeRunHandle handle;
         lock (_gate)
@@ -194,9 +269,13 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             }
 
             _runs[handle.Id] = handle;
+            if (start is not null && Store is { } store)
+            {
+                handle.Writer = store.Begin(handle.Id, sessionId, title, callId, start);
+            }
         }
 
-        handle.Record(AgentWorkflowEventKind.RunStarted, record => record with { Title = title });
+        handle.Record(AgentWorkflowEventKind.RunStarted, record => record with { Title = title, ResumesRunId = start?.ResumesRunId });
         handle.Start(run, OnEndedAsync);
         refusal = null;
         return handle;
@@ -214,6 +293,35 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             run.Record(kind, fill);
         }
     }
+
+    /// <summary>
+    /// Plans a resume or a rerun of a run of a session (<see cref="CodeModeResume.TryPlan"/>), once what the store keeps of
+    /// the run so far is written: a run that just ended in this process is read whole.
+    /// </summary>
+    /// <param name="sessionId">The session that resumes.</param>
+    /// <param name="code">The code <c>exec</c> was given.</param>
+    /// <param name="options">The options of its first line, which name the run.</param>
+    /// <returns>The plan, or why it is refused.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public async Task<(CodeModeResumePlan? Plan, string? Refusal)> PlanResumeAsync(string sessionId, string code, CodeModeExecOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(code);
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.Resume is { } runId)
+        {
+            await WhenKeptAsync(runId).ConfigureAwait(false);
+        }
+
+        var plan =CodeModeResume.TryPlan(Store, sessionId, code, options, id => _runs.TryGetValue(id, out var known) ? known.Running : null, out var refusal);
+        return (plan, refusal);
+    }
+
+    /// <summary>Waits until what the store was asked to keep of a run of this process is written.</summary>
+    /// <param name="runId">The run.</param>
+    /// <returns>A task that completes then; at once for a run this process does not know, or does not keep.</returns>
+    public Task WhenKeptAsync(string runId)
+        => runId is not null && _runs.TryGetValue(runId, out var run) && run.Writer is { } writer ? writer.FlushAsync() : Task.CompletedTask;
 
     /// <summary>Finds a run of any session, running or ended a short while ago.</summary>
     /// <param name="runId">The id of the run.</param>
@@ -273,6 +381,11 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         ForgetLater(run);
         try
         {
+            if (run.Writer is { } writer)
+            {
+                await writer.EndAsync(result.Status.ToString().ToLowerInvariant()).ConfigureAwait(false);
+            }
+
             run.Record(AgentWorkflowEventKind.RunEnded, record => record with
             {
                 Status = result.Status.ToString().ToLowerInvariant(),
@@ -447,6 +560,9 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     // The hold of the session of the run, released once its result is given.
     internal IDisposable? Hold { get; set; }
 
+    // What keeps the run for a resume, or null.
+    internal CodeModeRunStore.Writer? Writer { get; set; }
+
     internal void AddWaiter(int delta) => Interlocked.Add(ref _waiters, delta);
 
     internal void Start(Func<ICodeModeRunObserver, CancellationToken, Task<CodeModeRunResult>> run, Func<CodeModeRunHandle, CodeModeRunResult, Task> ended)
@@ -497,18 +613,29 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
         };
     }
 
-    void ICodeModeRunObserver.CallStarted(CodeModeCall call) => Interlocked.Increment(ref _calls);
+    void ICodeModeRunObserver.CallStarted(CodeModeCall call)
+    {
+        Interlocked.Increment(ref _calls);
+        Writer?.CallStarted(call);
+    }
+
+    void ICodeModeRunObserver.CallEnded(CodeModeCallRecord record) => Writer?.CallEnded(record);
 
     void ICodeModeRunObserver.StepStarted(string stepId) => Record(AgentWorkflowEventKind.StepStarted, record => record with { StepId = stepId });
 
     void ICodeModeRunObserver.StepEnded(CodeModeStepRecord record)
-        => Record(AgentWorkflowEventKind.StepEnded, written => written with
+    {
+        Writer?.StepEnded(record);
+        Record(AgentWorkflowEventKind.StepEnded, written => written with
         {
             StepId = record.StepId,
+            StepKey = record.Key,
+            Replayed = record.Replayed ? true : null,
             Status = record.Succeeded ? "completed" : "failed",
             Message = record.ErrorMessage,
             DurationMs = (long)record.Duration.TotalMilliseconds,
         });
+    }
 
     void ICodeModeRunObserver.Output(CodeModeOutputEntry entry)
     {
