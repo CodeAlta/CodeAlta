@@ -6,9 +6,11 @@ exactly. Harbor's reported cost is kept beside it: for Claude Code it misses the
 The optional CodeAlta CC / Opus run (CodeAlta driving the Claude Code CLI) has a column when its job exists.
 
 A run made with -Runs (for example only the CodeAlta jobs) is summarized with the jobs it has; --baseline-run-id takes
-the missing jobs from an earlier run of the same jobs root, such as the native harnesses of a reference run.
+the missing jobs from an earlier run, such as the native harnesses of a reference run: from the same jobs root, or from
+--baseline-jobs-root when that run is kept elsewhere.
 
-Usage: python summarize-results.py [--run-id ID] [--baseline-run-id ID] [--jobs-root DIR] [--benchmark-root DIR]
+Usage: python summarize-results.py [--run-id ID] [--baseline-run-id ID] [--baseline-jobs-root DIR] [--jobs-root DIR]
+       [--benchmark-root DIR]
 """
 from __future__ import annotations
 
@@ -111,6 +113,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--bundle-root", type=Path, default=Path(__file__).resolve().parents[1])
 parser.add_argument("--run-id")
 parser.add_argument("--baseline-run-id", help="takes the jobs the run lacks from this run")
+parser.add_argument("--baseline-jobs-root", type=Path, help="the jobs root of the baseline run, when it is not the jobs root")
 parser.add_argument("--jobs-root", type=Path)
 parser.add_argument("--benchmark-root", type=Path)
 parser.add_argument("--output-root", type=Path)
@@ -119,6 +122,7 @@ args = parser.parse_args()
 bundle = args.bundle_root.resolve()
 workspace = load_json(bundle / "workspace.json") if (bundle / "workspace.json").exists() else {}
 jobs = (args.jobs_root or bundle / "jobs").resolve()
+baseline_jobs = (args.baseline_jobs_root or jobs).resolve()
 results = (args.output_root or bundle / "results").resolve()
 if args.benchmark_root is None and "benchmark_root" not in workspace:
     raise RuntimeError("No benchmark checkout: run scripts/setup.ps1, or pass --benchmark-root.")
@@ -133,17 +137,18 @@ repositories: dict[str, dict[str, int]] = defaultdict(lambda: {"tasks": 0})
 
 for label, (suffix, kind, model) in RUNS.items():
     source_run = None
-    for candidate in [run_id] + ([args.baseline_run_id] if args.baseline_run_id else []):
-        if (jobs / f"{candidate}-{suffix}" / "result.json").exists():
-            source_run = candidate
+    source_jobs = jobs
+    for candidate, root in [(run_id, jobs)] + ([(args.baseline_run_id, baseline_jobs)] if args.baseline_run_id else []):
+        if (root / f"{candidate}-{suffix}" / "result.json").exists():
+            source_run, source_jobs = candidate, root
             break
     if source_run is None:
         if label in OPTIONAL_RUNS:
             continue
         print(f"skipped {label}: no {run_id}-{suffix} job" + (f" nor {args.baseline_run_id}-{suffix}" if args.baseline_run_id else ""))
         continue
-    model_job = jobs / f"{source_run}-{suffix}"
-    regrade_job = jobs / f"{source_run}-{suffix}-regrade"
+    model_job = source_jobs / f"{source_run}-{suffix}"
+    regrade_job = source_jobs / f"{source_run}-{suffix}-regrade"
     for path in (model_job / "result.json", regrade_job / "result.json"):
         if not path.exists():
             raise RuntimeError(f"Missing job result: {path}")

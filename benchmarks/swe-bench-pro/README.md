@@ -133,7 +133,19 @@ It writes `results\<run-id>-summary.md` and `.json`, and covers:
 
 **Costs** are estimated from the tokens at list prices, the same way for every run. Those prices reproduce exactly Claude Code's own `total_cost_usd` and Harbor's Codex `cost_usd`. Harbor's reported cost is shown beside the estimate: for Claude Code it misses the segments of a trial that restarted, and CodeAlta reports one only on the Claude Code CLI (the estimate `altacli` makes for the other providers is in the metadata of each trial, not in Harbor's cost). The provider's billing is the final word.
 
-**Partial runs:** a run made with `-Runs` is summarized with the jobs it has. `--baseline-run-id` takes the missing jobs from an earlier run in the same `jobs\` folder. That compares new CodeAlta jobs with the native jobs of a reference run, but runs made on different days or machines can differ for reasons outside the harness.
+**Partial runs:** a run made with `-Runs` is summarized with the jobs it has. `--baseline-run-id` takes the missing jobs from an earlier run in the same `jobs\` folder, or in `--baseline-jobs-root` when that run is kept elsewhere. That compares new CodeAlta jobs with the native jobs of a reference run, but runs made on different days or machines can differ for reasons outside the harness.
+
+## CodeAlta-only rounds
+
+After a change of CodeAlta, run only its jobs, once without Code Mode and once with it, each under its own run id, then summarize each against the native jobs of the reference run:
+
+```powershell
+pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-opus,codealta-astra -RunId 20261028-codemode-off -CodeAltaArgs "--code-mode=off"
+pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-opus,codealta-astra -RunId 20261028-codemode-on
+
+.\workspace\harbor-venv\Scripts\python.exe .\scripts\summarize-results.py --run-id 20261028-codemode-off --baseline-run-id 20261026-162310 --baseline-jobs-root <folder of the reference jobs>
+.\workspace\harbor-venv\Scripts\python.exe .\scripts\summarize-results.py --run-id 20261028-codemode-on --baseline-run-id 20261026-162310 --baseline-jobs-root <folder of the reference jobs>
+```
 
 ## Cleanup
 
