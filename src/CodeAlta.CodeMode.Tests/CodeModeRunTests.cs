@@ -251,16 +251,18 @@ public sealed class CodeModeRunTests
     [TestMethod]
     public async Task ABusyLoop_EndsWithTheCpuLimit_ButAwaitedTimeDoesNotCount()
     {
-        var limits = CodeModeLimits.Default with { CpuTimePerSlice = TimeSpan.FromMilliseconds(300) };
+        // Each await is longer than the limit, and the work between them takes a few milliseconds: a loaded machine (the
+        // limit is elapsed time) has room before it, where a loop of 200,000 iterations once failed under the 300 ms of before.
+        var limits = CodeModeLimits.Default with { CpuTimePerSlice = TimeSpan.FromSeconds(1) };
         var busy = await RunAsync("for (;;) {}", options: new() { Limits = limits });
-        var waiting = await RunAsync("await tools.slow(); return 1;", Handler(slowMilliseconds: 600), new() { Limits = limits });
+        var waiting = await RunAsync("await tools.slow(); return 1;", Handler(slowMilliseconds: 1200), new() { Limits = limits });
 
         Assert.AreEqual(CodeModeErrorKind.CpuTime, busy.Error?.Kind);
         Assert.AreEqual(CodeModeRunStatus.Completed, waiting.Status, waiting.Error?.Message);
 
         // Work right after a long await is a new slice: the wait never counts, whatever statement the clock is read at.
-        var resumed = await RunAsync("await tools.slow(); let s = 0; for (let i = 0; i < 200000; i++) s += i % 7; await tools.slow(); return s;",
-            Handler(slowMilliseconds: 400), new() { Limits = limits });
+        var resumed = await RunAsync("await tools.slow(); let s = 0; for (let i = 0; i < 20000; i++) s += i % 7; await tools.slow(); return s;",
+            Handler(slowMilliseconds: 1200), new() { Limits = limits });
         Assert.AreEqual(CodeModeRunStatus.Completed, resumed.Status, resumed.Error?.Message);
     }
 
