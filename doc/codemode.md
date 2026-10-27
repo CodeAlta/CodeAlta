@@ -70,7 +70,17 @@ that kind, on every path, because `CreatedBy` is durable. A child has at most th
 its restrictions (review, permission mode, sandbox: a script turns a sandbox on, never off), as a session the model
 creates with `alta session create`. A run caps its sessions (8 at work, 50 in all, 3 levels deep) and its tokens
 (`budget_tokens`). A tier the script asks for that is not set up gives the parent's model, with a warning: scripts are
-examples copied into any profile.
+examples copied into any profile. A child works in the project and the worktree of its parent, or with `worktree: true` in
+a new worktree that stays when it closes, with its branch, for the work to be merged.
+
+## Instructions
+
+A session that has `exec` is told when to use it, by a section of its instructions that the prompt builder adds from the
+mode the host gives it (`CodeModeRunRegistry.CodeModeOf`, set by the tools that give `exec`), so that the instructions
+and the tools never disagree. Without it, models rarely write a script on their own: they work through the parts of a
+request one turn after another. The section is the same text for every session of a mode, for prompt caches; a session
+a script started is also told to do its part itself, since each level of sub-agents is a whole session more. Claude
+Code loads `exec` and `wait` with `alta` instead of deferring them behind its tool search.
 
 ## Records
 

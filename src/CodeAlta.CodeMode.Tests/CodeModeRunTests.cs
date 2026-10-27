@@ -208,10 +208,13 @@ public sealed class CodeModeRunTests
     public async Task TheEngine_ReachesNeitherNetNorFilesNorNetwork()
     {
         var result = await RunAsync("""
-            return [typeof fetch, typeof require, typeof setTimeout, typeof process, typeof System, typeof importNamespace];
+            let required;
+            try { required = require("fs"); } catch (e) { required = e.name; }
+            return [typeof fetch, required, typeof setTimeout, typeof process, typeof System, typeof importNamespace];
             """);
 
-        Assert.AreEqual("""["undefined","undefined","undefined","undefined","undefined","undefined"]""", result.ValueJson);
+        // require exists only to fail with what a script uses instead.
+        Assert.AreEqual("""["undefined","TypeError","undefined","undefined","undefined","undefined"]""", result.ValueJson);
     }
 
     [TestMethod]
@@ -425,6 +428,37 @@ public sealed class CodeModeRunTests
         StringAssert.StartsWith(value.RootElement.GetProperty("failure").GetString(), "broken.js (line 2):");
         Assert.AreEqual("codemode.workflowNotFound", value.RootElement.GetProperty("missing").GetString());
         Assert.IsTrue(result.Output.Any(static entry => entry.Text == "doubling"), "the output of the nested script joins the run's");
+    }
+
+    [TestMethod]
+    public async Task Require_FailsWithWhatAScriptUsesInstead()
+    {
+        var result = await RunAsync("const fs = require('fs');\nreturn fs.readFileSync('a.txt', 'utf8');");
+
+        Assert.AreEqual(CodeModeRunStatus.Failed, result.Status);
+        StringAssert.Contains(result.Error!.Message, "require(\"fs\") is not available: scripts are not Node.js");
+        StringAssert.Contains(result.Error.Message, "tools.read_file");
+    }
+
+    [TestMethod]
+    public async Task Workflow_TakesTheArgumentsModelsPutInTheFirstObject_ButNotTwice()
+    {
+        var options = new CodeModeRunOptions
+        {
+            ResolveScript = (reference, _) => ValueTask.FromResult(CodeModeSource.Prepare("return args.n * 2;", reference.ScriptPath!)),
+        };
+
+        var result = await RunAsync("""
+            const inside = await workflow({ scriptPath: "double.js", args: { n: 21 } });
+            let twice = null;
+            try { await workflow({ scriptPath: "double.js", args: { n: 1 } }, { n: 2 }); } catch (e) { twice = e.message; }
+            return { inside, twice };
+            """, options: options);
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        using var value = JsonDocument.Parse(result.ValueJson!);
+        Assert.AreEqual(42, value.RootElement.GetProperty("inside").GetInt32());
+        StringAssert.Contains(value.RootElement.GetProperty("twice").GetString(), "give the arguments once");
     }
 
     [TestMethod]

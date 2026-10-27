@@ -151,7 +151,12 @@ public sealed class CodeModeApi
               if (target === null || typeof target !== "object" || (typeof target.name !== "string" && typeof target.scriptPath !== "string")) {
                 return Promise.reject(new TypeError("workflow(name | { scriptPath }, args): name a script of the library, or the path of a script file."));
               }
-              return host("codemode.workflow", stringify({ name: target.name, scriptPath: target.scriptPath, args: workflowArgs === undefined ? {} : workflowArgs })).then(unwrap);
+              // The arguments go second; models also put them in the first object, which is taken when nothing comes second.
+              if (typeof reference === "object" && target.args !== undefined && workflowArgs !== undefined) {
+                return Promise.reject(new TypeError("workflow({ scriptPath }, args): give the arguments once, as the second argument."));
+              }
+              const given = workflowArgs !== undefined ? workflowArgs : typeof reference === "object" ? target.args : undefined;
+              return host("codemode.workflow", stringify({ name: target.name, scriptPath: target.scriptPath, args: given === undefined ? {} : given })).then(unwrap);
             });
             // A warning the host gives with a reply, such as a tier that is not set up, goes to the output of the run.
             const warned = (json) => {
@@ -203,6 +208,7 @@ public sealed class CodeModeApi
               }
               return host("codemode.session.open", stringify(options === undefined ? {} : options)).then(warned).then(unwrap).then((opened) => freeze({
                 id: opened.sessionId,
+                worktree: opened.worktree === undefined ? null : freeze(opened.worktree),
                 run: (prompt, runOptions) => {
                   if (typeof prompt !== "string" || prompt.length === 0) return Promise.reject(new TypeError("session.run(prompt, options): the prompt is a non-empty string."));
                   return host("codemode.session.ask", stringify(Object.assign({}, runOptions, { sessionId: opened.sessionId, prompt }))).then(unwrap)
@@ -243,6 +249,10 @@ public sealed class CodeModeApi
                 }
                 return value;
               }));
+            });
+            // Models write Node.js first (`require("fs")`): the call fails with what a script uses instead.
+            global("require", function (name) {
+              throw new TypeError(`require(${stringify(String(name))}) is not available: scripts are not Node.js. Read and write files with tools.read_file and tools.write_file, list them with tools.list_dir, run commands with tools.shell_command.`);
             });
             // phase(title): a marker in the output, between the parts of the work.
             global("phase", (title) => writeOutput(1, `## ${String(title)}`));

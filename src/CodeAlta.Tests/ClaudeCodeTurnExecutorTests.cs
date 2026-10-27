@@ -943,19 +943,20 @@ public sealed class ClaudeCodeTurnExecutorTests
             process.EmitTextTurn("msg_2", "ok", user);
             return Task.CompletedTask;
         };
-        await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { Tools = [Tool("alta"), Tool("first_tool"), Tool("second_tool")] });
+        await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { Tools = [Tool("alta"), Tool("first_tool"), Tool("second_tool"), Tool("exec"), Tool("wait")] });
 
         var notification = cli.Last.Received.Single(static message =>
             message.GetProperty("type").GetString() == "control_request" &&
             message.GetProperty("request").GetProperty("subtype").GetString() == "mcp_message");
         Assert.AreEqual("notifications/tools/list_changed", notification.GetProperty("request").GetProperty("message").GetProperty("method").GetString());
         var tools = (await cli.Last.McpAsync("tools/list")).GetProperty("result").GetProperty("tools").EnumerateArray().ToArray();
-        CollectionAssert.AreEqual(new[] { "alta", "first_tool", "second_tool" }, tools.Select(static tool => tool.GetProperty("name").GetString()).ToArray());
+        CollectionAssert.AreEqual(new[] { "alta", "first_tool", "second_tool", "exec", "wait" }, tools.Select(static tool => tool.GetProperty("name").GetString()).ToArray());
 
-        // Claude Code defers the tools of a server behind its tool search once they are many: `alta` is always
-        // loaded, the others are left to the CLI.
-        Assert.IsTrue(tools[0].GetProperty("_meta").GetProperty("anthropic/alwaysLoad").GetBoolean());
-        Assert.IsTrue(tools.Skip(1).All(static tool => !tool.TryGetProperty("_meta", out _)));
+        // Claude Code defers the tools of a server behind its tool search once they are many: `alta` and the tools of
+        // Code Mode are always loaded, the others are left to the CLI.
+        CollectionAssert.AreEqual(new[] { "alta", "exec", "wait" }, tools.Where(static tool => tool.TryGetProperty("_meta", out var meta)
+            && meta.GetProperty("anthropic/alwaysLoad").GetBoolean()).Select(static tool => tool.GetProperty("name").GetString()).ToArray());
+        Assert.IsTrue(tools.Where(static tool => tool.GetProperty("name").GetString() is "first_tool" or "second_tool").All(static tool => !tool.TryGetProperty("_meta", out _)));
     }
 
     [TestMethod]

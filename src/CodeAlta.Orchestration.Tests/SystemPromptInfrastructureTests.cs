@@ -144,6 +144,42 @@ public sealed class SystemPromptInfrastructureTests
     }
 
     [TestMethod]
+    public void SystemPromptBuilder_TellsASessionThatHasExecToRunItsIndependentPartsTogether()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        var projectRoot = Path.Combine(temp.Path, "project");
+        Directory.CreateDirectory(projectRoot);
+        WriteSystem(appBase, "default", "Built-in default system.");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in default prompt.");
+        var builder = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase));
+        string Instructions(string mode, params string[] disabled) => InstructionsOf(mode, null, disabled);
+        string InstructionsOf(string mode, AltaActorProvenance? createdBy, params string[] disabled) => builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex",
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = projectRoot, Kind = SessionViewKind.ProjectSession, CreatedBy = createdBy },
+            UserCodeAltaRoot = Path.Combine(temp.Path, "global"),
+            CodeMode = mode,
+            DisabledTools = disabled.ToHashSet(StringComparer.Ordinal),
+        }).DeveloperInstructions!;
+
+        var on = Instructions("on");
+        StringAssert.Contains(on, "# Code Mode");
+        StringAssert.Contains(on, "Independent parts run together, in one `exec`");
+        StringAssert.Contains(on, "export const meta = { title:");
+        Assert.DoesNotContain(SystemPromptBuilder.CodeModeOnlyGuidance, on);
+        StringAssert.Contains(Instructions("only"), SystemPromptBuilder.CodeModeOnlyGuidance);
+        // A sub-agent of a script does its part itself: each level of sub-agents is a whole session more.
+        Assert.DoesNotContain(SystemPromptBuilder.CodeModeSubAgentGuidance, on);
+        StringAssert.Contains(InstructionsOf("on", new AltaActorProvenance { Kind = AltaActorProvenance.WorkflowKind }), SystemPromptBuilder.CodeModeSubAgentGuidance);
+        // A session without exec is not told about it, so that it never calls a tool it does not have.
+        Assert.DoesNotContain("# Code Mode", Instructions("off"));
+        Assert.DoesNotContain("# Code Mode", Instructions("on", "exec"));
+        // The same text for every session of a mode: provider prompt caches hold.
+        Assert.AreEqual(on, Instructions("on"));
+    }
+
+    [TestMethod]
     public void SystemPromptBuilder_UsesAgentPromptFrontmatterCompositionOverrides()
     {
         using var temp = TempDirectory.Create();

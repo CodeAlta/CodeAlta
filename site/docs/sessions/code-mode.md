@@ -8,6 +8,8 @@ With Code Mode, an agent can write a short JavaScript program that calls its too
 
 Code Mode is off by default. When it is on, agents keep all their tools and get two more: `exec`, which runs a script, and `wait`, which waits for a script that goes on in the background.
 
+Their instructions lead them to it for work that splits. A request about several topics, files, modules or options becomes one script that gives each part to a sub-agent and runs them all at once, and you follow its steps and sessions [in the timeline](#in-the-timeline). A sub-agent does its own part itself instead of starting sub-agents of its own.
+
 ## Turn it on
 
 In CodeAlta Desktop, **Settings > Code Mode** has **Mode**:
@@ -37,8 +39,8 @@ A script is the body of an async function: it uses `await` and `return`, in plai
 | `mcp.<server>.<tool>(args)` | The tools of the [MCP servers](../plugins/mcp.md) of the session |
 | `alta.<group>.<command>(args)` | The [`alta` commands](delegation.md#what-agents-can-use), such as `alta.session.list({ limit: 20 })` |
 | `codemode.help()`, `codemode.search({ query })`, `codemode.describe({ path })` | Find functions and read their TypeScript declarations |
-| `agent(prompt, { tier, model, title, schema })` | Start a session of its own for a part of the work, and get its final answer, or the JSON value it answered with `schema`. It is a sub-agent of the session, which you can open; 8 run at once, 50 per script. A [tier](../model-tiers.md) that is not set up runs it on the model of the session that runs the script, and the output says so once |
-| `session({ tier, title })` | Keep a session for several prompts: `run(prompt)` sends one, `close()` ends it. Its tier works as for `agent()` |
+| `agent(prompt, { tier, model, title, schema, worktree })` | Start a session of its own for a part of the work, and get its final answer, or the JSON value it answered with `schema`. It is a sub-agent of the session, which you can open; 8 run at once, 50 per script. A [tier](../model-tiers.md) that is not set up runs it on the model of the session that runs the script, and the output says so once. With `worktree: true` it works in a new [worktree](../worktrees.md) of the project, on a branch of its own, so that sub-agents that change files at the same time do not collide; the worktree stays, with the work to merge |
+| `session({ tier, title, worktree })` | Keep a session for several prompts: `run(prompt)` sends one, `close()` ends it, and `worktree` names the folder and branch of its worktree. Its tier works as for `agent()` |
 | `ask(question, { choices, default })` | Ask you a question and get your answer. It shows at once where the session asks its questions, also while the turn runs, one question of a script at a time. The time you take counts neither toward the script's time limit nor toward its `yield_ms`: the turn waits for your answer. In an automation, nobody is asked: the script gets an `AskError` |
 | `sleep(duration)` | Wait: milliseconds, or `"30s"`, `"5m"`, `"2h"`, `"1d"`, up to 7 days. A sleeping script goes on in the background, and the time it sleeps does not count toward its time limit. If CodeAlta closes meanwhile, the script goes on by itself when it wakes |
 | `parallel(functions, { limit })`, `pipeline(items, ...stages)` | Run work at once: a failure is `null`, and a warning in the output |
@@ -62,11 +64,15 @@ return read.map((r, i) => ({ file: files[i], lines: r.content.split("\n").length
 
 A script shows as one card: `exec`, its title (the `title` of its first line), its state, and the calls it made, with the running and failed ones first.
 
-A script that declares its steps (`meta.steps`) draws them as a small graph from its start: a box per step, laid out by `after` (the steps that run after the same ones side by side), dim until it runs, then running, done or failed. A step with `each: true` holds the sessions it started; above six, they fold into one group that says how many are done, running and failed, and a click lists them, the running and failed ones first. Each session opens with a click. A script without `meta.steps` lists its steps in a line.
+A script that runs steps or starts sessions is a workflow: it gets a block of its own in the timeline, the width of the conversation, under the tool calls of the turn and shown even when they are folded. Its `exec` card stays one line, and a click on it goes to the block.
 
-**Open run** opens the tab of the run: its graph large, the sessions it started (title, step, state, duration, tokens; each opens its session), a timeline of its steps and sessions, its result and its script. **Copy as Mermaid** copies the graph as a Mermaid `flowchart`, the text `alta workflow show <run-id> --format mermaid` gives. The tab is restored when CodeAlta starts again, while the run is still kept.
+- **The head**: the title and the run id, the state (running with its time, waiting for you, sleeping, completed, failed, interrupted), the sessions it started, their tokens and its duration, and the actions as icons (in its **…** menu when the conversation is narrow): **Resume**, **Rerun with recorded results**, **Save as script…**, **Copy as Mermaid**, **Show the call** (the window of the `exec` call) and **Open run**.
+- **The graph**, left to right: a box per step, from the steps the script declares (`meta.steps`, laid out by `after`) or else from the steps it ran, the steps that run together one above the other. In a conversation too narrow for it, the graph runs top to bottom. A step is dim until it runs; while it runs, its ring fills as its sessions end, and the arrow that leads to it flows. Each step lists the sessions it started: the logo of their provider, their title, model, duration and tokens. A click opens a session. Above six sessions, they fold into one bar of how many are done, running and failed; a click lists them, the running and failed ones first.
+- What the run waits for, or until when it sleeps, shows on a line under the head.
 
-Click the card for its window:
+**Open run** opens the tab of the run: its graph large, which you pan and zoom (a minimap shows once it is larger than the view); the sessions it started (title, step, state, duration, tokens; each opens its session); a timeline of its steps, each with its sessions under it, in the colors of their states; its result and its script. **Copy as Mermaid** copies the graph as a Mermaid `flowchart`, as `alta workflow show <run-id> --format mermaid` gives it. The tab is restored when CodeAlta starts again, while the run is still kept.
+
+Click the card of a script without steps or sessions, or **Show the call** on a workflow, for the window of the call:
 
 - **Console**: the calls, and the result and output the model read.
 - **Script**: the code that ran.
@@ -82,11 +88,11 @@ The source of each script is kept in the scratchpad of the session, and its resu
 
 ## Resume a run
 
-CodeAlta Desktop and CodeAlta TUI keep each run with the result of each `step()`. A script that ran when CodeAlta ended shows as **interrupted** on its card. The card of a run then offers:
+CodeAlta Desktop and CodeAlta TUI keep each run with the result of each `step()`. A script that ran when CodeAlta ended shows as **interrupted** in the timeline. Its card, or its block, then offers:
 
 - **Resume**, on an interrupted run: the script runs again, and the steps it completed give their recorded results without running. A step that changed, and everything after it, runs again.
 - **Rerun with recorded results**, on a run that ended: every recorded step gives its result, and only the rest of the code runs. This fixes the end of a script without paying again for the sessions its steps started.
-- **Rerun from this step**, in the menu of a step mark: the steps before it give their results, and that step and what follows run again.
+- **Rerun from this step**, on a step of the graph (its button shows when the pointer is over it): the steps before it give their results, and that step and what follows run again.
 
 Each one asks the session of the run to call `exec` again: it runs with that session's tools and permissions. From a terminal or another session, `alta workflow resume <run-id>` does the same, with `--all` or `--from <step>`.
 

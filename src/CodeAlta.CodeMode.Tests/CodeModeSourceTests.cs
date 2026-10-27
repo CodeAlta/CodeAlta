@@ -74,6 +74,20 @@ public sealed class CodeModeSourceTests
     }
 
     [TestMethod]
+    public void AScriptThatDeclaresAFunctionOfScripts_IsRefused_WithTheFix()
+    {
+        // A model wrote this: its step ran the work, and the run recorded no step of its meta.
+        var shadowed = CodeModeSource.Prepare("export const meta = { steps: [{ id: \"research\", title: \"Research\" }] };\nconst step = (id, fn) => fn();\nreturn step(\"research\", () => 1);");
+        var declared = CodeModeSource.Prepare("async function agent(prompt) { return prompt; }\nreturn agent(\"x\");");
+
+        StringAssert.Contains(shadowed.Error?.Message, "Remove the declaration and call `step(...)`");
+        Assert.AreEqual(2, shadowed.Error?.Location?.Line);
+        StringAssert.Contains(declared.Error?.Message, "`agent` is a function of scripts");
+        // A local of the same name inside a function is the script's own business, and other names are free.
+        Assert.IsNull(CodeModeSource.Prepare("const run = (step) => step + 1;\nconst text = \"a\";\nreturn run(1);").Error);
+    }
+
+    [TestMethod]
     public async Task MarkdownFences_AreIgnored_AndLinesKeepTheirNumbers()
     {
         var result = await RunAsync("```js\nconst a = {};\nreturn a.b.c;\n```");

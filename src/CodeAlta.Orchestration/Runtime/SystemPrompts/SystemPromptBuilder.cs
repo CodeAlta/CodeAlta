@@ -158,6 +158,11 @@ public sealed class SystemPromptBuilder
         if (composition.PartOptions.ToolGuidance)
         {
             AddGeneratedPart(developerParts, parts, "tool.guidance", "tool_guidance", "Tool Guidance", 500, BuildToolGuidance(request));
+            if (BuildCodeModeGuidance(request, disabledTools) is { } codeMode)
+            {
+                AddGeneratedPart(developerParts, parts, "tool.codemode", "code_mode", "Code Mode", 510, codeMode);
+            }
+
             var agentPromptGuidance = BuildAgentPromptGuidance(request, projectRoot, composition.AgentPromptName);
             if (!string.IsNullOrWhiteSpace(agentPromptGuidance))
             {
@@ -810,6 +815,43 @@ public sealed class SystemPromptBuilder
         return builder.ToString().Trim();
     }
 
+    /// <summary>What a session that has <c>exec</c> is told about using it; the same text for every session of a mode, so that prompt caches hold.</summary>
+    internal const string CodeModeGuidance = """
+        `exec` runs a JavaScript program that calls your tools, `alta` and sub-agents; the user watches each run live, as a graph of its steps and sessions. It is your way to run work that splits.
+
+        - **Independent parts run together, in one `exec`.** When a request names several items to look into, change, check or compare (topics, projects, sources, modules, files, options, angles of a review), your first call is one `exec` that gives each item an `agent()` and runs them at once with `parallel()`; do not work through them yourself one after another. A sub-agent has the tools you have (web search too, when you have it). Never start sub-agents one at a time with `alta session create`/`send`. A loop or batch of tool calls goes in a script too, not one call per turn.
+        - **Write the script for the task**, without a library script; `workflow("name")` reuses one that fits (`codemode.search({ query: "workflow:" })`).
+        - **Show the plan:** start with `export const meta = { title: "…", steps: [{ id: "…", title: "…" }] };`, declaring only the steps the script runs, and wrap each in `step("<id>", fn)` with those ids (`step`, `agent` and `parallel` are given: never define your own).
+        - **Brief each sub-agent fully** (it sees nothing else): what to find or do, when to stop, and a short answer, or a `schema` when code combines the answers. `tier: "quick"` for lookups; `worktree: true` for parts that edit files at the same time.
+        - **Return a compact result**, it is all you read back: findings, decisions, branches, failures.
+        - Call the tools directly for one or two calls, for items that each take a single call (make those calls together), and for steps that each need the previous result.
+
+        ```js
+        export const meta = { title: "Compare caches", steps: [{ id: "research", title: "Research each option" }, { id: "compare", title: "Compare" }] };
+        const notes = await step("research", () => parallel(["Redis", "Memcached", "in-process LRU"].map((name) => () =>
+          agent(`Research ${name} as a cache for <context>. Answer in 10 lines: strengths, limits, sources.`, { title: name, tier: "quick" }))));
+        return step("compare", () => agent(`Recommend one, in 5 lines:\n${notes.join("\n---\n")}`, { title: "Compare" }));
+        ```
+        """;
+
+    /// <summary>The line added for a session where <c>exec</c> takes over the other tools.</summary>
+    internal const string CodeModeOnlyGuidance = "Your other tools are called from scripts, as `tools.<name>(args)` in `exec`: batch them in one script instead of one `exec` per call.";
+
+    /// <summary>The line added for a session a script started: each level of sub-agents is a whole session more.</summary>
+    internal const string CodeModeSubAgentGuidance = "You are a sub-agent of a script: do your part yourself, with direct calls or a script of tool calls; start sub-agents only when your part is itself large and splits.";
+
+    // The section of a session that has exec, or null for one that has not.
+    private static string? BuildCodeModeGuidance(SystemPromptBuildRequest request, IReadOnlySet<string> disabledTools)
+    {
+        if (request.CodeMode is not ("on" or "only") || disabledTools.Contains("exec"))
+        {
+            return null;
+        }
+
+        var text = request.CodeMode == "only" ? CodeModeGuidance + "\n\n" + CodeModeOnlyGuidance : CodeModeGuidance;
+        return request.Session.CreatedBy?.Kind == AltaActorProvenance.WorkflowKind ? text + "\n\n" + CodeModeSubAgentGuidance : text;
+    }
+
     private string? BuildAgentPromptGuidance(SystemPromptBuildRequest request, string? projectRoot, string currentPromptName)
     {
         var prompts = new AgentPromptCatalog(_contentLocator).ListEffectivePrompts(new AgentPromptCatalogQuery
@@ -1402,6 +1444,12 @@ public sealed class SystemPromptBuildRequest
 
     /// <summary>Gets whether, in the space of the session, a session goes on with the next model of its tier when its provider fails.</summary>
     public bool ModelFallback { get; init; }
+
+    /// <summary>
+    /// Gets the mode of Code Mode the session has: <c>off</c>, the default; <c>on</c> when it has <c>exec</c>; <c>only</c> when
+    /// <c>exec</c> takes over its other tools. The instructions tell a session with <c>exec</c> when to use it.
+    /// </summary>
+    public string CodeMode { get; init; } = "off";
 
     /// <summary>Gets active-skills markdown restored from session state.</summary>
     public string? ActiveSkillsMarkdown { get; init; }

@@ -443,6 +443,57 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task Discovery_KnowsTheFunctionsCalledByName_FirstWhenTheyMatch_AndOnlyThoseTheRunHas()
+    {
+        using var root = TestTempDirectory.Create();
+        var project = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        var library = new CodeModeScriptLibrary(new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") });
+        Assert.IsNull(library.Save("release-code", CodeModeScriptScope.Project, """
+            export const meta = { name: "release-code", description: "Computes the release code of a version.", params: { channel: { type: "string" } } };
+            return args.channel;
+            """, project, null).Refusal);
+        await using var runs = new CodeModeRunRegistry(null);
+        var (dispatcher, _) = Dispatcher(project);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = project },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = new FakeAgents(), Library = library }).Single(static tool => tool.Spec.Name == "exec");
+        const string Script = """
+            const paths = async (query) => (await codemode.search({ query })).map(hit => hit.path);
+            return {
+              sessions: await paths("session create send"),
+              library: await paths("script run library"),
+              help: await codemode.help(),
+              workflow: await codemode.help({ path: "workflow" }),
+              agent: await codemode.describe({ path: "agent" }),
+              load: await codemode.describe({ path: "load" }),
+            };
+            """;
+
+        var result = await InvokeAsync(exec, Script, new FakeTools());
+        // A run without sessions to start has no agent().
+        var (bare, _) = Create(project, runs, library: library);
+        var without = await InvokeAsync(bare, "return [await codemode.help(), await codemode.describe({ path: 'agent' }).catch(e => e.message)];", new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        using var value = ValueOf(result);
+        var root0 = value.RootElement;
+        var sessions = root0.GetProperty("sessions").EnumerateArray().Select(static hit => hit.GetString()).ToList();
+        CollectionAssert.AreEquivalent(new[] { "session", "agent" }, sessions.Take(2).ToArray(), "the functions that wait for a session's answer come before alta.session.*");
+        CollectionAssert.Contains(sessions, "alta.session.create");
+        var found = root0.GetProperty("library").EnumerateArray().Select(static hit => hit.GetString()).ToList();
+        Assert.AreEqual("workflow", found[0]);
+        CollectionAssert.Contains(found, "workflow:release-code", "a query for library scripts lists them");
+        StringAssert.Contains(root0.GetProperty("help").GetString(), "Functions called by name: agent, session, workflow");
+        StringAssert.Contains(root0.GetProperty("workflow").GetString(), "declare function workflow(name: string");
+        StringAssert.Contains(root0.GetProperty("agent").GetString(), "declare function agent(prompt: string");
+        StringAssert.Contains(root0.GetProperty("load").GetString(), "declare function load(key: string)");
+        Assert.IsTrue(without.Success, Text(without));
+        using var bareValue = ValueOf(without);
+        Assert.IsFalse(bareValue.RootElement[0].GetString()!.Contains("agent", StringComparison.Ordinal), "no agent() without sessions to start");
+        StringAssert.Contains(bareValue.RootElement[1].GetString(), "not a function");
+    }
+
+    [TestMethod]
     public async Task AScriptWithMetaTool_IsADeferredToolOfTheSessionsOfItsProject_ThatRunsItThroughExec()
     {
         using var root = TestTempDirectory.Create();
@@ -488,12 +539,17 @@ public sealed class CodeModeToolTests
         var (dispatcher, _) = Dispatcher(root.Path);
         var mode = "off";
         var runs = new CodeModeRunRegistry(null);
+        // A host without the tools of Code Mode gives no session exec, and its instructions speak of none.
+        Assert.AreEqual("off", runs.CodeModeOf("automation-session"));
         var codeMode = new CodeModeSessionTools(new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache() }, () => mode);
         AgentToolDefinition[] others = [new(new AgentToolSpec("alta", "alta", Schema("{}")), static (_, _) => Task.FromResult(new AgentToolResult(true, [])))];
 
         var off = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
-        // The session of an automation that runs a script has exec while the setting is off.
+        Assert.AreEqual("off", runs.CodeModeOf("automation-session"));
+        // The session of an automation that runs a script has exec while the setting is off, and the instructions say so.
         runs.RequireCodeMode("automation-session");
+        Assert.AreEqual("on", runs.CodeModeOf("automation-session"));
+        Assert.AreEqual("off", runs.CodeModeOf("other"));
         CollectionAssert.AreEqual(new[] { "alta", "exec", "wait" },
             codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionIdProvider = static () => "automation-session" }, others).Select(static tool => tool.Spec.Name).ToArray());
         CollectionAssert.AreEqual(new[] { "alta" }, codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionId = "other" }, others).Select(static tool => tool.Spec.Name).ToArray());
@@ -501,6 +557,7 @@ public sealed class CodeModeToolTests
         var with = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
         mode = "only";
         var only = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
+        Assert.AreEqual("only", runs.CodeModeOf("other"));
 
         CollectionAssert.AreEqual(new[] { "alta" }, off.Select(static tool => tool.Spec.Name).ToArray());
         CollectionAssert.AreEqual(new[] { "alta", "exec", "wait" }, with.Select(static tool => tool.Spec.Name).ToArray());

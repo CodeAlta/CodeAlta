@@ -5452,6 +5452,14 @@ public sealed partial class AltaLiveToolTests
             StringAssert.Contains(notification.GetProperty("guidance").GetString()!, "Do not poll or actively wait");
             CollectionAssert.Contains(notification.GetProperty("forbiddenWaitActions").EnumerateArray().Select(static item => item.GetString()).ToArray(), "shell sleep");
             await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+
+            // A script that sends gets no answer either: it is told so, and what gives it one.
+            var otherCreated = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", ProviderId.Value, "--parent", parentSessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            var otherSessionId = ReadJsonLines(otherCreated.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+            var fromScript = await dispatcher.InvokeAsync(["session", "send", otherSessionId, "--message", "a part of the work"], caller: caller with { ScriptRunId = "run-1" }).ConfigureAwait(false);
+            var scriptRecord = ReadJsonLines(fromScript.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.submitted");
+            StringAssert.Contains(scriptRecord.GetProperty("nextStep").GetString()!, "never to this script");
+            StringAssert.Contains(scriptRecord.GetProperty("nextStep").GetString()!, "agent(prompt, { tier })");
         }
         finally
         {

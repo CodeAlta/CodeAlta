@@ -14,6 +14,12 @@ public sealed record HeadlessSessionRequest
     /// </summary>
     public string? ProjectFolder { get; init; }
 
+    /// <summary>
+    /// Gets the git worktree a new session works in, an existing folder of a checkout of the repository of
+    /// <see cref="ProjectFolder"/>; null for <see cref="ProjectFolder"/> itself. Ignored for a session that exists.
+    /// </summary>
+    public string? WorktreeDirectory { get; init; }
+
     /// <summary>Gets the model as a reference <c>provider:model</c> or <c>provider:model@reasoning</c>; null for <see cref="Tier"/> or the usual model.</summary>
     public string? ModelRef { get; init; }
 

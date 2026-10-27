@@ -174,6 +174,18 @@ public sealed partial class CodeModeSource
             }
         }
 
+        // Models sometimes define their own `step` or `agent`, as if the script ran elsewhere: theirs would run, and the run
+        // would record no step and start no session.
+        foreach (var statement in statements)
+        {
+            if (HiddenFunction(statement) is { } hidden)
+            {
+                return new(name, code, text, options, null, new(CodeModeErrorKind.Syntax, "SyntaxError",
+                    $"`{hidden.Name}` is a function of scripts: a declaration of your own hides it, and the run records nothing of what it does. Remove the declaration and call `{hidden.Name}(...)` as it is.")
+                { Location = Position(hidden) });
+            }
+        }
+
         if (!hasTopLevelReturn && statements.Count > 0)
         {
             edits.AddRange(ReturnTheResult(text, statements));
@@ -181,6 +193,20 @@ public sealed partial class CodeModeSource
 
         return new(name, code, Apply(text, edits), options, descriptor, null);
     }
+
+    // The functions of the prelude that compose the work, which a script never needs to declare.
+    private static readonly System.Collections.Frozen.FrozenSet<string> PreludeFunctions =
+        System.Collections.Frozen.FrozenSet.Create(StringComparer.Ordinal, "step", "agent", "parallel", "pipeline", "phase", "workflow");
+
+    // The name a top-level declaration gives to a function of the prelude, or null.
+    private static Identifier? HiddenFunction(Statement statement) => statement switch
+    {
+        VariableDeclaration variables => variables.Declarations.Select(static declarator => declarator.Id).OfType<Identifier>()
+            .FirstOrDefault(static id => PreludeFunctions.Contains(id.Name)),
+        FunctionDeclaration { Id: { } id } when PreludeFunctions.Contains(id.Name) => id,
+        ClassDeclaration { Id: { } id } when PreludeFunctions.Contains(id.Name) => id,
+        _ => null,
+    };
 
     // `export default async function run(args) {…}` runs its function; `export default async (args) => {…}` too.
     private static IEnumerable<(int Start, int End, string Replacement)> UnwrapDefault(ExportDefaultDeclaration exportDefault)

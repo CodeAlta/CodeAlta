@@ -58,6 +58,9 @@ public sealed class AgentInstructionTemplateProvider
     // over the built-in tools into the tools the session does without; none without a runtime.
     internal Func<string?, IReadOnlyList<string>>? SessionToolPatterns { get; set; }
 
+    // The mode of Code Mode the runtime gives a session (ISessionScriptRuns.CodeModeOf); off without a runtime.
+    internal Func<string?, string>? CodeModeOf { get; set; }
+
     /// <summary>
     /// Gets how the prompt lists the skills of a session of a project and a space: <c>full</c> (every skill with its
     /// description), <c>compact</c> (names and titles) or <c>auto</c> (full while there are few). Null, or a host whose
@@ -288,6 +291,7 @@ public sealed class AgentInstructionTemplateProvider
             CommitCoAuthor = _configStore?.LoadGlobalCommitCoAuthor() ?? true,
             ModelTiers = ModelTierResolver.DescribeForAgents(tiers.Tiers, tiers.IsProviderAvailable),
             ModelFallback = tiers.Fallback.Enabled,
+            CodeMode = CodeModeOf?.Invoke(session.SessionId) ?? "off",
         });
     }
 

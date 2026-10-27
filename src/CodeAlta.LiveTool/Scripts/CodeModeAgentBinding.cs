@@ -72,12 +72,14 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
               "effort":{"type":"string","enum":["minimal","low","medium","high","xhigh","max"]},
               "agent":{"type":"string","description":"The agent prompt, such as default or plan."},
               "sandbox":{"type":"string","description":"A sandbox profile."},
+              "worktree":{"type":"boolean","description":"Work in a new git worktree of the project, on a branch of its own, so that sessions that change files in parallel do not collide; the worktree and its branch stay for the work to be merged."},
+              "base":{"type":"string","description":"The branch or commit the worktree starts from; the commit the project is on by default."},
               "timeout":{"type":"integer","minimum":1,"description":"Milliseconds the session is given."},
               "step":{"type":"string","description":"The step the session belongs to, when not the current one."},
               "schema":{"type":"object","description":"A JSON Schema of the answer: agent() then resolves with the JSON value the session answered, checked against it."}
             },"required":["prompt"],"additionalProperties":false}
             """,
-        ResultType = "{ sessionId: string; answer: string; value?: unknown; status: string; inputTokens: number; outputTokens: number; durationMs: number }",
+        ResultType = "{ sessionId: string; answer: string; value?: unknown; status: string; inputTokens: number; outputTokens: number; durationMs: number; worktree?: { folder: string; branch: string } }",
         Parallel = true,
     };
 
@@ -87,9 +89,9 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
         Function,
         new(OpenPath)
         {
-            Description = "Creates a session of its own that the script keeps for several prompts; scripts call it as session(options), which gives { id, run(prompt, { schema }), close() }. The options are those of agent(), without the prompt. A session not closed is closed when the script ends.",
-            InputSchemaJson = """{"type":"object","properties":{"title":{"type":"string"},"model":{"type":"string"},"tier":{"type":"string","enum":["complex","standard","quick"]},"effort":{"type":"string"},"agent":{"type":"string"},"sandbox":{"type":"string"},"step":{"type":"string"}},"additionalProperties":false}""",
-            ResultType = "{ sessionId: string }",
+            Description = "Creates a session of its own that the script keeps for several prompts; scripts call it as session(options), which gives { id, worktree, run(prompt, { schema }), close() }. The options are those of agent(), without the prompt. A session not closed is closed when the script ends.",
+            InputSchemaJson = """{"type":"object","properties":{"title":{"type":"string"},"model":{"type":"string"},"tier":{"type":"string","enum":["complex","standard","quick"]},"effort":{"type":"string"},"agent":{"type":"string"},"sandbox":{"type":"string"},"worktree":{"type":"boolean"},"base":{"type":"string"},"step":{"type":"string"}},"additionalProperties":false}""",
+            ResultType = "{ sessionId: string; worktree?: { folder: string; branch: string } }",
         },
         new(AskPath)
         {
@@ -154,6 +156,8 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
             Effort = effort,
             AgentPromptId = String(arguments, "agent"),
             Sandbox = String(arguments, "sandbox"),
+            Worktree = arguments.TryGetProperty("worktree", out var worktree) && worktree.ValueKind == JsonValueKind.True,
+            WorktreeBase = String(arguments, "base"),
             Timeout = Timeout(arguments),
             Schema = Schema(arguments),
             BudgetTokens = _budgetTokens,
@@ -203,6 +207,14 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
             writer.WriteNumber("outputTokens", result.Usage.OutputTokens);
             writer.WriteNumber("durationMs", (long)result.Elapsed.TotalMilliseconds);
             if (result.Warning is { } warning) writer.WriteString("warning", warning);
+            if (result.WorktreeFolder is { } folder)
+            {
+                writer.WriteStartObject("worktree");
+                writer.WriteString("folder", folder);
+                if (result.WorktreeBranch is { } branch) writer.WriteString("branch", branch);
+                writer.WriteEndObject();
+            }
+
             writer.WriteEndObject();
         }
 

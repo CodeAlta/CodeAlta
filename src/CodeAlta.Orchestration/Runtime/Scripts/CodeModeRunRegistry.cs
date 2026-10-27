@@ -106,6 +106,23 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     public bool RequiresCodeMode(string? sessionId) => sessionId is not null && _codeModeSessions.ContainsKey(sessionId);
 
     /// <summary>
+    /// Gets or sets what says the mode of Code Mode the host gives its sessions now (<c>off</c>, <c>on</c> or <c>only</c>);
+    /// null for a host whose sessions have no tools of Code Mode. The host that gives the tools sets it, so that the
+    /// instructions of a session speak of <c>exec</c> exactly when the session has it.
+    /// </summary>
+    public Func<string>? Mode { get; set; }
+
+    /// <inheritdoc />
+    public string CodeModeOf(string? sessionId) => Mode is { } mode ? EffectiveMode(mode(), RequiresCodeMode(sessionId)) : "off";
+
+    /// <summary>Gets the mode a session has: the one of the setting, or <c>on</c> for a session that requires Code Mode while the setting is off.</summary>
+    /// <param name="setting">The mode of the setting.</param>
+    /// <param name="required">Whether the session requires Code Mode (<see cref="RequireCodeMode"/>).</param>
+    /// <returns><c>off</c>, <c>on</c> or <c>only</c>.</returns>
+    public static string EffectiveMode(string? setting, bool required)
+        => setting is "on" or "only" ? setting : required ? "on" : "off";
+
+    /// <summary>
     /// Keeps the runs in a store from now on, for a resume after a restart. The runs the store has without an end ran when
     /// CodeAlta ended: they are marked interrupted at once, and their sessions get the end of each in their journal, so that
     /// its card offers <b>Resume</b>. Called once, while the host starts and before a script runs.

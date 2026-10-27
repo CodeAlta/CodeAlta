@@ -103,6 +103,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
                 return Invalid("A new session needs the absolute path of the folder it works in.");
             folder = Path.GetFullPath(request.ProjectFolder);
             if (!Directory.Exists(folder)) return Invalid($"The folder '{folder}' does not exist.");
+            if (request.WorktreeDirectory is { } worktree && (!Path.IsPathFullyQualified(worktree) || !Directory.Exists(worktree)))
+                return Invalid($"The worktree '{worktree}' is not an existing folder named by its absolute path.");
         }
 
         var sessionId = existing?.SessionId ?? existingId ?? Guid.CreateVersion7().ToString();
@@ -133,7 +135,7 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             SessionViewDescriptor descriptor;
             if (existing is null)
             {
-                descriptor = await _host.Commands.CreateDraftSessionAsync(project, model.Provider, request.Title, request.CreatedBy, worktreeDirectory: null,
+                descriptor = await _host.Commands.CreateDraftSessionAsync(project, model.Provider, request.Title, request.CreatedBy, worktreeDirectory: request.WorktreeDirectory is { } worktreeFolder ? Path.GetFullPath(worktreeFolder) : null,
                     spaceId: null, bypass, sessionId, request.ParentSessionId).ConfigureAwait(false);
             }
             else

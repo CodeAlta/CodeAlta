@@ -24,6 +24,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     // the delegated LLM finishes. The timeout is only a submission-acknowledgement guard.
     private static readonly TimeSpan AgentCallerSubmitAckTimeout = TimeSpan.FromSeconds(5);
     private const string NotificationFollowUpNextStep = "Do not call any tool, shell sleep, reminder, status, tail, events, or polling command to wait for completion; yield control and wait for parent-session notifications.";
+
+    // A script that sends a prompt does not get the answer: models that fanned out this way in scripts ended their turn
+    // without the answers, or took more turns to collect them than agent() would have.
+    private const string ScriptSendNextStep = "This send does not wait: the session's answer comes to your session as a notification after your turn ends, never to this script. To use the answers in the script, start the sessions with agent(prompt, { tier }) instead, which resolves with each answer.";
     private const string NotificationFollowUpGuidance = "Do not poll or actively wait for this delegated session to complete. CodeAlta will forward the delegated session's final assistant reply to the parent session automatically.";
     private const string AskNextStep = "Do not call another tool or poll. End your turn now with one short sentence saying that you are waiting for the answer; the next user prompt contains the ask response.";
     private const string AskPayloadSchema = "{\"type\":\"object\",\"properties\":{\"questions\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"question\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"choices\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"}},\"required\":[\"title\"],\"additionalProperties\":false}},\"freeform\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"placeholder\":{\"type\":\"string\"}},\"additionalProperties\":false}},\"required\":[\"title\",\"question\"],\"additionalProperties\":false}}},\"required\":[\"questions\"],\"additionalProperties\":false}";
@@ -6933,7 +6937,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             followUpMode = parentNotificationExpected ? "notification" : null,
             recommendedAction = parentNotificationExpected ? "stop" : null,
             forbiddenWaitActions = parentNotificationExpected ? NotificationFollowUpForbiddenWaitActions : null,
-            nextStep = parentNotificationExpected ? NotificationFollowUpNextStep : null,
+            nextStep = !parentNotificationExpected ? null : context.Caller.ScriptRunId is null ? NotificationFollowUpNextStep : ScriptSendNextStep,
             notification = CreatePromptNotificationPayload(context, session),
             submittedBy = CreateProvenance(context),
             promptPreview = prompt.Length <= 160 ? prompt : prompt[..160],

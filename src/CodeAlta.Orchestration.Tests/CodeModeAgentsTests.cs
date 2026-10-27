@@ -74,8 +74,80 @@ public sealed class CodeModeAgentsTests
         Assert.IsTrue(records.All(static record => record.RunId is null && record.CallId == "call-9"), "a run's records belong to no turn, and name the call that runs it");
         Assert.AreEqual("Fan out", records[0].Title);
         Assert.AreEqual("look", records[1].StepId);
+        Assert.IsFalse(string.IsNullOrEmpty(records[1].ProviderKey), "the start of a session names its provider");
+        Assert.IsFalse(string.IsNullOrEmpty(records[1].ModelId), "and its model");
         Assert.AreEqual("completed", records[2].Status);
         Assert.AreEqual("completed", records[3].Status);
+    }
+
+    [TestMethod]
+    public async Task AChildAskedForAWorktree_WorksInANewWorktreeOfTheProject_OnABranchOfItsOwn()
+    {
+        var (root, provider, host, driver, parent) = await CreateAsync();
+        await using var scope = root;
+        await using var closing = driver;
+        if (!Git(root.ProjectRoot, "init", "-q", "-b", "main")) Assert.Inconclusive("git is not installed.");
+        foreach (var (name, value) in new[] { ("user.name", "Test"), ("user.email", "test@example.invalid"), ("commit.gpgsign", "false") }) Git(root.ProjectRoot, "config", name, value);
+        File.WriteAllText(Path.Combine(root.ProjectRoot, "a.txt"), "one\n");
+        Git(root.ProjectRoot, "add", "-A");
+        Assert.IsTrue(Git(root.ProjectRoot, "commit", "-q", "-m", "one"));
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("First."));
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Second."));
+
+        // Two children that change files at the same time, each in a worktree of its own.
+        var results = await Task.WhenAll(
+            host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Try one way.") { RunId = "run-w", Worktree = true }, CancellationToken.None),
+            host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Try another.") { RunId = "run-w", Worktree = true }, CancellationToken.None)).WaitAsync(Hang);
+
+        foreach (var result in results)
+        {
+            Assert.IsTrue(result.Succeeded, result.Failure);
+            Assert.IsTrue(File.Exists(Path.Combine(result.WorktreeFolder!, "a.txt")), "the worktree is a checkout of the project");
+            StringAssert.StartsWith(result.WorktreeBranch, "alta/");
+            var child = await host.RuntimeService.TryGetResumableSessionAsync(result.SessionId!, CancellationToken.None);
+            Assert.AreEqual(Path.GetFullPath(result.WorktreeFolder!), Path.GetFullPath(child!.WorktreeDirectory!), true, "the child works in its worktree");
+            Assert.AreEqual(parent.Descriptor.ProjectRef, child.ProjectRef, "of the project of its parent");
+        }
+
+        Assert.AreNotEqual(results[0].WorktreeBranch, results[1].WorktreeBranch);
+        Assert.IsTrue(Directory.Exists(results[0].WorktreeFolder), "the worktree stays when its session closes, with the work to merge");
+    }
+
+    [TestMethod]
+    public async Task AWorktree_IsRefusedToTheScriptOfASessionWithoutAGitProject()
+    {
+        var (root, _, host, driver, parent) = await CreateAsync();
+        await using var scope = root;
+        await using var closing = driver;
+
+        var result = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Change it.") { RunId = "run-nw", Worktree = true }, CancellationToken.None).WaitAsync(Hang);
+        var badBase = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Change it.") { RunId = "run-nw", Worktree = true, WorktreeBase = "--force" }, CancellationToken.None).WaitAsync(Hang);
+
+        Assert.AreEqual("refused", result.Status);
+        StringAssert.Contains(result.Failure, "worktree");
+        Assert.IsNull(result.SessionId, "no session is created without its worktree");
+        Assert.AreEqual("refused", badBase.Status);
+        StringAssert.Contains(badBase.Failure, "`base`");
+    }
+
+    private static bool Git(string folder, params string[] arguments)
+    {
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo("git") { WorkingDirectory = folder, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
+            foreach (var argument in arguments) start.ArgumentList.Add(argument);
+            start.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+            start.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(folder, "..", "no-global-config");
+            using var process = System.Diagnostics.Process.Start(start)!;
+            process.StandardOutput.ReadToEnd();
+            process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            return process.ExitCode == 0;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
     }
 
     [TestMethod]

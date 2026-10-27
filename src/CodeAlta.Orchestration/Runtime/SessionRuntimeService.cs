@@ -147,6 +147,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         Jobs = new SessionJobService(DeliverJobResultAsync);
         _sessionViewCatalog.JournalStore.StateAppended += OnSessionStateAppended;
         instructionTemplateProvider.SessionToolPatterns = GetDisabledToolPatterns;
+        instructionTemplateProvider.CodeModeOf = sessionId => ScriptRuns?.CodeModeOf(sessionId) ?? "off";
         _events.Published = PulseSettlement;
     }
 

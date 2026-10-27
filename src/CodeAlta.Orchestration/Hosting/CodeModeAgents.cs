@@ -4,8 +4,10 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.ModelTiers;
+using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Scripts;
+using CodeAlta.Orchestration.Runtime.SystemPrompts;
 
 namespace CodeAlta.Orchestration.Hosting;
 
@@ -31,6 +33,7 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
     private readonly CodeAltaHost _host;
     private readonly HeadlessSessionDriver _driver;
     private readonly ConcurrentDictionary<string, RunState> _runs = new(StringComparer.Ordinal);
+    private readonly Lazy<GitWorktreeService> _worktrees;
 
     /// <summary>Creates the service of a host.</summary>
     /// <param name="host">The host, borrowed.</param>
@@ -40,6 +43,9 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(host);
         _host = host;
         _driver = new HeadlessSessionDriver(host);
+        // The worktrees of sessions are made where `alta session create --worktree` makes them, under the settings of the user.
+        _worktrees = new Lazy<GitWorktreeService>(() => new GitWorktreeService(host.CatalogOptions, new CodeAltaConfigStore(host.CatalogOptions)),
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     /// <inheritdoc />
@@ -57,7 +63,7 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
             if (opened is null) return refusal! with { Warning = warning };
             session = opened;
             return await AskCoreAsync(opened, request.RunId, request.StepId, request.Prompt, request.Schema, request.Timeout, clock, cancellationToken).ConfigureAwait(false)
-                with { Warning = warning };
+                with { Warning = warning, WorktreeFolder = opened.Worktree?.Folder, WorktreeBranch = opened.Worktree?.Branch };
         }
         finally
         {
@@ -75,7 +81,12 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         var (opened, refusal, warning) = await OpenCoreAsync(parentSessionId, request, state, cancellationToken).ConfigureAwait(false);
         if (opened is null) return refusal! with { Warning = warning };
         state.Kept[opened.SessionId] = (opened, request.StepId);
-        return new CodeModeAgentResult(opened.SessionId, true, "opened", null, null, SessionUsageTotals.None, TimeSpan.Zero) { Warning = warning };
+        return new CodeModeAgentResult(opened.SessionId, true, "opened", null, null, SessionUsageTotals.None, TimeSpan.Zero)
+        {
+            Warning = warning,
+            WorktreeFolder = opened.Worktree?.Folder,
+            WorktreeBranch = opened.Worktree?.Branch,
+        };
     }
 
     /// <inheritdoc />
@@ -167,9 +178,60 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
                 warning = $"tier `{ModelTiers.NameOf(askedTier)}` is not set up: its sessions use this session's model ({ModelRefOf(parent) ?? parent.ResolvedProviderKey}).";
         }
 
-        var opened = await _driver.OpenAsync(new HeadlessSessionRequest
+        // A child works in the project of its parent, in the worktree of its parent, or in a new one of its own when asked.
+        var project = parent.ProjectRef is { } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
+        GitWorktreeCreation? worktree = null;
+        if (request.Worktree)
         {
-            ProjectFolder = parent.WorktreeDirectory ?? parent.WorkingDirectory,
+            if (project is null) return Refused("A worktree is a checkout of a project: the session that runs the script has none. Leave `worktree` out.");
+            if (request.WorktreeBase is { } baseReference && !GitWorktreeService.IsReferenceName(baseReference))
+                return Refused($"'{baseReference}' is not a name of a branch or a commit: `base` is the one the worktree starts from.");
+            // The files are the session's to write: a session without the shell, or in a sandbox, has git run none of its hooks.
+            var withoutHooks = (await runtime.GetDisabledToolsAsync(parentSessionId, cancellationToken).ConfigureAwait(false)).Contains(PromptToolConditions.ShellCommand)
+                || (await runtime.GetSessionSandboxAsync(parentSessionId, cancellationToken).ConfigureAwait(false)).IsSandboxed;
+            worktree = await _worktrees.Value.CreateAsync(project, request.WorktreeBase, progress: null, withoutHooks, cancellationToken).ConfigureAwait(false);
+            if (!worktree.Succeeded)
+                return Refused($"The worktree could not be created ({worktree.Status}){(worktree.Message is { Length: > 0 } why ? ": " + why : ".")}");
+        }
+
+        HeadlessSessionOpenResult opened;
+        try
+        {
+            opened = await OpenChildAsync(parent, project, worktree?.Folder ?? (project is null ? null : parent.WorktreeDirectory), request, tier, parentSessionId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception) when (worktree is not null)
+        {
+            await RemoveUnusedWorktreeAsync(project!, worktree).ConfigureAwait(false);
+            throw;
+        }
+
+        if (opened.Session is not { } created)
+        {
+            if (worktree is not null) await RemoveUnusedWorktreeAsync(project!, worktree).ConfigureAwait(false);
+            return (null, new(null, false, "refused", null, opened.Message ?? $"The session could not be created ({opened.Status}).", SessionUsageTotals.None, TimeSpan.Zero), warning);
+        }
+
+        _host.CodeModeRuns.Record(request.RunId, AgentWorkflowEventKind.SessionStarted, record => record with
+        {
+            ChildSessionId = created.SessionId,
+            StepId = request.StepId,
+            Title = request.Title ?? created.Descriptor.Title,
+            ProviderKey = created.ProviderKey,
+            ModelId = created.ModelId,
+        });
+        return (new KeptSession(created) { Worktree = worktree }, null, warning);
+
+        static (KeptSession?, CodeModeAgentResult?, string?) Refused(string message) => (null, new(null, false, "refused", null, message, SessionUsageTotals.None, TimeSpan.Zero), null);
+    }
+
+    private Task<HeadlessSessionOpenResult> OpenChildAsync(SessionViewDescriptor parent, ProjectDescriptor? project, string? worktreeDirectory, CodeModeAgentRequest request,
+        ModelTier? tier, string parentSessionId, CancellationToken cancellationToken)
+    {
+        var runtime = _host.RuntimeService;
+        return _driver.OpenAsync(new HeadlessSessionRequest
+        {
+            ProjectFolder = project?.ProjectPath ?? parent.WorktreeDirectory ?? parent.WorkingDirectory,
+            WorktreeDirectory = worktreeDirectory,
             ModelRef = request.ModelRef ?? (tier is null ? ModelRefOf(parent) : null),
             Tier = tier,
             Reasoning = request.Effort ?? (request.ModelRef is null && tier is null ? parent.ReasoningEffort : null),
@@ -187,18 +249,19 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
                 PromptProvenance = AgentPromptProvenance.Workflow,
                 CreatedAt = DateTimeOffset.UtcNow,
             },
-        }, cancellationToken).ConfigureAwait(false);
-        if (opened.Session is not { } created)
-            return (null, new(null, false, "refused", null, opened.Message ?? $"The session could not be created ({opened.Status}).", SessionUsageTotals.None, TimeSpan.Zero), warning);
-        _host.CodeModeRuns.Record(request.RunId, AgentWorkflowEventKind.SessionStarted, record => record with
-        {
-            ChildSessionId = created.SessionId,
-            StepId = request.StepId,
-            Title = request.Title ?? created.Descriptor.Title,
-        });
-        return (new KeptSession(created), null, warning);
+        }, cancellationToken);
+    }
 
-        static (KeptSession?, CodeModeAgentResult?, string?) Refused(string message) => (null, new(null, false, "refused", null, message, SessionUsageTotals.None, TimeSpan.Zero), null);
+    // Nothing was written there yet: the checkout no session will use goes with its branch, and the failure stays what it is.
+    private async Task RemoveUnusedWorktreeAsync(ProjectDescriptor project, GitWorktreeCreation worktree)
+    {
+        try
+        {
+            await _worktrees.Value.RemoveAsync(project.ProjectPath, worktree.Root!, force: false, deleteBranch: true, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private async Task<CodeModeAgentResult> AskCoreAsync(HeadlessSession session, string runId, string? stepId, string prompt, JsonElement? schema, TimeSpan? timeout,
@@ -284,6 +347,9 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
     private sealed class KeptSession(HeadlessSession session)
     {
         public HeadlessSession Session { get; } = session;
+
+        // The worktree made for the session, or null; it stays when the session closes, with the work on its branch.
+        public GitWorktreeCreation? Worktree { get; init; }
 
         public SemaphoreSlim Gate { get; } = new(1, 1);
 

@@ -678,6 +678,12 @@ public sealed record AgentWorkflowEvent(
     /// <summary>Gets the session the script started, for the records of a session.</summary>
     public string? ChildSessionId { get; init; }
 
+    /// <summary>Gets the provider the session the script started runs on, for the start of a session.</summary>
+    public string? ProviderKey { get; init; }
+
+    /// <summary>Gets the model the session the script started runs with, for the start of a session.</summary>
+    public string? ModelId { get; init; }
+
     /// <summary>Gets how it ended (<c>completed</c>, <c>failed</c>, <c>cancelled</c>...), for the records of an end.</summary>
     public string? Status { get; init; }
 

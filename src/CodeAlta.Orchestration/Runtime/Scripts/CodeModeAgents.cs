@@ -31,6 +31,15 @@ public sealed record CodeModeAgentRequest(string Prompt)
     /// <summary>Gets the sandbox profile, or null for the one the script's session gives the sessions it creates.</summary>
     public string? Sandbox { get; init; }
 
+    /// <summary>
+    /// Gets whether the session works in a new git worktree of the project of the script's session, on a branch of its own
+    /// (<c>alta/&lt;name&gt;</c>); false for the folder that session works in.
+    /// </summary>
+    public bool Worktree { get; init; }
+
+    /// <summary>Gets the branch or commit a new worktree starts from, or null for the commit the project is on.</summary>
+    public string? WorktreeBase { get; init; }
+
     /// <summary>Gets the time the session is given, or null for no limit but the run's.</summary>
     public TimeSpan? Timeout { get; init; }
 
@@ -59,6 +68,12 @@ public sealed record CodeModeAgentResult(string? SessionId, bool Succeeded, stri
 
     /// <summary>Gets what the script is told in its output about how the session was started, such as a tier that is not set up; null for nothing.</summary>
     public string? Warning { get; init; }
+
+    /// <summary>Gets the folder of the worktree the session works in, when the request asked for one; null otherwise.</summary>
+    public string? WorktreeFolder { get; init; }
+
+    /// <summary>Gets the branch of the worktree the session works in, when the request asked for one; null otherwise.</summary>
+    public string? WorktreeBranch { get; init; }
 }
 
 /// <summary>

@@ -404,8 +404,24 @@ public sealed class CodeModeRunStore
         var path = Path.Combine(folder, RunFile);
         var temporary = path + ".tmp";
         File.WriteAllBytes(temporary, buffer.ToArray());
-        File.Move(temporary, path, overwrite: true);
+        // On Windows a file being read cannot be replaced: a list of the runs that reads it as the run ends would leave
+        // the run without its end. A reader holds it for a moment only.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(temporary, path, overwrite: true);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException && attempt < MoveAttempts)
+            {
+                Thread.Sleep(attempt * 5);
+            }
+        }
     }
+
+    // How many times the run file is moved into place before its write fails: about one second in all.
+    private const int MoveAttempts = 20;
 
     private static List<CodeModeReplayStep> ReadSteps(string path)
     {

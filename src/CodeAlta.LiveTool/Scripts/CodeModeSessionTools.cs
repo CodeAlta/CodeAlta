@@ -7,14 +7,25 @@ namespace CodeAlta.LiveTool.Scripts;
 
 /// <summary>
 /// Adds the tools of Code Mode to the tools a host gives a session, while Code Mode is on: a host asks again at every
-/// send, so a change of the setting reaches a session at its next send.
+/// send, so a change of the setting reaches a session at its next send. Its runs follow its mode
+/// (<see cref="CodeModeRunRegistry.Mode"/>), which the instructions of the sessions read.
 /// </summary>
-/// <param name="options">The options of the host's Code Mode tools.</param>
-/// <param name="mode">Says the mode of Code Mode now: <c>off</c>, <c>on</c>, or <c>only</c>.</param>
-public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<string> mode)
+public sealed class CodeModeSessionTools
 {
-    private readonly CodeModeToolOptions _options = options ?? throw new ArgumentNullException(nameof(options));
-    private readonly Func<string> _mode = mode ?? throw new ArgumentNullException(nameof(mode));
+    private readonly CodeModeToolOptions _options;
+    private readonly Func<string> _mode;
+
+    /// <summary>Creates the tools of a host.</summary>
+    /// <param name="options">The options of the host's Code Mode tools.</param>
+    /// <param name="mode">Says the mode of Code Mode now: <c>off</c>, <c>on</c>, or <c>only</c>.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public CodeModeSessionTools(CodeModeToolOptions options, Func<string> mode)
+    {
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+        _mode = mode ?? throw new ArgumentNullException(nameof(mode));
+        // The instructions of a session speak of exec when these tools give it.
+        _options.Runs.Mode = mode;
+    }
 
     /// <summary>Gets the options of the host's Code Mode tools.</summary>
     public CodeModeToolOptions Options => _options;
@@ -113,13 +124,8 @@ public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<strin
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(tools);
-        var mode = _mode();
         // The session of an automation that runs a script has exec, whatever the setting says.
-        if (mode is not ("on" or "only") && _options.Runs.RequiresCodeMode(caller.SourceSessionIdProvider?.Invoke() ?? caller.SourceSessionId))
-        {
-            mode = "on";
-        }
-
+        var mode = CodeModeRunRegistry.EffectiveMode(_mode(), _options.Runs.RequiresCodeMode(caller.SourceSessionIdProvider?.Invoke() ?? caller.SourceSessionId));
         return mode switch
         {
             "on" => [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options), .. ScriptTools(dispatcher, caller, tools)],

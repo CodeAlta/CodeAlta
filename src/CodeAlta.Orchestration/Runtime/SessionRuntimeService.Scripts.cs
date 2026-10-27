@@ -18,6 +18,11 @@ public interface ISessionScriptRuns
     /// <param name="sessionId">The session.</param>
     /// <returns>A task that completes when they ended.</returns>
     Task StopAsync(string sessionId);
+
+    /// <summary>Gets the mode of Code Mode a session has now: <c>off</c>, <c>on</c> (it has <c>exec</c>) or <c>only</c> (<c>exec</c> takes over its tools).</summary>
+    /// <param name="sessionId">The session, or null.</param>
+    /// <returns>The mode.</returns>
+    string CodeModeOf(string? sessionId);
 }
 
 public sealed partial class SessionRuntimeService
