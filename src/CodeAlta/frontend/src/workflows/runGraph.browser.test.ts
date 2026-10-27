@@ -188,6 +188,23 @@ test("among 30 runs, a graph is drawn only near the view, in a place of its size
   }, { ...options, width: 900, height: 650 });
 });
 
+// The editor of the composer types through an element that is no field (an EditContext): a graph on the screen, in a block
+// or in a tab, must leave its keys alone.
+test("a graph shown leaves Space and the other keys to an editor that is no field", { skip: !edge, timeout: 240_000 }, async () => {
+  await withCanvas(async page => {
+    const typed = `(() => { const editor = document.createElement('div'); editor.tabIndex = 0; document.body.append(editor); editor.focus();
+      const cancelled = [' ', 'Backspace', 'Shift', 'Meta', 'Control'].filter(key => !editor.dispatchEvent(new KeyboardEvent('keydown',
+        { key, code: key === ' ' ? 'Space' : key, bubbles: true, cancelable: true })));
+      editor.remove(); return cancelled; })()`;
+    await page.evaluate(`runFixture.renderBlock(1180, "research")`);
+    await drawn(page, 3);
+    assert.deepEqual(await page.evaluate(typed), [], "no key cancelled beside a block");
+    await page.evaluate(`runFixture.renderTab()`);
+    await page.until(`document.querySelectorAll('.workflow-run-graph .workflow-step').length === 3`, "the graph of the tab");
+    assert.deepEqual(await page.evaluate(typed), [], "no key cancelled beside a tab");
+  }, options);
+});
+
 for (const light of [false, true]) {
   const theme = light ? "light" : "dark";
   test(`the tab of a run: its graph pans and zooms with a minimap, its sessions, its timeline, Copy as Mermaid (${theme})`, { skip: !edge, timeout: 240_000 }, async () => {

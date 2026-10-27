@@ -47,8 +47,11 @@ export function WorkflowFlow({ elements, mode, available = 0, onLayout, label }:
     data: { state: edge.state, animated: edge.animated }, selectable: false, focusable: false })), [elements]);
   const told = useRef(onLayout); told.current = onLayout;
   useEffect(() => { told.current?.(layout); }, [layout]);
+  // No key of React Flow: each one it has listens on the whole window and cancels its key outside the fields it knows, which
+  // the editor of the composer is not one of (Space would no longer type there while a graph is shown). A drag pans the tab.
   const common = { nodes, edges, nodeTypes, edgeTypes, nodesDraggable: false, nodesConnectable: false, elementsSelectable: false, nodesFocusable: false,
-    edgesFocusable: false, zoomOnDoubleClick: false, zoomOnScroll: false, panOnScroll: false, preventScrolling: false, "aria-label": label } as const;
+    edgesFocusable: false, zoomOnDoubleClick: false, zoomOnScroll: false, panOnScroll: false, preventScrolling: false,
+    panActivationKeyCode: null, selectionKeyCode: null, multiSelectionKeyCode: null, deleteKeyCode: null, zoomActivationKeyCode: null, "aria-label": label } as const;
   if (mode === "block") {
     const fit = blockFit(available, layout);
     return <div className="workflow-flow" data-mode="block" style={{ width: fit.width, height: fit.height }}>
