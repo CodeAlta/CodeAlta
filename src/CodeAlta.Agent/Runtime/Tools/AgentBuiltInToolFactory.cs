@@ -182,7 +182,7 @@ public static class AgentBuiltInToolFactory
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "read_file",
-                    $"Read a local text file by line number. Offsets are 1-based; use a negative offset to count from the end (-1 is the last line). Offsets past EOF return an empty text result, and oversized negative offsets clamp to line 1. Omitting limit returns up to {options.DefaultReadFileLineLimit} lines by default.",
+                    $"Read a local text file by line number. Offsets are 1-based; use a negative offset to count from the end (-1 is the last line). Offsets past EOF return an empty text result, and oversized negative offsets clamp to line 1. Omitting limit returns up to {options.DefaultReadFileLineLimit} lines by default.{DescribeReadFileCharacterLimits(options)}",
                     CreateReadFileSchema(options)) { RunsInParallel = true, Idempotent = true, OutputSchema = ReadFileOutputSchema },
                 (invocation, cancellationToken) => ReadFileAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
@@ -201,7 +201,7 @@ public static class AgentBuiltInToolFactory
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "grep",
-                    $"Search one or more files or directories for line-based matches using a .NET regular expression. Recurses into directories, defaults to case-insensitive matching, skips likely-binary files, accepts one or more optional globs, and returns '(no matches)' when nothing matches.",
+                    $"Search one or more files or directories for line-based matches using a .NET regular expression. Recurses into directories, defaults to case-insensitive matching, skips likely-binary files, accepts one or more optional globs, and returns '(no matches)' when nothing matches.{(options.MaxGrepLineCharacters > 0 ? FormattableString.Invariant($" A matching line longer than {options.MaxGrepLineCharacters} characters is cut around its first match.") : string.Empty)}",
                     CreateGrepSchema(options)) { RunsInParallel = true, Idempotent = true },
                 (invocation, cancellationToken) => GrepAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
@@ -213,7 +213,7 @@ public static class AgentBuiltInToolFactory
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "shell_command",
-                    "Execute a local shell command or short shell script using the platform shell, subject to host approval. Some hosts may auto-approve. Returns exit_code, working_directory, stdout, and stderr as emitted by the shell and child processes; child commands may still include ANSI/control sequences. On Windows, pwsh runs with -NoProfile and preserves the final external command exit code when that command fails.",
+                    $"Execute a local shell command or short shell script using the platform shell, subject to host approval. Some hosts may auto-approve. Returns exit_code, working_directory, stdout, and stderr as emitted by the shell and child processes; child commands may still include ANSI/control sequences. On Windows, pwsh runs with -NoProfile and preserves the final external command exit code when that command fails.{DescribeShellCommandOutputLimit(options)}",
                     CreateShellCommandSchema()) { OutputSchema = ShellCommandOutputSchema },
                 (invocation, cancellationToken) => ShellCommandAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
@@ -291,10 +291,13 @@ public static class AgentBuiltInToolFactory
         var limit = Math.Clamp(requestedLimit, 1, options.MaxReadFileLineLimit);
         var startLine = offset >= 1 ? offset : GetStartLineFromEnd(resolvedPath, offset, cancellationToken);
 
-        var lines = new List<string>(limit);
+        // The model is given numbered lines within its character limits; a script receives the lines read whole.
+        var text = new StringBuilder();
         var raw = new StringBuilder();
+        var lineCount = 0;
         var lineNumber = 0;
         var more = false;
+        int? stoppedAtLine = null;
         foreach (var line in File.ReadLines(resolvedPath))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -304,13 +307,32 @@ public static class AgentBuiltInToolFactory
                 continue;
             }
 
-            if (lines.Count >= limit)
+            if (lineCount >= limit)
             {
                 more = true;
                 break;
             }
 
-            lines.Add($"{lineNumber,5}: {line}");
+            if (stoppedAtLine is null)
+            {
+                var numbered = $"{lineNumber,5}: {CapLine(line, options.MaxReadFileLineCharacters)}";
+                if (lineCount > 0 && options.MaxReadFileCharacters > 0
+                    && text.Length + Environment.NewLine.Length + numbered.Length > options.MaxReadFileCharacters)
+                {
+                    stoppedAtLine = lineNumber;
+                }
+                else
+                {
+                    if (lineCount > 0)
+                    {
+                        text.Append(Environment.NewLine);
+                    }
+
+                    text.Append(numbered);
+                }
+            }
+
+            lineCount++;
             if (raw.Length > 0)
             {
                 raw.Append('\n');
@@ -319,13 +341,34 @@ public static class AgentBuiltInToolFactory
             raw.Append(line);
         }
 
+        if (stoppedAtLine is { } nextLine)
+        {
+            text.Append(Environment.NewLine).Append(FormattableString.Invariant(
+                $"[read_file stopped at {options.MaxReadFileCharacters:#,0} characters: read on with offset={nextLine}.]"));
+        }
+
         return Task.FromResult(new AgentToolResult(
             true,
-            [new AgentToolResultItem.Text(string.Join(Environment.NewLine, lines))])
+            [new AgentToolResultItem.Text(text.ToString())])
         {
-            Structured = CreateReadFileValue(resolvedPath, startLine, startLine + lines.Count - 1, raw.ToString(), more),
+            Structured = CreateReadFileValue(resolvedPath, startLine, startLine + lineCount - 1, raw.ToString(), more),
         });
     }
+
+    private static string DescribeReadFileCharacterLimits(AgentBuiltInToolOptions options)
+        => (options.MaxReadFileLineCharacters > 0 ? FormattableString.Invariant($" Lines longer than {options.MaxReadFileLineCharacters} characters are cut.") : string.Empty)
+            + (options.MaxReadFileCharacters > 0 ? FormattableString.Invariant($" A read stops before {options.MaxReadFileCharacters} characters and names the offset to read on from.") : string.Empty);
+
+    private static string DescribeShellCommandOutputLimit(AgentBuiltInToolOptions options)
+        => options.MaxShellCommandOutputCharacters > 0
+            ? FormattableString.Invariant($" An output longer than {options.MaxShellCommandOutputCharacters} characters keeps the head and the tail of each stream, and the whole output is saved to a file the result names.")
+            : string.Empty;
+
+    // A line of read_file longer than the limit keeps its start, and says how long it is.
+    private static string CapLine(string line, int maxCharacters)
+        => maxCharacters <= 0 || line.Length <= maxCharacters
+            ? line
+            : string.Concat(line.AsSpan(0, maxCharacters), FormattableString.Invariant($"… [line cut: {line.Length:#,0} characters]"));
 
     // What a script of Code Mode receives for a read: the text of the lines read as it is, without their numbers.
     private static JsonElement CreateReadFileValue(string path, int startLine, int endLine, string content, bool more)
@@ -545,7 +588,7 @@ public static class AgentBuiltInToolFactory
                         continue;
                     }
 
-                    SearchFileLines(file.FullPath, file.DisplayPath, regex, maxMatches, matches, cancellationToken);
+                    SearchFileLines(file.FullPath, file.DisplayPath, regex, maxMatches, options.MaxGrepLineCharacters, matches, cancellationToken);
                 }
                 catch (IOException)
                 {
@@ -574,7 +617,55 @@ public static class AgentBuiltInToolFactory
 
         return Task.FromResult(new AgentToolResult(
             true,
-            [new AgentToolResultItem.Text(matches.Count == 0 ? "(no matches)" : string.Join(Environment.NewLine, matches))]));
+            [new AgentToolResultItem.Text(matches.Count == 0 ? "(no matches)" : JoinGrepMatches(matches, options.MaxGrepCharacters))]));
+    }
+
+    // The matches that fit the limit, then a line that says how many were left out.
+    private static string JoinGrepMatches(List<string> matches, int maxCharacters)
+    {
+        var builder = new StringBuilder();
+        var shown = 0;
+        foreach (var match in matches)
+        {
+            var length = (shown > 0 ? Environment.NewLine.Length : 0) + match.Length;
+            if (shown > 0 && maxCharacters > 0 && builder.Length + length > maxCharacters)
+            {
+                break;
+            }
+
+            if (shown > 0)
+            {
+                builder.Append(Environment.NewLine);
+            }
+
+            builder.Append(match);
+            shown++;
+        }
+
+        if (shown < matches.Count)
+        {
+            builder.Append(Environment.NewLine).Append(FormattableString.Invariant(
+                $"[grep stopped at {maxCharacters:#,0} characters: {matches.Count - shown:#,0} more of the first {matches.Count:#,0} matches left out. Narrow the pattern, the path or the glob.]"));
+        }
+
+        return builder.ToString();
+    }
+
+    // A matching line longer than the limit keeps the part around its first match, and says how long it is.
+    private static string CapMatchingLine(string line, Match match, int maxCharacters)
+    {
+        if (maxCharacters <= 0 || line.Length <= maxCharacters)
+        {
+            return line;
+        }
+
+        var start = Math.Clamp(match.Index - (maxCharacters / 4), 0, line.Length - maxCharacters);
+        var end = start + maxCharacters;
+        return string.Concat(
+            start > 0 ? "…" : string.Empty,
+            line.AsSpan(start, maxCharacters),
+            end < line.Length ? "…" : string.Empty,
+            FormattableString.Invariant($" [line cut: {line.Length:#,0} characters]"));
     }
 
     private static async Task<AgentToolResult> WebGetAsync(
@@ -795,16 +886,133 @@ public static class AgentBuiltInToolFactory
         var stderr = (await stderrTask.ConfigureAwait(false)).Trim();
         var output = FormatShellCommandOutput(process.ExitCode, stdout, stderr, workdir);
         var structured = CreateShellCommandValue(process.ExitCode, stdout, stderr, workdir);
+        // A long output keeps its head and tail for the model; the user and a script have the whole of it.
+        string? display = null;
+        if (options.MaxShellCommandOutputCharacters > 0 && output.Length > options.MaxShellCommandOutputCharacters)
+        {
+            display = output;
+            output = await CutShellCommandOutputAsync(options, invocation.ToolCallId, process.ExitCode, stdout, stderr, workdir, output, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         if (process.ExitCode != 0)
         {
             return new AgentToolResult(
                 false,
                 [new AgentToolResultItem.Text(output)],
                 $"shell_command exited with code {process.ExitCode}.")
-            { Structured = structured };
+            { Structured = structured, Display = display };
         }
 
-        return new AgentToolResult(true, [new AgentToolResultItem.Text(output)]) { Structured = structured };
+        return new AgentToolResult(true, [new AgentToolResultItem.Text(output)]) { Structured = structured, Display = display };
+    }
+
+    private static async Task<string> CutShellCommandOutputAsync(
+        AgentBuiltInToolOptions options,
+        string toolCallId,
+        int exitCode,
+        string stdout,
+        string stderr,
+        string workdir,
+        string output,
+        CancellationToken cancellationToken)
+    {
+        string note;
+        try
+        {
+            var path = await SaveToolOutputAsync(options, "shell", toolCallId, output, cancellationToken).ConfigureAwait(false);
+            note = FormattableString.Invariant(
+                $"the output has {output.Length:#,0} characters: the head and the tail of each stream are shown, and the whole output is in {path}; read it with read_file (offset, limit) or grep.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            note = FormattableString.Invariant(
+                $"the output has {output.Length:#,0} characters: the head and the tail of each stream are shown; the whole output could not be saved ({ex.Message}).");
+        }
+
+        var overhead = FormatShellCommandOutput(exitCode, string.Empty, string.Empty, workdir, note).Length;
+        // Each marker of a cut takes about 80 characters of the budget.
+        var budget = Math.Max(options.MaxShellCommandOutputCharacters - overhead - 200, 0);
+        var stdoutBudget = budget;
+        var stderrBudget = budget;
+        if (stdout.Length + stderr.Length > budget)
+        {
+            var half = budget / 2;
+            (stdoutBudget, stderrBudget) = stdout.Length <= half ? (stdout.Length, budget - stdout.Length)
+                : stderr.Length <= half ? (budget - stderr.Length, stderr.Length)
+                : (half, budget - half);
+        }
+
+        return FormatShellCommandOutput(exitCode, KeepHeadAndTail(stdout, stdoutBudget), KeepHeadAndTail(stderr, stderrBudget), workdir, note);
+    }
+
+    // Keeps two fifths of the budget from the start of the text and the rest from its end, cut at line ends where it can:
+    // what a command prints last (errors, a summary) often matters most.
+    private static string KeepHeadAndTail(string text, int maxCharacters)
+    {
+        if (text.Length <= maxCharacters)
+        {
+            return text;
+        }
+
+        var headLength = maxCharacters * 2 / 5;
+        var tailLength = maxCharacters - headLength;
+        var headEnd = text.LastIndexOf('\n', Math.Max(headLength - 1, 0));
+        if (headEnd < headLength / 2)
+        {
+            headEnd = headLength;
+        }
+
+        var tailStart = text.IndexOf('\n', text.Length - tailLength);
+        if (tailStart < 0 || tailStart - (text.Length - tailLength) > tailLength / 2)
+        {
+            tailStart = text.Length - tailLength;
+        }
+        else
+        {
+            tailStart++;
+        }
+
+        var cut = text.AsSpan(headEnd, tailStart - headEnd);
+        var cutLines = cut.Count('\n');
+        return string.Concat(
+            text.AsSpan(0, headEnd).TrimEnd(),
+            FormattableString.Invariant($"{Environment.NewLine}[... {cut.Length:#,0} characters ({cutLines:#,0} lines) cut ...]{Environment.NewLine}"),
+            text.AsSpan(tailStart));
+    }
+
+    // Saves the whole output of a call to a file of the session's tool output folder, and returns its path.
+    private static async Task<string> SaveToolOutputAsync(
+        AgentBuiltInToolOptions options,
+        string toolName,
+        string toolCallId,
+        string output,
+        CancellationToken cancellationToken)
+    {
+        var folder = options.ResolveToolOutputDirectoryAsync is { } resolve
+            ? await resolve(cancellationToken).ConfigureAwait(false)
+            : null;
+        folder ??= Path.Combine(Path.GetTempPath(), "codealta", "tool-output", SafeFileName(options.SessionId));
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, $"{toolName}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{SafeFileName(toolCallId)}.txt");
+        await File.WriteAllTextAsync(path, output, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken).ConfigureAwait(false);
+        return path;
+    }
+
+    private static string SafeFileName(string value)
+    {
+        var builder = new StringBuilder(Math.Min(value.Length, 64));
+        foreach (var character in value)
+        {
+            if (builder.Length == 64)
+            {
+                break;
+            }
+
+            builder.Append(char.IsAsciiLetterOrDigit(character) || character is '-' or '_' ? character : '_');
+        }
+
+        return builder.Length == 0 ? Guid.NewGuid().ToString("N") : builder.ToString();
     }
 
     private static async Task<AgentToolResult> WriteFileAsync(
@@ -1528,6 +1736,7 @@ public static class AgentBuiltInToolFactory
         string displayPath,
         Regex regex,
         int maxMatches,
+        int maxLineCharacters,
         List<string> matches,
         CancellationToken cancellationToken)
     {
@@ -1538,12 +1747,13 @@ public static class AgentBuiltInToolFactory
         {
             cancellationToken.ThrowIfCancellationRequested();
             lineNumber++;
-            if (!regex.IsMatch(line))
+            var match = regex.Match(line);
+            if (!match.Success)
             {
                 continue;
             }
 
-            matches.Add($"{displayPath}:{lineNumber}: {line}");
+            matches.Add($"{displayPath}:{lineNumber}: {CapMatchingLine(line, match, maxLineCharacters)}");
             if (matches.Count >= maxMatches)
             {
                 break;
@@ -1837,11 +2047,16 @@ public static class AgentBuiltInToolFactory
         }
         """).RootElement.Clone();
 
-    private static string FormatShellCommandOutput(int exitCode, string stdout, string stderr, string workdir)
+    private static string FormatShellCommandOutput(int exitCode, string stdout, string stderr, string workdir, string? truncation = null)
     {
         var builder = new StringBuilder();
         builder.AppendLine($"exit_code: {exitCode}");
         builder.AppendLine($"working_directory: {workdir}");
+        if (truncation is not null)
+        {
+            builder.AppendLine($"output_truncated: {truncation}");
+        }
+
         builder.AppendLine("stdout:");
         builder.AppendLine(string.IsNullOrEmpty(stdout) ? "(empty)" : stdout);
         builder.AppendLine("stderr:");

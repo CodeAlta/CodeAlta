@@ -1715,6 +1715,70 @@ public sealed partial class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_SendAsync_ShowsTheDisplayTextOfAToolAndSendsTheModelItsItems()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-tool-display");
+        var state = CreateState("session-tool-display");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        using var schema = JsonDocument.Parse("""{"type":"object"}""");
+        using var toolArguments = JsonDocument.Parse("""{}""");
+        string? sentToModel = null;
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                (_, _, _) => Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new AgentConversationMessage(
+                        AgentConversationRole.Assistant,
+                        [new AgentMessagePart.ToolCall("call-run", "run_it", toolArguments.RootElement.Clone())]),
+                }),
+                (request, _, _) =>
+                {
+                    var toolResult = Assert.IsInstanceOfType<AgentMessagePart.ToolResult>(request.Conversation[^1].Parts.Single());
+                    sentToModel = Assert.IsInstanceOfType<AgentToolResultItem.Text>(toolResult.Result.Items.Single()).Value;
+                    Assert.IsNull(toolResult.Result.Display);
+                    return Task.FromResult(new AgentTurnResponse
+                    {
+                        AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]),
+                    });
+                }),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                Tools =
+                [
+                    new AgentToolDefinition(
+                        new AgentToolSpec("run_it", "Run it", schema.RootElement.Clone()),
+                        static (_, _) => Task.FromResult(
+                            new AgentToolResult(true, [new AgentToolResultItem.Text("head [cut] tail")]) { Display = "head middle tail" })),
+                ],
+            });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Run it") }).ConfigureAwait(false);
+
+        Assert.AreEqual("head [cut] tail", sentToModel);
+        var history = await session.GetHistoryAsync().ConfigureAwait(false);
+        var shown = history.OfType<AgentContentCompletedEvent>().Single(static evt => evt.Kind == AgentContentKind.ToolOutput);
+        Assert.AreEqual("head middle tail", shown.Content);
+        // The whole text is the output alone: the tool message and the details of the call hold what the model has.
+        Assert.IsFalse(history.OfType<AgentRawEvent>().Any(static evt => evt.Raw.GetRawText().Contains("head middle tail", StringComparison.Ordinal)));
+        Assert.IsFalse(shown.Details!.Value.GetRawText().Contains("head middle tail", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task AgentSession_SendAsync_TrustsAWholeRequestCountSmallerThanTheLocalEstimate()
     {
         // The estimate made after the tool results counts more than the provider does (as on GPT models): the count of

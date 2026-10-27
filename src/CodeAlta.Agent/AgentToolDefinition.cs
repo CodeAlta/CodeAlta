@@ -242,6 +242,13 @@ public sealed record AgentToolResult(
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Structured { get; init; }
+
+    /// <summary>
+    /// Gets the text a host shows the user for the call when it is not the text of <see cref="Items"/>, or null: the
+    /// whole output of a command whose result keeps only its head and its tail for the model. The model is never sent it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Display { get; init; }
 }
 
 /// <summary>
