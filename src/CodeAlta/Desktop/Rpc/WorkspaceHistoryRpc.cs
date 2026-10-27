@@ -158,6 +158,12 @@ internal sealed partial class WorkspaceService
                     text = activity.Message; details = HistoryImageProjection.ActivityDetails(activity.Details);
                     break;
                 case AgentNotesEvent notes: type = "notes"; kind = notes.Kind.ToString(); text = notes.Markdown; break;
+                // A record of a run of a script: the card of its exec call reads it (activity: the call, name: the run).
+                case AgentWorkflowEvent workflow:
+                    type = "workflow"; kind = workflow.Kind.ToString(); phase = workflow.Status; activityId = workflow.ChildSessionId ?? workflow.StepId;
+                    parentId = workflow.CallId; name = workflow.WorkflowRunId; text = workflow.Title ?? workflow.Message;
+                    details = workflow.ToJson();
+                    break;
                 case AgentErrorEvent error:
                     type = "error"; text = error.Message;
                     // A provider without a Claude Code CLI: the card of the error proposes its download.

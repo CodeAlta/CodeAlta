@@ -193,6 +193,13 @@ registered through `AgentToolInvocation.RunTools` and offered on the next model 
   each call by the `IAgentBuiltInToolRouter` of its attachment, and what it does with `alta`, plugins and MCP servers is
   limited to what keeps it there ([sandbox](sandbox.md)). The permissions above still apply inside the sandbox; the
   sandbox is what holds when a permission was given to a prompt injected into the session.
+- **Calls of scripts.** A tool call may call the other tools of its run through `AgentToolInvocation.Tools`
+  (`IAgentRunToolInvoker`): the call takes the run's own handler, so every rule above applies to it as to a call of the
+  model. It is recorded as an activity of the calling call (`ParentActivityId`), never as a message of the
+  conversation, so resume, forks and compaction see only the call of the model. These records are shown at once and
+  written to the journal together, at most 200 ms later and always before the calling call ends: a journal write
+  refreshes the cache row of the session, and a script can make hundreds of calls a second. `AgentToolSpec.Exposure`
+  keeps a tool from the model (`Scripts`) or from scripts (`Model`). See [Code Mode](codemode.md).
 
 ## System prompt and instructions
 

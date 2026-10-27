@@ -15,13 +15,14 @@ test("Ctrl+Tab and Ctrl+Shift+Tab go through the tabs of the window in the order
       await command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: name, code: name, windowsVirtualKeyCode: code, modifiers: flags });
       await command("Input.dispatchKeyEvent", { type: "keyUp", key: name, code: name, windowsVirtualKeyCode: code, modifiers: flags });
     };
-    const strip = (front: string) => ["one - Project", "Automations", "Work items", "Issues", "Canvases"].map(name => name === front ? `${name}*` : name);
+    const strip = (front: string) => ["one - Project", "Automations", "Work items", "Issues", "Workflows"].map(name => name === front ? `${name}*` : name);
     const inPrompt = `!!document.activeElement?.closest('#session-prompt')`;
 
     await until(`!!${session("one")} && ${session("one")}.getAttribute('aria-pressed')==='true'`, "the selected project with session one open");
     await press(session("one"), 2);
-    for (const tool of ["automations", "work", "issues", "canvases"]) await press(`document.querySelector('.activity-rail .activity-${tool}')`);
-    await shown(strip("Canvases"), "a session and four tools, the last one in front");
+    // Four tools whose buttons have room in the bar beside the Explorer.
+    for (const tool of ["automations", "work", "issues", "workflows"]) await press(`document.querySelector('.activity-rail .activity-${tool}')`);
+    await shown(strip("Workflows"), "a session and four tools, the last one in front");
 
     // From the prompt of the session: forward and backward, around the strip both ways.
     await press(title("one - Project"));
@@ -33,22 +34,22 @@ test("Ctrl+Tab and Ctrl+Shift+Tab go through the tabs of the window in the order
     await shown(strip("one - Project"), "Ctrl+Shift+Tab shows the tab before");
     await until(inPrompt, "the prompt has the keyboard again");
     await key("Tab", { shift: true });
-    await shown(strip("Canvases"), "Ctrl+Shift+Tab from the first tab goes around to the last one, without opening a new session");
+    await shown(strip("Workflows"), "Ctrl+Shift+Tab from the first tab goes around to the last one, without opening a new session");
     await key("Tab");
     await shown(strip("one - Project"), "Ctrl+Tab from the last tab goes around to the first one");
 
     // From the header of a tab: the same direction.
     for (const [shift, expected] of [[true, "Issues"], [false, "one - Project"]] as const) {
-      await press(title("Canvases"));
-      await shown(strip("Canvases"), "a click on the header of Canvases");
-      await evaluate(`${title("Canvases")}.closest('[role="tab"]').focus()`);
+      await press(title("Workflows"));
+      await shown(strip("Workflows"), "a click on the header of Workflows");
+      await evaluate(`${title("Workflows")}.closest('[role="tab"]').focus()`);
       await key("Tab", { shift });
-      await shown(strip(expected), `Ctrl+${shift ? "Shift+" : ""}Tab from the header of Canvases`);
+      await shown(strip(expected), `Ctrl+${shift ? "Shift+" : ""}Tab from the header of Workflows`);
     }
 
     // The other shortcuts of the same commands go the same way and open no tab either.
     await key("ArrowLeft", { alt: true });
-    await shown(strip("Canvases"), "Ctrl+Alt+Left from the session shows the tab before it, around the strip");
+    await shown(strip("Workflows"), "Ctrl+Alt+Left from the session shows the tab before it, around the strip");
     await key("ArrowRight", { alt: true });
     await shown(strip("one - Project"), "Ctrl+Alt+Right");
     await key("PageDown");

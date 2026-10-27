@@ -126,6 +126,7 @@ public sealed class SplitInvarianceTests
         Assert.AreEqual(expected.FirstRecord, actual.FirstRecord, $"first record at {split}");
         Assert.AreEqual(expected.LastRecord, actual.LastRecord, $"last record at {split}");
         Assert.AreEqual(expected.HasHeader, actual.HasHeader);
+        Assert.AreEqual(expected.ScriptRunId, actual.ScriptRunId);
     }
 
     [TestMethod]
@@ -163,6 +164,28 @@ public sealed class SplitInvarianceTests
     public void SplittingASyntheticJournalAtEveryRecordBoundaryGivesTheSameFacts()
     {
         var journal = RichJournal();
+
+        AssertSplitsMatch(journal, Enumerable.Range(0, journal.Lines.Count + 1));
+    }
+
+    [TestMethod]
+    public void SplittingAJournalWithScriptsAtEveryRecordBoundaryGivesTheSameFacts()
+    {
+        // A run of a library script that asks, sleeps and ends after its turn; another that crosses a quarter hour; one that never ends.
+        var journal = ScriptFactsTests.ScriptJournal();
+        var start = JournalBuilder.Time(10);
+        journal.ModelChanged(start, "r2", "codex", "gpt-6.1-sol", "High")
+            .User(start.AddSeconds(1), "r2", "go on")
+            .ToolStarted(start.AddSeconds(2), "r2", "t2", "exec")
+            .Workflow(start.AddSeconds(3), Agent.AgentWorkflowEventKind.RunStarted, "run-2", record => record with { RecordsScripts = true }, callId: "t2")
+            .Workflow(start.AddSeconds(4), Agent.AgentWorkflowEventKind.WaitStarted, "run-2", record => record with { Status = "approval" }, callId: "t2")
+            .ToolDone(start.AddSeconds(5), "r2", "t2", "exec")
+            .Idle(start.AddSeconds(6), "r2")
+            .Workflow(start.AddMinutes(9), Agent.AgentWorkflowEventKind.WaitEnded, "run-2", record => record with { Status = "approval" }, callId: "t2")
+            .Workflow(start.AddMinutes(9).AddSeconds(1), Agent.AgentWorkflowEventKind.StepEnded, "run-2", record => record with { StepId = "apply", Status = "failed", Replayed = true }, callId: "t2")
+            .Workflow(start.AddMinutes(10), Agent.AgentWorkflowEventKind.RunEnded, "run-2", record => record with { Status = "failed", Message = "Stopped: by the user", DurationMs = 597_000, Calls = 3 }, callId: "t2")
+            .Workflow(start.AddMinutes(11), Agent.AgentWorkflowEventKind.RunStarted, "run-3", record => record with { RecordsScripts = true }, callId: "t3")
+            .Workflow(start.AddMinutes(11).AddSeconds(1), Agent.AgentWorkflowEventKind.ScriptLoaded, "run-3", record => record with { ScriptName = "nightly" }, callId: "t3");
 
         AssertSplitsMatch(journal, Enumerable.Range(0, journal.Lines.Count + 1));
     }

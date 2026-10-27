@@ -28,6 +28,12 @@ internal sealed record SessionStartModel(WorkItemSelection? Asked = null, WorkIt
 
     /// <summary>Gets the sandbox the session runs in: a profile, or <c>off</c>; null for what the settings give.</summary>
     public string? Sandbox { get; init; }
+
+    /// <summary>
+    /// Gets whether the session has the tools of Code Mode whatever the setting says: one that runs a script of the
+    /// library through <c>exec</c>.
+    /// </summary>
+    public bool CodeMode { get; init; }
 }
 
 /// <summary>What the user chose for a new session besides its model, as the form of the Agent chip chooses it.</summary>

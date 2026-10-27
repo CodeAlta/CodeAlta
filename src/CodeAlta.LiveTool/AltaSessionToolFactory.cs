@@ -371,4 +371,10 @@ public sealed record AltaSessionToolOptions
 
     /// <summary>Gets the default command timeout, when any.</summary>
     public TimeSpan? DefaultTimeout { get; init; }
+
+    /// <summary>
+    /// Gets what the space of the session has, when the host read it for this send; null when not known. The scripts of the
+    /// library a space limits are offered and run only where it has them.
+    /// </summary>
+    public CodeAlta.Catalog.SpaceFilter? Spaces { get; init; }
 }

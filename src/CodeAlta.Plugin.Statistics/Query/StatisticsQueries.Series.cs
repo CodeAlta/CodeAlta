@@ -58,6 +58,17 @@ public sealed partial class StatisticsQueries
         new("instruction-chars", FactTables.Content, "SUM(f.chars)", "count", Where: "f.kind = 4"),
         new("instruction-tokens", FactTables.Content, "SUM(f.approx_tokens)", "tokens", Where: "f.kind = 4"),
         new("cost", FactTables.Cost, "SUM(f.total_micro)", "cost", Scale: 1e-6, PerUnit: true),
+
+        // The runs of scripts of Code Mode: a run is counted when it starts, what it did when it ends.
+        new("script-calls", FactTables.Tools, "SUM(f.script_calls)", "count"),
+        new("script-runs", FactTables.Scripts, "SUM(f.runs_started)", "count"),
+        new("script-runs-completed", FactTables.Scripts, "SUM(f.runs_completed)", "count"),
+        new("script-runs-failed", FactTables.Scripts, "SUM(f.runs_failed)", "count"),
+        new("script-runs-cancelled", FactTables.Scripts, "SUM(f.runs_cancelled)", "count"),
+        new("script-runs-interrupted", FactTables.Scripts, "SUM(f.runs_interrupted)", "count"),
+        new("script-time", FactTables.Scripts, "SUM(f.duration_ms)", "ms"),
+        new("script-wait-time", FactTables.Scripts, "SUM(f.wait_ms)", "ms"),
+        new("script-sessions", FactTables.Scripts, "SUM(f.sessions_started)", "count"),
     }.ToFrozenDictionary(static metric => metric.Name, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -68,7 +79,12 @@ public sealed partial class StatisticsQueries
     public static IReadOnlyList<string> MetricNames { get; } = [.. Metrics.Keys.Order(StringComparer.Ordinal), ContextFillMetric, "sessions-active", SessionsAtOnceMetric, "sessions-started"];
 
     /// <summary>Gets the ways a series can be grouped.</summary>
-    public static IReadOnlyList<string> GroupNames { get; } = ["provider", "model", "effort", "project", "delegated", "tool", "kind", "origin", "purpose", "unit", "prompt-kind"];
+    /// <remarks>
+    /// <c>script</c> cuts the runs of scripts by library script, <c>script-kind</c> into <c>library</c>, <c>inline</c> and
+    /// <c>unknown</c>; <c>creator</c> cuts the sessions started by who created them: <c>you</c>, <c>agent</c>, <c>script</c>,
+    /// <c>automation</c> or <c>other</c>.
+    /// </remarks>
+    public static IReadOnlyList<string> GroupNames { get; } = ["provider", "model", "effort", "project", "delegated", "creator", "tool", "kind", "origin", "purpose", "unit", "prompt-kind", "script", "script-kind"];
 
     /// <summary>Reads one metric over time, in buckets, optionally cut by a group.</summary>
     /// <param name="request">The period, the frequency, the filters and the comparison.</param>
@@ -104,9 +120,9 @@ public sealed partial class StatisticsQueries
 
         if (metric is "sessions-active" or "sessions-started")
         {
-            if (group is not null && group is not ("project" or "delegated"))
+            if (group is not null && group is not ("project" or "delegated" or "creator"))
             {
-                throw new ArgumentException($"'{metric}' can only be grouped by project or delegated.");
+                throw new ArgumentException($"'{metric}' can only be grouped by project, delegated or creator.");
             }
 
             var current = SessionCounts(sql, query, query.Plan, metric, group);
@@ -148,9 +164,14 @@ public sealed partial class StatisticsQueries
     private static string GroupColumn(FactTable family, string group)
     {
         var name = group.ToLowerInvariant();
-        if (name is "project" or "delegated")
+        if (name is "project" or "delegated" or "creator")
         {
             return name;
+        }
+
+        if (name == "script-kind")
+        {
+            return family.Name == "script" ? name : throw new ArgumentException("Only the runs of scripts can be cut by script kind.");
         }
 
         if (name == "origin")
@@ -194,7 +215,8 @@ public sealed partial class StatisticsQueries
     private List<AggRow> SessionCounts(SqlSession sql, ResolvedQuery query, BucketPlan plan, string metric, string? group)
     {
         var byProject = group == "project";
-        var byDelegation = group == "delegated";
+        var byDelegation = group is "delegated" or "creator";
+        var groupExpression = group == "creator" ? CreatorExpression : "CASE WHEN s.parent_session_id IS NULL THEN 'direct' ELSE 'sub-agent' END";
         // Sessions are counted in the facts: a session is active in a bucket when it had a run or some active time there.
         var rows = new Dictionary<string, AggRow>(StringComparer.Ordinal);
         if (metric == "sessions-active")
@@ -206,7 +228,7 @@ public sealed partial class StatisticsQueries
                 return "@p" + (args.Count - 1).ToString(CultureInfo.InvariantCulture);
             }
 
-            var builder = new System.Text.StringBuilder($"SELECT f.q, f.session_id, {(byDelegation ? "CASE WHEN s.parent_session_id IS NULL THEN 'direct' ELSE 'sub-agent' END" : $"COALESCE({query.ProjectOf("s.project_ref", value => Arg(value))}, '')")} FROM {P}activity_q f LEFT JOIN {P}session s ON s.session_id = f.session_id WHERE f.q >= ");
+            var builder = new System.Text.StringBuilder($"SELECT f.q, f.session_id, {(byDelegation ? groupExpression : $"COALESCE({query.ProjectOf("s.project_ref", value => Arg(value))}, '')")} FROM {P}activity_q f LEFT JOIN {P}session s ON s.session_id = f.session_id WHERE f.q >= ");
             var (from, to) = Days.QuarterRangeOfDays(LocalDays.ToDay(plan.Range.From), LocalDays.ToDay(plan.Range.To));
             builder.Append(Arg((long)from)).Append(" AND f.q < ").Append(Arg((long)to)).Append(" AND (f.active_ms > 0 OR f.runs_started > 0)");
             AppendFilters(builder, query, FactTables.Activity, Arg, applyOrigin: false);
@@ -238,7 +260,7 @@ public sealed partial class StatisticsQueries
         }
 
         var (lower, upper) = Days.QuarterRangeOfDays(LocalDays.ToDay(plan.Range.From), LocalDays.ToDay(plan.Range.To));
-        var startBuilder = new System.Text.StringBuilder($"SELECT s.first_ms, {(byDelegation ? "CASE WHEN s.parent_session_id IS NULL THEN 'direct' ELSE 'sub-agent' END" : $"COALESCE({query.ProjectOf("s.project_ref", value => StartArg(value))}, '')")} FROM {P}session s WHERE s.first_ms >= ")
+        var startBuilder = new System.Text.StringBuilder($"SELECT s.first_ms, {(byDelegation ? groupExpression : $"COALESCE({query.ProjectOf("s.project_ref", value => StartArg(value))}, '')")} FROM {P}session s WHERE s.first_ms >= ")
             .Append(StartArg(lower * QuarterHour.Milliseconds)).Append(" AND s.first_ms < ").Append(StartArg(upper * QuarterHour.Milliseconds));
         var filter = query.Filter;
         if (filter.Provider is { Length: > 0 } provider)
@@ -445,6 +467,9 @@ public sealed partial class StatisticsQueries
 
         Add("errors", "count", Series(activity.Current, 2, query.Plan), activity.Previous is null ? null : Series(activity.Previous, 2, query.ComparePlan!));
         Add("compactions", "count", Series(activity.Current, 3, query.Plan), activity.Previous is null ? null : Series(activity.Previous, 3, query.ComparePlan!));
+
+        var scripts = Read(FactTables.Scripts, ["SUM(f.runs_started)"]);
+        Add("script-runs", "count", Series(scripts.Current, 0, query.Plan), scripts.Previous is null ? null : Series(scripts.Previous, 0, query.ComparePlan!));
 
         // Costs never add up across units: a tile for each unit that has a cost.
         var cost = Read(FactTables.Cost, ["SUM(f.total_micro)"], null, ["unit"]);

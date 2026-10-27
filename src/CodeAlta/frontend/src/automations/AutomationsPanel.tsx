@@ -182,7 +182,8 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
     {item.problem && <Callout intent="warning" compact role="alert">{item.problem}</Callout>}
     {!item.problem && !paused && item.watchProblem && <Callout intent="warning" compact role="alert">{item.watchProblem}</Callout>}
     {waits && <Callout intent="primary" compact className="automation-allow">
-      <span>{t("This automation came with the project. Its triggers start it once you allow it.")}</span>
+      <span>{t(item.script && item.storeProjectId === null ? "This automation runs a script that changed since you allowed it. Its triggers start it once you allow it again."
+        : "This automation came with the project. Its triggers start it once you allow it.")}</span>
       <Button size="small" intent="primary" disabled={busy} onClick={onAllow}>{t("Allow")}</Button>
     </Callout>}
     <dl className="automation-facts">
@@ -196,8 +197,9 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
       {runsWith.length > 0 && <><dt>{t("Runs with")}</dt><dd>{runsWith.join(" · ")}</dd></>}
       <dt>{t("Stored in")}</dt><dd className="automation-file" title={item.file}>{item.file}</dd>
     </dl>
-    <h4>{t("Prompt")}</h4>
-    <pre className="automation-prompt">{item.prompt}</pre>
+    {item.script ? <><h4>{t("Script")}</h4>
+      <pre className="automation-prompt">{item.scriptArguments ? `${item.script}(${item.scriptArguments})` : item.script}</pre></>
+      : <><h4>{t("Prompt")}</h4><pre className="automation-prompt">{item.prompt}</pre></>}
     <h4>{t("Runs")}</h4>
     {runs === null ? <p className="automation-empty"><ActivitySpinner size={13} /></p> : <RunList runs={runs} sessions={sessions} now={now} named={false} onOpen={onOpen} />}
   </section>;
@@ -284,7 +286,8 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
     if (!outcome.ok) setNotice(outcome.message ?? t("The automation could not be saved."));
   }
   const create = (form: AutomationForm) => setEditing(form);
-  const fromTemplate = (template: AutomationTemplate) => create({ ...emptyForm(template.project ? projectId : null), name: t(template.name), prompt: template.prompt, triggers: template.triggers });
+  const fromTemplate = (template: AutomationTemplate) => create({ ...emptyForm(template.project ? projectId : null), name: t(template.name), prompt: template.prompt,
+    script: template.script ?? "", scriptArguments: template.scriptArguments ?? "", triggers: template.triggers });
 
   if (!state.loaded) return <div className="automations" onPointerDown={onActivate}><p className="automation-empty"><ActivitySpinner size={16} /></p></div>;
   if (!state.available) return <div className="automations" onPointerDown={onActivate}><p className="automation-empty">{t("Automations are unavailable in this window.")}</p></div>;

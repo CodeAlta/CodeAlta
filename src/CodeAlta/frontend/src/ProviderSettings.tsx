@@ -30,6 +30,7 @@ import { groupProviders, isFavoriteProvider, orderProviders, persistProviderList
   setFavoriteProvider, type ProviderGroupKind, type ProviderListPreferences } from "./providerListOrder";
 import type { MessageKey } from "./localization";
 import { ProviderSandboxField, type SandboxScopeApi } from "./sandbox/SandboxScopeControls";
+import { ProviderCodeModeField, type CodeModeScopeApi } from "./CodeModeScopeControls";
 
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 const newProvider = "\u0000new";
@@ -53,7 +54,7 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal, sandbox = sandboxSettings, initialProvider = null }: {
+export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal, sandbox = sandboxSettings, codeMode = globalConfig, initialProvider = null }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider" | "duplicateProvider">;
   /** The providers whose type a plugin runs (ACP agents): their form, their catalog and their sign-in; the host by default. */
   plugins?: Pick<typeof globalConfig, "savePluginProvider" | "pluginCatalog" | "installPluginProvider" | "pluginProviderDetails" | "updatePluginProvider" | "pluginProviderSignIn">;
@@ -80,6 +81,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   spaceScope?: ResourceSpaces;
   /** The sandbox of a provider and of its models; the host by default, null where it is not offered. */
   sandbox?: SandboxScopeApi | null;
+  /** The mode of Code Mode of a provider and of its models; the host by default, null where it is not offered. */
+  codeMode?: CodeModeScopeApi | null;
   /** The provider selected when the page opens, as a link of Settings > Sandbox asks. */
   initialProvider?: string | null;
 }) {
@@ -382,6 +385,10 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             {sandbox && original && <FormGroup label={t("Sandbox")} labelFor="provider-sandbox" className="provider-settings-wide">
               <ProviderSandboxField key={original.key} epoch={epoch} providerKey={original.key} providerName={original.effectiveName} disabled={busy}
                 api={sandbox} readModels={readModels} /></FormGroup>}
+            {/* The mode of Code Mode of a saved provider, and of some of its models; each choice is saved at once. */}
+            {codeMode && original && <FormGroup label={t("Code Mode")} labelFor="provider-code-mode" className="provider-settings-wide">
+              <ProviderCodeModeField key={original.key} epoch={epoch} providerKey={original.key} providerName={original.effectiveName} disabled={busy}
+                api={codeMode} readModels={readModels} /></FormGroup>}
             {/* Blank is the order of the type: the agents of a plugin may sort their models by default. */}
             <FormGroup label={t("Model order")} labelFor="provider-models-order">
               <HTMLSelect id="provider-models-order" fill value={form.modelsOrder} disabled={busy} onChange={event => edit({ modelsOrder: event.target.value })}>

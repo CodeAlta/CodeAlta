@@ -9,11 +9,20 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="ProviderKey">The provider the session runs on.</param>
 public sealed record OwnedSessionToolRequest(string? SessionId, string? ProjectId, string WorkingDirectory, string ProviderKey)
 {
+    /// <summary>Gets the model of this send, or null when its provider lists none; the mode of Code Mode depends on it.</summary>
+    public string? ModelId { get; init; }
+
     /// <summary>
     /// Gets the folder of the session's project, or null for a global session. The tools of a session outlive a
     /// git worktree that is removed: once <see cref="WorkingDirectory"/> is gone, they work in this folder.
     /// </summary>
     public string? ProjectDirectory { get; init; }
+
+    /// <summary>
+    /// Gets what the space of the session has, read at each send, or null while the session is being created: the tools a
+    /// space limits (the scripts of the library offered as tools) are given only where it has them.
+    /// </summary>
+    public CodeAlta.Catalog.SpaceFilter? Spaces { get; init; }
 }
 
 /// <summary>Text and optional bounded image admission input; no caller-owned execution objects are accepted.</summary>

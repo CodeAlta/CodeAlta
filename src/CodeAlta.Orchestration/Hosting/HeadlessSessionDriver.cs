@@ -103,6 +103,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
                 return Invalid("A new session needs the absolute path of the folder it works in.");
             folder = Path.GetFullPath(request.ProjectFolder);
             if (!Directory.Exists(folder)) return Invalid($"The folder '{folder}' does not exist.");
+            if (request.WorktreeDirectory is { } worktree && (!Path.IsPathFullyQualified(worktree) || !Directory.Exists(worktree)))
+                return Invalid($"The worktree '{worktree}' is not an existing folder named by its absolute path.");
         }
 
         var sessionId = existing?.SessionId ?? existingId ?? Guid.CreateVersion7().ToString();
@@ -124,14 +126,17 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             var project = existing is not null ? null : await ResolveProjectAsync(folder!, cancellationToken).ConfigureAwait(false);
             var model = await ResolveModelAsync(request, existing, project, cancellationToken).ConfigureAwait(false);
             if (model.Failure is { } failure) return failure;
-            var bypass = BypassModeOf(model.Provider!.ProviderId.Value);
+            // The child of a session takes the mode its creator gives the sessions it creates; the driver's own, full trust.
+            var bypass = request.ParentSessionId is { } parent
+                ? runtime.GetCreatedSessionPermissionMode(parent, model.Provider!.ProviderId.Value) ?? BypassModeOf(model.Provider!.ProviderId.Value)
+                : BypassModeOf(model.Provider!.ProviderId.Value);
             // The tools the session does without are known before it attaches: a new session is created with them.
             runtime.SetDisabledToolPatterns(sessionId, request.DisabledToolPatterns.Count > 0 ? request.DisabledToolPatterns : null);
             SessionViewDescriptor descriptor;
             if (existing is null)
             {
-                descriptor = await _host.Commands.CreateDraftSessionAsync(project, model.Provider, request.Title, createdBy: null, worktreeDirectory: null,
-                    spaceId: null, bypass, sessionId).ConfigureAwait(false);
+                descriptor = await _host.Commands.CreateDraftSessionAsync(project, model.Provider, request.Title, request.CreatedBy, worktreeDirectory: request.WorktreeDirectory is { } worktreeFolder ? Path.GetFullPath(worktreeFolder) : null,
+                    spaceId: null, bypass, sessionId, request.ParentSessionId).ConfigureAwait(false);
             }
             else
             {
@@ -286,6 +291,7 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         {
             Selection = session.Selection,
             Attachments = attachments,
+            Provenance = prompt.Provenance,
         }, CancellationToken.None);
         if (admission is not { Kind: OwnedSessionCommandAdmissionKind.Accepted, Receipt: { } receipt })
             return Result(HeadlessRunStatus.Failed, null, null, null, null, $"The prompt was not admitted ({admission.Kind.ToString().ToLowerInvariant()}): the session is busy or the host is closing.");

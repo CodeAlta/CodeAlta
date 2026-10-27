@@ -26,7 +26,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceClaudeCodeConversation, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
-  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, reviews as reviewsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
+  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workflows as workflowsApi, workItems as workItemsApi, reviews as reviewsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
   skills as skillsApi,
 } from "#neoastra";
 import { skillPrompt, usableSkills, type SkillChoice } from "./search/skillResults";
@@ -56,7 +56,7 @@ import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget }
 import { browserActivation } from "./sessionBrowser";
 import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, claudeCodeTabProvider, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
+import { activateFileTab, claudeCodeTabProvider, automationsTab, isWorkflowsTab, workflowsTab, isWorkflowRunTab, workflowRunTab,bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
 import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
@@ -86,6 +86,7 @@ import { PermissionSettings } from "./PermissionSettings";
 import { PermissionModeSelect } from "./PermissionModeSelect";
 import { permissionModeName } from "./permissionModes";
 import { SessionSettings } from "./SessionSettings";
+import { CodeModeSettings } from "./CodeModeSettings";
 import { verifiedReminderCountTarget } from "./reminderListObservation";
 import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions, noOutgoing } from "./sessionOperations";
@@ -174,6 +175,11 @@ import { createAutomationsHub } from "./automations/automationsHub";
 import { AutomationsPanel } from "./automations/AutomationsPanel";
 import { SessionOrigin } from "./automations/SessionOrigin";
 import { sessionOrigin } from "./automations/automations";
+import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
+import { RunTab } from "./workflows/RunTab";
+import { OpenRunContext } from "./workflows/openRun";
+import { createWorkflowsHub } from "./workflows/workflowsHub";
+import { ScriptRunActionsContext } from "./scriptCard/SaveAsScript";
 import { IssuesPanel } from "./issues/IssuesPanel";
 import { PullRequestButton } from "./pullRequests/PullRequestButton";
 import { PullRequestSettings } from "./pullRequests/PullRequestSettings";
@@ -303,9 +309,11 @@ import "normalize.css";
 import "@blueprintjs/core/lib/css/blueprint.css";
 import "flexlayout-react/style/light.css";
 import "@xterm/xterm/css/xterm.css";
+import "@xyflow/react/dist/style.css";
 import "./style.css";
 import "./timelineEmphasis/timelineEmphasis.css";
 import "./timelineActivity/timelineActivity.css";
+import "./scriptCard/scriptCard.css";
 import "./editor/editor.css";
 import "./pluginProviders/pluginProviders.css";
 import "./review/review.css";
@@ -314,6 +322,7 @@ import "./explorer/explorer.css";
 import "./labels/labels.css";
 import "./terminal/terminal.css";
 import "./automations/automations.css";
+import "./workflows/workflows.css";
 import "./workItems/workItems.css";
 import "./charts/charts.css";
 // The Statistics canvas is a module the application loads when a tab shows it, and a module brings no stylesheet with it: the sheet is part of the page.
@@ -414,7 +423,7 @@ const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 if (!demoMode) installLocalCallPolicy(createSlowCallWatch(reportToHost));
 const noSubscription = () => () => { };
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
-type View = "workspace" | "appearance" | "general" | "windows" | "spaces" | "labels" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sandbox" | "sessions" | "storage" | "speech" | "search" | "plugin";
+type View = "workspace" | "appearance" | "general" | "windows" | "spaces" | "labels" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sandbox" | "codeMode" | "sessions" | "storage" | "speech" | "search" | "plugin";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse | null }) {
@@ -1641,6 +1650,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!fileTabs.open.some(value => sameFileTab(value, tab)) && windowsHub.heldElsewhere(ref)) { windowsHub.focusTab(ref); return; }
     openFileHere(tab);
   }
+  // Open run on the card of a run, or a run of the Workflows tab: the tab of that run.
+  const [openRun] = useState(() => (run: Readonly<{ runId: string; title: string | null }>) => openFileLatest.current(workflowRunTab(run)));
+  const openFileLatest = useRef(openFile); openFileLatest.current = openFile;
   function openFileHere(tab: FileTab) {
     // At the tab limit a file with unsaved edits is never the one that makes room.
     setFileTabs(state => openFileTab(state, tab, value => fileEditors.dirty(fileTabKey(value))));
@@ -3193,7 +3205,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
       case "externalEditor": case "fileExplorer": { const origin = view === "workspace" ? terminalOrigin() : null; return !!origin && !!(origin.projectId || origin.sessionId); }
-      case "automations": case "workItems": case "reviews": case "issues": case "canvases": case "documentation": case "bookmarks": return owned;
+      case "automations": case "workflows": case "workItems": case "reviews": case "issues": case "canvases": case "documentation": case "bookmarks": return owned;
       case "spaces": case "newSpace": return owned && spacesState.available;
       case "goToSpace": return spacesState.available;
       case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
@@ -3262,6 +3274,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         break;
       }
       case "automations": openAutomations(); break;
+      case "workflows": openFile(workflowsTab); break;
       case "workItems": openWorkItems(); break;
       case "issues": openFile(issuesTab); break;
       // The tab in front, a file over the session behind it, goes to a window of its own.
@@ -5003,7 +5016,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
+  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
@@ -5037,6 +5050,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               { key: "search", icon: "search", className: "activity-search", label: t("Search"), title: `${t("Search")} (Ctrl+P)`, onClick: () => openSearch() },
               { key: "automations", icon: "automation", className: "activity-automations", disabled: !owned, active: !!fileTabs.active && isAutomationsTab(fileTabs.active),
                 label: t("Automations"), title: `${t("Automations")} (Ctrl+G, Ctrl+M)`, onClick: () => openAutomations() },
+              { key: "workflows", icon: "workflow", className: "activity-workflows", disabled: !owned, active: !!fileTabs.active && isWorkflowsTab(fileTabs.active),
+                label: t("Workflows"), title: t("Workflows"), onClick: () => openFile(workflowsTab) },
               { key: "work", icon: "task", className: "activity-work", disabled: !owned, active: !!fileTabs.active && isWorkItemsTab(fileTabs.active), dot: work.some(item => item.stage === "todo"),
                 label: t("Work items"), title: `${t("Work items")} (Ctrl+G, Ctrl+I)`, onClick: () => openWorkItems() },
               { key: "issues", icon: "issueOpen", className: "activity-issues", disabled: !owned, active: !!fileTabs.active && isIssuesTab(fileTabs.active),
@@ -5447,6 +5462,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 providers={configurationState.snapshot?.providerRuntimeAvailable ? [...configurationState.snapshot.providers].filter(provider => provider.enabled).sort((a, b) => Number(b.isDefault) - Number(a.isDefault)) : []}
                 visible={visible && view === "workspace" && !settingsOpen} focus={automationFocus} onFocused={() => setAutomationFocus(null)}
                 onActivate={activateShown(tab, visible)} onOpenSession={id => void openAutomationSession(id)} />
+              : isWorkflowsTab(tab)
+              ? <WorkflowsPanel key={fileTabKey(tab)} api={workflowsApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
+                projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={(catalog.current ?? snapshot)?.sessions ?? []}
+                projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null} visible={visible && view === "workspace" && !settingsOpen}
+                onActivate={activateShown(tab, visible)} onOpenSession={id => void openAutomationSession(id)} onOpenRun={owned ? openRun : undefined}
+                onEditScript={owned ? (project, path) => openEditor(project, { path, line: null, column: null, explorer: null }) : undefined} />
+              : isWorkflowRunTab(tab)
+              ? <RunTab key={fileTabKey(tab)} api={workflowsApi} epoch={!status ? undefined : owned ? status.hostEpoch : null} runId={tab.key ?? ""}
+                visible={visible && view === "workspace" && !settingsOpen} onActivate={activateShown(tab, visible)} onGone={() => closeFile(tab)} />
               : isTerminalTab(tab)
               ? <TerminalPanel key={fileTabKey(tab)} workspace={terminalWorkspace} id={tab.terminalId ?? ""} terminal={terminalList.find(terminal => terminal.id === tab.terminalId)}
                 visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} look={terminalLook} onLook={changeTerminalLook}
@@ -5526,6 +5550,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
           inherit: shellPreferences.inheritPermissions, setInherit: setInheritPermissions } : null} />
       : settingsSection === "sandbox" ? <SandboxSettings epoch={owned ? status?.hostEpoch ?? null : null} onOpenScope={openSandboxScope} />
+      : settingsSection === "codeMode" ? <CodeModeSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
+        onOpenScope={scope => { navigate("providers"); setProviderFocus(scope.providerKey); }} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
         chats={spaceChatCounts(catalog.current?.sessions ?? [])} showOthers={showOthers} onShowOthers={setShowOthers}
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)}
@@ -5719,7 +5745,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
+  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
@@ -5741,7 +5767,7 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
     ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["windows", "Windows", "window"], ["speech", "Speech", "mic"], ["search", "Search", "search"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
-      ["permissions", "Permissions", "shield"], ["sandbox", "Sandbox", "sandbox"], ["sessions", "Sessions", "chat"],
+      ["permissions", "Permissions", "shield"], ["sandbox", "Sandbox", "sandbox"], ["codeMode", "Code Mode", "code"], ["sessions", "Sessions", "chat"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
     ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
     ["Advanced", [["config", "Configuration file", "config"], ["storage", "Storage", "database"], ["mcpHost", "CodeAlta MCP", "remote"]]],
@@ -6175,7 +6201,22 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   // The error of a Claude Code provider without its CLI proposes the download in an owned host only.
   const cliEpoch = ownedSession && !demoMode ? status?.hostEpoch ?? null : null;
   const cliHost = useMemo(() => cliEpoch ? { epoch: cliEpoch, composerProvider: session.providerKey ?? null, Card: ClaudeCliFirstUse } : null, [cliEpoch, session.providerKey]);
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  // Save as script…, Resume and the reruns on the card of a run that ended ask this session, in an owned host only.
+  const scriptActions = useMemo(() => cliEpoch ? {
+    saveAsScript: async (runId: string, name: string) => {
+      const outcome = await createWorkflowsHub(workflowsApi, cliEpoch).saveAsScript(session.id, runId, name);
+      return outcome.ok ? null : outcome.message ?? "";
+    },
+    resume: async (runId: string, how: Readonly<{ from?: string; all?: boolean }>) => {
+      const outcome = await createWorkflowsHub(workflowsApi, cliEpoch).resume(session.id, runId, how);
+      return outcome.ok ? null : outcome.message ?? "";
+    },
+    stop: async (runId: string) => {
+      const outcome = await createWorkflowsHub(workflowsApi, cliEpoch).stop(runId);
+      return outcome.ok ? null : outcome.message ?? "";
+    },
+  } : null, [cliEpoch, session.id]);
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       // The conversation of the Claude Code CLI the session continues: read when the window opens; another provider has none.
       conversation={ownedSession && !demoMode && session.providerConversation === true
@@ -6264,7 +6305,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></MarkdownLinkScopeContext.Provider>;
+  </div></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></ScriptRunActionsContext.Provider></MarkdownLinkScopeContext.Provider>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

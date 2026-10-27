@@ -334,7 +334,11 @@ public sealed record SessionsResult(QueryHeader Query, string Sort, IReadOnlyLis
 /// <param name="BytesIn">The bytes of the arguments.</param>
 /// <param name="BytesOut">The bytes of the results.</param>
 /// <param name="Spark">The calls over time.</param>
-public sealed record ToolRow(string Kind, string Tool, long Calls, long Failures, double FailureRate, double TimeMs, double? P50Ms, double? P90Ms, double MaxMs, long BytesIn, long BytesOut, IReadOnlyList<double> Spark);
+public sealed record ToolRow(string Kind, string Tool, long Calls, long Failures, double FailureRate, double TimeMs, double? P50Ms, double? P90Ms, double MaxMs, long BytesIn, long BytesOut, IReadOnlyList<double> Spark)
+{
+    /// <summary>Gets the calls a script of Code Mode made: a part of <see cref="Calls"/>.</summary>
+    public long ScriptCalls { get; init; }
+}
 
 /// <summary>The tools of a period.</summary>
 /// <param name="Query">What the query echoes.</param>
@@ -478,6 +482,89 @@ public sealed record ContextFillRow(string Provider, string Model, double? Avera
 /// <param name="OutputTokens">Its output tokens.</param>
 /// <param name="Model">The model at its start.</param>
 public sealed record RunEntry(string RunId, string Start, double DurationMs, string Outcome, string Sender, long Requests, long ToolCalls, long InputTokens, long OutputTokens, string Model);
+
+/// <summary>The totals of the runs of scripts of Code Mode in a period.</summary>
+/// <param name="Runs">The runs that started.</param>
+/// <param name="Completed">The runs that completed.</param>
+/// <param name="Failed">The runs that failed.</param>
+/// <param name="Cancelled">The runs that were stopped.</param>
+/// <param name="Interrupted">The runs CodeAlta ended while they ran.</param>
+/// <param name="SuccessRate">The completed runs over the runs that ended; null when none ended.</param>
+/// <param name="Calls">The calls the runs made: tools, <c>alta</c>, sessions.</param>
+/// <param name="ToolCalls">The tool calls scripts made, as the journal records them.</param>
+/// <param name="Sessions">The sessions the runs started.</param>
+/// <param name="SessionTokens">The input and output tokens of the sessions scripts started.</param>
+/// <param name="SessionCosts">The costs of those sessions, by unit.</param>
+/// <param name="RunMs">The time of the runs whose duration is known.</param>
+/// <param name="WaitMs">The time the runs waited for an answer or an approval of the user.</param>
+/// <param name="Steps">The steps that ended (a run records at most 200: a lower bound).</param>
+/// <param name="StepsFailed">The steps that failed.</param>
+public sealed record ScriptTotals(long Runs, long Completed, long Failed, long Cancelled, long Interrupted, double? SuccessRate, long Calls, long ToolCalls, long Sessions,
+    long SessionTokens, IReadOnlyList<CostAmount> SessionCosts, double RunMs, double WaitMs, long Steps, long StepsFailed);
+
+/// <summary>One script of the table of scripts.</summary>
+/// <param name="Script">The library script, <c>(inline)</c> for the code sent to <c>exec</c>, <c>(unknown)</c> for a run recorded before the script was.</param>
+/// <param name="Runs">The runs that started.</param>
+/// <param name="Failed">The runs that failed.</param>
+/// <param name="FailureRate">The failed runs over the runs that ended.</param>
+/// <param name="P50Ms">The median duration.</param>
+/// <param name="P90Ms">The 90th percentile of the duration.</param>
+/// <param name="Sessions">The sessions its runs started.</param>
+/// <param name="SessionTokens">The tokens of those sessions in the period.</param>
+/// <param name="SessionCosts">The costs of those sessions in the period, by unit.</param>
+/// <param name="LastRun">When its last run of the period started, <c>yyyy-MM-ddTHH:mm:ssZ</c>.</param>
+/// <param name="Spark">Its runs per bucket.</param>
+public sealed record ScriptRow(string Script, long Runs, long Failed, double FailureRate, double? P50Ms, double? P90Ms, long Sessions, long SessionTokens,
+    IReadOnlyList<CostAmount> SessionCosts, string? LastRun, IReadOnlyList<double> Spark);
+
+/// <summary>How much a model uses scripts: its turns, those that sent one, and the runs of scripts it started.</summary>
+/// <param name="Provider">The provider.</param>
+/// <param name="Model">The model at the start of the turns.</param>
+/// <param name="Turns">The turns that started.</param>
+/// <param name="TurnsWithScript">The turns that called <c>exec</c>.</param>
+/// <param name="Share">The share of the turns that called <c>exec</c>, from 0 to 1.</param>
+/// <param name="ScriptRuns">The runs of scripts that started under the model.</param>
+/// <param name="CallsPerRun">The calls of a run that ended, on average; null when none ended.</param>
+public sealed record ScriptAdoptionRow(string Provider, string Model, long Turns, long TurnsWithScript, double Share, long ScriptRuns, double? CallsPerRun);
+
+/// <summary>The turns that called <c>exec</c>, or those that did not, on average. It describes, it does not measure a cause.</summary>
+/// <param name="WithScript">Whether the turns called <c>exec</c>.</param>
+/// <param name="Turns">The turns.</param>
+/// <param name="ToolCalls">The tool calls of a turn.</param>
+/// <param name="Requests">The requests of a turn.</param>
+/// <param name="Tokens">The input and output tokens of a turn.</param>
+/// <param name="DurationMs">The duration of a turn.</param>
+public sealed record ScriptTurnsRow(bool WithScript, long Turns, double ToolCalls, double Requests, double Tokens, double DurationMs);
+
+/// <summary>One run of a script.</summary>
+/// <param name="SessionId">The session that ran it.</param>
+/// <param name="RunId">The run of the script.</param>
+/// <param name="Script">The library script, <c>(inline)</c> or <c>(unknown)</c>.</param>
+/// <param name="Title">Its title, cleaned as the titles of sessions are.</param>
+/// <param name="Status">How it ended: <c>running</c>, <c>completed</c>, <c>failed</c>, <c>cancelled</c> or <c>interrupted</c>.</param>
+/// <param name="Error">The name of the error it failed with.</param>
+/// <param name="Origin">Who sent the turn it started in, or <c>resume</c>.</param>
+/// <param name="Start">When it started, <c>yyyy-MM-ddTHH:mm:ssZ</c>.</param>
+/// <param name="DurationMs">How long it lasted; null while it runs and for an interrupted run.</param>
+/// <param name="Calls">The calls it made.</param>
+/// <param name="Steps">The steps that ended.</param>
+/// <param name="Sessions">The sessions it started.</param>
+/// <param name="Model">The model in force when it started.</param>
+public sealed record ScriptRunSample(string SessionId, string RunId, string Script, string? Title, string Status, string? Error, string Origin, string Start, double? DurationMs,
+    long Calls, long Steps, long Sessions, string Model);
+
+/// <summary>The runs of scripts of Code Mode in a period: totals, the scripts, how models adopt them, and the latest runs.</summary>
+/// <param name="Query">What the query echoes.</param>
+/// <param name="Buckets">The buckets of the lines.</param>
+/// <param name="Totals">The totals.</param>
+/// <param name="Scripts">The scripts, the most run first.</param>
+/// <param name="Adoption">The models, the most turns first.</param>
+/// <param name="Turns">The turns with a script and those without, on average.</param>
+/// <param name="Recent">The latest runs, newest first, at most twenty.</param>
+/// <param name="TotalScripts">The number of scripts before the limit.</param>
+/// <param name="Truncated">Whether the limit cut scripts.</param>
+public sealed record ScriptsResult(QueryHeader Query, IReadOnlyList<BucketInfo> Buckets, ScriptTotals Totals, IReadOnlyList<ScriptRow> Scripts, IReadOnlyList<ScriptAdoptionRow> Adoption,
+    IReadOnlyList<ScriptTurnsRow> Turns, IReadOnlyList<ScriptRunSample> Recent, int TotalScripts, bool Truncated);
 
 /// <summary>The numbers of one session, with its sub-agents when asked.</summary>
 /// <param name="Query">What the query echoes: the period is the whole history.</param>

@@ -122,8 +122,14 @@ internal sealed class FactBatch
     /// <summary>Gets the largest values.</summary>
     public Dictionary<ExtremeKey, ExtremeValue> Extremes { get; } = [];
 
+    /// <summary>Gets the runs of scripts of Code Mode.</summary>
+    public Dictionary<ScriptKey, ScriptMeasures> Scripts { get; } = [];
+
     /// <summary>Gets the runs that changed, by run: the last version of each.</summary>
     public Dictionary<string, RunRow> Runs { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Gets the runs of scripts that changed, by run of the script: the last version of each.</summary>
+    public Dictionary<string, ScriptRunRow> ScriptRuns { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Gets or sets the session as it is after the catch-up; null when nothing about it changed.</summary>
     public SessionRow? Session { get; set; }
@@ -131,7 +137,7 @@ internal sealed class FactBatch
     /// <summary>Gets a value indicating whether the batch adds nothing.</summary>
     public bool IsEmpty
         => Activity.Count == 0 && Usage.Count == 0 && Cost.Count == 0 && Tools.Count == 0 && Content.Count == 0 && Details.Count == 0
-            && Histograms.Count == 0 && Extremes.Count == 0 && Runs.Count == 0 && Session is null;
+            && Histograms.Count == 0 && Extremes.Count == 0 && Scripts.Count == 0 && Runs.Count == 0 && ScriptRuns.Count == 0 && Session is null;
 
     /// <summary>Gets the measures for a key, added when there are none.</summary>
     /// <param name="key">The key.</param>
@@ -157,6 +163,11 @@ internal sealed class FactBatch
     /// <param name="key">The key.</param>
     /// <returns>The measures to add to.</returns>
     public ContentMeasures ContentFor(ContentKey key) => GetOrAdd(Content, key);
+
+    /// <summary>Gets the measures for a key, added when there are none.</summary>
+    /// <param name="key">The key.</param>
+    /// <returns>The measures to add to.</returns>
+    public ScriptMeasures ScriptFor(ScriptKey key) => GetOrAdd(Scripts, key);
 
     /// <summary>Counts a name.</summary>
     /// <param name="key">The key.</param>
@@ -246,9 +257,19 @@ internal sealed class FactBatch
             Extremes[key] = Extremes.TryGetValue(key, out var current) ? current.Larger(value) : value;
         }
 
+        foreach (var (key, value) in other.Scripts)
+        {
+            GetOrAdd(Scripts, key).Add(value);
+        }
+
         foreach (var (runId, row) in other.Runs)
         {
             Runs[runId] = row;
+        }
+
+        foreach (var (runId, row) in other.ScriptRuns)
+        {
+            ScriptRuns[runId] = row;
         }
 
         if (other.Session is not null)
@@ -305,6 +326,11 @@ internal sealed class FactBatch
             lines.Add($"extreme {key.Quarter} {key.Measure}/{key.Subject} {value.Value} {value.RunId} {value.At:O}");
         }
 
+        foreach (var (key, value) in Scripts.Where(static pair => !pair.Value.IsZero))
+        {
+            lines.Add($"script {key.Quarter} {key.Provider}/{key.Model}/{key.Script}/{key.Origin} {value}");
+        }
+
         lines.Sort(StringComparer.Ordinal);
         var builder = new StringBuilder();
         foreach (var line in lines)
@@ -322,7 +348,13 @@ internal sealed class FactBatch
         var builder = new StringBuilder();
         foreach (var row in Runs.Values.OrderBy(static row => row.Start).ThenBy(static row => row.RunId, StringComparer.Ordinal))
         {
-            builder.Append(CultureInfo.InvariantCulture, $"run {row.RunId} {row.Start:O} {row.End:O} {row.Outcome} {row.Sender}/{row.PromptKind} chars={row.PromptChars} words={row.PromptWords} req={row.Requests} tools={row.ToolCalls}/{row.ToolFailures} tokens={row.InputTokens}/{row.OutputTokens} compactions={row.Compactions} answer={row.AnswerChars}/{row.AnswerWords} cost={row.CostUsd:R}/{row.CostCredits:R} {row.Provider}/{row.Model}/{row.Effort}/{row.PermissionMode}")
+            builder.Append(CultureInfo.InvariantCulture, $"run {row.RunId} {row.Start:O} {row.End:O} {row.Outcome} {row.Sender}/{row.PromptKind} chars={row.PromptChars} words={row.PromptWords} req={row.Requests} tools={row.ToolCalls}/{row.ToolFailures} tokens={row.InputTokens}/{row.OutputTokens} compactions={row.Compactions} answer={row.AnswerChars}/{row.AnswerWords} cost={row.CostUsd:R}/{row.CostCredits:R} {row.Provider}/{row.Model}/{row.Effort}/{row.PermissionMode} exec={row.ExecCalls}")
+                .AppendLine();
+        }
+
+        foreach (var row in ScriptRuns.Values.OrderBy(static row => row.Start).ThenBy(static row => row.RunId, StringComparer.Ordinal))
+        {
+            builder.Append(CultureInfo.InvariantCulture, $"script-run {row.RunId} {row.Start:O} {row.End:O} {row.Status}/{row.Error} {row.Script}/{row.Origin} dur={row.DurationMs} calls={row.Calls} steps={row.Steps}/{row.StepsFailed} sessions={row.Sessions} wait={row.WaitMs} resumes={row.ResumesRunId} {row.Provider}/{row.Model} {row.Title}")
                 .AppendLine();
         }
 

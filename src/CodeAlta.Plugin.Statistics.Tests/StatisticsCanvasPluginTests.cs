@@ -13,7 +13,7 @@ public sealed class StatisticsCanvasPluginTests
 {
     private static readonly string[] Questions =
     [
-        "summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "skills", "mcp-tools", "runs",
+        "summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "skills", "mcp-tools", "runs", "scripts",
     ];
 
     private static readonly string[] Controls = ["status", "choose-history", "pause", "resume", "stop-here", "forget-deleted", "reset", "context"];
@@ -245,6 +245,7 @@ public sealed class StatisticsCanvasPluginTests
             ("skills", Wrap(), async () => StatisticsJson.Serialize(await queries.SkillsAsync(request))),
             ("mcp-tools", Wrap(), async () => StatisticsJson.Serialize(await queries.McpToolsAsync(request))),
             ("runs", Wrap("\"sort\":\"longest\""), async () => StatisticsJson.Serialize(await queries.RunsAsync(request, "longest"))),
+            ("scripts", Wrap(), async () => StatisticsJson.Serialize(await queries.ScriptsAsync(request))),
         };
 
         foreach (var (name, json, expected) in calls)

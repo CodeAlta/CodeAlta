@@ -33,6 +33,22 @@ public sealed class RuntimeDisplayToolActivityTests
     }
 
     [TestMethod]
+    public void TheCallsOfAScript_TakeNoLiveSlot_AndNeverEvictTheCallThatRunsIt()
+    {
+        var display = new RuntimeDisplayProjection();
+        Publish(display, Activity("exec-call"));
+        for (var index = 1; index <= 5; index++)
+        {
+            Publish(display, Activity($"exec-call/{index}") with { ParentActivityId = "exec-call" });
+        }
+
+        // Another parent is not a call of a script: it keeps its row.
+        Publish(display, Activity("other") with { ParentActivityId = "exec-call" });
+        CollectionAssert.AreEqual(new[] { "exec-call", "other" }, Session(display).ToolActivities.Select(row => row.ActivityId).ToArray());
+        Assert.AreEqual(0L, Session(display).EvictedToolActivities);
+    }
+
+    [TestMethod]
     public void Identity_UsesExactProviderNullableRunAndActivity_InExistingSessionContainer()
     {
         foreach (var other in new[] { Activity(provider: "Provider"), Activity(run: "Run"), Activity(run: null),

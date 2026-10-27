@@ -120,6 +120,28 @@ public sealed class HarnessTests
     }
 
     [TestMethod]
+    public async Task ToolCallBridge_AnMcpCallThatComesBeforeItsCall_WaitsForIt_AndRunsAsThatCall()
+    {
+        // The harness tells its call and makes its MCP call by two channels: under load the MCP call came first and ran by
+        // itself, without the run of the session (a script of exec then had no tools).
+        var tool = CreateTool("alta", static (invocation, _) =>
+            Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text(invocation.ToolCallId)])));
+        var bridge = new HarnessToolCallBridge();
+        var arguments = Parse("""{"args":["session","list"]}""");
+
+        var early = bridge.CallFromMcpAsync(new HarnessMcpToolCall("alta", arguments, null), _ => tool, Provider, "s1", CancellationToken.None);
+        await Task.Delay(100);
+        Assert.IsFalse(early.IsCompleted, "it waits for its call instead of running by itself");
+        bridge.Register("call-1", "alta", arguments, isCodeAltaTool: true);
+        var definition = bridge.Resolve(new AgentMessagePart.ToolCall("call-1", "alta", arguments), tool, "x", static () => Task.CompletedTask)!;
+        var sessionRun = definition.Handler(new AgentToolInvocation(Provider, "s1", "call-1", "alta", arguments), CancellationToken.None);
+
+        var answer = await early.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual("call-1", ((AgentToolResultItem.Text)answer.Items[0]).Value, "it ran as the call of the session");
+        Assert.AreSame(answer, await sessionRun);
+    }
+
+    [TestMethod]
     public async Task ToolCallBridge_RunsAnUnmatchedMcpCallByItself()
     {
         var tool = CreateTool("alta", static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("detached")])));

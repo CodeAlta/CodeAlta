@@ -176,6 +176,13 @@ public sealed class CodeAltaProviderModelOverrideDocument
     /// </summary>
     [JsonPropertyName("sandbox")]
     public string? Sandbox { get; set; }
+
+    /// <summary>
+    /// Gets or sets the mode of Code Mode of the sessions on this model (<c>off</c>, <c>on</c> or <c>only</c>); null
+    /// for the one of its provider (<see cref="CodeModeScopes"/>).
+    /// </summary>
+    [JsonPropertyName("code_mode")]
+    public string? CodeMode { get; set; }
 }
 
 /// <summary>
@@ -350,6 +357,13 @@ public sealed class CodeAltaProviderDocument
     /// </summary>
     [JsonPropertyName("sandbox")]
     public string? Sandbox { get; set; }
+
+    /// <summary>
+    /// Gets or sets the mode of Code Mode of the sessions of the provider (<c>off</c>, <c>on</c> or <c>only</c>); null
+    /// for the setting of every session (<see cref="CodeModeScopes"/>).
+    /// </summary>
+    [JsonPropertyName("code_mode")]
+    public string? CodeMode { get; set; }
 
     /// <summary>
     /// Gets or sets whether a <c>claude-code</c> provider gives the CLI the API key of the environment

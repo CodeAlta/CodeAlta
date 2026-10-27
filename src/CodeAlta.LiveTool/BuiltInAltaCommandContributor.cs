@@ -24,6 +24,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     // the delegated LLM finishes. The timeout is only a submission-acknowledgement guard.
     private static readonly TimeSpan AgentCallerSubmitAckTimeout = TimeSpan.FromSeconds(5);
     private const string NotificationFollowUpNextStep = "Do not call any tool, shell sleep, reminder, status, tail, events, or polling command to wait for completion; yield control and wait for parent-session notifications.";
+
+    // A script that sends a prompt does not get the answer: models that fanned out this way in scripts ended their turn
+    // without the answers, or took more turns to collect them than agent() would have.
+    private const string ScriptSendNextStep = "This send does not wait: the session's answer comes to your session as a notification after your turn ends, never to this script. To use the answers in the script, start the sessions with agent(prompt, { tier }) instead, which resolves with each answer.";
     private const string NotificationFollowUpGuidance = "Do not poll or actively wait for this delegated session to complete. CodeAlta will forward the delegated session's final assistant reply to the parent session automatically.";
     private const string AskNextStep = "Do not call another tool or poll. End your turn now with one short sentence saying that you are waiting for the answer; the next user prompt contains the ask response.";
     private const string AskPayloadSchema = "{\"type\":\"object\",\"properties\":{\"questions\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"question\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"choices\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"}},\"required\":[\"title\"],\"additionalProperties\":false}},\"freeform\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"placeholder\":{\"type\":\"string\"}},\"additionalProperties\":false}},\"required\":[\"title\",\"question\"],\"additionalProperties\":false}}},\"required\":[\"questions\"],\"additionalProperties\":false}";
@@ -67,6 +71,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("session report"),
         Read("session children"),
         Read("session model"),
+        Read("session choices"),
         Read("session metrics"),
         Read("session tail"),
         Read("session events"),
@@ -97,6 +102,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("job status"),
         Read("job output"),
         Disruptive("job cancel"),
+        Read("workflow list"),
+        Read("workflow show"),
+        Read("workflow result"),
+        Disruptive("workflow cancel"),
+        Mutating("workflow resume"),
+        Read("script list"),
+        Read("script show"),
+        Read("script check"),
+        Mutating("script edit"),
+        Mutating("script save"),
+        Mutating("script run"),
+        Disruptive("script delete"),
         Read("skill list", supportsCatalogOnlyContext: true),
         Read("skill show", supportsCatalogOnlyContext: true),
         Mutating("skill activate"),
@@ -142,6 +159,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         yield return CreateSandboxCommand(context.Invocation);
         yield return CreateReminderCommand(context.Invocation);
         yield return CreateJobCommand(context.Invocation);
+        // The runs of the scripts of Code Mode, in a host that runs them.
+        if (context.Invocation.Services.Get<Orchestration.Runtime.Scripts.CodeModeRunRegistry>() is not null)
+        {
+            yield return CreateWorkflowCommand(context.Invocation);
+        }
+
+        // The library of scripts, in a host that keeps one.
+        if (context.Invocation.Services.Get<Orchestration.Runtime.Scripts.CodeModeScriptLibrary>() is not null)
+        {
+            yield return CreateScriptCommand(context.Invocation);
+        }
+
         yield return CreateSkillCommand(context.Invocation);
         yield return CreateSkillsAliasCommand(context.Invocation);
         yield return CreateSkillsActivateAliasCommand(context.Invocation);
@@ -5171,7 +5200,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             Sandbox = sandbox,
             AgentPromptId = NormalizeOptionalText(promptId),
             // The commands of the session resolve paths from the folder it works in.
-            Tools = CreateAltaSessionTools(context, selection.ProviderKey, sourceSessionIdProvider, sourceProjectId, worktreeDirectory ?? workingDirectory, workingDirectory),
+            Tools = CreateAltaSessionTools(context, selection.ProviderKey, selection.ProviderKey, selection.ModelId, sourceSessionIdProvider, sourceProjectId,
+                worktreeDirectory ?? workingDirectory, workingDirectory),
             OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
@@ -5216,7 +5246,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ReasoningEffort = reasoning,
             AgentPromptId = NormalizeOptionalText(promptId) ?? NormalizeOptionalText(info.Session.AgentPromptId),
             // The session works where it records: its worktree while that folder exists, the folder of its project otherwise.
-            Tools = CreateAltaSessionTools(context, info.Session.ProviderId, () => info.Session.SessionId, info.Session.ProjectRef,
+            Tools = CreateAltaSessionTools(context, info.Session.ProviderId, info.Session.ResolvedProviderKey, modelId, () => info.Session.SessionId, info.Session.ProjectRef,
                 info.Session.WorktreeDirectory is { Length: > 0 } worktree && Directory.Exists(worktree) ? worktree : workingDirectory, workingDirectory),
             OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
@@ -5243,6 +5273,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static IReadOnlyList<AgentToolDefinition>? CreateAltaSessionTools(
         AltaCommandContext context,
         string ProviderId,
+        string? providerKey,
+        string? modelId,
         Func<string?>? sourceSessionIdProvider,
         string? sourceProjectId,
         string? workingDirectory,
@@ -5256,24 +5288,22 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         var dispatcher = context.Services.Get<AltaCommandDispatcher>()
             ?? new AltaCommandDispatcher(new AltaCommandRegistry(), context.Services);
-        return
-        [
-            AltaSessionToolFactory.Create(
-                dispatcher,
-                new AltaSessionToolOptions
-                {
-                    SourceSessionIdProvider = sourceSessionIdProvider,
-                    SourceProjectId = sourceProjectId,
-                    WorkingDirectory = workingDirectory,
-                    // The tool outlives a worktree that is removed: its commands then start from the folder of the project.
-                    WorkingDirectoryProvider = workingDirectory is null || projectDirectory is null || string.Equals(workingDirectory, projectDirectory, StringComparison.Ordinal)
-                        ? null
-                        : () => Directory.Exists(workingDirectory) ? workingDirectory : projectDirectory,
-                    DefaultMaxOutputRecords = 200,
-                    DefaultMaxOutputBytes = 64 * 1024,
-                    DefaultTimeout = TimeSpan.FromSeconds(120),
-                }),
-        ];
+        var caller = new AltaSessionToolOptions
+        {
+            SourceSessionIdProvider = sourceSessionIdProvider,
+            SourceProjectId = sourceProjectId,
+            WorkingDirectory = workingDirectory,
+            // The tool outlives a worktree that is removed: its commands then start from the folder of the project.
+            WorkingDirectoryProvider = workingDirectory is null || projectDirectory is null || string.Equals(workingDirectory, projectDirectory, StringComparison.Ordinal)
+                ? null
+                : () => Directory.Exists(workingDirectory) ? workingDirectory : projectDirectory,
+            DefaultMaxOutputRecords = 200,
+            DefaultMaxOutputBytes = 64 * 1024,
+            DefaultTimeout = TimeSpan.FromSeconds(120),
+        };
+        IReadOnlyList<AgentToolDefinition> tools = [AltaSessionToolFactory.Create(dispatcher, caller)];
+        // A session that an alta command creates gets the tools of Code Mode as the sessions of the window do.
+        return context.Services.Get<Scripts.CodeModeSessionTools>()?.Create(dispatcher, caller, tools, providerKey, modelId) ?? tools;
     }
 
     private static Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath = "alta model resolve")
@@ -6910,7 +6940,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             followUpMode = parentNotificationExpected ? "notification" : null,
             recommendedAction = parentNotificationExpected ? "stop" : null,
             forbiddenWaitActions = parentNotificationExpected ? NotificationFollowUpForbiddenWaitActions : null,
-            nextStep = parentNotificationExpected ? NotificationFollowUpNextStep : null,
+            nextStep = !parentNotificationExpected ? null : context.Caller.ScriptRunId is null ? NotificationFollowUpNextStep : ScriptSendNextStep,
             notification = CreatePromptNotificationPayload(context, session),
             submittedBy = CreateProvenance(context),
             promptPreview = prompt.Length <= 160 ? prompt : prompt[..160],

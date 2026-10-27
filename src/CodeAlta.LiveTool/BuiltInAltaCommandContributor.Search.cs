@@ -35,7 +35,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             if (value is not null) words.Add(value);
         });
-        command.Add("kind=", "Kinds, separated by commas: message, session, note, plan, task, skill, tool, mcp, plugin, command, doc. Every kind when left out.", value => kinds = value);
+        command.Add("kind=", "Kinds, separated by commas: message, session, note, plan, task, skill, tool, mcp, plugin, command, doc, script. Every kind when left out.", value => kinds = value);
         command.Add("project=", "A project: its id, its name, its folder, or `.` for the project of this session. Every project of the space when left out.", value => project = value);
         command.Add("session=", "One session only.", value => session = value);
         command.Add("since=", "The earliest time: `30d`, `12h`, `2w`, or a date such as `2026-10-01`.", value => since = value);
@@ -73,7 +73,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         const string CommandPath = "alta search";
         if (!TryGetSearch(context, out var search)) return AltaExitCodes.ServiceUnavailable;
         if (string.IsNullOrWhiteSpace(query)) return UsageError(context, "usage.missingQuery", "Give what to look for: `alta search \"<words or a question>\"`.", CommandPath);
-        if (!TryParseKinds(kindsText, out var kinds, out var unknown)) return UsageError(context, "usage.invalidKind", $"Unknown kind '{unknown}': use message, session, note, plan, task, skill, tool, mcp, plugin, command or doc.", CommandPath);
+        if (!TryParseKinds(kindsText, out var kinds, out var unknown)) return UsageError(context, "usage.invalidKind", $"Unknown kind '{unknown}': use message, session, note, plan, task, skill, tool, mcp, plugin, command, doc or script.", CommandPath);
         var limit = SearchDefaultLimit;
         if (NormalizeOptionalText(limitText) is { } limitValue && (!int.TryParse(limitValue, NumberStyles.None, CultureInfo.InvariantCulture, out limit) || limit < 1 || limit > SearchMaximumLimit))
             return UsageError(context, "usage.invalidLimit", $"The limit must be from 1 to {SearchMaximumLimit.ToString(CultureInfo.InvariantCulture)}.", CommandPath);
@@ -215,6 +215,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             SearchKind.Doc when Value("api") is { } type => $"alta plugin api {type}",
             SearchKind.Doc when Value("page") is { } page => Value("anchor") is { } anchor ? $"alta documentation read {page} (section #{anchor})" : $"alta documentation read {page}",
             SearchKind.Plugin => "alta plugin list",
+            SearchKind.Script when Value("name") is { } name => $"alta script show {name} --declarations (run it with workflow(\"{name}\", args) in exec, or alta script run {name} --arg <key>=<value>)",
             _ => $"alta search show {hit.Ref}",
         };
     }
@@ -262,6 +263,9 @@ internal sealed partial class BuiltInAltaCommandContributor
                         SearchKind.Skill when extra.TryGetValue("name", out var name) => filter.Allows(SpaceResourceKind.Skill, name),
                         SearchKind.Mcp when extra.TryGetValue("server", out var server) => filter.Allows(SpaceResourceKind.McpServer, server),
                         SearchKind.Plugin when extra.TryGetValue("id", out var id) => filter.Allows(SpaceResourceKind.Plugin, id),
+                        // A script of a project is in the spaces of its sessions; yours and the samples as the user assigned them.
+                        SearchKind.Script when extra.TryGetValue("name", out var name) && !(extra.TryGetValue("scope", out var where) && where == "project")
+                            => filter.Allows(SpaceResourceKind.Script, name),
                         _ => true,
                     };
                 },
@@ -641,6 +645,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         SearchKind.Plugin => key == "plugins",
         SearchKind.Command => key == "commands",
         SearchKind.Doc => key == "docs",
+        SearchKind.Script => key == "scripts",
         _ => false,
     };
 

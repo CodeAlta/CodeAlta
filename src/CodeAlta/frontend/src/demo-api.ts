@@ -201,6 +201,9 @@ export const terminals = Object.freeze({ acknowledge: unavailable, attach: unava
 const noAutomations = async () => ({ status: "unavailable", paused: false, scanned: false, items: [], faults: [], runs: [], upcoming: [] });
 export const automations = Object.freeze({ list: noAutomations, refresh: noAutomations, save: unavailable, delete: unavailable, setEnabled: unavailable,
   allow: unavailable, setPaused: unavailable, run: unavailable, runs: unavailable, preview: unavailable, watch: unavailable });
+// The demo has no library of scripts and runs none.
+export const workflows = Object.freeze({ scripts: async () => ({ status: "unavailable", scripts: [] }), runs: async () => ({ status: "unavailable", runs: [] }),
+  run: unavailable, saveAsScript: unavailable, resume: unavailable, stop: unavailable, source: async () => ({ status: "unavailable", source: null }), runDetail: async () => ({ status: "unavailable", run: null, records: [], source: null, result: null, mermaid: null }) });
 // The demo has no project folder to keep tasks and plans in.
 export const workItems = Object.freeze({ list: async () => ({ status: "unavailable", projects: [], settings: null }), read: unavailable, act: unavailable,
   saveSettings: unavailable, watch: unavailable });
@@ -299,6 +302,10 @@ export const globalConfig = Object.freeze({
   saveCommitSettings: async () => ({ status: "unavailable", coAuthor: true }),
   promptSuggestionSettings: async () => ({ status: "unavailable", enabled: true }),
   savePromptSuggestionSettings: async () => ({ status: "unavailable", enabled: true }),
+  codeModeSettings: async () => ({ status: "unavailable", mode: null, modes: [], scopes: [] }),
+  saveCodeModeSettings: async () => ({ status: "unavailable", mode: null, modes: [], scopes: [] }),
+  codeModeProvider: async () => ({ status: "unavailable", provider: null, allSessions: null, models: [] }),
+  saveCodeModeScope: async () => ({ status: "unavailable", message: null }),
   validate: async () => ({ valid: true, message: null, line: null, column: null }),
   save: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   providers: async () => ({ status: "unavailable", revision: null, defaultProvider: null, providers: [], providerTypes: [], reasoningEfforts: [], typeDefaults: [], builtIn: [] }),

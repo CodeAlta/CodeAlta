@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.CodeMode.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The engine knows no CodeAlta project: the bindings a run receives come from its host. -->
+    <PackageReference Include="Acornima" />
+    <PackageReference Include="Jint" />
+  </ItemGroup>
+</Project>

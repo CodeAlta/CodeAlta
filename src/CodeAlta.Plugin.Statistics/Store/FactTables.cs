@@ -201,9 +201,9 @@ internal static class FactTables
     public static FactTable Tools { get; } = new(
         "tool",
         [Text("provider"), Int("kind"), Text("tool")],
-        [Sum("calls"), Sum("failures"), Sum("canceled"), Sum("duration_count"), Sum("duration_ms_total"), Max("duration_ms_max"), Sum("bytes_in"), Sum("bytes_out"), Sum("files_read"), Sum("files_changed"), Sum("lines_added"), Sum("lines_removed")],
+        [Sum("calls"), Sum("failures"), Sum("canceled"), Sum("duration_count"), Sum("duration_ms_total"), Max("duration_ms_max"), Sum("bytes_in"), Sum("bytes_out"), Sum("files_read"), Sum("files_changed"), Sum("lines_added"), Sum("lines_removed"), Sum("script_calls")],
         static batch => Rows(batch.Tools, static value => value.IsZero, static key => (key.Quarter, new object[] { key.Provider, (long)key.Kind, key.Tool }),
-            static value => [value.Calls, value.Failures, value.Canceled, value.DurationCount, value.DurationMsTotal, value.DurationMsMax, value.BytesIn, value.BytesOut, value.FilesRead, value.FilesChanged, value.LinesAdded, value.LinesRemoved]));
+            static value => [value.Calls, value.Failures, value.Canceled, value.DurationCount, value.DurationMsTotal, value.DurationMsMax, value.BytesIn, value.BytesOut, value.FilesRead, value.FilesChanged, value.LinesAdded, value.LinesRemoved, value.ScriptCalls]));
 
     /// <summary>The prompts, answers, reasonings and instructions.</summary>
     public static FactTable Content { get; } = new(
@@ -227,8 +227,18 @@ internal static class FactTables
         [Sum("n")],
         static batch => Rows(batch.Histograms, static value => value == 0, static key => (key.Quarter, new object[] { (long)key.Measure, key.Subject, (long)key.Step }), static value => [value]));
 
+    /// <summary>The runs of scripts of Code Mode.</summary>
+    public static FactTable Scripts { get; } = new(
+        "script",
+        [Text("provider"), Text("model"), Text("script"), Text("origin")],
+        [Sum("runs_started"), Sum("runs_completed"), Sum("runs_failed"), Sum("runs_cancelled"), Sum("runs_interrupted"), Sum("duration_count"), Sum("duration_ms"), Sum("wait_ms"),
+            Sum("calls"), Sum("steps"), Sum("steps_failed"), Sum("steps_replayed"), Sum("sessions_started"), Sum("asks_failed"), Sum("sleeps")],
+        static batch => Rows(batch.Scripts, static value => value.IsZero, static key => (key.Quarter, new object[] { key.Provider, key.Model, key.Script, key.Origin }),
+            static value => [value.RunsStarted, value.RunsCompleted, value.RunsFailed, value.RunsCancelled, value.RunsInterrupted, value.DurationCount, value.DurationMs, value.WaitMs,
+                value.Calls, value.Steps, value.StepsFailed, value.StepsReplayed, value.SessionsStarted, value.AsksFailed, value.Sleeps]));
+
     /// <summary>The families that add up: every family but the extremes.</summary>
-    public static IReadOnlyList<FactTable> All { get; } = [Activity, Usage, Cost, Tools, Content, Details, Histograms];
+    public static IReadOnlyList<FactTable> All { get; } = [Activity, Usage, Cost, Tools, Content, Details, Histograms, Scripts];
 
     private static FactColumn Text(string name) => new(name, IsText: true);
 

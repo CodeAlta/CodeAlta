@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TriggerIcon } from "./TriggerIcon";
 import { Button, ButtonGroup, Callout, FormGroup, HTMLSelect, InputGroup, Menu, MenuItem, NumericInput, PopoverNext, SegmentedControl, Switch, TextArea } from "@blueprintjs/core";
-import type { AutomationTriggerItem, WorkspaceProject } from "#neoastra";
+import type { AutomationScriptItem, AutomationTriggerItem, WorkspaceProject } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
@@ -9,7 +9,7 @@ import { sessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { useShellLanguage } from "../shellLanguage";
 import type { RunProvider } from "../workItems/runsWith";
 import { dayName, formProblem, formSettings, inputOf, isSchedule as schedule, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
-  newTrigger, sessionSettingsOf, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
+  newTrigger, scriptArgumentsTemplate, sessionSettingsOf, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
 
 const hours = [1, 2, 3, 4, 6, 8, 12];
@@ -101,6 +101,31 @@ export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove }:
   </li>;
 }
 
+/** The script of the library an automation runs, and its arguments: a JSON object, its parameters said below. */
+function ScriptFields({ scripts, form, disabled, edit }: {
+  scripts: readonly AutomationScriptItem[]; form: AutomationForm; disabled: boolean; edit: (change: Partial<AutomationForm>) => void;
+}) {
+  const { t } = useShellLanguage();
+  const script = scripts.find(candidate => candidate.name === form.script);
+  return <FormGroup label={t("Script")} labelFor="automation-script" className="automation-script-group">
+    <HTMLSelect id="automation-script" fill value={form.script} disabled={disabled} onChange={event => {
+      const next = scripts.find(candidate => candidate.name === event.target.value);
+      edit({ script: event.target.value, scriptArguments: form.scriptArguments.trim() ? form.scriptArguments : scriptArgumentsTemplate(next?.parameters ?? []) });
+    }}>
+      {!form.script && <option value="" />}
+      {form.script && !script && <option value={form.script}>{form.script}</option>}
+      {scripts.map(candidate => <option key={candidate.name} value={candidate.name}>{candidate.name}</option>)}
+    </HTMLSelect>
+    {script?.description && <p className="automation-script-description">{script.description}</p>}
+    {form.script && !script && scripts.length > 0 && <p className="automation-script-description" data-problem role="alert">{t("This script is not in the library.")}</p>}
+    <TextArea className="automation-script-arguments" fill value={form.scriptArguments} disabled={disabled} spellCheck={false} aria-label={t("Arguments")}
+      placeholder={"{ }"} onChange={event => edit({ scriptArguments: event.target.value })} />
+    {script && script.parameters.length > 0 && <p className="automation-script-parameters">
+      {script.parameters.map(parameter => <code key={parameter.name} title={parameter.description ?? undefined}>{`${parameter.name}${parameter.required ? "" : "?"}: ${parameter.type ?? "unknown"}`}</code>)}
+    </p>}
+  </FormGroup>;
+}
+
 /**
  * The window that writes an automation: its name, where it runs, what starts it, the prompt it sends and what its
  * sessions run with (the Agent chip of the composer). Saving writes its configuration file; nothing runs before that.
@@ -127,9 +152,23 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   const api = useMemo(() => epoch ? sessionSettingsApi(epoch, project?.id ?? null, project?.path ?? null, null) : null, [epoch, project?.id, project?.path]);
   const settings = sessionSettingsOf(form);
   const choices = useSessionSettingsChoices(api, providers, null, settings);
+  const [kind, setKind] = useState<"prompt" | "script">(initial.script ? "script" : "prompt");
+  const [scripts, setScripts] = useState<readonly AutomationScriptItem[]>([]);
+  // The scripts of the project it runs in come first, then yours.
+  useEffect(() => {
+    const abort = new AbortController();
+    void hub.scripts(form.projectId, abort.signal).then(value => { if (!abort.signal.aborted) setScripts(value); });
+    return () => abort.abort();
+  }, [hub, form.projectId]);
+  function choose(next: "prompt" | "script") {
+    setKind(next);
+    if (next === "prompt") { edit({ script: "" }); return; }
+    const first = form.script ? null : scripts[0];
+    if (first) edit({ script: first.name, scriptArguments: form.scriptArguments.trim() ? form.scriptArguments : scriptArgumentsTemplate(first.parameters) });
+  }
 
   async function save(run: boolean) {
-    const missing = formProblem(form);
+    const missing = kind === "script" && !form.script.trim() ? "Choose a script." : formProblem(form);
     if (missing) { setProblem(t(missing)); return; }
     setBusy(true);
     const outcome = await hub.save(inputOf(form), form.projectId && form.storeInProject ? form.projectId : null);
@@ -181,10 +220,13 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
             <Button size="small" variant="minimal" disabled={busy} icon={<AppIcon name="plus" size={14} />} endIcon={<AppIcon name="chevronDown" size={13} />}>{t("Add a trigger")}</Button>
           </PopoverNext>}
         </FormGroup>
-        <FormGroup label={t("Prompt")} labelFor="automation-prompt" className="automation-prompt-group">
+        {/* A prompt, or a script of the library, offered once the library has one. */}
+        {(scripts.length > 0 || kind === "script") && <SegmentedControl size="small" className="automation-kind" value={kind} disabled={busy}
+          onValueChange={value => choose(value === "script" ? "script" : "prompt")} options={[{ value: "prompt", label: t("Prompt") }, { value: "script", label: t("Script") }]} />}
+        {kind === "prompt" ? <FormGroup label={t("Prompt")} labelFor="automation-prompt" className="automation-prompt-group">
           <TextArea id="automation-prompt" fill value={form.prompt} disabled={busy} maxLength={maximumPromptLength} spellCheck
             placeholder={t("What the session does each time, written for a session that starts with nothing else.")} onChange={event => edit({ prompt: event.target.value })} />
-        </FormGroup>
+        </FormGroup> : <ScriptFields scripts={scripts} form={form} disabled={busy} edit={edit} />}
         {/* What its sessions run with: the Agent chip of the composer, and its form. */}
         <FormGroup label={t("Runs with")} className="automation-runs-with">
           <SessionSettingsChip id="automation" providers={providers} choices={choices} value={settings} disabled={busy} onChange={next => edit(formSettings(next))} />

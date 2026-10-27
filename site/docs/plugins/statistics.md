@@ -52,7 +52,7 @@ In CodeAlta Desktop the Statistics page opens in a tab:
 
 CodeAlta Desktop reads your sessions once, in the background, and keeps small counts: runs and their duration, models, tools, tokens, and file changes.
 
-**What is kept.** Numbers, and a few names to tell them apart: providers, models, tools, skills, MCP tools and session titles. Never the text of prompts, answers or tool results. A file is counted by its extension; a command by its program name, never its arguments. A title is the first sentence of the first prompt, at most 80 characters, without words holding `/` or `\`. The numbers stay on your computer, and remain after a session is deleted.
+**What is kept.** Numbers, and a few names to tell them apart: providers, models, tools, skills, MCP tools, scripts and session titles. Never the text of prompts, answers or tool results. A file is counted by its extension; a command by its program name, never its arguments. A title is the first sentence of the first prompt, at most 80 characters, without words holding `/` or `\`. The numbers stay on your computer, and remain after a session is deleted.
 
 **The first time**, nothing is read until you choose:
 
@@ -106,6 +106,7 @@ One tab for each question:
 | Tools | Which tools, skills and MCP tools are used, how long do they take, how often do they fail? |
 | Prompts | How much do I write, and how much do agents write to each other? |
 | Agents | How much work goes to sub-agents, how deep, and what do automations, reminders and CodeAlta itself start? |
+| Scripts | How much work runs as [Code Mode](../sessions/code-mode.md) scripts, which scripts, how they end, and what their sessions cost? |
 | Code | How many files and lines changed? |
 | Projects | Which projects and spaces take the work? |
 | Sessions | The sessions of the period, sortable, each opening its session |
@@ -132,6 +133,17 @@ One tab for each question:
 </figure>
 
 At the end of the Tools page, **Skills** lists each skill used in the period: its origin (project, yours, CodeAlta, a plugin, Claude Code, or `MCP · <server>`), its activations, the prompts it was attached to, the reads of its `SKILL.md`, where it was used and when last. **MCP servers** counts every MCP tool call, including those through `alta mcp tool call`. The skills used most recently are listed first in session prompts (see [Skills](../workspace/settings.md#skills-management)).
+
+The **Scripts** page counts the runs of [Code Mode](../sessions/code-mode.md) scripts:
+
+- A run is named by the library script it loads with `workflow("name")`. **Inline scripts** ran only the code sent to `exec`; **Unknown scripts** ran before CodeAlta recorded which script it was.
+- The table gives each script its runs, failures, median and 90th-percentile duration, the sessions it started, and the tokens and cost of those sessions.
+- **Failing steps** and **Why runs fail** name the step and the error. Only names are kept, never a message.
+- **Waiting for you** is the time scripts waited for your answer or approval.
+- **Scripts by model** and **A turn, with a script and without** compare the turns that sent a script with the others.
+- **Recent runs** opens the session of a run.
+
+The Tools page counts `exec` and `wait` as **Scripts** and shows how many calls of each tool scripts made. The Agents page shows who started the sessions, scripts included.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-statistics-projects.webp" alt="The Projects page of the Statistics tab: a table of the projects with their sessions, runs, active time, tokens, tool calls and cost, and a line of their activity" loading="lazy">
@@ -193,6 +205,7 @@ Which tools take the most time in the CodeAlta project over the last 30 days?
 | `alta statistics details <list>` | Shell programs, `alta` commands, file kinds changed, `sub-agent-depth`, `prompt-provenance` |
 | `alta statistics skills` | Skills used, with their uses and sessions |
 | `alta statistics mcp` | MCP tools called, and calls per server |
+| `alta statistics scripts` | Runs of Code Mode scripts: outcomes, each script, adoption by model, latest runs. `details script-step-failed` and `details script-error` name what failed |
 | `alta statistics session <session>` | One session, with its sub-agents when asked. `--session` (and `--with-children`) works on `summary`, `series`, `top` and `details` |
 | `alta statistics status` | How far the history is read |
 | `alta statistics history ...` | Choose, pause, resume or stop reading history, or forget deleted sessions |

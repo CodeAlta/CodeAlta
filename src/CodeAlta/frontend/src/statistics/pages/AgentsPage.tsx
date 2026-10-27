@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { StatTile } from "../../charts";
 import { Block, RankedBars, type RankedItem } from "../blocks";
 import { usePageColors } from "../colors";
-import { provenanceLabel, senderLabel } from "../labels";
+import { creatorLabel, provenanceLabel, senderLabel } from "../labels";
 import { SeriesChart, useDrill } from "../pageKit";
 import { useDetails, useSeries, useSessions } from "../queries";
 import { useStatistics } from "../runtime";
@@ -21,6 +21,8 @@ export function AgentsPage() {
   const colors = usePageColors();
   const drill = useDrill();
   const created = useSeries("sessions-started", "delegated", { main: true });
+  // Who created the sessions: you, another agent, a script of Code Mode, an automation.
+  const creators = useSeries("sessions-started", "creator", { extra: { comparison: "none" } });
   const tokens = useSeries("tokens", "delegated", { extra: { comparison: "none" } });
   const time = useSeries("active-time", "delegated", { extra: { comparison: "none" } });
   const sessions = useSessions("runs", { extra: { limit: 500, comparison: "none" } });
@@ -61,6 +63,9 @@ export function AgentsPage() {
     </Block>
     <Block title={t("The largest trees of sessions")} span={12} minHeight={120} query={sessions} empty={largest.length === 0}>
       <RankedBars label={t("Sessions with the most sub-agents")} items={largest} color={colors.at(4)} onSelect={item => drill.openSession(item.key)} selectLabel={item => t("Open {title}", { title: item.label })} />
+    </Block>
+    <Block title={t("Sessions started by")} span={12} minHeight={240} query={creators} empty={creators.data !== undefined && creators.data.series.every(line => line.total === 0)}>
+      {creators.data && <SeriesChart result={creators.data} height={220} ariaLabel={t("Sessions started, by who created them")} name={line => creatorLabel(t, line.key)} />}
     </Block>
     <Block title={t("Runs started by")} span={6} minHeight={240} query={runsByOrigin} empty={runsByOrigin.data !== undefined && runsByOrigin.data.series.every(line => line.total === 0)}>
       {runsByOrigin.data && <SeriesChart result={runsByOrigin.data} height={220} ariaLabel={t("Runs by who started them")} name={line => senderLabel(t, line.key)} />}

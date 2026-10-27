@@ -24,7 +24,7 @@ namespace CodeAlta.Plugin.Statistics.Store;
 internal sealed partial class StatisticsStore
 {
     /// <summary>The version of the tables, kept by the host for the plugin.</summary>
-    public const int SchemaVersion = 5;
+    public const int SchemaVersion = 6;
 
     /// <summary>The version of the roll-ups: when it changes, they are added up again from the facts.</summary>
     public const int RollupVersion = 1;
@@ -131,6 +131,33 @@ internal sealed partial class StatisticsStore
                 sql.Execute($"CREATE INDEX IF NOT EXISTS {Table("session")}_by_folder ON {Table("session")} (folder_key)");
                 if (from >= 1)
                     SetMeta(sql, new Dictionary<string, string?> { [FolderBackfillKey] = string.Empty });
+            }
+
+            if (from < 6)
+            {
+                // The runs of scripts of Code Mode: their family of facts, a row per run, the calls scripts make, the exec calls of a
+                // turn and the run of the script that started a session. A store created at this version has the tables of its facts
+                // already (SchemaV1 creates every family); the sessions are read again for version 9 of the facts.
+                using var sql = new SqlSession(connection);
+                bool HasTable(string name) => sql.ScalarLong("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = @p0", Table(name)) != 0;
+                bool HasColumn(string table, string column) => sql.ScalarLong($"SELECT COUNT(*) FROM pragma_table_info('{Table(table)}') WHERE name = @p0", column) != 0;
+                foreach (var level in new[] { RollupLevel.Quarter, RollupLevel.Day, RollupLevel.Month, RollupLevel.Year })
+                {
+                    if (!HasTable(FactTables.Scripts.Name + level.Suffix()))
+                        sql.ExecuteScript(FactTables.Scripts.CreateSql(Prefix, level));
+                    if (!HasColumn(FactTables.Tools.Name + level.Suffix(), "script_calls"))
+                        sql.Execute($"ALTER TABLE {FactTables.Tools.TableName(Prefix, level)} ADD COLUMN script_calls INTEGER NOT NULL DEFAULT 0");
+                }
+
+                if (!HasColumn("run", "exec_calls"))
+                    sql.Execute($"ALTER TABLE {Table("run")} ADD COLUMN exec_calls INTEGER NOT NULL DEFAULT 0");
+                if (!HasColumn("session", "script_run_id"))
+                    sql.Execute($"ALTER TABLE {Table("session")} ADD COLUMN script_run_id TEXT");
+                sql.Execute($"CREATE INDEX IF NOT EXISTS {Table("session")}_by_script_run ON {Table("session")} (script_run_id)");
+                sql.ExecuteScript($"CREATE TABLE IF NOT EXISTS {Table("script_run")} (session_id TEXT NOT NULL, run_id TEXT NOT NULL, script TEXT NOT NULL, origin TEXT NOT NULL, title TEXT, status TEXT NOT NULL, error TEXT, "
+                    + "start_ms INTEGER NOT NULL, end_ms INTEGER, duration_ms INTEGER, resumes_run_id TEXT, provider TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL, steps INTEGER NOT NULL, "
+                    + "steps_failed INTEGER NOT NULL, sessions INTEGER NOT NULL, wait_ms INTEGER NOT NULL, PRIMARY KEY (session_id, run_id)) WITHOUT ROWID;"
+                    + $"CREATE INDEX IF NOT EXISTS {Table("script_run")}_by_start ON {Table("script_run")} (start_ms);");
             }
 
             return ValueTask.CompletedTask;
@@ -448,6 +475,7 @@ internal sealed partial class StatisticsStore
         }
 
         WriteRuns(sql, session, batch, floor);
+        WriteScriptRuns(sql, session, batch, floor);
         WriteSession(sql, batch);
         WriteJournal(sql, request);
         RecordDataUpdate(sql);
@@ -481,6 +509,7 @@ internal sealed partial class StatisticsStore
 
         sql.Execute($"DELETE FROM {extreme} WHERE session_id = @p0", session);
         sql.Execute($"DELETE FROM {Table("run")} WHERE session_id = @p0", session);
+        sql.Execute($"DELETE FROM {Table("script_run")} WHERE session_id = @p0", session);
     }
 
     private void WriteRuns(SqlSession sql, string session, FactBatch batch, int floor)
@@ -490,8 +519,8 @@ internal sealed partial class StatisticsStore
             return;
         }
 
-        var insert = $"INSERT OR REPLACE INTO {Table("run")} (session_id, run_id, start_ms, end_ms, outcome, sender, prompt_kind, prompt_chars, prompt_words, requests, tool_calls, tool_failures, input_tokens, output_tokens, compactions, answer_chars, answer_words, cost_usd_micro, cost_credits_micro, provider, model, effort, permission_mode, skipped_ms) "
-            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21, @p22, @p23)";
+        var insert = $"INSERT OR REPLACE INTO {Table("run")} (session_id, run_id, start_ms, end_ms, outcome, sender, prompt_kind, prompt_chars, prompt_words, requests, tool_calls, tool_failures, input_tokens, output_tokens, compactions, answer_chars, answer_words, cost_usd_micro, cost_credits_micro, provider, model, effort, permission_mode, skipped_ms, exec_calls) "
+            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21, @p22, @p23, @p24)";
         foreach (var run in batch.Runs.Values)
         {
             if (floor != int.MinValue && QuarterHour.Of(run.Start).Index < floor)
@@ -524,7 +553,47 @@ internal sealed partial class StatisticsStore
                 run.Model,
                 run.Effort,
                 run.PermissionMode,
-                run.SkippedMs);
+                run.SkippedMs,
+                run.ExecCalls);
+        }
+    }
+
+    private void WriteScriptRuns(SqlSession sql, string session, FactBatch batch, int floor)
+    {
+        if (batch.ScriptRuns.Count == 0)
+        {
+            return;
+        }
+
+        var insert = $"INSERT OR REPLACE INTO {Table("script_run")} (session_id, run_id, script, origin, title, status, error, start_ms, end_ms, duration_ms, resumes_run_id, provider, model, calls, steps, steps_failed, sessions, wait_ms) "
+            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17)";
+        foreach (var run in batch.ScriptRuns.Values)
+        {
+            if (floor != int.MinValue && QuarterHour.Of(run.Start).Index < floor)
+            {
+                continue;
+            }
+
+            sql.Execute(
+                insert,
+                session,
+                run.RunId,
+                run.Script,
+                run.Origin,
+                run.Title,
+                run.Status,
+                run.Error,
+                run.Start.ToUnixTimeMilliseconds(),
+                run.End?.ToUnixTimeMilliseconds(),
+                run.DurationMs,
+                run.ResumesRunId,
+                run.Provider,
+                run.Model,
+                run.Calls,
+                run.Steps,
+                run.StepsFailed,
+                run.Sessions,
+                run.WaitMs);
         }
     }
 
@@ -536,11 +605,11 @@ internal sealed partial class StatisticsStore
         }
 
         sql.Execute(
-            $"INSERT INTO {Table("session")} (session_id, project_ref, session_kind, parent_session_id, created_by_kind, created_by_session_id, automation_id, title, provider, permission_mode, first_ms, last_ms, deleted, space_id, folder_key) "
-            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, 0, @p12, @p13) "
+            $"INSERT INTO {Table("session")} (session_id, project_ref, session_kind, parent_session_id, created_by_kind, created_by_session_id, automation_id, title, provider, permission_mode, first_ms, last_ms, deleted, space_id, folder_key, script_run_id) "
+            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, 0, @p12, @p13, @p14) "
             + "ON CONFLICT (session_id) DO UPDATE SET project_ref = excluded.project_ref, session_kind = excluded.session_kind, parent_session_id = excluded.parent_session_id, created_by_kind = excluded.created_by_kind, "
             + "created_by_session_id = excluded.created_by_session_id, automation_id = excluded.automation_id, title = excluded.title, provider = excluded.provider, permission_mode = excluded.permission_mode, "
-            + "first_ms = excluded.first_ms, last_ms = excluded.last_ms, deleted = 0, space_id = excluded.space_id, folder_key = COALESCE(excluded.folder_key, folder_key)",
+            + "first_ms = excluded.first_ms, last_ms = excluded.last_ms, deleted = 0, space_id = excluded.space_id, folder_key = COALESCE(excluded.folder_key, folder_key), script_run_id = excluded.script_run_id",
             row.SessionId,
             row.ProjectRef,
             row.SessionKind,
@@ -554,7 +623,8 @@ internal sealed partial class StatisticsStore
             row.FirstRecord?.ToUnixTimeMilliseconds(),
             row.LastRecord?.ToUnixTimeMilliseconds(),
             row.SpaceId,
-            row.FolderKey);
+            row.FolderKey,
+            row.ScriptRunId);
     }
 
     private void WriteJournal(SqlSession sql, ApplyRequest request, long? updatedMilliseconds = null)

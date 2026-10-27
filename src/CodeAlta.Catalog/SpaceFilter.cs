@@ -68,6 +68,7 @@ public sealed class ResourceNotInSpaceException : InvalidOperationException
             SpaceResourceKind.Plugin => "The plugin",
             SpaceResourceKind.Skill => "The skill",
             SpaceResourceKind.Prompt => "The agent prompt",
+            SpaceResourceKind.Script => "The script",
             _ => "The resource",
         };
         return $"{what} '{key}' is not available in the space '{spaceId}' of this session. " +

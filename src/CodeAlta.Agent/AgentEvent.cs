@@ -18,6 +18,7 @@ namespace CodeAlta.Agent;
 [JsonDerivedType(typeof(AgentSystemPromptEvent), "system_prompt")]
 [JsonDerivedType(typeof(AgentSessionUpdateEvent), "sessionUpdate")]
 [JsonDerivedType(typeof(AgentNotesEvent), "notes")]
+[JsonDerivedType(typeof(AgentWorkflowEvent), "workflow")]
 [JsonDerivedType(typeof(AgentPlanSnapshotEvent), "planSnapshot")]
 [JsonDerivedType(typeof(AgentInteractionEvent), "interaction")]
 [JsonDerivedType(typeof(AgentErrorEvent), "error")]
@@ -596,6 +597,150 @@ public sealed record AgentNotesEvent(
     AgentNotesUpdateKind Kind,
     string Markdown)
     : AgentEvent(ProviderId, SessionId, Timestamp, RunId);
+
+/// <summary>What a record of a run of a script of Code Mode says.</summary>
+public enum AgentWorkflowEventKind
+{
+    /// <summary>The run started: its title, and the tool call that runs it.</summary>
+    RunStarted,
+
+    /// <summary>A step of the script started.</summary>
+    StepStarted,
+
+    /// <summary>A step of the script ended: its status and its duration.</summary>
+    StepEnded,
+
+    /// <summary>The script started a session of its own (<c>agent()</c>): its id, its step.</summary>
+    SessionStarted,
+
+    /// <summary>A session the script started ended: its status, its duration and its tokens.</summary>
+    SessionEnded,
+
+    /// <summary>The run ended: its status, its duration and its calls.</summary>
+    RunEnded,
+
+    /// <summary>
+    /// The run waits for the user: <see cref="AgentWorkflowEvent.Status"/> says for what (<c>question</c> for <c>ask()</c>,
+    /// <c>approval</c> for a call of the script to approve), with its step and the question.
+    /// </summary>
+    WaitStarted,
+
+    /// <summary>The run no longer waits for the user: the question was answered, dismissed or withdrawn.</summary>
+    WaitEnded,
+
+    /// <summary>
+    /// A script of the run declares its steps (<c>meta.steps</c>): <see cref="AgentWorkflowEvent.Steps"/>, which its graph
+    /// draws before they run. <see cref="AgentWorkflowEvent.Title"/> is the title of the script.
+    /// </summary>
+    StepsDeclared,
+
+    /// <summary>
+    /// <c>workflow("name")</c> resolved a script of the library: <see cref="AgentWorkflowEvent.ScriptName"/> and
+    /// <see cref="AgentWorkflowEvent.ScriptScope"/>. A run that writes none ran only the code sent to <c>exec</c>.
+    /// </summary>
+    ScriptLoaded,
+}
+
+/// <summary>A step a script declares in its <c>meta</c>, for the graph of its run.</summary>
+/// <param name="Id">The id that <c>step()</c> names.</param>
+/// <param name="Title">The title of its box.</param>
+public sealed record AgentWorkflowStep(string Id, string Title)
+{
+    /// <summary>Gets the steps it runs after: null for the step declared before it, empty for the start.</summary>
+    public IReadOnlyList<string>? After { get; init; }
+
+    /// <summary>Gets whether the step fans out: one instance per item at run time.</summary>
+    public bool Each { get; init; }
+}
+
+/// <summary>
+/// A record of a run of a script of Code Mode, in the journal of the session that runs it. Its <see cref="AgentEvent.RunId"/>
+/// is always null: a run goes on after the turn that started it, and its records belong to no turn.
+/// </summary>
+/// <param name="ProviderId">The model provider identifier.</param>
+/// <param name="SessionId">The session that runs the script.</param>
+/// <param name="Timestamp">When it happened.</param>
+/// <param name="RunId">Always null.</param>
+/// <param name="Kind">What happened.</param>
+/// <param name="WorkflowRunId">The run of the script, such as <c>run-7f3c2a</c>.</param>
+public sealed record AgentWorkflowEvent(
+    ModelProviderId ProviderId,
+    string SessionId,
+    DateTimeOffset Timestamp,
+    AgentRunId? RunId,
+    AgentWorkflowEventKind Kind,
+    string WorkflowRunId)
+    : AgentEvent(ProviderId, SessionId, Timestamp, RunId)
+{
+    /// <summary>Gets the tool call that runs the script (<c>exec</c>), when known.</summary>
+    public string? CallId { get; init; }
+
+    /// <summary>Gets the title of the run, or the title of the session it started.</summary>
+    public string? Title { get; init; }
+
+    /// <summary>Gets the step, for the records of a step or of a session.</summary>
+    public string? StepId { get; init; }
+
+    /// <summary>Gets the session the script started, for the records of a session.</summary>
+    public string? ChildSessionId { get; init; }
+
+    /// <summary>Gets the provider the session the script started runs on, for the start of a session.</summary>
+    public string? ProviderKey { get; init; }
+
+    /// <summary>Gets the model the session the script started runs with, for the start of a session.</summary>
+    public string? ModelId { get; init; }
+
+    /// <summary>Gets how it ended (<c>completed</c>, <c>failed</c>, <c>cancelled</c>...), for the records of an end.</summary>
+    public string? Status { get; init; }
+
+    /// <summary>Gets what went wrong, for a failed end.</summary>
+    public string? Message { get; init; }
+
+    /// <summary>Gets the duration in milliseconds, for the records of an end.</summary>
+    public long? DurationMs { get; init; }
+
+    /// <summary>Gets the calls the run made, for its end.</summary>
+    public int? Calls { get; init; }
+
+    /// <summary>Gets the input tokens of a session the script started, for its end.</summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>Gets the output tokens of a session the script started, for its end.</summary>
+    public long? OutputTokens { get; init; }
+
+    /// <summary>Gets the key a resume matches the step by, such as <c>merge#1</c>, for the records of a step.</summary>
+    public string? StepKey { get; init; }
+
+    /// <summary>Gets whether the step gave the result a previous run recorded instead of running, for the end of a step.</summary>
+    public bool? Replayed { get; init; }
+
+    /// <summary>Gets the run this one resumes or reruns over its recorded steps, for the start of a run.</summary>
+    public string? ResumesRunId { get; init; }
+
+    /// <summary>
+    /// Gets when the run wakes: for the wait of a sleep (<see cref="AgentWorkflowEventKind.WaitStarted"/> with the status
+    /// <c>sleep</c>), and for the end of an interrupted run that resumes by itself then.
+    /// </summary>
+    public DateTimeOffset? WakeAt { get; init; }
+
+    /// <summary>Gets the steps a script declares, for <see cref="AgentWorkflowEventKind.StepsDeclared"/>.</summary>
+    public IReadOnlyList<AgentWorkflowStep>? Steps { get; init; }
+
+    /// <summary>Gets the name of the library script, for <see cref="AgentWorkflowEventKind.ScriptLoaded"/>.</summary>
+    public string? ScriptName { get; init; }
+
+    /// <summary>
+    /// Gets where the library script comes from (<c>project</c>, <c>user</c> or <c>sample</c>), for
+    /// <see cref="AgentWorkflowEventKind.ScriptLoaded"/>.
+    /// </summary>
+    public string? ScriptScope { get; init; }
+
+    /// <summary>
+    /// Gets whether the run writes a <see cref="AgentWorkflowEventKind.ScriptLoaded"/> record for each library script it
+    /// loads, for the start of a run: a run recorded before these records existed has none, and which script it ran is not known.
+    /// </summary>
+    public bool? RecordsScripts { get; init; }
+}
 
 /// <summary>
 /// Structured plan snapshot event.

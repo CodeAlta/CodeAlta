@@ -22,6 +22,9 @@ public sealed partial class StatisticsQueries
         ["skill-read"] = DetailList.SkillRead,
         ["mcp-tool"] = DetailList.McpTool,
         ["prompt-provenance"] = DetailList.PromptProvenance,
+        ["script-step-failed"] = DetailList.ScriptStepFailed,
+        ["script-error"] = DetailList.ScriptError,
+        ["script-called"] = DetailList.ScriptCalled,
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

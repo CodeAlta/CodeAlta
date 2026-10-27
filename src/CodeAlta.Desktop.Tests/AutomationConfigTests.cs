@@ -181,6 +181,24 @@ public sealed class AutomationConfigTests
     }
 
     [TestMethod]
+    public void AnAutomationThatRunsAScript_IsWrittenWithItsArguments_AndHasNoPrompt()
+    {
+        var definition = new AutomationDefinition(First, "Triage") { Script = "triage", ScriptArguments = "{\"days\": 1, \"label\": \"a \\\"b\\\"\"}" };
+        Assert.IsNull(AutomationConfig.Validate(definition));
+        var written = AutomationConfig.Write(string.Empty, definition);
+        StringAssert.Contains(written, "script = \"triage\"\n");
+        Assert.IsFalse(written.Contains("prompt", StringComparison.Ordinal));
+        AssertSame(definition, AutomationConfig.Read(written, Global).Definitions.Single());
+        Assert.AreNotEqual(definition.Fingerprint(), (definition with { ScriptArguments = "{\"days\": 2}" }).Fingerprint());
+
+        StringAssert.Contains(AutomationConfig.Validate(definition with { Prompt = "Also this." }), "not both");
+        StringAssert.Contains(AutomationConfig.Validate(definition with { Script = "Not A Name" }), "name of a script");
+        StringAssert.Contains(AutomationConfig.Validate(definition with { ScriptArguments = "[1]" }), "JSON object");
+        StringAssert.Contains(AutomationConfig.Validate(definition with { ScriptArguments = "{ days: 1" }), "JSON object");
+        StringAssert.Contains(AutomationConfig.Validate(new AutomationDefinition(First, "n") { Prompt = "p", ScriptArguments = "{}" }), "runs a script");
+    }
+
+    [TestMethod]
     public void Write_ReplacesOnlyTheTextOfItsAutomation()
     {
         var before = $"""

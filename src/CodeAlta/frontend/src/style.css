@@ -1242,13 +1242,13 @@ dialog::backdrop { background: var(--scrim); }
 .provider-model-picker .bp6-menu-item-label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .provider-settings-wide { grid-column: 1 / -1; }
 /* The sandbox of a provider, then the models that have one of their own, a row each. */
-.provider-sandbox { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
-.provider-sandbox > .sandbox-scope-select { flex: 0 1 260px; min-width: 0; }
-.provider-sandbox-models { display: grid; flex: 1 0 100%; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.provider-sandbox-models > li { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.provider-sandbox-model { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
-.provider-sandbox-models .sandbox-scope-select { flex: 0 1 220px; min-width: 0; }
-.provider-sandbox-add.bp6-html-select { flex: 0 1 260px; }
+.provider-sandbox, .provider-code-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.provider-sandbox > .sandbox-scope-select, .provider-code-mode > .code-mode-scope-select { flex: 0 1 260px; min-width: 0; }
+.provider-sandbox-models, .provider-code-mode-models { display: grid; flex: 1 0 100%; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.provider-sandbox-models > li, .provider-code-mode-models > li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.provider-sandbox-model, .provider-code-mode-model { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.provider-sandbox-models .sandbox-scope-select, .provider-code-mode-models .code-mode-scope-select { flex: 0 1 220px; min-width: 0; }
+.provider-sandbox-add.bp6-html-select, .provider-code-mode-add.bp6-html-select { flex: 0 1 260px; }
 .provider-settings-footer.bp6-section-card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .provider-settings-spacer { flex: 1 1 auto; }
 .provider-settings-problem { flex: 1 0 100%; color: var(--red); font-size: 12px; }
@@ -1543,7 +1543,8 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .sandbox-profile-problem { margin-bottom: 8px; }
 .sandbox-profile-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .sandbox-profile-spacer { flex: 1 1 auto; }
-.sandbox-scopes-none { margin: 0; color: var(--muted); }
+.sandbox-scopes-none, .code-mode-scopes-none { margin: 0; color: var(--muted); }
+.code-mode-scope-mode.bp6-tag { flex: none; }
 .sandbox-scope-list { display: grid; gap: 2px; margin: 8px 0 0; padding: 0; list-style: none; }
 .sandbox-scope-list > li { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .sandbox-scope-link.bp6-button { min-width: 0; }
@@ -1815,10 +1816,10 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 
 /* Chromeless window: the page draws the title bar. The application mark sits over the Explorer column and the
    session tab strips along the top edge continue it up to the window controls. */
-.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-room: calc(270px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 100px; }
+.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-room: calc(298px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 100px; }
 /* Without the Explorer the mark has the room of the whole rail: 11px and 6px of padding, the 22px mark and its 9px gap, and
-   eight 26px buttons 2px apart. The developer instance says so beside the mark: its navigation needs that much more room. */
-.ide-shell:has(.window-brand-tag) { --brand-room: calc(316px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
+   nine 26px buttons 2px apart. The developer instance says so beside the mark: its navigation needs that much more room. */
+.ide-shell:has(.window-brand-tag) { --brand-room: calc(344px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
 .ide-shell .workspace-shell:has(> .window-controls) { --titlebar-inset-end: 138px; }
 /* In a very narrow window the mark ends where the actions of the title bar start: its buttons that have no room fold into its menu. */
 .ide-shell .workspace-shell { --brand-width: min(var(--brand-room), calc(100vw - var(--titlebar-inset-end) - var(--window-actions-width) - var(--space-switch-width, 0px) - var(--plugin-buttons-width, 0px))); }
@@ -1852,6 +1853,9 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 .ide-shell .workspace-shell:not(.project-rail-open) .flexlayout__tabset_tabbar_outer[data-titlebar-start] { padding-left: var(--brand-width); }
 /* In a narrow window the Explorer opens over the content, so the mark and the first tab strip are the same with it. */
 @media (max-width: 875px) {
+  /* The tabs keep the room they had with eight buttons: one more folds into the menu rather than push the first tab under the mark. */
+  .ide-shell { --brand-room: calc(270px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
+  .ide-shell:has(.window-brand-tag) { --brand-room: calc(316px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
   .ide-shell .workspace-shell .window-brand { grid-area: auto; position: absolute; z-index: 2; top: 0; left: 0; width: var(--brand-width); height: var(--titlebar-height); }
   .ide-shell .workspace-shell .flexlayout__tabset_tabbar_outer[data-titlebar-start] { padding-left: var(--brand-width); }
 }

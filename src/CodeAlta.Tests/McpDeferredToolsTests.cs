@@ -52,6 +52,10 @@ public sealed partial class McpRuntimeServiceTests
         using var arguments = JsonDocument.Parse("""{"text":"hi"}""");
         var result = await echo.Handler(new AgentToolInvocation(new ModelProviderId("test"), "session", "call", echo.Spec.Name, arguments.RootElement.Clone()), CancellationToken.None);
         Assert.AreEqual("echo:hi", Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items[0]).Value);
+        // A script of Code Mode reads the structured content of the result, by the name of the tool in its server.
+        Assert.AreEqual("hi", result.Structured?.GetProperty("echoed").GetString());
+        Assert.AreEqual("echo", echo.Spec.ScriptName);
+        Assert.IsTrue(echo.Spec.RunsInParallel);
         await plugin.DisposeAsync();
     }
 

@@ -175,8 +175,17 @@ internal static class AcpToolCalls
         return null;
     }
 
+    // The names under which an agent that calls the tools of MCP servers through a tool of its own (Grok Build's
+    // `use_tool`: { tool_name: "codealta__exec", tool_input: { ... } }) gives the tool, its server and its arguments.
+    private static readonly System.Collections.Immutable.ImmutableArray<string> WrappedToolKeys = ["tool", "toolName", "tool_name"];
+    private static readonly System.Collections.Immutable.ImmutableArray<string> WrappedServerKeys = ["server", "serverName", "server_name"];
+    private static readonly System.Collections.Immutable.ImmutableArray<string> WrappedArgumentKeys = ["arguments", "tool_input", "toolInput", "input"];
+
     // A call of a tool of the MCP server of CodeAlta: its title names the tool, alone or after the name of the server
-    // ("alta", "codealta/alta", "mcp__codealta__alta"), and some agents wrap the arguments with the names.
+    // ("alta", "codealta/alta", "mcp__codealta__alta"), or a tool of the agent that relays calls names it in its input.
+    // A relayed call must be known as the tool of CodeAlta it is: the call the agent then makes on the MCP server is
+    // matched to it and runs with the session's run, where a call matched to none runs by itself, without the run's
+    // tools (a script of `exec` would have no `tools`).
     private static (string Name, JsonElement Arguments)? FindCodeAltaTool(
         string? title,
         JsonElement rawInput,
@@ -188,11 +197,11 @@ internal static class AcpToolCalls
         }
 
         if (rawInput.ValueKind == JsonValueKind.Object &&
-            (AcpJson.GetString(rawInput, "tool") ?? AcpJson.GetString(rawInput, "toolName")) is { } wrapped &&
+            FirstString(rawInput, WrappedToolKeys) is { } wrapped &&
             MatchName(wrapped, tools) is { } wrappedName &&
-            (AcpJson.GetString(rawInput, "server") ?? AcpJson.GetString(rawInput, "serverName") ?? AcpPrompts.McpServerName) == AcpPrompts.McpServerName)
+            (FirstString(rawInput, WrappedServerKeys) ?? AcpPrompts.McpServerName) == AcpPrompts.McpServerName)
         {
-            return (wrappedName, AcpJson.TryGetObject(rawInput, "arguments", out var arguments) ? arguments.Clone() : AcpJson.EmptyObject);
+            return (wrappedName, WrappedArguments(rawInput));
         }
 
         if (title is null || MatchName(title.Trim(), tools) is not { } name)
@@ -201,6 +210,54 @@ internal static class AcpToolCalls
         }
 
         return (name, rawInput.ValueKind == JsonValueKind.Object ? rawInput.Clone() : AcpJson.EmptyObject);
+    }
+
+    private static string? FirstString(JsonElement input, System.Collections.Immutable.ImmutableArray<string> names)
+    {
+        foreach (var name in names)
+        {
+            if (AcpJson.GetString(input, name) is { Length: > 0 } value)
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    // The arguments of a relayed call: an object, or an object written as a JSON string.
+    private static JsonElement WrappedArguments(JsonElement input)
+    {
+        foreach (var name in WrappedArgumentKeys)
+        {
+            if (!input.TryGetProperty(name, out var value))
+            {
+                continue;
+            }
+
+            if (value.ValueKind == JsonValueKind.Object)
+            {
+                return value.Clone();
+            }
+
+            if (value.ValueKind == JsonValueKind.String)
+            {
+                try
+                {
+                    using var document = JsonDocument.Parse(value.GetString()!);
+                    if (document.RootElement.ValueKind == JsonValueKind.Object)
+                    {
+                        return document.RootElement.Clone();
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Not JSON: not the arguments.
+                }
+            }
+        }
+
+        return AcpJson.EmptyObject;
     }
 
     private static string? MatchName(string text, IReadOnlyDictionary<string, AgentToolDefinition> tools)

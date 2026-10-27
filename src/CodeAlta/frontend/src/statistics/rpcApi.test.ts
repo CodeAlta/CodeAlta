@@ -49,7 +49,7 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 5));
 const request: StatisticsRequest = { period: "30d", frequency: "week", comparison: "previousPeriod", filter: { project: "p1" } };
 
 test("every question is one call of the plugin, named statistics.<question>, with the request and its arguments as they are", async () => {
-  const plugin = carrier(Object.fromEntries(["summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "skills", "mcp-tools", "runs"]
+  const plugin = carrier(Object.fromEntries(["summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "skills", "mcp-tools", "runs", "scripts"]
     .map(name => [`statistics.${name}`, (input: unknown) => ({ echoed: name, input })])));
   const api = createRpcApi(plugin.rpc);
   await api.summary(request);
@@ -70,7 +70,8 @@ test("every question is one call of the plugin, named statistics.<question>, wit
   await api.skills(request);
   await api.mcpTools(request);
   await api.runs(request, "longest");
-  assert.deepEqual(plugin.calls.map(call => call.name), ["summary", "series", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "skills", "mcp-tools", "runs"].map(name => `statistics.${name}`));
+  await api.scripts(request);
+  assert.deepEqual(plugin.calls.map(call => call.name), ["summary", "series", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "skills", "mcp-tools", "runs", "scripts"].map(name => `statistics.${name}`));
   assert.deepEqual(plugin.calls[0].input, { request });
   assert.deepEqual(plugin.calls[1].input, { request, metric: "tokens", group: "provider" });
   assert.deepEqual(plugin.calls[3].input, { request, kind: "models", by: "calls" });

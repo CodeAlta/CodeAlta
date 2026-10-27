@@ -8,6 +8,7 @@ import type { MessageKey } from "./localization";
 export const promptProvenanceIds = Object.freeze({
   userAnswer: "user-answer", userReview: "user-review", reminder: "reminder", backgroundJob: "background-job",
   agentSession: "agent-session", automation: "automation", modelFallback: "model-fallback", plugin: "plugin", provider: "provider",
+  workflow: "workflow",
 } as const);
 
 // The title of a known provenance, as a key of the translations.
@@ -21,6 +22,8 @@ const titles: Readonly<Record<string, MessageKey>> = Object.freeze({
   [promptProvenanceIds.modelFallback]: "Model fallback",
   [promptProvenanceIds.plugin]: "Plugin",
   [promptProvenanceIds.provider]: "Provider",
+  // The result of a script of Code Mode that ended in the background.
+  [promptProvenanceIds.workflow]: "Workflow",
 });
 
 const icons: Readonly<Record<string, IconName>> = Object.freeze({
@@ -33,6 +36,7 @@ const icons: Readonly<Record<string, IconName>> = Object.freeze({
   [promptProvenanceIds.modelFallback]: "model",
   [promptProvenanceIds.plugin]: "plugin",
   [promptProvenanceIds.provider]: "terminal",
+  [promptProvenanceIds.workflow]: "code",
 });
 
 /** The identifier a record names, when it is well-formed (lowercase words separated by hyphens, at most 64 characters); else null. */

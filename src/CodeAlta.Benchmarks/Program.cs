@@ -4,6 +4,9 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.CodeMode;
+using CodeAlta.LiveTool;
+using CodeAlta.LiveTool.Scripts;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 
@@ -66,6 +69,7 @@ internal static class Program
                 CharactersPerDelta = options.DeltaCharacters,
                 ToolOutputLines = options.ToolLines,
                 DeltasPerSecond = options.Rate,
+                ScriptCalls = options.ScriptCalls,
             };
             var counters = new PluginCounters();
             var providerId = new ModelProviderId("bench");
@@ -86,13 +90,24 @@ internal static class Program
                 },
                 CancellationToken.None).ConfigureAwait(false);
 
+            // Code Mode: the runs of the benchmark, without a limit that would refuse one; their results are not delivered.
+            await using var scripts = new CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry(null, maxPerSession: 64, maxPerHost: 100_000);
+            IReadOnlyList<AgentToolDefinition> codeModeTools = [];
+            if (options.ScriptCalls > 0)
+            {
+                var registry = new AltaCommandRegistry();
+                var dispatcher = new AltaCommandDispatcher(registry, new AltaServiceCollection().Add(host.CatalogOptions).Add(registry));
+                codeModeTools = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { WorkingDirectory = projectRoot },
+                    new CodeModeToolOptions { Runs = scripts, Cache = new CodeModeScriptCache() });
+            }
+
             var executionOptions = new SessionExecutionOptions
             {
                 ProviderId = providerId,
                 ProviderKey = providerId.Value,
                 WorkingDirectory = projectRoot,
                 ProjectRoots = [projectRoot],
-                Tools = [workload.CreateTool()],
+                Tools = [workload.CreateTool(), .. codeModeTools],
                 OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowForSession)),
             };
 
@@ -116,6 +131,9 @@ internal static class Program
 
             // One turn of every session first: what the JIT, the journal files and the database set up is not measured.
             await RunTurnsAsync(host.RuntimeService, sessions, executionOptions, workload, idle, turns: 1, options.Timeout).ConfigureAwait(false);
+            await WaitForScriptsAsync(scripts, options.Timeout).ConfigureAwait(false);
+            var scriptsBefore = scripts.List().Count;
+            var toolCallsBefore = Interlocked.Read(ref workload.ToolCalls);
 
             var before = MetricsSnapshot.Capture();
             var sampler = ThreadPoolSampler.Start(stop.Token);
@@ -124,7 +142,8 @@ internal static class Program
             var pluginEventsBefore = Interlocked.Read(ref counters.Events);
             var pluginDeltasBefore = Interlocked.Read(ref counters.Deltas);
             var stopwatch = Stopwatch.StartNew();
-            var completed = await RunTurnsAsync(host.RuntimeService, sessions, executionOptions, workload, idle, options.Turns, options.Timeout).ConfigureAwait(false);
+            var completed = await RunTurnsAsync(host.RuntimeService, sessions, executionOptions, workload, idle, options.Turns, options.Timeout).ConfigureAwait(false)
+                && await WaitForScriptsAsync(scripts, options.Timeout).ConfigureAwait(false);
             stopwatch.Stop();
             var after = MetricsSnapshot.Capture();
             var threadPool = await sampler.StopAsync().ConfigureAwait(false);
@@ -158,6 +177,8 @@ internal static class Program
                 DisplayReplacements = observers.Sum(static observer => observer.Replacements),
                 RuntimeStreamEvents = streamReader?.Events ?? 0,
                 DroppedRuntimeEvents = host.RuntimeService.DroppedRuntimeEventCount,
+                Scripts = scripts.List().Count - scriptsBefore,
+                ToolCalls = Interlocked.Read(ref workload.ToolCalls) - toolCallsBefore,
             };
         }
         finally
@@ -211,6 +232,24 @@ internal static class Program
 
             return false;
         }
+    }
+
+    // The scripts of the turns go on in the background: the measure ends when the last one ended.
+    private static async Task<bool> WaitForScriptsAsync(CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry scripts, TimeSpan timeout)
+    {
+        var deadline = Stopwatch.StartNew();
+        while (scripts.List().Any(static run => run.Running))
+        {
+            if (deadline.Elapsed > timeout)
+            {
+                Console.Error.WriteLine($"Scripts still running after {timeout.TotalSeconds:0} s.");
+                return false;
+            }
+
+            await Task.Delay(5).ConfigureAwait(false);
+        }
+
+        return true;
     }
 
     private static string LinkFreeTempPath()
@@ -437,6 +476,8 @@ internal sealed class BenchmarkOptions
           --quiet-plugins N     plugins that do not look at events (default 5)
           --observing-plugins N plugins that look at events (default 2)
           --stream-reader       read the original runtime event stream, as the terminal application does
+          --script-calls N      Code Mode: each step that calls the tool runs a script instead, in the background,
+                                which calls it N times at once (default 0: the tool is called directly)
           --repeat N            runs, each in a new host (default 1)
           --timeout SECONDS     time allowed for the measured turns (default 600)
           --json PATH           also write the results as JSON
@@ -453,6 +494,7 @@ internal sealed class BenchmarkOptions
     public int QuietPlugins { get; private set; } = 5;
     public int ObservingPlugins { get; private set; } = 2;
     public bool StreamReader { get; private set; }
+    public int ScriptCalls { get; private set; }
     public int Repeat { get; private set; } = 1;
     public TimeSpan Timeout { get; private set; } = TimeSpan.FromSeconds(600);
     public string? JsonPath { get; private set; }
@@ -477,6 +519,7 @@ internal sealed class BenchmarkOptions
                 case "--tool-lines": options.ToolLines = NonNegative(); break;
                 case "--rate": options.Rate = NonNegative(); break;
                 case "--observers": options.Observers = NonNegative(); break;
+                case "--script-calls": options.ScriptCalls = NonNegative(); break;
                 case "--quiet-plugins": options.QuietPlugins = NonNegative(); break;
                 case "--observing-plugins": options.ObservingPlugins = NonNegative(); break;
                 case "--repeat": options.Repeat = Positive(); break;
@@ -511,7 +554,7 @@ internal sealed class BenchmarkOptions
 
     public string Describe()
         => string.Create(CultureInfo.InvariantCulture,
-            $"sessions={Sessions} turns={Turns} steps={Steps} deltas={Deltas} delta-chars={DeltaCharacters} tool-lines={ToolLines} rate={(Rate == 0 ? "max" : Rate.ToString(CultureInfo.InvariantCulture))} observers={Observers} plugins={QuietPlugins}+{ObservingPlugins} stream-reader={StreamReader}");
+            $"sessions={Sessions} turns={Turns} steps={Steps} deltas={Deltas} delta-chars={DeltaCharacters} tool-lines={ToolLines} rate={(Rate == 0 ? "max" : Rate.ToString(CultureInfo.InvariantCulture))} observers={Observers} plugins={QuietPlugins}+{ObservingPlugins} stream-reader={StreamReader} script-calls={ScriptCalls}");
 }
 
 internal sealed class BenchmarkResult
@@ -537,6 +580,8 @@ internal sealed class BenchmarkResult
     public long DisplayReplacements { get; init; }
     public long RuntimeStreamEvents { get; init; }
     public long DroppedRuntimeEvents { get; init; }
+    public long Scripts { get; init; }
+    public long ToolCalls { get; init; }
 }
 
 internal sealed class BenchmarkReport
@@ -571,6 +616,11 @@ internal sealed class BenchmarkReport
                 $"  lock contentions {result.LockContentions}, thread-pool work items {result.ThreadPoolWorkItems} ({result.ThreadPoolWorkItems / (double)events:0.0} per streamed item), max pool threads {result.MaxThreadPoolThreads}, max queued {result.MaxPendingWorkItems}");
             builder.AppendLine(CultureInfo.InvariantCulture,
                 $"  plugin events {result.PluginEvents} (fragments {result.PluginDeltas}), display replacements {result.DisplayReplacements}, runtime stream events {result.RuntimeStreamEvents}, dropped {result.DroppedRuntimeEvents}");
+            if (result.Scripts > 0)
+            {
+                builder.AppendLine(CultureInfo.InvariantCulture,
+                    $"  scripts {result.Scripts}, tool calls {result.ToolCalls} ({result.ToolCalls / (double)result.Scripts:0.0} each), {result.Scripts / Math.Max(0.001, result.WallMilliseconds / 1000):0} scripts/s, cpu {result.CpuMilliseconds / result.Scripts:0.00} ms and {result.AllocatedBytes / (double)result.Scripts / 1024:0} KB allocated per script");
+            }
         }
 
         return builder.ToString();

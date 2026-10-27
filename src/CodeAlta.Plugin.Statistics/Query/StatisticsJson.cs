@@ -77,6 +77,7 @@ public static class StatisticsJson
 [JsonSerializable(typeof(SkillsResult))]
 [JsonSerializable(typeof(McpToolsResult))]
 [JsonSerializable(typeof(RunsResult))]
+[JsonSerializable(typeof(ScriptsResult))]
 [JsonSerializable(typeof(StatisticsCoverage))]
 [JsonSerializable(typeof(StatisticsRequest))]
 internal sealed partial class StatisticsResultJsonContext : JsonSerializerContext;

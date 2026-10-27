@@ -16,7 +16,7 @@ An automation is a prompt that CodeAlta Desktop sends by itself: at a time you c
 1. Click the bolt at the top of the window, or press `Ctrl+G` `Ctrl+M`, to open the **Automations** tab.
 2. Click **New automation**, or start from a template such as **Issue triage** or **Pull request review**.
 3. Choose where it runs: in a project, or as a chat in no project.
-4. Add what starts it and write the prompt.
+4. Add what starts it and write the prompt, or choose a [script](#run-a-script).
 5. Choose what its sessions run with in **Runs with** (see below).
 6. Click **Save**, or **Save and run** to try it right away.
 
@@ -26,6 +26,21 @@ An automation is a prompt that CodeAlta Desktop sends by itself: at a time you c
 </figure>
 
 The session starts with nothing but your prompt: say what to look at and what to report.
+
+## Run a script
+
+An automation can run a [script of the library](sessions/code-mode.md#scripts-of-the-library) in place of a prompt. The editor offers **Prompt** or **Script**: choose the script, and write its arguments as a JSON object. The editor lists its parameters under them. The template **Pull request review in parallel** runs the sample `review-pr` on each pull request.
+
+- Its session calls the script through `exec`, even when [Code Mode](sessions/code-mode.md) is off, then answers with its result.
+- A script that declares an `event` parameter gets what started the run in it: the issue, the pull request, or what the command printed. `review-pr` reads the number of the pull request there.
+- An automation that runs a script waits for **Allow** until it is saved in the editor or created with `alta automation create`, and asks again whenever the script changes: a version saved by an agent, or one that came with a `git pull`.
+
+```toml
+script = "triage-issues"
+script_args = '{"limit": 10}'
+```
+
+An agent creates one with `alta automation create --name "PR review" --trigger pull_request@opened --script review-pr`, and gives the arguments with `--script-args '{"lenses": ["security"]}'`. The script and its arguments are checked as a run checks them.
 
 ## What its sessions run with
 

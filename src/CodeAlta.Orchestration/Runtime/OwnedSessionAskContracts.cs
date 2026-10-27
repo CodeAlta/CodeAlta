@@ -8,7 +8,14 @@ public sealed record OwnedAskHandle(Guid OperationId, Guid RuntimeInstanceId, lo
     string ProviderId, string SessionId, string RunId, string AskId, long ResponseGeneration);
 
 /// <summary>One pending original ask and its current claim state.</summary>
-public sealed record OwnedAskHead(OwnedAskHandle Handle, AltaAskRequest Request, string State);
+public sealed record OwnedAskHead(OwnedAskHandle Handle, AltaAskRequest Request, string State)
+{
+    /// <summary>
+    /// Gets whether the ask is shown at once, whatever the turn of its session does: a question of a script of Code Mode
+    /// (<c>ask()</c>), which the running turn waits for. Another ask is shown once the turn that asked has ended.
+    /// </summary>
+    public bool Immediate { get; init; }
+}
 
 /// <summary>Bounded selected-session view; absence is not an acknowledgment.</summary>
 public sealed record OwnedAskPage(OwnedAskHead? Head, OwnedAskDisposition? Latest, bool HasMore);

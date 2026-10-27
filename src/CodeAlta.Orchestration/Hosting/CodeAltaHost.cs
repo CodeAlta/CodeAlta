@@ -95,6 +95,23 @@ public sealed class CodeAltaHost : IAsyncDisposable
         };
         Commands.Fallback.ProviderStates = () => modelProviderInitializationService.CurrentStates;
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
+        // A script that went on in the background gives its result to its session as a prompt.
+        CodeModeRuns = new Runtime.Scripts.CodeModeRunRegistry(
+            (sessionId, prompt, token) => runtimeService.DeliverHostPromptAsync(sessionId, prompt, AgentPromptProvenance.Workflow, token),
+            runtimeService.TryHoldForScript);
+        runtimeService.ScriptRuns = CodeModeRuns;
+        CodeModeRuns.Journal = (sessionId, record) => runtimeService.AppendScriptRecordAsync(sessionId, record);
+        // The sessions scripts start go through a headless driver of the host, made when a script first asks for one.
+        _codeModeAgents = new Lazy<CodeModeAgents>(() => new CodeModeAgents(this), LazyThreadSafetyMode.ExecutionAndPublication);
+        // The sessions a run kept open close with it.
+        CodeModeRuns.RunEnded += runId => { if (_codeModeAgents.IsValueCreated) _ = _codeModeAgents.Value.ForgetRunAsync(runId); };
+        CodeModeQuestions = new CodeModeQuestions(this);
+        // The approval of a call of a script, in its turn or in the background, takes its turn among the questions of its run;
+        // its card says that the run waits for it, and the exec that waits for the run does not count that time.
+        runtimeService.Permissions.WaitingForUser = async (request, token) =>
+            CodeModeRuns.FindByToolCall(request.SessionId, request.InteractionId) is { } run
+                ? await CodeModeRuns.WaitForUserAsync(run, "approval", null, null, token).ConfigureAwait(false)
+                : null;
         ExternalSessions = followExternalSessions
             ? new ExternalSessionFollower(catalogOptions, sessionViewCatalog.JournalStore.CreateSessionStore(), agentSessionCatalog, runtimeService)
             : null;
@@ -231,6 +248,34 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     /// <summary>Gets host-owned admission and drainage for up to eight actual cached workspace reads.</summary>
     public OwnedSessionWorkspace WorkspaceReads { get; }
+
+    /// <summary>Gets the runs of the Code Mode scripts of the sessions.</summary>
+    public Runtime.Scripts.CodeModeRunRegistry CodeModeRuns { get; }
+
+    private readonly Lazy<CodeModeAgents> _codeModeAgents;
+
+    /// <summary>
+    /// Keeps the runs of scripts under the state root (<c>codemode/runs</c>) with the results of their steps, so that a run
+    /// CodeAlta ended during is resumed and a run is rerun over what it recorded. The runs that had no end are marked
+    /// interrupted now. Called once by a frontend whose state lasts (CodeAlta Desktop, the TUI), before a script runs; a
+    /// second call does nothing. <c>altacli</c> keeps none: its database is thrown away.
+    /// </summary>
+    /// <returns>A task that completes when the sessions of the interrupted runs were told.</returns>
+    public Task KeepCodeModeRunsAsync()
+        => CodeModeRuns.Store is not null
+            ? Task.CompletedTask
+            : CodeModeRuns.UseStoreAsync(new Runtime.Scripts.CodeModeRunStore(Runtime.Scripts.CodeModeRunStore.RootOf(CatalogOptions)));
+
+    /// <summary>Gets the library of the scripts of Code Mode: the user's scripts, and those of the projects.</summary>
+    public Runtime.Scripts.CodeModeScriptLibrary CodeModeScripts => _codeModeScripts ??= new Runtime.Scripts.CodeModeScriptLibrary(CatalogOptions, Runtime.Scripts.CodeModeScriptLibrary.ShippedRoot);
+
+    private Runtime.Scripts.CodeModeScriptLibrary? _codeModeScripts;
+
+    /// <summary>Gets where the questions of the scripts of Code Mode (<c>ask()</c>) reach the user.</summary>
+    public Runtime.Scripts.ICodeModeQuestions CodeModeQuestions { get; }
+
+    /// <summary>Gets the sessions the scripts of Code Mode start (<c>agent()</c>).</summary>
+    public Runtime.Scripts.ICodeModeAgents CodeModeAgents => _codeModeAgents.Value;
 
     /// <summary>
     /// Gets what lists the sessions another process writes into the sessions folder of the host and follows those it holds
@@ -740,6 +785,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     private async ValueTask DisposeCommandsAndRuntimeAsync()
     {
+        // The scripts stop first: their calls run on the sessions that close next.
+        await CodeModeRuns.DisposeAsync().ConfigureAwait(false);
+        if (_codeModeAgents.IsValueCreated) await _codeModeAgents.Value.DisposeAsync().ConfigureAwait(false);
         // Nothing is listed or followed any more while the sessions close.
         if (ExternalSessions is { } follower) await follower.DisposeAsync().ConfigureAwait(false);
         BeginShutdownControls();

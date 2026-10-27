@@ -14,6 +14,12 @@ public sealed record HeadlessSessionRequest
     /// </summary>
     public string? ProjectFolder { get; init; }
 
+    /// <summary>
+    /// Gets the git worktree a new session works in, an existing folder of a checkout of the repository of
+    /// <see cref="ProjectFolder"/>; null for <see cref="ProjectFolder"/> itself. Ignored for a session that exists.
+    /// </summary>
+    public string? WorktreeDirectory { get; init; }
+
     /// <summary>Gets the model as a reference <c>provider:model</c> or <c>provider:model@reasoning</c>; null for <see cref="Tier"/> or the usual model.</summary>
     public string? ModelRef { get; init; }
 
@@ -46,6 +52,15 @@ public sealed record HeadlessSessionRequest
     /// of the user, or <c>off</c>); null for what the settings decide.
     /// </summary>
     public string? Sandbox { get; init; }
+
+    /// <summary>
+    /// Gets the session a new session is the child of, or null. The child is in its tree (aborts, retention) and takes
+    /// the permission mode a session it creates takes (<see cref="SessionRuntimeService.GetCreatedSessionPermissionMode"/>).
+    /// </summary>
+    public string? ParentSessionId { get; init; }
+
+    /// <summary>Gets who creates a new session, or null for the driver itself.</summary>
+    public AltaActorProvenance? CreatedBy { get; init; }
 }
 
 /// <summary>How the opening of a headless session went.</summary>
@@ -125,6 +140,9 @@ public sealed record HeadlessPrompt(string Text)
 {
     /// <summary>Gets what is attached to the prompt by reference: files, folders, images, text blocks.</summary>
     public IReadOnlyList<SessionPromptAttachment> Attachments { get; init; } = [];
+
+    /// <summary>Gets the provenance the prompt is recorded with (<see cref="CodeAlta.Agent.AgentPromptProvenance"/>), or null for a prompt of the user.</summary>
+    public string? Provenance { get; init; }
 }
 
 /// <summary>How a headless run ended.</summary>

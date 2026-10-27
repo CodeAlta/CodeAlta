@@ -29,6 +29,9 @@ import { usePromptChange } from "./systemPromptReader";
 import { TimelineClaudeCli } from "./claudeCli/timelineCard";
 import { promptProvenanceTitle } from "./promptProvenance";
 import type { MessageKey } from "./localization";
+import { ScriptCalls } from "./scriptCard/ScriptCalls";
+import { ScriptRunView } from "./scriptCard/ScriptRunView";
+import { hasWorkflowBlock } from "./workflows/runFlow";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -211,9 +214,18 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   // A tool call has its own window, which the timeline holds: it follows the call while it runs. A row that is
   // no call (an output whose call is not in the window) keeps the details of its record.
   const callWindow = item.category === "tool" && !!item.toolCall && !!onOpenTool && !!rowKey;
+  // The call of a script whose run has its workflow block: the tile stays one line, and goes to the block, which opens the call.
+  const workflowBlock = toolTile && callWindow && !!item.scriptRun && hasWorkflowBlock(item.scriptRun);
   function openDetails(origin: HTMLButtonElement) {
     if (!current() || !origin.isConnected || origin.closest('[inert], [hidden]')
       || modalDialogOpen()) return;
+    const block = workflowBlock ? origin.closest(".timeline-activity")?.querySelector<HTMLElement>(`[data-workflow-row="${CSS.escape(rowKey!)}"]`) : null;
+    if (block) {
+      block.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      block.focus({ preventScroll: true });
+      block.animate?.([{ boxShadow: "0 0 0 2px var(--accent)" }, { boxShadow: "0 0 0 2px transparent" }], { duration: 900, easing: "ease-out" });
+      return;
+    }
     if (callWindow) onOpenTool!(rowKey!, origin);
     else setDetails({ item, origin, current: canInspect });
   }
@@ -235,7 +247,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
-        <span>{clickableTile && hasDetails ? <button ref={toolTrigger} type="button" className="tool-tile-title" aria-haspopup="dialog"
+        <span>{clickableTile && hasDetails ? <button ref={toolTrigger} type="button" className="tool-tile-title" aria-haspopup={workflowBlock ? undefined : "dialog"}
           aria-label={job ? `${title} · ${item.summary} · ${job.result}` : undefined}
           // Open on Enter's release: opening on its press focuses the window's Blueprint Close button,
           // which would interpret that same release as its own activation and immediately close it.
@@ -287,6 +299,8 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           : item.toolOutputBytes != null && item.toolOutputLines != null && <span className="tool-output-stats">{item.toolOutputLines}L · {(item.toolOutputBytes / 1024).toFixed(1)} KB</span>}
         {toolOutput && <span className="tool-result-preview" title={toolOutput.slice(0, 512)}>{commandPreview(toolOutput)}</span>}
       </div>}
+      {toolTile && item.scriptRun && !workflowBlock && <ScriptRunView run={item.scriptRun} title={item.scriptTitle ?? null} />}
+      {toolTile && item.scriptCalls && !workflowBlock && <ScriptCalls calls={item.scriptCalls} />}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}

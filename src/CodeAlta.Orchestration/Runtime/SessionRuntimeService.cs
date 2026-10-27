@@ -147,6 +147,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         Jobs = new SessionJobService(DeliverJobResultAsync);
         _sessionViewCatalog.JournalStore.StateAppended += OnSessionStateAppended;
         instructionTemplateProvider.SessionToolPatterns = GetDisabledToolPatterns;
+        instructionTemplateProvider.CodeModeOf = (sessionId, providerKey, modelId) => ScriptRuns?.CodeModeOf(sessionId, providerKey, modelId) ?? "off";
         _events.Published = PulseSettlement;
     }
 
@@ -3146,6 +3147,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
         // A background job is a task of the host, not of the provider: the user stops it whatever the session does.
         if (taskId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase)) return StopJobAsync(sessionId, taskId, cancellationToken);
+        // So is a script of Code Mode that went on in the background: the user stops it from the tasks of its session.
+        if (ScriptRuns?.StopRun(sessionId, taskId, "the user") == true) return Task.FromResult(true);
         return AdmitAsync(() => StopBackgroundTaskBodyAsync(sessionId, taskId, cancellationToken), cancellationToken);
     }
 
@@ -6137,7 +6140,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public IReadOnlyList<ParentNotificationWork> TakeParentNotifications(AgentEvent? @event)
         {
-            if (string.IsNullOrWhiteSpace(ParentSessionId) || @event is null)
+            // A session a script created answers the script, which waits for its outcome: its parent is told nothing.
+            if (string.IsNullOrWhiteSpace(ParentSessionId) || @event is null
+                || string.Equals(CreatedBy?.Kind, AltaActorProvenance.WorkflowKind, StringComparison.Ordinal))
             {
                 return [];
             }

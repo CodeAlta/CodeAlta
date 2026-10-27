@@ -20,8 +20,9 @@ const frame = `(() => {
   return { mark: box(".window-brand"), explorer: box(".session-content-rail-slot"), content: box(".session-content-main-panel"),
     tabs: Math.round(parseFloat(getComputedStyle(document.querySelector(".flexlayout__tabset_tabbar_outer[data-titlebar-start]")).paddingLeft)) };
 })()`;
-// The height of the title bar, the width the mark takes when it is alone, and the width the Explorer starts with.
-const bar = 38, mark = 270, explorer = 272;
+// The height of the title bar, the width the mark takes when it is alone in a narrow window and in a wide one, and the
+// width the Explorer starts with.
+const bar = 38, mark = 270, wideMark = 298, explorer = 272;
 
 test("the title bar keeps Explorer in place and Home opens or focuses one Welcome tab", { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-window-frame-"));
@@ -115,7 +116,8 @@ test("the title bar keeps Explorer in place and Home opens or focuses one Welcom
     // A wide window gives the Explorer a column, with the mark above it and its divider, which is before the content.
     await size(1280, 900);
     assert.deepEqual(await shown(true), { mark: [0, 0, explorer + 2, bar], explorer: [0, bar, explorer, 900 - bar], content: [explorer + 2, 0, 1280 - explorer - 2, 900], tabs: 0 });
-    assert.deepEqual(await shown(false), { ...alone, content: [0, 0, 1280, 900] });
+    // Without the Explorer, a wide window gives the mark the room of all its buttons.
+    assert.deepEqual(await shown(false), { ...alone, mark: [0, 0, wideMark, bar], tabs: wideMark, content: [0, 0, 1280, 900] });
 
     const home = `document.querySelector('.window-actions button[aria-label="Home"]')`;
     const welcomeTabs = `Array.from(document.querySelectorAll('.flexlayout__tab_button')).filter(tab=>tab.textContent.trim()==='Welcome')`;
@@ -132,7 +134,7 @@ test("the title bar keeps Explorer in place and Home opens or focuses one Welcom
     assert.equal(await evaluate(`${welcomeTabs}.length`), 1, "Repeated clicks reuse the tab");
     assert.deepEqual(await evaluate("windowFrameFixture.commands.map(command=>command.commandId)"), ["welcome-command", "welcome-command", "welcome-command"]);
     assert.equal(await evaluate("windowFrameFixture.opens.every(open=>open.projectId===null && open.sessionId===null && open.key===null)"), true);
-    await evaluate("document.querySelector('.activity-canvases').click()");
+    await evaluate("document.querySelector('.activity-issues').click()");
     assert.equal(await wait(`!${home}.classList.contains('bp6-active')`), true);
     await evaluate(`${home}.click()`);
     assert.equal(await wait(`${welcomeTabs}.length === 1 && ${home}.classList.contains('bp6-active')`), true, "Home focuses Welcome from another tab");
@@ -156,7 +158,7 @@ test("the title bar keeps Explorer in place and Home opens or focuses one Welcom
     assert.equal(await wait(`${welcomeTabs}.length === 0`), true, "The native close action closes Welcome");
     await evaluate(`projectFocusFixture.notify({kind:'close-tab',runningSessions:0,busyTerminals:0})`);
     assert.equal(await wait(`document.querySelectorAll('.flexlayout__tab_button').length === 2 && !!document.querySelector('#catalog-prompt')`), true, "Closing the session returns to a prompt");
-    await evaluate(`[...document.querySelectorAll('.flexlayout__tab_button')].find(tab => tab.textContent.trim() === 'Canvases').click()`);
+    await evaluate(`[...document.querySelectorAll('.flexlayout__tab_button')].find(tab => tab.textContent.trim() === 'Issues').click()`);
     await frames();
     await evaluate(`projectFocusFixture.notify({kind:'close-tab',runningSessions:0,busyTerminals:0})`);
     assert.equal(await wait(`document.querySelectorAll('.flexlayout__tab_button').length === 1 && !!document.querySelector('#catalog-prompt, #session-prompt')`), true);

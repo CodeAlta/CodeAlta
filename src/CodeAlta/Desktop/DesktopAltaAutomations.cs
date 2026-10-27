@@ -60,7 +60,9 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
 
         var definition = new AutomationDefinition(AutomationDefinition.NewId(), request.Name ?? string.Empty)
         {
-            Prompt = request.Prompt ?? string.Empty,
+            Prompt = request.Script is null ? request.Prompt ?? string.Empty : string.Empty,
+            Script = request.Script,
+            ScriptArguments = request.Script is null ? null : request.ScriptArguments,
             Enabled = request.Enabled,
             Project = request.StoreInProject ? null : folder,
             Model = model,
@@ -91,7 +93,7 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
     private AltaAutomation Automation(AutomationEntry entry)
         => new(entry.Id, entry.Definition.Name, entry.Definition.Enabled, entry.Definition.Prompt, entry.ProjectId, entry.ProjectPath, entry.Source.FilePath,
             entry.Definition.Model.Format(), entry.Definition.Agent, [.. entry.Definition.Triggers.Select(AutomationTriggerText.Format)], entry.Problem,
-            automations.NextDue(entry.Id), automations.IsRunning(entry.Id), automations.IsAllowed(entry));
+            automations.NextDue(entry.Id), automations.IsRunning(entry.Id), automations.IsAllowed(entry)) { Script = entry.Definition.Script };
 
     private static AltaAutomationRun Run(AutomationRun run)
         => new(run.Id, run.AutomationId, run.Name, run.SessionId, run.ProjectId, run.StartedAt, run.EndedAt, run.Trigger, run.Detail, run.Status, run.Message);

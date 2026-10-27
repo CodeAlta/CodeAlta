@@ -5,6 +5,7 @@ using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Catalog;
 using CodeAlta.Hosting;
 using CodeAlta.LiveTool;
+using CodeAlta.LiveTool.Scripts;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
@@ -34,6 +35,9 @@ internal sealed record CliHostRequest
     public bool ListsSkills { get; init; } = true;
 
     public bool Offline { get; init; }
+
+    /// <summary>Gets the mode of Code Mode of the sessions (<c>off</c>, <c>on</c>, <c>only</c>), or null for <c>[code_mode]</c> of the configuration.</summary>
+    public string? CodeMode { get; init; }
 
     /// <summary>
     /// Gets whether the host checks, once started, that the plugins and the MCP servers the configuration marks required
@@ -169,7 +173,22 @@ internal sealed class CliHost : IAsyncDisposable
                 },
             }, cancellationToken).ConfigureAwait(false);
             var alta = ComposeAlta(host, request.ListsSkills);
-            host.Commands.SessionTools = CreateSessionTools(alta);
+            // --code-mode wins over the settings, for every session; without it, each session has the mode of its provider and model.
+            var codeModeOptions = new CodeModeToolOptions
+            {
+                Runs = host.CodeModeRuns,
+                Agents = new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents),
+                Library = host.CodeModeScripts,
+                Cache = new CodeAlta.CodeMode.CodeModeScriptCache(),
+                SourceFolder = sessionId => Path.Combine(storage.GlobalRoot, "scratchpad", "codemode", sessionId),
+            };
+            var store = new CodeAltaConfigStore(catalog);
+            host.Commands.SessionTools = CreateSessionTools(alta, request.CodeMode switch
+            {
+                null => new CodeModeSessionTools(codeModeOptions, (providerKey, modelId) => CodeModeSessionTools.ResolveMode(store, providerKey, modelId)),
+                CodeModeScopes.Off => null,
+                { } fixedMode => new CodeModeSessionTools(codeModeOptions, () => fixedMode),
+            });
             // The MCP plugin that runs: one that was created but did not start is not used.
             var started = Volatile.Read(ref mcp) is { } created && host.PluginRuntime.ActivePlugins.Any(plugin => ReferenceEquals(plugin.Instance, created)) ? created : null;
             if (request.ChecksRequired && await CheckRequiredAsync(host, started, request, catalog, cancellationToken).ConfigureAwait(false) is { } missing)
@@ -376,6 +395,9 @@ internal sealed class CliHost : IAsyncDisposable
                 new CodeAlta.Catalog.Bookmarks.SessionJournalBookmarks(host.SessionViewCatalog.JournalStore.CreateSessionStore())))
             .Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(host.PluginRuntime))
             .Add(host.PluginRuntime)
+            // The runs of the scripts of Code Mode, for `alta workflow`.
+            .Add(host.CodeModeRuns)
+            .Add(host.CodeModeScripts)
             .AddPluginRuntimeHooks(host.Commands.Plugins ?? new PluginOrchestrationBridge(host.PluginRuntime.Adapter, () => host.PluginRuntime.ActivePlugins));
         var registry = new AltaCommandRegistry(listsSkills ? AltaCommandRegistryOptions.Cli : WithoutSkills(AltaCommandRegistryOptions.Cli));
         var dispatcher = new AltaCommandDispatcher(registry, services);
@@ -392,13 +414,14 @@ internal sealed class CliHost : IAsyncDisposable
                 .ToHashSet(StringComparer.Ordinal),
         };
 
-    // One alta tool per session, as the desktop gives them, without the tool search of an index the command line has not.
-    private static Func<OwnedSessionToolRequest, IReadOnlyList<AgentToolDefinition>> CreateSessionTools(AltaCommandDispatcher dispatcher)
+    // One alta tool per session, as the desktop gives them, without the tool search of an index the command line has not;
+    // with --code-mode, the exec and wait tools of Code Mode beside it.
+    private static Func<OwnedSessionToolRequest, IReadOnlyList<AgentToolDefinition>> CreateSessionTools(AltaCommandDispatcher dispatcher, CodeModeSessionTools? codeMode)
         => request =>
         {
             // A session being created has no id yet: its tool learns it from its first call.
             var session = request.SessionId;
-            var tool = AltaSessionToolFactory.Create(dispatcher, new AltaSessionToolOptions
+            var caller = new AltaSessionToolOptions
             {
                 SourceSessionIdProvider = () => Volatile.Read(ref session),
                 SourceProjectId = request.ProjectId,
@@ -409,8 +432,10 @@ internal sealed class CliHost : IAsyncDisposable
                 DefaultMaxOutputRecords = 200,
                 DefaultMaxOutputBytes = 64 * 1024,
                 DefaultTimeout = TimeSpan.FromSeconds(120),
-            });
-            return
+                Spaces = request.Spaces,
+            };
+            var tool = AltaSessionToolFactory.Create(dispatcher, caller);
+            AgentToolDefinition[] tools =
             [
                 tool with
                 {
@@ -421,6 +446,7 @@ internal sealed class CliHost : IAsyncDisposable
                     },
                 },
             ];
+            return codeMode?.Create(dispatcher, caller, tools, request.ProviderKey, request.ModelId) ?? tools;
         };
 
     /// <summary>

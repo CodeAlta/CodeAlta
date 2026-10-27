@@ -30,6 +30,11 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
         }
 
         var jsonl = format == CliFormat.Jsonl ? new CliJsonlWriter(output) : null;
+        if (options.CodeMode is { } codeMode && !CodeAltaConfigStore.CodeModeModes.Contains(codeMode))
+        {
+            return Invalid(jsonl, $"'{codeMode}' is not a mode of Code Mode: use on, only or off.");
+        }
+
         if (!TryReadRequest(options, out var request, out var timeout, out var schema, out var error)) return Invalid(jsonl, error!);
         var (prompt, promptError) = await CliPrompt.ReadAsync(options.Prompt, streams, processToken).ConfigureAwait(false);
         if (prompt is null) return Invalid(jsonl, promptError!);
@@ -52,6 +57,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
                 StartPlugins = !options.NoPlugins,
                 StartMcp = !options.NoMcp,
                 ListsSkills = !options.NoSkills,
+                CodeMode = options.CodeMode,
                 Offline = options.Offline,
                 ChecksRequired = true,
             }, environment, processToken).ConfigureAwait(false);

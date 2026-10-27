@@ -10,6 +10,7 @@ using CodeAlta.Desktop.Rpc;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.Scripts;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -218,6 +219,35 @@ public sealed class AutomationHostTests
             Assert.AreEqual(AltaExitCodes.Success, help.ExitCode, command);
             Assert.IsTrue(help.IsHelp && help.Stdout.Length > 0, command);
         }
+    }
+
+    [TestMethod]
+    public async Task ASession_CreatesAnAutomationThatRunsAScript_OnEachPullRequest()
+    {
+        await using var fixture = await Fixture.CreateAsync(withLibrary: true);
+
+        var created = await fixture.One("alta.automation.created", "automation", "create", "--name", "PR review", "--trigger", "pull_request@opened",
+            "--script", "review-pr", "--script-args", """{"lenses":["security"]}""");
+
+        Assert.AreEqual("review-pr", Text(created, "script"));
+        var definition = fixture.Service.Snapshot.Find(Text(created, "id")!)!.Definition;
+        Assert.AreEqual(("review-pr", """{"lenses":["security"]}""", string.Empty), (definition.Script, definition.ScriptArguments, definition.Prompt));
+        foreach (var (arguments, expected) in new (string[], string)[]
+                 {
+                     (["automation", "create", "--name", "x", "--script", "review-pr", "--content", "y"], "usage.contentConflict"),
+                     (["automation", "create", "--name", "x", "--script-args", "{}", "--content", "y"], "usage.scriptArgsWithoutScript"),
+                     (["automation", "create", "--name", "x", "--script", "Review PR"], "usage.invalidScript"),
+                     (["automation", "create", "--name", "x", "--script", "review-pr", "--script-args", "[1]"], "usage.invalidScriptArgs"),
+                     (["automation", "create", "--name", "x", "--script", "nope"], "There is no script 'nope' in the library of its project."),
+                     (["automation", "create", "--name", "x", "--script", "review-pr", "--script-args", """{"depth":2}"""], "the script takes no argument `depth`"),
+                 })
+        {
+            var refused = await fixture.Run(arguments);
+            Assert.AreEqual(AltaExitCodes.Usage, refused.Code, string.Join(' ', arguments));
+            StringAssert.Contains(refused.Text, expected);
+        }
+
+        Assert.AreEqual(1, fixture.Service.Snapshot.Entries.Count, "A refused command writes nothing.");
     }
 
     [TestMethod]
@@ -792,6 +822,204 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task Runner_RunsTheScriptOfAnAutomation_WithItsArgumentsAndTheEventThatStartedIt()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-automation-script-").FullName;
+        try
+        {
+            var global = Path.Combine(root, "global");
+            var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            var provider = new RunnerProvider();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => new RunnerRuntime(provider)),
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            Assert.IsNull(host.CodeModeScripts.Save("triage", CodeModeScriptScope.Project, """
+                export const meta = { name: "triage", description: "Triage.", params: { days: { type: "integer" }, event: { type: "string", default: "" } } };
+                return args.days;
+                """, project.ProjectPath, null).Refusal);
+            var runner = new AutomationRunner(host);
+            var source = new AutomationSource(Path.Combine(global, "config.toml"), null, null);
+            const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d78";
+            AutomationEntry Entry(AutomationDefinition definition) => new(definition, source, project.Id, project.ProjectPath, null);
+
+            // A script that is not in the library, or arguments it refuses, start no session.
+            foreach (var (definition, expected) in new (AutomationDefinition, string)[]
+                     {
+                         (new(Id, "x") { Script = "missing" }, "There is no script 'missing' in the library of its project."),
+                         (new(Id, "x") { Script = "triage" }, "The script 'triage' refuses its arguments: the argument `days` is missing."),
+                         (new(Id, "x") { Script = "triage", ScriptArguments = "{\"days\": \"one\"}" }, "The script 'triage' refuses its arguments: the argument `days` must be integer, not string."),
+                     })
+            {
+                var refused = await runner.StartAsync(Entry(definition), "run-refused", string.Empty, null, default);
+                Assert.AreEqual((null, expected, null), (refused.SessionId, refused.Problem, refused.Completion));
+            }
+
+            var start = await runner.StartAsync(Entry(new(Id, "Triage") { Script = "triage", ScriptArguments = "{\"days\": 1}" }), "run-1",
+                "\n\n---\nThis automation was started by its command.", null, default);
+            Assert.IsNull(start.Problem);
+            var (sessionId, sent) = await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            Assert.AreEqual(start.SessionId, sessionId);
+            var text = string.Concat(sent.Input.Items.OfType<AgentInputItem.Text>().Select(static item => item.Value));
+            StringAssert.Contains(text, "Run the script `triage` of the library with `exec`");
+            StringAssert.Contains(text, "return await workflow(\"triage\", {\"days\":1,\"event\":\"This automation was started by its command.\"});");
+            Assert.IsTrue(host.CodeModeRuns.RequiresCodeMode(sessionId), "Its session has exec whatever the setting of Code Mode says.");
+            provider.Release.SetResult();
+            Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WaitAsync(Patience)).Status);
+            var workspace = new WorkspaceService(host, Epoch);
+            await workspace.CloseSessionsAsync();
+            await workspace.CloseImportsAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
+    public async Task Workflows_ListTheLibrary_RunAScriptInANewSession_ListTheRuns_AndAskARunToBeSaved()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-workflows-").FullName;
+        try
+        {
+            var global = Path.Combine(root, "global");
+            var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            var provider = new RunnerProvider();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => new RunnerRuntime(provider)),
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            Assert.IsNull(host.CodeModeScripts.Save("triage", CodeModeScriptScope.Project, """
+                export const meta = {
+                  name: "triage", title: "Triage issues", description: "Triage.",
+                  params: { days: { type: "integer", description: "How far back." }, labels: { type: "array", optional: true }, event: { type: "string", default: "" } },
+                  steps: [{ id: "fetch", title: "Fetch" }, { id: "label", title: "Label", each: true }, { id: "report", title: "Report", after: ["fetch", "label"] }],
+                };
+                return args.days;
+                """, project.ProjectPath, null).Refusal);
+            var asked = new List<(string SessionId, string Text)>();
+            var rpc = new WorkflowsService(host.CodeModeScripts, host.CodeModeRuns, host.ProjectCatalog, new CodeAlta.Desktop.WorkItems.SessionStarter(host, null, () => null),
+                (sessionId, text, _) => { asked.Add((sessionId, text)); return Task.FromResult<string?>(null); }, Epoch);
+            Assert.AreEqual("unavailable", new WorkflowsService().Runs(new(Epoch)).Status);
+            Assert.AreEqual("stale_epoch", (await rpc.ScriptsAsync(new("other", null), default)).Status);
+            Assert.AreEqual("stale_epoch", (await rpc.RunAsync(new("other", "triage", project.Id, null), default)).Status);
+
+            // The library of the project: its script with its parameters and its declared steps.
+            var listed = await rpc.ScriptsAsync(new(Epoch, project.Id), default);
+            Assert.AreEqual("ok", listed.Status);
+            var triage = listed.Scripts.Single(static script => script.Scope == "project");
+            Assert.IsTrue(listed.Scripts.Any(static script => script is { Name: "review-pr", Scope: "builtin" }), "the samples of CodeAlta come after the project's scripts");
+            Assert.AreEqual(("triage", "project", "Triage issues", "Triage.", null), (triage.Name, triage.Scope, triage.Title, triage.Description, triage.Problem));
+            Assert.AreEqual("days:integer:True:How far back.:|labels:array:False::|event:string:False::\"\"",
+                string.Join('|', triage.Parameters.Select(static parameter => $"{parameter.Name}:{parameter.Type}:{parameter.Required}:{parameter.Description}:{parameter.Default}")));
+            Assert.AreEqual("fetch:-:False|label:-:True|report:fetch,label:False",
+                string.Join('|', triage.Steps.Select(static step => $"{step.Id}:{(step.After is null ? "-" : string.Join(',', step.After))}:{step.Each}")));
+            Assert.IsTrue((await rpc.ScriptsAsync(new(Epoch, null), default)).Scripts.All(static script => script.Scope == "builtin"), "Without a project, no script of a project.");
+            Assert.AreEqual("not_found", (await rpc.ScriptsAsync(new(Epoch, "missing"), default)).Status);
+
+            // The source of a script, to show it: of the scope asked, as the project sees it; a sample without a project.
+            var source = await rpc.SourceAsync(new(Epoch, "triage", "project", project.Id), default);
+            Assert.AreEqual("ok", source.Status);
+            StringAssert.Contains(source.Source, "return args.days;");
+            StringAssert.Contains((await rpc.SourceAsync(new(Epoch, "review-pr", "builtin", null), default)).Source, "export const meta");
+            Assert.AreEqual("not_found", (await rpc.SourceAsync(new(Epoch, "triage", "global", project.Id), default)).Status, "no script of that name in that scope");
+            Assert.AreEqual("invalid_request", (await rpc.SourceAsync(new(Epoch, "../config", "project", project.Id), default)).Status);
+            Assert.AreEqual("stale_epoch", (await rpc.SourceAsync(new("other", "triage", "project", project.Id), default)).Status);
+
+            // Run… checks the script and its arguments as an automation does, before any session exists.
+            foreach (var (name, arguments, expected) in new (string, string?, string)[]
+                     {
+                         ("missing", null, "There is no script 'missing' in the library of its project."),
+                         ("triage", null, "The script 'triage' refuses its arguments: the argument `days` is missing."),
+                         ("triage", "{\"days\": 1", "The arguments of the script 'triage' are not a JSON object."),
+                         ("triage", "[1]", "The arguments of the script 'triage' are not a JSON object."),
+                     })
+            {
+                var refused = await rpc.RunAsync(new(Epoch, name, project.Id, arguments), default);
+                Assert.AreEqual(("refused", null, expected), (refused.Status, refused.SessionId, refused.Message));
+            }
+
+            Assert.AreEqual("invalid_request", (await rpc.RunAsync(new(Epoch, "Not A Name", project.Id, null), default)).Status);
+            var started = await rpc.RunAsync(new(Epoch, "triage", project.Id, "{\"days\": 2}"), default);
+            Assert.AreEqual(("ok", null), (started.Status, started.Message));
+            var (sessionId, sent) = await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            Assert.AreEqual(started.SessionId, sessionId);
+            var text = string.Concat(sent.Input.Items.OfType<AgentInputItem.Text>().Select(static item => item.Value));
+            StringAssert.Contains(text, "Run the script `triage` of the library with `exec`");
+            StringAssert.Contains(text, "return await workflow(\"triage\", {\"days\":2});");
+            Assert.IsTrue(host.CodeModeRuns.RequiresCodeMode(sessionId), "Its session has exec whatever the setting of Code Mode says.");
+            var workspace = new WorkspaceService(host, Epoch);
+            Assert.AreEqual("Triage issues", (await workspace.SnapshotAsync(new(), default)).Sessions.Single(session => session.Id == sessionId).Title);
+            provider.Release.SetResult();
+
+            // The runs of the host, running first; an ended one says how it ended and when.
+            var gate = new TaskCompletionSource<CodeAlta.CodeMode.CodeModeRunResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var ended = host.CodeModeRuns.TryStart(sessionId, "first", 1000, "call-1",
+                (_, _) => Task.FromResult(new CodeAlta.CodeMode.CodeModeRunResult(CodeAlta.CodeMode.CodeModeRunStatus.Failed, TimeSpan.FromSeconds(3))), out var noRefusal);
+            Assert.IsNull(noRefusal);
+            await ended!.Completion.WaitAsync(Patience);
+            var running = host.CodeModeRuns.TryStart(sessionId, "second", 1000, "call-2", (_, token) => gate.Task.WaitAsync(token), out noRefusal);
+            Assert.IsNull(noRefusal);
+            var runs = rpc.Runs(new(Epoch));
+            Assert.AreEqual("ok", runs.Status);
+            Assert.AreEqual($"{running!.Id}:second:running:call-2:False|{ended.Id}:first:failed:call-1:True",
+                string.Join('|', runs.Runs.Select(static run => $"{run.Id}:{run.Title}:{run.State}:{run.CallId}:{run.EndedAt is not null}")));
+            Assert.AreEqual(sessionId, runs.Runs[0].SessionId);
+            Assert.AreEqual(TimeSpan.FromSeconds(3), runs.Runs[1].EndedAt - runs.Runs[1].StartedAt);
+            gate.SetResult(new(CodeAlta.CodeMode.CodeModeRunStatus.Completed, TimeSpan.FromSeconds(1)));
+            await running.Completion.WaitAsync(Patience);
+
+            // Save as script… asks the session of the run, with the name the user gave.
+            var bad = await rpc.SaveAsScriptAsync(new(Epoch, sessionId, ended.Id, "Bad Name"), default);
+            Assert.AreEqual(("refused", "'Bad Name' is not a script name: lowercase letters, digits and hyphens, starting with a letter."), (bad.Status, bad.Message));
+            Assert.AreEqual("invalid_request", (await rpc.SaveAsScriptAsync(new(Epoch, sessionId, "run 1", "count"), default)).Status);
+            Assert.AreEqual(0, asked.Count);
+            Assert.AreEqual("ok", (await rpc.SaveAsScriptAsync(new(Epoch, sessionId, ended.Id, "first-run"), default)).Status);
+            Assert.AreEqual(sessionId, asked.Single().SessionId);
+            StringAssert.Contains(asked[0].Text, $"Turn the script of the run `{ended.Id}` into the script `first-run` of the library");
+            StringAssert.Contains(asked[0].Text, $"alta script save first-run --from-run {ended.Id}");
+            StringAssert.Contains(asked[0].Text, "meta.params");
+            StringAssert.Contains(asked[0].Text, "alta script check");
+
+            // Resume and the reruns of the card ask the session of the run too, for a run the record of runs keeps.
+            Assert.AreEqual("refused", (await rpc.ResumeAsync(new(Epoch, sessionId, ended.Id, null, false), default)).Status, "No record of runs is kept yet.");
+            await host.KeepCodeModeRunsAsync();
+            var kept = host.CodeModeRuns.TryStart(sessionId, "kept", 1000, "call-3", new CodeModeRunStart("return 1;"),
+                (_, _) => Task.FromResult(new CodeAlta.CodeMode.CodeModeRunResult(CodeAlta.CodeMode.CodeModeRunStatus.Completed, TimeSpan.Zero)), out noRefusal);
+            Assert.IsNull(noRefusal);
+            await kept!.Completion.WaitAsync(Patience);
+            Assert.AreEqual("invalid_request", (await rpc.ResumeAsync(new(Epoch, sessionId, kept.Id, "a", true), default)).Status);
+            Assert.AreEqual("refused", (await rpc.ResumeAsync(new(Epoch, "other-session", kept.Id, null, false), default)).Status);
+            Assert.AreEqual("ok", (await rpc.ResumeAsync(new(Epoch, sessionId, kept.Id, null, true), default)).Status);
+            Assert.AreEqual(sessionId, asked[^1].SessionId);
+            StringAssert.Contains(asked[^1].Text, $"// @exec: {{\"resume\": \"{kept.Id}\", \"replay\": \"all\", \"yield_ms\": 600000}}");
+            Assert.IsTrue(File.Exists(Path.Combine(CodeModeRunStore.RootOf(host.CatalogOptions), kept.Id, "run.json")), "the record is under the state root");
+            await workspace.CloseSessionsAsync();
+            await workspace.CloseImportsAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
     public async Task WorkStartedFromTheWindow_IsInTheSpaceTheWindowShows()
     {
         var root = Directory.CreateTempSubdirectory("codealta-work-space-").FullName;
@@ -1022,7 +1250,8 @@ public sealed class AutomationHostTests
     {
         private readonly string _root;
 
-        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands, AltaCommandReviewPolicy? policy, SessionRuntimeService? runtime, CatalogOptions? catalog, SpaceCatalog? spaces)
+        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands, AltaCommandReviewPolicy? policy, SessionRuntimeService? runtime, CatalogOptions? catalog, SpaceCatalog? spaces,
+            CodeModeScriptLibrary? library)
         {
             (_root, Project, Other) = (root, project, other);
             Service = new AutomationService(GlobalPath, token => projects.LoadAsync(token), new AutomationStateStore(Path.Combine(root, "state", "automations.json"), false),
@@ -1033,6 +1262,7 @@ public sealed class AutomationHostTests
             if (runtime is not null) services.Add(runtime);
             if (catalog is not null) services.Add(catalog);
             if (spaces is not null) services.Add(spaces);
+            if (library is not null) services.Add(library);
             var registry = new AltaCommandRegistry();
             Alta = new AltaCommandDispatcher(registry, services);
             services.Add(registry).Add(Alta);
@@ -1050,13 +1280,16 @@ public sealed class AutomationHostTests
         public AltaCallerIdentity Session { get; }
 
         /// <param name="acceptsCommands">False for a host that has the user review the commands of its sessions.</param>
-        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true, AltaCommandReviewPolicy? policy = null, SessionRuntimeService? runtime = null, CatalogOptions? catalog = null, SpaceCatalog? spaces = null)
+        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true, AltaCommandReviewPolicy? policy = null, SessionRuntimeService? runtime = null, CatalogOptions? catalog = null, SpaceCatalog? spaces = null,
+            bool withLibrary = false)
         {
             var root = Directory.CreateTempSubdirectory("codealta-automation-host-").FullName;
             var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName });
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "app")).FullName);
             var other = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "other")).FullName);
-            var fixture = new Fixture(root, projects, project, other, acceptsCommands, policy, runtime, catalog, spaces);
+            // The library of scripts, with the samples of CodeAlta.
+            var library = withLibrary ? new CodeModeScriptLibrary(new CatalogOptions { GlobalRoot = Path.Combine(root, "global") }, CodeModeScriptLibrary.ShippedRoot) : null;
+            var fixture = new Fixture(root, projects, project, other, acceptsCommands, policy, runtime, catalog, spaces, library);
             await fixture.Service.RefreshAsync();
             return fixture;
         }

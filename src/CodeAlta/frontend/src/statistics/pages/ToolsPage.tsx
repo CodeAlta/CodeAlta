@@ -67,6 +67,9 @@ export function ToolsPage() {
       <>{row.name}<small className="stats-cell-sub">{row.server ? `${filterValueLabel(t, "toolKind", row.kind)} · ${row.server}` : filterValueLabel(t, "toolKind", row.kind)}</small></> },
     { id: "calls", header: t("Calls"), sort: row => row.calls, align: "end", render: row => fmt.number(row.calls) },
     { id: "failures", header: t("Failures"), sort: row => row.failureRate, align: "end", render: row => row.failures ? `${fmt.number(row.failures)} · ${fmt.percent(row.failureRate)}` : "–" },
+    // The calls scripts of Code Mode made of the tool, and their share of its calls.
+    { id: "scripts", header: t("By scripts"), sort: row => row.calls ? row.scriptCalls / row.calls : 0, align: "end",
+      render: row => row.scriptCalls ? `${fmt.number(row.scriptCalls)} · ${fmt.percent(row.scriptCalls / row.calls)}` : "–" },
     { id: "time", header: t("Total time"), sort: row => row.timeMs, align: "end", render: row => fmt.duration(row.timeMs) },
     { id: "p50", header: t("Median"), sort: row => row.p50Ms ?? 0, align: "end", render: row => row.p50Ms === undefined ? "–" : fmt.duration(row.p50Ms) },
     { id: "p90", header: t("90th percentile"), sort: row => row.p90Ms ?? 0, align: "end", render: row => row.p90Ms === undefined ? "–" : fmt.duration(row.p90Ms) },
