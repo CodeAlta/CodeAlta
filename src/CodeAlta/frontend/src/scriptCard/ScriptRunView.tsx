@@ -5,6 +5,7 @@ import { SessionLinksContext } from "../SessionReference";
 import { useShellLanguage } from "../shellLanguage";
 import type { ScriptRun, ScriptSession } from "../timeline";
 import { formatDuration } from "../toolCall";
+import { SaveAsScript, ScriptRunActionsContext } from "./SaveAsScript";
 
 // The state of a step or a session, as the marks of the card show it.
 function state(status: string): "running" | "completed" | "failed" {
@@ -13,11 +14,14 @@ function state(status: string): "running" | "completed" | "failed" {
 
 /**
  * The run of a script, under its tile: its steps in order, then a box for each session it started, which opens the
- * session. What the boxes say comes from the records of the run in the journal of the session.
+ * session. What the boxes say comes from the records of the run in the journal of the session. A run that ended offers
+ * Save as script…, where the session can be asked.
  */
 export const ScriptRunView = memo(function ScriptRunView({ run }: { run: ScriptRun }) {
   const { t } = useShellLanguage();
-  if (run.steps.length === 0 && run.sessions.length === 0) return null;
+  const actions = useContext(ScriptRunActionsContext);
+  const ended = run.status !== null && run.status !== "running" && run.runId !== "";
+  if (run.steps.length === 0 && run.sessions.length === 0 && !(ended && actions)) return null;
   return <div className="script-run" role="group" aria-label={t("Steps and sessions of the script")}>
     {run.steps.length > 0 && <ol className="script-run-steps">
       {run.steps.map((step, index) => <li key={`${step.id}:${index}`} data-state={state(step.status)} title={step.durationMs !== null ? formatDuration(step.durationMs) : undefined}>
@@ -27,6 +31,7 @@ export const ScriptRunView = memo(function ScriptRunView({ run }: { run: ScriptR
     {run.sessions.length > 0 && <ul className="script-run-sessions">
       {run.sessions.map(session => <li key={session.sessionId}><ScriptSessionBox session={session} /></li>)}
     </ul>}
+    {ended && <div className="script-run-actions"><SaveAsScript runId={run.runId} /></div>}
   </div>;
 });
 

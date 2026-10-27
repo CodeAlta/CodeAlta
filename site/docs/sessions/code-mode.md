@@ -100,6 +100,17 @@ Agents manage the library with `alta script`:
 
 A [sandboxed session](sandbox.md) reads the library but does not save in it.
 
+## The Workflows tab
+
+In CodeAlta Desktop, the **Workflows** button of the title bar (or **Workflows** in the command palette) opens a tab with the library and the runs:
+
+- **Library**: the scripts the project chosen at the top sees, the project's and yours, each with its description, its parameters (`*` for a required one) and its steps drawn small. A step that runs once per item shows `×`.
+- **Runs**: the scripts running in CodeAlta and those that ended in the last minutes, the running ones first. Click a run to open its session.
+
+To run a script, click **Run…** on it, fill in its parameters, choose the project it runs in, then click **Run**. A list or an object is written as JSON. The script runs in a new session of that project, which opens. That session has `exec` even when Code Mode is off.
+
+To keep a script that ran in a session, click **Save as script…** on its card in the timeline once it ended, and give it a name. The session is asked to turn it into a library script: the values it was written for become parameters, then it is checked and saved under that name.
+
 ## Limits
 
 A script stops with a message that says which limit it reached:

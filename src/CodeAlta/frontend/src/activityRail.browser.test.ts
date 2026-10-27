@@ -6,7 +6,7 @@ import { withSessionWindow } from "./sessionWindowHarness";
 // Headless Edge can draw the page late after a resize: until it does, the narrow media query has not changed and the
 // rail has not folded its buttons. Two frames have the window as a person sees it, before it is measured or clicked.
 const rendered = `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`;
-const names = ["Explorer", "Search", "Automations", "Work items", "Issues", "Canvases", "Bookmarks", "Settings & extensions"];
+const names = ["Explorer", "Search", "Automations", "Workflows", "Work items", "Issues", "Canvases", "Bookmarks", "Settings & extensions"];
 
 // The window itself (main.tsx) over an isolated host: every button of the title bar's navigation can be seen and clicked,
 // at the narrowest Explorer and without the Explorer. What has no room is in the "…" menu; the Explorer and Settings always show.

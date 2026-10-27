@@ -1020,6 +1020,20 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                             caller: AltaCallerIdentity.Host with { PromptProvenance = CodeAlta.Agent.AgentPromptProvenance.UserReview }, cancellationToken: token).ConfigureAwait(false);
                         return sent.ExitCode == 0 ? null : FirstLine(sent.Stderr.Length > 0 ? sent.Stderr : sent.Stdout);
                     }, sessionStarter, epoch));
+                    // The Workflows tab: a script runs in a new session started from the window; Save as script asks the session of a run.
+                    builder.AddWorkflowsService(new WorkflowsService(host.CodeModeScripts, host.CodeModeRuns, host.ProjectCatalog, sessionStarter, async (sessionId, text, token) =>
+                    {
+                        // The answer comes once the prompt is accepted, not when the turn it starts ends; a session at work gets it queued.
+                        var admission = host.Commands.AdmitSend(new CodeAlta.Orchestration.Runtime.OwnedTextSendRequest("workflow-save:" + Guid.NewGuid().ToString("N"), sessionId, text),
+                            CancellationToken.None);
+                        if (admission.Kind is CodeAlta.Orchestration.Runtime.OwnedSessionCommandAdmissionKind.Accepted or CodeAlta.Orchestration.Runtime.OwnedSessionCommandAdmissionKind.Replay)
+                            return null;
+                        if (admission.Kind is not CodeAlta.Orchestration.Runtime.OwnedSessionCommandAdmissionKind.Busy)
+                            return $"The prompt was not accepted ({admission.Kind.ToString().ToLowerInvariant()}).";
+                        var queued = await altaCommands.InvokeAsync(["session", "send", sessionId, "--stdin", "--queue-if-busy"], stdin: text,
+                            caller: AltaCallerIdentity.Host, cancellationToken: token).ConfigureAwait(false);
+                        return queued.ExitCode == 0 ? null : FirstLine(queued.Stderr.Length > 0 ? queued.Stderr : queued.Stdout);
+                    }, epoch));
                     // The local search: the queries of the search window and of the Search canvas, in the space the window shows.
                     builder.AddLocalSearchService(new LocalSearchService(search,
                         async (spaceId, token) => await host.RuntimeService.GetSpaceFilterAsync(spaceId, null, token).ConfigureAwait(false),
@@ -1399,6 +1413,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddMcpHostService(new McpHostService());
             builder.AddTerminalsService(new TerminalsService());
             builder.AddAutomationsService(new AutomationsService());
+            builder.AddWorkflowsService(new WorkflowsService());
             builder.AddWorkItemsService(new WorkItemsService());
             builder.AddReviewsService(new ReviewsService());
             builder.AddBookmarksService(new BookmarksService());

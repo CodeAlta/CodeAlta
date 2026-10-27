@@ -19,6 +19,16 @@ public enum CodeModeScriptScope
     Project,
 }
 
+/// <summary>A step a library script declares in its <c>meta</c>.</summary>
+/// <param name="Id">The id that calls and <c>step()</c> name.</param>
+/// <param name="Title">The title shown on its box.</param>
+/// <param name="After">
+/// The steps it runs after: null means after the step declared before it, an empty list at the start. Steps with the same
+/// <paramref name="After"/> are parallel branches.
+/// </param>
+/// <param name="Each">Whether the step fans out, one instance per item, at run time.</param>
+public sealed record CodeModeLibraryStep(string Id, string Title, IReadOnlyList<string>? After, bool Each);
+
 /// <summary>A script of the library: its name, where it is, and what its <c>meta</c> says.</summary>
 /// <param name="Name">Its name, which <c>workflow("name")</c> runs.</param>
 /// <param name="Scope">Where it comes from.</param>
@@ -30,8 +40,17 @@ public sealed record CodeModeLibraryScript(string Name, CodeModeScriptScope Scop
     /// <summary>Gets why the script does not parse, or null when it does.</summary>
     public string? Problem => Source.Error?.Message;
 
+    /// <summary>Gets the title its <c>meta</c> gives, or null.</summary>
+    public string? Title => Source.Descriptor?.Title;
+
     /// <summary>Gets the one-line description its <c>meta</c> gives, or null.</summary>
     public string? Description => Source.Descriptor?.Description;
+
+    /// <summary>Gets the steps its <c>meta</c> declares, in their order: what a graph of the script draws before it runs.</summary>
+    public IReadOnlyList<CodeModeLibraryStep> Steps
+        => Source.Descriptor is { } descriptor
+            ? [.. descriptor.Steps.Select(static step => new CodeModeLibraryStep(step.Id, step.Title, step.After, step.Each))]
+            : [];
 
     /// <summary>Gets the JSON Schema of its arguments, built from <c>meta.params</c>, or null when it takes none.</summary>
     public string? ParametersSchemaJson => Source.Descriptor?.ParametersSchemaJson;

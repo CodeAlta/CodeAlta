@@ -1,7 +1,6 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Desktop.Workflows;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
@@ -74,7 +73,9 @@ internal sealed class AutomationRunner : IAutomationRunner
             var definition = entry.Definition;
             if (definition.Script is { } scriptName)
             {
-                if (ScriptPrompt(scriptName, definition.ScriptArguments, prompt, project?.ProjectPath, out var problem) is not { } scriptPrompt) return Refuse(problem!);
+                // What started the automation (an issue, the output of a command) is the `event` argument of a script that declares it.
+                if (ScriptRunPrompt.Build(_host.CodeModeScripts, scriptName, definition.ScriptArguments, prompt, project?.ProjectPath, out var problem) is not { } scriptPrompt)
+                    return Refuse(problem!);
                 prompt = scriptPrompt;
             }
 
@@ -176,56 +177,6 @@ internal sealed class AutomationRunner : IAutomationRunner
     /// </summary>
     internal static string SessionTitle(string name, string? detail)
         => AutomationText.Line(detail, MaximumDetailInTitle) is { Length: > 0 } about ? name + " · " + about : name;
-
-    /// <summary>
-    /// The prompt that runs a script of the library: one call of <c>exec</c> that runs it with its arguments, then a short
-    /// answer with its result. What started the automation (an issue, the output of a command) is its <c>event</c>
-    /// argument when the script declares one.
-    /// </summary>
-    /// <returns>The prompt, or null with the reason when the script cannot run so.</returns>
-    private string? ScriptPrompt(string name, string? arguments, string trigger, string? projectPath, out string? problem)
-    {
-        problem = null;
-        if (_host.CodeModeScripts.Find(name, projectPath) is not { } script)
-        {
-            problem = $"There is no script '{name}' in the library{(projectPath is null ? string.Empty : " of its project")}.";
-            return null;
-        }
-
-        if (script.Problem is { } error)
-        {
-            problem = $"The script '{name}' does not parse: {FirstLine(error)}";
-            return null;
-        }
-
-        var values = (arguments is null ? null : JsonNode.Parse(arguments)) as JsonObject ?? [];
-        var started = trigger.Trim();
-        if (started.StartsWith("---", StringComparison.Ordinal)) started = started[3..].Trim();
-        if (started.Length > 0 && !values.ContainsKey("event") && Declares(script.ParametersSchemaJson, "event")) values["event"] = started;
-        var json = values.ToJsonString();
-        if (script.CheckArguments(json) is { } invalid)
-        {
-            problem = $"The script '{name}' refuses its arguments: {invalid}";
-            return null;
-        }
-
-        return $"""
-            Run the script `{name}` of the library with `exec`, as it is written below, and wait for it to end. Then answer with its result in a few lines: do nothing else.
-
-            ```js
-            // @exec: {"{"}"title": "{name}", "yield_ms": 600000{"}"}
-            return await workflow("{name}", {json});
-            ```
-            """;
-
-        static bool Declares(string? schema, string parameter)
-        {
-            if (schema is null) return false;
-            using var document = JsonDocument.Parse(schema);
-            return document.RootElement.TryGetProperty("properties", out var properties) && properties.ValueKind == JsonValueKind.Object
-                && properties.TryGetProperty(parameter, out _);
-        }
-    }
 
     private static async Task<AutomationOutcome> ObserveAsync(OwnedSessionCommandReceipt receipt)
     {

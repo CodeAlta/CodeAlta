@@ -26,7 +26,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceClaudeCodeConversation, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
-  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, reviews as reviewsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
+  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workflows as workflowsApi, workItems as workItemsApi, reviews as reviewsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
   skills as skillsApi,
 } from "#neoastra";
 import { skillPrompt, usableSkills, type SkillChoice } from "./search/skillResults";
@@ -56,7 +56,7 @@ import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget }
 import { browserActivation } from "./sessionBrowser";
 import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, claudeCodeTabProvider, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
+import { activateFileTab, claudeCodeTabProvider, automationsTab, isWorkflowsTab, workflowsTab,bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
 import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
@@ -175,6 +175,9 @@ import { createAutomationsHub } from "./automations/automationsHub";
 import { AutomationsPanel } from "./automations/AutomationsPanel";
 import { SessionOrigin } from "./automations/SessionOrigin";
 import { sessionOrigin } from "./automations/automations";
+import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
+import { createWorkflowsHub } from "./workflows/workflowsHub";
+import { ScriptRunActionsContext } from "./scriptCard/SaveAsScript";
 import { IssuesPanel } from "./issues/IssuesPanel";
 import { PullRequestButton } from "./pullRequests/PullRequestButton";
 import { PullRequestSettings } from "./pullRequests/PullRequestSettings";
@@ -316,6 +319,7 @@ import "./explorer/explorer.css";
 import "./labels/labels.css";
 import "./terminal/terminal.css";
 import "./automations/automations.css";
+import "./workflows/workflows.css";
 import "./workItems/workItems.css";
 import "./charts/charts.css";
 // The Statistics canvas is a module the application loads when a tab shows it, and a module brings no stylesheet with it: the sheet is part of the page.
@@ -3195,7 +3199,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
       case "externalEditor": case "fileExplorer": { const origin = view === "workspace" ? terminalOrigin() : null; return !!origin && !!(origin.projectId || origin.sessionId); }
-      case "automations": case "workItems": case "reviews": case "issues": case "canvases": case "documentation": case "bookmarks": return owned;
+      case "automations": case "workflows": case "workItems": case "reviews": case "issues": case "canvases": case "documentation": case "bookmarks": return owned;
       case "spaces": case "newSpace": return owned && spacesState.available;
       case "goToSpace": return spacesState.available;
       case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
@@ -3264,6 +3268,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         break;
       }
       case "automations": openAutomations(); break;
+      case "workflows": openFile(workflowsTab); break;
       case "workItems": openWorkItems(); break;
       case "issues": openFile(issuesTab); break;
       // The tab in front, a file over the session behind it, goes to a window of its own.
@@ -5039,6 +5044,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               { key: "search", icon: "search", className: "activity-search", label: t("Search"), title: `${t("Search")} (Ctrl+P)`, onClick: () => openSearch() },
               { key: "automations", icon: "automation", className: "activity-automations", disabled: !owned, active: !!fileTabs.active && isAutomationsTab(fileTabs.active),
                 label: t("Automations"), title: `${t("Automations")} (Ctrl+G, Ctrl+M)`, onClick: () => openAutomations() },
+              { key: "workflows", icon: "workflow", className: "activity-workflows", disabled: !owned, active: !!fileTabs.active && isWorkflowsTab(fileTabs.active),
+                label: t("Workflows"), title: t("Workflows"), onClick: () => openFile(workflowsTab) },
               { key: "work", icon: "task", className: "activity-work", disabled: !owned, active: !!fileTabs.active && isWorkItemsTab(fileTabs.active), dot: work.some(item => item.stage === "todo"),
                 label: t("Work items"), title: `${t("Work items")} (Ctrl+G, Ctrl+I)`, onClick: () => openWorkItems() },
               { key: "issues", icon: "issueOpen", className: "activity-issues", disabled: !owned, active: !!fileTabs.active && isIssuesTab(fileTabs.active),
@@ -5448,6 +5455,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 providers={configurationState.snapshot?.providerRuntimeAvailable ? [...configurationState.snapshot.providers].filter(provider => provider.enabled).sort((a, b) => Number(b.isDefault) - Number(a.isDefault)) : []}
                 visible={visible && view === "workspace" && !settingsOpen} focus={automationFocus} onFocused={() => setAutomationFocus(null)}
+                onActivate={activateShown(tab, visible)} onOpenSession={id => void openAutomationSession(id)} />
+              : isWorkflowsTab(tab)
+              ? <WorkflowsPanel key={fileTabKey(tab)} api={workflowsApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
+                projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={(catalog.current ?? snapshot)?.sessions ?? []}
+                projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null} visible={visible && view === "workspace" && !settingsOpen}
                 onActivate={activateShown(tab, visible)} onOpenSession={id => void openAutomationSession(id)} />
               : isTerminalTab(tab)
               ? <TerminalPanel key={fileTabKey(tab)} workspace={terminalWorkspace} id={tab.terminalId ?? ""} terminal={terminalList.find(terminal => terminal.id === tab.terminalId)}
@@ -6178,7 +6190,14 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   // The error of a Claude Code provider without its CLI proposes the download in an owned host only.
   const cliEpoch = ownedSession && !demoMode ? status?.hostEpoch ?? null : null;
   const cliHost = useMemo(() => cliEpoch ? { epoch: cliEpoch, composerProvider: session.providerKey ?? null, Card: ClaudeCliFirstUse } : null, [cliEpoch, session.providerKey]);
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  // Save as script… on the card of a run that ended asks this session, in an owned host only.
+  const scriptActions = useMemo(() => cliEpoch ? {
+    saveAsScript: async (runId: string, name: string) => {
+      const outcome = await createWorkflowsHub(workflowsApi, cliEpoch).saveAsScript(session.id, runId, name);
+      return outcome.ok ? null : outcome.message ?? "";
+    },
+  } : null, [cliEpoch, session.id]);
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       // The conversation of the Claude Code CLI the session continues: read when the window opens; another provider has none.
       conversation={ownedSession && !demoMode && session.providerConversation === true
@@ -6267,7 +6286,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></MarkdownLinkScopeContext.Provider>;
+  </div></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></ScriptRunActionsContext.Provider></MarkdownLinkScopeContext.Provider>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

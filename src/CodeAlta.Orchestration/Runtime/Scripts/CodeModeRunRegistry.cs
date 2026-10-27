@@ -14,7 +14,20 @@ namespace CodeAlta.Orchestration.Runtime.Scripts;
 /// <param name="Elapsed">How long it has run.</param>
 /// <param name="Calls">The calls it made.</param>
 /// <param name="Running">Whether it still runs.</param>
-public sealed record CodeModeRunInfo(string Id, string SessionId, string? Title, TimeSpan Elapsed, int Calls, bool Running);
+public sealed record CodeModeRunInfo(string Id, string SessionId, string? Title, TimeSpan Elapsed, int Calls, bool Running)
+{
+    /// <summary>Gets when it started.</summary>
+    public DateTimeOffset StartedAt { get; init; }
+
+    /// <summary>Gets when it ended, or null while it runs.</summary>
+    public DateTimeOffset? EndedAt { get; init; }
+
+    /// <summary>Gets the tool call that runs it (<c>exec</c>), or null.</summary>
+    public string? CallId { get; init; }
+
+    /// <summary>Gets how it ended (<c>completed</c>, <c>failed</c> or <c>cancelled</c>), or null while it runs.</summary>
+    public string? Status { get; init; }
+}
 
 /// <summary>
 /// The runs of the scripts of a host. <c>exec</c> waits for a run up to its yield; a run still going then goes on in the
@@ -472,7 +485,17 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
 
     /// <summary>Describes the run.</summary>
     /// <returns>What a session is told of it.</returns>
-    public CodeModeRunInfo Info() => new(Id, SessionId, Title, _clock.Elapsed, Calls, Running);
+    public CodeModeRunInfo Info()
+    {
+        var ended = Completion.IsCompletedSuccessfully ? Completion.Result : null;
+        return new(Id, SessionId, Title, ended?.Duration ?? _clock.Elapsed, Calls, ended is null)
+        {
+            StartedAt = StartedAt,
+            EndedAt = ended is null ? null : StartedAt + ended.Duration,
+            CallId = CallId,
+            Status = ended?.Status.ToString().ToLowerInvariant(),
+        };
+    }
 
     void ICodeModeRunObserver.CallStarted(CodeModeCall call) => Interlocked.Increment(ref _calls);
 
