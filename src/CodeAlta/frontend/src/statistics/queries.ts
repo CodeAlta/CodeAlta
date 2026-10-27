@@ -1,7 +1,7 @@
 import { useStatistics } from "./runtime";
 import { queryKey, useStatisticsQuery, type QueryState } from "./useQuery";
 import type {
-  CalendarResult, DetailsResult, DistributionResult, HealthResult, McpToolsResult, ModelsResult, ProjectsResult, RecordsResult, RunsResult, SeriesResult, SessionsResult,
+  CalendarResult, DetailsResult, DistributionResult, HealthResult, McpToolsResult, ModelsResult, ProjectsResult, RecordsResult, RunsResult, ScriptsResult, SeriesResult, SessionsResult,
   SkillsResult, StatisticsRequest, SummaryResult, ToolsResult, TopResult, WeekHourResult,
 } from "./types";
 
@@ -121,6 +121,13 @@ export function useRuns(sort: string, options: QueryOptions = {}): QueryState<Ru
   const { api, request } = useStatistics();
   const req = request(options.extra);
   return useStatisticsQuery(queryKey("runs", req, sort), signal => api.runs(req, sort, signal), options.enabled ?? true, options.main);
+}
+
+/** The runs of scripts of the period. */
+export function useScripts(options: QueryOptions = {}): QueryState<ScriptsResult> {
+  const { api, request } = useStatistics();
+  const req = request(options.extra);
+  return useStatisticsQuery(queryKey("scripts", req), signal => api.scripts(req, signal), options.enabled ?? true, options.main);
 }
 
 /** The estimate of the cost, when the binding offers one. */

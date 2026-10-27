@@ -55,6 +55,11 @@ internal static class JournalPrefixClassifier
             return JournalRecordKind.SystemPrompt;
         }
 
+        if (type.SequenceEqual("workflow"u8))
+        {
+            return JournalRecordKind.Workflow;
+        }
+
         if (type.SequenceEqual("activity"u8))
         {
             return ClassifyActivity(prefix, position);

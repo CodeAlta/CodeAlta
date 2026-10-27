@@ -1,5 +1,5 @@
 import type {
-  CalendarResult, DetailsResult, DistributionResult, HealthResult, HistoryChoice, McpToolsResult, ModelsResult, ProjectsResult, RecordsResult, RunsResult, SeriesResult,
+  CalendarResult, DetailsResult, DistributionResult, HealthResult, HistoryChoice, McpToolsResult, ModelsResult, ProjectsResult, RecordsResult, RunsResult, ScriptsResult, SeriesResult,
   SessionDetailResult, SessionsResult, SkillsResult, StatisticsDataChange, StatisticsRequest, StatisticsStatus, SummaryResult, ToolsResult, TopResult, WeekHourResult,
 } from "./types";
 
@@ -51,6 +51,8 @@ export interface StatisticsApi {
   mcpTools(request: StatisticsRequest, signal?: AbortSignal): Promise<McpToolsResult>;
   /** The runs of a period, sorted on `recent`, `longest`, `tokens` or `tools`. */
   runs(request: StatisticsRequest, sort: string, signal?: AbortSignal): Promise<RunsResult>;
+  /** The runs of scripts of Code Mode: totals, the scripts, how models adopt them, the latest runs. */
+  scripts(request: StatisticsRequest, signal?: AbortSignal): Promise<ScriptsResult>;
 
   /**
    * An estimate of the cost from public prices, as a series of `cost-estimate` by model in dollars. Optional: the Cost page shows

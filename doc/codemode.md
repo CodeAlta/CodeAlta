@@ -89,9 +89,14 @@ Code loads `exec` and `wait` with `alta` instead of deferring them behind its to
 ## Records
 
 A run writes `AgentWorkflowEvent` records in the journal of its session (`RunStarted`, `StepsDeclared`, steps,
-sessions, waits, `RunEnded`), all before its result is given, so what reads the journal after the result sees the
-whole run. Their `RunId` is null: a run outlives the turn that started it. The card of the run and its tab read these
-records; they keep no state of their own.
+sessions, waits, `ScriptLoaded`, `RunEnded`), all before its result is given, so what reads the journal after the result
+sees the whole run. Their `RunId` is null: a run outlives the turn that started it. The card of the run and its tab read
+these records; they keep no state of their own, and pass over a kind they do not draw.
+
+`ScriptLoaded` names each library script `workflow("name")` resolves (its name and its scope), and `RunStarted` says
+that the run writes them (`RecordsScripts`), so that a run without one ran only the code sent to `exec`, and a run of a
+journal written before is told apart. Statistics reads all these records (see [statistics](statistics.md)): the
+`message` of an end is text of the script and is never kept, only the name of its error.
 
 Desktop and TUI also keep each run in a store under the state root (`CodeModeRunStore`): its source, arguments, the
 value of each step, the calls of tools that are not idempotent, its sleeps and its result. Writes are queued off the

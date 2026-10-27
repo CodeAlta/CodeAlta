@@ -5,7 +5,7 @@ import type { Comparison, Frequency, Origin, RequestFrequency, StatisticsFilter,
 // the request of every question by `requestOf`.
 
 /** The pages of the canvas, in the order of its tabs. */
-export const pageIds = ["overview", "activity", "models", "cost", "tools", "prompts", "agents", "code", "projects", "sessions", "health"] as const;
+export const pageIds = ["overview", "activity", "models", "cost", "tools", "prompts", "agents", "scripts", "code", "projects", "sessions", "health"] as const;
 /** One page of the canvas. */
 export type PageId = typeof pageIds[number];
 
@@ -51,7 +51,7 @@ export type Frame = Readonly<{
 /** The origins and kinds of tool a filter can take. */
 export const originValues: readonly Origin[] = ["you", "agent", "automation", "reminder"];
 /** The kinds of tool a filter can take. */
-export const toolKindValues: readonly ToolKind[] = ["files", "search", "shell", "web", "alta", "mcp", "skill", "other"];
+export const toolKindValues: readonly ToolKind[] = ["files", "search", "shell", "web", "alta", "mcp", "skill", "script", "other"];
 
 /** The frame a canvas opens with: the last 30 days, the Overview, no comparison. */
 export const defaultFrame: Frame = Object.freeze<Frame>({

@@ -19,7 +19,7 @@ const numbers = array("number");
 const cost = object({ unit: "string", total: "number" });
 const keyCount = object({ key: "string", value: "number" });
 const tile = object({ id: "string", unit: "string", value: "number", previous: optional("number"), change: optional("number"), spark: numbers });
-const toolRow = object({ kind: "string", tool: "string", calls: "number", failures: "number", failureRate: "number", timeMs: "number", p50Ms: optional("number"), p90Ms: optional("number"), maxMs: "number", bytesIn: "number", bytesOut: "number", spark: numbers });
+const toolRow = object({ kind: "string", tool: "string", calls: "number", failures: "number", failureRate: "number", timeMs: "number", p50Ms: optional("number"), p90Ms: optional("number"), maxMs: "number", bytesIn: "number", bytesOut: "number", spark: numbers, scriptCalls: "number" });
 const session = object({ sessionId: "string", title: optional("string"), project: optional("string"), projectName: optional("string"), provider: optional("string"), model: optional("string"), parentSessionId: optional("string"),
   runs: "number", activeMs: "number", tokens: "number", toolCalls: "number", costs: array(cost), subAgents: "number", lastActivity: optional("string"), deleted: "boolean" });
 const modelRow = object({ provider: "string", model: "string", requests: "number", inputTokens: "number", freshInputTokens: "number", cacheReadTokens: "number", cacheWriteTokens: "number", outputTokens: "number",
@@ -56,6 +56,15 @@ const shapes: Readonly<Record<string, Shape>> = {
   RunsResult: object({ query, sort: "string", totalRows: "number", truncated: "boolean",
     runs: array(object({ sessionId: "string", runId: "string", start: "string", durationMs: "number", outcome: "string", origin: "string", promptKind: "string", promptChars: "number", promptWords: "number", requests: "number", toolCalls: "number",
       toolFailures: "number", inputTokens: "number", outputTokens: "number", answerChars: "number", answerWords: "number", provider: "string", model: "string", effort: "string" })) }),
+  ScriptsResult: object({ query, buckets: array(bucket), totalScripts: "number", truncated: "boolean",
+    totals: object({ runs: "number", completed: "number", failed: "number", cancelled: "number", interrupted: "number", successRate: optional("number"), calls: "number", toolCalls: "number", sessions: "number",
+      sessionTokens: "number", sessionCosts: array(cost), runMs: "number", waitMs: "number", steps: "number", stepsFailed: "number" }),
+    scripts: array(object({ script: "string", runs: "number", failed: "number", failureRate: "number", p50Ms: optional("number"), p90Ms: optional("number"), sessions: "number", sessionTokens: "number",
+      sessionCosts: array(cost), lastRun: optional("string"), spark: numbers })),
+    adoption: array(object({ provider: "string", model: "string", turns: "number", turnsWithScript: "number", share: "number", scriptRuns: "number", callsPerRun: optional("number") })),
+    turns: array(object({ withScript: "boolean", turns: "number", toolCalls: "number", requests: "number", tokens: "number", durationMs: "number" })),
+    recent: array(object({ sessionId: "string", runId: "string", script: "string", title: optional("string"), status: "string", error: optional("string"), origin: "string", start: "string",
+      durationMs: optional("number"), calls: "number", steps: "number", sessions: "number", model: "string" })) }),
   StatisticsStatus: object({ state: "string", reason: optional("string"), choice: optional("string"), floorDay: optional("number"), sessionsTotal: "number", sessionsDone: "number", bytesTotal: "number", bytesDone: "number",
     oldestDateReached: optional("number"), completeFromDay: optional("number"), bytesPerSecond: optional("number"), etaSeconds: optional("number"), currentSessionId: optional("string"), skippedCount: "number",
     skipped: array(object({ sessionId: "string", reason: "string" })), pendingFlow: "number", revision: "number", savedSessions: optional("number"), error: optional("string"), isComplete: "boolean" }),

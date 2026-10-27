@@ -295,7 +295,7 @@ public sealed partial class StatisticsQueries
             query,
             single,
             FactTables.Tools,
-            ["SUM(f.calls)", "SUM(f.failures)", "SUM(f.duration_ms_total)", "MAX(f.duration_ms_max)", "SUM(f.bytes_in)", "SUM(f.bytes_out)"],
+            ["SUM(f.calls)", "SUM(f.failures)", "SUM(f.duration_ms_total)", "MAX(f.duration_ms_max)", "SUM(f.bytes_in)", "SUM(f.bytes_out)", "SUM(f.script_calls)"],
             ["kind", "tool"],
             restrict: Restrict("tool", onlyTools));
         var durations = Percentiles(sql, query, single, HistogramMeasure.ToolDurationMs, null, perSubject: true);
@@ -318,7 +318,10 @@ public sealed partial class StatisticsQueries
                     group.Max(static row => row.Values[3]),
                     (long)group.Sum(static row => row.Values[4]),
                     (long)group.Sum(static row => row.Values[5]),
-                    []);
+                    [])
+                {
+                    ScriptCalls = (long)group.Sum(static row => row.Values[6]),
+                };
             })
             .OrderByDescending(static row => row.Calls)
             .ThenBy(static row => row.Tool, StringComparer.Ordinal)

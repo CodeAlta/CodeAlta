@@ -20,6 +20,9 @@ public sealed partial class StatisticsQueries
         ["prompt-words"] = new(HistogramMeasure.PromptWords, "words"),
         ["run-cost"] = new(HistogramMeasure.RunCostMicro, "micro-unit"),
         ["run-tool-calls"] = new(HistogramMeasure.RunToolCalls, "count"),
+        ["script-run-duration"] = new(HistogramMeasure.ScriptRunDurationMs, "ms"),
+        ["script-run-sessions"] = new(HistogramMeasure.ScriptRunSessions, "count"),
+        ["script-run-calls"] = new(HistogramMeasure.ScriptRunCalls, "count"),
     };
 
     /// <summary>Gets the names of the distributions <see cref="DistributionAsync"/> knows.</summary>
@@ -269,6 +272,8 @@ public sealed partial class StatisticsQueries
         Add("longestTool", ExtremeMeasure.LongestToolMs, "ms", 1, 5);
         Add("highestContextFill", ExtremeMeasure.HighestContextFillPpm, "ratio", 1e-6, 3);
         Add("largestRequestInput", ExtremeMeasure.LargestRequestInputTokens, "tokens", 1, 3);
+        Add("longestScriptRun", ExtremeMeasure.LongestScriptRunMs, "ms", 1, 1);
+        Add("widestScriptRun", ExtremeMeasure.WidestScriptRun, "count", 1, 1);
 
         var dayPlan = BucketPlan.Create(query.Range, StatisticsFrequency.Day, query.WeekStart, Days);
         var activity = Aggregate(sql, query, dayPlan, FactTables.Activity, ["SUM(f.active_ms)", "SUM(f.runs_started)"], []);

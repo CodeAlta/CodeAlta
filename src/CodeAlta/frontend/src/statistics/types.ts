@@ -11,7 +11,7 @@ export type Comparison = "none" | "previousPeriod" | "samePeriodLastYear";
 /** Who started the work. */
 export type Origin = "you" | "agent" | "automation" | "reminder";
 /** The kinds of tool. */
-export type ToolKind = "files" | "search" | "shell" | "web" | "alta" | "mcp" | "skill" | "other";
+export type ToolKind = "files" | "search" | "shell" | "web" | "alta" | "mcp" | "skill" | "script" | "other";
 /** The days of the week, as the host writes them. */
 export type WeekDayName = "Sunday" | "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday";
 
@@ -241,6 +241,8 @@ export type ToolRow = Readonly<{
   bytesIn: number;
   bytesOut: number;
   spark: readonly number[];
+  /** The calls a script of Code Mode made: a part of `calls`. */
+  scriptCalls: number;
 }>;
 /** `KeyValuePair<string, long>` as System.Text.Json writes it. */
 export type KeyCount = Readonly<{ key: string; value: number }>;
@@ -296,6 +298,45 @@ export type HealthResult = Readonly<{
   tokensBeforeCompaction: number;
   tokensAfterCompaction: number;
   contextByModel: readonly ContextFillRow[];
+}>;
+
+/** The totals of the runs of scripts of Code Mode in a period. */
+export type ScriptTotals = Readonly<{
+  runs: number; completed: number; failed: number; cancelled: number; interrupted: number;
+  /** The completed runs over the runs that ended; absent when none ended. */
+  successRate?: number;
+  /** The calls the runs made: tools, `alta`, sessions. */
+  calls: number;
+  /** The tool calls scripts made, as the journal records them. */
+  toolCalls: number;
+  sessions: number;
+  /** The tokens and the costs of the sessions scripts started. */
+  sessionTokens: number; sessionCosts: readonly CostAmount[];
+  runMs: number; waitMs: number; steps: number; stepsFailed: number;
+}>;
+/** One script: a library script, `(inline)` for the code sent to `exec`, `(unknown)` for a run recorded before the script was. */
+export type ScriptRow = Readonly<{
+  script: string; runs: number; failed: number; failureRate: number; p50Ms?: number; p90Ms?: number; sessions: number;
+  sessionTokens: number; sessionCosts: readonly CostAmount[]; lastRun?: string; spark: readonly number[];
+}>;
+/** How much a model sends scripts. */
+export type ScriptAdoptionRow = Readonly<{ provider: string; model: string; turns: number; turnsWithScript: number; share: number; scriptRuns: number; callsPerRun?: number }>;
+/** The turns that called `exec`, or those that did not, on average: a description, not a measure of a cause. */
+export type ScriptTurnsRow = Readonly<{ withScript: boolean; turns: number; toolCalls: number; requests: number; tokens: number; durationMs: number }>;
+/** One run of a script. */
+export type ScriptRunSample = Readonly<{
+  sessionId: string; runId: string; script: string; title?: string;
+  /** `running`, `completed`, `failed`, `cancelled` or `interrupted`. */
+  status: string;
+  error?: string;
+  /** Who sent the turn it started in, or `resume`. */
+  origin: string;
+  start: string; durationMs?: number; calls: number; steps: number; sessions: number; model: string;
+}>;
+/** The runs of scripts of a period. */
+export type ScriptsResult = Readonly<{
+  query: QueryHeader; buckets: readonly BucketInfo[]; totals: ScriptTotals; scripts: readonly ScriptRow[]; adoption: readonly ScriptAdoptionRow[];
+  turns: readonly ScriptTurnsRow[]; recent: readonly ScriptRunSample[]; totalScripts: number; truncated: boolean;
 }>;
 
 /** One run of a session. */

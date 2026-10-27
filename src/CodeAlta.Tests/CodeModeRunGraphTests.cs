@@ -112,6 +112,34 @@ public sealed class CodeModeRunGraphTests
     }
 
     [TestMethod]
+    public async Task ARunThatLoadsALibraryScript_RecordsWhichOnce_AndItsGraphIsTheSame()
+    {
+        using var root = TestTempDirectory.Create();
+        var project = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        var library = new CodeModeScriptLibrary(new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") });
+        Assert.IsNull(library.Save("double", CodeModeScriptScope.Project, """
+            export const meta = { name: "double", params: { n: { type: "number" } } };
+            return await step("twice", async () => args.n * 2);
+            """, project, null).Refusal);
+        var records = new List<AgentWorkflowEvent>();
+        await using var runs = new CodeModeRunRegistry(null) { Journal = (_, record) => { lock (records) records.Add(record); return Task.CompletedTask; } };
+
+        var result = await InvokeAsync(Exec(project, runs, library: library), """return [await workflow("double", { n: 2 }), await workflow("double", { n: 3 })];""");
+
+        Assert.IsTrue(result.Success, Text(result));
+        await runs.FindAny(runs.List("session-1").Single().Id)!.JournalWritten;
+        Assert.IsTrue(records.Single(static record => record.Kind == AgentWorkflowEventKind.RunStarted).RecordsScripts);
+        var loaded = records.Where(static record => record.Kind == AgentWorkflowEventKind.ScriptLoaded).ToList();
+        Assert.AreEqual("double:project|double:project", string.Join('|', loaded.Select(static record => $"{record.ScriptName}:{record.ScriptScope}")), "one record per load");
+        Assert.IsLessThan(records.FindIndex(static record => record.Kind == AgentWorkflowEventKind.StepStarted), records.IndexOf(loaded[0]));
+        // A kind the graph does not draw changes nothing of it.
+        Assert.AreEqual(
+            string.Join('|', CodeModeRunGraph.Read(records.Where(static record => record.Kind != AgentWorkflowEventKind.ScriptLoaded)).Select(static step => $"{step.Id}:{step.State}")),
+            string.Join('|', CodeModeRunGraph.Read(records).Select(static step => $"{step.Id}:{step.State}")));
+    }
+
+    [TestMethod]
     public async Task AfterARestart_TheStoreListsTheRunsThatEnded_ShowsThem_AndGivesTheirResult()
     {
         using var root = TestTempDirectory.Create();
@@ -241,12 +269,12 @@ public sealed class CodeModeRunGraphTests
         using (var value = ValueOf(nextRun)) Assert.AreEqual("[null]", value.RootElement.GetRawText(), "without a store, a value lasts as long as its run");
     }
 
-    private static AgentToolDefinition Exec(string root, CodeModeRunRegistry runs, CodeModeValueStore? values = null)
+    private static AgentToolDefinition Exec(string root, CodeModeRunRegistry runs, CodeModeValueStore? values = null, CodeModeScriptLibrary? library = null)
     {
         var registry = new AltaCommandRegistry();
         var dispatcher = new AltaCommandDispatcher(registry, new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root }).Add(registry));
         return CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root },
-            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Values = values }).Single(static tool => tool.Spec.Name == "exec");
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Values = values, Library = library }).Single(static tool => tool.Spec.Name == "exec");
     }
 
     private static Task<AgentToolResult> InvokeAsync(AgentToolDefinition tool, string code, string sessionId = "session-1")
