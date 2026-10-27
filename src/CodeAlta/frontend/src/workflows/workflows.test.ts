@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkflowRunItem, WorkflowScriptItem, WorkflowScriptParameter, WorkflowStepItem } from "#neoastra";
-import { argumentsOf, fieldKind, fieldsOf, filterScripts, initialValues, runDuration, runsRefreshMilliseconds, sortRuns, stepColumns } from "./workflows";
+import { argumentsOf, fieldKind, fieldsOf, filterScripts, initialValues, projectScriptPath, runDuration, runsRefreshMilliseconds, sortRuns, stepColumns } from "./workflows";
+
+test("a script of the project opens in its code editor by its path there; yours and the samples do not", () => {
+  assert.equal(projectScriptPath({ scope: "project", path: "C:\\code\\App\\.alta\\scripts\\triage.js" }, "C:\\code\\App"), ".alta/scripts/triage.js");
+  assert.equal(projectScriptPath({ scope: "project", path: "c:\\Code\\app\\.alta\\scripts\\triage.js" }, "C:\\code\\App\\"), ".alta/scripts/triage.js", "Windows: the case alone differs");
+  assert.equal(projectScriptPath({ scope: "project", path: "/home/me/App/.alta/scripts/triage.js" }, "/home/me/App"), ".alta/scripts/triage.js");
+  assert.equal(projectScriptPath({ scope: "project", path: "/home/me/app/.alta/scripts/triage.js" }, "/home/me/App"), null, "elsewhere, the case counts");
+  assert.equal(projectScriptPath({ scope: "global", path: "C:\\Users\\me\\.alta\\scripts\\triage.js" }, "C:\\code\\App"), null);
+  assert.equal(projectScriptPath({ scope: "project", path: "C:\\code\\App2\\.alta\\scripts\\x.js" }, "C:\\code\\App"), null, "not a folder that only starts like it");
+  assert.equal(projectScriptPath({ scope: "project", path: "C:\\code\\App\\.alta\\scripts\\x.js" }, null), null);
+});
 
 const step = (id: string, after: string[] | null = null, each = false): WorkflowStepItem => ({ id, title: id, after, each });
 const parameter = (name: string, type: string | null, required = true, value: string | null = null): WorkflowScriptParameter =>

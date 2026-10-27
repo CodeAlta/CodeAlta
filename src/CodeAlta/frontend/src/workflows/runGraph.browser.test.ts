@@ -223,6 +223,9 @@ for (const light of [false, true]) {
       }
       await page.evaluate(`document.querySelector('.workflow-run-tab').scrollTop = 0`);
       assert.match(await page.evaluate<string>(`document.querySelector('.workflow-run-source').textContent`), /fix-failing-tests/);
+      // The script in the colors of JavaScript, its lines numbered: an error names its line.
+      assert.ok(await page.evaluate<boolean>(`!!document.querySelector('.workflow-run-source .hljs-keyword')`), "the script is highlighted");
+      assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.workflow-run-source .tool-code-number')].map(e => e.textContent)`), ["1", "2"]);
       assert.ok(await page.evaluate<boolean>(noSideScroll(".workflow-run-tab")), "the tab does not scroll sideways");
       // Its group opens there too.
       await page.click(".workflow-run-graph .workflow-group-head");

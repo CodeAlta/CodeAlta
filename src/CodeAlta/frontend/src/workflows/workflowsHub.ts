@@ -1,7 +1,7 @@
 // The page's link to the scripts of the library and to their runs, for the host of one epoch.
 import type { workflows, WorkflowRunDetailResponse, WorkflowRunItem, WorkflowScriptItem } from "#neoastra";
 
-export type WorkflowsApi = Pick<typeof workflows, "scripts" | "runs" | "run" | "saveAsScript" | "resume" | "stop" | "runDetail">;
+export type WorkflowsApi = Pick<typeof workflows, "scripts" | "source" | "runs" | "run" | "saveAsScript" | "resume" | "stop" | "runDetail">;
 
 /** What the host said of a list; `available` is false in a window without a host of its own. A request that failed gives null. */
 export type WorkflowsList<T> = Readonly<{ available: boolean; items: readonly T[] }>;
@@ -19,6 +19,13 @@ export function createWorkflowsHub(api: WorkflowsApi, epoch: string) {
       try {
         const reply = await api.scripts({ expectedEpoch: epoch, projectId }, { signal, timeoutMilliseconds: 15_000 });
         return reply.status === "ok" ? { available: true, items: reply.scripts } : reply.status === "unavailable" ? { available: false, items: [] } : null;
+      } catch { return null; }
+    },
+    /** The source of a script of the library, of its scope, as a project sees it; null when it cannot be read. */
+    async source(name: string, scope: string, projectId: string | null, signal?: AbortSignal): Promise<string | null> {
+      try {
+        const reply = await api.source({ expectedEpoch: epoch, name, scope, projectId }, { signal, timeoutMilliseconds: 15_000 });
+        return reply.status === "ok" ? reply.source ?? null : null;
       } catch { return null; }
     },
     /** The runs of scripts of the host. */

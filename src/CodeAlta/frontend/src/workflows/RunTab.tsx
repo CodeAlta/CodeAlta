@@ -10,6 +10,7 @@ import { scriptRunOf } from "../timeline";
 import { formatDuration } from "../toolCall";
 import { graphStateLabel } from "./flowActions";
 import { graphState, timelineBars, timelineOption, timelineStates, type GraphState } from "./runGraph";
+import { ScriptSource } from "./ScriptSource";
 import { RunTabGraph } from "./WorkflowBlock";
 import { runDuration, runStateLabel, runTone } from "./workflows";
 import { createWorkflowsHub, type WorkflowsApi } from "./workflowsHub";
@@ -170,7 +171,7 @@ export function RunTab({ api, epoch, runId, visible, onActivate, onGone, write =
     </section>}
     {detail.source && <section className="workflow-run-section">
       <h3>{t("Script")}</h3>
-      <pre className="workflow-run-text workflow-run-source">{detail.source}</pre>
+      <ScriptSource source={detail.source} className="workflow-run-source" />
     </section>}
   </div>;
 }

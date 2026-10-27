@@ -19,6 +19,18 @@ export function stepColumns(steps: readonly WorkflowStepItem[]): readonly (reado
 /** The scope of a script as the tab names it. */
 export const scopeLabel = (scope: string) => scope === "project" ? "Project" : scope === "global" ? "Mine" : "Sample";
 
+/**
+ * The path of a script of a project in that project, as its code editor names its files (`.alta/scripts/triage.js`); null for
+ * a script outside it (yours, the samples), which the editor of a project does not open.
+ */
+export function projectScriptPath(script: Readonly<{ scope: string; path: string }>, projectPath: string | null): string | null {
+  if (script.scope !== "project" || !projectPath) return null;
+  const file = script.path.replaceAll("\\", "/"), root = projectPath.replaceAll("\\", "/").replace(/\/+$/u, "") + "/";
+  // Paths of Windows differ in case alone; the others keep theirs.
+  const within = /^[a-z]:\//iu.test(root) ? file.toLowerCase().startsWith(root.toLowerCase()) : file.startsWith(root);
+  return within ? file.slice(root.length) : null;
+}
+
 /** The scripts whose name, title or description has every word of a query. */
 export function filterScripts(scripts: readonly WorkflowScriptItem[], query: string): readonly WorkflowScriptItem[] {
   const words = query.toLowerCase().split(/\s+/u).filter(Boolean);

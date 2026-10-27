@@ -70,5 +70,9 @@ export const workflowMessages = {
   "Hide the sessions": ["Ocultar las sesiones", "Masquer les sessions", "Sitzungen ausblenden", "セッションを隠す", "隐藏会话"],
   "Sleeping": ["Durmiendo", "En sommeil", "Schläft", "スリープ中", "休眠中"],
   "Show the call": ["Mostrar la llamada", "Afficher l’appel", "Aufruf anzeigen", "呼び出しを表示", "显示调用"],
+  "Show the script": ["Mostrar el script", "Afficher le script", "Skript anzeigen", "スクリプトを表示", "显示脚本"],
+  "Hide the script": ["Ocultar el script", "Masquer le script", "Skript ausblenden", "スクリプトを隠す", "隐藏脚本"],
+  "The script cannot be read.": ["No se puede leer el script.", "Le script ne peut pas être lu.", "Das Skript kann nicht gelesen werden.",
+    "スクリプトを読み込めません。", "无法读取脚本。"],
   "{done}/{total} sessions": ["{done}/{total} sesiones", "{done}/{total} sessions", "{done}/{total} Sitzungen", "{done}/{total} セッション", "{done}/{total} 个会话"],
 } as const;

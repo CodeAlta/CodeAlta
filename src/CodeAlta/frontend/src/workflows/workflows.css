@@ -18,6 +18,7 @@
   transition: border-color 120ms, box-shadow 120ms; }
 .workflow-card:hover { border-color: var(--line-strong); box-shadow: 0 8px 22px -14px #000; }
 .workflow-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.workflow-card-actions { display: flex; align-items: center; gap: 2px; }
 .workflow-card-glyph { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #4fa3f5; background: color-mix(in srgb, currentColor 16%, transparent); }
 .workflow-card[data-problem] .workflow-card-glyph { color: var(--danger, #e76a6e); }
 .workflow-card-text { display: grid; gap: 2px; min-width: 0; }
@@ -263,6 +264,10 @@ button.workflow-session:focus-visible { outline: 2px solid var(--accent); outlin
 .workflow-run-sessions tr[data-state="completed"] td:nth-child(3) { color: var(--green); }
 .workflow-run-text { max-height: 420px; margin: 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
   color: var(--text); font: 12px/1.5 var(--code-font); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The source of a script: its lines numbered and colored, in a frame of its own that scrolls both ways. */
+.workflow-script-source { display: flex; max-height: 420px; min-width: 0; }
+.workflow-script-source .tool-code-lines { border-top: 1px solid var(--line); border-radius: 8px; padding: 6px 0; }
+.workflow-card-source { max-height: 320px; }
 @container (max-width: 640px) {
   .workflow-run-tab { padding: 14px 12px 20px; }
   .workflow-run-sessions th:nth-child(2), .workflow-run-sessions td:nth-child(2) { display: none; }

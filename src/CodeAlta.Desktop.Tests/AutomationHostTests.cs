@@ -931,6 +931,15 @@ public sealed class AutomationHostTests
             Assert.IsTrue((await rpc.ScriptsAsync(new(Epoch, null), default)).Scripts.All(static script => script.Scope == "builtin"), "Without a project, no script of a project.");
             Assert.AreEqual("not_found", (await rpc.ScriptsAsync(new(Epoch, "missing"), default)).Status);
 
+            // The source of a script, to show it: of the scope asked, as the project sees it; a sample without a project.
+            var source = await rpc.SourceAsync(new(Epoch, "triage", "project", project.Id), default);
+            Assert.AreEqual("ok", source.Status);
+            StringAssert.Contains(source.Source, "return args.days;");
+            StringAssert.Contains((await rpc.SourceAsync(new(Epoch, "review-pr", "builtin", null), default)).Source, "export const meta");
+            Assert.AreEqual("not_found", (await rpc.SourceAsync(new(Epoch, "triage", "global", project.Id), default)).Status, "no script of that name in that scope");
+            Assert.AreEqual("invalid_request", (await rpc.SourceAsync(new(Epoch, "../config", "project", project.Id), default)).Status);
+            Assert.AreEqual("stale_epoch", (await rpc.SourceAsync(new("other", "triage", "project", project.Id), default)).Status);
+
             // Run… checks the script and its arguments as an automation does, before any session exists.
             foreach (var (name, arguments, expected) in new (string, string?, string)[]
                      {

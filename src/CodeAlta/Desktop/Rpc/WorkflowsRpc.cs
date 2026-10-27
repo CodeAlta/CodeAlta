@@ -76,6 +76,36 @@ internal sealed class WorkflowsService
             [.. script.Steps.Select(static step => new WorkflowStepItem(step.Id, step.Title, step.After, step.Each))]))]);
     }
 
+    /// <summary>The longest source of a script the tab shows, in characters.</summary>
+    internal const int MaximumSourceLength = 512 * 1024;
+
+    /// <summary>
+    /// The source of a script of the library, to show it: the one of its scope that a project sees, or yours and the samples
+    /// without a project.
+    /// </summary>
+    [NeoRpcMethod("source")]
+    public async Task<WorkflowSourceResponse> SourceAsync(WorkflowSourceRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null);
+        if (!CodeModeScriptLibrary.IsName(request.Name) || (request.ProjectId is { } projectId && !Identifier(projectId))) return new("invalid_request", null);
+        var project = request.ProjectId is null ? null : await _projects!.GetByIdAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
+        if (request.ProjectId is not null && (project is null || project.Archived)) return new("not_found", null);
+        var spaces = _spaceOf is null ? null : await _spaceOf(project, cancellationToken).ConfigureAwait(false);
+        var script = await Task.Run(() => _scripts!.List(project?.ProjectPath, spaces)
+            .FirstOrDefault(candidate => candidate.Name == request.Name && Scope(candidate.Scope) == request.Scope), cancellationToken).ConfigureAwait(false);
+        if (script is null) return new("not_found", null);
+        try
+        {
+            var source = await File.ReadAllTextAsync(script.Path, cancellationToken).ConfigureAwait(false);
+            return source.Length > MaximumSourceLength ? new("refused", null) : new("ok", source);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new("not_found", null);
+        }
+    }
+
     /// <summary>
     /// The runs of scripts of the host: running ones, and those that ended, which the store keeps (the 100 newest, 14 days at
     /// most), also from before CodeAlta started again. Listing reads the store, never a journal.
@@ -281,6 +311,14 @@ internal sealed record WorkflowResumeRequest(string? ExpectedEpoch, string Sessi
 
 /// <summary>Stops a run that runs.</summary>
 internal sealed record WorkflowStopRequest(string? ExpectedEpoch, string RunId);
+
+/// <summary>Asks for the source of a script of the library.</summary>
+/// <param name="Scope"><c>project</c>, <c>global</c> or <c>builtin</c>: the one of the scripts of that name.</param>
+/// <param name="ProjectId">The project whose scripts are read; null for yours and the samples.</param>
+internal sealed record WorkflowSourceRequest(string? ExpectedEpoch, string Name, string Scope, string? ProjectId);
+
+/// <summary>The source of a script, or null when it is not found or too long to show.</summary>
+internal sealed record WorkflowSourceResponse(string Status, string? Source);
 
 /// <param name="Message">Why the request was refused.</param>
 internal sealed record WorkflowMutationResponse(string Status, string? Message);
