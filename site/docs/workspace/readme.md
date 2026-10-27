@@ -46,6 +46,7 @@ The Explorer lists the projects of the space the window shows. **Chats**, at the
 
 - **Filter sessions**, at the top, keeps the sessions, chats, projects and Claude Code conversations whose title has every word you type. `Esc` or **×** clears it.
 - Click the arrow of a project to show or hide its sessions; **Collapse all** closes them all. Open projects stay open at the next start.
+- A project or a [label](../labels.md) shows a spinner while sessions run in it, with their number when there are several, and a yellow mark with the number of sessions that wait for you: a folded one tells it without being opened. A project with no session or terminal has no arrow.
 - Click a project to write the prompt of a new session in it. Click a session to look at it; double-click it to keep its tab (see [Tabs](#tabs)).
 - Point at a project for its buttons: the star (adds it to **Favorites**), its [changes](code.md#changes), its [code editor](code.md#code-editor) and a [terminal](code.md#terminals).
 - The `…` button or a right-click (`Ctrl`+click on macOS) opens the menu of a project or a session.

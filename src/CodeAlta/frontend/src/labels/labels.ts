@@ -93,6 +93,12 @@ export function labelSubtree(id: string, labels: readonly Label[]): readonly str
   return ids;
 }
 
+/** The projects of a label and of every label under it: what its folded row speaks for. */
+export function labelSubtreeProjects(id: string, labels: readonly Label[]): ReadonlySet<string> {
+  const below = new Set(labelSubtree(id, labels));
+  return new Set(labels.filter(label => below.has(label.id)).flatMap(label => label.projectIds));
+}
+
 /** The level of a label: 1 at the top. */
 export const labelDepth = (label: Label, labels: readonly Label[]): number => labelAncestors(label, labels).length + 1;
 

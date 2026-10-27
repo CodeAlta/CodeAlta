@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { tabKey, type SessionTab } from "./sessionTabs";
 import { BackgroundMark } from "./BackgroundTaskViews";
-import { projectRunning, sessionBackground, sessionRunning, type createRuntimeObservations } from "./runtimeObservations";
+import { runningCount, sessionBackground, sessionRunning, type createRuntimeObservations } from "./runtimeObservations";
 import { useShellLanguage } from "./shellLanguage";
 
 export type RuntimeObservationControls = { store: ReturnType<typeof createRuntimeObservations>; enabled: boolean; canObserve: (tab: SessionTab) => boolean; refresh: (tabs: readonly SessionTab[]) => void };
@@ -11,14 +11,25 @@ export type RuntimeObservationControls = { store: ReturnType<typeof createRuntim
  * Sidebar activity: a spinner while an observed session (or any observed session of a project) is running, and
  * a quieter mark for a session that runs no turn while its provider still works in the background.
  */
-export function RunningSessionBadge({ controls, tab, projectId }: { controls: RuntimeObservationControls; tab?: SessionTab; projectId?: string | null }) {
+export function RunningSessionBadge({ controls, tab, projectId, projectIds }: {
+  controls: RuntimeObservationControls; tab?: SessionTab; projectId?: string | null;
+  /** The projects of a label and of the labels under it: the badge counts the sessions that run in any of them. */
+  projectIds?: ReadonlySet<string>;
+}) {
   const { t } = useShellLanguage();
   // The answer is followed, not the observations: a refresh that changes nothing of it renders nothing.
   const running = useSyncExternalStore(controls.store.subscribe,
-    () => tab ? sessionRunning(controls.store.getSnapshot(), tab) : projectRunning(controls.store.getSnapshot(), projectId ?? null));
+    () => tab ? sessionRunning(controls.store.getSnapshot(), tab) ? 1 : 0
+      : runningCount(controls.store.getSnapshot(), projectIds ? id => id !== null && projectIds.has(id) : id => id === (projectId ?? null)));
   const background = useSyncExternalStore(controls.store.subscribe, () => tab ? sessionBackground(controls.store.getSnapshot(), tab) : 0);
   if (!controls.enabled || tab && !controls.canObserve(tab)) return null;
-  return running ? <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>
+  if (running > 0 && !tab) {
+    // A scope says how many of its sessions run, so that a folded project or label tells it without being opened.
+    const label = t(running === 1 ? "{count} session running" : "{count} sessions running", { count: running });
+    return <span className="session-running" data-count={running > 1 ? running : undefined} title={label}>
+      <ActivitySpinner size={12} label={label} />{running > 1 && <span className="session-running-count" aria-hidden="true">{running}</span>}</span>;
+  }
+  return running > 0 ? <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>
     : background > 0 ? <BackgroundMark count={background} /> : null;
 }
 

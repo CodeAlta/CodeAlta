@@ -71,8 +71,10 @@ export type ProjectRailLabels = Readonly<{
   otherDrop?: "into";
 }>;
 
-export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, creating, editor, changes, terminals, tree, head, drop, footer, filter, labels }: {
+export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, creating, editor, changes, terminals, tree, head, drop, footer, filter, labels, unfoldable }: {
   activity?: (projectId: string | null) => ReactNode;
+  /** Whether a closed project has something to show when it is opened; its chevron is hidden when it has not. Absent: every project has. */
+  unfoldable?: (projectId: string) => boolean;
   /** The projects listed, the favorite ones first. */
   projects: WorkspaceProject[];
   /** How many of the projects, from the first, are favorites: they are listed under a title of their own. */
@@ -129,7 +131,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     if (id !== selectedId) setFolded(null);
     onSelect(id);
   }
-  const twist = (id: string | null) => <span className="tree-twist" onClick={event => { event.stopPropagation(); toggle(id); }} onDoubleClick={event => event.stopPropagation()}>
+  const twist = (id: string | null) => <span className="tree-twist" data-empty={id !== null && !open(id) && unfoldable && !unfoldable(id) ? "true" : undefined} onClick={event => { event.stopPropagation(); toggle(id); }} onDoubleClick={event => event.stopPropagation()}>
     <AppIcon name="chevronDown" size={12} className={open(id) ? "tree-chevron expanded" : "tree-chevron"} /></span>;
   // The sessions of the selected scope stay in the page while it is closed: what is being typed there is kept.
   const branch = (id: string | null) => id === selectedId ? <li className="project-session-branch" hidden={!open(id)}>{children}{tree?.after?.(id)}</li>

@@ -208,6 +208,7 @@ h1, h2, h3, p { margin-top: 0; }
 .session-tabs[data-dragging="true"] { user-select: none; cursor: grabbing; }
 .session-drop-preview { position: absolute; z-index: 20; pointer-events: none; border: 2px solid var(--accent); background: var(--accent-soft); }
 .session-running { color: var(--green); flex: 0 0 auto; font-size: 11px; }
+.session-running[data-count] { display: inline-flex; align-items: center; gap: 1px; font-weight: 700; font-variant-numeric: tabular-nums; }
 /* A session that runs no turn while its provider still works in the background: a dot that breathes, quieter than the spinner of a run. */
 /* Only its opacity pulses: in a tab the mark is in the drag region of the title bar, and a box that changes there
    (a scale) makes the window compute that region again at every frame, which slows the whole desktop. */

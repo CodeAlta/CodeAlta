@@ -163,7 +163,7 @@ import { ConversationElsewhereBanner, ConversationElsewhereLine, promptFocusTarg
 import { openElsewhereEntries } from "./claudeCodeOpen/openElsewhereEntries";
 import { projectRailGroups, projectRailProjection } from "./explorer/projectRail";
 import { createLabelsHub } from "./labels/labelsHub";
-import { canMoveLabel, labelsOfSpace, projectLabels } from "./labels/labels";
+import { canMoveLabel, labelsOfSpace, labelSubtreeProjects, projectLabels } from "./labels/labels";
 import { LabelRailRow, type LabelRowEditing } from "./labels/LabelRailRow";
 import { LabelDragGhost, LabelFormPopover } from "./labels/LabelViews";
 import { LabelSettings } from "./labels/LabelSettings";
@@ -3660,6 +3660,18 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
     </>;
   }
+  // A closed project shows its chevron only when opening it shows something: its sessions, its terminals, or the
+  // Claude Code sessions of its folder. A truncated snapshot does not tell, so every project keeps it then.
+  const projectsWithSessions = new Set(snapshot?.sessions.flatMap(session => session.projectId ? [session.projectId] : []) ?? []);
+  const projectUnfoldable = (id: string) => !snapshot || snapshot.sessionsTruncated || claudeCodeConfigured || projectsWithSessions.has(id)
+    || terminalsOf(terminalList, id).length > 0;
+  // What a label row tells of the projects it holds, with those of the labels under it: the sessions that wait for
+  // the user, and how many run, so that a folded label says it without being unfolded.
+  function labelActivity(projects: ReadonlySet<string>) {
+    if (!projects.size) return null;
+    return <><WaitingBadge count={spacesState.sessions.reduce((count, session) => count + (session.waiting && session.projectId && projects.has(session.projectId) ? 1 : 0), 0)} />
+      <RunningSessionBadge controls={runtimeObservationControls()} projectIds={projects} /></>;
+  }
   function scopeSessions(scope: string | null) {
     const shown = openScopes.get(scopeKey(scope));
     if (!shown || !snapshot) return null;
@@ -5166,7 +5178,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               row: group => <LabelRailRow group={group} labels={spaceLabels} folded={!filterView && isLabelFolded(projectTree, group.label.id)}
                 onFold={value => setProjectTree(current => setLabelFolded(current, group.label.id, value))} editing={owned ? labelEditing : undefined}
                 drop={railDrag.view?.over?.labelId === group.label.id ? railDrag.view.over.place : undefined}
-                drag={owned ? railDrag.source({ kind: "label", labelId: group.label.id }, group.label.name) : undefined} />,
+                drag={owned ? railDrag.source({ kind: "label", labelId: group.label.id }, group.label.name) : undefined}
+                activity={labelActivity(labelSubtreeProjects(group.label.id, spaceLabels))} />,
               badges: project => <ProjectLabelBadges labels={projectLabels(project.id, spaceLabels)} all={spaceLabels} />,
               drag: owned && spaceLabels.length ? (project, from) => railDrag.source({ kind: "project", projectId: project.id, from }, project.name) : undefined,
               otherDrop: railDrag.view?.over?.labelId === "" ? "into" : undefined,
@@ -5183,6 +5196,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 onOpen={showTerminal} onClose={terminal => terminalWorkspace.hub.close(terminal.id)} /> }}
             terminals={owned ? { count: id => terminalsOf(terminalList, id).length, create: project => void createTerminal(project.id) } : undefined}
             changes={owned ? { open: id => fileTabs.open.some(tab => isChangesTab(tab) && tab.projectId === id), show: project => showChanges(project) } : undefined}
+            unfoldable={projectUnfoldable}
             activity={id => <><WaitingBadge count={spacesState.sessions.reduce((count, session) => count + (session.waiting && session.projectId === id ? 1 : 0), 0)} />
               <RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />
               <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} />

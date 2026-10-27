@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { LabelItem } from "#neoastra";
 import { labelMoveTarget } from "./labelDrag";
-import { canMoveLabel, labelPath, labelsOfSpace, readLabels, type Label } from "./labels";
+import { canMoveLabel, labelPath, labelsOfSpace, labelSubtreeProjects, readLabels, type Label } from "./labels";
 import { steppedPlace } from "./LabelSettings";
 
 const item = (id: string, look: Partial<LabelItem> = {}): LabelItem =>
@@ -43,4 +43,13 @@ test("the buttons of a row move a label one step: up, down, under the label abov
   assert.equal(steppedPlace(labels, "infra", "in"), null);
   assert.deepEqual(steppedPlace(labels, "charts", "out"), { parent: "infra", index: 1 });
   assert.equal(steppedPlace(labels, "tools", "out"), null);
+});
+
+test("a label speaks for its projects and for those of the labels under it", () => {
+  const tree = readLabels([item("infra", { projectIds: ["a"] }), item("helm", { parent: "infra", projectIds: ["b", "a"] }),
+    item("charts", { parent: "helm", projectIds: ["c"] }), item("tools", { projectIds: ["d"] })]);
+  assert.deepEqual([...labelSubtreeProjects("infra", tree)].sort(), ["a", "b", "c"]);
+  assert.deepEqual([...labelSubtreeProjects("helm", tree)].sort(), ["a", "b", "c"]);
+  assert.deepEqual([...labelSubtreeProjects("tools", tree)], ["d"]);
+  assert.equal(labelSubtreeProjects("gone", tree).size, 0);
 });

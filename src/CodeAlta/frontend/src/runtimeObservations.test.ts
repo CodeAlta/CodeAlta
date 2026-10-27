@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { SessionRuntimeScopedResponse } from "#neoastra";
-import { createRuntimeObservations, projectRunning, projectRuntimeObservation, sessionRunning, type RuntimeTarget } from "./runtimeObservations";
+import { createRuntimeObservations, projectRunning, projectRuntimeObservation, runningCount, sessionRunning, type RuntimeTarget } from "./runtimeObservations";
 import { tabKey } from "./sessionTabs";
 
 const target = (id = "one"): RuntimeTarget => ({ tab: { sessionId: id, projectId: null, path: null },
@@ -121,4 +121,21 @@ test("a refresh that changes no running session keeps the running set, and never
   assert.notEqual(owner.getRunning(), running);
   assert.deepEqual([...owner.getRunning()], [tabKey(target("two").tab)]);
   assert.equal(sessionRunning(owner.getSnapshot(), target("one").tab), false);
+});
+
+test("a scope counts the sessions that run in its projects: one project, or the projects of a label", () => {
+  const owner = createRuntimeObservations(async request => reply(request.sessionId));
+  const tab = (sessionId: string, projectId: string | null) => ({ sessionId, projectId, path: projectId ? `/work/${projectId}` : null });
+  owner.setLive(tab("one", "alpha"), true);
+  owner.setLive(tab("two", "alpha"), true);
+  owner.setLive(tab("three", "beta"), true);
+  owner.setLive(tab("four", "beta"), false);
+  owner.setLive(tab("five", null), true);
+  const state = owner.getSnapshot();
+  assert.equal(runningCount(state, id => id === "alpha"), 2);
+  assert.equal(runningCount(state, id => id === "beta"), 1, "a session that stopped is not counted");
+  assert.equal(runningCount(state, id => id === null), 1, "the chats are a scope of their own");
+  const label = new Set(["alpha", "beta"]);
+  assert.equal(runningCount(state, id => id !== null && label.has(id)), 3);
+  assert.equal(projectRunning(state, "gamma"), false);
 });
