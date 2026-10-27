@@ -66,18 +66,20 @@ function research(): WorkflowRecordItem[] {
 
 const runOf = (records: WorkflowRecordItem[], runId: string) => scriptRunOf(records.map(record => ({ ...record, name: runId })), runId);
 
-const state = { opened: [] as string[], runs: [] as string[], copied: [] as string[], reruns: [] as string[], calls: [] as string[], reads: 0, gone: 0,
+const state = { opened: [] as string[], runs: [] as string[], copied: [] as string[], reruns: [] as string[], stops: [] as string[], calls: [] as string[], reads: 0, gone: 0,
   mermaid: "flowchart LR\n  s0[\"Find the failing tests · completed\"]:::completed\n" };
 Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { state.copied.push(text); } } });
 const detail = (): WorkflowRunDetailResponse => ({
   status: "ok", run: { id: "run-7f3c2a", sessionId: "session-1", title: "Fix failing tests", state: "running", startedAt: at(0), endedAt: null, callId: "call-1", calls: 60 },
   records: fanOut(), source: "export const meta = { name: \"fix-failing-tests\" };\nreturn 1;", result: null, mermaid: state.mermaid,
 });
-const api = { runDetail: async () => { state.reads++; return detail(); } } as unknown as WorkflowsApi;
+const api = { runDetail: async () => { state.reads++; return detail(); },
+  stop: async ({ runId }: { runId: string }) => { state.stops.push(runId); return { status: "ok", message: null }; } } as unknown as WorkflowsApi;
 const links = { title: (id: string) => id.startsWith("child-") ? `Fix ${id}` : id === "session-1" ? "Fix the tests" : null, open: (id: string) => { state.opened.push(id); } };
 const actions: ScriptRunActions = {
   saveAsScript: async () => null,
   resume: async (runId, how) => { state.reruns.push(`${runId}:${how.from ?? (how.all ? "all" : "resume")}`); return null; },
+  stop: async runId => { state.stops.push(runId); return null; },
 };
 
 function wrap(child: ReactNode, width: number | null, scroll = false) {

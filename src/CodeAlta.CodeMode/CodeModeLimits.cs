@@ -27,17 +27,26 @@ public sealed record CodeModeLimits
     /// <summary>Gets the largest array the script may create.</summary>
     public uint MaxArraySize { get; init; } = 1_000_000;
 
-    /// <summary>Gets the calls to the host one run may make.</summary>
-    public int MaxCalls { get; init; } = 5_000;
+    /// <summary>
+    /// Gets the calls to the host one run may make: no limit by default, since a run that researches for days makes many,
+    /// and the user and other sessions can stop a run.
+    /// </summary>
+    public int MaxCalls { get; init; } = int.MaxValue;
 
-    /// <summary>Gets the calls to the host that run at the same time; the next ones wait for a slot.</summary>
-    public int MaxCallsInFlight { get; init; } = 8;
+    /// <summary>
+    /// Gets the calls to the host that run at the same time; the next ones wait for a slot, none fails. A session a script
+    /// started (<c>agent()</c>) holds its slot while it works, so this leaves room beside the sessions at work.
+    /// </summary>
+    public int MaxCallsInFlight { get; init; } = 32;
 
     /// <summary>Gets the size of the log of a run (console output and <c>text()</c>), in characters.</summary>
     public int MaxLogCharacters { get; init; } = 64 * 1024;
 
-    /// <summary>Gets the wall time of a run, awaited time included.</summary>
-    public TimeSpan Timeout { get; init; } = TimeSpan.FromHours(1);
+    /// <summary>
+    /// Gets the wall time of a run, awaited time included: none by default (<see cref="System.Threading.Timeout.InfiniteTimeSpan"/>),
+    /// since a run may research for hours or sleep for days, and awaiting costs no CPU. A script sets one with <c>timeout_ms</c>.
+    /// </summary>
+    public TimeSpan Timeout { get; init; } = System.Threading.Timeout.InfiniteTimeSpan;
 
     /// <summary>
     /// Gets how long a script may wait with no call in flight and no JavaScript running before the run fails as

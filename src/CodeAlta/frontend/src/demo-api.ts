@@ -203,7 +203,7 @@ export const automations = Object.freeze({ list: noAutomations, refresh: noAutom
   allow: unavailable, setPaused: unavailable, run: unavailable, runs: unavailable, preview: unavailable, watch: unavailable });
 // The demo has no library of scripts and runs none.
 export const workflows = Object.freeze({ scripts: async () => ({ status: "unavailable", scripts: [] }), runs: async () => ({ status: "unavailable", runs: [] }),
-  run: unavailable, saveAsScript: unavailable, resume: unavailable, runDetail: async () => ({ status: "unavailable", run: null, records: [], source: null, result: null, mermaid: null }) });
+  run: unavailable, saveAsScript: unavailable, resume: unavailable, stop: unavailable, runDetail: async () => ({ status: "unavailable", run: null, records: [], source: null, result: null, mermaid: null }) });
 // The demo has no project folder to keep tasks and plans in.
 export const workItems = Object.freeze({ list: async () => ({ status: "unavailable", projects: [], settings: null }), read: unavailable, act: unavailable,
   saveSettings: unavailable, watch: unavailable });

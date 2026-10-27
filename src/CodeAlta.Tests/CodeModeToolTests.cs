@@ -287,7 +287,7 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
-    public async Task AltaWorkflow_ListsReadsAndCancelsRuns_AndASessionCancelsOnlyItsOwn()
+    public async Task AltaWorkflow_ListsReadsAndCancelsRuns_AndASessionCancelsOnlyRunsOfSessionsItReaches()
     {
         using var root = TestTempDirectory.Create();
         await using var runs = new CodeModeRunRegistry(null);
@@ -313,12 +313,13 @@ public sealed class CodeModeToolTests
         StringAssert.Contains(listed.Stdout, $"\"id\":\"{run.Id}\"");
         StringAssert.Contains(listed.Stdout, "\"state\":\"running\"");
         StringAssert.Contains(listed.Stdout, "\"callId\":\"call-7\"");
-        Assert.AreNotEqual(AltaExitCodes.Success, other.ExitCode, "a session does not cancel the run of another");
+        Assert.AreNotEqual(AltaExitCodes.Success, other.ExitCode, "a session does not cancel the run of a session it cannot reach");
         StringAssert.Contains(early.Transcript, "workflow.running");
         Assert.AreEqual(AltaExitCodes.Success, cancelled.ExitCode, cancelled.Transcript);
         StringAssert.Contains(cancelled.Stdout, "\"wasRunning\":true");
         StringAssert.Contains(result.Stdout, "\"state\":\"cancelled\"");
         StringAssert.Contains(result.Stdout, "Script stopped");
+        StringAssert.Contains(result.Stdout, "stopped by this session");
         StringAssert.Contains(missing.Transcript, "workflow.notFound");
         Assert.AreEqual(AltaExitCodes.Success, shown.ExitCode, shown.Transcript);
         StringAssert.Contains(shown.Stdout, "\"profile\":{\"durationMs\"");

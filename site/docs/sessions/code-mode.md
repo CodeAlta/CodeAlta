@@ -181,13 +181,24 @@ To run a script, click **Run…** on it, fill in its parameters, choose the proj
 
 To keep a script that ran in a session, click **Save as script…** on its card in the timeline once it ended, and give it a name. The session is asked to turn it into a library script: the values it was written for become parameters, then it is checked and saved under that name.
 
+## Stop a script
+
+A script can run for hours, or sleep for days. To stop one:
+
+- in the timeline, click **Stop** on its card, or in its tab;
+- or click **Stop** beside it in the list of what the session runs in the background, above the prompt.
+
+An agent stops one with `wait` and `terminate`, or one of another session with `alta workflow cancel <run-id>`, as it can stop that session. The sessions the script started stop with it. Its session is told who stopped it.
+
 ## Limits
 
-A script stops with a message that says which limit it reached:
+No limit of time or of number of calls cuts a script, so research over many topics or several days is not cut short. What protects CodeAlta:
 
-- 1 hour of run time, 5,000 calls, 8 calls at once;
-- the tokens of the sessions a script starts, when its first line sets `budget_tokens`;
-- 256 MB of memory, and a guard against endless loops and deep recursion;
-- 4 scripts at a time per session, 32 in CodeAlta.
+- 256 MB of memory and a few seconds of computing at a time, which a script uses only between its calls; a guard against deep recursion;
+- 32 calls at once, and 8 sessions at work at once, per script: the others wait for their turn;
+- sessions started by scripts, 3 levels deep;
+- 32 scripts at a time per session, 128 in CodeAlta.
+
+A script that reaches one stops with a message that says which. A script can set its own limits on its first line: `timeout_ms` for its time, and `budget_tokens` for the tokens of the sessions it starts.
 
 Calls made before a failure are not undone: the result lists them.

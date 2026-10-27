@@ -59,6 +59,15 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// <summary>Gets the durable record of the runs, for a resume after a restart; null for a host that keeps none (<c>altacli</c>).</summary>
     public CodeModeRunStore? Store { get; private set; }
 
+    /// <summary>
+    /// The most runs of one session at the same time by default: a run that sleeps for days keeps its place, and a session
+    /// may have several going on.
+    /// </summary>
+    public const int DefaultMaxPerSession = 32;
+
+    /// <summary>The most runs of the host at the same time by default, sleeping ones included; Codex allows 128 active cells per host as well.</summary>
+    public const int DefaultMaxPerHost = 128;
+
     private readonly int _maxPerSession;
     private readonly int _maxPerHost;
     private readonly Lock _gate = new();
@@ -68,7 +77,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// <param name="deliver">Delivers the result of a run that went on in the background to its session: the session, the prompt. Null for a host without sessions to deliver to.</param>
     /// <param name="maxPerSession">The most runs of one session at the same time.</param>
     /// <param name="maxPerHost">The most runs of the host at the same time.</param>
-    public CodeModeRunRegistry(Func<string, string, CancellationToken, Task>? deliver, int maxPerSession = 4, int maxPerHost = 32)
+    public CodeModeRunRegistry(Func<string, string, CancellationToken, Task>? deliver, int maxPerSession = DefaultMaxPerSession, int maxPerHost = DefaultMaxPerHost)
         : this(deliver, hold: null, maxPerSession, maxPerHost)
     {
     }
@@ -78,7 +87,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// <param name="hold">Holds the session of a run until its result is given (<see cref="SessionRuntimeService.TryHoldForScript"/>): the session is not settled meanwhile. Null when nothing holds; a null hold refuses the run.</param>
     /// <param name="maxPerSession">The most runs of one session at the same time.</param>
     /// <param name="maxPerHost">The most runs of the host at the same time.</param>
-    public CodeModeRunRegistry(Func<string, string, CancellationToken, Task>? deliver, Func<string, IDisposable?>? hold, int maxPerSession = 4, int maxPerHost = 32)
+    public CodeModeRunRegistry(Func<string, string, CancellationToken, Task>? deliver, Func<string, IDisposable?>? hold, int maxPerSession = DefaultMaxPerSession, int maxPerHost = DefaultMaxPerHost)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPerSession);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPerHost);
@@ -242,6 +251,14 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         }
 
         return Task.WhenAll(runs.Select(static run => run.Completion.ContinueWith(static _ => { }, TaskScheduler.Default)));
+    }
+
+    /// <inheritdoc />
+    public bool StopRun(string sessionId, string runId, string? by)
+    {
+        if (Find(sessionId, runId) is not { Running: true } run) return false;
+        run.Stop(by);
+        return true;
     }
 
     /// <summary>Lists the runs of a session, or of the host.</summary>
@@ -820,11 +837,11 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
         {
             try
             {
-                return await run(this, _cancellation.Token).ConfigureAwait(false);
+                return WhoStopped(await run(this, _cancellation.Token).ConfigureAwait(false));
             }
             catch (OperationCanceledException)
             {
-                return new CodeModeRunResult(CodeModeRunStatus.Cancelled, _clock.Elapsed);
+                return WhoStopped(new CodeModeRunResult(CodeModeRunStatus.Cancelled, _clock.Elapsed));
             }
             catch (Exception exception)
             {
@@ -842,7 +859,26 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     public void Background() => Volatile.Write(ref _backgrounded, 1);
 
     /// <summary>Stops the run.</summary>
-    public void Stop() => _cancellation.Cancel();
+    public void Stop() => Stop(null);
+
+    /// <summary>Stops the run, saying who stops it: its result tells its session, which then does not start it again blindly.</summary>
+    /// <param name="by">Who stops it, such as <c>the user</c> or <c>session 01a1…</c>; null to say nothing.</param>
+    public void Stop(string? by)
+    {
+        if (by is { Length: > 0 }) Interlocked.CompareExchange(ref _stoppedBy, by, null);
+        _cancellation.Cancel();
+    }
+
+    private string? _stoppedBy;
+
+    /// <summary>Gets who stopped the run, or null.</summary>
+    public string? StoppedBy => Volatile.Read(ref _stoppedBy);
+
+    // The result of a run that was stopped says by whom.
+    private CodeModeRunResult WhoStopped(CodeModeRunResult result)
+        => result.Status == CodeModeRunStatus.Cancelled && StoppedBy is { } by
+            ? result with { Error = new CodeModeRunError(CodeModeErrorKind.Cancelled, "Stopped", $"The run was stopped by {by}.") }
+            : result;
 
     private int _silenced;
 

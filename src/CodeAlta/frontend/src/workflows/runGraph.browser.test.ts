@@ -130,7 +130,12 @@ for (const light of [false, true]) {
       assert.equal(await page.evaluate(`document.querySelectorAll('.workflow-session').length`), 0, "no row per session while it is closed");
       assert.ok(await page.evaluate(`!!document.querySelector('[data-step="fix"] .workflow-ring')`), "the running step fills its ring as its sessions end");
       assert.ok(await page.evaluate(`!!document.querySelector('.workflow-edge[data-animated] .workflow-edge-current')`), "the edge toward the running step flows");
-      const closed = await page.evaluate<number>(`document.querySelector('.workflow-block').getBoundingClientRect().height`);
+      // A run that goes on is stopped from its block, its first action.
+      assert.equal(await page.evaluate(`[...document.querySelectorAll('.workflow-block-actions button')][0]?.getAttribute('aria-label')`), "Stop");
+      await page.click('.workflow-block-actions [aria-label="Stop"]');
+      await page.until(`runFixture.state.stops.length === 1`, "the run asked to stop");
+      assert.equal(await page.evaluate(`runFixture.state.stops[0]`), "run-7f3c2a");
+      const closed =await page.evaluate<number>(`document.querySelector('.workflow-block').getBoundingClientRect().height`);
       await shot(page, `workflow-fanout-${theme}`);
 
       await page.click(".workflow-group-head");
@@ -230,6 +235,10 @@ for (const light of [false, true]) {
       await page.until(`[...document.querySelectorAll('button')].some(e => e.textContent.trim() === 'Copied')`, "the button says it was copied");
       await page.until(`runFixture.state.reads >= 2`, "a second read of the running run");
       assert.equal(await page.evaluate(`runFixture.state.gone`), 0);
+      // The run goes on: its tab stops it.
+      await page.clickText("button", "Stop");
+      await page.until(`runFixture.state.stops.length === 1`, "the run asked to stop from its tab");
+      assert.equal(await page.evaluate(`runFixture.state.stops[0]`), "run-7f3c2a");
       // The window narrows while the timeline is out of view: it follows the width all the same.
       await page.evaluate(`document.querySelector('.workflow-run-tab').scrollTop = 0`);
       await page.resize(900, 650);

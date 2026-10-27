@@ -72,8 +72,8 @@ the host's `HeadlessSessionDriver`). They are children of the script's session, 
 answers go back to the script, never to the parent: `TakeParentNotifications` gives nothing for a session created by
 that kind, on every path, because `CreatedBy` is durable. A child has at most the tools of its creator and at least
 its restrictions (review, permission mode, sandbox: a script turns a sandbox on, never off), as a session the model
-creates with `alta session create`. A run caps its sessions (8 at work, 50 in all, 3 levels deep) and its tokens
-(`budget_tokens`). A tier the script asks for that is not set up gives the parent's model, with a warning: scripts are
+creates with `alta session create`. A run has 8 sessions at work at once and 3 levels of sessions started by scripts, and
+no count of sessions in all: research over many topics needs them, and `budget_tokens` bounds their cost. A tier the script asks for that is not set up gives the parent's model, with a warning: scripts are
 examples copied into any profile. A child works in the project and the worktree of its parent, or with `worktree: true` in
 a new worktree that stays when it closes, with its branch, for the work to be merged.
 
@@ -137,11 +137,19 @@ goes to the background, but not toward the time limit, and its wake time is reco
 
 ## Limits
 
-The limits protect the process: memory, statements and CPU time per synchronous slice (awaited time does not count),
-recursion with the stack overflow guard, regular-expression time, array size, the wall time of a run, and the calls a
-run may make. Jint 4.17 needs three settings that are not optional: the stack overflow guard (deep recursion would
-end the process), no promise timeout (its 10 s default would fail any longer await; the run's token bounds the wall
-time), and Task interop for host promises (the public promise API cannot be settled from another thread).
+The limits protect the process, never the length of the work: memory, statements and CPU time per synchronous slice
+(awaited time does not count), recursion with the stack overflow guard, regular-expression time, array size, the calls
+in flight, the sessions at work and the runs at a time. A run has no wall time and no count of calls unless its script
+sets them (`timeout_ms`): research runs for hours and sleeps for days, an await costs no CPU, and a run the user or
+another session can stop needs no deadline. Jint 4.17 needs three settings that are not optional: the stack overflow
+guard (deep recursion would end the process), no promise timeout (its 10 s default would fail any longer await; the
+run's token bounds the wall time when the script sets one), and Task interop for host promises (the public promise API
+cannot be settled from another thread).
+
+A run is stopped by its model (`wait` with `terminate`), by the user (its card, its tab, the background tasks of its
+session), by any session that may abort its session (`alta workflow cancel`; a sandboxed one, only its own runs and those
+of the sessions it started), and with the tree of its session. Who stopped it is in its result, so that its session does
+not start it again blindly.
 
 A script that waits while no call is in flight and no JavaScript runs can never be resumed: a watchdog fails it as
 stalled. Calls still pending when the script returns are cancelled and listed in the result.

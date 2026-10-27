@@ -322,6 +322,25 @@ public sealed class CodeModeRunTests
     }
 
     [TestMethod]
+    public async Task ARun_HasNoLimitOfTimeOrOfCalls_UnlessItIsGivenOne()
+    {
+        // Research over many topics or several days: neither a wall time nor a count of calls cuts it (they were 1 hour and
+        // 5,000 calls); what is left protects the process, a slice at a time.
+        Assert.AreEqual(Timeout.InfiniteTimeSpan, CodeModeLimits.Default.Timeout);
+        Assert.AreEqual(int.MaxValue, CodeModeLimits.Default.MaxCalls);
+        Assert.IsGreaterThanOrEqualTo(16, CodeModeLimits.Default.MaxCallsInFlight, "sessions at work hold a slot each: the other calls keep room beside them");
+
+        var result = await RunAsync("""
+            let total = 0;
+            for (let i = 0; i < 6000; i++) total += (await tools.echo({ i })).i;
+            return total;
+            """);
+
+        Assert.IsNull(result.Error, result.Error?.Message);
+        Assert.AreEqual("17997000", result.ValueJson);
+    }
+
+    [TestMethod]
     public async Task CallsBeyondTheLimit_AreRefused()
     {
         var result = await RunAsync("""

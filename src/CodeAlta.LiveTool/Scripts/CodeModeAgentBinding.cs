@@ -62,7 +62,7 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
     /// <summary>Gets the declaration of <c>codemode.agent</c>.</summary>
     public static CodeModeFunction Function { get; } = new(Path)
     {
-        Description = "Starts a session of its own for a part of the work, sends it the prompt, and resolves with its final answer once it and the sessions it started ended; scripts call it as agent(prompt, options). It runs in parallel with the other calls (8 sessions at once, 50 per script); a session that fails throws an AgentError with its sessionId.",
+        Description = "Starts a session of its own for a part of the work, sends it the prompt, and resolves with its final answer once it and the sessions it started ended; scripts call it as agent(prompt, options). It runs in parallel with the other calls, 8 sessions at once (the others wait for one); a session that fails throws an AgentError with its sessionId.",
         InputSchemaJson = """
             {"type":"object","properties":{
               "prompt":{"type":"string","description":"What the session is asked: all it needs to know, it sees nothing else."},

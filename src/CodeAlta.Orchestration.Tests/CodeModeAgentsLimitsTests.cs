@@ -87,23 +87,20 @@ public sealed class CodeModeAgentsLimitsTests
     }
 
     [TestMethod]
-    public async Task ARun_StartsAtMost50Sessions_3LevelsDeep_8AtWorkAtOnce()
+    public async Task ARun_StartsAsManySessionsAsItsWorkNeeds_3LevelsDeep_8AtWorkAtOnce()
     {
         var (root, provider, host, driver, parent) = await CreateAsync();
         await using var scope = root;
         await using var closing = driver;
         var agents = (CodeModeAgents)host.CodeModeAgents;
 
-        // 50 sessions, then the 51st is refused with its reason.
-        for (var index = 0; index < CodeModeAgents.MaxPerRun; index++)
+        // Research over many topics: a run is not cut at a count of sessions (it was 50); its budget bounds what they cost.
+        for (var index = 0; index < 60; index++)
         {
             var opened = await agents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-many" }, CancellationToken.None).WaitAsync(Hang);
             Assert.AreEqual("opened", opened.Status, $"session {index + 1}: {opened.Failure}");
         }
 
-        var fiftyFirst = await agents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-many" }, CancellationToken.None).WaitAsync(Hang);
-        Assert.AreEqual("refused", fiftyFirst.Status);
-        StringAssert.Contains(fiftyFirst.Failure, "already started 50 sessions");
         await agents.ForgetRunAsync("run-many");
 
         // A script of a session three levels below the first is refused a fourth level.

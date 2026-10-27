@@ -147,7 +147,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var command = Leaf("cancel", "Stop a run, and the sessions it started.");
         command.Add("<run-id>", "Run id from `alta workflow list`.", value => id = value);
         command.Add(async (_, _) => await HandleWorkflowCancelAsync(context, id).ConfigureAwait(false));
-        AddHelpText(command, "A session cancels its own runs and those of the sessions it started. Its result still comes back to the session that ran it, as stopped.");
+        AddHelpText(command, "A session stops a run of any session it may abort (`alta session abort`): its own, those of the sessions it started, and those of the other sessions of its space; a sandboxed session, only its own and those of the sessions it created. The result still comes back to the session that ran it, as stopped, with who stopped it.");
         return command;
     }
 
@@ -286,12 +286,16 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (NormalizeOptionalText(id) is not { } runId) return UsageError(context, "usage.missingRun", "A run id is required.", "alta workflow cancel");
         if (runs.FindAny(runId) is not { } run) return WorkflowNotFound(context, runId);
 
-        // A session stops its own runs and those of the sessions below it; a caller that is no session (the user), any.
-        if (NormalizeOptionalText(context.Caller.SourceSessionId) is { } caller && !await IsAtOrBelowAsync(context, run.SessionId, caller).ConfigureAwait(false))
-            return PermissionDenied(context, "workflow.notOwnRun", $"Run '{runId}' belongs to a session that is neither this session nor one it started: it cannot cancel it.");
+        // A session stops a run as it may abort the session of the run (`alta session abort`): its own, those below it, and
+        // any other it reaches, in its space; a sandboxed session reaches only those it created. The user, any.
+        var caller = NormalizeOptionalText(context.Caller.SourceSessionId);
+        if (caller is not null && !await IsAtOrBelowAsync(context, run.SessionId, caller).ConfigureAwait(false)
+            && await ResolveSessionInfoAsync(context, run.SessionId).ConfigureAwait(false) is { ExitCode: not AltaExitCodes.Success } unreachable)
+            return unreachable.ExitCode;
 
         var wasRunning = run.Running;
-        run.Stop();
+        // Its session is told who stopped it, so that its agent does not start it again blindly.
+        run.Stop(caller is null ? "the user" : string.Equals(caller, run.SessionId, StringComparison.OrdinalIgnoreCase) ? "this session" : $"session {caller}");
         var record = WorkflowRecord(context, "alta.workflow.cancelled", run.Info(), run);
         record["wasRunning"] = wasRunning;
         AltaJsonlWriter.WriteRecord(context.Stdout, record);

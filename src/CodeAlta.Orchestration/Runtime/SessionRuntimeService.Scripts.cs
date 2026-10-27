@@ -19,6 +19,13 @@ public interface ISessionScriptRuns
     /// <returns>A task that completes when they ended.</returns>
     Task StopAsync(string sessionId);
 
+    /// <summary>Stops one script of a session that runs, saying who stops it; its result still comes back to the session.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="runId">The run.</param>
+    /// <param name="by">Who stops it, such as <c>the user</c>; null to say nothing.</param>
+    /// <returns>Whether a run of that session was running and is stopped.</returns>
+    bool StopRun(string sessionId, string runId, string? by);
+
     /// <summary>
     /// Gets the mode of Code Mode a session has now, on a provider and a model: <c>off</c>, <c>on</c> (it has <c>exec</c>)
     /// or <c>only</c> (<c>exec</c> takes over its tools).

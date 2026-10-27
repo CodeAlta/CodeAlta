@@ -3147,6 +3147,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
         // A background job is a task of the host, not of the provider: the user stops it whatever the session does.
         if (taskId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase)) return StopJobAsync(sessionId, taskId, cancellationToken);
+        // So is a script of Code Mode that went on in the background: the user stops it from the tasks of its session.
+        if (ScriptRuns?.StopRun(sessionId, taskId, "the user") == true) return Task.FromResult(true);
         return AdmitAsync(() => StopBackgroundTaskBodyAsync(sessionId, taskId, cancellationToken), cancellationToken);
     }
 

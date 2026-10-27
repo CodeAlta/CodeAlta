@@ -73,6 +73,8 @@ export function RunTab({ api, epoch, runId, visible, onActivate, onGone, write =
   const hub = useMemo(() => epoch ? createWorkflowsHub(api, epoch) : null, [api, epoch]);
   const [detail, setDetail] = useState<WorkflowRunDetailResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const running = detail?.run?.state === "running";
   const gone = useRef(onGone); gone.current = onGone;
@@ -118,6 +120,14 @@ export function RunTab({ api, epoch, runId, visible, onActivate, onGone, write =
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
+  async function stop() {
+    if (!hub) return;
+    setStopping(true);
+    setProblem(null);
+    const outcome = await hub.stop(runId);
+    setStopping(false);
+    if (!outcome.ok) setProblem(outcome.message || t("The run could not be stopped."));
+  }
   const select = (datum: ChartDatum) => { const bar = bars[datum.dataIndex]; if (bar?.sessionId && links) links.open(bar.sessionId); };
   return <div className="workflow-run-tab" data-state={runTone(info.state)} onPointerDown={onActivate}>
     <header className="workflow-run-head">
@@ -126,8 +136,10 @@ export function RunTab({ api, epoch, runId, visible, onActivate, onGone, write =
         <h2>{info.title ?? info.id}</h2>
         <p><code>{info.id}</code>{session && <> · <button type="button" className="workflow-run-session" onClick={() => links?.open(info.sessionId)}>{session}</button></>} · {facts}</p>
       </div>
+      {running && <Button variant="minimal" icon={<AppIcon name="stop" size={15} />} loading={stopping} onClick={() => void stop()}>{t("Stop")}</Button>}
       <Button variant="minimal" icon={<AppIcon name={copied ? "check" : "copy"} size={15} />} disabled={!detail.mermaid} onClick={() => void copy()}>{t(copied ? "Copied" : "Copy as Mermaid")}</Button>
     </header>
+    {problem && <p role="alert" className="script-run-problem">{problem}</p>}
     <RunTabGraph run={run} visible={visible} />
     {run.sessions.length > 0 && <section className="workflow-run-section">
       <h3>{t("Sessions")}<span className="count">{run.sessions.length}</span></h3>

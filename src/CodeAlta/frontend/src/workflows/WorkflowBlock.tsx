@@ -122,6 +122,14 @@ export const WorkflowBlock = memo(function WorkflowBlock({ run, title = null, ro
     setBusy(false);
     if (failure !== null) setProblem(failure || t("The session could not be asked."));
   }, [actions, run.runId, t]);
+  const stop = useCallback(async () => {
+    if (!actions) return;
+    setBusy(true);
+    setProblem(null);
+    const failure = await actions.stop(run.runId);
+    setBusy(false);
+    if (failure !== null) setProblem(failure || t("The run could not be stopped."));
+  }, [actions, run.runId, t]);
   const flowActions = useMemo<FlowActions>(() => ({ toggle, busy, rerunFrom: offers?.rerunFromStep ? key => void rerun({ from: key }) : null }),
     [toggle, busy, offers?.rerunFromStep, rerun]);
   useEffect(() => {
@@ -138,6 +146,8 @@ export const WorkflowBlock = memo(function WorkflowBlock({ run, title = null, ro
   const tokensLabel = t("{count} tokens", { count: totals.tokens.toLocaleString() });
   // The actions, as icons on a wide block and as the items of its `…` menu on a narrow one: the head stays one line.
   const items: readonly Readonly<{ icon: IconName; label: string; busy?: boolean; act: (origin: HTMLButtonElement) => void }>[] = [
+    // A run that goes on, sleeps or waits for the user is stopped from its card, with the sessions it started.
+    ...actions && live && run.runId ? [{ icon: "stop" as const, label: t("Stop"), busy, act: () => void stop() }] : [],
     ...offers?.resume ? [{ icon: "play" as const, label: t("Resume"), busy, act: () => void rerun({}) }] : [],
     ...offers?.rerun ? [{ icon: "repeat" as const, label: t("Rerun with recorded results"), busy, act: () => void rerun({ all: true }) }] : [],
     ...graph ? [{ icon: copied ? "check" as const : "copy" as const, label: t(copied ? "Copied" : "Copy as Mermaid"), act: () => void copy() }] : [],

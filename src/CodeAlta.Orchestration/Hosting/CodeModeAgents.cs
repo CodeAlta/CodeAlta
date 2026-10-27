@@ -15,19 +15,20 @@ namespace CodeAlta.Orchestration.Hosting;
 /// The sessions scripts start, through the headless driver of the host. A child is created by kind <c>workflow</c>, in the
 /// project of the script's session, as its child: it is in its tree (aborts, retention), takes the sandbox and the tools
 /// its creator gives the sessions it creates, and its answer goes to the script. A run may have
-/// <see cref="MaxAtWork"/> sessions at work and <see cref="MaxPerRun"/> in all; a script of a session a script started
-/// may start sessions too, <see cref="MaxDepth"/> levels deep. A session a script keeps (<c>session()</c>) is closed when
-/// the script closes it, or when its run ends.
+/// <see cref="MaxAtWork"/> sessions at work, and starts as many in all as its work needs (research over a hundred topics),
+/// its <c>budget_tokens</c> bounding what they cost; a script of a session a script started may start sessions too,
+/// <see cref="MaxDepth"/> levels deep. A session a script keeps (<c>session()</c>) is closed when the script closes it, or
+/// when its run ends.
 /// </summary>
 public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
 {
     /// <summary>The most sessions of one run at work at the same time; the others wait for one to end.</summary>
     public const int MaxAtWork = 8;
 
-    /// <summary>The most sessions one run starts.</summary>
-    public const int MaxPerRun = 50;
-
-    /// <summary>The most levels of sessions started by scripts of sessions started by scripts.</summary>
+    /// <summary>
+    /// The most levels of sessions started by scripts of sessions started by scripts: a script whose sessions run the same
+    /// script would otherwise multiply without end.
+    /// </summary>
     public const int MaxDepth = 3;
 
     private readonly CodeAltaHost _host;
@@ -156,8 +157,6 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
             return Refused($"A script of a session started by scripts {MaxDepth} levels deep starts no session.");
         if (request.BudgetTokens is { } budget && Interlocked.Read(ref state.SpentTokens) is var spent && spent >= budget)
             return Refused($"The budget of this script is spent: its sessions used {spent:N0} tokens of {budget:N0}.");
-        if (Interlocked.Increment(ref state.Started) > MaxPerRun)
-            return Refused($"This script already started {MaxPerRun} sessions, the most for one run.");
         if (request.Schema is { } asked && StructuredAnswer.Inspect(asked) is { Count: > 0 } problems) return Refused(SchemaRefusal(problems));
         if (request.Sandbox is { } sandbox && await RefuseSandboxAsync(parentSessionId, sandbox, cancellationToken).ConfigureAwait(false) is { } sandboxRefusal)
             return Refused(sandboxRefusal);
@@ -363,7 +362,6 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         public readonly SemaphoreSlim AtWork = new(MaxAtWork, MaxAtWork);
         public readonly ConcurrentDictionary<string, (KeptSession Session, string? StepId)> Kept = new(StringComparer.OrdinalIgnoreCase);
         public readonly ConcurrentDictionary<ModelTier, byte> WarnedTiers = new();
-        public int Started;
         public long SpentTokens;
     }
 }

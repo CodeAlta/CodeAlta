@@ -46,6 +46,8 @@ export const workflowMessages = {
     "小写字母、数字和连字符，以字母开头。"],
   "The session could not be asked.": ["No se pudo pedir a la sesión.", "La session n’a pas pu être sollicitée.", "Die Sitzung konnte nicht gefragt werden.",
     "セッションに依頼できませんでした。", "无法向会话发出请求。"],
+  "The run could not be stopped.": ["No se pudo detener la ejecución.", "L’exécution n’a pas pu être arrêtée.", "Der Lauf konnte nicht angehalten werden.",
+    "実行を停止できませんでした。", "无法停止运行。"],
   "Other steps": ["Otros pasos", "Autres étapes", "Weitere Schritte", "その他のステップ", "其他步骤"],
   "Waiting": ["En espera", "En attente", "Wartet", "待機中", "等待中"],
   "Open run": ["Abrir ejecución", "Ouvrir l’exécution", "Ausführung öffnen", "実行を開く", "打开运行"],

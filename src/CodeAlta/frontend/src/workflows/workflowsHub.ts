@@ -1,7 +1,7 @@
 // The page's link to the scripts of the library and to their runs, for the host of one epoch.
 import type { workflows, WorkflowRunDetailResponse, WorkflowRunItem, WorkflowScriptItem } from "#neoastra";
 
-export type WorkflowsApi = Pick<typeof workflows, "scripts" | "runs" | "run" | "saveAsScript" | "resume" | "runDetail">;
+export type WorkflowsApi = Pick<typeof workflows, "scripts" | "runs" | "run" | "saveAsScript" | "resume" | "stop" | "runDetail">;
 
 /** What the host said of a list; `available` is false in a window without a host of its own. A request that failed gives null. */
 export type WorkflowsList<T> = Readonly<{ available: boolean; items: readonly T[] }>;
@@ -56,6 +56,13 @@ export function createWorkflowsHub(api: WorkflowsApi, epoch: string) {
     async resume(sessionId: string, runId: string, how: ScriptRerun): Promise<WorkflowsOutcome> {
       try {
         const reply = await api.resume({ expectedEpoch: epoch, sessionId, runId, from: how.from ?? null, all: how.all ?? false }, { timeoutMilliseconds: 30_000 });
+        return { ok: reply.status === "ok", message: reply.message ?? null };
+      } catch { return { ok: false }; }
+    },
+    /** Stops a run that runs, with the sessions it started. */
+    async stop(runId: string): Promise<WorkflowsOutcome> {
+      try {
+        const reply = await api.stop({ expectedEpoch: epoch, runId }, { timeoutMilliseconds: 15_000 });
         return { ok: reply.status === "ok", message: reply.message ?? null };
       } catch { return { ok: false }; }
     },

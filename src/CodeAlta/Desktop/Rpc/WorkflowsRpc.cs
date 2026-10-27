@@ -162,6 +162,21 @@ internal sealed class WorkflowsService
         return failure is null ? new("ok", null) : new("refused", failure);
     }
 
+    /// <summary>
+    /// Stops a run that runs (<b>Stop</b> on its card or in its tab), with the sessions it started. Its result still comes
+    /// back to its session, which is told that the user stopped it.
+    /// </summary>
+    [NeoRpcMethod("stop")]
+    public WorkflowMutationResponse Stop(WorkflowStopRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null);
+        if (!RunId(request.RunId)) return new("invalid_request", null);
+        if (_runs!.FindAny(request.RunId) is not { Running: true } run) return new("refused", "The run no longer runs.");
+        run.Stop("the user");
+        return new("ok", null);
+    }
+
     private string? Refuse(string? expectedEpoch)
         => _scripts is null ? "unavailable" : string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
 
@@ -263,6 +278,9 @@ internal sealed record WorkflowSaveAsScriptRequest(string? ExpectedEpoch, string
 /// <param name="From">The step from which it runs again, such as <c>merge#1</c>; null to resume, or with <paramref name="All"/>.</param>
 /// <param name="All">Whether every recorded step gives its result again (a rerun with recorded results).</param>
 internal sealed record WorkflowResumeRequest(string? ExpectedEpoch, string SessionId, string RunId, string? From, bool All);
+
+/// <summary>Stops a run that runs.</summary>
+internal sealed record WorkflowStopRequest(string? ExpectedEpoch, string RunId);
 
 /// <param name="Message">Why the request was refused.</param>
 internal sealed record WorkflowMutationResponse(string Status, string? Message);

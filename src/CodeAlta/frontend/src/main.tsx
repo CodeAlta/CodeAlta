@@ -6210,6 +6210,10 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
       const outcome = await createWorkflowsHub(workflowsApi, cliEpoch).resume(session.id, runId, how);
       return outcome.ok ? null : outcome.message ?? "";
     },
+    stop: async (runId: string) => {
+      const outcome = await createWorkflowsHub(workflowsApi, cliEpoch).stop(runId);
+      return outcome.ok ? null : outcome.message ?? "";
+    },
   } : null, [cliEpoch, session.id]);
   return <MarkdownLinkScopeContext.Provider value={linkScope}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
