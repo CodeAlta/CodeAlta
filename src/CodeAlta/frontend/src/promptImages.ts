@@ -189,10 +189,11 @@ export class AttachmentError extends Error {
 /**
  * Reads a file the user attached (chosen, dropped or pasted): an image as a PNG, any other file as it is.
  * @param imageTitle The title of a pasted image (the clipboard names every image alike); null keeps the name of the file.
+ * @param maxSide The longest side of an image, which is scaled down to it; the desktop keeps every image as it is.
  */
-export async function readAttachedFile(file: File, imageTitle: string | null): Promise<SessionPromptImage> {
+export async function readAttachedFile(file: File, imageTitle: string | null, maxSide = Infinity): Promise<SessionPromptImage> {
   if (isImageFile(file)) {
-    try { return await readPastedImage(file, imageTitle ?? fileTitle(file.name || "image")); }
+    try { return await readPastedImage(file, imageTitle ?? fileTitle(file.name || "image"), maxSide); }
     catch { /* An image the browser cannot decode is attached as a file. */ }
   }
   if (file.size === 0 || file.size > attachmentLimits.fileBytes) throw new AttachmentError(file.name);
@@ -204,19 +205,29 @@ export async function readAttachedFile(file: File, imageTitle: string | null): P
   return Object.freeze({ title: fileTitle(file.name), mediaType, base64: toBase64(bytes) });
 }
 
+/** The size of an image whose longest side is at most `maxSide`, its proportions kept; an image already within it keeps its size. */
+export function scaledSize(width: number, height: number, maxSide: number): { width: number; height: number } {
+  const longest = Math.max(width, height);
+  if (!(longest > maxSide)) return { width, height };
+  const scale = maxSide / longest;
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+}
+
 // Only called for files synchronously obtained from the originating user paste event.
 // No navigator.clipboard, filesystem paths, URL fetching, HTML or blob URLs. Decode first:
 // clipboard PNGs may contain palettes, grayscale, interlacing or ordinary metadata that
 // the deliberately narrow host wire format does not accept. Canvas strips those differences.
-export async function readPastedImage(file: File, title: string): Promise<SessionPromptImage> {
+export async function readPastedImage(file: File, title: string, maxSide = Infinity): Promise<SessionPromptImage> {
   if (!["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/bmp", "image/x-ms-bmp"].includes(file.type)) throw new Error(imagePasteFailure);
   const bitmap = await createImageBitmap(file);
   try {
     const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width; canvas.height = bitmap.height;
+    const size = scaledSize(bitmap.width, bitmap.height, maxSide);
+    canvas.width = size.width; canvas.height = size.height;
     const context = canvas.getContext("2d");
     if (!context) throw new Error(imagePasteFailure);
-    context.drawImage(bitmap, 0, 0);
+    if (size.width === bitmap.width && size.height === bitmap.height) context.drawImage(bitmap, 0, 0);
+    else { context.imageSmoothingQuality = "high"; context.drawImage(bitmap, 0, 0, size.width, size.height); }
     const dataUrl = canvas.toDataURL("image/png");
     const prefix = "data:image/png;base64,";
     if (!dataUrl.startsWith(prefix)) throw new Error(imagePasteFailure);
@@ -224,7 +235,7 @@ export async function readPastedImage(file: File, title: string): Promise<Sessio
     const all = Uint8Array.from(atob(written), value => value.charCodeAt(0));
     const bytes = stripPngMetadata(all);
     const dimensions = pngHeader(bytes);
-    if (dimensions.width !== bitmap.width || dimensions.height !== bitmap.height) throw new Error(imagePasteFailure);
+    if (dimensions.width !== size.width || dimensions.height !== size.height) throw new Error(imagePasteFailure);
     return Object.freeze({ title, mediaType: "image/png", base64: bytes === all ? written : toBase64(bytes) });
   } finally { bitmap.close(); }
 }

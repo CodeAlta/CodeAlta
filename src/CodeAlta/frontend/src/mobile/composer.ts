@@ -16,16 +16,20 @@ export type ComposerView = Readonly<{
 /**
  * The composer, after the desktop's. Idle: Send. While a turn runs: only Stop until new text is typed, then Queue
  * (after this turn), and Steer (into it) when the server says the session can be steered. Steer is the primary action
- * unless the phone was set to queue first.
+ * unless the phone was set to queue first. Files held go with Send or Queue, never into a turn: alone they can be queued,
+ * and a steer of the text leaves them held for the next Send or Queue.
  */
-export function composerView(busy: boolean, typed: boolean, canSteer: boolean, queueFirst = false): ComposerView {
+export function composerView(busy: boolean, typed: boolean, canSteer: boolean, queueFirst = false, files = false): ComposerView {
   if (!busy) return { primary: "send", secondary: null, stop: false, hint: "", submit: "send" };
   const submit: PromptMode = canSteer && !queueFirst ? "steer" : "queue";
+  if (!typed && files) return { primary: null, secondary: "queue", stop: true, hint: "Queue: the files go after this turn", submit: "queue" };
   if (!typed) return { primary: null, secondary: null, stop: true, hint: canSteer ? "Working… type to steer or queue" : "Working… type to queue", submit };
-  if (!canSteer) return { primary: null, secondary: "queue", stop: true, hint: "Queue: runs after this turn", submit };
+  const queue = files ? "Queue: runs after this turn, with the files" : "Queue: runs after this turn";
+  if (!canSteer) return { primary: null, secondary: "queue", stop: true, hint: queue, submit };
+  const steer = files ? "Steer: the text into this turn, the files wait" : "Steer: into this turn";
   return queueFirst
-    ? { primary: "queue", secondary: "steer", stop: true, hint: "Queue: runs after this turn · Steer: into this turn", submit }
-    : { primary: "steer", secondary: "queue", stop: true, hint: "Steer: into this turn · Queue: runs after this turn", submit };
+    ? { primary: "queue", secondary: "steer", stop: true, hint: `${queue} · ${steer}`, submit }
+    : { primary: "steer", secondary: "queue", stop: true, hint: `${steer} · ${queue}`, submit };
 }
 
 /**

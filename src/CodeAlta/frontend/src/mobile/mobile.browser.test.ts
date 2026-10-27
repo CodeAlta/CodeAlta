@@ -417,6 +417,56 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await waitFor(`document.querySelector("#attach-strip .attach-chip")?.textContent === "again.txt"`, "the file that will fail");
     await evaluate("document.getElementById('composer').requestSubmit()");
     await waitFor(`document.getElementById("detail-note").textContent.includes("Not sent") && document.querySelector("#attach-strip .attach-chip")?.textContent === "again.txt"`, "a failed send gives the file back");
+    const removeButton = await evaluate<{ width: number; height: number }>(`(() => { const r = document.querySelector("#attach-strip .attach-chip button").getBoundingClientRect(); return { width: r.width, height: r.height }; })()`);
+    assert.ok(removeButton.width >= 44 && removeButton.height >= 44, `the remove button of a chip is a touch target of 44 px (${JSON.stringify(removeButton)})`);
+
+    // While a turn runs, files go with Queue, never into the turn: alone they can be queued, and a steer sends the text and leaves them.
+    server.push({ id: "s1", projectId: "p1", live: "running", kind: "activity", line: null, at: new Date().toISOString(), activity: null, canSteer: true });
+    await waitFor(`${shown("#queue")} && !(${shown("#send")})`, "Queue alone, for the files");
+    assert.equal(await evaluate("document.getElementById('prompt').placeholder"), "Queue: the files go after this turn");
+    await typeInto("#prompt", "Look at the log too");
+    assert.equal(await evaluate("document.querySelector('#send span').textContent"), "Steer");
+    // The composer fits the phone with every button of a turn: nothing goes past the screen.
+    const composerRow = await evaluate<{ overflow: boolean; outside: string[] }>(`(() => {
+      const composer = document.getElementById("composer");
+      const outside = [...composer.querySelectorAll("button, textarea")].filter(e => e.getClientRects().length && (e.getBoundingClientRect().right > window.innerWidth + 0.5 || e.getBoundingClientRect().left < -0.5)).map(e => e.id || e.className);
+      return { overflow: composer.scrollWidth > composer.clientWidth || document.querySelector(".composer-actions").scrollWidth > document.querySelector(".composer-actions").clientWidth, outside };
+    })()`);
+    assert.deepEqual(composerRow, { overflow: false, outside: [] }, "the composer row fits 390 px");
+    await evaluate("document.getElementById('composer').requestSubmit()");
+    await waitUntil(() => count("POST", "/api/sessions/s1/prompt") === prompts + 3, "the text steered");
+    assert.deepEqual(server.requests.filter(r => r.path === "/api/sessions/s1/prompt").at(-1)?.body, { text: "Look at the log too", mode: "steer" });
+    assert.equal(await evaluate(`document.querySelector("#attach-strip .attach-chip")?.textContent`), "again.txt", "the file waits");
+    await click("#queue");
+    await waitUntil(() => count("POST", "/api/sessions/s1/prompt") === prompts + 4, "the file queued");
+    const queuedFile = server.requests.filter(r => r.path === "/api/sessions/s1/prompt").at(-1)?.body as { text: string; mode: string; attachments?: { title: string }[] };
+    assert.deepEqual([queuedFile.text, queuedFile.mode, queuedFile.attachments?.map(file => file.title)], ["", "queue", ["again.txt"]]);
+    await waitFor(`[...document.querySelectorAll("#timeline > li.pending")].some(e => e.querySelector(".msg-label").textContent === "You · queued" && e.querySelector(".attach-chip")?.textContent === "again.txt")`, "the queued file in the timeline");
+    server.push({ id: "s1", projectId: "p1", live: "idle", kind: "assistant", line: "Done.", at: new Date().toISOString(), activity: null, canSteer: false });
+    await waitFor(`${shown("#send")} && document.getElementById("attach-strip").hidden`, "idle again, no file held");
+
+    // A camera photo is scaled down to 2048 px on its longest side, a PNG the host reads, before it is held.
+    await evaluate(`(async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 4032; canvas.height = 3024;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#3a7"; context.fillRect(0, 0, 4032, 3024);
+      context.fillStyle = "#fff"; context.fillRect(400, 300, 1600, 1200);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.9));
+      const input = document.getElementById("attach-input");
+      const data = new DataTransfer();
+      data.items.add(new File([blob], "IMG_0001.jpg", { type: "image/jpeg" }));
+      input.files = data.files;
+      input.dispatchEvent(new Event("change"));
+    })()`);
+    await waitFor(`document.querySelector("#attach-strip .attach-chip")?.textContent === "IMG_0001.jpg"`, "the photo held", 20_000);
+    await evaluate("document.getElementById('composer').requestSubmit()");
+    await waitUntil(() => count("POST", "/api/sessions/s1/prompt") === prompts + 5, "the photo sent");
+    const photo = (server.requests.filter(r => r.path === "/api/sessions/s1/prompt").at(-1)?.body as { attachments: { title: string; mediaType: string; base64: string }[] }).attachments[0];
+    const png = Buffer.from(photo.base64, "base64");
+    assert.deepEqual([photo.mediaType, png.subarray(1, 4).toString("ascii"), png.readUInt32BE(16), png.readUInt32BE(20), png[24], png[25] === 2 || png[25] === 6, png[28]], ["image/png", "PNG", 2048, 1536, 8, true, 0],
+      "an 8-bit RGB or RGBA PNG, not interlaced, of 2048 × 1536");
+    assert.ok(png.length < 20 * 1024 * 1024, `within the size of a file (${png.length} bytes)`);
 
     // The page fits the phone: nothing wider than the screen.
     for (const hash of ["#/", "#/session/s1", "#/new"]) {

@@ -67,8 +67,14 @@ export type SessionPage = Readonly<{
   error: string | null;
 }>;
 
-/** An event of a session's timeline (`GET /api/sessions/<id>/events`). */
-export type TimelineEvent = Readonly<{ seq: number; at: string | null; kind: string; text: string | null; activityId: string | null; attachments?: readonly string[] | null }>;
+/**
+ * A file of a user message: its title, its type and the id of its saved copy, a name without a folder (never a path of the
+ * computer), by which a later page can ask for an image.
+ */
+export type EventAttachment = Readonly<{ title: string; mediaType: string; id: string }>;
+
+/** An event of a session's timeline (`GET /api/sessions/<id>/events`); a user message names its files in `attachments`. */
+export type TimelineEvent = Readonly<{ seq: number; at: string | null; kind: string; text: string | null; activityId: string | null; attachments?: readonly EventAttachment[] | null }>;
 
 /** The events of a session after a sequence number. */
 export type EventPage = Readonly<{ since: number; events: readonly TimelineEvent[]; error: string | null }>;

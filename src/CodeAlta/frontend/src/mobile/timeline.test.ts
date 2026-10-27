@@ -97,14 +97,16 @@ test("drawing the timeline again keeps the blocks that did not change, updates t
   assert.deepEqual(planTimeline(drawn, []).removed, first.map(b => b.key));
 });
 
-test("a user message keeps its words and the file names the server sent", () => {
+test("a user message keeps its words and the files the server named: their titles, types and ids", () => {
   seq = 0;
-  const sent = { ...event("user.message", "Read these"), attachments: ["photo.png", "notes.txt"] };
+  const files = [{ title: "photo.png", mediaType: "image/png", id: "20261024-01-photo-1a2b.png" }, { title: "notes.txt", mediaType: "text/plain", id: "20261024-02-notes-1a2b.txt" }];
+  const sent = { ...event("user.message", "Read these"), attachments: [...files, { title: " ", mediaType: "text/plain", id: "x" }] };
   const [message] = foldEvents([sent]);
   assert.equal(message.kind, "message");
   if (message.kind !== "message") return;
   assert.equal(message.text, "Read these");
-  assert.deepEqual(message.attachments, ["photo.png", "notes.txt"]);
-  const prompt: PendingPrompt = { key: "p", text: "Read these", mode: "send", sentAt: 0, after: 0, attachments: ["photo.png", "notes.txt"] };
+  assert.deepEqual(message.attachments, files);
+  assert.equal(foldEvents([{ ...event("user.message", ""), attachments: files }]).length, 1, "Files alone are a message.");
+  const prompt: PendingPrompt = { key: "p", text: "Read these", mode: "send", sentAt: 0, after: 0, attachments: files.map(({ title, mediaType }) => ({ title, mediaType })) };
   assert.deepEqual(stillPending([prompt], [sent], true, pendingGrace).map(item => item.key), []);
 });
