@@ -174,6 +174,25 @@ for (const light of [false, true]) {
   });
 }
 
+test("a background task goes to its place in the timeline: the block of its run, the tile of its call, the folded activity", { skip: !edge, timeout: 240_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`runFixture.renderTimeline(false)`);
+    await drawn(page, 3);
+    assert.equal(await page.evaluate(`runFixture.reveal({ id: "run-5b81e0", kind: "workflow", toolCallId: "call-1" })`), true);
+    await page.until(`document.activeElement?.matches('.workflow-block[data-run-id="run-5b81e0"]')`, "the block of the run focused");
+    // A task of another kind goes to its call: folded, the activity that holds it is opened on it (the fixture keeps it folded).
+    await page.evaluate(`document.activeElement.blur()`);
+    assert.equal(await page.evaluate(`runFixture.reveal({ id: "task-1", kind: "agent", toolCallId: "call-1" })`), true);
+    await page.until(`document.activeElement?.classList.contains('timeline-activity-line')`, "the line of the folded activity");
+    await page.evaluate(`runFixture.renderTimeline(true)`);
+    await drawn(page, 3);
+    assert.equal(await page.evaluate(`runFixture.reveal({ id: "task-1", kind: "agent", toolCallId: "call-1" })`), true);
+    await page.until(`!!document.activeElement?.closest('.timeline-message[data-tool-call="call-1"]')`, "the tile of the call");
+    // A call that the timeline does not hold is not found: the composer opens the run in its tab instead.
+    assert.equal(await page.evaluate(`runFixture.reveal({ id: "run-000000", kind: "workflow", toolCallId: "call-9" })`), false);
+  }, options);
+});
+
 test("among 30 runs, a graph is drawn only near the view, in a place of its size", { skip: !edge, timeout: 240_000 }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`runFixture.renderMany(30)`);

@@ -71,6 +71,8 @@ import { AttachmentError, composerImageKey, attachmentBytes, attachmentLimits, i
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import { sendDiagnostics } from "./sendDiagnostics";
+import { revealBackgroundTask } from "./timelineReveal";
+import { OpenRunContext } from "./workflows/openRun";
 
 // Sent prompts of this window, for Alt+Up / Alt+Down in the prompt editor.
 const promptHistory = createPromptHistory();
@@ -529,6 +531,13 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     // The answer is not shown: the task leaves the list when its provider stopped it.
     await sessions.stopBackgroundTask({ expectedEpoch: epoch, sessionId, taskId }, { timeoutMilliseconds: 15_000 });
   }, [capability, epoch, sessionId]);
+  // A task of the list goes to its place in the timeline of this session; a run whose block is not there (older than the
+  // history read) opens in its tab.
+  const openRun = useContext(OpenRunContext);
+  const revealBackground = useCallback((task: BackgroundTask, origin: HTMLElement) => {
+    if (revealBackgroundTask(origin.closest(".session-workspace") ?? document, task)) return;
+    if (task.kind === "workflow") openRun?.({ runId: task.id, title: task.description });
+  }, [openRun]);
   const runActivity = useRef(onRunActivity); runActivity.current = onRunActivity;
   useEffect(() => {
     if (!watching) return;
@@ -1397,7 +1406,7 @@ ${value}` : value);
       {/* A prompt that waits for a reload offers it: the window would otherwise have no way out. */}
       {invalidEpoch && !composerBusy && !compacting && <Button variant="minimal" size="small" intent="danger" className="composer-reload"
         icon={<AppIcon name="refresh" size={13} />} onClick={() => window.location.reload()}>{t("Reload")}</Button>}
-      <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask}
+      <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask} onReveal={revealBackground}
         renderOutput={props => <BackgroundJobDialog key={props.task.id} {...props} outputs={toolOutputs} readJob={readBackgroundJob} />} />
       {providerState.errors > 0 && <Button variant="minimal" size="small" className="composer-provider-alert" icon={<AppIcon name="warning" size={13} />}
         onClick={() => onOpenCatalog?.("providers")} title={t("Providers")}>{t(providerState.errors === 1 ? "{count} provider error" : "{count} provider errors", { count: providerState.errors })}</Button>}

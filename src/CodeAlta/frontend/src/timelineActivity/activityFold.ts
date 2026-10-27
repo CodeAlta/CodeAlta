@@ -206,6 +206,16 @@ export function activityViews(groups: readonly TimelineGroup[]): ActivityView[] 
   return views;
 }
 
+/** The tool calls of an activity, by the identity a background task names its call with, separated by spaces. */
+export function activityCalls(groups: readonly TimelineGroup[]): string {
+  const calls: string[] = [];
+  for (const group of groups) for (const row of group.rows) {
+    const id = row.source === "history" ? row.item.toolCall?.activityId : undefined;
+    if (id && !/\s/u.test(id)) calls.push(id);
+  }
+  return calls.join(" ");
+}
+
 /** A run of a script of an activity that has its workflow block: the call that runs it, and the run. */
 export type ActivityWorkflow = Readonly<{ rowKey: string; run: ScriptRun; title: string | null }>;
 

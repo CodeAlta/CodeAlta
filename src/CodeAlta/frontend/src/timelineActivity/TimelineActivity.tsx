@@ -12,7 +12,7 @@ import type { TimelineEntryType } from "../timelineEmphasis/timelineEmphasis";
 import type { TimelineGroup } from "../toolGroups";
 import { McpAppSlot } from "../mcpApps/McpAppView";
 import { WorkflowBlock } from "../workflows/WorkflowBlock";
-import { activityDuration, activitySummary, activityViews, activityWorkflows, type ActivityStep, type ActivityStepState } from "./activityFold";
+import { activityCalls, activityDuration, activitySummary, activityViews, activityWorkflows, type ActivityStep, type ActivityStepState } from "./activityFold";
 
 /** What every group of the timeline is rendered with, whatever block holds it. */
 export type TimelineGroupContext = Omit<TimelineGroupProps, "group" | "entryType">;
@@ -109,6 +109,7 @@ export const TimelineActivity = memo(function TimelineActivity(props: TimelineAc
     [expanded, images, groups, context.readImages]);
   const views = useMemo(() => activityViews(groups), [groups]);
   const workflows = useMemo(() => activityWorkflows(groups), [groups]);
+  const calls = useMemo(() => activityCalls(groups), [groups]);
   const { canInspect, onOpenTool } = context;
   const openCall = useCallback((rowKey: string, origin: HTMLButtonElement) => { if (canInspect()) onOpenTool(rowKey, origin); }, [canInspect, onOpenTool]);
   const headline = summary.headline ??(summary.tools + summary.jobs > 0 ? t(live ? "Calling tools…" : "Called tools") : t(live ? "Working…" : "Worked"));
@@ -116,7 +117,8 @@ export const TimelineActivity = memo(function TimelineActivity(props: TimelineAc
     if (context.canInspect() && step.item.toolCall) context.onOpenTool(step.rowKey, origin);
     else onToggle(groups, true);
   };
-  return <div className="timeline-activity" role="group" data-state={state} data-expanded={expanded} aria-label={t("Activity")}>
+  // Its calls, by which a task in the background goes to the place of the call that started it, even folded.
+  return <div className="timeline-activity" role="group" data-state={state} data-expanded={expanded} data-tool-calls={calls || undefined} aria-label={t("Activity")}>
     <button type="button" className="timeline-activity-line" aria-expanded={expanded} aria-controls={expanded ? bodyId : undefined}
       onClick={() => onToggle(groups, !expanded)}>
       <AppIcon name="chevronRight" size={14} className="timeline-activity-chevron" />

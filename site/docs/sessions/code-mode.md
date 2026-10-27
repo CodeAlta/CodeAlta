@@ -94,6 +94,8 @@ Click the card of a script without steps or sessions, or **Show the call** on a 
 
 `exec` waits 30 seconds for a script, or what its first line says (`yield_ms`). A script still running then goes on in the background: the agent can call `wait` for it, or end its turn. When it ends, its result comes back to the session as a **Workflow** message.
 
+While it runs, it is listed above the prompt with what the session runs in the background: click it there to go to its card in the timeline.
+
 Another session, or you from a terminal, reads a run with `alta workflow list`, `alta workflow show <run-id>` (its steps and the sessions it started) and `alta workflow result <run-id>`, and stops it with `alta workflow cancel <run-id>`. CodeAlta Desktop and CodeAlta TUI keep the runs that ended, the 100 newest for 14 days at most, so these commands, the **Workflows** tab and the tab of a run still find them after CodeAlta starts again.
 
 The source of each script is kept in the scratchpad of the session, and its result says where. An agent fixes a long script by editing that file and running it again with `workflow({ scriptPath })`.

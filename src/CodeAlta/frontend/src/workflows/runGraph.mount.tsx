@@ -12,6 +12,7 @@ import { scriptRunOf } from "../timeline";
 import { groupEntryTypes } from "../timelineEmphasis/timelineEmphasis";
 import { foldTimeline } from "../timelineActivity/activityFold";
 import { TimelineActivity } from "../timelineActivity/TimelineActivity";
+import { revealBackgroundTask } from "../timelineReveal";
 import { groupTimelineTools } from "../toolGroups";
 import { OpenRunContext } from "./openRun";
 import { RunTab } from "./RunTab";
@@ -136,6 +137,10 @@ const fixture = {
   renderTab() {
     flushSync(() => root.render(wrap(createElement(RunTab, { api, epoch: "epoch", runId: "run-7f3c2a", visible: true, onActivate: () => { },
       onGone: () => { state.gone++; }, write: async (text: string) => { state.copied.push(text); } }), null)));
+  },
+  /** Goes to the place of a background task in what is drawn, as the list of the composer does. */
+  reveal(task: Readonly<{ id: string; kind: string; toolCallId: string | null }>) {
+    return revealBackgroundTask(document, { description: null, startedAt: null, state: "running", job: false, exitCode: null, endedAt: null, ...task });
   },
   clear() { flushSync(() => root.render(null)); },
 };

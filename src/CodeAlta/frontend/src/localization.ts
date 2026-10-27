@@ -640,6 +640,7 @@ export const messages = dictionary({
   "Stopped": ["Detenido", "Arrêté", "Angehalten", "停止", "已停止"],
   "Background job": ["Tarea en segundo plano", "Tâche en arrière-plan", "Hintergrundjob", "バックグラウンドジョブ", "后台作业"],
   "Show the output of this job": ["Mostrar la salida de esta tarea", "Afficher la sortie de cette tâche", "Ausgabe dieses Jobs anzeigen", "このジョブの出力を表示", "显示此作业的输出"],
+  "Go to it in the timeline": ["Ir a ella en la línea de tiempo", "Y aller dans la chronologie", "In der Zeitleiste anzeigen", "タイムラインで表示", "在时间线中转到它"],
   "Agent": ["Agente", "Agent", "Agent", "エージェント", "代理"],
   "Workflow": ["Flujo de trabajo", "Workflow", "Workflow", "ワークフロー", "工作流"],
   "Prompt ready": ["Prompt listo", "Prompt prêt", "Prompt bereit", "入力できます", "提示词就绪"],

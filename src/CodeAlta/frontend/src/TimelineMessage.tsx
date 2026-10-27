@@ -34,6 +34,7 @@ import { ScriptRunView } from "./scriptCard/ScriptRunView";
 import { hasWorkflowBlock } from "./workflows/runFlow";
 import { ScriptResultFacts } from "./workflows/ScriptResultFacts";
 import { useWholeMessage, WholeMessageNote } from "./WholeMessageNote";
+import { flashTimelineTarget } from "./timelineReveal";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -227,12 +228,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
     if (!current() || !origin.isConnected || origin.closest('[inert], [hidden]')
       || modalDialogOpen()) return;
     const block = workflowBlock ? origin.closest(".timeline-activity")?.querySelector<HTMLElement>(`[data-workflow-row="${CSS.escape(rowKey!)}"]`) : null;
-    if (block) {
-      block.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      block.focus({ preventScroll: true });
-      block.animate?.([{ boxShadow: "0 0 0 2px var(--accent)" }, { boxShadow: "0 0 0 2px transparent" }], { duration: 900, easing: "ease-out" });
-      return;
-    }
+    if (block) { flashTimelineTarget(block); return; }
     if (callWindow) onOpenTool!(rowKey!, origin);
     else setDetails({ item, origin, current: canInspect });
   }
@@ -250,7 +246,9 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       if (clickableTile && hasDetails && toolTrigger.current && !event.defaultPrevented
         && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
     }}
-    data-tool-phase={job?.phase ?? item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-not-sent={item.notSent ? "true" : undefined} data-job-result={job ? job.succeeded ? "succeeded" : "ended" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
+    data-tool-phase={job?.phase ?? item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-not-sent={item.notSent ? "true" : undefined} data-job-result={job ? job.succeeded ? "succeeded" : "ended" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}
+    // The call, by which a task in the background goes to the tile of the call that started it.
+    data-tool-call={item.category === "tool" ? item.toolCall?.activityId : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">

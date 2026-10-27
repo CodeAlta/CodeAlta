@@ -166,7 +166,7 @@ export const WorkflowBlock = memo(function WorkflowBlock({ run, title = null, ro
     </PopoverNext>
   </span>;
 
-  return <section className="workflow-block" data-phase={phase} data-workflow-row={rowKey} tabIndex={-1} aria-label={name}>
+  return <section className="workflow-block" data-phase={phase} data-workflow-row={rowKey} data-run-id={run.runId || undefined} tabIndex={-1} aria-label={name}>
     <header className="workflow-block-head">
       <span className="workflow-block-emblem" aria-hidden="true"><AppIcon name="workflow" size={15} /></span>
       <span className="workflow-block-title">
