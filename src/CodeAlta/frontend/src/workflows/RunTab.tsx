@@ -8,16 +8,51 @@ import { SessionLinksContext } from "../SessionReference";
 import { useShellLanguage } from "../shellLanguage";
 import { scriptRunOf } from "../timeline";
 import { formatDuration } from "../toolCall";
-import { graphStateLabel, RunGraphView } from "./RunGraphView";
-import { graphState, runGraph, timelineBars, timelineOption, timelineStates, type GraphState } from "./runGraph";
+import { graphStateLabel } from "./flowActions";
+import { graphState, timelineBars, timelineOption, timelineStates, type GraphState } from "./runGraph";
+import { RunTabGraph } from "./WorkflowBlock";
 import { runDuration, runStateLabel, runTone } from "./workflows";
 import { createWorkflowsHub, type WorkflowsApi } from "./workflowsHub";
+
+// The variables of the page each state of the graph is drawn with.
+const stateVariables: Readonly<Partial<Record<GraphState, string>>> = { completed: "--green", running: "--accent", waiting: "--yellow", failed: "--red",
+  interrupted: "--yellow", cancelled: "--muted", pending: "--muted" };
+
+/**
+ * The colors of the states as the graph draws them, as plain colors the chart takes, read again when the theme or the color
+ * scheme of the page changes.
+ */
+function useStateColors(): Readonly<Partial<Record<GraphState, string>>> {
+  const read = () => {
+    const probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
+    document.body.appendChild(probe);
+    const colors: Partial<Record<GraphState, string>> = {};
+    for (const [state, variable] of Object.entries(stateVariables) as [GraphState, string][]) {
+      probe.style.color = `var(${variable})`;
+      colors[state] = getComputedStyle(probe).color;
+    }
+    probe.remove();
+    return colors;
+  };
+  const [colors, setColors] = useState(read);
+  useEffect(() => {
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setColors(current => { const next = read(); return JSON.stringify(next) === JSON.stringify(current) ? current : next; }));
+    });
+    for (const element of [document.documentElement, document.body]) observer.observe(element, { attributes: true, attributeFilter: ["class", "data-theme", "data-palette", "style"] });
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, []);
+  return colors;
+}
 
 /** How often the tab reads a run again while it runs. */
 export const runTabRefreshMilliseconds = 2000;
 
 /**
- * The tab of a run of a script: its graph large, the sessions it started (title, step, state, duration, tokens; each opens
+ * The tab of a run of a script: its graph large (pans and zooms, with a minimap), the sessions it started (title, step, state, duration, tokens; each opens
  * its session), a timeline of its steps and sessions, its script and its result, and Copy as Mermaid, the text `alta
  * workflow show --format mermaid` gives. It reads the run again while it runs. A run the host no longer keeps closes its tab.
  */
@@ -63,10 +98,12 @@ export function RunTab({ api, epoch, runId, visible, onActivate, onGone, write =
   }, [visible, running]);
 
   const run = useMemo(() => detail ? scriptRunOf(detail.records.map(record => ({ ...record, timestamp: record.timestamp })), runId) : null, [detail, runId]);
-  const graph = useMemo(() => run ? runGraph(run) : null, [run]);
   const bars = useMemo(() => run ? timelineBars(run, now) : [], [run, now]);
   const states = useMemo(() => Object.fromEntries(timelineStates.map(state => [state, t(graphStateLabel(state))])) as Record<GraphState, string>, [t]);
-  const option = useMemo(() => timelineOption(bars, states, t("Seconds")), [bars, states, t]);
+  const colors = useStateColors();
+  const option = useMemo(() => timelineOption(bars, states, t("Seconds"), colors, bar => [bar.kind === "session" && links?.title(bar.sessionId ?? "") || bar.label,
+    states[bar.state], formatDuration(bar.end - bar.start), bar.tokens !== null ? t("{count} tokens", { count: bar.tokens.toLocaleString() }) : null].filter(Boolean).join(" · ")),
+  [bars, states, t, colors, links]);
 
   if (epoch === null) return <div className="workflow-run-tab" onPointerDown={onActivate}><p className="automation-empty">{t("Workflows are unavailable in this window.")}</p></div>;
   if (!detail?.run || !run) return <div className="workflow-run-tab" onPointerDown={onActivate}><p className="automation-empty"><ActivitySpinner size={16} /></p></div>;
@@ -91,9 +128,7 @@ export function RunTab({ api, epoch, runId, visible, onActivate, onGone, write =
       </div>
       <Button variant="minimal" icon={<AppIcon name={copied ? "check" : "copy"} size={15} />} disabled={!detail.mermaid} onClick={() => void copy()}>{t(copied ? "Copied" : "Copy as Mermaid")}</Button>
     </header>
-    {graph ? <section aria-label={t("Graph of the run")}><RunGraphView graph={graph} size="large" /></section>
-      : run.steps.length > 0 && <section aria-label={t("Steps")}><ol className="script-run-steps">{run.steps.map((step, index) =>
-        <li key={`${step.id}:${index}`} data-state={graphState(step.status)}><span>{step.id}</span></li>)}</ol></section>}
+    <RunTabGraph run={run} visible={visible} />
     {run.sessions.length > 0 && <section className="workflow-run-section">
       <h3>{t("Sessions")}<span className="count">{run.sessions.length}</span></h3>
       <HTMLTable compact className="workflow-run-sessions">

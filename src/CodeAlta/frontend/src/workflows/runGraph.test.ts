@@ -69,29 +69,45 @@ test("the states of the boxes", () => {
     ["running", "completed", "failed", "cancelled", "interrupted", "waiting", "pending", "failed"] satisfies GraphState[]);
 });
 
-test("the timeline of a run: a bar per step and per session from its start, a running one until now, in seconds", () => {
+test("the timeline of a run: each step, its sessions under it, a running bar until now, in seconds", () => {
   const run = scriptRunOf([
     record("RunStarted", 0),
     record("StepStarted", 1, { activityId: "plan" }), record("StepEnded", 3, { activityId: "plan", phase: "completed" }),
+    record("StepStarted", 3, { activityId: "explore" }),
     record("SessionStarted", 4, { activityId: "child-1", text: "Research A", details: { stepId: "explore" } }),
+    record("SessionStarted", 5, { activityId: "child-9", text: "Loose" }),
+    record("SessionStarted", 5, { activityId: "child-2", text: "Research B", details: { stepId: "explore" } }),
+    record("SessionEnded", 8, { activityId: "child-2", phase: "failed", details: { inputTokens: 900, outputTokens: 100 } }),
   ]);
   const now = Date.parse(at(10));
   const bars = timelineBars(run, now);
 
-  assert.deepEqual(bars, [
-    { label: "plan", kind: "step", state: "completed", start: 1000, end: 3000, sessionId: null },
-    { label: "Research A", kind: "session", state: "running", start: 4000, end: 10_000, sessionId: "child-1" },
-  ]);
+  assert.deepEqual(bars.map(bar => [bar.label, bar.kind, bar.state, bar.start, bar.end, bar.stepId, bar.tokens]), [
+    ["plan", "step", "completed", 1000, 3000, "plan", null],
+    ["explore", "step", "running", 3000, 10_000, "explore", null],
+    ["Research A", "session", "running", 4000, 10_000, "explore", null],
+    ["Research B", "session", "failed", 5000, 8000, "explore", 1000],
+    ["Loose", "session", "running", 5000, 10_000, null, null],
+  ], "the sessions of a step are under it, the ones of no step at the end");
+  assert.deepEqual(timelineBars(scriptRunOf([]), now), []);
+});
+
+test("the option of the timeline: the colors of the graph by state, sessions marked and lighter, an escaped tooltip per bar", () => {
+  const bar = (label: string, kind: "step" | "session", state: GraphState, start: number, end: number, stepId: string | null) =>
+    ({ label, kind, state, start, end, sessionId: kind === "session" ? label : null, stepId, tokens: null });
+  const bars = [bar("explore", "step", "completed", 1000, 3000, "explore"), bar("<b>A</b> {b}", "session", "failed", 1000, 2000, "explore"), bar("x", "session", "running", 0, 4000, null)];
   const names = Object.fromEntries(timelineStates.map(state => [state, state.toUpperCase()])) as Record<GraphState, string>;
-  const option = timelineOption(bars, names, "Seconds") as { yAxis: { data: string[] }; series: { name: string; data: unknown[] }[] };
-  assert.deepEqual(option.yAxis.data, ["plan", "Research A"]);
-  assert.deepEqual(option.series.map(series => series.name), ["start", "COMPLETED", "RUNNING"]);
-  assert.deepEqual(option.series[0].data, [1, 4], "the invisible series carries each bar to its start");
-  assert.deepEqual(option.series[1].data, [2, "-"]);
-  assert.deepEqual(option.series[2].data, ["-", 6]);
+  const option = timelineOption(bars, names, "Seconds", { completed: "rgb(0, 128, 0)", failed: "rgb(200, 0, 0)" }, item => `${item.label} · ${names[item.state]}`) as {
+    yAxis: { data: string[] }; series: { name: string; itemStyle?: { color: string }; data: unknown[] }[] };
+  assert.deepEqual(option.yAxis.data, ["explore", "↳ <b>A</b> {b}", "x"], "a session of a step is marked under it");
+  assert.deepEqual(option.series.map(series => series.name), ["start", "COMPLETED", "RUNNING", "FAILED"]);
+  assert.deepEqual(option.series.map(series => series.itemStyle?.color), ["transparent", "rgb(0, 128, 0)", undefined, "rgb(200, 0, 0)"]);
+  assert.deepEqual(option.series[0].data, [1, 1, 0], "the invisible series carries each bar to its start");
+  assert.deepEqual(option.series[1].data, [{ value: 2, tooltip: { formatter: "explore · COMPLETED" } }, "-", "-"]);
+  assert.deepEqual(option.series[3].data[1], { value: 1, itemStyle: { opacity: 0.55 },
+    tooltip: { formatter: "&#60;b&#62;A&#60;/b&#62; &#123;b&#125; · FAILED" } }, "a session is lighter, and its tooltip says its text, not markup nor fields");
   // The option is plain data: what a chart from JSON may hold.
   assert.equal(JSON.stringify(JSON.parse(JSON.stringify(option))), JSON.stringify(option));
-  assert.deepEqual(timelineBars(scriptRunOf([]), now), []);
 });
 
 test("the tab of a run is stored with the others, and restored while its id reads", () => {

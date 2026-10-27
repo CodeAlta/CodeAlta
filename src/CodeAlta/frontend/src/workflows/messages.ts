@@ -66,4 +66,7 @@ export const workflowMessages = {
   "Seconds": ["Segundos", "Secondes", "Sekunden", "秒", "秒"],
   "Show the sessions": ["Mostrar las sesiones", "Afficher les sessions", "Sitzungen anzeigen", "セッションを表示", "显示会话"],
   "Hide the sessions": ["Ocultar las sesiones", "Masquer les sessions", "Sitzungen ausblenden", "セッションを隠す", "隐藏会话"],
+  "Sleeping": ["Durmiendo", "En sommeil", "Schläft", "スリープ中", "休眠中"],
+  "Show the call": ["Mostrar la llamada", "Afficher l’appel", "Aufruf anzeigen", "呼び出しを表示", "显示调用"],
+  "{done}/{total} sessions": ["{done}/{total} sesiones", "{done}/{total} sessions", "{done}/{total} Sitzungen", "{done}/{total} セッション", "{done}/{total} 个会话"],
 } as const;

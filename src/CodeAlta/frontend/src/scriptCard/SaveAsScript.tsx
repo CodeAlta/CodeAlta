@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactElement } from "react";
 import { Button, InputGroup, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
@@ -21,22 +21,32 @@ export const isScriptName = (name: string) => /^[a-z][a-z0-9-]{0,63}$/u.test(nam
  * Save as script… on the card of a run that ended: a small popover beside the button asks for the name, then the session of
  * the run is asked to turn it into a script of the library, with parameters in place of the values it was written for.
  */
-export function SaveAsScript({ runId }: { runId: string }) {
+export function SaveAsScript({ runId, iconOnly = false, open: asked, onClose, children }: {
+  runId: string;
+  /** The button is its icon alone, its name a tooltip. */
+  iconOnly?: boolean;
+  /** Given with `children`: the popover opens from another control (a menu), beside `children`, and says when it closes. */
+  open?: boolean; onClose?: () => void; children?: ReactElement;
+}) {
   const { t } = useShellLanguage();
   const actions = useContext(ScriptRunActionsContext);
   const id = useId();
-  const [open, setOpen] = useState(false);
+  const [own, setOwn] = useState(false);
+  const controlled = asked !== undefined;
+  const open = controlled ? asked : own;
+  const setOpen = (value: boolean) => { if (!controlled) setOwn(value); else if (!value) onClose?.(); };
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!open) return;
+    setName("");
+    setProblem(null);
     const timer = setTimeout(() => input.current?.select(), 0);
     return () => clearTimeout(timer);
   }, [open]);
   if (!actions) return null;
-  function show() { setName(""); setProblem(null); setOpen(true); }
   async function save() {
     const chosen = name.trim();
     if (!isScriptName(chosen)) { setProblem(t("Lowercase letters, digits and hyphens, starting with a letter.")); return; }
@@ -65,7 +75,8 @@ export function SaveAsScript({ runId }: { runId: string }) {
   </form>;
   return <PopoverNext isOpen={open} content={form} placement="bottom-start" popoverClassName="rename-popover" autoFocus={false} enforceFocus={false}
     canEscapeKeyClose={!busy} onInteraction={next => { if (!next && !busy) setOpen(false); }}>
-    <Button size="small" variant="minimal" className="script-save" icon={<AppIcon name="save" size={13} />} text={t("Save as script…")}
-      onClick={event => { event.stopPropagation(); if (open) setOpen(false); else show(); }} />
+    {children ?? <Button size="small" variant="minimal" className="script-save" icon={<AppIcon name="save" size={13} />} text={iconOnly ? undefined : t("Save as script…")}
+      title={iconOnly ? t("Save as script…") : undefined} aria-label={iconOnly ? t("Save as script…") : undefined}
+      onClick={event => { event.stopPropagation(); setOpen(!open); }} />}
   </PopoverNext>;
 }

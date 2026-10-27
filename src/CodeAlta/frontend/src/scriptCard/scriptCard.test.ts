@@ -111,6 +111,7 @@ test("the records of a run give its card its steps and the sessions it started, 
 
   assert.equal(run.runId, "run-1");
   assert.equal(run.status, "running", "no RunEnded record yet");
+  assert.equal(run.title, "Review PR 231", "the title its start gives it");
   assert.deepEqual(run.steps.map(({ startedAt: _start, endedAt: _end, ...step }) => step), [{ id: "review", status: "completed", durationMs: 1500, key: null, replayed: false }]);
   assert.deepEqual(run.sessions.map(session => [session.sessionId, session.title, session.stepId, session.status, session.inputTokens, session.message]),
     [["child-a", "Security", "review", "completed", 900, null], ["child-b", "Tests", "review", "failed", null, "It broke."]]);
