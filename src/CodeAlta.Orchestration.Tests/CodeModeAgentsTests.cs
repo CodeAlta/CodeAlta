@@ -114,6 +114,37 @@ public sealed class CodeModeAgentsTests
     }
 
     [TestMethod]
+    public async Task AChild_DoesWithoutTheToolsOfItsParent_AndOneThatWouldHaveAToolItsParentDoesWithoutIsRefused()
+    {
+        var (root, provider, host, driver, parent) = await CreateAsync();
+        await using var scope = root;
+        await using var closing = driver;
+        var prompts = Directory.CreateDirectory(Path.Combine(root.GlobalRoot, "prompts", "agents")).FullName;
+        File.WriteAllText(Path.Combine(prompts, "reader.prompt.md"), "---\nname: Reader\ndisabled_tools: [shell_command]\n---\nRead only.\n");
+
+        // A session of `altacli run --disable-tools web`: its children do without the web tools too.
+        var narrow = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model", DisabledToolPatterns = ["web"] })).Session!;
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Child answer."));
+        var child = await host.CodeModeAgents.RunAsync(narrow.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-t" }, CancellationToken.None).WaitAsync(Hang);
+        Assert.IsTrue(child.Succeeded, child.Failure);
+        var disabled = await host.RuntimeService.GetDisabledToolsAsync(child.SessionId!);
+        foreach (var tool in new[] { "webget", "web_search", "web_fetch" }) Assert.IsTrue(disabled.Contains(tool), tool);
+
+        // A session whose agent prompt does without the shell gives it to no child under another prompt.
+        var reader = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model", AgentPromptId = "reader" })).Session!;
+        provider.Script(reader.SessionId, ScriptedTurnProvider.Reply("Reader ready."));
+        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(reader, new HeadlessPrompt("start")).WaitAsync(Hang)).Status);
+        Assert.IsTrue((await host.RuntimeService.GetDisabledToolsAsync(reader.SessionId)).Contains("shell_command"), "the reader does without the shell");
+        var wider = await host.CodeModeAgents.RunAsync(reader.SessionId, new CodeModeAgentRequest("Run it.") { RunId = "run-t" }, CancellationToken.None).WaitAsync(Hang);
+        Assert.AreEqual("refused", wider.Status);
+        Assert.IsNull(wider.SessionId, "no session is created");
+        StringAssert.Contains(wider.Failure, "`shell_command`");
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Read."));
+        var same = await host.CodeModeAgents.RunAsync(reader.SessionId, new CodeModeAgentRequest("Read it.") { RunId = "run-t", AgentPromptId = "reader" }, CancellationToken.None).WaitAsync(Hang);
+        Assert.IsTrue(same.Succeeded, same.Failure);
+    }
+
+    [TestMethod]
     public async Task AWorktree_IsRefusedToTheScriptOfASessionWithoutAGitProject()
     {
         var (root, _, host, driver, parent) = await CreateAsync();

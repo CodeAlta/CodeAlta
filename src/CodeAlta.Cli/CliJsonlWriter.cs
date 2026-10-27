@@ -26,6 +26,9 @@ internal sealed record CliRunReport(string Status, int ExitCode)
 
     public SessionUsageTotals? Usage { get; init; }
 
+    /// <summary>The cost estimated from the usage and the public price of the model, in US dollars, for a provider that reports none.</summary>
+    public decimal? EstimatedCost { get; init; }
+
     public TimeSpan Duration { get; init; }
 }
 
@@ -37,7 +40,7 @@ internal sealed record CliRunReport(string Status, int ExitCode)
 /// <remarks>
 /// <list type="number">
 /// <item>The first line is <see cref="CodeAltaAcpExtensions.SessionMethod"/>, the header of the run: <c>schemaVersion</c> (1), <c>sessionId</c>,
-/// <c>created</c>, <c>cwd</c>, <c>provider</c>, <c>model</c>, <c>reasoning</c>, <c>agentPrompt</c>, <c>tier</c>,
+/// <c>created</c>, <c>cwd</c>, <c>provider</c>, <c>providerType</c>, <c>model</c>, <c>reasoning</c>, <c>agentPrompt</c>, <c>tier</c>,
 /// <c>storage</c>. A run that ends before it has a session (invalid usage, a provider not ready, a session in use) has no
 /// header.</item>
 /// <item>Then the <c>session/update</c> notifications (<c>params</c> is a <see cref="SessionNotification"/>) and the
@@ -47,7 +50,8 @@ internal sealed record CliRunReport(string Status, int ExitCode)
 /// <c>finalMessage</c>, <c>abortReason</c>, <c>failure</c> (<c>kind</c>, <c>message</c>) or null, <c>usage</c> in the shape of
 /// ACP's <see cref="Usage"/> (<c>inputTokens</c>, <c>outputTokens</c>, <c>totalTokens</c>, <c>cachedReadTokens</c>,
 /// <c>cachedWriteTokens</c>, <c>thoughtTokens</c>) or null, <c>cost</c> in the shape of ACP's <see cref="Cost"/>
-/// (<c>amount</c>, <c>currency</c>, which is the unit the provider reports, such as <c>USD</c>) or null when it is unknown,
+/// (<c>amount</c>, <c>currency</c>, which is the unit the provider reports, such as <c>USD</c>), else one in US dollars estimated from
+/// the usage and the public price of the model, marked by <c>_meta.codealta.estimated</c>, or null when it is unknown,
 /// and <c>durationMs</c>.</item>
 /// </list>
 /// </remarks>
@@ -101,6 +105,7 @@ internal sealed class CliJsonlWriter : IAcpEventSink
             writer.WriteBoolean("created", header.Created);
             writer.WriteString("cwd", header.Cwd);
             writer.WriteString("provider", header.Provider);
+            AcpEventProjector.WriteStringOrNull(writer, "providerType", header.ProviderType);
             writer.WriteString("model", header.Model);
             AcpEventProjector.WriteStringOrNull(writer, "reasoning", header.Reasoning);
             writer.WriteString("agentPrompt", header.AgentPrompt);
@@ -152,10 +157,22 @@ internal sealed class CliJsonlWriter : IAcpEventSink
             }
 
             writer.WritePropertyName("cost");
-            // A cost the provider did not report is unknown, never zero.
+            // A cost the provider did not report is estimated from public prices, and marked so; unknown, never zero.
             if (report.Usage is { Cost: { } amount } known)
             {
                 JsonSerializer.Serialize(writer, new Cost { Amount = amount, Currency = known.CostUnit ?? string.Empty }, _costInfo);
+            }
+            else if (report.EstimatedCost is { } estimate)
+            {
+                writer.WriteStartObject();
+                writer.WriteNumber("amount", Math.Round(estimate, 6));
+                writer.WriteString("currency", "USD");
+                writer.WriteStartObject("_meta");
+                writer.WriteStartObject(MetaKey);
+                writer.WriteBoolean("estimated", true);
+                writer.WriteEndObject();
+                writer.WriteEndObject();
+                writer.WriteEndObject();
             }
             else
             {
@@ -213,4 +230,8 @@ internal sealed class CliJsonlWriter : IAcpEventSink
 
 /// <summary>The header of a run: the session and what it runs with.</summary>
 internal sealed record CliSessionHeader(string SessionId, bool Created, string Cwd, string Provider, string Model, string? Reasoning,
-    string AgentPrompt, string? Tier, string Storage);
+    string AgentPrompt, string? Tier, string Storage)
+{
+    /// <summary>The type of the provider (<c>anthropic</c>, <c>openai-responses</c>, <c>claude-code</c>, <c>codex</c>...), null when it is not known.</summary>
+    public string? ProviderType { get; init; }
+}

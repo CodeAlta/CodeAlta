@@ -39,7 +39,7 @@ Nobody is there to answer, so every tool runs without asking, and the agents are
 
 `--sandbox PROFILE` runs the tools of the sessions in a [sandbox](sessions/sandbox.md) (`workspace`, `strict` or a profile of yours), whatever the settings say; `--sandbox off` runs them without one. A command never runs outside the sandbox there: nobody is there to allow it.
 
-`--disable-tools PATTERN` turns tools off (`web` turns off every tool that reaches the web, `mcp__*` the tools of MCP servers); `--no-mcp`, `--no-plugins` and `--no-skills` start none of them. Only the [plugins](plugins/readme.md) made for the command line run there: Git, Jira, MCP and ACP among the built-in ones.
+`--disable-tools PATTERN` turns tools off (`web` turns off every tool that reaches the web, `mcp__*` the tools of MCP servers), for the session of the run and the sub-agents it starts; `--no-mcp`, `--no-plugins` and `--no-skills` start none of them. Only the [plugins](plugins/readme.md) made for the command line run there: Git, Jira, MCP and ACP among the built-in ones.
 
 ## Output and exit codes
 
@@ -49,10 +49,10 @@ By default, standard output holds the final answer only, so `altacli run "..." >
 
 | Line | What it says |
 | --- | --- |
-| `_codealta/session` | First line: the session, its folder, provider, model and storage. |
+| `_codealta/session` | First line: the session, its folder, provider and its type (`anthropic`, `codex`, `claude-code`...), model and storage. |
 | `session/update` | Messages, thinking, tool calls and their results, plans and token use, as in ACP. The lines of a delegated agent carry its own `sessionId`. |
 | `_codealta/session_started`, `_codealta/compaction`, `_codealta/retry`, `_codealta/fallback`, `_codealta/error` | What ACP has no update for: a delegated agent starts, a compaction, a retry, a [fallback](model-tiers.md) to another model, an error (`events_dropped` when updates were lost: the whole answer is in the result). |
-| `_codealta/result` | Last line: the status, exit code, final answer, tokens and cost when the provider gives them (null otherwise, never 0), and duration. |
+| `_codealta/result` | Last line: the status, exit code, final answer, tokens, cost, and duration. Tokens and cost the provider does not give are null, never 0; a cost it does not give is estimated in US dollars from the public price of the model, at its base rate, and marked `"_meta": {"codealta": {"estimated": true}}`. |
 
 | Exit code | The run |
 | --- | --- |

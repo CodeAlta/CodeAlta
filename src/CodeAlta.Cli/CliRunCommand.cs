@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.LiveTool;
@@ -135,7 +136,10 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
 
         jsonl?.WriteHeader(new CliSessionHeader(session.SessionId, session.Created, session.Descriptor.WorkingDirectory ?? request.ProjectFolder!,
             session.ProviderKey, session.ModelId, ReasoningName(session.ReasoningEffort), session.AgentPromptId,
-            session.Tier is { } tier ? ModelTiers.NameOf(tier) : null, host.Storage.Name));
+            session.Tier is { } tier ? ModelTiers.NameOf(tier) : null, host.Storage.Name)
+        {
+            ProviderType = host.Host.ModelProviderRegistry.TryGetProvider(new ModelProviderId(session.ProviderKey), out var provider) ? provider.ProviderType : null,
+        });
         if (jsonl is null && !options.Quiet) sink = new CliProgressWriter(output, session.SessionId);
         if (sink is not null)
         {
@@ -225,6 +229,8 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
 
         Volatile.Write(ref projector, null);
         var report = Report(result);
+        if (report.Usage is { Cost: null, OperationCount: > 0 } unpriced && await EstimateCostAsync(host, session, unpriced).ConfigureAwait(false) is { } estimate)
+            report = report with { EstimatedCost = estimate };
         if (report.Status == "completed" && schema is { } outputSchema)
         {
             var (json, errors) = CliStructuredOutput.Check(result.FinalMessage, outputSchema);
@@ -261,6 +267,28 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
         if (jsonl is not null) jsonl.WriteResult(report);
         else if (report.Status == "completed" && report.FinalMessage is { } answer) output.WriteText(answer);
         return report.ExitCode;
+    }
+
+    // What the run would cost at the public price of the model of its session (models.dev), for a provider that reports
+    // no cost: a subscription, a gateway. The price is applied to the totals of the run, which do not keep the input of
+    // each request: a request above a long-context tier (GPT-6 Astra above 272k tokens) is counted at the base price, and
+    // a sub-agent at the price of this model. Null when the model has no price.
+    internal static async Task<decimal?> EstimateCostAsync(CliHost host, HeadlessSession session, CodeAlta.Orchestration.Runtime.SessionUsageTotals usage)
+    {
+        IReadOnlyList<AgentModelInfo> models;
+        try
+        {
+            models = await host.Host.ModelProviderInitializationService.GetModelsAsync(new ModelProviderId(session.ProviderKey), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or InvalidOperationException or NotSupportedException)
+        {
+            models = [];
+        }
+
+        var model = models.FirstOrDefault(candidate => string.Equals(candidate.Id, session.ModelId, StringComparison.OrdinalIgnoreCase)) ?? new AgentModelInfo(session.ModelId);
+        var price = AgentModelPrice.Of(model) ?? AgentModelPrice.Of(host.ModelsDev.Describe(model, catalogModelId: null, catalogProviderId: null));
+        return price?.Estimate(Math.Max(0, usage.InputTokens), usage.ReportsCachedInputTokens ? Math.Max(0, usage.CachedInputTokens) : 0,
+            usage.ReportsCacheWriteTokens ? Math.Max(0, usage.CacheWriteTokens) : 0, Math.Max(0, usage.OutputTokens));
     }
 
     private static CliRunReport Report(HeadlessRunResult result)

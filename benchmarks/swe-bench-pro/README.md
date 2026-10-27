@@ -1,6 +1,6 @@
 # SWE-bench Pro v2 HARD-51: reproduction kit
 
-Runs the 51 tasks of HARD-51 of [SWE-bench Pro v2](https://github.com/scaleapi/SWE-bench_Pro-os/blob/main/v2/README.md) with [Harbor](https://github.com/laude-institute/harbor), under its locked protocol, for four harness/model pairs, one job at a time:
+Runs the 51 tasks of HARD-51 of [SWE-bench Pro v2](https://github.com/scaleapi/SWE-bench_Pro-os/blob/main/v2/README.md) with [Harbor](https://github.com/laude-institute/harbor), under its locked protocol, for four harness/model pairs, and optionally a fifth, one job at a time:
 
 | Run (`-Runs` name) | Harness | Model |
 |---|---|---|
@@ -8,8 +8,11 @@ Runs the 51 tasks of HARD-51 of [SWE-bench Pro v2](https://github.com/scaleapi/S
 | `claude-code-opus` | Claude Code CLI | Claude Opus 5.5, `xhigh` |
 | `codealta-astra` | CodeAlta's own agent loop, `openai-responses` provider | GPT-6 Astra, `xhigh` |
 | `codex-astra` | Codex CLI 0.155.1 (code mode) | GPT-6 Astra, `xhigh` |
+| `codealta-cc-opus` (optional) | CodeAlta driving the Claude Code CLI 2.1.309, `claude-code` provider | Claude Opus 5.5 (`opus`), `xhigh` |
 
 CodeAlta runs through its adapter, [`../harbor/locked_codealta.py`](../harbor/README.md), which maps `-m anthropic/<model>` to the `anthropic` provider type. CodeAlta / Opus is therefore not CodeAlta driving the Claude Code CLI. The native harnesses use the locked adapters of SWE-bench Pro (`v2/tooling`).
+
+`codealta-cc-opus` is CodeAlta driving the Claude Code CLI (`--ak provider_type=claude-code`): the adapter installs the version of Claude Code that CodeAlta pins during setup, and the CLI makes the model requests with `ANTHROPIC_API_KEY`. Beside `claude-code-opus`, it tells what CodeAlta adds or costs on top of Claude Code's own loop. It is not in the default `-Runs`: name it (`-Runs codealta-cc-opus`, alone or with the others). See [CodeAlta on the Claude Code CLI](../harbor/README.md#codealta-on-the-claude-code-cli).
 
 Each model job is followed by a pristine replay of its captured patches, which gives the authoritative score. The reference run, its results and its analysis are in [`reference-20261026-162310.md`](reference-20261026-162310.md) and [`../2026-10-26-swe-bench-pro-v2-hard51.md`](../2026-10-26-swe-bench-pro-v2-hard51.md).
 
@@ -79,7 +82,7 @@ It spends nothing:
 
 - It takes the 51 tasks of the official `v2\hard51_ids.txt` and checks them against `v2\SHA256SUMS`, which catches a checkout whose line endings were converted.
 - It builds the dataset with the official `make_subset.py` and checks Docker's memory.
-- It runs an install-only Harbor job in all 51 images for each harness that will run.
+- It runs an install-only Harbor job in all 51 images for each harness that will run; `codealta-cc-opus` has its own, which also installs the Claude Code CLI.
 
 ## API keys
 
@@ -99,9 +102,10 @@ A run that has only Opus jobs needs only `ANTHROPIC_API_KEY`, and one with only 
 ```powershell
 pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun                                    # all four jobs
 pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-opus,codealta-astra # CodeAlta only
+pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-cc-opus            # CodeAlta on the Claude Code CLI
 ```
 
-- **Order:** the jobs run one after the other, in the order of the table above, each followed by its replay.
+- **Order:** the jobs run one after the other, in the order of the table above, each followed by its replay. `codealta-cc-opus` needs `ANTHROPIC_API_KEY`.
 - **Concurrency:** 8 task sandboxes at a time (`-Concurrency`).
 - **Retries:** one retry, for `NetworkConnectionError` only.
 - **Stop on error:** a job that has any errored trial stops the run. Harbor can exit with 0 while its trials failed, so the script checks each job's `result.json`.
@@ -119,12 +123,12 @@ pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-opus,codealta
 It writes `results\<run-id>-summary.md` and `.json`, and covers:
 
 - the replay scores and the required tests;
-- the pairwise outcomes and the failed tests;
+- the pairwise outcomes and the failed tests (CodeAlta CC / Opus against Claude Code / Opus when it ran);
 - times (mean, median, P90, agent-hours);
 - tokens: input, cache read, cache write and output;
 - costs.
 
-**Costs** are estimated from the tokens at list prices, the same way for every run. Those prices reproduce exactly Claude Code's own `total_cost_usd` and Harbor's Codex `cost_usd`. Harbor's reported cost is shown beside the estimate: for Claude Code it misses the segments of a trial that restarted, and CodeAlta reports none. The provider's billing is the final word.
+**Costs** are estimated from the tokens at list prices, the same way for every run. Those prices reproduce exactly Claude Code's own `total_cost_usd` and Harbor's Codex `cost_usd`. Harbor's reported cost is shown beside the estimate: for Claude Code it misses the segments of a trial that restarted, and CodeAlta reports one only on the Claude Code CLI (the estimate `altacli` makes for the other providers is in the metadata of each trial, not in Harbor's cost). The provider's billing is the final word.
 
 **Partial runs:** a run made with `-Runs` is summarized with the jobs it has. `--baseline-run-id` takes the missing jobs from an earlier run in the same `jobs\` folder. That compares new CodeAlta jobs with the native jobs of a reference run, but runs made on different days or machines can differ for reasons outside the harness.
 

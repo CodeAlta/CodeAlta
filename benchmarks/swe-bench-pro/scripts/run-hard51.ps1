@@ -1,6 +1,7 @@
 # Runs SWE-bench Pro v2 HARD-51 under its locked protocol with Harbor, one harness job at a time, each followed by a
 # pristine patch replay (the authoritative score). -PrepareOnly runs the model-free install preflights only; a paid run
-# needs -ConfirmPaidRun. -Runs selects the jobs (all four by default), for example only the CodeAlta ones after a change.
+# needs -ConfirmPaidRun. -Runs selects the jobs (the four of the comparison by default), for example only the CodeAlta
+# ones after a change; codealta-cc-opus, CodeAlta driving the Claude Code CLI, runs only when named.
 [CmdletBinding()]
 param(
     [ValidateRange(1, 20)]
@@ -10,8 +11,8 @@ param(
 
     [string]$BundleRoot = (Split-Path $PSScriptRoot -Parent),
 
-    # Names among codealta-opus, claude-code-opus, codealta-astra, codex-astra; under pwsh -File, one comma-separated
-    # argument (-Runs codealta-opus,codealta-astra).
+    # Names among codealta-opus, claude-code-opus, codealta-astra, codex-astra and codealta-cc-opus (not in the default);
+    # under pwsh -File, one comma-separated argument (-Runs codealta-opus,codealta-astra).
     [string[]]$Runs = @("codealta-opus", "claude-code-opus", "codealta-astra", "codex-astra"),
 
     [ValidateRange(0, 3)]
@@ -34,13 +35,15 @@ $workspaceConfigPath = Join-Path $bundle "workspace.json"
 $jobsRoot = Join-Path $bundle "jobs"
 $datasetRoot = Join-Path $bundle "datasets\hard51"
 
-# The four jobs, in the order they run. CodeAlta / Opus runs CodeAlta's own agent loop on the Anthropic Messages API:
-# the adapter maps -m anthropic/<model> to the `anthropic` provider type, not to the Claude Code CLI.
+# The jobs, in the order they run. CodeAlta / Opus runs CodeAlta's own agent loop on the Anthropic Messages API: the
+# adapter maps -m anthropic/<model> to the `anthropic` provider type. CodeAlta CC / Opus (optional) runs CodeAlta's
+# claude-code provider instead: CodeAlta drives the Claude Code CLI, which the adapter installs during setup.
 $runDefinitions = [ordered]@{
     "codealta-opus" = [ordered]@{ Name = "codealta-opus55-xhigh"; Harness = "CodeAlta"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-opus-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=xhigh", "disable_tools=web") }
     "claude-code-opus" = [ordered]@{ Name = "claude-code-opus55-xhigh"; Harness = "Claude Code"; Agent = "locked_claude_code:LockedClaudeCode"; Model = "anthropic/claude-opus-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=xhigh", "disallowed_tools=WebFetch,WebSearch") }
     "codealta-astra" = [ordered]@{ Name = "codealta-astra-xhigh"; Harness = "CodeAlta"; Agent = "locked_codealta:LockedCodeAlta"; Model = "openai/gpt-6-astra"; Host = "api.openai.com"; Kwargs = @("reasoning_effort=xhigh", "disable_tools=web") }
     "codex-astra" = [ordered]@{ Name = "codex-astra-xhigh"; Harness = "Codex"; Agent = "locked_codex:LockedCodex"; Model = "openai/gpt-6-astra"; Host = "api.openai.com"; Kwargs = @("reasoning_effort=xhigh", "web_search=disabled") }
+    "codealta-cc-opus" = [ordered]@{ Name = "codealta-cc-opus55-xhigh"; Harness = "CodeAlta on Claude Code"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-opus-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=xhigh", "disable_tools=web", "provider_type=claude-code") }
 }
 $requestedRuns = @($Runs | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $unknownRuns = @($requestedRuns | Where-Object { -not $runDefinitions.Contains($_) })
@@ -272,6 +275,8 @@ $preflights = [ordered]@{
     "CodeAlta" = [ordered]@{ Name = "codealta-install-preflight"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-opus-5-5"; Kwargs = @("reasoning_effort=xhigh") }
     "Claude Code" = [ordered]@{ Name = "claude-code-install-preflight"; Agent = "locked_claude_code:LockedClaudeCode"; Model = "anthropic/claude-opus-5-5"; Kwargs = @("reasoning_effort=xhigh") }
     "Codex" = [ordered]@{ Name = "codex-install-preflight"; Agent = "locked_codex:LockedCodex"; Model = "openai/gpt-6-astra"; Kwargs = @("reasoning_effort=xhigh", "web_search=disabled") }
+    # altacli and the Claude Code CLI the claude-code provider runs.
+    "CodeAlta on Claude Code" = [ordered]@{ Name = "codealta-cc-install-preflight"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-opus-5-5"; Kwargs = @("reasoning_effort=xhigh", "provider_type=claude-code") }
 }
 $harnesses = @($selectedRuns | ForEach-Object { $runDefinitions[$_].Harness } | Select-Object -Unique)
 foreach ($harness in $preflights.Keys) {

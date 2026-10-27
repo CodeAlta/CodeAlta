@@ -2842,8 +2842,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         var promptId = promptChoice.PromptId!;
 
-        // Nor does it have a tool that the session that creates it does without.
-        var newSession = new SessionViewDescriptor { ProjectRef = project?.Id, SpaceId = space.SpaceId, AgentPromptId = promptId };
+        // Nor does it have a tool that the session that creates it does without: it takes what the command line of a run
+        // turns off from its parent or from that session, and its own settings must leave out the rest.
+        var newSession = new SessionViewDescriptor
+        {
+            ProjectRef = project?.Id, SpaceId = space.SpaceId, AgentPromptId = promptId, ParentSessionId = parentResolution.ParentSessionId,
+            CreatedBy = CreateProvenance(context),
+        };
         if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(newSession, promptId, context.CancellationToken), "the session it creates",
                 "Create it with an agent prompt that does without them too (`--prompt-id`), or do the work here.").ConfigureAwait(false) is { } wider)
         {
@@ -7309,8 +7314,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     // Refuses, for a session that does without some built-in tools, what would hand one of them to a session: to
     // itself under another agent prompt, to a session it creates or forks, to a session it hands a prompt to, which
-    // would use them for it. `target` says what that session would do without, `what` names it. Null when allowed;
-    // the user, with no calling session, decides the tools.
+    // would use them for it. `target` says what that session would do without, `what` names it: a session it creates
+    // or forks takes the tools the command line of a run turns off, so only its settings can widen them. Null when
+    // allowed; the user, with no calling session, decides the tools.
     private static async Task<int?> RefuseWiderToolsAsync(AltaCommandContext context, Func<SessionRuntimeService, Task<IReadOnlySet<string>>> target, string what, string? hint = null)
     {
         if (NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
@@ -7326,7 +7332,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return wider.Length == 0
             ? null
             : PermissionDenied(context, "session.widerTools",
-                $"This session does without {string.Join(", ", wider.Select(static tool => $"`{tool}`"))} (in the settings of the user, of its space or of its agent prompt), " +
+                $"This session does without {string.Join(", ", wider.Select(static tool => $"`{tool}`"))} (in the settings of the user, of its space or of its agent prompt, or on the command line of its run), " +
                 $"and {what} would have {(wider.Length == 1 ? "it" : "them")}: a session does not give a tool it does without. {hint ?? "Do the work here, or ask the user."}");
     }
 
