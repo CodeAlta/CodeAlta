@@ -1446,7 +1446,7 @@ public sealed class SystemPromptBuildRequest
     public bool ModelFallback { get; init; }
 
     /// <summary>
-    /// Gets the mode of Code Mode the session has: <c>off</c>, the default; <c>on</c> when it has <c>exec</c>; <c>only</c> when
+    /// Gets the mode of Code Mode the session has: <c>off</c> when the host gives none; <c>on</c> when it has <c>exec</c>; <c>only</c> when
     /// <c>exec</c> takes over its other tools. The instructions tell a session with <c>exec</c> when to use it.
     /// </summary>
     public string CodeMode { get; init; } = "off";

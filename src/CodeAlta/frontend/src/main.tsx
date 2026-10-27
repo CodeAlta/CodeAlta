@@ -5549,7 +5549,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
           inherit: shellPreferences.inheritPermissions, setInherit: setInheritPermissions } : null} />
       : settingsSection === "sandbox" ? <SandboxSettings epoch={owned ? status?.hostEpoch ?? null : null} onOpenScope={openSandboxScope} />
-      : settingsSection === "codeMode" ? <CodeModeSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined} />
+      : settingsSection === "codeMode" ? <CodeModeSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
+        onOpenScope={scope => { navigate("providers"); setProviderFocus(scope.providerKey); }} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
         chats={spaceChatCounts(catalog.current?.sessions ?? [])} showOthers={showOthers} onShowOthers={setShowOthers}
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)}

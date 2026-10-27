@@ -19,10 +19,15 @@ public interface ISessionScriptRuns
     /// <returns>A task that completes when they ended.</returns>
     Task StopAsync(string sessionId);
 
-    /// <summary>Gets the mode of Code Mode a session has now: <c>off</c>, <c>on</c> (it has <c>exec</c>) or <c>only</c> (<c>exec</c> takes over its tools).</summary>
+    /// <summary>
+    /// Gets the mode of Code Mode a session has now, on a provider and a model: <c>off</c>, <c>on</c> (it has <c>exec</c>)
+    /// or <c>only</c> (<c>exec</c> takes over its tools).
+    /// </summary>
     /// <param name="sessionId">The session, or null.</param>
+    /// <param name="providerKey">The key of its provider, or null.</param>
+    /// <param name="modelId">Its model, or null.</param>
     /// <returns>The mode.</returns>
-    string CodeModeOf(string? sessionId);
+    string CodeModeOf(string? sessionId, string? providerKey, string? modelId);
 }
 
 public sealed partial class SessionRuntimeService

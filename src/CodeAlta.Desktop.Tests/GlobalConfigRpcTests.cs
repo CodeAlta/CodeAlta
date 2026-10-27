@@ -483,24 +483,51 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
-    public async Task CodeMode_IsOffByDefault_AndOffRemovesItsTable()
+    public async Task CodeMode_IsOnByDefault_OffIsWritten_AndOnRemovesItsTable()
     {
         await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");
         var read = fixture.Service.CodeModeSettings(new(Epoch));
         Assert.AreEqual("ok", read.Status);
-        Assert.AreEqual("off", read.Mode);
+        Assert.AreEqual("on", read.Mode, "no setting is on");
         CollectionAssert.AreEqual(new[] { "off", "on", "only" }, read.Modes.ToArray());
 
-        Assert.AreEqual("on", fixture.Service.SaveCodeModeSettings(new(Epoch, "on")).Mode);
-        Assert.AreEqual("on", fixture.Service.CodeModeSettings(new(Epoch)).Mode);
-        var text = File.ReadAllText(fixture.ConfigPath);
-        StringAssert.Contains(text, "[code_mode]");
-        StringAssert.Contains(text, "sk-kept", "The other settings stay.");
-
         Assert.AreEqual("off", fixture.Service.SaveCodeModeSettings(new(Epoch, "off")).Mode);
-        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("[code_mode]", StringComparison.Ordinal), "off is the absence of the setting");
+        Assert.AreEqual("off", fixture.Service.CodeModeSettings(new(Epoch)).Mode);
+        var text = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(text, "mode = \"off\"");
+        StringAssert.Contains(text, "sk-kept", "The other settings stay.");
+        Assert.AreEqual("only", fixture.Service.SaveCodeModeSettings(new(Epoch, "only")).Mode);
+
+        Assert.AreEqual("on", fixture.Service.SaveCodeModeSettings(new(Epoch, "on")).Mode);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("[code_mode]", StringComparison.Ordinal), "on is the absence of the setting");
+        Assert.AreEqual("invalid", fixture.Service.SaveCodeModeSettings(new(Epoch, null)).Status);
         Assert.AreEqual("invalid", fixture.Service.SaveCodeModeSettings(new(Epoch, "sometimes")).Status);
         Assert.AreEqual("stale_epoch", fixture.Service.CodeModeSettings(new("another")).Status);
+    }
+
+    [TestMethod]
+    public async Task CodeMode_OfAProviderAndItsModels_IsSaved_AndListed()
+    {
+        await using var fixture = new Fixture("[providers.copilot]\nenabled = true\ntype = \"openai-responses\"\ndisplay_name = \"Copilot\"\napi_key = \"sk-kept\"\n");
+        var first = fixture.Service.CodeModeProvider(new(Epoch, "copilot"));
+        Assert.AreEqual(("ok", null, "on", 0), (first.Status, first.Provider, first.AllSessions, first.Models.Count), "a provider without a mode follows every session: on");
+
+        Assert.AreEqual("ok", fixture.Service.SaveCodeModeScope(new(Epoch, "copilot", null, "only")).Status);
+        Assert.AreEqual("ok", fixture.Service.SaveCodeModeScope(new(Epoch, "copilot", "claude-haiku-4.5", "off")).Status);
+        Assert.AreEqual("off", fixture.Service.SaveCodeModeSettings(new(Epoch, "off")).Mode);
+        var read = fixture.Service.CodeModeProvider(new(Epoch, "copilot"));
+        Assert.AreEqual(("only", "off"), (read.Provider, read.AllSessions));
+        CollectionAssert.AreEqual(new[] { "claude-haiku-4.5:off" }, read.Models.Select(static model => $"{model.ModelId}:{model.Mode}").ToArray());
+        CollectionAssert.AreEqual(new[] { "copilot:Copilot:-:only", "copilot:Copilot:claude-haiku-4.5:off" },
+            fixture.Service.CodeModeSettings(new(Epoch)).Scopes.Select(static scope => $"{scope.ProviderKey}:{scope.ProviderName}:{scope.ModelId ?? "-"}:{scope.Mode}").ToArray());
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "sk-kept", "nothing else of the provider changes");
+
+        Assert.AreEqual("ok", fixture.Service.SaveCodeModeScope(new(Epoch, "copilot", "claude-haiku-4.5", null)).Status);
+        Assert.AreEqual("ok", fixture.Service.SaveCodeModeScope(new(Epoch, "copilot", null, null)).Status);
+        Assert.AreEqual(0, fixture.Service.CodeModeSettings(new(Epoch)).Scopes.Count);
+        Assert.AreEqual("not_found", fixture.Service.SaveCodeModeScope(new(Epoch, "missing", null, "on")).Status);
+        Assert.AreEqual("invalid", fixture.Service.SaveCodeModeScope(new(Epoch, "copilot", null, "sometimes")).Status);
+        Assert.AreEqual("not_found", fixture.Service.CodeModeProvider(new(Epoch, "missing")).Status);
     }
 
     [TestMethod]

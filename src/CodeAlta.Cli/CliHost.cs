@@ -173,15 +173,22 @@ internal sealed class CliHost : IAsyncDisposable
                 },
             }, cancellationToken).ConfigureAwait(false);
             var alta = ComposeAlta(host, request.ListsSkills);
-            var codeMode = request.CodeMode ?? new CodeAltaConfigStore(catalog).LoadCodeModeMode();
-            host.Commands.SessionTools = CreateSessionTools(alta, codeMode is "on" or "only" ? new CodeModeSessionTools(new CodeModeToolOptions
+            // --code-mode wins over the settings, for every session; without it, each session has the mode of its provider and model.
+            var codeModeOptions = new CodeModeToolOptions
             {
                 Runs = host.CodeModeRuns,
                 Agents = new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents),
                 Library = host.CodeModeScripts,
                 Cache = new CodeAlta.CodeMode.CodeModeScriptCache(),
                 SourceFolder = sessionId => Path.Combine(storage.GlobalRoot, "scratchpad", "codemode", sessionId),
-            }, () => codeMode) : null);
+            };
+            var store = new CodeAltaConfigStore(catalog);
+            host.Commands.SessionTools = CreateSessionTools(alta, request.CodeMode switch
+            {
+                null => new CodeModeSessionTools(codeModeOptions, (providerKey, modelId) => CodeModeSessionTools.ResolveMode(store, providerKey, modelId)),
+                CodeModeScopes.Off => null,
+                { } fixedMode => new CodeModeSessionTools(codeModeOptions, () => fixedMode),
+            });
             // The MCP plugin that runs: one that was created but did not start is not used.
             var started = Volatile.Read(ref mcp) is { } created && host.PluginRuntime.ActivePlugins.Any(plugin => ReferenceEquals(plugin.Instance, created)) ? created : null;
             if (request.ChecksRequired && await CheckRequiredAsync(host, started, request, catalog, cancellationToken).ConfigureAwait(false) is { } missing)
@@ -439,7 +446,7 @@ internal sealed class CliHost : IAsyncDisposable
                     },
                 },
             ];
-            return codeMode?.Create(dispatcher, caller, tools) ?? tools;
+            return codeMode?.Create(dispatcher, caller, tools, request.ProviderKey, request.ModelId) ?? tools;
         };
 
     /// <summary>

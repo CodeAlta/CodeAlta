@@ -6,26 +6,36 @@ title: Code Mode
 
 With Code Mode, an agent can write a short JavaScript program that calls its tools, instead of calling them one by one. Loops, filters and calls in parallel then run without a round trip to the model, and only what the script returns comes back to it: fewer turns, fewer tokens, and work that keeps going while the model waits.
 
-Code Mode is off by default. When it is on, agents keep all their tools and get two more: `exec`, which runs a script, and `wait`, which waits for a script that goes on in the background.
+Code Mode is on by default, for every provider and model. Agents keep all their tools and get two more: `exec`, which runs a script, and `wait`, which waits for a script that goes on in the background.
 
 Their instructions lead them to it for work that splits. A request about several topics, files, modules or options becomes one script that gives each part to a sub-agent and runs them all at once, and you follow its steps and sessions [in the timeline](#in-the-timeline). A sub-agent does its own part itself instead of starting sub-agents of its own.
 
-## Turn it on
+## Turn it off or change it
 
-In CodeAlta Desktop, **Settings > Code Mode** has **Mode**:
+Turn it off for a small model with a short context: the description of `exec` takes a few thousand tokens of each request.
+
+In CodeAlta Desktop, **Settings > Code Mode** has **Mode**, for every session:
 
 - **Off**: agents call their tools one at a time, as usual.
-- **On**: agents also get `exec` and `wait`.
+- **On**, the default: agents also get `exec` and `wait`.
 - **Only**: agents get `exec` and `wait` in place of their tools, which they call from scripts. They still look at images and ask you questions directly.
 
-It is saved in `~/.alta/config.toml`:
+For a provider or one of its models: in **Settings > Providers**, select the provider, then **Code Mode**. Its select sets the mode of the provider; **Code Mode by model** adds a model with a mode of its own. **Follow the settings** leaves it to the next place: a session takes the mode of its model, else of its provider, else the one of **Settings > Code Mode**. **Where it applies**, on the Code Mode page, lists the providers and models that choose one, each a link to its provider.
+
+It is saved in `~/.alta/config.toml`, never in the file of a project:
 
 ```toml
 [code_mode]
-mode = "on"
+mode = "off"
+
+[providers.ollama]
+code_mode = "off"
+
+[providers.ollama.model_overrides."qwen3-coder"]
+code_mode = "off"
 ```
 
-A session takes the change with its next prompt. It applies to the sessions of the window, to the sessions agents create, and to CodeAlta TUI. With `altacli`, `--code-mode` turns it on for `run` and `acp` (`--code-mode=only` for **Only**), whatever the file says.
+A session takes the change with its next prompt. It applies to the sessions of the window, to the sessions agents create, and to CodeAlta TUI. With `altacli`, `--code-mode=on|only|off` sets the mode of every session of `run` and `acp`, whatever the file says; without it, the settings decide (on by default).
 
 Agents of Claude Code get `exec` and `wait` through CodeAlta's MCP server, beside `alta`. They and the [ACP agents](../model-providers/acp-agents.md) keep their own tools, so **Only** works as **On** for them.
 

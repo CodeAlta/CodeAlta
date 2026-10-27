@@ -106,14 +106,16 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     public bool RequiresCodeMode(string? sessionId) => sessionId is not null && _codeModeSessions.ContainsKey(sessionId);
 
     /// <summary>
-    /// Gets or sets what says the mode of Code Mode the host gives its sessions now (<c>off</c>, <c>on</c> or <c>only</c>);
-    /// null for a host whose sessions have no tools of Code Mode. The host that gives the tools sets it, so that the
-    /// instructions of a session speak of <c>exec</c> exactly when the session has it.
+    /// Gets or sets what says the mode of Code Mode the host gives a session now (<c>off</c>, <c>on</c> or <c>only</c>),
+    /// from the key of its provider and its model, either null; null for a host whose sessions have no tools of Code Mode.
+    /// The host that gives the tools sets it, so that the instructions of a session speak of <c>exec</c> exactly when the
+    /// session has it.
     /// </summary>
-    public Func<string>? Mode { get; set; }
+    public Func<string?, string?, string>? Mode { get; set; }
 
     /// <inheritdoc />
-    public string CodeModeOf(string? sessionId) => Mode is { } mode ? EffectiveMode(mode(), RequiresCodeMode(sessionId)) : "off";
+    public string CodeModeOf(string? sessionId, string? providerKey, string? modelId)
+        => Mode is { } mode ? EffectiveMode(mode(providerKey, modelId), RequiresCodeMode(sessionId)) : "off";
 
     /// <summary>Gets the mode a session has: the one of the setting, or <c>on</c> for a session that requires Code Mode while the setting is off.</summary>
     /// <param name="setting">The mode of the setting.</param>

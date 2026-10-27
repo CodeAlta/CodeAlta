@@ -129,6 +129,7 @@ internal static class CodeAltaConfigDocumentCopy
         Arguments = Copy(provider.Arguments),
         PermissionMode = provider.PermissionMode,
         Sandbox = provider.Sandbox,
+        CodeMode = provider.CodeMode,
         AnthropicApiKey = provider.AnthropicApiKey,
         RefusalFallback = provider.RefusalFallback,
         PromptCacheTtl = provider.PromptCacheTtl,
@@ -220,6 +221,7 @@ internal static class CodeAltaConfigDocumentCopy
             SupportsAttachments = modelOverride.SupportsAttachments,
             SupportsStructuredOutput = modelOverride.SupportsStructuredOutput,
             Sandbox = modelOverride.Sandbox,
+            CodeMode = modelOverride.CodeMode,
         }),
         ModelRequest = Copy(provider.ModelRequest, static modelRequest => new CodeAltaProviderModelRequestDocument
         {

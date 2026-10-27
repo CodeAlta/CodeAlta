@@ -51,7 +51,7 @@ public sealed partial class OwnedSessionCommandService
                     observedOnly: false).ConfigureAwait(false);
                 var policy = SessionExecutionPolicy.CaptureSession(session, project, _catalog.GlobalRoot, default, modelId, effort, session.AgentPromptId);
                 var options = SessionExecutionPolicy.BuildOptions(
-                    policy, ToolsFor(session.SessionId, project, project is null ? _catalog.GlobalRoot : WorkFolder(session, project), session.ResolvedProviderKey),
+                    policy, ToolsFor(session.SessionId, project, project is null ? _catalog.GlobalRoot : WorkFolder(session, project), session.ResolvedProviderKey, modelId),
                     _runtime.Permissions.OwnedDefaultPermissionHandler,
                     _runtime.Permissions.OwnedDefaultUserInputHandler);
                 // With what plugins give every run of the session, as a send has it: the next send keeps this

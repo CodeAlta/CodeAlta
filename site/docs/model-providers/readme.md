@@ -41,6 +41,7 @@ The provider editor can:
 - in CodeAlta Desktop, **Duplicate** a provider to add another account of the same type;
 - in CodeAlta Desktop, set the **Icon** and **Icon color** of a provider, and its **Spaces** with the chip of its row (see [Providers of a space](../spaces.md#providers-of-a-space));
 - in CodeAlta Desktop, run the sessions of a provider, or of one of its models, in a **Sandbox**, for example a provider of local models you trust less (see [Sandbox](../sessions/sandbox.md));
+- in CodeAlta Desktop, choose the **Code Mode** of a provider, or of one of its models (see [Code Mode](../sessions/code-mode.md#turn-it-off-or-change-it));
 - in CodeAlta Desktop, choose the **Model order** of the lists: the provider's order, by name, or by name with the newest version first, the default for [ACP agents](acp-agents.md);
 - store an API key, or name the environment variable that holds it;
 - check keys, endpoint URLs, missing credentials and settings that conflict;

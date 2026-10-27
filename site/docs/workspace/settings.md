@@ -126,7 +126,7 @@ In CodeAlta TUI, **Auto approve commands**, in the Workspace Settings, is on by 
 
 A mode decides what you are asked; an agent that is not sandboxed runs with your user privileges. **Settings > Sandbox** limits what it can read, write and reach whatever you approve: see [sandbox](../sessions/sandbox.md).
 
-**Settings > Code Mode** lets agents write scripts that call their tools; each call of a script asks as a call of the agent does. See [Code Mode](../sessions/code-mode.md).
+Code Mode, on by default, lets agents write scripts that call their tools; each call of a script asks as a call of the agent does. **Settings > Code Mode** sets it off, on or only for every session, and the **Code Mode** of a provider in **Settings > Providers** for that provider or one of its models. See [Code Mode](../sessions/code-mode.md).
 
 ### Answer a request
 

@@ -6,20 +6,31 @@ using CodeAlta.Orchestration.Runtime.Scripts;
 namespace CodeAlta.LiveTool.Scripts;
 
 /// <summary>
-/// Adds the tools of Code Mode to the tools a host gives a session, while Code Mode is on: a host asks again at every
-/// send, so a change of the setting reaches a session at its next send. Its runs follow its mode
-/// (<see cref="CodeModeRunRegistry.Mode"/>), which the instructions of the sessions read.
+/// Adds the tools of Code Mode to the tools a host gives a session, while Code Mode is on for its provider and its model:
+/// a host asks again at every send, so a change of the setting reaches a session at its next send. Its runs follow its
+/// mode (<see cref="CodeModeRunRegistry.Mode"/>), which the instructions of the sessions read.
 /// </summary>
 public sealed class CodeModeSessionTools
 {
     private readonly CodeModeToolOptions _options;
-    private readonly Func<string> _mode;
+    private readonly Func<string?, string?, string> _mode;
 
-    /// <summary>Creates the tools of a host.</summary>
+    /// <summary>Creates the tools of a host whose sessions all have one mode.</summary>
     /// <param name="options">The options of the host's Code Mode tools.</param>
     /// <param name="mode">Says the mode of Code Mode now: <c>off</c>, <c>on</c>, or <c>only</c>.</param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     public CodeModeSessionTools(CodeModeToolOptions options, Func<string> mode)
+        : this(options, Everywhere(mode ?? throw new ArgumentNullException(nameof(mode))))
+    {
+    }
+
+    private static Func<string?, string?, string> Everywhere(Func<string> mode) => (_, _) => mode();
+
+    /// <summary>Creates the tools of a host whose sessions have the mode of their provider and their model.</summary>
+    /// <param name="options">The options of the host's Code Mode tools.</param>
+    /// <param name="mode">Says the mode of Code Mode now for the key of a provider and a model, either null: <c>off</c>, <c>on</c>, or <c>only</c>.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public CodeModeSessionTools(CodeModeToolOptions options, Func<string?, string?, string> mode)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _mode = mode ?? throw new ArgumentNullException(nameof(mode));
@@ -31,8 +42,9 @@ public sealed class CodeModeSessionTools
     public CodeModeToolOptions Options => _options;
 
     /// <summary>
-    /// Creates the Code Mode tools of a host that follows the user's file (<c>[code_mode] mode</c>): read again at every
-    /// send, and off when the file cannot be read.
+    /// Creates the Code Mode tools of a host that follows the user's file (<see cref="CodeModeScopes"/>): the mode of the
+    /// model of a session, of its provider, of every session, else <c>on</c>; read again at every send,
+    /// and off when the file cannot be read.
     /// </summary>
     /// <param name="runs">The runs of the host.</param>
     /// <param name="catalog">The roots of the host, whose configuration file says the mode.</param>
@@ -98,34 +110,46 @@ public sealed class CodeModeSessionTools
             Cache = new CodeModeScriptCache(),
             SourceFolder = scratchpadRoot is { Length: > 0 } scratchpad ? sessionId => Path.Combine(scratchpad, "codemode", sessionId) : null,
         };
-        return new CodeModeSessionTools(options, () =>
+        return new CodeModeSessionTools(options, (providerKey, modelId) => ResolveMode(store, providerKey, modelId));
+    }
+
+    /// <summary>Resolves the mode of a session from the user's file (<see cref="CodeAltaConfigStore.ResolveCodeMode"/>); off when the file cannot be read.</summary>
+    /// <param name="store">The store of the user's file.</param>
+    /// <param name="providerKey">The key of the provider of the session, or null.</param>
+    /// <param name="modelId">Its model, or null.</param>
+    /// <returns><c>off</c>, <c>on</c> or <c>only</c>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="store"/> is null.</exception>
+    public static string ResolveMode(CodeAltaConfigStore store, string? providerKey, string? modelId)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        try
         {
-            try
-            {
-                return store.LoadCodeModeMode();
-            }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException)
-            {
-                return "off";
-            }
-        });
+            return store.ResolveCodeMode(providerKey, modelId);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            return CodeModeScopes.Off;
+        }
     }
 
     /// <summary>
-    /// Returns the tools of a session, with <c>exec</c> and <c>wait</c> after them while Code Mode is on; in <c>only</c>,
-    /// <c>exec</c> takes over the others, which the model then calls through scripts.
+    /// Returns the tools of a session on a provider and a model, with <c>exec</c> and <c>wait</c> after them while Code
+    /// Mode is on for them; in <c>only</c>, <c>exec</c> takes over the others, which the model then calls through scripts.
     /// </summary>
     /// <param name="dispatcher">The dispatcher of <c>alta</c>.</param>
     /// <param name="caller">Who the session is, as for its <c>alta</c> tool.</param>
     /// <param name="tools">The other tools the host gives the session.</param>
+    /// <param name="providerKey">The key of the provider of this send, or null.</param>
+    /// <param name="modelId">The model of this send, or null.</param>
     /// <returns>The tools of the session.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    public IReadOnlyList<AgentToolDefinition> Create(AltaCommandDispatcher dispatcher, AltaSessionToolOptions caller, IReadOnlyList<AgentToolDefinition> tools)
+    public IReadOnlyList<AgentToolDefinition> Create(AltaCommandDispatcher dispatcher, AltaSessionToolOptions caller, IReadOnlyList<AgentToolDefinition> tools,
+        string? providerKey, string? modelId)
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(tools);
         // The session of an automation that runs a script has exec, whatever the setting says.
-        var mode = CodeModeRunRegistry.EffectiveMode(_mode(), _options.Runs.RequiresCodeMode(caller.SourceSessionIdProvider?.Invoke() ?? caller.SourceSessionId));
+        var mode = CodeModeRunRegistry.EffectiveMode(_mode(providerKey, modelId), _options.Runs.RequiresCodeMode(caller.SourceSessionIdProvider?.Invoke() ?? caller.SourceSessionId));
         return mode switch
         {
             "on" => [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options), .. ScriptTools(dispatcher, caller, tools)],

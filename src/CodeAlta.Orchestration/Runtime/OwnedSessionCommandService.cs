@@ -259,8 +259,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// </remarks>
     public PluginOrchestrationBridge? Plugins { get; init; }
 
-    private IReadOnlyList<AgentToolDefinition> ToolsFor(string? sessionId, ProjectDescriptor? project, string workingDirectory, string providerKey, SpaceFilter? spaces = null)
-        => SessionTools?.Invoke(new(sessionId, project?.Id, workingDirectory, providerKey) { ProjectDirectory = project?.ProjectPath, Spaces = spaces }) ?? [];
+    private IReadOnlyList<AgentToolDefinition> ToolsFor(string? sessionId, ProjectDescriptor? project, string workingDirectory, string providerKey, string? modelId, SpaceFilter? spaces = null)
+        => SessionTools?.Invoke(new(sessionId, project?.Id, workingDirectory, providerKey) { ModelId = modelId, ProjectDirectory = project?.ProjectPath, Spaces = spaces }) ?? [];
 
     /// <summary>
     /// Gets whether one more command can be admitted: the owner keeps fewer receipts than it can, or one of them
@@ -435,7 +435,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         var directory = project?.ProjectPath ?? _catalog.GlobalRoot;
         var policy = SessionExecutionPolicy.CapturePreferred(provider.ProviderId, directory,
             project is null ? [] : [directory], project, provider.DefaultModelId, provider.DefaultReasoningEffort, null);
-        var options = SessionExecutionPolicy.BuildOptions(policy, ToolsFor(null, project, worktreeDirectory ?? directory, provider.ProviderId.Value),
+        var options = SessionExecutionPolicy.BuildOptions(policy, ToolsFor(null, project, worktreeDirectory ?? directory, provider.ProviderId.Value, provider.DefaultModelId),
             _runtime.Permissions.OwnedDefaultPermissionHandler, _runtime.Permissions.OwnedDefaultUserInputHandler, permissionMode);
         return Plugins is null ? Create(options) : CreateWithPluginsAsync(Plugins, options);
 
@@ -1195,7 +1195,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             // The tools a space limits follow the space of the session as it is at this send.
             var spaces = SessionTools is null ? null : await _runtime.GetSpaceFilterAsync(session.SpaceId, project, operation.Execution.Token).ConfigureAwait(false);
             var options = SessionExecutionPolicy.BuildOptions(
-                policy, ToolsFor(session.SessionId, project, project is null ? _catalog.GlobalRoot : WorkFolder(session, project), session.ResolvedProviderKey, spaces),
+                policy, ToolsFor(session.SessionId, project, project is null ? _catalog.GlobalRoot : WorkFolder(session, project), session.ResolvedProviderKey, modelId, spaces),
                 _runtime.Permissions.OwnedDefaultPermissionHandler,
                 _runtime.Permissions.OwnedDefaultUserInputHandler);
             if (Plugins is not null)
