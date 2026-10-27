@@ -263,6 +263,12 @@ public sealed class CodeAltaHostOptions
     public bool IsHeadless { get; init; }
 
     /// <summary>
+    /// Gets the clock of what the host schedules for its sessions (the holds of providers whose limit is reached, the
+    /// resumes after a limit); the system clock when null.
+    /// </summary>
+    public TimeProvider? TimeProvider { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether interactive UI services are available to plugins and adapters.
     /// </summary>
     public bool HasInteractiveUi { get; init; }

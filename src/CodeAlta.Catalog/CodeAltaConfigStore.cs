@@ -2133,7 +2133,7 @@ public sealed partial class CodeAltaConfigStore
                 if (tiers is { Complex: null, Standard: null, Quick: null }) models.Tiers = null;
             }
 
-            if (models.Fallback is { Enabled: null or false, On: null }) models.Fallback = null;
+            if (models.Fallback is { Enabled: null or false, On: null, Resume: null or false, MaxResumes: null }) models.Fallback = null;
             if (models is { Tiers: null, Fallback: null }) document.Models = null;
         }
 

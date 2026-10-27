@@ -591,6 +591,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             operation.Work = RunSendAsync(operation);
         }
         operation.Launch.TrySetResult();
+        // A session given a prompt no longer waits for a resume after a limit.
+        Fallback.NoteSend(request.SessionId, request.Provenance);
         return new(OwnedSessionCommandAdmissionKind.Accepted, operation.Receipt);
     }
 

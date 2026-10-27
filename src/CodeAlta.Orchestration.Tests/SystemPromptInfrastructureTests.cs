@@ -468,10 +468,10 @@ public sealed class SystemPromptInfrastructureTests
         WriteSystem(appBase, "default", "Built-in default system.");
         WritePrompt(appBase, "default", "Default", "default", "Built-in default prompt.");
         var builder = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase));
-        string Build(string? tiers, bool fallback) => builder.Build(new SystemPromptBuildRequest
+        string Build(string? tiers, bool fallback, bool resume = false) => builder.Build(new SystemPromptBuildRequest
         {
             ProviderKey = "codex", ProviderType = "codex", ProtocolFamily = "codex",
-            ModelTiers = tiers, ModelFallback = fallback,
+            ModelTiers = tiers, ModelFallback = fallback, ModelResume = resume,
             Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = temp.Path, Kind = SessionViewKind.GlobalSession },
             PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
         }).DeveloperInstructions!;
@@ -481,6 +481,9 @@ public sealed class SystemPromptInfrastructureTests
         StringAssert.Contains(listed, "- Model tiers: `quick` (claude-code:haiku@low). Give a session one with `alta session create --tier <name>` instead of naming a model.");
         Assert.IsFalse(listed.Contains("goes on with the next model", StringComparison.Ordinal));
         StringAssert.Contains(Build("`quick` (claude-code:haiku@low)", fallback: true), "a session goes on with the next model of its tier");
+        Assert.IsFalse(Build("`quick` (claude-code:haiku@low)", fallback: true).Contains("resumes by itself", StringComparison.Ordinal));
+        StringAssert.Contains(Build("`quick` (claude-code:haiku@low)", fallback: true, resume: true),
+            "When every model of its tier reached its limit, it resumes by itself once a limit resets: a session that waits for it has not failed.");
     }
 
     [TestMethod]

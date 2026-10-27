@@ -152,7 +152,8 @@ public sealed class CatalogYamlSerializer
         public string? Sandbox { get; set; }
     }
 
-    // The fallback of a space, as [models.fallback] writes it: enabled, and the failures it falls back on.
+    // The fallback of a space, as [models.fallback] writes it: enabled, the failures it falls back on, and the resume
+    // after a limit.
     private sealed class SpaceFallbackFrontMatter
     {
         [JsonPropertyName("enabled")]
@@ -162,6 +163,14 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("on")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<string>? On { get; set; }
+
+        [JsonPropertyName("resume")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Resume { get; set; }
+
+        [JsonPropertyName("max_resumes")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? MaxResumes { get; set; }
     }
 
     private sealed class SpaceTiersFrontMatter
@@ -431,6 +440,10 @@ public sealed class CatalogYamlSerializer
             ? new ModelTiers.ModelFallbackSettings(own.Enabled ?? false,
                 on is null || on.Contains(ModelTiers.ModelFallbackSettings.QuotaTrigger),
                 on is null || on.Contains(ModelTiers.ModelFallbackSettings.UnavailableTrigger))
+            {
+                Resume = own.Resume ?? false,
+                MaxResumes = ModelTiers.ModelFallbackSettings.ClampMaxResumes(own.MaxResumes),
+            }
             : null;
         var identity = frontMatter.Identity;
         var git = identity?.Git is { } g
@@ -468,6 +481,8 @@ public sealed class CatalogYamlSerializer
                     {
                         Enabled = fallback.Enabled,
                         On = fallback.OnQuota && fallback.OnUnavailable ? null : [.. fallback.Triggers()],
+                        Resume = fallback.Resume ? true : null,
+                        MaxResumes = fallback.MaxResumes == ModelTiers.ModelFallbackSettings.DefaultMaxResumes ? null : fallback.MaxResumes,
                     }
                     : null,
                 Sandbox = sessions.Sandbox,

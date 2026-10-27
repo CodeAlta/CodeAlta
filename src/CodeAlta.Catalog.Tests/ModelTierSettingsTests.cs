@@ -138,6 +138,39 @@ public sealed class ModelTierSettingsTests
     }
 
     [TestMethod]
+    public void Config_RoundTripsTheResumeAfterALimit_AndOmitsItsDefaults()
+    {
+        WithStore(store =>
+        {
+            var tiers = Read(complex: [], standard: ["claude-code:opus@high"], quick: []);
+            var resuming = new ModelFallbackSettings(true, OnQuota: true, OnUnavailable: true) { Resume = true, MaxResumes = 3 };
+            store.SaveGlobalModelSettings(new ModelSettings(tiers, resuming));
+
+            var content = File.ReadAllText(store.ConfigPath);
+            StringAssert.Contains(content, "resume = true");
+            StringAssert.Contains(content, "max_resumes = 3");
+            Assert.AreEqual(resuming, store.LoadGlobalModelSettings().Fallback);
+
+            // The usual number of resumes is not written; nor is the resume while it is off.
+            store.SaveGlobalModelSettings(new ModelSettings(tiers, resuming with { MaxResumes = ModelFallbackSettings.DefaultMaxResumes }));
+            content = File.ReadAllText(store.ConfigPath);
+            StringAssert.Contains(content, "resume = true");
+            Assert.DoesNotContain("max_resumes", content);
+            store.SaveGlobalModelSettings(new ModelSettings(tiers, resuming with { Resume = false, MaxResumes = ModelFallbackSettings.DefaultMaxResumes }));
+            Assert.DoesNotContain("resume", File.ReadAllText(store.ConfigPath));
+            Assert.IsFalse(store.LoadGlobalModelSettings().Fallback.Resume);
+        });
+
+        // Off, five resumes in a row, unless the file says otherwise.
+        Assert.IsFalse(ModelFallbackSettings.Default.Resume);
+        Assert.AreEqual(5, ModelFallbackSettings.Default.MaxResumes);
+        var errors = ModelSettings.Validate(new CodeAltaModelSettingsDocument { Fallback = new CodeAltaModelFallbackDocument { Resume = true, MaxResumes = 0 } });
+        StringAssert.StartsWith(errors.Single(), "models.fallback.max_resumes:");
+        Assert.IsFalse(CodeAltaConfigStore.ValidateGlobalConfigContent("[models.fallback]\nmax_resumes = 51\n").IsValid);
+        Assert.IsTrue(CodeAltaConfigStore.ValidateGlobalConfigContent("[models.fallback]\nenabled = true\nresume = true\nmax_resumes = 50\n").IsValid);
+    }
+
+    [TestMethod]
     public void InvalidTargets_FailTheValidationOfTheFile()
     {
         var result = CodeAltaConfigStore.ValidateGlobalConfigContent("[models.tiers]\nquick = [\"haiku\"]\n");

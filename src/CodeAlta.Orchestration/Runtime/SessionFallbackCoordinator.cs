@@ -24,9 +24,10 @@ public sealed record SessionFallbackRecord(string SessionId, DateTimeOffset At, 
 /// The decision is made on the actor of the session, with the error of the run; the switch runs afterwards, once
 /// the send of the failed run has released the session. The parent of the session is not told of a failure it went
 /// on from, and its queue waits for the run that continues. When nothing can be taken, the failure goes through with
-/// a card that says what to do.
+/// a card that says what to do, or, when the settings ask for it and a limit stopped it, with a resume at the earliest
+/// reset of the limits of its tier (see the Resume part).
 /// </remarks>
-internal sealed class SessionFallbackCoordinator
+internal sealed partial class SessionFallbackCoordinator
 {
     /// <summary>A rate limit shorter than this is waited out by the provider: it is not a reason to change model.</summary>
     internal static readonly TimeSpan ShortRateLimit = TimeSpan.FromSeconds(60);
@@ -72,6 +73,9 @@ internal sealed class SessionFallbackCoordinator
         {
             if (!_closing.IsCancellationRequested) _closing.Cancel();
             running = [.. _running];
+            // A resume that waits stays in its store: the next start of the host arms it again.
+            foreach (var pending in _resumes.Values) pending.Timer?.Dispose();
+            _resumes.Clear();
         }
 
         try { await Task.WhenAll(running).ConfigureAwait(false); }
@@ -147,17 +151,25 @@ internal sealed class SessionFallbackCoordinator
                 string.Equals(candidate.Target.ModelId, notice.ModelId, StringComparison.OrdinalIgnoreCase)) continue;
             if (sameProvider && candidate.Is(notice.ProviderKey, notice.ModelId, notice.ReasoningEffort) && candidate.Reasoning == notice.ReasoningEffort) continue;
             if (IsExhausted(candidate.Target.ProviderKey, now)) continue;
-            // A queue that waits cannot follow the session to another provider: the switch is refused then.
-            if (!sameProvider && notice.HasQueuedPrompts) continue;
-            // Only a provider of the space of the session is approved for it.
-            if (!notice.Scope.IsProviderAvailable(candidate.Target.ProviderKey)) continue;
-            if (!IsUsable(candidate.Target, states)) continue;
-            // A sandboxed session goes on only where its sandbox holds its tools.
-            if (notice.Sandboxed && !SandboxedProviders.RunsInSandbox(_commands.SelectionProvider?.Invoke(new ModelProviderId(candidate.Target.ProviderKey))?.ProviderType)) continue;
+            if (!CanTake(candidate.Target, notice, states)) continue;
             return candidate;
         }
 
         return null;
+    }
+
+    // Whether the session of a notice can go on with a target, whatever its limits: its queue, its space, the state of
+    // the provider and its sandbox allow it.
+    private bool CanTake(ModelTierTarget target, RunFailureNotice notice, IReadOnlyList<ModelProviderStateSnapshot> states)
+    {
+        var sameProvider = string.Equals(target.ProviderKey, notice.ProviderKey, StringComparison.OrdinalIgnoreCase);
+        // A queue that waits cannot follow the session to another provider: the switch is refused then.
+        if (!sameProvider && notice.HasQueuedPrompts) return false;
+        // Only a provider of the space of the session is approved for it.
+        if (!notice.Scope.IsProviderAvailable(target.ProviderKey)) return false;
+        if (!IsUsable(target, states)) return false;
+        // A sandboxed session goes on only where its sandbox holds its tools.
+        return !notice.Sandboxed || SandboxedProviders.RunsInSandbox(_commands.SelectionProvider?.Invoke(new ModelProviderId(target.ProviderKey))?.ProviderType);
     }
 
     private bool IsExhausted(string providerKey, DateTimeOffset now)
@@ -185,18 +197,20 @@ internal sealed class SessionFallbackCoordinator
     private void Start(RunFailureNotice notice, ModelTier tier, ModelTierCandidate? next, IReadOnlyList<ModelProviderStateSnapshot> states,
         SessionRuntimeService.HeldRunFailure held)
     {
+        if (!Track(notice.SessionId, () => RunAsync(notice, tier, next, states, held))) _ = held.ReleaseAsync();
+    }
+
+    // Runs work of a session on its own, which the settlement of the session waits for and the closing of the host
+    // awaits. False when the host is closing: nothing was started.
+    private bool Track(string sessionId, Func<Task> work)
+    {
         Task task;
         lock (_gate)
         {
-            if (_closing.IsCancellationRequested)
-            {
-                task = held.ReleaseAsync();
-                return;
-            }
-
-            task = Task.Run(() => RunAsync(notice, tier, next, states, held));
+            if (_closing.IsCancellationRequested) return false;
+            task = Task.Run(work);
             _running.Add(task);
-            _runningSessions[notice.SessionId] = _runningSessions.GetValueOrDefault(notice.SessionId) + 1;
+            _runningSessions[sessionId] = _runningSessions.GetValueOrDefault(sessionId) + 1;
         }
 
         _ = task.ContinueWith(completed =>
@@ -204,11 +218,12 @@ internal sealed class SessionFallbackCoordinator
             lock (_gate)
             {
                 _running.Remove(completed);
-                if (--_runningSessions[notice.SessionId] == 0) _runningSessions.Remove(notice.SessionId);
+                if (--_runningSessions[sessionId] == 0) _runningSessions.Remove(sessionId);
             }
 
             _runtime.PulseSettlement();
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return true;
     }
 
     /// <summary>Gets whether a fallback of a session is under way: it holds what its failure would release.</summary>
@@ -227,9 +242,11 @@ internal sealed class SessionFallbackCoordinator
         {
             if (next is null)
             {
+                // A limit that resets: the session can wait for it, when the settings ask for it.
+                if (await TryScheduleResumeAsync(notice, tier, failure, from, states, held).ConfigureAwait(false)) return;
                 await WriteCardAsync(notice.SessionId, AgentSessionUpdateKind.Warning,
                     $"{Reason(from.Provider, from.Model, failure)}, and no other model of the {ModelTiers.NameOf(tier)} tier can take over. " +
-                    (failure.ResetsAt is not null ? "Choose another model, or send again after the reset." : "Choose another model, or send again later."),
+                    NoResumeAdvice(failure),
                     Details(notice, failure, from.Ref, to: null)).ConfigureAwait(false);
                 await held.ReleaseAsync().ConfigureAwait(false);
                 return;
@@ -392,7 +409,7 @@ internal sealed class SessionFallbackCoordinator
             details), CancellationToken.None).ConfigureAwait(false);
     }
 
-    private static JsonElement Details(RunFailureNotice notice, AgentFailureInfo failure, string from, string? to)
+    private static JsonElement Details(RunFailureNotice notice, AgentFailureInfo failure, string from, string? to, Action<Utf8JsonWriter>? more = null)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -403,6 +420,7 @@ internal sealed class SessionFallbackCoordinator
             if (to is not null) writer.WriteString("to", to);
             if (failure.ResetsAt is { } reset) writer.WriteString("resetsAt", reset.ToString("O", CultureInfo.InvariantCulture));
             if (notice.Error.RunId is { } runId) writer.WriteString("failedRunId", runId.Value);
+            more?.Invoke(writer);
             writer.WriteEndObject();
         }
 
@@ -440,7 +458,12 @@ internal sealed class SessionFallbackCoordinator
         => $"""
             [CodeAlta fallback]
             The last run stopped on {from.Provider} {from.Model} ({Reason(from.Provider, from.Model, failure)}). CodeAlta moved this session to {to} to finish it.
-            Go on from where it stopped. If it stopped before any answer, answer the prompt before this message, and do nothing more. If a tool call was running when it stopped, it may or may not have taken effect: check its result (the files, git status, the output of the command) before you run it again, and do not redo what is already done.
-            This message comes from CodeAlta, not from the user.
+            {ContinuationInstructions}
             """;
+
+    // What the agent of a session that goes on after a failure is asked to do, after a fallback or a resume.
+    private const string ContinuationInstructions = """
+        Go on from where it stopped. If it stopped before any answer, answer the prompt before this message, and do nothing more. If a tool call was running when it stopped, it may or may not have taken effect: check its result (the files, git status, the output of the command) before you run it again, and do not redo what is already done.
+        This message comes from CodeAlta, not from the user.
+        """;
 }

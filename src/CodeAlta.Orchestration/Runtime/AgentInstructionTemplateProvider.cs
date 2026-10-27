@@ -319,6 +319,7 @@ public sealed class AgentInstructionTemplateProvider
             CommitCoAuthor = _configStore?.LoadGlobalCommitCoAuthor() ?? true,
             ModelTiers = ModelTierResolver.DescribeForAgents(tiers.Tiers, tiers.IsProviderAvailable),
             ModelFallback = tiers.Fallback.Enabled,
+            ModelResume = tiers.Fallback is { Enabled: true, OnQuota: true, Resume: true },
             // The provider and the model of this send, as its tools resolve them.
             CodeMode = CodeModeOf?.Invoke(session.SessionId, session.ResolvedProviderKey, model) ?? "off",
         });

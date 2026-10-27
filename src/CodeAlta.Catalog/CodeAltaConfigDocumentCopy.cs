@@ -79,7 +79,7 @@ internal static class CodeAltaConfigDocumentCopy
                         ? new CodeAltaModelTiersDocument { Complex = Copy(tiers.Complex), Standard = Copy(tiers.Standard), Quick = Copy(tiers.Quick) }
                         : null,
                     Fallback = models.Fallback is { } fallback
-                        ? new CodeAltaModelFallbackDocument { Enabled = fallback.Enabled, On = Copy(fallback.On) }
+                        ? new CodeAltaModelFallbackDocument { Enabled = fallback.Enabled, On = Copy(fallback.On), Resume = fallback.Resume, MaxResumes = fallback.MaxResumes }
                         : null,
                 }
                 : null,
