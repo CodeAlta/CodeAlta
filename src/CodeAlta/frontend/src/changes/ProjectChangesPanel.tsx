@@ -27,7 +27,8 @@ import type { DiffEditors } from "../monaco/DiffEditor";
 import type { monaco } from "../monaco/monacoEnvironment";
 import { ReviewBar } from "../review/ReviewBar";
 import { ReviewCommentsList } from "../review/ReviewCommentsList";
-import { nextReviewThread, reviewKeyAction, reviewOrder, reviewTargetOfScope, threadCountsByFile, typingTarget, viewedFiles, type FileThreadCounts } from "../review/changesReview";
+import { nextReviewThread, reviewChoiceAfterRequest, reviewKeyAction, reviewOrder, reviewTargetOfScope, threadCountsByFile, typingTarget, viewedFiles,
+  type FileThreadCounts } from "../review/changesReview";
 import { orderThreads, threadCounts, type ReviewFilter, type ReviewThread } from "../review/reviewThreads";
 import { ReviewThreadCard } from "../review/ReviewThreadCard";
 import { reviewSessions } from "../review/reviewSessions";
@@ -321,7 +322,30 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const reviewList = useReviewList(reviews, reviewTarget ? reviewScope : null, reviewTarget);
   const [reviewChoice, setReviewChoice] = useState<boolean | null>(null);
   const reviewWaits = reviewList.threads.some(thread => thread.state !== "resolved") || !!reviewList.request;
+  // A request answered, here or in the session, gives the review mode back to what waits.
+  const requestId = reviewList.loaded ? reviewList.request?.id ?? null : undefined;
+  const shownRequest = useRef<string | null>(null);
+  useEffect(() => {
+    if (requestId === undefined) return;
+    const before = shownRequest.current;
+    shownRequest.current = requestId;
+    setReviewChoice(choice => reviewChoiceAfterRequest(choice, before, requestId));
+  }, [requestId]);
   const reviewing = !!reviewTarget && !!reviewScope && (reviewChoice ?? reviewWaits);
+  // Whether the user approved the work tree as it is now: read again with the list of the files (which follows the
+  // work tree) and after each round, while the review shows and no agent asks for another.
+  const [approval, setApproval] = useState<Readonly<{ key: string; current: boolean }> | null>(null);
+  const approvalKey = JSON.stringify([tab.projectId, checkout]);
+  const lastRound = reviewList.rounds.at(-1)?.id ?? null;
+  useEffect(() => {
+    if (!reviewing || !reviews || !reviewScope || !reviewTarget || reviewList.request) return;
+    let alive = true;
+    void reviews.approval(reviewScope).then(value => {
+      if (alive) setApproval(current => current?.key === approvalKey && current.current === !!value?.current ? current : { key: approvalKey, current: !!value?.current });
+    });
+    return () => { alive = false; };
+  }, [reviewing, reviews, reviewScope, reviewTarget, reviewList.request, list, lastRound, approvalKey]);
+  const approved = !reviewList.request && approval?.key === approvalKey && approval.current;
   const reviewActions = useReviewActions(reviews, reviewing ? reviewScope : null, !!reviewList.readOnly);
   const reviewThreads = reviewing ? reviewList.threads : noThreads;
   const fileThreads = useMemo(() => threadCountsByFile(reviewThreads), [reviewThreads]);
@@ -572,7 +596,9 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const reviewBar = reviewing && reviews && reviewScope && reviewTarget && list && <ReviewBar showPaths projectId={tab.projectId} threads={reviewList.threads} readOnly={reviewList.readOnly}
     title={<span className="review-bar-file">{reviewTarget.kind === "branch" ? t("Since {reference}", { reference: list.baseReference ?? "" }) : t("Uncommitted changes")}</span>}
     detail={<>{shownWorktree ? shownWorktree.name : projectName ?? ""}{list.files.length > 0 && ` · ${t("{viewed}/{count} files viewed", { viewed: viewed.size, count: list.files.length })}`}
-      {reviewList.request && <span className="review-bar-request"> · {t("Review requested by {session}", { session: requester?.title ?? reviewList.request.title ?? t("an agent") })}</span>}</>}
+      {reviewList.request && <span className="review-bar-request"> · {t("Review requested by {session}", { session: requester?.title ?? reviewList.request.title ?? t("an agent") })}</span>}
+      {approved && <span className="review-bar-approved" title={t("You approved the uncommitted changes as they are now: the agent may commit them.")}>
+        {" · "}<AppIcon name="checked" size={12} />{t("Approved")}</span>}</>}
     onReveal={revealThread} onResolveAddressed={async () => (await reviews.resolveAddressed(reviewScope, reviewTarget)).ok}
     onDelete={reviewDeleter(reviews, reviewScope, reviewTarget, t)}
     submit={<SubmitReviewButton disabled={!!reviewList.readOnly} comments={threadCounts(reviewList.threads)}

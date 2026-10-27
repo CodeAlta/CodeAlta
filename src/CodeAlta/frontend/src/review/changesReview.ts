@@ -99,8 +99,20 @@ export function reviewHeightEstimate(threads: number): number {
 
 /**
  * Whether the composer says "Changes waiting for your review": the session reviews before commit, its checkout has
- * uncommitted changes, no agent waits for a review of them already, and no run is active (the agent may still be at work).
+ * uncommitted changes, no agent waits for a review of them already, no run is active (the agent may still be at work),
+ * and the work tree is not the one the user approved last. An approval holds until a file changes, whatever is
+ * committed meanwhile: what the agent left uncommitted after it was approved does not wait for another review.
  */
-export function changesWaitForReview(state: Readonly<{ reviewBeforeCommit: boolean | null; changedFiles: number | null; requested: boolean; running: boolean }>): boolean {
-  return state.reviewBeforeCommit === true && (state.changedFiles ?? 0) > 0 && !state.requested && !state.running;
+export function changesWaitForReview(state: Readonly<{ reviewBeforeCommit: boolean | null; changedFiles: number | null; requested: boolean; running: boolean;
+  approved: boolean }>): boolean {
+  return state.reviewBeforeCommit === true && (state.changedFiles ?? 0) > 0 && !state.requested && !state.running && !state.approved;
+}
+
+/**
+ * The review mode the Changes tab keeps once the request of an agent is answered (`before` the id of the request it
+ * showed, `now` the one it shows): an answer, given here or in the session, gives the choice back to what waits, so
+ * that a review that is done does not stay open with its **Submit review** button.
+ */
+export function reviewChoiceAfterRequest(choice: boolean | null, before: string | null, now: string | null): boolean | null {
+  return before !== null && now !== before ? null : choice;
 }

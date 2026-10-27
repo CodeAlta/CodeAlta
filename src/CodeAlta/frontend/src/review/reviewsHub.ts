@@ -5,7 +5,7 @@ import { sameCheckout } from "./reviewSessions";
 import { orderThreads, readThread, type ReviewSide, type ReviewTargetKind, type ReviewThread, type ReviewVerdict } from "./reviewThreads";
 
 export type ReviewsApi = Pick<typeof reviews, "list" | "add" | "update" | "delete" | "deleteReview" | "resolve" | "resolveAddressed" | "reply" | "viewed" | "submit"
-  | "counts" | "watch">;
+  | "counts" | "watch"> & Partial<Pick<typeof reviews, "approval">>;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
 /** A checkout of a project: its folder (`checkout` null) or one of its worktrees, by its full path. */
@@ -21,6 +21,8 @@ export type ReviewList = Readonly<{ loaded: boolean; status: string; threads: re
   viewed: readonly ReviewViewedDto[]; request: ReviewRequestDto | null; readOnly: string | null }>;
 /** What waits in each checkout of a project that has reviews. */
 export type ReviewProjectCounts = Readonly<{ loaded: boolean; checkouts: readonly ReviewCheckoutCounts[] }>;
+/** The last approval of the changes of a checkout: its round, and whether the work tree is still the one approved. */
+export type ReviewApproval = Readonly<{ round: ReviewRoundDto; current: boolean }>;
 /** How a change ended: done, or refused with what the host said. */
 export type ReviewOutcome = Readonly<{ ok: boolean; status: string; message: string | null }>;
 export type ReviewThreadOutcome = ReviewOutcome & Readonly<{ thread: ReviewThread | null }>;
@@ -193,6 +195,18 @@ export function createReviewsHub(api: ReviewsApi, timers: Timers = { set: (run, 
     },
     /** Reads every retained review again. */
     refresh: readAll,
+    /**
+     * The last approval of the changes of a checkout, read now: the work tree changes without the host telling. Null
+     * when the last round of its changes or branch did not approve, or when it cannot be read.
+     */
+    async approval(scope: ReviewScope): Promise<ReviewApproval | null> {
+      const host = epoch;
+      if (!host || !api.approval) return null;
+      try {
+        const reply = await api.approval(base(host, scope), { timeoutMilliseconds: 60_000 });
+        return reply.status === "ok" && reply.round ? { round: reply.round, current: reply.current } : null;
+      } catch { return null; }
+    },
     /** Where the drafts of a checkout are, in review order: the files and the changes they are written on. */
     async drafts(scope: ReviewScope): Promise<readonly ReviewTarget[]> {
       const host = epoch;

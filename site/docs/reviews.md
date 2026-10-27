@@ -38,7 +38,7 @@ In CodeAlta Desktop you can review the changes of a project or a worktree withou
 - **Review changes** in the menu of a session, or `/review_changes`, opens the Changes tab on the folder or worktree the session works in;
 - **Open** beside **Changes waiting for your review**, above the prompt of a session (see [Review before commit](#review-before-commit)).
 
-The Changes tab stays in review mode while comments are not resolved or an agent waits for your review. Click **Review** again to leave it.
+The Changes tab stays in review mode while comments are not resolved or an agent waits for your review; once you answer the agent, here or in its session, it stays only while comments are not resolved. Click **Review** again to leave it.
 
 In review mode:
 
@@ -55,7 +55,7 @@ In review mode:
 | `]` / `[` | Goes to the next or previous file. |
 | `v` | Marks the file **Viewed**, or not. |
 
-The review bar says what is reviewed, where, how many files you viewed and which session asked for the review. **Submit review** sends it to that session; otherwise you choose one.
+The review bar says what is reviewed, where, how many files you viewed and which session asked for the review, or **Approved** while the changes are the ones you approved. **Submit review** sends it to that session; otherwise you choose one.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-review-changes.webp" alt="CodeAlta Desktop with a SharpYaml session at the left and its Changes tab in review mode at the right: a comment on a new line of the diff, marked addressed, with the answer of the agent under it" loading="lazy">
@@ -97,13 +97,13 @@ When you submit, the review and your answers go back to the agent in one message
 
 ## Review before commit
 
-When **Review before commit** is on, agents never commit by themselves. When their work is done, they ask for your review of the changes and stop. They commit once you approve, and only what you approved: a change made after your approval needs a new review. CodeAlta refuses an unapproved commit, whatever the permission mode of the session.
+When **Review before commit** is on, agents never commit by themselves. When their work is done, they ask for your review of the changes and stop. They commit once you approve, and only what you approved: a change made after your approval needs a new review. CodeAlta refuses an unapproved commit, whatever the permission mode of the session, and tells the agent which files changed since your approval.
 
 - **Settings > Sessions > Reviews > Review changes before commit** turns it on for every session.
 - The form of the **Agent** chip under the prompt has a **Review before commit** row: **On**, **Off**, or the setting (marked **Default**). Change it at any time; an eye on the chip shows it is on. The agent is told with its next prompt.
 - The form of a new session has the same row.
 
-While it is on, the line above the prompt says **Changes waiting for your review** when the session has uncommitted changes, nothing runs and the agent has not asked yet: click **Open**. Whether it is on or not, the same line shows your unsubmitted draft comments on the session's folder or worktree (*2 draft comments*), with **Open**.
+While it is on, the line above the prompt says **Changes waiting for your review** when the session has uncommitted changes that you did not approve, nothing runs and the agent has not asked yet: click **Open**. What stays uncommitted after your approval, unchanged, waits for nothing. Whether it is on or not, the same line shows your unsubmitted draft comments on the session's folder or worktree (*2 draft comments*), with **Open**.
 
 In CodeAlta TUI, agents do not commit either: they leave the changes uncommitted and tell you. Review them in CodeAlta Desktop.
 
