@@ -155,7 +155,8 @@ public sealed class MobilePlugin : PluginBase
         var server = new MobileServer(new MobileServerOptions
         {
             Port = _settings.Port, Token = () => _settings.Token!, Hosts = () => _state.TailnetHost is { } host ? [host] : [],
-            Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions), Live = _live, Logger = Logger,
+            Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions),
+            Asks = new MobileAsks(Services.Asks, sessions), Live = _live, Logger = Logger,
         });
         try
         {
@@ -347,7 +348,7 @@ public sealed class MobilePlugin : PluginBase
         {
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                _live.Flush();
+                _live.Flush(await Services.Asks.ListAskingSessionsAsync(cancellationToken).ConfigureAwait(false));
                 if (++ticks % 60 == 0) _live.Broadcast("ping", "{}");
             }
         }

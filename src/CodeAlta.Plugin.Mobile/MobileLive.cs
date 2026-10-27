@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -19,6 +20,8 @@ internal sealed class MobileLive
     private const int LineLength = 160;
     private readonly ConcurrentDictionary<string, Session> _sessions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Channel<string>, byte> _listeners = new();
+    // The sessions that wait for the user to answer a question or a review request, as the last flush read them.
+    private volatile FrozenSet<string> _asking = FrozenSet<string>.Empty;
 
     internal int ListenerCount => _listeners.Count;
 
@@ -40,11 +43,11 @@ internal sealed class MobileLive
     /// <param name="sessionId">The session.</param>
     /// <param name="projectId">Its project.</param>
     /// <param name="running">Whether a turn of it runs.</param>
-    internal static JsonObject Quiet(string sessionId, string? projectId, bool running) => new()
+    internal JsonObject Quiet(string sessionId, string? projectId, bool running) => new()
     {
         ["id"] = sessionId, ["projectId"] = projectId, ["live"] = running ? Running : Idle, ["kind"] = null, ["line"] = null,
         // alta steers a session whose turn runs, as `isRunning` says it.
-        ["at"] = null, ["activity"] = null, ["canSteer"] = running,
+        ["at"] = null, ["activity"] = null, ["canSteer"] = running, ["asking"] = _asking.Contains(sessionId),
     };
 
     /// <summary>Follows one event of a session.</summary>
@@ -125,14 +128,22 @@ internal sealed class MobileLive
     }
 
     /// <summary>Pushes the sessions that changed since the last flush; called a few times a second.</summary>
-    internal void Flush()
+    /// <param name="asking">
+    /// The sessions that wait for the user to answer a question or a review request, now; null keeps those of the last flush.
+    /// A session the plugin has not seen run is not told of: the list says it of each session the phone sees.
+    /// </param>
+    internal void Flush(IReadOnlyCollection<string>? asking = null)
     {
+        if (asking is not null) _asking = asking.ToFrozenSet(StringComparer.Ordinal);
+        var waiting = _asking;
         foreach (var (id, session) in _sessions)
         {
             Probe(id, session);
             string? payload = null;
             lock (session)
             {
+                var asks = waiting.Contains(id);
+                if (session.Asking != asks) { session.Asking = asks; session.Dirty = true; }
                 if (!session.Dirty) continue;
                 session.Dirty = false;
                 payload = session.ToJson(id).ToJsonString();
@@ -239,7 +250,7 @@ internal sealed class MobileLive
         internal bool Dirty;
         internal readonly HashSet<string> Tools = new(StringComparer.Ordinal);
         internal readonly MobileActivity Activity = new();
-        internal bool CanSteer, Probing;
+        internal bool CanSteer, Probing, Asking;
         internal int NotRunning;
         internal DateTimeOffset ProbedAt;
 
@@ -262,7 +273,7 @@ internal sealed class MobileLive
         {
             ["id"] = id, ["projectId"] = ProjectId, ["live"] = State, ["kind"] = Kind, ["line"] = Line, ["at"] = At == default ? null : At.ToString("O"),
             ["activity"] = Kind == "activity" ? Activity.ToJson(State != Idle) : null,
-            ["canSteer"] = CanSteer,
+            ["canSteer"] = CanSteer, ["asking"] = Asking,
         };
     }
 }

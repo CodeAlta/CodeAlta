@@ -42,10 +42,40 @@ public sealed class MobileLiveTests
     [TestMethod]
     public void AQuietSession_HasTheShapeOfALiveOne()
     {
-        var quiet = MobileLive.Quiet("s2", "p2", running: true);
-        CollectionAssert.AreEquivalent(new[] { "id", "projectId", "live", "kind", "line", "at", "activity", "canSteer" }, quiet.Select(static property => property.Key).ToArray());
-        Assert.AreEqual(("running", true), ((string?)quiet["live"], (bool)quiet["canSteer"]!));
+        var live = new MobileLive();
+        var quiet = live.Quiet("s2", "p2", running: true);
+        CollectionAssert.AreEquivalent(new[] { "id", "projectId", "live", "kind", "line", "at", "activity", "canSteer", "asking" }, quiet.Select(static property => property.Key).ToArray());
+        Assert.AreEqual(("running", true, false), ((string?)quiet["live"], (bool)quiet["canSteer"]!, (bool)quiet["asking"]!));
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-1"), "p1");
+        CollectionAssert.AreEquivalent(quiet.Select(static property => property.Key).ToArray(), live.Describe("s1")!.Select(static property => property.Key).ToArray());
     }
+
+    [TestMethod]
+    public void ASessionThatAsksTheUser_IsPushedWhenItStartsAndWhenItEndsToAsk()
+    {
+        var live = new MobileLive();
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-1"), "p1");
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Completed, "turn-1"), "p1");
+        live.Flush([]);
+        var phone = live.Subscribe();
+        Assert.IsTrue(phone.Reader.TryRead(out _), "the state of now");
+
+        live.Flush(["s1", "s-unseen"]);
+        Assert.IsTrue(phone.Reader.TryRead(out var asking));
+        Assert.IsTrue((bool)Data(asking)["asking"]!);
+        Assert.AreEqual("s1", (string?)Data(asking)["id"]);
+        Assert.IsFalse(phone.Reader.TryRead(out _), "A session the plugin has not seen run is not told of on the stream.");
+        Assert.IsTrue((bool)live.Quiet("s-unseen", "p1", running: false)["asking"]!, "The list says it of a session it shows.");
+
+        live.Flush(["s1"]);
+        live.Flush();
+        Assert.IsFalse(phone.Reader.TryRead(out _), "Nothing changed: nothing is pushed.");
+        live.Flush([]);
+        Assert.IsTrue(phone.Reader.TryRead(out var answered));
+        Assert.IsFalse((bool)Data(answered)["asking"]!);
+    }
+
+    private static JsonNode Data(string frame) => JsonNode.Parse(frame["event: session\ndata: ".Length..].Trim())!;
 
     [TestMethod]
     public void TheLine_IsTheFirstLineOfATextWithoutItsMarks()

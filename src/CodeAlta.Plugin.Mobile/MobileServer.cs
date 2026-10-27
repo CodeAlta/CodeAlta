@@ -33,6 +33,9 @@ internal sealed record MobileServerOptions
     /// <summary>Gets what the phone does through alta.</summary>
     public required MobileApi Api { get; init; }
 
+    /// <summary>Gets the questions and the review requests of the sessions, which the phone answers.</summary>
+    public required MobileAsks Asks { get; init; }
+
     /// <summary>Gets the live state of the sessions.</summary>
     public required MobileLive Live { get; init; }
 
@@ -134,6 +137,11 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapPost("/sessions/{id}/abort", async (string id, CancellationToken ct) => Json(await _options.Api.AbortAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/archive", async (string id, CancellationToken ct) => Json(await _options.Api.ArchiveAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/restore", async (string id, CancellationToken ct) => Json(await _options.Api.RestoreAsync(id, ct).ConfigureAwait(false)));
+        api.MapGet("/sessions/{id}/ask", async (string id, CancellationToken ct) => Json(await _options.Asks.GetAsync(id, ct).ConfigureAwait(false)));
+        api.MapPost("/sessions/{id}/ask/answer", async (string id, HttpRequest request, CancellationToken ct) =>
+            await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Asks.AnswerAsync(id, body, ct).ConfigureAwait(false)) : Invalid());
+        api.MapPost("/sessions/{id}/ask/cancel", async (string id, HttpRequest request, CancellationToken ct) =>
+            await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Asks.CancelAsync(id, body, ct).ConfigureAwait(false)) : Invalid());
 
         // A diagram to open in a tab of its own, at a link that needs no sign-in: a new tab of an app installed on iOS opens in
         // Safari, which has neither the app's cookie nor its storage. The link is a random id, kept two hours.
