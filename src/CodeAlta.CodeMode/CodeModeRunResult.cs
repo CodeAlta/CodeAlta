@@ -154,6 +154,19 @@ public enum CodeModeOutputKind
 /// <param name="StepId">The step that wrote it, or null.</param>
 public sealed record CodeModeOutputEntry(CodeModeOutputKind Kind, string Text, string? StepId);
 
+/// <summary>
+/// A picture a script attached to its result with <c>image(path, { title })</c>. The script does not read the file: the host
+/// reads it when the run ends, and gives it to the model and to the user with the result.
+/// </summary>
+/// <param name="Path">The path of the file: full when the run had a working folder, otherwise as the script gave it.</param>
+/// <param name="Title">The title the script gave it, or null.</param>
+/// <param name="StepId">The step that attached it, or null.</param>
+public sealed record CodeModeImage(string Path, string? Title, string? StepId)
+{
+    /// <summary>The most pictures one run attaches; <c>image()</c> beyond them writes a warning instead.</summary>
+    public const int MaxPerRun = 8;
+}
+
 /// <summary>What a run did.</summary>
 /// <param name="Status">How it ended.</param>
 /// <param name="Duration">Its wall time.</param>
@@ -173,6 +186,9 @@ public sealed record CodeModeRunResult(CodeModeRunStatus Status, TimeSpan Durati
 
     /// <summary>Gets the output of the script, in its order.</summary>
     public IReadOnlyList<CodeModeOutputEntry> Output { get; init; } = [];
+
+    /// <summary>Gets the pictures the script attached to its result (<c>image()</c>), in their order; at most <see cref="CodeModeImage.MaxPerRun"/>.</summary>
+    public IReadOnlyList<CodeModeImage> Images { get; init; } = [];
 
     /// <summary>Gets how many characters of output were dropped beyond the log limit.</summary>
     public int DroppedOutputCharacters { get; init; }

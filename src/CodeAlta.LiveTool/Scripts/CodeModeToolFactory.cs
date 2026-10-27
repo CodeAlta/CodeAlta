@@ -112,7 +112,7 @@ public static class CodeModeToolFactory
         - `workflow("name", args)` runs a script of the library (the project's `.alta/scripts`, the user's, the samples) and resolves with what it returns: `codemode.search` finds them as `workflow:<name>`, and `codemode.describe({ path: "workflow:<name>" })` gives their arguments. `workflow({ scriptPath }, args)` runs a script file.
         - `ask(question, { choices, default })` asks the user and resolves with the answer; it throws an `AskError` (code `cancelled` or `unavailable`, as in an automation).
         - `sleep(duration)` waits (milliseconds, or "30s", "5m", "2h", "1d"; 7 days at most): a run CodeAlta ended during goes on by itself when it wakes.
-        - `step(id, fn)` groups the calls of one part of the work; `log(...)`, `console.log(...)` and `text(...)` write output; `args` holds the arguments of the run.
+        - `step(id, fn)` groups the calls of one part of the work; `log(...)`, `console.log(...)` and `text(...)` write output; `args` holds the arguments of the run. `image(path, { title })` attaches a picture to the result: the user sees it, and you too.
         - `store(key, value)` keeps a JSON value for the later scripts of this session, and `load(key)` reads it back (undefined when there is none).
 
         Calls run at the same time under `Promise.all`; tools that change files run one at a time. Await every call whose result matters: calls still pending when the script returns are cancelled. A failed call throws an error you can catch, and the calls made before a failure are not undone.
@@ -353,6 +353,7 @@ public static class CodeModeToolFactory
                         AgentWorkflowEventKind.ScriptLoaded, record => record with { ScriptName = script.Name, ScriptScope = ScopeName(script.Scope) })),
                     ArgumentsJson = plan?.Run.ArgumentsJson,
                     Replay = plan?.Replay,
+                    WorkingDirectory = cwd,
                 }, observer, runCancellation);
             }, out var refusal);
         if (run is null)
@@ -432,7 +433,7 @@ public static class CodeModeToolFactory
         {
             return result is null
                 ? new AgentToolResult(true, [new AgentToolResultItem.Text($"Script {run.Id} ended; its result was already given to this session.")])
-                : new AgentToolResult(result.Status == CodeModeRunStatus.Completed, [new AgentToolResultItem.Text(await options.Runs.FormatResultAsync(run, result).ConfigureAwait(false))]);
+                : new AgentToolResult(result.Status == CodeModeRunStatus.Completed, await WithImagesAsync(options.Runs, run, result, await options.Runs.FormatResultAsync(run, result).ConfigureAwait(false)).ConfigureAwait(false));
         }
 
         return new AgentToolResult(true, [new AgentToolResultItem.Text(CodeModeResultFormatter.FormatRunning(run.Id, run.Elapsed, run.Calls, run.RecentOutput()))]);
@@ -505,7 +506,16 @@ public static class CodeModeToolFactory
         var text = await runs.FormatResultAsync(run, result, execOptions.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens).ConfigureAwait(false);
         var header = text.IndexOf('\n') + 1;
         text = text[..header] + SourceLine(sourcePath) + text[header..];
-        return new AgentToolResult(result.Status == CodeModeRunStatus.Completed, [new AgentToolResultItem.Text(text)], result.Error is { } error ? $"{error.Name}: {error.Message}" : null);
+        return new AgentToolResult(result.Status == CodeModeRunStatus.Completed, await WithImagesAsync(runs, run, result, text).ConfigureAwait(false),
+            result.Error is { } error ? $"{error.Name}: {error.Message}" : null);
+    }
+
+    // The text of a result, then the pictures the script attached (image()): the session keeps them with its attachments,
+    // and the model and the user see them as the images of a tool.
+    private static async Task<IReadOnlyList<AgentToolResultItem>> WithImagesAsync(CodeModeRunRegistry runs, CodeModeRunHandle run, CodeModeRunResult result, string text)
+    {
+        var images = await runs.ReadImagesAsync(run, result).ConfigureAwait(false);
+        return [new AgentToolResultItem.Text(text), .. images.Images.Select(static image => new AgentToolResultItem.Image(Convert.ToBase64String(image.Bytes), image.MediaType, image.Title))];
     }
 
     private static string SourceLine(string? sourcePath) => sourcePath is null ? string.Empty : $"Source: {sourcePath}\n";

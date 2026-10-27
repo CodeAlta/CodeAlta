@@ -374,6 +374,59 @@ public sealed class CodeModeRunTests
     }
 
     [TestMethod]
+    public async Task Image_RecordsAPictureForTheResult_FromTheWorkingFolder()
+    {
+        var folder = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "codemode-images"));
+        var full = Path.Combine(folder, "full.png");
+        var result = await RunAsync($$"""
+            image("out/chart.png", { title: "Chart" });
+            await step("map", async () => image({{JsonSerializer.Serialize(full)}}));
+            return "done";
+            """, options: new() { WorkingDirectory = folder });
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        Assert.AreEqual(new CodeModeImage(Path.Combine(folder, "out", "chart.png"), "Chart", null), result.Images[0]);
+        Assert.AreEqual(new CodeModeImage(full, null, "map"), result.Images[1]);
+        Assert.HasCount(2, result.Images);
+    }
+
+    [TestMethod]
+    public async Task Image_WithoutAPathString_IsATypeError()
+    {
+        var result = await RunAsync("""
+            const errors = [];
+            for (const call of [() => image(), () => image(42), () => image("a.png", "title")]) {
+              try { call(); } catch (e) { errors.push(`${e.name}: ${e.message}`); }
+            }
+            return errors;
+            """);
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        using var errors = JsonDocument.Parse(result.ValueJson!);
+        Assert.AreEqual(3, errors.RootElement.GetArrayLength());
+        foreach (var error in errors.RootElement.EnumerateArray())
+        {
+            StringAssert.StartsWith(error.GetString(), "TypeError: image(path, { title }):");
+        }
+
+        Assert.IsEmpty(result.Images);
+    }
+
+    [TestMethod]
+    public async Task Image_BeyondTheMostOfARun_IsAWarning()
+    {
+        var result = await RunAsync("""
+            for (let i = 0; i < 10; i++) image(`/pictures/${i}.png`);
+            """);
+
+        Assert.HasCount(CodeModeImage.MaxPerRun, result.Images);
+        Assert.AreEqual("/pictures/7.png", result.Images[^1].Path);
+        var warnings = result.Output.Where(static entry => entry.Kind == CodeModeOutputKind.Warning).ToArray();
+        Assert.HasCount(2, warnings);
+        Assert.AreEqual("image: /pictures/8.png is not attached: a result has 8 pictures at most.", warnings[0].Text);
+    }
+
+    [TestMethod]
     public async Task ArgsClockAndRandom_ComeFromTheRun()
     {
         var options = new CodeModeRunOptions

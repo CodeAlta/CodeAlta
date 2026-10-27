@@ -466,6 +466,13 @@ public sealed class SessionViewQueuedPrompt
     public string? PromptPreview { get; set; }
 
     /// <summary>
+    /// Gets or sets the images sent with the prompt, saved with the attachments of the session (such as the pictures of the
+    /// result of a script); null for none.
+    /// </summary>
+    [JsonPropertyName("images")]
+    public List<SessionViewQueuedPromptImage>? Images { get; set; }
+
+    /// <summary>
     /// Gets or sets the durable queue state, such as <c>queued</c>, <c>submitting</c>, <c>submitted</c>, or <c>failed</c>.
     /// </summary>
     [JsonPropertyName("state")]
@@ -555,6 +562,30 @@ public sealed class SessionViewQueuedPrompt
             throw new ArgumentException("SubmittedBy kind is required when queued prompt attribution is present.", nameof(SubmittedBy));
         }
     }
+}
+
+/// <summary>
+/// Describes an image of a queued prompt: a file saved with the attachments of its session.
+/// </summary>
+public sealed class SessionViewQueuedPromptImage
+{
+    /// <summary>
+    /// Gets or sets the full path of the saved file.
+    /// </summary>
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the title of the image.
+    /// </summary>
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    /// <summary>
+    /// Gets or sets the media type of the image, such as <c>image/png</c>.
+    /// </summary>
+    [JsonPropertyName("media_type")]
+    public string? MediaType { get; set; }
 }
 
 /// <summary>

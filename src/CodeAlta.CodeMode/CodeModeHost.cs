@@ -30,6 +30,12 @@ public sealed record CodeModeRunOptions
     /// <summary>Gets how deep scripts may start scripts: a nested run of this depth cannot start another one.</summary>
     public int MaxWorkflowDepth { get; init; } = 3;
 
+    /// <summary>
+    /// Gets the folder a relative path of <c>image(path)</c> starts from: the working folder of the session; null keeps the
+    /// path as the script gave it.
+    /// </summary>
+    public string? WorkingDirectory { get; init; }
+
     /// <summary>Gets the depth of this run: 0 for the script <c>exec</c> runs.</summary>
     internal int Depth { get; init; }
 

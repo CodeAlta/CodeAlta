@@ -20,6 +20,15 @@ public sealed class CodeModeResultFormatterTests
     }
 
     [TestMethod]
+    public void TheLinesOfTheHost_GoBeforeTheResult()
+    {
+        var text = CodeModeResultFormatter.Format(Completed("done", "checked"), CodeModeResultFormatter.DefaultMaxOutputTokens, null,
+            ["Images: 1 attached (Chart)", "image skipped: C:\\out\\a.txt: not a PNG, JPEG, GIF or WebP picture."]);
+
+        Assert.AreEqual("Script completed · 2.0 s · no calls\nOutput:\n```\nchecked\n```\nImages: 1 attached (Chart)\nimage skipped: C:\\out\\a.txt: not a PNG, JPEG, GIF or WebP picture.\nResult:\ndone\n", text);
+    }
+
+    [TestMethod]
     public void TheAnswersOfSubAgents_AreSectionsOfMarkdown()
     {
         var presented = CodeModeResultFormatter.Present(JsonSerializer.Serialize(new[] { "## One\nfirst\n", "## Two\nsecond" }));

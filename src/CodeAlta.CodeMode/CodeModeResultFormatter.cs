@@ -119,8 +119,19 @@ public static class CodeModeResultFormatter
     /// <returns>The text for the model.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="result"/> is null.</exception>
     public static string Format(CodeModeRunResult result, int maxOutputTokens, string? fullResultPath)
+        => Format(result, maxOutputTokens, fullResultPath, []);
+
+    /// <summary>Formats a finished run, with lines of the host before its result, such as the pictures it attached.</summary>
+    /// <param name="result">The result of the run.</param>
+    /// <param name="maxOutputTokens">The output budget, in tokens.</param>
+    /// <param name="fullResultPath">The file that keeps the whole result, or null when none does.</param>
+    /// <param name="notes">The lines of the host, in their order; each is written on a line of its own.</param>
+    /// <returns>The text for the model.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="result"/> or <paramref name="notes"/> is null.</exception>
+    public static string Format(CodeModeRunResult result, int maxOutputTokens, string? fullResultPath, IReadOnlyList<string> notes)
     {
         ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(notes);
         var budget = Budget(maxOutputTokens);
         var builder = new StringBuilder();
         var status = result.Status switch
@@ -168,6 +179,11 @@ public static class CodeModeResultFormatter
         if (result.Calls.Count > 0 && result.Duration >= TimeSpan.FromSeconds(1))
         {
             builder.Append(Profile(result)).Append('\n');
+        }
+
+        foreach (var note in notes)
+        {
+            builder.Append(note).Append('\n');
         }
 
         // The result comes last: everything after its line is the value, which the window shows as Markdown.

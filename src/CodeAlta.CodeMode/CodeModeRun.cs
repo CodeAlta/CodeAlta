@@ -58,6 +58,7 @@ internal sealed partial class CodeModeRun
     private readonly Stopwatch _limitClock = new();
     private int _userWaits;
     private readonly List<CodeModeOutputEntry> _output = [];
+    private readonly List<CodeModeImage> _images = [];
     private int _outputCharacters;
     private int _droppedOutput;
     private int _callCount;
@@ -148,6 +149,7 @@ internal sealed partial class CodeModeRun
                 Calls = [.. _calls.OrderBy(static call => call.Index)],
                 Steps = [.. _steps],
                 Output = [.. _output],
+                Images = [.. _images],
                 DroppedOutputCharacters = _droppedOutput,
                 MaxCallsAtOnce = _maxRunning,
                 ScriptTime = Stopwatch.GetElapsedTime(0, Interlocked.Read(ref _scriptTicks)),
@@ -188,6 +190,7 @@ internal sealed partial class CodeModeRun
 
         engine.SetValue("__host", new ClrFunction(engine, "__host", Call, 2));
         engine.SetValue("__output", new ClrFunction(engine, "__output", Output, 2));
+        engine.SetValue("__image", new ClrFunction(engine, "__image", Image, 2));
         engine.SetValue("__stepBegin", new ClrFunction(engine, "__stepBegin", StepBegin, 1));
         engine.SetValue("__stepRun", new ClrFunction(engine, "__stepRun", StepRun, 2));
         engine.SetValue("__stepEnd", new ClrFunction(engine, "__stepEnd", StepEnd, 4));
@@ -513,6 +516,12 @@ internal sealed partial class CodeModeRun
             AppendOutput(entry.Kind, entry.Text, entry.StepId);
         }
 
+        // So are its pictures: they go with the result of this run.
+        foreach (var image in result.Images)
+        {
+            AddImage(image);
+        }
+
         if (result.Status == CodeModeRunStatus.Completed)
         {
             return CodeModeCallResult.Success(result.ValueJson);
@@ -579,6 +588,43 @@ internal sealed partial class CodeModeRun
         var text = arguments.Length > 1 ? arguments[1].ToString() : string.Empty;
         AppendOutput(kind, text, _tracker.Current?.Id);
         return JsValue.Undefined;
+    }
+
+    // image(path, { title }): the prelude checked that the path is a string. The file is read by the host when the run ends;
+    // a relative path starts from the working folder of the session.
+    private JsValue Image(JsValue self, JsValue[] arguments)
+    {
+        Touch();
+        var path = arguments.Length > 0 && arguments[0].IsString() ? arguments[0].AsString() : string.Empty;
+        var title = arguments.Length > 1 && arguments[1].IsString() ? arguments[1].AsString() : null;
+        if (_options.WorkingDirectory is { Length: > 0 } folder && !Path.IsPathFullyQualified(path))
+        {
+            try
+            {
+                path = Path.GetFullPath(path, folder);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // Not a path this platform can name: the host says so when it reads it.
+            }
+        }
+
+        AddImage(new CodeModeImage(path, string.IsNullOrWhiteSpace(title) ? null : title, _tracker.Current?.Id));
+        return JsValue.Undefined;
+    }
+
+    private void AddImage(CodeModeImage image)
+    {
+        lock (_gate)
+        {
+            if (_images.Count < CodeModeImage.MaxPerRun)
+            {
+                _images.Add(image);
+                return;
+            }
+        }
+
+        AppendOutput(CodeModeOutputKind.Warning, $"image: {image.Path} is not attached: a result has {CodeModeImage.MaxPerRun} pictures at most.", image.StepId);
     }
 
     private void AppendOutput(CodeModeOutputKind kind, string text, string? stepId)

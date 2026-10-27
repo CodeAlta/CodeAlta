@@ -97,7 +97,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
         // A script that went on in the background gives its result to its session as a prompt.
         CodeModeRuns = new Runtime.Scripts.CodeModeRunRegistry(
-            (sessionId, prompt, token) => runtimeService.DeliverHostPromptAsync(sessionId, prompt, AgentPromptProvenance.Workflow, token),
+            (sessionId, prompt, images, token) => runtimeService.DeliverHostPromptAsync(sessionId, prompt, AgentPromptProvenance.Workflow, images, token),
             runtimeService.TryHoldForScript);
         runtimeService.ScriptRuns = CodeModeRuns;
         CodeModeRuns.Journal = (sessionId, record) => runtimeService.AppendScriptRecordAsync(sessionId, record);

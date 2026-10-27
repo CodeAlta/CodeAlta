@@ -1,7 +1,8 @@
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { MarkdownContent } from "./MarkdownContent";
+import { MarkdownContent, MarkdownImagesContext, MarkdownLinkScopeContext } from "./MarkdownContent";
+import type { MarkdownImage, MarkdownImages } from "./markdownImages";
 import { sourceBlocks } from "./markdownSourceLines";
 import { MessageLinksContext, TimelineMessage } from "./TimelineMessage";
 import type { TimelineItem } from "./timeline";
@@ -10,7 +11,7 @@ import MarkdownIt from "markdown-it";
 // Literal fixtures only; no application host, clipboard or bridge.
 const root = createRoot(document.getElementById("app")!);
 const state = { phase: "ready", executed: 0, opens: [] as string[], copies: [] as string[],
-  external: [] as string[], sourceLines: false,
+  external: [] as string[], pictures: [] as string[], reveals: [] as string[], sourceLines: false,
   policies: [] as { directive: string; uri: string; phase: string }[], parses: 0, parsedBases: [] as string[] };
 window.open = ((url?: string | URL) => { state.opens.push(String(url)); return null; }) as typeof window.open;
 Object.defineProperty(navigator, "clipboard", { value: { writeText: async (text: string) => { state.copies.push(text); } } });
@@ -41,6 +42,7 @@ const cases = [
   { id: "tasks", source: '- [ ] open\n- [x] done **now**\n- plain\n\n1. [X] numbered\n\nloose:\n\n- [ ] first\n\n- [x] second\n\n<input type="checkbox" checked> authored', selectors: 'ul.markdown-task-list li.markdown-task-item span.markdown-task[role=checkbox][aria-checked=false][aria-disabled=true],span.markdown-task[aria-checked=true],ol.markdown-task-list,li.markdown-task-item p span.markdown-task' },
   { id: "alerts", source: '> [!NOTE]\n> Useful to know.\n\n> [!warning]\n>\n> Careful.\n\n> [!UNKNOWN]\n> a plain quote', selectors: 'blockquote.markdown-alert[data-alert=note] p.markdown-alert-title,blockquote.markdown-alert[data-alert=warning] p.markdown-alert-title' },
   { id: "spoof", source: '<table class="markdown-front-matter"><tr><td>authored</td></tr></table><ul class="markdown-task-list"><li class="markdown-task-item"><span class="markdown-task" role="checkbox" aria-checked="true">x</span> authored</li></ul><blockquote class="markdown-alert" data-alert="caution"><p class="markdown-alert-title">Caution</p>authored</blockquote>', selectors: 'table td,ul li span,blockquote p' },
+  { id: "file-images", source: '![chart <b>](out/chart.png) ![](C:/pics/my%20plot.png) ![web](https://remote.invalid/a.png) <img src="out/raw.png" class="markdown-local-image"> <a href="out/forged.png" data-file-link="spoof" data-file-image="spoof">forged</a> <span class="markdown-local-image-alt">authored</span>', selectors: 'a[href="out/chart.png"] > span.markdown-local-image-alt + img.markdown-local-image[alt="chart <b>"],a[href="C:/pics/my%20plot.png"] > img.markdown-local-image[alt="my plot.png"]' },
   { id: "authority", source: '<div id="session-prompt" class="timeline-code copy-markdown" data-persisted-message="true" tabindex="0" role="button" aria-label="Send"><button>Run</button><form action="https://markdown-production.invalid/post"><input name="neoastra"></form><object data="https://markdown-production.invalid/object"></object><embed src="https://remote.invalid/embed"><script>window.markdownFixture.state.executed++</script><span onclick="window.open(\'https://remote.invalid\')">text</span></div>' },
 ];
 function item(source: string): TimelineItem {
@@ -57,8 +59,10 @@ function snapshot() {
   const content = document.querySelector(".markdown-content")!;
   return { ...state, html: content?.innerHTML, text: content?.textContent, location: location.href, base: document.baseURI, frames: frames.length,
     prohibited: content ? Array.from(content.querySelectorAll("script,style,img,picture,source,video,audio,track,iframe,link,base,meta,object,embed,svg,math,form,input,button,textarea,select"))
-      .filter(e => !copyButton(e)).map(e => e.outerHTML) : [],
+      .filter(e => !copyButton(e) && !localImage(e)).map(e => e.outerHTML) : [],
     attributes: content ? Array.from(content.querySelectorAll("*")).flatMap(e => Array.from(e.attributes).filter(a => /^on|^(style|id|name|data-.*|src|srcset|srcdoc|target|download|ping|action|formaction)$/i.test(a.name)
+        // A picture of the disk is drawn from the `data:` URL the window read.
+        && !(localImage(e) && a.name === "src" && a.value.startsWith("data:image/png;base64,"))
         // The renderer names a fenced block's language on its pre and colors its tokens with highlight.js spans.
         && !((e.tagName === "PRE" || copyButton(e)) && a.name === "data-language" && /^[a-z0-9_-]{1,32}$/.test(a.value))
         // The button of a code block says for a moment that it copied.
@@ -81,7 +85,22 @@ function snapshot() {
 }
 // The classes that the renderer gives its own elements. Authored HTML keeps none: see the "spoof" case.
 const rendererClasses: Record<string, readonly string[] | undefined> = { TABLE: ["markdown-front-matter"], DIV: ["markdown-front-matter"], LI: ["markdown-task-item"],
-  UL: ["markdown-task-list"], OL: ["markdown-task-list"], SPAN: ["markdown-task"], BLOCKQUOTE: ["markdown-alert"], P: ["markdown-alert-title"], BUTTON: ["markdown-copy"] };
+  UL: ["markdown-task-list"], OL: ["markdown-task-list"], SPAN: ["markdown-task", "markdown-local-image-alt"], BLOCKQUOTE: ["markdown-alert"], P: ["markdown-alert-title"], BUTTON: ["markdown-copy"],
+  IMG: ["markdown-local-image"] };
+// The image of the renderer in a link to a picture of the disk: last in its link, after the alternative text.
+const localImage = (e: Element) => e.tagName === "IMG" && e.className === "markdown-local-image" && !e.hasAttribute("srcset")
+  && e.parentElement?.tagName === "A" && e.parentElement.hasAttribute("href") && e.parentElement.lastElementChild === e
+  && e.previousElementSibling?.className === "markdown-local-image-alt";
+// What the window gives the pictures of the disk: one picture, drawn by the page, for one link; any other is not drawn.
+function pictures(): MarkdownImages {
+  const canvas = document.createElement("canvas");
+  canvas.width = 48; canvas.height = 32;
+  const url = canvas.toDataURL("image/png");
+  const read = (address: string): MarkdownImage | null => address === "out/chart.png" ? { url, path: "C:\\out\\chart.png" } : null;
+  return { platform: "windows", peek: () => undefined,
+    load: async (address, scope) => { state.pictures.push(`${address}@${scope?.sessionId ?? ""}`); return read(address); },
+    reveal: (address, scope) => { state.reveals.push(`${address}@${scope?.sessionId ?? ""}`); } };
+}
 // The one control of the renderer: the button of a code block, first in its block, with nothing in it.
 const copyButton = (e: Element) => e.tagName === "BUTTON" && e.className === "markdown-copy" && !e.firstChild && e.getAttribute("type") === "button"
   && e.parentElement?.tagName === "PRE" && e.parentElement.firstElementChild === e && e.nextElementSibling?.tagName === "CODE";
@@ -91,6 +110,20 @@ Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
     flushSync(() => root.render(createElement(MessageLinksContext.Provider, { value: address => state.external.push(address) },
       createElement(TimelineMessage, { item: { ...item(source), category }, canInspect: () => current }))));
   },
+  // A message of a session whose window reads the pictures of the disk.
+  renderPictures(source: string) {
+    flushSync(() => root.render(createElement(MessageLinksContext.Provider, { value: address => state.external.push(address) },
+      createElement(MarkdownImagesContext.Provider, { value: pictures() }, createElement(MarkdownLinkScopeContext.Provider, { value: { sessionId: "s1" } },
+        createElement(TimelineMessage, { item: item(source), canInspect: () => true }))))));
+  },
+  pictureRect() { return document.querySelector(".markdown-content img.markdown-local-image[src]")?.getBoundingClientRect().toJSON() ?? null; },
+  viewer() {
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.timeline-image-dialog");
+    return dialog && { open: dialog.open, title: dialog.getAttribute("aria-label"), path: dialog.querySelector(".timeline-image-file code")?.textContent,
+      image: dialog.querySelector<HTMLImageElement>(".timeline-image-view img")?.src.startsWith("data:image/png;base64,") ?? false,
+      buttons: Array.from(dialog.querySelectorAll(".timeline-image-file button"), button => button.getAttribute("title")) };
+  },
+  revealPicture() { document.querySelector<HTMLButtonElement>("dialog.timeline-image-dialog .timeline-image-file button[title='Reveal in File Explorer']")!.click(); },
   // A document, as the code editor and the Skills page show one.
   renderDocument(source: string) { state.phase = "render"; flushSync(() => root.render(createElement(MarkdownContent, { key: "document", source, document: true }))); state.phase = "insert-deferred"; },
   // A document whose blocks say which lines they come from, as a review shows one.

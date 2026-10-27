@@ -37,7 +37,34 @@ public sealed partial class SessionRuntimeService
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
-        return AdmitAsync(() => DeliverHostPromptBodyAsync(sessionId, prompt, kind, whenIdle: true), cancellationToken);
+        return AdmitAsync(() => DeliverHostPromptBodyAsync(sessionId, prompt, kind, [], whenIdle: true), cancellationToken);
+    }
+
+    /// <summary>
+    /// Gives a session a prompt that comes from the host with images, as <see cref="DeliverHostPromptAsync(string, string, string, CancellationToken)"/>
+    /// does: the images are saved with the attachments of the session, as those of a prompt of the user, and sent after its text.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="prompt">The prompt.</param>
+    /// <param name="kind">What the prompt is, as its record says it (for example <see cref="AgentPromptProvenance.Workflow"/>).</param>
+    /// <param name="images">The images, such as the pictures of the result of a script; empty for none.</param>
+    /// <param name="cancellationToken">Cancels the admission of the request, not a delivery that started.</param>
+    /// <returns>
+    /// <c>steered</c> when a running turn took the prompt, <c>queued</c> when it waits for the turn it starts,
+    /// <c>missing_session</c> when the session is not known.
+    /// </returns>
+    /// <exception cref="ArgumentException">An argument is blank.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="images"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The request was canceled before it was admitted.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired or has been retired.</exception>
+    public Task<string> DeliverHostPromptAsync(string sessionId, string prompt, string kind, IReadOnlyList<PromptImageAttachment> images, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+        ArgumentNullException.ThrowIfNull(images);
+        return AdmitAsync(() => DeliverHostPromptBodyAsync(sessionId, prompt, kind, images, whenIdle: true), cancellationToken);
     }
 
     /// <summary>
@@ -63,13 +90,13 @@ public sealed partial class SessionRuntimeService
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
-        return AdmitAsync(() => DeliverHostPromptBodyAsync(sessionId, prompt, kind, whenIdle: false), cancellationToken);
+        return AdmitAsync(() => DeliverHostPromptBodyAsync(sessionId, prompt, kind, [], whenIdle: false), cancellationToken);
     }
 
-    private Task<string> DeliverHostPromptBodyAsync(string sessionId, string prompt, string kind, bool whenIdle)
-        => WithRetentionWorkAsync(() => DeliverHostPromptClaimedBodyAsync(sessionId, prompt, kind, whenIdle), sessionId);
+    private Task<string> DeliverHostPromptBodyAsync(string sessionId, string prompt, string kind, IReadOnlyList<PromptImageAttachment> images, bool whenIdle)
+        => WithRetentionWorkAsync(() => DeliverHostPromptClaimedBodyAsync(sessionId, prompt, kind, images, whenIdle), sessionId);
 
-    private async Task<string> DeliverHostPromptClaimedBodyAsync(string sessionId, string prompt, string kind, bool whenIdle)
+    private async Task<string> DeliverHostPromptClaimedBodyAsync(string sessionId, string prompt, string kind, IReadOnlyList<PromptImageAttachment> images, bool whenIdle)
     {
         var session = await TryResolveSessionForParentDeliveryAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
         if (session is null) return "missing_session";
@@ -79,6 +106,19 @@ public sealed partial class SessionRuntimeService
         {
         var running = await HasActiveRunOwnedBodyAsync(session, CancellationToken.None).ConfigureAwait(false);
         if (!running && !whenIdle) return "idle";
+        // The images are kept with the attachments of the session, where the timeline reads those of a prompt of the user.
+        IReadOnlyList<PromptImageAttachmentReference> saved = [];
+        try
+        {
+            if (images.Count > 0) saved = await new PromptImageAttachmentStore(_catalogOptions).SaveAsync(session, images, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // The prompt still goes: its text names the images it could not keep.
+        }
+
+        var input = saved.Count == 0 ? AgentInput.Text(prompt)
+            : new AgentInput([new AgentInputItem.Text(prompt), .. saved.Select(static image => new AgentInputItem.LocalImage(image.Path, image.Title, image.MediaType))]);
         var submittedBy = new AltaActorProvenance
         {
             Kind = kind,
@@ -91,7 +131,7 @@ public sealed partial class SessionRuntimeService
             try
             {
                 var runId = await SteerOwnedBodyAsync(session, CreateParentDeliveryExecutionOptions(session),
-                    new AgentSteerOptions { Input = AgentInput.Text(prompt), Provenance = SessionPromptProvenance.Of(kind, submittedBy) },
+                    new AgentSteerOptions { Input = input, Provenance = SessionPromptProvenance.Of(kind, submittedBy) },
                     CancellationToken.None).ConfigureAwait(false);
                 await PersistPromptProvenanceAsync(session, runId.Value, queued: false, kind, prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);
                 return "steered";
@@ -102,7 +142,7 @@ public sealed partial class SessionRuntimeService
             }
         }
 
-        await QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, CancellationToken.None).ConfigureAwait(false);
+        await QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, saved, CancellationToken.None).ConfigureAwait(false);
         await TryDrainNextQueuedPromptAsync(session.SessionId).ConfigureAwait(false);
         return "queued";
         }, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);

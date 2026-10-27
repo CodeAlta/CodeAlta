@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.CodeMode;
 
 namespace CodeAlta.Orchestration.Runtime.Scripts;
@@ -43,7 +44,7 @@ public sealed record CodeModeRunDetail(CodeModeRunInfo Info, string? Source, str
 public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
 {
     private readonly ConcurrentDictionary<string, CodeModeRunHandle> _runs = new(StringComparer.Ordinal);
-    private readonly Func<string, string, CancellationToken, Task>? _deliver;
+    private readonly Func<string, string, IReadOnlyList<PromptImageAttachment>, CancellationToken, Task>? _deliver;
     private readonly Func<string, IDisposable?>? _hold;
     private readonly ConcurrentDictionary<string, byte> _codeModeSessions = new(StringComparer.OrdinalIgnoreCase);
 
@@ -83,7 +84,23 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         var path = CodeModeResultFormatter.ResultToKeep(result, tokens) is { } whole
             ? await run.KeepResultAsync(() => KeepResultAsync(run, whole)).ConfigureAwait(false)
             : null;
-        return CodeModeResultFormatter.Format(result, tokens, path);
+        var images = await ReadImagesAsync(run, result).ConfigureAwait(false);
+        return CodeModeResultFormatter.Format(result, tokens, path, images.Lines);
+    }
+
+    /// <summary>
+    /// Reads the pictures a run attached to its result (<see cref="CodeModeRunResult.Images"/>), once per run: what gives the
+    /// result (exec, wait, the prompt) gives them with it.
+    /// </summary>
+    /// <param name="run">The run.</param>
+    /// <param name="result">Its result.</param>
+    /// <returns>The pictures that could be read, and the lines the result says about them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="run"/> or <paramref name="result"/> is null.</exception>
+    public Task<CodeModeResultImages> ReadImagesAsync(CodeModeRunHandle run, CodeModeRunResult result)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(result);
+        return result.Images.Count == 0 ? Task.FromResult(CodeModeResultImages.None) : run.ReadImagesAsync(() => CodeModeResultImages.Read(result.Images));
     }
 
     // Writes the whole result in a file: what reads the text reads the rest there. A result that cannot be written keeps
@@ -146,6 +163,23 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// <param name="maxPerSession">The most runs of one session at the same time.</param>
     /// <param name="maxPerHost">The most runs of the host at the same time.</param>
     public CodeModeRunRegistry(Func<string, string, CancellationToken, Task>? deliver, Func<string, IDisposable?>? hold, int maxPerSession = DefaultMaxPerSession, int maxPerHost = DefaultMaxPerHost)
+        : this(WithoutImages(deliver), hold, maxPerSession, maxPerHost)
+    {
+    }
+
+    // A host whose sessions take the text alone: the pictures are named in the text of the result.
+    private static Func<string, string, IReadOnlyList<PromptImageAttachment>, CancellationToken, Task>? WithoutImages(Func<string, string, CancellationToken, Task>? deliver)
+        => deliver is null ? null : (sessionId, prompt, _, cancellationToken) => deliver(sessionId, prompt, cancellationToken);
+
+    /// <summary>Creates the registry of a host whose sessions are given the pictures of a result with its prompt.</summary>
+    /// <param name="deliver">
+    /// Delivers the result of a run that went on in the background to its session: the session, the prompt, the pictures the
+    /// script attached (<c>image()</c>), read from their files. Null for a host without sessions to deliver to.
+    /// </param>
+    /// <param name="hold">Holds the session of a run until its result is given (<see cref="SessionRuntimeService.TryHoldForScript"/>). Null when nothing holds; a null hold refuses the run.</param>
+    /// <param name="maxPerSession">The most runs of one session at the same time.</param>
+    /// <param name="maxPerHost">The most runs of the host at the same time.</param>
+    public CodeModeRunRegistry(Func<string, string, IReadOnlyList<PromptImageAttachment>, CancellationToken, Task>? deliver, Func<string, IDisposable?>? hold, int maxPerSession = DefaultMaxPerSession, int maxPerHost = DefaultMaxPerHost)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPerSession);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPerHost);
@@ -272,7 +306,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
                 return;
             }
 
-            await _deliver(run.SessionId, CodeModeResume.Prompt(runId, null, all: false), CancellationToken.None).ConfigureAwait(false);
+            await _deliver(run.SessionId, CodeModeResume.Prompt(runId, null, all: false), [], CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is OperationCanceledException or InvalidOperationException or ObjectDisposedException or IOException)
         {
@@ -690,9 +724,19 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         }
 
         var prompt = $"Script {run.Id}{(run.Title is null ? string.Empty : $" ({run.Title})")} ended:\n{await FormatResultAsync(run, result).ConfigureAwait(false)}";
+        // The pictures go with the prompt: its session keeps them with its attachments, as the images of a prompt of the user.
+        var images = (await ReadImagesAsync(run, result).ConfigureAwait(false)).Images
+            .Select((image, index) => new PromptImageAttachment($"{run.Id}-image-{index + 1}", image.Title, image.Bytes, image.MediaType, image.MediaType switch
+            {
+                "image/jpeg" => ".jpg",
+                "image/gif" => ".gif",
+                "image/webp" => ".webp",
+                _ => ".png",
+            }))
+            .ToArray();
         try
         {
-            await _deliver(run.SessionId, prompt, CancellationToken.None).ConfigureAwait(false);
+            await _deliver(run.SessionId, prompt, images, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or OperationCanceledException)
         {
@@ -778,6 +822,25 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     internal int Waiters => Volatile.Read(ref _waiters);
 
     private Task<string?>? _keptResult;
+    private Task<CodeModeResultImages>? _images;
+
+    // The pictures of the result, read by the first that gives the result: exec, wait, the prompt, the store.
+    internal Task<CodeModeResultImages> ReadImagesAsync(Func<CodeModeResultImages> read)
+    {
+        if (Volatile.Read(ref _images) is { } images)
+        {
+            return images;
+        }
+
+        var reading = new Task<CodeModeResultImages>(read);
+        if (Interlocked.CompareExchange(ref _images, reading, null) is { } first)
+        {
+            return first;
+        }
+
+        reading.Start(TaskScheduler.Default);
+        return reading;
+    }
 
     // The file of the whole result, written by the first that formats the result: exec, wait, the prompt, the store.
     internal Task<string?> KeepResultAsync(Func<Task<string?>> keep)

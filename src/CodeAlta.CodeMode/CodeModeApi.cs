@@ -16,7 +16,7 @@ public sealed class CodeModeApi
     public static IReadOnlySet<string> ReservedNames { get; } = new[]
     {
         "args", "console", "log", "text", "step", "meta", "workflow", "agent", "ask", "sleep", "session", "parallel",
-        "pipeline", "phase", "budget", "store", "load", "exit", "globalThis", "Math", "JSON", "Promise",
+        "pipeline", "phase", "budget", "store", "load", "image", "exit", "globalThis", "Math", "JSON", "Promise",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     private readonly FrozenDictionary<string, CodeModeFunction> _byPath;
@@ -95,8 +95,8 @@ public sealed class CodeModeApi
             "use strict";
             const host = globalThis.__host, writeOutput = globalThis.__output, stepRun = globalThis.__stepRun,
               stepBegin = globalThis.__stepBegin, stepEnd = globalThis.__stepEnd, random = globalThis.__random,
-              argsJson = globalThis.__args;
-            for (const name of ["__host", "__output", "__stepRun", "__stepBegin", "__stepEnd", "__random", "__args"]) delete globalThis[name];
+              argsJson = globalThis.__args, attachImage = globalThis.__image;
+            for (const name of ["__host", "__output", "__stepRun", "__stepBegin", "__stepEnd", "__random", "__args", "__image"]) delete globalThis[name];
             const stringify = JSON.stringify, parse = JSON.parse, freeze = Object.freeze, define = Object.defineProperty;
             class CodeModeError extends Error {
               constructor(e) {
@@ -131,6 +131,15 @@ public sealed class CodeModeApi
             }));
             global("log", (...v) => writeOutput(1, format(v)));
             global("text", (...v) => writeOutput(0, format(v)));
+            // image(path, { title }): a picture for the result, which the host reads when the run ends.
+            global("image", (path, options) => {
+              if (typeof path !== "string" || path.length === 0) throw new TypeError('image(path, { title }): path is the path of a picture file, such as "out/chart.png".');
+              if (options !== undefined && (options === null || typeof options !== "object" || Array.isArray(options))) {
+                throw new TypeError('image(path, { title }): options is an object, such as { title: "Chart" }.');
+              }
+              const title = options === undefined || options.title === undefined || options.title === null ? undefined : String(options.title);
+              attachImage(path, title);
+            });
             // The value of a step as the host records it for a resume: its JSON, "" for undefined, null when it is not JSON.
             const recordOf = (v) => {
               if (v === undefined) return "";

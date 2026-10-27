@@ -5135,6 +5135,52 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task HostPromptImages_SteeredOrQueuedIntoABusySession_GoWithThePrompt(bool supportsSteering)
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var sessionCatalog = new SessionViewCatalog(options);
+        var providerId = new ModelProviderId("host-prompt-images");
+        var providerRuntime = new StatefulProviderRuntime(providerId) { SupportsSteering = supportsSteering };
+        await using var runtime = CreateRuntime(options, providerRuntime);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options).Add(new ProjectCatalog(options)).Add(sessionCatalog).Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var first = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "first prompt"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, first.ExitCode, first.Stderr);
+
+        // The end of a script that went on in the background, with the picture it attached, while the turn of the user runs.
+        var png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=");
+        var delivery = await runtime.DeliverHostPromptAsync(sessionId, "Script run-1a2b3c ended:\nScript completed", AgentPromptProvenance.Workflow,
+            [new PromptImageAttachment("run-1a2b3c-image-1", "Chart", png, "image/png", ".png")]).ConfigureAwait(false);
+
+        Assert.AreEqual(supportsSteering ? "steered" : "queued", delivery);
+        if (!supportsSteering)
+        {
+            // The picture of a queued prompt is saved with the attachments of the session, and named by the queue in the journal.
+            var state = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
+            var queued = state.QueuedPrompts.Single(static prompt => prompt.State == "queued");
+            var image = queued.Images!.Single();
+            Assert.AreEqual("Chart", image.Title);
+            Assert.AreEqual("image/png", image.MediaType);
+            StringAssert.Contains(Path.GetDirectoryName(image.Path)!, ".attachments");
+            CollectionAssert.AreEqual(png, File.ReadAllBytes(image.Path));
+            providerRuntime.PublishIdle(sessionId, new AgentRunId("run-1"));
+            await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 2).ConfigureAwait(false);
+        }
+
+        var input = supportsSteering ? providerRuntime.SteeredOptions.Single().Input : providerRuntime.SentOptions[1].Input;
+        Assert.AreEqual("Script run-1a2b3c ended:\nScript completed", ((AgentInputItem.Text)input.Items[0]).Value);
+        var sent = input.Items.OfType<AgentInputItem.LocalImage>().Single();
+        Assert.AreEqual("Chart", sent.DisplayName);
+        Assert.AreEqual("image/png", sent.MediaType);
+        CollectionAssert.AreEqual(png, File.ReadAllBytes(sent.Path));
+    }
+
+    [TestMethod]
     public async Task SessionSend_PublishesStartedCatalogEventSoLiveCreatedSessionsCanLoadHistory()
     {
         using var root = TempDirectory.Create();

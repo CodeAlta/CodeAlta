@@ -62,13 +62,15 @@ export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
     if (alignment) token.attrSet("align", alignment);
     return renderer.renderToken(tokens, index, options);
   };
-  // No picture is drawn in a text. One of the disk, such as a chart a script made, is a link that opens it in the code
-  // editor, which shows it; another is its alternative text.
+  // The parser draws no picture. One of the disk, such as a chart a script made, is a link to its file, marked as a
+  // picture as well: the window may draw it there (see `markdownBoundary`), or open the file. Another is its
+  // alternative text.
   md.renderer.rules.image = (tokens, index) => {
     const token = tokens[index];
     const src = token.attrGet("src");
     if (!options.fileLinkMark || typeof src !== "string" || !fileMarkdownHref(src)) return escape(token.content);
-    return `<a href="${escape(src)}" data-file-link="${escape(options.fileLinkMark)}">${escape(token.content || src)}</a>`;
+    const mark = escape(options.fileLinkMark);
+    return `<a href="${escape(src)}" data-file-link="${mark}" data-file-image="${mark}">${escape(token.content || fileName(src))}</a>`;
   };
   if (options.fileLinkMark) md.renderer.rules.link_open = (tokens, index, rendering, _env, renderer) => {
     const token = tokens[index];
@@ -77,6 +79,13 @@ export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
     return renderer.renderToken(tokens, index, rendering);
   };
   return (source: string, sourceLines?: MarkdownSourceLines) => md.render(source, sourceLines ? { sourceLines } : {});
+}
+
+// The name of the file a target names, without its folder and the place in the file; the target itself when it has none.
+function fileName(target: string): string {
+  let path = target.split("#", 1)[0];
+  try { path = decodeURIComponent(path); } catch { /* Not escapes: the path is as it is written. */ }
+  return path.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) || target;
 }
 
 /**

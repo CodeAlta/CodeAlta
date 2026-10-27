@@ -224,7 +224,8 @@ export const localSearch = Object.freeze({ query: async () => ({ status: "unavai
   cancelDownload: unavailable, deleteModel: unavailable, answerOffer: unavailable });
 // The demo has no repository whose issues could be read.
 export const issues = Object.freeze({ sources: async () => ({ status: "unavailable", sources: [] }), list: unavailable, read: unavailable, start: unavailable, openLink: unavailable });
-export const markdownLinks = Object.freeze({ open: async () => ({ status: "unavailable", hostEpoch: "" }) });
+export const markdownLinks = Object.freeze({ open: async () => ({ status: "unavailable", hostEpoch: "" }),
+  image: async () => ({ status: "unavailable", hostEpoch: "", mediaType: null, base64: null, fullPath: null }), reveal: async () => ({ status: "unavailable", hostEpoch: "" }) });
 // The demo has no host to keep the instructions for a pull request.
 // The identity of a space needs a host that keeps spaces.
 export const spaceIdentity = Object.freeze({ get: async () => ({ status: "unavailable", message: null, identity: null, usual: null }),

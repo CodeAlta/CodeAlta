@@ -443,6 +443,66 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task ARunThatEndsInTheBackground_DeliversItsPicturesWithItsPrompt()
+    {
+        using var root = TestTempDirectory.Create();
+        File.WriteAllBytes(Path.Combine(root.Path, "chart.png"), Png);
+        var delivered = new TaskCompletionSource<(string Prompt, IReadOnlyList<PromptImageAttachment> Images)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var runs = new CodeModeRunRegistry((_, prompt, images, _) => { delivered.TrySetResult((prompt, images)); return Task.CompletedTask; }, hold: null);
+        var invoker = new FakeTools { Gate = new TaskCompletionSource() };
+        var (exec, _) = Create(root.Path, runs);
+
+        await InvokeAsync(exec, """
+            // @exec: {"title": "slow", "yield_ms": 50}
+            image("chart.png", { title: "Chart" });
+            return (await tools.read_file({ path: "a.txt" })).content;
+            """, invoker);
+        invoker.Gate.SetResult();
+        var (prompt, images) = await delivered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        StringAssert.Contains(prompt, "Images: 1 attached (Chart)\n");
+        var image = images.Single();
+        Assert.AreEqual("Chart", image.Title);
+        Assert.AreEqual("image/png", image.MediaType);
+        Assert.AreEqual(".png", image.FileExtension);
+        CollectionAssert.AreEqual(Png, image.Bytes);
+    }
+
+    [TestMethod]
+    public async Task Exec_GivesThePicturesOfTheScript_AfterItsText_AndSaysWhichWereSkipped()
+    {
+        using var root = TestTempDirectory.Create();
+        Directory.CreateDirectory(Path.Combine(root.Path, "out"));
+        File.WriteAllBytes(Path.Combine(root.Path, "out", "chart.png"), Png);
+        File.WriteAllText(Path.Combine(root.Path, "notes.txt"), "not a picture");
+        await using var runs = new CodeModeRunRegistry(null);
+        var (exec, _) = Create(root.Path, runs);
+
+        var result = await InvokeAsync(exec, """
+            image("out/chart.png", { title: "Chart" });
+            image("missing.png");
+            image("notes.txt");
+            return "done";
+            """, new FakeTools());
+
+        var text = Text(result);
+        Assert.IsTrue(result.Success, text);
+        var image = (AgentToolResultItem.Image)result.Items[1];
+        Assert.AreEqual("image/png", image.MediaType);
+        Assert.AreEqual("Chart", image.DisplayName);
+        CollectionAssert.AreEqual(Png, Convert.FromBase64String(image.Base64Data));
+        Assert.HasCount(2, result.Items);
+        StringAssert.Contains(text, "Images: 1 attached (Chart)\n");
+        StringAssert.Contains(text, $"image skipped: {Path.Combine(root.Path, "missing.png")}: no such file.\n");
+        StringAssert.Contains(text, $"image skipped: {Path.Combine(root.Path, "notes.txt")}: not a PNG, JPEG, GIF or WebP picture.\n");
+        // The result stays the end of the text.
+        StringAssert.EndsWith(text, "Result:\ndone\n");
+    }
+
+    // A picture of one pixel.
+    private static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=");
+
+    [TestMethod]
     public async Task ARunOverTheLimitOfItsSession_IsRefused()
     {
         using var root = TestTempDirectory.Create();

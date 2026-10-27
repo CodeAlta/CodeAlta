@@ -2816,11 +2816,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         string kind,
         AltaActorProvenance? submittedBy,
         CancellationToken cancellationToken = default)
-        => await AdmitAsync(() => QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, CancellationToken.None), cancellationToken)
+        => await AdmitAsync(() => QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, images: null, CancellationToken.None), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
 
+    // The images of a queued prompt are files saved with the attachments of the session: the drain sends them with its text.
     private async Task<SessionViewQueuedPrompt> QueuePromptOwnedBodyAsync(SessionViewDescriptor session, string prompt, string kind,
-        AltaActorProvenance? submittedBy, CancellationToken cancellationToken)
+        AltaActorProvenance? submittedBy, IReadOnlyList<PromptImageAttachmentReference>? images, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
@@ -2842,6 +2843,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         Kind = kind,
                         Prompt = prompt,
                         PromptPreview = CreatePromptPreview(prompt),
+                        Images = images is { Count: > 0 }
+                            ? [.. images.Select(static image => new SessionViewQueuedPromptImage { Path = image.Path, Title = image.Title, MediaType = image.MediaType })]
+                            : null,
                         State = "queued",
                         SubmittedBy = submittedBy,
                         CreatedAt = timestamp,
@@ -3862,6 +3866,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private static string CreatePromptPreview(string prompt)
         => prompt.Length <= 160 ? prompt : prompt[..160];
 
+    // The input of a queued prompt: its text, then its images.
+    private static AgentInput QueuedInput(SessionViewQueuedPrompt prompt)
+        => prompt.Images is not { Count: > 0 } images
+            ? AgentInput.Text(prompt.Prompt)
+            : new AgentInput([new AgentInputItem.Text(prompt.Prompt),
+                .. images.Where(static image => !string.IsNullOrWhiteSpace(image.Path)).Select(static image => new AgentInputItem.LocalImage(image.Path, image.Title, image.MediaType))]);
+
     private static void TrimLocalStateHistory(SessionViewLocalState localState)
     {
         const int MaxPromptProvenanceRecords = 200;
@@ -4667,7 +4678,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var runStartedAt = DateTimeOffset.UtcNow;
             var sendOptions = new AgentSendOptions
             {
-                Input = AgentInput.Text(work.Prompt!.Prompt), SourceSessionId = AgentSource(work.Prompt.SubmittedBy),
+                Input = QueuedInput(work.Prompt!), SourceSessionId = AgentSource(work.Prompt!.SubmittedBy),
                 Provenance = SessionPromptProvenance.Of(work.Prompt.Kind, work.Prompt.SubmittedBy),
             };
             if (askExecution is not null) sendOptions = ComposeRunAsk(askExecution, work.Entry, sendOptions);
@@ -4905,6 +4916,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Kind = item.Kind,
             Prompt = item.Prompt,
             PromptPreview = item.PromptPreview,
+            Images = item.Images,
             State = item.State,
             RunId = item.RunId,
             SubmittedBy = item.SubmittedBy,
@@ -5008,7 +5020,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 }
             }
 
-            await QueuePromptOwnedBodyAsync(parent, prompt, SessionPromptProvenance.ParentNotifyKind, submittedBy, CancellationToken.None).ConfigureAwait(false);
+            await QueuePromptOwnedBodyAsync(parent, prompt, SessionPromptProvenance.ParentNotifyKind, submittedBy, images: null, CancellationToken.None).ConfigureAwait(false);
             await TryDrainNextQueuedPromptAsync(parent.SessionId).ConfigureAwait(false);
         }
         catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex)
