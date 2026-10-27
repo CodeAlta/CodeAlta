@@ -1975,6 +1975,12 @@ dialog .copy-value, .copy-value { display: grid; place-items: center; width: 26p
 .logs-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .logs-filter.bp6-input-group { flex: 0 1 280px; }
 .logs-toolbar .bp6-switch { margin: 0; }
+.logs-levels { display: grid; gap: 8px; width: 400px; max-width: calc(100vw - 48px); max-height: min(560px, calc(100vh - 120px)); overflow: auto; padding: 12px; box-sizing: border-box; }
+.logs-levels > h2 { margin: 0; font-size: 14px; }
+.logs-levels > p { margin: 0; }
+.logs-levels-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); align-items: center; gap: 6px 10px; }
+.logs-levels-grid .bp6-html-select { min-width: 0; }
+.logs-levels-grid select { width: 100%; }
 .settings-dialog-content > .application-logs > .logs-view { flex: 1 1 0; min-height: 160px; }
 .logs-view { overflow: auto; padding: 6px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-family: var(--bp-typography-family-mono); font-size: 12px; line-height: 1.55; }
 .log-line { display: flex; gap: 10px; padding: 0 10px; white-space: pre; }

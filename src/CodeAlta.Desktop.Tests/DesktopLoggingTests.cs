@@ -247,6 +247,35 @@ public sealed class DesktopLoggingTests
         }
     }
 
+    [TestMethod]
+    public void AFailureReportedAfterTheLogEnded_IsWrittenToStandardError_AndNeverThrows()
+    {
+        // The handlers of unhandled exceptions and of unobserved tasks stay for the life of the process: a finalizer
+        // that reports a task after the log ended must not throw there, which would end the process.
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-desktop-logging-" + Guid.NewGuid().ToString("N"));
+        var previousError = Console.Error;
+        using var error = new StringWriter();
+        Assert.IsFalse(LogManager.IsInitialized);
+        try
+        {
+            Assert.IsNotNull(DesktopLogging.Initialize(root));
+            LogManager.Shutdown();
+            Console.SetError(error);
+
+            DesktopLogging.ReportUnobservedTask(new AggregateException(new InvalidOperationException("late task failure")));
+            DesktopLogging.ReportFailure(new InvalidOperationException("late failure"), "Late failure.");
+
+            StringAssert.Contains(error.ToString(), "late task failure");
+            StringAssert.Contains(error.ToString(), "Late failure.");
+        }
+        finally
+        {
+            Console.SetError(previousError);
+            LogManager.Shutdown();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string ReadLogs(string root)
         => string.Concat(Directory.GetFiles(Path.Combine(root, "logs")).Select(path =>
         {

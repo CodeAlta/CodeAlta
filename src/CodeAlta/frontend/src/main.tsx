@@ -5670,7 +5670,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "logs" ? <>
         <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
-          ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} /></>
+          ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read}
+          levelsApi={demoMode ? undefined : applicationLogs} epoch={owned ? status!.hostEpoch : null} /></>
       : settingsSection === "providers" ? owned && status?.hostEpoch
         ? <ProviderSettings key={providerFocus ?? ""} epoch={status.hostEpoch} readRuntime={modelCatalog.providers} probe={modelCatalog.probe} initialProvider={providerFocus}
           onOpenModels={() => navigate("models")} onOpenConfiguration={() => navigate("config")}

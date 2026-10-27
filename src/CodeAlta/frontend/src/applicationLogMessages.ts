@@ -1,0 +1,31 @@
+// English source keys; translations in es, fr, de, ja, zh-CN order.
+export const applicationLogMessages = {
+  "System": ["Sistema", "Système", "System", "システム", "系统"],
+  "Issue trackers": ["Gestores de incidencias", "Suivis de tickets", "Issue-Tracker", "課題トラッカー", "问题跟踪器"],
+  "Git": ["Git", "Git", "Git", "Git", "Git"],
+  "MCP": ["MCP", "MCP", "MCP", "MCP", "MCP"],
+  "Mobile": ["Móvil", "Mobile", "Mobil", "モバイル", "移动端"],
+  "Trace": ["Traza", "Trace", "Trace", "トレース", "跟踪"],
+  "Debug": ["Depuración", "Débogage", "Debug", "デバッグ", "调试"],
+  "Feature": ["Función", "Fonction", "Funktion", "機能", "功能"],
+  "All features": ["Todas las funciones", "Toutes les fonctions", "Alle Funktionen", "すべての機能", "所有功能"],
+  "{name} ({count})": ["{name} ({count})", "{name} ({count})", "{name} ({count})", "{name}（{count}）", "{name}（{count}）"],
+  "Log levels": ["Niveles de registro", "Niveaux du journal", "Protokollstufen", "ログレベル", "日志级别"],
+  "What is written to the log": ["Lo que se escribe en el registro", "Ce qui est écrit dans le journal", "Was ins Protokoll geschrieben wird", "ログに書き込まれる内容", "写入日志的内容"],
+  "Default level": ["Nivel predeterminado", "Niveau par défaut", "Standardstufe", "既定のレベル", "默认级别"],
+  "Default ({level})": ["Predeterminado ({level})", "Par défaut ({level})", "Standard ({level})", "既定（{level}）", "默认（{level}）"],
+  "Debug and Trace write more details of a feature, such as each request of an issue tracker and what the service answered. Saved in config.toml ([logging]).": [
+    "Depuración y Traza escriben más detalles de una función, como cada solicitud de un gestor de incidencias y lo que respondió el servicio. Se guarda en config.toml ([logging]).",
+    "Débogage et Trace écrivent plus de détails d’une fonction, comme chaque requête d’un suivi de tickets et ce que le service a répondu. Enregistré dans config.toml ([logging]).",
+    "Debug und Trace schreiben mehr Details einer Funktion, etwa jede Anfrage eines Issue-Trackers und die Antwort des Dienstes. Gespeichert in config.toml ([logging]).",
+    "デバッグとトレースは、課題トラッカーの各リクエストとサービスの応答など、機能の詳細をより多く書き込みます。config.toml（[logging]）に保存されます。",
+    "调试和跟踪会写入功能的更多细节，例如问题跟踪器的每个请求以及服务的回答。保存在 config.toml（[logging]）中。"],
+  "The log levels can be changed only in the window of the running application.": [
+    "Los niveles de registro solo se pueden cambiar en la ventana de la aplicación en ejecución.",
+    "Les niveaux du journal ne se changent que dans la fenêtre de l’application en cours.",
+    "Die Protokollstufen lassen sich nur im Fenster der laufenden Anwendung ändern.",
+    "ログレベルは実行中のアプリケーションのウィンドウでのみ変更できます。",
+    "日志级别只能在正在运行的应用程序窗口中更改。"],
+  "The log levels could not be saved.": ["No se pudieron guardar los niveles de registro.", "Les niveaux du journal n’ont pas pu être enregistrés.", "Die Protokollstufen konnten nicht gespeichert werden.", "ログレベルを保存できませんでした。", "无法保存日志级别。"],
+  "Level of {feature}": ["Nivel de {feature}", "Niveau de {feature}", "Stufe von {feature}", "{feature} のレベル", "{feature} 的级别"],
+} as const;

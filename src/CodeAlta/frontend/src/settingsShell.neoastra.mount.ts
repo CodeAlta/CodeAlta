@@ -265,7 +265,9 @@ export const applicationLogs = { read: async () => { calls.push("logs"); return 
     captureOmitted: "0", readOmitted: 0, captureId: "11111111-1111-4111-8111-111111111111", boundary: "1",
     grant: "22222222-2222-4222-8222-222222222222" }
   : { status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }; },
-  clear: (request: unknown) => { clearRequests.push(request); return new Promise(() => {}); } };
+  clear: (request: unknown) => { clearRequests.push(request); return new Promise(() => {}); },
+  levels: async () => ({ status: "unavailable", level: "info", features: [], levels: [], editable: false }),
+  saveLevels: async () => ({ status: "unavailable", level: "info", features: [], levels: [], editable: false }) };
 export const modelCatalog = { providers: async () => ({ status: "ok", epoch, truncated: false,
   providers: [{ id: "fixture", name: "Fixture", type: "test", isDefault: true, defaultModel: "old", observedAt: null,
     availability: "Unknown", enabled: true }] }),

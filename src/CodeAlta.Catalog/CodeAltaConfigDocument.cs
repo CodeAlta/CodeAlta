@@ -105,6 +105,10 @@ public sealed class CodeAltaConfigDocument
     [JsonPropertyName("sandbox")]
     public CodeAltaSandboxSettingsDocument? Sandbox { get; set; }
 
+    /// <summary>Gets or sets what the application writes to its log, by feature. Read from the user's file only.</summary>
+    [JsonPropertyName("logging")]
+    public CodeAltaLoggingSettingsDocument? Logging { get; set; }
+
     /// <summary>
     /// Gets or sets what the sessions of a project work under over the identity of their space: its CLI profiles,
     /// <c>[identity.cli.&lt;name&gt;]</c> with <c>env</c>, <c>check</c> and <c>login</c>. Read from a project file only, as a
@@ -234,6 +238,21 @@ public sealed class CodeAltaCommitSettingsDocument
     /// </summary>
     [JsonPropertyName("co_author")]
     public bool? CoAuthor { get; set; }
+}
+
+/// <summary>
+/// Represents what the application writes to its log, from the global <c>[logging]</c> table: a level for every
+/// feature, and the level of some features (<c>[logging.features]</c>) over it.
+/// </summary>
+public sealed class CodeAltaLoggingSettingsDocument
+{
+    /// <summary>Gets or sets the least severe level written for a feature the file does not name; <c>info</c> when absent.</summary>
+    [JsonPropertyName("level")]
+    public string? Level { get; set; }
+
+    /// <summary>Gets or sets the level of a feature, by the id of the feature (<c>issues = "debug"</c>).</summary>
+    [JsonPropertyName("features")]
+    public Dictionary<string, string>? Features { get; set; }
 }
 
 /// <summary>Global-only automatic storage maintenance preferences.</summary>

@@ -104,6 +104,9 @@ internal static class CodeAltaConfigDocumentCopy
                     }),
                 }
                 : null,
+            Logging = document.Logging is { } logging
+                ? new CodeAltaLoggingSettingsDocument { Level = logging.Level, Features = Copy(logging.Features, static level => level) }
+                : null,
             Identity = Copy(document.Identity),
         };
     }

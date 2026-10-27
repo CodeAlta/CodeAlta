@@ -43,6 +43,7 @@ import { mobileCanvasMessages } from "./mobile/canvas/messages";
 import { labelMessages } from "./labels/messages";
 import { sessionSettingsMessages } from "./sessionSettings/messages";
 import { composerCommandMessages } from "./composerCommandMessages";
+import { applicationLogMessages } from "./applicationLogMessages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2820,6 +2821,7 @@ export const messages = dictionary({
   ...labelMessages,
   ...sessionSettingsMessages,
   ...composerCommandMessages,
+  ...applicationLogMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

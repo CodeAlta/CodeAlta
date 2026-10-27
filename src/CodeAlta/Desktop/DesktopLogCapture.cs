@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CodeAlta.Catalog.Logging;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop;
@@ -14,6 +15,9 @@ internal sealed class DesktopLogCapture
     private readonly Queue<(long Sequence, DesktopLogLine Line)> _rows = new();
     private readonly Queue<(string Token, long Boundary)> _grants = new();
     internal string CaptureId { get; } = Guid.NewGuid().ToString("D");
+
+    /// <summary>Gets the levels of the log this capture belongs to; null for a capture of its own, as in tests.</summary>
+    internal DesktopLogLevels? Levels { get; set; }
     private int _bytes;
     private long _sequence;
     private long _evictedThrough;
@@ -23,7 +27,7 @@ internal sealed class DesktopLogCapture
     {
         var length = Math.Min(text.Length, MaximumTextChars);
         if (length > 0 && length < text.Length && char.IsHighSurrogate(text[length - 1])) length--;
-        var line = new DesktopLogLine(Bound(timestamp, 48), Bound(level, 32), Bound(logger, 128), text[..length].ToString(), length < text.Length);
+        var line = new DesktopLogLine(Bound(timestamp, 48), Bound(level, 32), Bound(logger, 128), text[..length].ToString(), length < text.Length, LogFeatures.Of(logger));
         var bytes = Size(line);
         lock (_gate)
         {
@@ -78,7 +82,7 @@ internal sealed class DesktopLogCapture
     }
 
     private static int Size(DesktopLogLine line) => Encoding.UTF8.GetByteCount(line.Text) + Encoding.UTF8.GetByteCount(line.Logger)
-        + Encoding.UTF8.GetByteCount(line.Timestamp) + Encoding.UTF8.GetByteCount(line.Level) + 64;
+        + Encoding.UTF8.GetByteCount(line.Timestamp) + Encoding.UTF8.GetByteCount(line.Level) + line.Feature.Length + 64;
     private static string Bound(string text, int maximum)
     {
         var length = Math.Min(text.Length, maximum);
@@ -87,7 +91,9 @@ internal sealed class DesktopLogCapture
     }
 }
 
-internal sealed record DesktopLogLine(string Timestamp, string Level, string Logger, string Text, bool TextTruncated);
+/// <summary>One captured message.</summary>
+/// <param name="Feature">The id of the feature of its logger (<see cref="LogFeatures"/>).</param>
+internal sealed record DesktopLogLine(string Timestamp, string Level, string Logger, string Text, bool TextTruncated, string Feature);
 
 internal sealed class DesktopCaptureLogWriter(DesktopLogCapture capture) : LogWriter
 {

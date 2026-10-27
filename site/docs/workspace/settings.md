@@ -228,6 +228,18 @@ Open **MCP Servers** with `/mcp`, or `Ctrl+G Ctrl+Y` in CodeAlta Desktop. See [M
 
 Open the logs with `Ctrl+G Ctrl+L` or `/logs` (**Settings > Application Logs**): startup, provider, credential and plugin messages, with search and level filters.
 
+In CodeAlta Desktop, each message belongs to a feature: **System**, **Providers**, **Sessions**, **Tools**, **Issue trackers**, **Git**, **MCP**, **Plugins**, **Search**, **Speech** or **Mobile**. The feature list beside the level filter shows the messages of one feature, with the number of messages of each.
+
+**Log levels** sets what is written to the log: a default level, and a level for any feature that needs another one. Choose **Debug** for the feature you investigate, such as **Issue trackers**, and its details are written while the others stay quiet. The change applies at once and is saved in `config.toml`:
+
+```toml
+[logging]
+level = "info"        # trace, debug, info, warn or error
+
+[logging.features]
+issues = "debug"      # system, providers, sessions, tools, issues, git, mcp, plugins, search, speech, mobile
+```
+
 If `~/.alta/config.toml` cannot be loaded at startup, CodeAlta opens a recovery editor with TOML highlighting and live errors: fix the file and save to continue. **Settings > Configuration file** edits it at any time.
 
 <figure class="my-4">

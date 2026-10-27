@@ -76,7 +76,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     private static int RunWithCapture(DesktopLaunchOptions options, Func<DesktopLaunchOptions, DesktopLogCapture?, int> run)
     {
-        var capture = DesktopLogging.Initialize(options.DataRoot, out var flushPending);
+        var capture = DesktopLogging.Initialize(options.DataRoot, LoggingSettingsOf(options), out var flushPending);
         var result = 1;
         try
         {
@@ -96,6 +96,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             else flushPending?.Invoke(); // Persist failures without invalidating retained callbacks' loggers.
         }
     }
+
+    // The levels of the features of the log, from the configuration of the user, before the host reads it.
+    private static Func<CodeAlta.Catalog.Logging.LoggingSettings>? LoggingSettingsOf(DesktopLaunchOptions options)
+        => options.CatalogRoot is { } root
+            ? () => new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root, StateRoot = options.StateRoot ?? root }).LoadGlobalLoggingSettings()
+            : null;
 
     private static int RunCore(DesktopLaunchOptions options, DesktopLogCapture? capture)
     {
@@ -941,8 +947,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         PluginProviderTypes = pluginProviderTypes,
                     });
+                    var applicationLogs = new ApplicationLogsService(logCapture, configStore, epoch);
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch)
                     {
+                        // The file may change the levels of the log: they are taken at once.
+                        Saved = applicationLogs.Reload,
                         ProviderStates = () => host.ModelProviderInitializationService.CurrentStates,
                         Spaces = host.SpaceCatalog,
                         SessionSpace = (sessionId, token) => host.RuntimeService.GetSessionSpaceAsync(sessionId, token),
@@ -991,7 +1000,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         ProviderTypes = pluginProviderTypes,
                         Sessions = host.RuntimeService.ListOverview,
                     });
-                    builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
+                    builder.AddApplicationLogsService(applicationLogs);
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch, new DesktopDefaultProvider(host.CatalogOptions), modelsDev);
                     _ = providers.StartInitialization(shown.Shown); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);

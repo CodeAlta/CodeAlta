@@ -1433,6 +1433,42 @@ public sealed partial class CodeAltaConfigStore
         Save(_options.ConfigPath, document);
     }
 
+    /// <summary>
+    /// Reads what the application writes to its log (<c>[logging]</c>). A file that is missing or cannot be read gives
+    /// the defaults, and a value that is not understood is ignored: the log must work whatever the file says.
+    /// </summary>
+    /// <returns>The settings.</returns>
+    public Logging.LoggingSettings LoadGlobalLoggingSettings()
+    {
+        try
+        {
+            return Logging.LoggingSettings.Read(ReadSharedGlobalDocument().Logging);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return Logging.LoggingSettings.Default;
+        }
+    }
+
+    /// <summary>Saves what the application writes to its log (<c>[logging]</c>). The defaults are not written.</summary>
+    /// <param name="settings">The settings.</param>
+    /// <exception cref="ArgumentNullException">The settings are null.</exception>
+    /// <exception cref="ArgumentException">A level or a feature of the settings is not one the log knows.</exception>
+    /// <exception cref="InvalidDataException">The existing configuration is invalid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public void SaveGlobalLoggingSettings(Logging.LoggingSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ThrowIfReadOnly();
+        var table = settings.ToDocument();
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        document.Logging = table;
+        Save(_options.ConfigPath, document);
+    }
+
     /// <summary>Saves the global choices for speech to prompt. Defaults are not written.</summary>
     /// <exception cref="ArgumentNullException">The settings are null.</exception>
     /// <exception cref="InvalidDataException">The model or the existing configuration is invalid.</exception>

@@ -59,6 +59,9 @@ internal sealed partial class GlobalConfigService
     /// </summary>
     internal ModelsDevCatalogService? ModelCatalog { get; init; }
 
+    /// <summary>Gets what is done once the text of the file was saved, such as giving the log its new levels; null for nothing.</summary>
+    internal Action? Saved { get; init; }
+
     /// <summary>Reads the current configuration text and its revision.</summary>
     [NeoRpcMethod("read")]
     public GlobalConfigReadResponse Read(GlobalConfigReadRequest request)
@@ -117,6 +120,8 @@ internal sealed partial class GlobalConfigService
             {
                 return Failure("write_failed");
             }
+
+            Saved?.Invoke();
 
             var revision = Revision(request.Content);
             if (!request.ApplyProviders) return new("ok", revision, null, null, null, 0);
