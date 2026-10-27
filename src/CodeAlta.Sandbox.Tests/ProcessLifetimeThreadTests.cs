@@ -36,13 +36,17 @@ public sealed class ProcessLifetimeThreadTests
         var lifetime = new ProcessLifetimeThread("test");
         using var release = new ManualResetEventSlim();
         using var cancellation = new CancellationTokenSource();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var disposed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var run = lifetime.RunAsync(() =>
         {
+            started.TrySetResult();
             release.Wait();
             return "late";
         }, late => disposed.TrySetResult(late), cancellation.Token);
+        // Canceled once it runs: an operation canceled before it starts never runs, and has no result to release.
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await cancellation.CancelAsync();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => run);
