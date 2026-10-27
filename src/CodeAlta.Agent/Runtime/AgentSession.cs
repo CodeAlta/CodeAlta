@@ -1608,14 +1608,25 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return await CompactProviderContextAsync(providerCompaction, instructionBundle, modelInfo, cancellationToken).ConfigureAwait(false);
         }
 
-        var outcome = await CompactCoreAsync(
-                trigger: AgentCompactionTrigger.Manual,
-                runId: null,
-                systemMessage: instructionBundle.SystemMessage,
-                developerInstructions: instructionBundle.DeveloperInstructions,
-                modelInfo: modelInfo,
-                cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
+        AgentCompactionOutcome? outcome;
+        try
+        {
+            outcome = await CompactCoreAsync(
+                    trigger: AgentCompactionTrigger.Manual,
+                    runId: null,
+                    systemMessage: instructionBundle.SystemMessage,
+                    developerInstructions: instructionBundle.DeveloperInstructions,
+                    modelInfo: modelInfo,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The timeline says why, as it does for a compaction of the provider: the caller only gets a code.
+            await RecordManualCompactionFailureAsync(ex).ConfigureAwait(false);
+            throw;
+        }
+
         if (outcome is null)
         {
             return new AgentCompactionOutcome(true, "Nothing to compact.");
@@ -1628,6 +1639,21 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             TokensRemoved: outcome.TokensRemoved,
             PreCompactionTokens: outcome.PreCompactionTokens,
             PostCompactionTokens: outcome.PostCompactionTokens);
+    }
+
+    private async Task RecordManualCompactionFailureAsync(Exception failure)
+    {
+        try
+        {
+            await AppendEventsAsync(
+                [new AgentSessionUpdateEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, null, AgentSessionUpdateKind.Warning,
+                    $"Manual local compaction failed: {failure.Message}")],
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception recordFailure) when (recordFailure is not OperationCanceledException)
+        {
+            // The failure of the compaction is the one its caller gets; a journal that cannot record it does not replace it.
+        }
     }
 
     private Task AppendInstructionWarningsAsync(AgentInstructionBundle instructions, AgentRunId? runId, CancellationToken cancellationToken)
