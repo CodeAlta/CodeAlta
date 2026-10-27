@@ -62,7 +62,14 @@ export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
     if (alignment) token.attrSet("align", alignment);
     return renderer.renderToken(tokens, index, options);
   };
-  md.renderer.rules.image = (tokens, index) => escape(tokens[index].content);
+  // No picture is drawn in a text. One of the disk, such as a chart a script made, is a link that opens it in the code
+  // editor, which shows it; another is its alternative text.
+  md.renderer.rules.image = (tokens, index) => {
+    const token = tokens[index];
+    const src = token.attrGet("src");
+    if (!options.fileLinkMark || typeof src !== "string" || !fileMarkdownHref(src)) return escape(token.content);
+    return `<a href="${escape(src)}" data-file-link="${escape(options.fileLinkMark)}">${escape(token.content || src)}</a>`;
+  };
   if (options.fileLinkMark) md.renderer.rules.link_open = (tokens, index, rendering, _env, renderer) => {
     const token = tokens[index];
     const href = token.attrGet("href");

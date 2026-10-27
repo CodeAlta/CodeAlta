@@ -10,6 +10,9 @@ import { scriptRunOf } from "../timeline";
 import { formatDuration } from "../toolCall";
 import { graphStateLabel } from "./flowActions";
 import { graphState, timelineBars, timelineOption, timelineStates, type GraphState } from "./runGraph";
+import { MarkdownContent, MarkdownLinkScopeContext, MarkdownLinksContext } from "../MarkdownContent";
+import { parseScriptResult } from "./scriptResult";
+import { ScriptResultFacts } from "./ScriptResultFacts";
 import { ScriptSource } from "./ScriptSource";
 import { RunTabGraph } from "./WorkflowBlock";
 import { runDuration, runStateLabel, runTone } from "./workflows";
@@ -57,6 +60,19 @@ export const runTabRefreshMilliseconds = 2000;
  * its session), a timeline of its steps and sessions, its script and its result, and Copy as Mermaid, the text `alta
  * workflow show --format mermaid` gives. It reads the run again while it runs. A run the host no longer keeps closes its tab.
  */
+// The result as its session was given it: the value as Markdown, what the run wrote beside; a text of another form as written.
+// Its links start from the folder of the run's session.
+function RunResult({ text, sessionId }: { text: string; sessionId: string }) {
+  const opener = useContext(MarkdownLinksContext);
+  const parsed = useMemo(() => parseScriptResult(text), [text]);
+  const scope = useMemo(() => ({ sessionId }), [sessionId]);
+  if (!parsed) return <pre className="workflow-run-text">{text}</pre>;
+  return <MarkdownLinkScopeContext.Provider value={scope}>
+    <ScriptResultFacts result={parsed} onOpenLink={opener && (address => opener(address, scope))} />
+    <div className="workflow-run-result"><MarkdownContent source={parsed.result ?? parsed.notes} timelineCodeBlocks /></div>
+  </MarkdownLinkScopeContext.Provider>;
+}
+
 export function RunTab({ api, epoch, runId, visible, onActivate, onGone, write = text => navigator.clipboard.writeText(text) }: {
   api: WorkflowsApi;
   /** The epoch of the host of the window; null in a window without a host of its own, undefined while it is not known. */
@@ -167,7 +183,7 @@ export function RunTab({ api, epoch, runId, visible, onActivate, onGone, write =
     </section>}
     {detail.result && <section className="workflow-run-section">
       <h3>{t("Result")}</h3>
-      <pre className="workflow-run-text">{detail.result}</pre>
+      <RunResult text={detail.result} sessionId={info.sessionId} />
     </section>}
     {detail.source && <section className="workflow-run-section">
       <h3>{t("Script")}</h3>

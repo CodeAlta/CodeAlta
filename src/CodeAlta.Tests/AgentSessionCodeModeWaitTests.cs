@@ -84,7 +84,7 @@ public sealed partial class AgentSessionTests
 
         Assert.IsTrue(waitedInTurn, "the question did not send the script to the background, nor end the turn");
         Assert.IsNotNull(result);
-        StringAssert.Contains(Text(result), "\"answer: yes\"");
+        StringAssert.Contains(Text(result), "Result:\nanswer: yes\n");
         Assert.IsFalse(Text(result).Contains("still running", StringComparison.OrdinalIgnoreCase), Text(result));
     }
 
@@ -108,7 +108,7 @@ public sealed partial class AgentSessionTests
 
         Assert.IsTrue(waitedInTurn, "the approval did not send the script to the background, nor end the turn");
         Assert.IsNotNull(result);
-        StringAssert.Contains(Text(result), "\"refused\"");
+        StringAssert.Contains(Text(result), "Result:\nrefused\n");
     }
 
     // The user of the test: takes the turn of the run's questions, says it was asked, and answers "yes" when the test lets it.

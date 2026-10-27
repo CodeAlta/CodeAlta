@@ -8,6 +8,7 @@ import { fileChangesMarkdown, projectFileChanges, type FileChanges } from "./fil
 import { projectTimelineImages, type TimelineImage } from "./timelineImages";
 import { projectTimelineAttachments, type TimelineAttachment } from "./timelineAttachments";
 import { promptRow, promptTokens, type PromptRow } from "./systemPrompt";
+import { parseWorkflowResult, type WorkflowResult } from "./workflows/scriptResult";
 
 export type HistoryEntry = HistoryResponse["entries"][number];
 
@@ -66,6 +67,10 @@ export type TimelineItem = Readonly<{
   sourceSessionId?: string;
   /** The recorded result of a background job, shown as a compact card with its facts and output in a window. */
   jobResult?: JobResult;
+  /** The result of a script that ended in the background: its Markdown is the body, its facts and what it wrote are beside. */
+  workflowResult?: WorkflowResult;
+  /** True when the history page gave only the start of the text of the record: the card reads the rest on demand. */
+  textShortened?: boolean;
   /** True for the message of a turn the provider started by itself: nobody wrote it, and it is not a prompt to continue from. */
   providerPrompt?: boolean;
   /**
@@ -529,6 +534,8 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     ?? (entry.sourceSessionId ? { sourceSessionId: entry.sourceSessionId, kind: "prompt", body: entry.text ?? "" } : null);
   // The end of a background job is a prompt of the host: it is shown as what it is, without its envelope.
   const job = !fromAgent || delegated ? null : parseJobResult(entry.text);
+  // So is the end of a script that went on in the background: its result is shown as Markdown, what it wrote beside.
+  const workflow = provenance === promptProvenanceIds.workflow && !delegated ? parseWorkflowResult(entry.text) : null;
   const toolImages = !streaming && normalizedKind === "tooloutput" && entry.eventType === "contentCompleted" ? projectTimelineImages(entry.images) : undefined;
   const elsewhere = fromAgent && !delegated && !job && !provenance ? externalOrigin(entry.contentId) : null;
   // A prompt of the host that has no card of its own (a message of an agent, a job result) is titled by its provenance.
@@ -540,6 +547,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       category = "user"; icon = delegated ? "branch" : job ? "terminal" : hostPrompt ? promptProvenanceIcon(hostPrompt) : "user";
       title = delegated ? "Agent message" : job ? "Background job" : hostPrompt ? userTitle(hostPrompt) : "You";
       if (delegated) markdown = delegated.body;
+      if (workflow) markdown = workflow.result ?? (workflow.notes || null);
       if (job) {
         markdown = job.body;
         summary = job.title || job.command || job.jobId;
@@ -556,6 +564,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     subtitle = streaming ? "Streaming" : elsewhere ? externalOriginSubtitles[elsewhere] : delegated
       ? friendly(delegated.kind)
       : job ? [job.title, job.result].filter(part => part).join(" · ")
+      : workflow ? workflow.title ?? workflow.runId
       : category === "image" ? toolImages!.map(image => image.title).join(", ") : null;
   } else if (entry.eventType === "activity") {
     category = normalizedKind === "filechange" ? "file" : "tool";
@@ -675,6 +684,8 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolApp: entry.tool?.app ? { server: entry.tool.app } : undefined,
     delegated: delegated ? true : undefined,
     jobResult: job ?? undefined,
+    workflowResult: workflow ?? undefined,
+    textShortened: entry.textTruncated ? true : undefined,
     providerPrompt: category === "user" && (entry.contentId?.startsWith("provider:") || provenance === promptProvenanceIds.provider) ? true : undefined,
     provenance: category === "user" ? provenance ?? undefined : undefined,
     missingCliProvider: entry.eventType === "error" && entry.kind === "claude-code-not-found" && entry.providerId ? entry.providerId : undefined,
@@ -682,6 +693,18 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
     prompt,
   };
+}
+
+/**
+ * The body of a message from its whole text, as its row makes it from the start the history page gave: the result of
+ * a script without the facts of its run, the message of an agent without its envelope.
+ */
+export function wholeMessageBody(item: Pick<TimelineItem, "workflowResult" | "delegated">, text: string): string {
+  if (item.workflowResult) {
+    const read = parseWorkflowResult(text);
+    return read ? read.result ?? read.notes : text;
+  }
+  return item.delegated ? parseDelegatedMessage(text)?.body ?? text : text;
 }
 
 // The English title of a prompt of the host: the key of the translations of a known provenance, the words of another.

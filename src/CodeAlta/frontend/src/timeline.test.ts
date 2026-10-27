@@ -67,6 +67,10 @@ test("a prompt the host sent is titled by the provenance it was recorded with, n
     ["Agent message", true]);
   // A turn the provider started is a prompt nobody wrote, by its provenance as by its content id.
   assert.equal(user("done", "provider").providerPrompt, true);
+  // The end of a script shows its result as its body, and its title and what it wrote beside.
+  const ended = user("Script run-1 (Research) ended:\nScript completed · 2.0 s · 1 call\nOutput:\n```\nlog\n```\nResult:\n## Findings\n- one", "workflow");
+  assert.deepEqual([ended.title, ended.subtitle, ended.markdown, ended.workflowResult?.notes], ["Workflow", "Research", "## Findings\n- one", "Output:\n```\nlog\n```"]);
+  assert.equal(user("Script run-1 ended:\nScript completed · 1 ms · no calls", "reminder").workflowResult, undefined);
   // Only a prompt has a provenance.
   assert.equal(buildTimelineItems([entry({ eventType: "contentCompleted", kind: "Assistant", text: "Done.", provenance: "reminder" })])[0].provenance, undefined);
   // Every title the timeline gives a known provenance has its translations.
