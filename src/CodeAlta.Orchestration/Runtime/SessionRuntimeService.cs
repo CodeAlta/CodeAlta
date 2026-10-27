@@ -193,7 +193,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         + "No user is available while this run goes on: nobody reads a question, approves a plan or reviews a change before it ends. "
         + "Decide by yourself instead of asking: choose the narrowest safe interpretation of the request, go on, and say in your final answer what you assumed. "
         + "The commands `alta ask`, `alta review`, `alta reminder` and the commands of the windows and of the user interface (`alta ui`, `alta window`) are not available here. "
-        + "Your final answer is the result of the run, read by a script or a program: make it complete and self-contained.";
+        + "Your final answer is the result of the run, read by a script or a program: make it complete and self-contained. "
+        + "Nobody reads what you write between tool calls: do not narrate your steps, and keep what matters for the final answer.\n\n"
+        + "Run builds and tests in the foreground with the shell tool when they fit its timeout. "
+        + "A job you start with `alta job start` must have ended before your final answer: one that ends after it starts this session again, with the whole context, and the answer is given twice. "
+        + "While a job runs, go on with other work; when only the job is left, end your turn with one line that names it, not with your answer: its result comes back to you as a prompt, and you give the final answer then.";
 
     /// <summary>
     /// Gets or initializes whether the host shows the prompts the model suggests. False, the default: no session
