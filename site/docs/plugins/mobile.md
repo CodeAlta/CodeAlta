@@ -38,7 +38,8 @@ When something keeps a phone from connecting, the Mobile tab says what it is and
 
 - **The sessions**, latest activity first, six at a time, each with a dot and a line that show what it does: working, calling tools, thinking, writing. The filter button keeps the list to the projects you check, one or several; the checked ones come first, and **All projects** shows them all again.
 - **A session**: its timeline, with the messages, the thoughts, the tool calls (without their output) and the diagrams. A diagram opens in a tab of its own, where you can zoom.
-- **Questions and review requests** of agents, as in the window. A session that waits for you shows **Waits for your answer** in the list. On its page, once its turn has ended, the ask takes the place of the prompt: pick a choice or write an answer for each question, then **Submit**. For a review request, read its message, choose **Approve**, **Request changes** or **Comment**, add an overall comment if you like, then **Submit review**. Comments on lines are written on the computer, and those already written go with the review. **Cancel** leaves without answering, after asking first.
+- **Questions and review requests** of agents, as in the window. A session that waits for you shows **Waits for your answer** in the list. On its page, once its turn has ended, the ask takes the place of the prompt; a question of a script shows at once, while its turn runs. Pick a choice or write an answer for each question, then **Submit**. For a review request, read its message, choose **Approve**, **Request changes** or **Comment**, add an overall comment if you like, then **Submit review**. Comments on lines are written on the computer, and those already written go with the review. **Cancel** leaves without answering, after asking first.
+- **While an answer goes**, the card says so. When the session does not take it, the ask comes back with what you wrote, to send again. When CodeAlta cannot tell whether the session got it, the card says to check the session on the computer.
 - **The prompt** sends to an idle session. While a turn runs, **Steer** sends into that turn, **Queue** keeps the prompt until the turn ends, and **Stop** stops the turn.
 - **The model chip**, beside the prompt buttons, shows the session's model and effort, such as `GPT-6.1 Sol · low`. Tap it to choose another model of the provider and its effort. **⋯** holds the agent prompt, the permissions (when the provider has modes), and **Queue rather than steer while it works**, which makes Queue the first button during a turn. A choice shows in blue until the next prompt takes it, and the session keeps it. A steered prompt changes none of these.
 - **A new session**: the project and the prompt, then the model chip beside **Start**: a tier of the settings or a model, and its effort. **⋯** holds the agent prompt, the provider, the permissions and a worktree of its own. The choices are remembered for each project.
@@ -51,7 +52,8 @@ With more than the Default space, the **Mobile** row of **Settings > Plugins** h
 ## Security
 
 - The page is served by CodeAlta on `127.0.0.1` only. Tailscale Serve publishes it at `https://<computer>.<tailnet>.ts.net:2584` to the devices of your tailnet, with a certificate of Tailscale. No other device of your network reaches it.
-- The QR code holds an access token. The phone keeps it, and every request needs it. **Reset access**, in **Settings > Extensions > Mobile**, makes a new one: every phone has to scan the new code.
+- The QR code holds a pairing token. A phone that scans it gets a key of its own, which it keeps, and every request needs it. CodeAlta keeps neither on disk, only their fingerprints, so no program of the computer can read them there. After CodeAlta restarts, the Mobile tab shows a new code; the phones already connected stay connected.
+- **Reset access**, in **Settings > Extensions > Mobile**, disconnects every phone and makes a new code: every phone has to scan it.
 - The plugin publishes one port of the computer on the tailnet, 2584 unless you change it, and nothing else. It never changes what you serve with Tailscale Serve on other ports, and when the port already serves something else, it leaves it and says so.
 - Turn the plugin off in **Settings > Plugins**: the page stops, and Tailscale no longer serves it.
 
@@ -67,6 +69,6 @@ With more than the Default space, the **Mobile** row of **Settings > Plugins** h
 - **Port on this computer**: the port of the page on `127.0.0.1`, 2584 at first.
 - **Port on the tailnet**: the HTTPS port Tailscale Serve publishes the page on, 2584 at first.
 - **Address on the tailnet**: the address of the page while Tailscale serves it.
-- **Reset access**: a new access token. Every phone has to scan the new code.
+- **Reset access**: disconnects every phone and makes a new code. Every phone has to scan it.
 
 **Apply** moves the page to the new ports at once: Tailscale stops serving the old port and publishes the new one, and phones scan the new QR code of the Mobile tab. A port is a number from 1024 to 65535.
