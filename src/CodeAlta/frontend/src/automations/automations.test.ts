@@ -202,13 +202,18 @@ test("a session started by an automation is told which one, and what started tha
 test("every template can be saved as it is, in a project or as a chat, and is named in every language", () => {
   assert.equal(new Set(automationTemplates.map(template => template.key)).size, automationTemplates.length);
   for (const template of automationTemplates) {
-    const form: AutomationForm = { ...emptyForm(template.project ? "p" : null), name: english(template.name), prompt: template.prompt, triggers: template.triggers };
+    const form: AutomationForm = { ...emptyForm(template.project ? "p" : null), name: english(template.name), prompt: template.prompt,
+      script: template.script ?? "", scriptArguments: template.scriptArguments ?? "", triggers: template.triggers };
     assert.equal(formProblem(form), null, template.key);
-    assert.ok(template.prompt.length > 80 && template.prompt.length < 1000, template.key);
+    // A template runs a prompt, or a script of the library in place of one.
+    assert.ok(template.script ? template.prompt === "" : template.prompt.length > 80 && template.prompt.length < 1000, template.key);
     // A template that watches a repository runs in a project.
     assert.ok(template.project || template.triggers.every(isSchedule), template.key);
     for (const locale of locales) assert.ok(translate(locale, template.name).length > 0 && translate(locale, template.description).length > 0, `${template.key} ${locale}`);
   }
   assert.ok(automationTemplates.some(template => !template.project), "One template needs no project.");
   assert.ok(automationTemplates.some(template => template.triggers.length === 0), "One template is run by hand.");
+  const script = automationTemplates.find(template => template.script);
+  assert.equal(script?.script, "review-pr", "One template runs a sample script on each pull request.");
+  assert.deepEqual(inputOf({ ...emptyForm("p"), name: "Review", prompt: script!.prompt, script: script!.script!, triggers: script!.triggers }).script, "review-pr");
 });

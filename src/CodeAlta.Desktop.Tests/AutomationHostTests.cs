@@ -222,6 +222,35 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task ASession_CreatesAnAutomationThatRunsAScript_OnEachPullRequest()
+    {
+        await using var fixture = await Fixture.CreateAsync(withLibrary: true);
+
+        var created = await fixture.One("alta.automation.created", "automation", "create", "--name", "PR review", "--trigger", "pull_request@opened",
+            "--script", "review-pr", "--script-args", """{"lenses":["security"]}""");
+
+        Assert.AreEqual("review-pr", Text(created, "script"));
+        var definition = fixture.Service.Snapshot.Find(Text(created, "id")!)!.Definition;
+        Assert.AreEqual(("review-pr", """{"lenses":["security"]}""", string.Empty), (definition.Script, definition.ScriptArguments, definition.Prompt));
+        foreach (var (arguments, expected) in new (string[], string)[]
+                 {
+                     (["automation", "create", "--name", "x", "--script", "review-pr", "--content", "y"], "usage.contentConflict"),
+                     (["automation", "create", "--name", "x", "--script-args", "{}", "--content", "y"], "usage.scriptArgsWithoutScript"),
+                     (["automation", "create", "--name", "x", "--script", "Review PR"], "usage.invalidScript"),
+                     (["automation", "create", "--name", "x", "--script", "review-pr", "--script-args", "[1]"], "usage.invalidScriptArgs"),
+                     (["automation", "create", "--name", "x", "--script", "nope"], "There is no script 'nope' in the library of its project."),
+                     (["automation", "create", "--name", "x", "--script", "review-pr", "--script-args", """{"depth":2}"""], "the script takes no argument `depth`"),
+                 })
+        {
+            var refused = await fixture.Run(arguments);
+            Assert.AreEqual(AltaExitCodes.Usage, refused.Code, string.Join(' ', arguments));
+            StringAssert.Contains(refused.Text, expected);
+        }
+
+        Assert.AreEqual(1, fixture.Service.Snapshot.Entries.Count, "A refused command writes nothing.");
+    }
+
+    [TestMethod]
     public async Task ASession_CreatesAnAutomation_RunsIt_AndTheSessionItStartsFindsIt()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -892,13 +921,14 @@ public sealed class AutomationHostTests
             // The library of the project: its script with its parameters and its declared steps.
             var listed = await rpc.ScriptsAsync(new(Epoch, project.Id), default);
             Assert.AreEqual("ok", listed.Status);
-            var triage = listed.Scripts.Single();
+            var triage = listed.Scripts.Single(static script => script.Scope == "project");
+            Assert.IsTrue(listed.Scripts.Any(static script => script is { Name: "review-pr", Scope: "builtin" }), "the samples of CodeAlta come after the project's scripts");
             Assert.AreEqual(("triage", "project", "Triage issues", "Triage.", null), (triage.Name, triage.Scope, triage.Title, triage.Description, triage.Problem));
             Assert.AreEqual("days:integer:True:How far back.:|labels:array:False::|event:string:False::\"\"",
                 string.Join('|', triage.Parameters.Select(static parameter => $"{parameter.Name}:{parameter.Type}:{parameter.Required}:{parameter.Description}:{parameter.Default}")));
             Assert.AreEqual("fetch:-:False|label:-:True|report:fetch,label:False",
                 string.Join('|', triage.Steps.Select(static step => $"{step.Id}:{(step.After is null ? "-" : string.Join(',', step.After))}:{step.Each}")));
-            Assert.AreEqual(0, (await rpc.ScriptsAsync(new(Epoch, null), default)).Scripts.Count, "Without a project, no script of a project.");
+            Assert.IsTrue((await rpc.ScriptsAsync(new(Epoch, null), default)).Scripts.All(static script => script.Scope == "builtin"), "Without a project, no script of a project.");
             Assert.AreEqual("not_found", (await rpc.ScriptsAsync(new(Epoch, "missing"), default)).Status);
 
             // Run… checks the script and its arguments as an automation does, before any session exists.
@@ -1211,7 +1241,8 @@ public sealed class AutomationHostTests
     {
         private readonly string _root;
 
-        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands, AltaCommandReviewPolicy? policy, SessionRuntimeService? runtime, CatalogOptions? catalog, SpaceCatalog? spaces)
+        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands, AltaCommandReviewPolicy? policy, SessionRuntimeService? runtime, CatalogOptions? catalog, SpaceCatalog? spaces,
+            CodeModeScriptLibrary? library)
         {
             (_root, Project, Other) = (root, project, other);
             Service = new AutomationService(GlobalPath, token => projects.LoadAsync(token), new AutomationStateStore(Path.Combine(root, "state", "automations.json"), false),
@@ -1222,6 +1253,7 @@ public sealed class AutomationHostTests
             if (runtime is not null) services.Add(runtime);
             if (catalog is not null) services.Add(catalog);
             if (spaces is not null) services.Add(spaces);
+            if (library is not null) services.Add(library);
             var registry = new AltaCommandRegistry();
             Alta = new AltaCommandDispatcher(registry, services);
             services.Add(registry).Add(Alta);
@@ -1239,13 +1271,16 @@ public sealed class AutomationHostTests
         public AltaCallerIdentity Session { get; }
 
         /// <param name="acceptsCommands">False for a host that has the user review the commands of its sessions.</param>
-        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true, AltaCommandReviewPolicy? policy = null, SessionRuntimeService? runtime = null, CatalogOptions? catalog = null, SpaceCatalog? spaces = null)
+        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true, AltaCommandReviewPolicy? policy = null, SessionRuntimeService? runtime = null, CatalogOptions? catalog = null, SpaceCatalog? spaces = null,
+            bool withLibrary = false)
         {
             var root = Directory.CreateTempSubdirectory("codealta-automation-host-").FullName;
             var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName });
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "app")).FullName);
             var other = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "other")).FullName);
-            var fixture = new Fixture(root, projects, project, other, acceptsCommands, policy, runtime, catalog, spaces);
+            // The library of scripts, with the samples of CodeAlta.
+            var library = withLibrary ? new CodeModeScriptLibrary(new CatalogOptions { GlobalRoot = Path.Combine(root, "global") }, CodeModeScriptLibrary.ShippedRoot) : null;
+            var fixture = new Fixture(root, projects, project, other, acceptsCommands, policy, runtime, catalog, spaces, library);
             await fixture.Service.RefreshAsync();
             return fixture;
         }

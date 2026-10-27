@@ -1,15 +1,16 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using CodeAlta.Orchestration.Runtime.Scripts;
+using CodeAlta.Catalog;
 
-namespace CodeAlta.Desktop.Workflows;
+namespace CodeAlta.Orchestration.Runtime.Scripts;
 
 /// <summary>
 /// The prompt that runs a script of the library in a new session: one call of <c>exec</c> that runs it with its arguments,
-/// then a short answer with its result. An automation that runs a script and <b>Run…</b> in the Workflows tab both send it,
-/// after the same checks: the script is in the library of the project, parses, and accepts its arguments.
+/// then a short answer with its result. An automation that runs a script, <b>Run…</b> in the Workflows tab and
+/// <c>alta script run</c> all send it, after the same checks: the script is in the library of the project and in the space
+/// of the session, parses, and accepts its arguments.
 /// </summary>
-internal static class ScriptRunPrompt
+public static class CodeModeScriptRunPrompt
 {
     /// <summary>Checks a script and its arguments, and writes the prompt that runs it.</summary>
     /// <param name="library">The library of the host.</param>
@@ -23,14 +24,30 @@ internal static class ScriptRunPrompt
     /// <param name="problem">Why the script cannot run so.</param>
     /// <returns>The prompt, or null when <paramref name="problem"/> is set.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="library"/> or <paramref name="name"/> is null.</exception>
-    internal static string? Build(CodeModeScriptLibrary library, string name, string? argumentsJson, string? trigger, string? projectPath, out string? problem)
+    public static string? Build(CodeModeScriptLibrary library, string name, string? argumentsJson, string? trigger, string? projectPath, out string? problem)
+        => Build(library, name, argumentsJson, trigger, projectPath, null, out problem);
+
+    /// <summary>Checks a script of a space and its arguments, and writes the prompt that runs it.</summary>
+    /// <param name="library">The library of the host.</param>
+    /// <param name="name">The name of the script.</param>
+    /// <param name="argumentsJson">Its arguments, a JSON object; null for none.</param>
+    /// <param name="trigger">What started the run: its <c>event</c> argument when the script declares one; null or blank for nothing.</param>
+    /// <param name="projectPath">The folder of the project the session runs in, whose scripts come first; null for none.</param>
+    /// <param name="spaces">The space of the session that runs it: yours and the samples only when the space has them; null for every script.</param>
+    /// <param name="problem">Why the script cannot run so.</param>
+    /// <returns>The prompt, or null when <paramref name="problem"/> is set.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="library"/> or <paramref name="name"/> is null.</exception>
+    public static string? Build(CodeModeScriptLibrary library, string name, string? argumentsJson, string? trigger, string? projectPath, SpaceFilter? spaces,
+        out string? problem)
     {
         ArgumentNullException.ThrowIfNull(library);
         ArgumentNullException.ThrowIfNull(name);
         problem = null;
-        if (library.Find(name, projectPath) is not { } script)
+        if (library.Find(name, projectPath, spaces) is not { } script)
         {
-            problem = $"There is no script '{name}' in the library{(projectPath is null ? string.Empty : " of its project")}.";
+            problem = spaces is not null && library.Find(name, projectPath) is not null
+                ? ResourceNotInSpaceException.MessageOf(SpaceResourceKind.Script, name, spaces.SpaceId)
+                : $"There is no script '{name}' in the library{(projectPath is null ? string.Empty : " of its project")}.";
             return null;
         }
 
@@ -87,7 +104,7 @@ internal static class ScriptRunPrompt
     /// <param name="name">The name of the script, one <see cref="CodeModeScriptLibrary.IsName"/> accepts.</param>
     /// <returns>The prompt.</returns>
     /// <exception cref="ArgumentException"><paramref name="runId"/> is blank, or <paramref name="name"/> is not a script name.</exception>
-    internal static string SaveAsScript(string runId, string name)
+    public static string SaveAsScript(string runId, string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
         if (!CodeModeScriptLibrary.IsName(name)) throw new ArgumentException($"'{name}' is not a script name.", nameof(name));

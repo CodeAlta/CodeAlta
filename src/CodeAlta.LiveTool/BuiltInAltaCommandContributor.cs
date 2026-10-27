@@ -108,6 +108,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("script check"),
         Mutating("script edit"),
         Mutating("script save"),
+        Mutating("script run"),
         Disruptive("script delete"),
         Read("skill list", supportsCatalogOnlyContext: true),
         Read("skill show", supportsCatalogOnlyContext: true),

@@ -54,7 +54,7 @@ test("without automations the tab invites to write one, in every language; templ
   }
   assert.doesNotMatch(render({}), /class="automation-template" disabled/);
   const alone = render({}, { projects: [] });
-  assert.equal(alone.split('class="automation-template" disabled=""').length - 1, 7, "Every template but the chat needs a project.");
+  assert.equal(alone.split('class="automation-template" disabled=""').length - 1, 8, "Every template but the chat needs a project.");
   assert.match(alone, /class="automation-template"><span[^>]*data-file-tone="teal"[\s\S]*?Daily brief/);
 });
 

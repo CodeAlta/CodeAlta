@@ -202,6 +202,7 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
             writer.WriteNumber("inputTokens", result.Usage.InputTokens);
             writer.WriteNumber("outputTokens", result.Usage.OutputTokens);
             writer.WriteNumber("durationMs", (long)result.Elapsed.TotalMilliseconds);
+            if (result.Warning is { } warning) writer.WriteString("warning", warning);
             writer.WriteEndObject();
         }
 

@@ -37,8 +37,8 @@ A script is the body of an async function: it uses `await` and `return`, in plai
 | `mcp.<server>.<tool>(args)` | The tools of the [MCP servers](../plugins/mcp.md) of the session |
 | `alta.<group>.<command>(args)` | The [`alta` commands](delegation.md#what-agents-can-use), such as `alta.session.list({ limit: 20 })` |
 | `codemode.help()`, `codemode.search({ query })`, `codemode.describe({ path })` | Find functions and read their TypeScript declarations |
-| `agent(prompt, { tier, model, title, schema })` | Start a session of its own for a part of the work, and get its final answer, or the JSON value it answered with `schema`. It is a sub-agent of the session, which you can open; 8 run at once, 50 per script |
-| `session({ tier, title })` | Keep a session for several prompts: `run(prompt)` sends one, `close()` ends it |
+| `agent(prompt, { tier, model, title, schema })` | Start a session of its own for a part of the work, and get its final answer, or the JSON value it answered with `schema`. It is a sub-agent of the session, which you can open; 8 run at once, 50 per script. A [tier](../model-tiers.md) that is not set up runs it on the model of the session that runs the script, and the output says so once |
+| `session({ tier, title })` | Keep a session for several prompts: `run(prompt)` sends one, `close()` ends it. Its tier works as for `agent()` |
 | `ask(question, { choices, default })` | Ask you a question and get your answer. It shows at once where the session asks its questions, also while the turn runs, one question of a script at a time. The time you take counts neither toward the script's time limit nor toward its `yield_ms`: the turn waits for your answer. In an automation, nobody is asked: the script gets an `AskError` |
 | `sleep(duration)` | Wait: milliseconds, or `"30s"`, `"5m"`, `"2h"`, `"1d"`, up to 7 days. A sleeping script goes on in the background, and the time it sleeps does not count toward its time limit. If CodeAlta closes meanwhile, the script goes on by itself when it wakes |
 | `parallel(functions, { limit })`, `pipeline(items, ...stages)` | Run work at once: a failure is `null`, and a warning in the output |
@@ -98,8 +98,19 @@ The steps of a library script, such as those **Run…** and the automations star
 
 A script worth keeping goes in the library, where any session runs it by its name with `workflow("name", args)`:
 
+- the samples that come with CodeAlta;
 - your scripts, in `~/.alta/scripts/<name>.js`;
-- the scripts of a project, in `.alta/scripts/<name>.js`, committed with it. A project script wins over yours of the same name.
+- the scripts of a project, in `.alta/scripts/<name>.js`, committed with it. A project script wins over yours of the same name, and yours over a sample.
+
+The samples show what scripts do well, and are a start for your own (`alta script edit <name>` gives a copy to change):
+
+| Sample | What it does |
+| --- | --- |
+| `review-pr` | Reviews a pull request from several angles at once, one session each, then merges the findings into one review |
+| `compare-models` | Gives the same task to several models, then has a judge compare their answers |
+| `fix-failing-tests` | Runs the tests, then gives each failing test to a session of its own. The sessions share the folder of the project: one works at a time unless `at_once` says more |
+| `triage-issues` | Classifies each open issue of the project's tracker (kind, priority, summary) and reports them by priority |
+| `research` | Splits a question into sub-questions, researches each in a session, then writes one answer |
 
 A library script starts by describing itself. Its `params` are checked before it runs: a missing argument, an unknown one or one of the wrong type stops the call with a message that says which.
 
@@ -107,29 +118,40 @@ A library script starts by describing itself. Its `params` are checked before it
 export const meta = {
   name: "count-lines",
   description: "Counts the lines of files.",
+  whenToUse: "To size the files of a change.",
   params: { files: { type: "array", description: "The paths" } },
 };
 const read = await Promise.all(args.files.map(path => tools.read_file({ path })));
 return read.map((r, i) => ({ file: args.files[i], lines: r.content.split("\n").length }));
 ```
 
+Agents find a script by what it does: `codemode.search()` in a script returns it as `workflow:<name>`, and `alta search --kind script` finds it by its name, its description and its `whenToUse`. With `tool: true` in its `meta`, a script is also a tool of the sessions of its project while Code Mode is on, named after it (`review_pr`), whose arguments are its `params`: the model loads it when it needs it, and calling it runs the script.
+
 Agents manage the library with `alta script`:
 
 | Command | What it does |
 | --- | --- |
 | `alta script list`, `alta script show <name>` | List the scripts, read one (`--declarations` for how to call it) |
+| `alta script run <name> --arg <key>=<value>` | Run a script in a new session of the project, as **Run…** does. A value is JSON (`7`, `["a","b"]`) unless the parameter is a string |
 | `alta script edit <name>` | Copy a script into the scratchpad of the session, where the agent changes it with its file tools |
 | `alta script check <name-or-path>` | Check that a script parses and describes itself |
 | `alta script save <name> --from <path>` | Publish a script, in the project (`--scope global` for yours). With the `--hash` that `edit` gave, a save is refused when the library copy changed since |
 | `alta script delete <name>` | Delete a script |
 
-A [sandboxed session](sandbox.md) reads the library but does not save in it.
+A [sandboxed session](sandbox.md) reads the library but does not save in it. `alta script run` from a terminal needs a CodeAlta that keeps running: `altacli alta script run` refuses, since its CodeAlta ends with the command.
+
+Your scripts and the samples are in every [space](../spaces.md) unless you limit them, as skills are, in `~/.alta/config.toml`. A script limited so is listed, found and run only in those spaces; the scripts of a project are in every space of its sessions.
+
+```toml
+[scripts.spaces]
+review-pr = ["work"]
+```
 
 ## The Workflows tab
 
 In CodeAlta Desktop, the **Workflows** button of the title bar (or **Workflows** in the command palette) opens a tab with the library and the runs:
 
-- **Library**: the scripts the project chosen at the top sees, the project's and yours, each with its description, its parameters (`*` for a required one) and its steps drawn small. A step that runs once per item shows `×`.
+- **Library**: the scripts the project chosen at the top sees in the space the window shows, the project's, yours and the samples, each with its description, its parameters (`*` for a required one) and its steps drawn small. A step that runs once per item shows `×`.
 - **Runs**: the scripts running in CodeAlta and those that ended in the last minutes, the running ones first. Click a run to open its session.
 
 To run a script, click **Run…** on it, fill in its parameters, choose the project it runs in, then click **Run**. A list or an object is written as JSON. The script runs in a new session of that project, which opens. That session has `exec` even when Code Mode is off.

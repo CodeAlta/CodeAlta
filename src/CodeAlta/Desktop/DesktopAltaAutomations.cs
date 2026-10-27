@@ -60,7 +60,9 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
 
         var definition = new AutomationDefinition(AutomationDefinition.NewId(), request.Name ?? string.Empty)
         {
-            Prompt = request.Prompt ?? string.Empty,
+            Prompt = request.Script is null ? request.Prompt ?? string.Empty : string.Empty,
+            Script = request.Script,
+            ScriptArguments = request.Script is null ? null : request.ScriptArguments,
             Enabled = request.Enabled,
             Project = request.StoreInProject ? null : folder,
             Model = model,

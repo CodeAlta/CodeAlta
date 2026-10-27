@@ -11,19 +11,36 @@ internal sealed partial class BuiltInAltaCommandContributor
 {
     private static Command CreateScriptCommand(AltaCommandContext context)
     {
-        var group = Group("script", "The library of the scripts of Code Mode: list them, show one, check one, edit one through a copy, save, delete. A script runs from `exec` with `workflow(\"name\", args)`.");
+        var group = Group("script", "The library of the scripts of Code Mode: list them, show one, check one, edit one through a copy, save, delete, run one in a new session. A script runs from `exec` with `workflow(\"name\", args)`.");
         group.Add(CreateScriptListCommand(context));
         group.Add(CreateScriptShowCommand(context));
         group.Add(CreateScriptCheckCommand(context));
         group.Add(CreateScriptEditCommand(context));
         group.Add(CreateScriptSaveCommand(context));
         group.Add(CreateScriptDeleteCommand(context));
+        group.Add(CreateScriptRunCommand(context));
         AddHelpText(
             group,
-            "Scripts live in `~/.alta/scripts/<name>.js` (yours) and `.alta/scripts/<name>.js` (the project's, committed with it); a project script wins over yours of the same name. A script starts with `export const meta = { name, description, params, steps }`.",
+            "Scripts live in `~/.alta/scripts/<name>.js` (yours) and `.alta/scripts/<name>.js` (the project's, committed with it); a project script wins over yours of the same name, and yours over a sample of CodeAlta. A script starts with `export const meta = { name, description, params, steps }`.",
+            "Your scripts and the samples are in every space, unless the user limits them to some (`[scripts.spaces] <name> = [...]` in the configuration); the scripts of a project are in the spaces of its sessions.",
             "Edit a script through a copy: `alta script edit <name>` gives a file to change with your file tools and the hash it started from; check it with `alta script check <path>`, try it with `workflow({ scriptPath })`, then publish it with `alta script save <name> --from <path> --hash <hash>`.",
-            "Examples: `alta script list`; `alta script show review-pr --declarations`; `alta script save triage --scope project --stdin`.");
+            "Examples: `alta script list`; `alta script show review-pr --declarations`; `alta script save triage --scope project --stdin`; `alta script run review-pr --arg pr=128`.");
         return group;
+    }
+
+    private static Command CreateScriptRunCommand(AltaCommandContext context)
+    {
+        var options = new ScriptRunOptions();
+        var command = Leaf("run", "Run a script of the library in a new session of the project, as Run… in the Workflows tab does: the session runs it with `exec` and answers with its result. Returns once the session got the prompt.");
+        command.Add("<name>", "Script name.", value => options.Name = value);
+        command.Add("arg=", "An argument of the script as `<key>=<value>`; repeat for several. A value is JSON (`7`, `true`, `[\"a\",\"b\"]`) unless the parameter is a string.", value => { if (value is not null) options.Arguments.Add(value); });
+        command.Add("project=", "Project id, slug or path. Defaults to the project of the calling session, then to the cwd.", value => options.Project = value);
+        command.Add(async (_, _) => await HandleScriptRunAsync(context, options).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "From a session, the new session is one of its sub-sessions, in its space: a script of yours or a sample runs only when that space has it. `alta session report <session-id>` follows it.",
+            "Examples: `alta script run review-pr --arg pr=128`; `alta script run research --arg question=\"How are TOML keys parsed?\" --arg angles=3`.");
+        return command;
     }
 
     private static Command CreateScriptListCommand(AltaCommandContext context)
@@ -31,7 +48,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? scope = null;
         var command = Leaf("list", "List the scripts the project sees: the project's, yours and the samples, one per name.");
         command.Add("scope=", "Only `project`, `global` or `builtin`.", value => scope = value);
-        command.Add((_, _) => ValueTask.FromResult(HandleScriptList(context, scope)));
+        command.Add(async (_, _) => await HandleScriptListAsync(context, scope).ConfigureAwait(false));
         return command;
     }
 
@@ -42,7 +59,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var command = Leaf("show", "Show a script: its meta, where it is, its hash, and its source.");
         command.Add("<name>", "Script name.", value => name = value);
         command.Add("declarations", "Give the declaration a caller uses instead of the source: `workflow(\"name\", args: {...})`.", value => declarations = value is not null);
-        command.Add((_, _) => ValueTask.FromResult(HandleScriptShow(context, name, declarations)));
+        command.Add(async (_, _) => await HandleScriptShowAsync(context, name, declarations).ConfigureAwait(false));
         return command;
     }
 
@@ -62,7 +79,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? name = null;
         var command = Leaf("edit", "Copy a script into the scratchpad of the session to change it with your file tools; gives the path and the hash it started from.");
         command.Add("<name>", "Script name.", value => name = value);
-        command.Add((_, _) => ValueTask.FromResult(HandleScriptEdit(context, name)));
+        command.Add(async (_, _) => await HandleScriptEditAsync(context, name).ConfigureAwait(false));
         return command;
     }
 
@@ -91,7 +108,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         return command;
     }
 
-    private static int HandleScriptList(AltaCommandContext context, string? scope)
+    private static async ValueTask<int> HandleScriptListAsync(AltaCommandContext context, string? scope)
     {
         if (context.Services.Get<CodeModeScriptLibrary>() is not { } library) return ScriptsUnavailable(context);
         CodeModeScriptScope? only = null;
@@ -101,7 +118,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             only = parsed;
         }
 
-        var scripts = library.List(ProjectRoot(context)).Where(script => only is null || script.Scope == only).ToArray();
+        var spaces = await CallerSpaceFilterAsync(context).ConfigureAwait(false);
+        var scripts = library.List(ProjectRoot(context), spaces).Where(script => only is null || script.Scope == only).ToArray();
         foreach (var script in scripts)
         {
             AltaJsonlWriter.WriteRecord(context.Stdout, ScriptRecord(context, "alta.script", script));
@@ -111,11 +129,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    private static int HandleScriptShow(AltaCommandContext context, string? name, bool declarations)
+    private static async ValueTask<int> HandleScriptShowAsync(AltaCommandContext context, string? name, bool declarations)
     {
         if (context.Services.Get<CodeModeScriptLibrary>() is not { } library) return ScriptsUnavailable(context);
         if (NormalizeOptionalText(name) is not { } scriptName) return UsageError(context, "usage.missingName", "A script name is required.", "alta script show");
-        if (library.Find(scriptName, ProjectRoot(context)) is not { } script) return ScriptNotFound(context, scriptName);
+        if (await FindInCallerSpaceAsync(context, library, scriptName).ConfigureAwait(false) is not { } script) return ScriptNotFound(context, scriptName);
         var record = ScriptRecord(context, "alta.script.show", script);
         if (declarations) record["declaration"] = Declaration(script);
         else record["source"] = script.Source.Original;
@@ -137,7 +155,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             return UsageError(context, "usage.missingScript", "Name a script, the path of a script file, or use --stdin.", path);
         }
-        else if (CodeModeScriptLibrary.IsName(given) && context.Services.Get<CodeModeScriptLibrary>()?.Find(given, ProjectRoot(context)) is { } script)
+        else if (CodeModeScriptLibrary.IsName(given) && context.Services.Get<CodeModeScriptLibrary>() is { } library
+                 && await FindInCallerSpaceAsync(context, library, given).ConfigureAwait(false) is { } script)
         {
             content = script.Source.Original;
             label = given;
@@ -173,11 +192,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         return source.Error is null ? AltaExitCodes.Success : AltaExitCodes.Failure;
     }
 
-    private static int HandleScriptEdit(AltaCommandContext context, string? name)
+    private static async ValueTask<int> HandleScriptEditAsync(AltaCommandContext context, string? name)
     {
         if (context.Services.Get<CodeModeScriptLibrary>() is not { } library) return ScriptsUnavailable(context);
         if (NormalizeOptionalText(name) is not { } scriptName) return UsageError(context, "usage.missingName", "A script name is required.", "alta script edit");
-        var script = library.Find(scriptName, ProjectRoot(context));
+        var script = await FindInCallerSpaceAsync(context, library, scriptName).ConfigureAwait(false);
         // The copy is in the scratchpad of the session, which its file tools reach; a new script starts empty.
         var scratchpad = context.Services.Get<SessionRuntimeService>()?.ScratchpadRoot
             ?? (context.Services.Get<CodeAlta.Catalog.CatalogOptions>() is { } catalog ? Path.Combine(catalog.GlobalRoot, "scratchpad") : Path.GetTempPath());
@@ -272,6 +291,128 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
+    private static async ValueTask<int> HandleScriptRunAsync(AltaCommandContext context, ScriptRunOptions options)
+    {
+        const string path = "alta script run";
+        if (context.Services.Get<CodeModeScriptLibrary>() is not { } library || context.Services.Get<CodeModeRunRegistry>() is not { } runs) return ScriptsUnavailable(context);
+        if (NormalizeOptionalText(options.Name) is not { } name) return UsageError(context, "usage.missingName", "A script name is required.", path);
+        // Without a calling session, only a host with a window keeps the new session running: `altacli alta` ends with the command.
+        if (NormalizeOptionalText(context.Caller.SourceSessionId) is null && context.Services.Get<IAltaSpaceView>() is null)
+        {
+            return Unsupported(context, "script.noSessionHost",
+                "A script runs in a new session, and this CodeAlta ends with the command: the session would not run. Run it from a session " +
+                "(`alta script run`, or `workflow(\"name\", args)` in `exec`), from the Workflows tab of CodeAlta Desktop, or with `altacli run` and a prompt that runs it.");
+        }
+
+        var (project, exitCode) = await ResolveWorkItemProjectAsync(context, options.Project).ConfigureAwait(false);
+        if (project is null) return exitCode;
+        if (ScriptArguments(library.Find(name, project.ProjectPath), options.Arguments, out var argumentsJson) is { } invalid)
+            return UsageError(context, "usage.invalidArg", invalid, path);
+
+        // The script must be in the space of the session that runs it: the space of the calling session, else the one the window shows.
+        var (spaceId, spaceExit) = await ResolveNewSessionSpaceAsync(context, null, path).ConfigureAwait(false);
+        if (spaceExit != AltaExitCodes.Success) return spaceExit;
+        var spaces = context.Services.Get<SessionRuntimeService>() is { } runtime
+            ? await runtime.GetSpaceFilterAsync(spaceId, project, context.CancellationToken).ConfigureAwait(false)
+            : null;
+        if (CodeModeScriptRunPrompt.Build(library, name, argumentsJson, null, project.ProjectPath, spaces, out var problem) is not { } prompt)
+        {
+            AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "script.runRefused", AltaExitCodes.Failure, problem!);
+            return AltaExitCodes.Failure;
+        }
+
+        var dispatcher = context.Services.Get<AltaCommandDispatcher>() ?? new AltaCommandDispatcher(new AltaCommandRegistry(), context.Services);
+        var title = library.Find(name, project.ProjectPath, spaces)?.Title is { Length: > 0 } named ? named : name;
+        var created = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", title], caller: context.Caller, cwd: context.Cwd,
+            cancellationToken: context.CancellationToken).ConfigureAwait(false);
+        var sessionId = created.ExitCode == AltaExitCodes.Success ? StringProperty(created.Stdout, "alta.session.created", "sessionId") : null;
+        if (sessionId is null) return Forward(context, created);
+
+        // The session runs the script through exec, whatever the setting of Code Mode says.
+        runs.RequireCodeMode(sessionId);
+        var sent = await dispatcher.InvokeAsync(["session", "send", sessionId, "--stdin"], prompt, context.Caller, context.Cwd,
+            cancellationToken: context.CancellationToken).ConfigureAwait(false);
+        if (sent.ExitCode != AltaExitCodes.Success) return Forward(context, sent);
+
+        AltaJsonlWriter.WriteRecord(context.Stdout, new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["type"] = "alta.script.run",
+            ["version"] = 1,
+            ["correlationId"] = context.CorrelationId,
+            ["name"] = name,
+            ["sessionId"] = sessionId,
+            ["projectId"] = project.Id,
+            ["arguments"] = argumentsJson,
+            ["nextStep"] = $"The session `{sessionId}` runs the script and answers with its result: `alta session report {sessionId}` follows it.",
+        });
+        return AltaExitCodes.Success;
+
+        // The errors of a command it ran, as its own: the flat transcript of a dispatch holds them with the records.
+        static int Forward(AltaCommandContext context, AltaCommandResult result)
+        {
+            if (result.Stderr.Length > 0)
+            {
+                context.Stderr.Write(result.Stderr);
+            }
+            else
+            {
+                foreach (var line in result.Stdout.Split('\n'))
+                {
+                    if (line.Contains("\"alta.error\"", StringComparison.Ordinal)) context.Stderr.WriteLine(line.TrimEnd('\r'));
+                }
+            }
+
+            return result.ExitCode == AltaExitCodes.Success ? AltaExitCodes.Failure : result.ExitCode;
+        }
+    }
+
+    // The arguments `--arg key=value` give, as a JSON object: a value is JSON unless the parameter is a string, or is not JSON.
+    internal static string? ScriptArguments(CodeModeLibraryScript? script, IReadOnlyList<string> pairs, out string json)
+    {
+        var values = new System.Text.Json.Nodes.JsonObject();
+        JsonElement properties = default;
+        using var schema = script?.ParametersSchemaJson is { } text ? JsonDocument.Parse(text) : null;
+        var hasProperties = schema is not null && schema.RootElement.TryGetProperty("properties", out properties) && properties.ValueKind == JsonValueKind.Object;
+        json = "{}";
+        foreach (var pair in pairs)
+        {
+            var separator = pair.IndexOf('=', StringComparison.Ordinal);
+            if (separator <= 0) return $"--arg takes `<key>=<value>`, not `{pair}`.";
+            var (key, value) = (pair[..separator].Trim(), pair[(separator + 1)..]);
+            var isString = hasProperties && properties.TryGetProperty(key, out var parameter) && parameter.ValueKind == JsonValueKind.Object
+                && parameter.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "string";
+            System.Text.Json.Nodes.JsonNode? node;
+            try
+            {
+                node = isString ? System.Text.Json.Nodes.JsonValue.Create(value) : System.Text.Json.Nodes.JsonNode.Parse(value);
+            }
+            catch (JsonException)
+            {
+                node = System.Text.Json.Nodes.JsonValue.Create(value);
+            }
+
+            values[key] = node;
+        }
+
+        json = values.ToJsonString();
+        return null;
+    }
+
+    // A string property of the first record of a type in a JSONL transcript.
+    private static string? StringProperty(string jsonl, string type, string property)
+    {
+        foreach (var line in jsonl.Split('\n'))
+        {
+            if (!line.Contains($"\"{type}\"", StringComparison.Ordinal)) continue;
+            using var document = JsonDocument.Parse(line);
+            if (document.RootElement.TryGetProperty("type", out var found) && found.GetString() == type
+                && document.RootElement.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String)
+                return value.GetString();
+        }
+
+        return null;
+    }
+
     // The declaration a caller of a library script reads: `workflow("name", args: {...}): Promise<unknown>`.
     internal static string Declaration(CodeModeLibraryScript script)
     {
@@ -317,6 +458,10 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static string? ProjectRoot(AltaCommandContext context) => CodeModeScriptLibrary.ProjectRootOf(NormalizeOptionalText(context.Cwd));
 
+    // The script a caller sees under a name: one of yours or a sample only when the space of the calling session has it.
+    private static async Task<CodeModeLibraryScript?> FindInCallerSpaceAsync(AltaCommandContext context, CodeModeScriptLibrary library, string name)
+        => library.Find(name, ProjectRoot(context), await CallerSpaceFilterAsync(context).ConfigureAwait(false));
+
     private static CodeModeScriptScope? ParseScope(string scope) => scope.ToLowerInvariant() switch
     {
         "project" => CodeModeScriptScope.Project,
@@ -339,6 +484,13 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "service.unavailable", AltaExitCodes.ServiceUnavailable, "This host has no library of scripts.");
         return AltaExitCodes.ServiceUnavailable;
+    }
+
+    private sealed class ScriptRunOptions
+    {
+        public string? Name { get; set; }
+        public List<string> Arguments { get; } = [];
+        public string? Project { get; set; }
     }
 
     private sealed class ScriptSaveOptions

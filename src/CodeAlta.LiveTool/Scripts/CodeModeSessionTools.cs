@@ -121,9 +121,24 @@ public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<strin
 
         return mode switch
         {
-            "on" => [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options)],
-            "only" => [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options with { TakesOver = true })],
+            "on" => [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options), .. ScriptTools(dispatcher, caller, tools)],
+            "only" => [.. tools, .. CodeModeToolFactory.Create(dispatcher, caller, _options with { TakesOver = true }), .. ScriptTools(dispatcher, caller, tools)],
             _ => tools,
         };
     }
+
+    /// <summary>Returns a copy whose runs read the space of a session by its id when its tools do not give it.</summary>
+    /// <param name="spaceOf">Gives what the space of a session has.</param>
+    /// <returns>The tools of Code Mode with that reader.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="spaceOf"/> is null.</exception>
+    public CodeModeSessionTools WithSpaces(Func<string, CancellationToken, Task<SpaceFilter?>> spaceOf)
+    {
+        ArgumentNullException.ThrowIfNull(spaceOf);
+        return new CodeModeSessionTools(_options with { SpaceOf = spaceOf }, _mode);
+    }
+
+    // The scripts of the library offered as tools, under a name no other tool of the session has.
+    private IEnumerable<AgentToolDefinition> ScriptTools(AltaCommandDispatcher dispatcher, AltaSessionToolOptions caller, IReadOnlyList<AgentToolDefinition> tools)
+        => CodeModeToolFactory.CreateScriptTools(dispatcher, caller, _options).Where(tool => tool.Spec.Name is not (CodeModeToolFactory.ExecToolName or CodeModeToolFactory.WaitToolName)
+            && !tools.Any(other => string.Equals(other.Spec.Name, tool.Spec.Name, StringComparison.Ordinal)));
 }

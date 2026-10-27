@@ -46,6 +46,12 @@ public sealed record CodeModeLibraryScript(string Name, CodeModeScriptScope Scop
     /// <summary>Gets the one-line description its <c>meta</c> gives, or null.</summary>
     public string? Description => Source.Descriptor?.Description;
 
+    /// <summary>Gets when to use it, as its <c>meta</c> says, or null.</summary>
+    public string? WhenToUse => Source.Descriptor?.WhenToUse;
+
+    /// <summary>Gets whether its <c>meta</c> offers it as a tool of the sessions of its project (<c>tool: true</c>).</summary>
+    public bool IsTool => Source.Descriptor?.Tool == true;
+
     /// <summary>Gets the steps its <c>meta</c> declares, in their order: what a graph of the script draws before it runs.</summary>
     public IReadOnlyList<CodeModeLibraryStep> Steps
         => Source.Descriptor is { } descriptor
@@ -85,6 +91,10 @@ public sealed partial class CodeModeScriptLibrary
         _builtInRoot = builtInRoot;
     }
 
+    /// <summary>Gets the folder of the samples shipped with CodeAlta, <c>content/scripts</c> beside its executable, or null when it has none.</summary>
+    public static string? ShippedRoot
+        => System.IO.Path.Combine(AppContext.BaseDirectory, "content", "scripts") is var folder && Directory.Exists(folder) ? folder : null;
+
     /// <summary>Gets the folder of your scripts.</summary>
     public string GlobalFolder => System.IO.Path.Combine(_catalog.GlobalRoot, "scripts");
 
@@ -101,7 +111,16 @@ public sealed partial class CodeModeScriptLibrary
     /// <summary>Lists the scripts a project sees, one per name: the project's, then yours, then the samples.</summary>
     /// <param name="projectRoot">The folder of the project, or null for none.</param>
     /// <returns>The scripts, by name.</returns>
-    public IReadOnlyList<CodeModeLibraryScript> List(string? projectRoot)
+    public IReadOnlyList<CodeModeLibraryScript> List(string? projectRoot) => List(projectRoot, null);
+
+    /// <summary>
+    /// Lists the scripts a project sees in a space, one per name: the project's, then yours and the samples that the space
+    /// has (<c>[scripts.spaces]</c>). The scripts of a project are in every space its sessions are in.
+    /// </summary>
+    /// <param name="projectRoot">The folder of the project, or null for none.</param>
+    /// <param name="spaces">The filter of the space, or null for every script.</param>
+    /// <returns>The scripts, by name.</returns>
+    public IReadOnlyList<CodeModeLibraryScript> List(string? projectRoot, SpaceFilter? spaces)
     {
         var byName = new Dictionary<string, CodeModeLibraryScript>(StringComparer.Ordinal);
         foreach (var (scope, folder) in Folders(projectRoot))
@@ -110,7 +129,7 @@ public sealed partial class CodeModeScriptLibrary
             foreach (var file in Directory.EnumerateFiles(folder, "*.js"))
             {
                 var name = System.IO.Path.GetFileNameWithoutExtension(file);
-                if (IsName(name) && Read(name, scope, file) is { } script) byName[name] = script;
+                if (IsName(name) && InSpace(scope, name, spaces) && Read(name, scope, file) is { } script) byName[name] = script;
             }
         }
 
@@ -121,17 +140,32 @@ public sealed partial class CodeModeScriptLibrary
     /// <param name="name">The name.</param>
     /// <param name="projectRoot">The folder of the project, or null.</param>
     /// <returns>The script, or null.</returns>
-    public CodeModeLibraryScript? Find(string name, string? projectRoot)
+    public CodeModeLibraryScript? Find(string name, string? projectRoot) => Find(name, projectRoot, null);
+
+    /// <summary>Finds the script a project runs under a name in a space: one of yours or a sample only when the space has it.</summary>
+    /// <param name="name">The name.</param>
+    /// <param name="projectRoot">The folder of the project, or null.</param>
+    /// <param name="spaces">The filter of the space, or null for every script.</param>
+    /// <returns>The script, or null.</returns>
+    public CodeModeLibraryScript? Find(string name, string? projectRoot, SpaceFilter? spaces)
     {
         if (!IsName(name)) return null;
         foreach (var (scope, folder) in Folders(projectRoot).Reverse())
         {
             var file = System.IO.Path.Combine(folder, name + ".js");
-            if (File.Exists(file) && Read(name, scope, file) is { } script) return script;
+            if (File.Exists(file) && InSpace(scope, name, spaces) && Read(name, scope, file) is { } script) return script;
         }
 
         return null;
     }
+
+    /// <summary>Gets whether a script of a scope is in a space: the scripts of a project always are, yours and the samples as <c>[scripts.spaces]</c> says.</summary>
+    /// <param name="scope">Where it comes from.</param>
+    /// <param name="name">Its name.</param>
+    /// <param name="spaces">The filter of the space, or null for every script.</param>
+    /// <returns>True when the space has it.</returns>
+    public static bool InSpace(CodeModeScriptScope scope, string name, SpaceFilter? spaces)
+        => spaces is null || scope == CodeModeScriptScope.Project || spaces.Allows(SpaceResourceKind.Script, name);
 
     /// <summary>Gets the hash of the script a project runs under a name, without preparing it: what an automation was allowed with.</summary>
     /// <param name="name">The name.</param>

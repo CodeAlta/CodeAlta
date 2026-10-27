@@ -690,7 +690,7 @@ internal static class AltaScriptAnnotations
           projects: [string, string][];
         }
 
-        type SearchKind = "message" | "session" | "note" | "plan" | "task" | "skill" | "tool" | "mcp" | "plugin" | "command" | "doc";
+        type SearchKind = "message" | "session" | "note" | "plan" | "task" | "skill" | "tool" | "mcp" | "plugin" | "command" | "doc" | "script";
 
         interface SearchHit extends AltaRecord {
           type: "alta.search.hit";

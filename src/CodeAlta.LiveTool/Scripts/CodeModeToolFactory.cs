@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.CodeMode;
 using CodeAlta.Orchestration.Runtime.Scripts;
 
@@ -35,6 +36,13 @@ public sealed record CodeModeToolOptions
 
     /// <summary>Gets the library of scripts that <c>workflow("name")</c> runs, or null for none.</summary>
     public CodeModeScriptLibrary? Library { get; init; }
+
+    /// <summary>
+    /// Gets what the space of a session has, by its id, when the host did not give it with the tools of the session
+    /// (<see cref="AltaSessionToolOptions.Spaces"/>); null when the host keeps no spaces. A script of yours or a sample that
+    /// a space does not have is neither found nor run there.
+    /// </summary>
+    public Func<string, CancellationToken, Task<SpaceFilter?>>? SpaceOf { get; init; }
 }
 
 /// <summary>
@@ -49,6 +57,11 @@ public static class CodeModeToolFactory
 
     /// <summary>The name of the tool that waits for a script.</summary>
     public const string WaitToolName = "wait";
+
+    /// <summary>Gets the name of the tool a library script with <c>meta.tool: true</c> is offered as: its name with underscores, such as <c>review_pr</c>.</summary>
+    /// <param name="scriptName">The name of the script.</param>
+    /// <returns>The name of the tool.</returns>
+    public static string ScriptToolName(string scriptName) => scriptName.Replace('-', '_');
 
     private const int MaxWaitMilliseconds = 600_000;
 
@@ -127,6 +140,76 @@ public static class CodeModeToolFactory
         ];
     }
 
+    /// <summary>
+    /// Creates the tools of the scripts of the library that say <c>meta.tool: true</c>, those the project of the session and its
+    /// space have: deferred tools named after them (<c>review_pr</c>), whose schema is their <c>params</c> and whose call runs
+    /// them as <c>workflow("name", args)</c> through <c>exec</c>. Without the space of the session, only the scripts of the
+    /// project are offered, which every space of its sessions has.
+    /// </summary>
+    /// <param name="dispatcher">The dispatcher of <c>alta</c>.</param>
+    /// <param name="caller">Who the session is, as for its <c>alta</c> tool.</param>
+    /// <param name="options">The options of the host.</param>
+    /// <returns>The tools, or none without a library.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static IReadOnlyList<AgentToolDefinition> CreateScriptTools(AltaCommandDispatcher dispatcher, AltaSessionToolOptions caller, CodeModeToolOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.Library is not { } library)
+        {
+            return [];
+        }
+
+        IReadOnlyList<CodeModeLibraryScript> scripts;
+        try
+        {
+            scripts = library.List(CodeModeScriptLibrary.ProjectRootOf(caller.WorkingDirectoryProvider?.Invoke() ?? caller.WorkingDirectory), caller.Spaces);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+
+        var tools = new List<AgentToolDefinition>();
+        foreach (var script in scripts)
+        {
+            if (script.Problem is not null || script.Source.Descriptor is not { Tool: true } meta || (caller.Spaces is null && script.Scope != CodeModeScriptScope.Project))
+            {
+                continue;
+            }
+
+            var name = ScriptToolName(script.Name);
+            var description = string.Join(' ', new[] { meta.Description, meta.WhenToUse }.Where(static text => !string.IsNullOrWhiteSpace(text)))
+                + $" Runs the script `{script.Name}` of the library: its steps may start sessions and take minutes. Past {options.DefaultYield.TotalSeconds:0} s it goes on in the background, and its result comes back to you as a prompt.";
+            using var schema = JsonDocument.Parse(meta.ParametersSchemaJson ?? """{"type":"object","properties":{}}""");
+            var title = script.Title is { Length: > 0 } named ? named : script.Name;
+            var scriptName = script.Name;
+            tools.Add(new AgentToolDefinition(
+                new AgentToolSpec(name, description.Trim(), schema.RootElement.Clone()) { Deferred = true, Exposure = AgentToolExposure.Model },
+                (invocation, cancellationToken) => ExecAsync(dispatcher, caller, options, invocation with { Arguments = WorkflowCall(scriptName, title, invocation.Arguments) }, cancellationToken)));
+        }
+
+        return tools;
+    }
+
+    // The arguments of exec that run a script of the library with the arguments of a call of its tool.
+    private static JsonElement WorkflowCall(string name, string title, JsonElement arguments)
+    {
+        var args = arguments.ValueKind == JsonValueKind.Object ? arguments.GetRawText() : "{}";
+        var options = "\"" + JsonEncodedText.Encode(title).ToString() + "\"";
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("code", $"// @exec: {{\"title\": {options}}}\nreturn await workflow(\"{name}\", {args});");
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
     private static async Task<AgentToolResult> ExecAsync(AltaCommandDispatcher dispatcher, AltaSessionToolOptions caller, CodeModeToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)
     {
         if (invocation.Arguments.ValueKind != JsonValueKind.Object || !invocation.Arguments.TryGetProperty("code", out var codeElement) || codeElement.ValueKind != JsonValueKind.String)
@@ -191,7 +274,11 @@ public static class CodeModeToolFactory
         CodeModeApi? api = null;
         api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions,
             .. options.Agents is null ? [] : CodeModeAgentBinding.Functions, CodeModeAskBinding.Function]);
-        var discovery = new CodeModeDiscovery(() => api);
+        // The scripts of the library the run sees: those of its project, and of yours and the samples those its space has.
+        var spaces = options.Library is null ? null
+            : caller.Spaces ?? (options.SpaceOf is { } spaceOf ? await spaceOf(sessionId, cancellationToken).ConfigureAwait(false) : null);
+        var projectRoot = CodeModeScriptLibrary.ProjectRootOf(cwd);
+        var discovery = new CodeModeDiscovery(() => api, options.Library is { } library ? () => library.List(projectRoot, spaces) : null);
         var limits = execOptions.TimeoutMilliseconds is { } timeout ? options.Limits with { Timeout = TimeSpan.FromMilliseconds(timeout) } : options.Limits;
         var maxOutputTokens = execOptions.MaxOutputTokens ?? CodeModeResultFormatter.DefaultMaxOutputTokens;
         var host = new CodeModeHost(api, options.Cache);
@@ -221,7 +308,7 @@ public static class CodeModeToolFactory
                 return host.RunAsync(source, handler, new CodeModeRunOptions
                 {
                     Limits = limits,
-                    ResolveScript = ResolveWith(invocation.Tools, options.Library, cwd),
+                    ResolveScript = ResolveWith(invocation.Tools, options.Library, cwd, spaces),
                     ArgumentsJson = plan?.Run.ArgumentsJson,
                     Replay = plan?.Replay,
                 }, observer, runCancellation);
@@ -311,7 +398,8 @@ public static class CodeModeToolFactory
 
     // workflow({ scriptPath }) reads the file with the session's own read_file, so its sandbox and its tools apply.
     // workflow("name") runs a script of the library, the project's before the user's.
-    private static Func<CodeModeScriptReference, CancellationToken, ValueTask<CodeModeSource>> ResolveWith(IAgentRunToolInvoker? tools, CodeModeScriptLibrary? library, string? cwd)
+    private static Func<CodeModeScriptReference, CancellationToken, ValueTask<CodeModeSource>> ResolveWith(IAgentRunToolInvoker? tools, CodeModeScriptLibrary? library, string? cwd,
+        SpaceFilter? spaces)
         => async (reference, cancellationToken) =>
         {
             if (reference.ScriptPath is not { Length: > 0 } path)
@@ -321,8 +409,16 @@ public static class CodeModeToolFactory
                     throw new InvalidOperationException($"This session has no library of scripts: name a script file with workflow({{ scriptPath }}) instead of `{reference.Name}`.");
                 }
 
-                return library.Find(reference.Name ?? string.Empty, CodeModeScriptLibrary.ProjectRootOf(cwd))?.Source
-                    ?? throw new InvalidOperationException($"No script `{reference.Name}` in the library: alta.script.list({{}}) lists them.");
+                var name = reference.Name ?? string.Empty;
+                var projectRoot = CodeModeScriptLibrary.ProjectRootOf(cwd);
+                if (library.Find(name, projectRoot, spaces) is { } script)
+                {
+                    return script.Source;
+                }
+
+                throw new InvalidOperationException(spaces is not null && library.Find(name, projectRoot) is not null
+                    ? ResourceNotInSpaceException.MessageOf(SpaceResourceKind.Script, name, spaces.SpaceId)
+                    : $"No script `{reference.Name}` in the library: alta.script.list({{}}) lists them.");
             }
 
             if (tools is null)

@@ -73,7 +73,8 @@ internal static class DesktopAltaTools
         ArgumentNullException.ThrowIfNull(reminders);
         // The tools of Code Mode, for the sessions of the window and those that alta commands create.
         var codeMode = CodeModeSessionTools.FromSettings(host.CodeModeRuns, host.CatalogOptions, host.RuntimeService.ScratchpadRoot,
-            new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents), host.CodeModeScripts, host.CodeModeQuestions);
+            new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents), host.CodeModeScripts, host.CodeModeQuestions)
+            .WithSpaces(async (sessionId, token) => await host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false));
         var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search,
             reviews, reviewPolicy, windows, codeMode);
         pluginAlta?.SetDispatcher(dispatcher);
@@ -191,6 +192,7 @@ internal static class DesktopAltaTools
                 DefaultMaxOutputRecords = 200,
                 DefaultMaxOutputBytes = 64 * 1024,
                 DefaultTimeout = TimeSpan.FromSeconds(120),
+                Spaces = request.Spaces,
             };
             var tool = AltaSessionToolFactory.Create(dispatcher, caller);
             AgentToolDefinition[] tools =
@@ -209,7 +211,7 @@ internal static class DesktopAltaTools
         };
     }
 
-    private static readonly IReadOnlySet<CodeAlta.Search.SearchKind> ToolSearchKinds = new HashSet<CodeAlta.Search.SearchKind> { CodeAlta.Search.SearchKind.Tool, CodeAlta.Search.SearchKind.Mcp }.ToFrozenSet();
+    private static readonly IReadOnlySet<CodeAlta.Search.SearchKind> ToolSearchKinds = new HashSet<CodeAlta.Search.SearchKind> { CodeAlta.Search.SearchKind.Tool, CodeAlta.Search.SearchKind.Mcp, CodeAlta.Search.SearchKind.Script }.ToFrozenSet();
 
     // The tools and MCP tools of the index that match, by the name a session has them under: an MCP tool by its alias. The
     // session loads only those of its deferred tools: the space and the policy of the session decided which it has.
@@ -232,7 +234,13 @@ internal static class DesktopAltaTools
             var hits = new List<AgentToolSearchHit>(response.Hits.Count);
             foreach (var hit in response.Hits)
             {
-                var name = hit.Kind == CodeAlta.Search.SearchKind.Mcp ? ReadExtra(hit.Extra, "alias") : hit.Title;
+                // A script of the library is a tool only when its meta says so, under the name of its tool.
+                var name = hit.Kind switch
+                {
+                    CodeAlta.Search.SearchKind.Mcp => ReadExtra(hit.Extra, "alias"),
+                    CodeAlta.Search.SearchKind.Script => ReadExtra(hit.Extra, "tool"),
+                    _ => hit.Title,
+                };
                 if (!string.IsNullOrWhiteSpace(name)) hits.Add(new AgentToolSearchHit(name, string.IsNullOrWhiteSpace(hit.Snippet) ? null : hit.Snippet));
             }
 

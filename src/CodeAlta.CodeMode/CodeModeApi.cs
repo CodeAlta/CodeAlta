@@ -153,13 +153,20 @@ public sealed class CodeModeApi
               }
               return host("codemode.workflow", stringify({ name: target.name, scriptPath: target.scriptPath, args: workflowArgs === undefined ? {} : workflowArgs })).then(unwrap);
             });
+            // A warning the host gives with a reply, such as a tier that is not set up, goes to the output of the run.
+            const warned = (json) => {
+              const reply = parse(json);
+              const warning = reply.ok ? reply.value && reply.value.warning : reply.error && reply.error.data && reply.error.data.warning;
+              if (typeof warning === "string" && warning.length > 0) writeOutput(2, warning);
+              return json;
+            };
             // A session of its own for a part of the work: resolves with its final answer (codemode.agent, given by the host).
             global("agent", function (prompt, options) {
               if (typeof prompt !== "string" || prompt.length === 0) return Promise.reject(new TypeError("agent(prompt, options): the prompt is a non-empty string."));
               if (options !== undefined && (options === null || typeof options !== "object" || Array.isArray(options))) {
                 return Promise.reject(new TypeError('agent(prompt, options): options is an object, such as { tier: "quick" }.'));
               }
-              return host("codemode.agent", stringify(Object.assign({}, options, { prompt }))).then(unwrap).then((reply) => reply.value !== undefined ? reply.value : reply.answer);
+              return host("codemode.agent", stringify(Object.assign({}, options, { prompt }))).then(warned).then(unwrap).then((reply) => reply.value !== undefined ? reply.value : reply.answer);
             });
             // sleep(duration): waits, in milliseconds or "30s", "5m", "2h", "1d"; a run CodeAlta ended during wakes on time.
             global("sleep", function (duration) {
@@ -178,7 +185,7 @@ public sealed class CodeModeApi
               if (options !== undefined && (options === null || typeof options !== "object" || Array.isArray(options))) {
                 return Promise.reject(new TypeError('session(options): options is an object, such as { tier: "quick", title: "Reviewer" }.'));
               }
-              return host("codemode.session.open", stringify(options === undefined ? {} : options)).then(unwrap).then((opened) => freeze({
+              return host("codemode.session.open", stringify(options === undefined ? {} : options)).then(warned).then(unwrap).then((opened) => freeze({
                 id: opened.sessionId,
                 run: (prompt, runOptions) => {
                   if (typeof prompt !== "string" || prompt.length === 0) return Promise.reject(new TypeError("session.run(prompt, options): the prompt is a non-empty string."));

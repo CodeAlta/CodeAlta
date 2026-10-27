@@ -1,7 +1,6 @@
 using System.Text.Json;
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.WorkItems;
-using CodeAlta.Desktop.Workflows;
 using CodeAlta.Orchestration.Runtime.Scripts;
 using NeoAstra.Rpc;
 
@@ -24,6 +23,7 @@ internal sealed class WorkflowsService
     private readonly ProjectCatalog? _projects;
     private readonly ISessionStarter? _starter;
     private readonly Func<string, string, CancellationToken, Task<string?>>? _send;
+    private readonly Func<ProjectDescriptor?, CancellationToken, Task<SpaceFilter>>? _spaceOf;
     private readonly string? _epoch;
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
@@ -38,8 +38,12 @@ internal sealed class WorkflowsService
     /// <param name="starter">Starts a session of a project from the window, in the space it shows.</param>
     /// <param name="send">Sends a prompt to a session, queued when it is busy: the session, the text; it gives why it was not sent, or null.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <param name="spaceOf">
+    /// Gives the space the window shows, for a project or none: the tab lists and runs only the scripts it has
+    /// (<c>[scripts.spaces]</c>); null for every script.
+    /// </param>
     internal WorkflowsService(CodeModeScriptLibrary scripts, CodeModeRunRegistry runs, ProjectCatalog projects, ISessionStarter starter,
-        Func<string, string, CancellationToken, Task<string?>> send, string epoch)
+        Func<string, string, CancellationToken, Task<string?>> send, string epoch, Func<ProjectDescriptor?, CancellationToken, Task<SpaceFilter>>? spaceOf = null)
     {
         ArgumentNullException.ThrowIfNull(scripts);
         ArgumentNullException.ThrowIfNull(runs);
@@ -47,7 +51,7 @@ internal sealed class WorkflowsService
         ArgumentNullException.ThrowIfNull(starter);
         ArgumentNullException.ThrowIfNull(send);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
-        (_scripts, _runs, _projects, _starter, _send, _epoch) = (scripts, runs, projects, starter, send, epoch);
+        (_scripts, _runs, _projects, _starter, _send, _epoch, _spaceOf) = (scripts, runs, projects, starter, send, epoch, spaceOf);
     }
 
     /// <summary>The scripts of the library a project sees, or yours and the samples without a project.</summary>
@@ -59,7 +63,8 @@ internal sealed class WorkflowsService
         if (request.ProjectId is { } projectId && !Identifier(projectId)) return new("invalid_request", []);
         var project = request.ProjectId is null ? null : await _projects!.GetByIdAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (request.ProjectId is not null && (project is null || project.Archived)) return new("not_found", []);
-        var scripts = await Task.Run(() => _scripts!.List(project?.ProjectPath), cancellationToken).ConfigureAwait(false);
+        var spaces = _spaceOf is null ? null : await _spaceOf(project, cancellationToken).ConfigureAwait(false);
+        var scripts = await Task.Run(() => _scripts!.List(project?.ProjectPath, spaces), cancellationToken).ConfigureAwait(false);
         return new("ok", [.. scripts.Select(static script => new WorkflowScriptItem(script.Name, Scope(script.Scope), script.Title, script.Description,
             script.Problem, script.Path, Parameters(script.ParametersSchemaJson),
             [.. script.Steps.Select(static step => new WorkflowStepItem(step.Id, step.Title, step.After, step.Each))]))]);
@@ -87,7 +92,8 @@ internal sealed class WorkflowsService
             return new("invalid_request", null, null);
         var project = await _projects!.GetByIdAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project is null || project.Archived) return new("refused", null, "The project is no longer one of the projects of CodeAlta.");
-        var (prompt, problem) = await Task.Run(() => (ScriptRunPrompt.Build(_scripts!, request.Name, request.Arguments, null, project.ProjectPath, out var problem), problem),
+        var spaces = _spaceOf is null ? null : await _spaceOf(project, cancellationToken).ConfigureAwait(false);
+        var (prompt, problem) = await Task.Run(() => (CodeModeScriptRunPrompt.Build(_scripts!, request.Name, request.Arguments, null, project.ProjectPath, spaces, out var problem), problem),
             cancellationToken).ConfigureAwait(false);
         if (prompt is null) return new("refused", null, problem);
         var title = _scripts!.Find(request.Name, project.ProjectPath)?.Title is { Length: > 0 } named ? named : request.Name;
@@ -103,7 +109,7 @@ internal sealed class WorkflowsService
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null);
         if (!Identifier(request.SessionId) || !RunId(request.RunId)) return new("invalid_request", null);
         if (!CodeModeScriptLibrary.IsName(request.Name)) return new("refused", $"'{request.Name}' is not a script name: lowercase letters, digits and hyphens, starting with a letter.");
-        var failure = await _send!(request.SessionId, ScriptRunPrompt.SaveAsScript(request.RunId, request.Name), cancellationToken).ConfigureAwait(false);
+        var failure = await _send!(request.SessionId, CodeModeScriptRunPrompt.SaveAsScript(request.RunId, request.Name), cancellationToken).ConfigureAwait(false);
         return failure is null ? new("ok", null) : new("refused", failure);
     }
 

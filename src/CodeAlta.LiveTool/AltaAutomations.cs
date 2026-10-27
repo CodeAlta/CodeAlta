@@ -101,9 +101,15 @@ public sealed record AltaAutomationRun(string Id, string AutomationId, string? N
 
 /// <summary>A new automation.</summary>
 /// <param name="Name">Its name.</param>
-/// <param name="Prompt">What it sends to the session it starts.</param>
+/// <param name="Prompt">What it sends to the session it starts; empty for one that runs a script.</param>
 public sealed record AltaAutomationRequest(string Name, string Prompt)
 {
+    /// <summary>Gets the script of the library it runs in place of a prompt; null when it sends its prompt.</summary>
+    public string? Script { get; init; }
+
+    /// <summary>Gets the arguments of its script, a JSON object; null for none.</summary>
+    public string? ScriptArguments { get; init; }
+
     /// <summary>Gets the project it runs in; null to run as a chat.</summary>
     public string? ProjectId { get; init; }
 

@@ -326,6 +326,49 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ScriptsOfAnotherSpace_AreNotListedNorShownNorRun_AndScriptRunStartsASessionOfTheProjectThatRunsIt()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: true, withLibrary: true).ConfigureAwait(false);
+        fixture.WriteConfig("""
+            [scripts.spaces]
+            review = ["business"]
+            """);
+        var folder = Path.Combine(Path.GetDirectoryName(fixture.Options.GlobalRoot!)!, "work");
+        Directory.CreateDirectory(Path.Combine(folder, ".git"));
+        var project = await fixture.Spaces.Projects.UpsertFromPathAsync(folder).ConfigureAwait(false);
+        var library = new CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary(fixture.Options);
+        Assert.IsNull(library.Save("review", CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptScope.Global,
+            "export const meta = { name: \"review\", description: \"Reviews.\", params: { pr: { type: \"integer\" } } };\nreturn args.pr;", null, null).Refusal);
+        Assert.IsNull(library.Save("notes", CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptScope.Global, "return 1;", null, null).Refusal);
+        // A script of the project is in every space of its sessions, whatever the configuration says of the name.
+        Assert.IsNull(library.Save("local", CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptScope.Project, "return 2;", folder, null).Refusal);
+        var personal = Agent(await fixture.CreateAsync(AltaCallerIdentity.Cli, "--project", project.Id, "--space", "personal").ConfigureAwait(false));
+        var business = Agent(await fixture.CreateAsync(AltaCallerIdentity.Cli, "--project", project.Id, "--space", "business").ConfigureAwait(false));
+        Task<AltaCommandResult> Invoke(AltaCallerIdentity caller, params string[] args) => fixture.Dispatcher.InvokeAsync(args, caller: caller, cwd: folder).AsTask();
+        static string[] Names(AltaCommandResult result) => [.. ReadJsonLines(result.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.script").Select(static line => line.GetProperty("name").GetString()!)];
+
+        CollectionAssert.AreEquivalent(new[] { "local", "notes" }, Names(await Invoke(personal, "script", "list").ConfigureAwait(false)));
+        CollectionAssert.AreEquivalent(new[] { "local", "notes", "review" }, Names(await Invoke(business, "script", "list").ConfigureAwait(false)));
+        CollectionAssert.AreEquivalent(new[] { "local", "notes", "review" }, Names(await Invoke(AltaCallerIdentity.Cli, "script", "list").ConfigureAwait(false)), "the user sees every script");
+        StringAssert.Contains((await Invoke(personal, "script", "show", "review").ConfigureAwait(false)).Transcript, "script.notFound");
+        var refused = await Invoke(personal, "script", "run", "review", "--arg", "pr=7").ConfigureAwait(false);
+        StringAssert.Contains(refused.Transcript, "script.runRefused");
+        StringAssert.Contains(refused.Transcript, "not available in the space 'personal'");
+        var badArgument = await Invoke(business, "script", "run", "review", "--arg", "pr=seven").ConfigureAwait(false);
+        StringAssert.Contains(badArgument.Transcript, "the argument `pr` must be integer, not string");
+
+        var ran = await Invoke(business, "script", "run", "review", "--arg", "pr=7").ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, ran.ExitCode, ran.Stdout + ran.Stderr);
+        var record = ReadJsonLines(ran.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.script.run");
+        Assert.AreEqual("""{"pr":7}""", record.GetProperty("arguments").GetString());
+        var sessionId = record.GetProperty("sessionId").GetString()!;
+        Assert.IsTrue(fixture.Runs!.RequiresCodeMode(sessionId), "the session runs the script through exec, whatever the setting says");
+        var space = await fixture.Runtime.GetSessionSpaceAsync(sessionId).ConfigureAwait(false);
+        Assert.AreEqual(("business", business.SourceSessionId), (space!.SpaceId, space.ParentSessionId), "a sub-session of the caller, in its space");
+    }
+
+    [TestMethod]
     public async Task AScript_CreatesNoSessionWithAToolItsSessionDoesWithout_AsTheModelsOwnCall()
     {
         await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: true).ConfigureAwait(false);
@@ -460,8 +503,12 @@ public sealed partial class AltaLiveToolTests
         private readonly TempDirectory _root;
         private readonly SessionRuntimeService _runtime;
 
-        private SpaceResourceFixture(TempDirectory root, CatalogOptions options, SpaceCatalog spaces, SessionRuntimeService runtime, AltaCommandDispatcher dispatcher, ShownSpaceView view)
-            => (_root, Options, Spaces, _runtime, Dispatcher, View) = (root, options, spaces, runtime, dispatcher, view);
+        private SpaceResourceFixture(TempDirectory root, CatalogOptions options, SpaceCatalog spaces, SessionRuntimeService runtime, AltaCommandDispatcher dispatcher, ShownSpaceView view,
+            CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry? runs)
+            => (_root, Options, Spaces, _runtime, Dispatcher, View, Runs) = (root, options, spaces, runtime, dispatcher, view, runs);
+
+        // The runs of the scripts of Code Mode, with the library.
+        public CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry? Runs { get; }
 
         public CatalogOptions Options { get; }
 
@@ -500,7 +547,8 @@ public sealed partial class AltaLiveToolTests
             var view = new ShownSpaceView { ShownSpaceId = "personal" };
             var services = new AltaServiceCollection();
             if (withOwner) services.Add(new OwnedSessionCommandService(runtime, projectCatalog, options, 8, () => true));
-            if (withLibrary) services.Add(new CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary(options));
+            var runs = withLibrary ? new CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry(null) : null;
+            if (withLibrary) services.Add(new CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary(options)).Add(runs!);
             var dispatcher = CreateDispatcher(services
                 .Add(options)
                 .Add(projectCatalog)
@@ -511,7 +559,7 @@ public sealed partial class AltaLiveToolTests
                 .Add(new Catalog.Skills.SkillCatalog())
                 .Add<IReadOnlyList<ModelProviderDescriptor>>(descriptors)
                 .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
-            return new SpaceResourceFixture(root, options, spaces, runtime, dispatcher, view);
+            return new SpaceResourceFixture(root, options, spaces, runtime, dispatcher, view, runs);
         }
 
         public void WriteConfig(string content) => File.WriteAllText(Path.Combine(Options.GlobalRoot!, "config.toml"), content);
@@ -554,6 +602,7 @@ public sealed partial class AltaLiveToolTests
 
         public async ValueTask DisposeAsync()
         {
+            if (Runs is not null) await Runs.DisposeAsync().ConfigureAwait(false);
             await _runtime.DisposeAsync().ConfigureAwait(false);
             _root.Dispose();
         }

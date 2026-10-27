@@ -21,6 +21,9 @@ public enum SpaceResourceKind
 
     /// <summary>An agent prompt, by its id: <c>[prompts.spaces] &lt;id&gt; = [...]</c>.</summary>
     Prompt,
+
+    /// <summary>A script of Code Mode of the user or of CodeAlta, by its name: <c>[scripts.spaces] &lt;name&gt; = [...]</c>.</summary>
+    Script,
 }
 
 /// <summary>
@@ -40,11 +43,12 @@ public sealed class SpaceAssignments
         FrozenDictionary<string, IReadOnlyList<string>> mcpServers,
         FrozenDictionary<string, IReadOnlyList<string>> plugins,
         FrozenDictionary<string, IReadOnlyList<string>> skills,
-        FrozenDictionary<string, IReadOnlyList<string>> prompts)
-        => (Providers, McpServers, Plugins, Skills, Prompts) = (providers, mcpServers, plugins, skills, prompts);
+        FrozenDictionary<string, IReadOnlyList<string>> prompts,
+        FrozenDictionary<string, IReadOnlyList<string>> scripts)
+        => (Providers, McpServers, Plugins, Skills, Prompts, Scripts) = (providers, mcpServers, plugins, skills, prompts, scripts);
 
     /// <summary>Gets assignments that list nothing: every resource is in every space.</summary>
-    public static SpaceAssignments Empty { get; } = new(None, None, None, None, None);
+    public static SpaceAssignments Empty { get; } = new(None, None, None, None, None, None);
 
     /// <summary>Gets the spaces of the providers that list some, by provider key.</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<string>> Providers { get; }
@@ -60,6 +64,9 @@ public sealed class SpaceAssignments
 
     /// <summary>Gets the spaces of the agent prompts that list some, by prompt id.</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<string>> Prompts { get; }
+
+    /// <summary>Gets the spaces of the scripts of Code Mode that list some, by script name.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> Scripts { get; }
 
     /// <summary>Gets the spaces a resource is assigned to.</summary>
     /// <param name="kind">The kind of the resource.</param>
@@ -92,6 +99,7 @@ public sealed class SpaceAssignments
             SpaceResourceKind.Plugin => Plugins,
             SpaceResourceKind.Skill => Skills,
             SpaceResourceKind.Prompt => Prompts,
+            SpaceResourceKind.Script => Scripts,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown kind of resource."),
         };
 
@@ -133,7 +141,8 @@ public sealed class SpaceAssignments
             ListsOfTables(Table(Table(plugins, "mcp"), "servers")),
             ListsOfTables(plugins),
             Lists(Table(Table(root, "skills"), "spaces")),
-            Lists(Table(Table(root, "prompts"), "spaces")));
+            Lists(Table(Table(root, "prompts"), "spaces")),
+            Lists(Table(Table(root, "scripts"), "spaces")));
     }
 
     // [<table>.<key>] spaces = [...]
@@ -192,6 +201,7 @@ public sealed class SpaceAssignments
             SpaceResourceKind.Plugin => (["plugins", key], "spaces"),
             SpaceResourceKind.Skill => (["skills", "spaces"], key),
             SpaceResourceKind.Prompt => (["prompts", "spaces"], key),
+            SpaceResourceKind.Script => (["scripts", "spaces"], key),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown kind of resource."),
         };
 }

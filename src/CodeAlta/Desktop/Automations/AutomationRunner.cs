@@ -1,6 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
-using CodeAlta.Desktop.Workflows;
+using CodeAlta.Orchestration.Runtime.Scripts;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
@@ -71,20 +71,21 @@ internal sealed class AutomationRunner : IAutomationRunner
             }
 
             var definition = entry.Definition;
-            if (definition.Script is { } scriptName)
-            {
-                // What started the automation (an issue, the output of a command) is the `event` argument of a script that declares it.
-                if (ScriptRunPrompt.Build(_host.CodeModeScripts, scriptName, definition.ScriptArguments, prompt, project?.ProjectPath, out var problem) is not { } scriptPrompt)
-                    return Refuse(problem!);
-                prompt = scriptPrompt;
-            }
-
             // Nothing of the window decides where a run goes: the space of its project when the project is in
             // exactly one, the default space otherwise.
             var spaceId = SpaceCatalog.ResolveSessionSpace(null, project, await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
             // A run starts with a provider of its space: the one the automation names, which must be there, else the
             // default provider of the configuration when it is, else the first enabled provider of the space.
             var inSpace = new SpaceFilter(new CachedSpaceAssignments(new CodeAltaConfigStore(_host.CatalogOptions)).Current(), spaceId);
+            if (definition.Script is { } scriptName)
+            {
+                // What started the automation (an issue, the output of a command) is the `event` argument of a script that
+                // declares it. A script of yours or a sample runs only in a space that has it.
+                if (CodeModeScriptRunPrompt.Build(_host.CodeModeScripts, scriptName, definition.ScriptArguments, prompt, project?.ProjectPath, inSpace, out var problem) is not { } scriptPrompt)
+                    return Refuse(problem!);
+                prompt = scriptPrompt;
+            }
+
             if (definition.Model.Provider is { Length: > 0 } named && !inSpace.Allows(SpaceResourceKind.Provider, named))
                 return Refuse($"The provider '{named}' is not available in the space '{spaceId}'.");
             var providers = _host.ModelProviderRegistry.ListProviders().Where(candidate => inSpace.Allows(SpaceResourceKind.Provider, candidate.ProviderId.Value)).ToArray();

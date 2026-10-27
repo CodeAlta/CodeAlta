@@ -14,6 +14,12 @@ public sealed record OwnedSessionToolRequest(string? SessionId, string? ProjectI
     /// git worktree that is removed: once <see cref="WorkingDirectory"/> is gone, they work in this folder.
     /// </summary>
     public string? ProjectDirectory { get; init; }
+
+    /// <summary>
+    /// Gets what the space of the session has, read at each send, or null while the session is being created: the tools a
+    /// space limits (the scripts of the library offered as tools) are given only where it has them.
+    /// </summary>
+    public CodeAlta.Catalog.SpaceFilter? Spaces { get; init; }
 }
 
 /// <summary>Text and optional bounded image admission input; no caller-owned execution objects are accepted.</summary>

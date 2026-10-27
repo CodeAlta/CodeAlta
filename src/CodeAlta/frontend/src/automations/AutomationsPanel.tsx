@@ -286,7 +286,8 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
     if (!outcome.ok) setNotice(outcome.message ?? t("The automation could not be saved."));
   }
   const create = (form: AutomationForm) => setEditing(form);
-  const fromTemplate = (template: AutomationTemplate) => create({ ...emptyForm(template.project ? projectId : null), name: t(template.name), prompt: template.prompt, triggers: template.triggers });
+  const fromTemplate = (template: AutomationTemplate) => create({ ...emptyForm(template.project ? projectId : null), name: t(template.name), prompt: template.prompt,
+    script: template.script ?? "", scriptArguments: template.scriptArguments ?? "", triggers: template.triggers });
 
   if (!state.loaded) return <div className="automations" onPointerDown={onActivate}><p className="automation-empty"><ActivitySpinner size={16} /></p></div>;
   if (!state.available) return <div className="automations" onPointerDown={onActivate}><p className="automation-empty">{t("Automations are unavailable in this window.")}</p></div>;

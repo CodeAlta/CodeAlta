@@ -3,28 +3,44 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeAlta.CodeMode;
+using CodeAlta.Orchestration.Runtime.Scripts;
 
 namespace CodeAlta.LiveTool.Scripts;
 
 /// <summary>
 /// What a script learns of its own functions: <c>codemode.help()</c> lists the namespaces, <c>codemode.search()</c>
 /// finds functions by what they do, <c>codemode.describe()</c> gives their TypeScript declarations. The answers come
-/// in the script, after the cached part of the prompt, so the model learns the API without a longer prompt.
+/// in the script, after the cached part of the prompt, so the model learns the API without a longer prompt. The scripts
+/// of the library are found too, as <c>workflow:&lt;name&gt;</c>, which <c>workflow("name", args)</c> runs.
 /// </summary>
 public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
 {
     /// <summary>The namespace of discovery in scripts.</summary>
     public const string Namespace = "codemode";
 
+    /// <summary>The prefix of the paths of the scripts of the library in the results of search.</summary>
+    public const string WorkflowPrefix = "workflow:";
+
     private readonly Func<CodeModeApi> _api;
+    private readonly Func<IReadOnlyList<CodeModeLibraryScript>>? _scripts;
 
     /// <summary>Creates the discovery of an API.</summary>
     /// <param name="api">The API of the run, the discovery functions included.</param>
     /// <exception cref="ArgumentNullException"><paramref name="api"/> is null.</exception>
     public CodeModeDiscovery(Func<CodeModeApi> api)
+        : this(api, null)
+    {
+    }
+
+    /// <summary>Creates the discovery of an API and of the scripts of a library.</summary>
+    /// <param name="api">The API of the run, the discovery functions included.</param>
+    /// <param name="scripts">Lists the scripts of the library the run sees (those of its project and of its space), or null for none.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="api"/> is null.</exception>
+    public CodeModeDiscovery(Func<CodeModeApi> api, Func<IReadOnlyList<CodeModeLibraryScript>>? scripts)
     {
         ArgumentNullException.ThrowIfNull(api);
         _api = api;
+        _scripts = scripts;
     }
 
     /// <summary>Gets the discovery functions, for the API of a run.</summary>
@@ -38,7 +54,7 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
         },
         new($"{Namespace}.search")
         {
-            Description = "Finds functions by what they do. Read the declaration of a result with describe before calling it.",
+            Description = "Finds functions, and scripts of the library (`workflow:<name>`, run with workflow(\"name\", args)), by what they do. Read the declaration of a result with describe before calling it.",
             InputSchemaJson = """{"type":"object","properties":{"query":{"type":"string","description":"What you want to do, in a few words."},"limit":{"type":"integer","minimum":1,"description":"The most results, 10 by default."}},"required":["query"]}""",
             // A string says why nothing matched.
             ResultType = "{ path: string; description: string }[] | string",
@@ -61,8 +77,10 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
         return ValueTask.FromResult(call.Path switch
         {
             $"{Namespace}.help" => CodeModeCallResult.Text(Help(api, String(arguments, "path"))),
-            $"{Namespace}.search" => Search(api, String(arguments, "query") ?? string.Empty, arguments.TryGetProperty("limit", out var limit) && limit.TryGetInt32(out var count) ? count : 10),
-            $"{Namespace}.describe" => Describe(api, String(arguments, "path") ?? string.Empty),
+            $"{Namespace}.search" => Search(api, Scripts(), String(arguments, "query") ?? string.Empty, arguments.TryGetProperty("limit", out var limit) && limit.TryGetInt32(out var count) ? count : 10),
+            $"{Namespace}.describe" => String(arguments, "path")?.Trim() is { } scriptPath && scriptPath.StartsWith(WorkflowPrefix, StringComparison.Ordinal)
+                ? DescribeScript(Scripts(), scriptPath[WorkflowPrefix.Length..])
+                : Describe(api, String(arguments, "path") ?? string.Empty),
             _ => CodeModeCallResult.Failure(new CodeModeCallError("TypeError", $"`{call.Path}` is not a function of {Namespace}.")),
         });
     }
@@ -114,7 +132,25 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
             .Select(static group => (group.Key, group.Count()));
     }
 
-    private static CodeModeCallResult Search(CodeModeApi api, string query, int limit)
+    // The scripts of the library, or none when it cannot be read.
+    private IReadOnlyList<CodeModeLibraryScript> Scripts()
+    {
+        try
+        {
+            return _scripts?.Invoke() ?? [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private static CodeModeCallResult DescribeScript(IReadOnlyList<CodeModeLibraryScript> scripts, string name)
+        => scripts.FirstOrDefault(script => script.Name == name) is { } script
+            ? CodeModeCallResult.Text(BuiltInAltaCommandContributor.Declaration(script))
+            : CodeModeCallResult.Failure(new CodeModeCallError("TypeError", $"No script `{name}` in the library of this session: alta.script.list({{}}) lists them."));
+
+    private static CodeModeCallResult Search(CodeModeApi api, IReadOnlyList<CodeModeLibraryScript> scripts, string query, int limit)
     {
         var words = query.ToLowerInvariant().Split([' ', '.', '_', '-', ',', '/'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (words.Length == 0)
@@ -124,10 +160,13 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
 
         var hits = api.Functions
             .Where(static function => !function.Path.StartsWith(Namespace + ".", StringComparison.Ordinal))
-            .Select(function => (Function: function, Score: Score(function, words)))
+            .Select(function => (Path: function.Path, Description: FirstLine(function.Description), Score: Score(function.Path, function.Description, words)))
+            .Concat(scripts.Where(static script => script.Problem is null).Select(script => (Path: WorkflowPrefix + script.Name,
+                Description: $"Script of the library, run with workflow(\"{script.Name}\", args): {FirstLine(script.Description)}",
+                Score: Score(script.Name, script.Description + "\n" + script.Source.Descriptor?.WhenToUse, words))))
             .Where(static hit => hit.Score > 0)
             .OrderByDescending(static hit => hit.Score)
-            .ThenBy(static hit => hit.Function.Path.Length)
+            .ThenBy(static hit => hit.Path.Length)
             .Take(Math.Clamp(limit, 1, 50))
             .ToArray();
         if (hits.Length == 0)
@@ -140,11 +179,11 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartArray();
-            foreach (var (function, _) in hits)
+            foreach (var (path, description, _) in hits)
             {
                 writer.WriteStartObject();
-                writer.WriteString("path", function.Path);
-                writer.WriteString("description", FirstLine(function.Description));
+                writer.WriteString("path", path);
+                writer.WriteString("description", description);
                 writer.WriteEndObject();
             }
 
@@ -154,11 +193,11 @@ public sealed partial class CodeModeDiscovery : ICodeModeCallHandler
         return CodeModeCallResult.Success(Encoding.UTF8.GetString(stream.ToArray()));
     }
 
-    // A word of the query in the path counts more than one in the description.
-    private static int Score(CodeModeFunction function, string[] words)
+    // A word of the query in the path (or the name of a script) counts more than one in the description.
+    private static int Score(string functionPath, string? text, string[] words)
     {
-        var path = function.Path.ToLowerInvariant();
-        var description = function.Description?.ToLowerInvariant() ?? string.Empty;
+        var path = functionPath.ToLowerInvariant();
+        var description = text?.ToLowerInvariant() ?? string.Empty;
         var score = 0;
         foreach (var word in words)
         {

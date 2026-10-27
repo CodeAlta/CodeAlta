@@ -87,6 +87,59 @@ public sealed class CodeModeScriptLibraryTests
     }
 
     [TestMethod]
+    public void AScriptOfYoursLimitedToSpaces_IsFoundOnlyThere_AndAProjectScriptEverywhere()
+    {
+        using var root = TestTempDirectory.Create();
+        var (library, project) = Create(root.Path);
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") };
+        Directory.CreateDirectory(options.GlobalRoot);
+        File.WriteAllText(Path.Combine(options.GlobalRoot, "config.toml"), "[scripts.spaces]\nreview = [\"work\"]\nlocal = [\"work\"]\n");
+        library.Save("review", CodeModeScriptScope.Global, Review, null, null);
+        library.Save("local", CodeModeScriptScope.Project, "return 1;", project, null);
+        var store = new CodeAltaConfigStore(options);
+        var home = SpaceFilter.Load(store, "home");
+        var work = SpaceFilter.Load(store, "work");
+
+        CollectionAssert.AreEqual(new[] { "local" }, library.List(project, home).Select(static script => script.Name).ToArray());
+        CollectionAssert.AreEqual(new[] { "local", "review" }, library.List(project, work).Select(static script => script.Name).ToArray());
+        Assert.IsNull(library.Find("review", project, home));
+        Assert.IsNotNull(library.Find("review", project, work));
+        Assert.IsNotNull(library.Find("review", project), "without a space, every script");
+        var prompt = CodeModeScriptRunPrompt.Build(library, "review", """{"pr":1}""", null, project, home, out var problem);
+        Assert.IsNull(prompt);
+        StringAssert.Contains(problem, "The script 'review' is not available in the space 'home'");
+    }
+
+    [TestMethod]
+    public async Task AltaScriptRun_FromATerminalWhoseCodeAltaEndsWithTheCommand_IsRefusedWithWhatToDoInstead()
+    {
+        using var root = TestTempDirectory.Create();
+        var (library, project) = Create(root.Path);
+        library.Save("review", CodeModeScriptScope.Project, Review, project, null);
+        await using var runs = new CodeModeRunRegistry(null);
+        var registry = new AltaCommandRegistry();
+        var dispatcher = new AltaCommandDispatcher(registry, new AltaServiceCollection()
+            .Add(new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") }).Add(registry).Add(library).Add(runs));
+
+        var refused = await dispatcher.InvokeAsync(["script", "run", "review", "--arg", "pr=1"], caller: AltaCallerIdentity.Cli, cwd: project);
+
+        Assert.AreEqual(AltaExitCodes.Unsupported, refused.ExitCode, refused.Transcript);
+        StringAssert.Contains(refused.Transcript, "script.noSessionHost");
+        StringAssert.Contains(refused.Transcript, "the Workflows tab of CodeAlta Desktop");
+    }
+
+    [TestMethod]
+    public void ScriptArguments_AreJson_UnlessTheParameterIsAString()
+    {
+        var script = new CodeModeLibraryScript("q", CodeModeScriptScope.Global, "q.js", "h", CodeAlta.CodeMode.CodeModeSource.Prepare(
+            """export const meta = { name: "q", params: { question: { type: "string" }, angles: { type: "integer" }, kinds: { type: "array" } } }; return 1;"""));
+
+        Assert.IsNull(BuiltInAltaCommandContributor.ScriptArguments(script, ["question=42", "angles=3", "kinds=[\"a\",\"b\"]", "other=not json"], out var json));
+        Assert.AreEqual("""{"question":"42","angles":3,"kinds":["a","b"],"other":"not json"}""", json);
+        StringAssert.Contains(BuiltInAltaCommandContributor.ScriptArguments(script, ["angles"], out _), "--arg takes `<key>=<value>`");
+    }
+
+    [TestMethod]
     public void ProjectRootOf_FindsTheNearestFolderWithAltaOrGit()
     {
         using var root = TestTempDirectory.Create();

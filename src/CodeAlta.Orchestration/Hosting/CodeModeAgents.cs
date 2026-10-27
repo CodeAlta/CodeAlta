@@ -53,10 +53,11 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         HeadlessSession? session = null;
         try
         {
-            var (opened, refusal) = await OpenCoreAsync(parentSessionId, request, state, cancellationToken).ConfigureAwait(false);
-            if (opened is null) return refusal!;
+            var (opened, refusal, warning) = await OpenCoreAsync(parentSessionId, request, state, cancellationToken).ConfigureAwait(false);
+            if (opened is null) return refusal! with { Warning = warning };
             session = opened;
-            return await AskCoreAsync(opened, request.RunId, request.StepId, request.Prompt, request.Schema, request.Timeout, clock, cancellationToken).ConfigureAwait(false);
+            return await AskCoreAsync(opened, request.RunId, request.StepId, request.Prompt, request.Schema, request.Timeout, clock, cancellationToken).ConfigureAwait(false)
+                with { Warning = warning };
         }
         finally
         {
@@ -71,10 +72,10 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(parentSessionId);
         ArgumentNullException.ThrowIfNull(request);
         var state = _runs.GetOrAdd(request.RunId, static _ => new RunState());
-        var (opened, refusal) = await OpenCoreAsync(parentSessionId, request, state, cancellationToken).ConfigureAwait(false);
-        if (opened is null) return refusal!;
+        var (opened, refusal, warning) = await OpenCoreAsync(parentSessionId, request, state, cancellationToken).ConfigureAwait(false);
+        if (opened is null) return refusal! with { Warning = warning };
         state.Kept[opened.SessionId] = (opened, request.StepId);
-        return new CodeModeAgentResult(opened.SessionId, true, "opened", null, null, SessionUsageTotals.None, TimeSpan.Zero);
+        return new CodeModeAgentResult(opened.SessionId, true, "opened", null, null, SessionUsageTotals.None, TimeSpan.Zero) { Warning = warning };
     }
 
     /// <inheritdoc />
@@ -134,7 +135,7 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _driver.DisposeAsync();
 
-    private async Task<(KeptSession? Session, CodeModeAgentResult? Refusal)> OpenCoreAsync(string parentSessionId, CodeModeAgentRequest request, RunState state,
+    private async Task<(KeptSession? Session, CodeModeAgentResult? Refusal, string? Warning)> OpenCoreAsync(string parentSessionId, CodeModeAgentRequest request, RunState state,
         CancellationToken cancellationToken)
     {
         var runtime = _host.RuntimeService;
@@ -154,6 +155,17 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         if (request.Tier is { } tierName && (tier = ModelTiers.Parse(tierName)) is null)
             return Refused($"'{tierName}' is not a tier: name complex, standard or quick.");
         if (request.ModelRef is not null && tier is not null) return Refused("Name either a model or a tier, not both.");
+
+        // Scripts are examples people copy into any profile: a tier that is not set up there (no model for it, or no tiers
+        // at all) runs on the model of the session that runs the script, and the run is told once per tier. A tier that
+        // has models keeps its fallback, and its error when none of them can run.
+        string? warning = null;
+        if (tier is { } askedTier && (await runtime.LoadModelTierScopeAsync(parent.SpaceId, parent.ProjectRef, cancellationToken).ConfigureAwait(false)).Tiers.Get(askedTier).Count == 0)
+        {
+            tier = null;
+            if (state.WarnedTiers.TryAdd(askedTier, 0))
+                warning = $"tier `{ModelTiers.NameOf(askedTier)}` is not set up: its sessions use this session's model ({ModelRefOf(parent) ?? parent.ResolvedProviderKey}).";
+        }
 
         var opened = await _driver.OpenAsync(new HeadlessSessionRequest
         {
@@ -176,16 +188,17 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
                 CreatedAt = DateTimeOffset.UtcNow,
             },
         }, cancellationToken).ConfigureAwait(false);
-        if (opened.Session is not { } created) return Refused(opened.Message ?? $"The session could not be created ({opened.Status}).");
+        if (opened.Session is not { } created)
+            return (null, new(null, false, "refused", null, opened.Message ?? $"The session could not be created ({opened.Status}).", SessionUsageTotals.None, TimeSpan.Zero), warning);
         _host.CodeModeRuns.Record(request.RunId, AgentWorkflowEventKind.SessionStarted, record => record with
         {
             ChildSessionId = created.SessionId,
             StepId = request.StepId,
             Title = request.Title ?? created.Descriptor.Title,
         });
-        return (new KeptSession(created), null);
+        return (new KeptSession(created), null, warning);
 
-        static (KeptSession?, CodeModeAgentResult?) Refused(string message) => (null, new(null, false, "refused", null, message, SessionUsageTotals.None, TimeSpan.Zero));
+        static (KeptSession?, CodeModeAgentResult?, string?) Refused(string message) => (null, new(null, false, "refused", null, message, SessionUsageTotals.None, TimeSpan.Zero), null);
     }
 
     private async Task<CodeModeAgentResult> AskCoreAsync(HeadlessSession session, string runId, string? stepId, string prompt, JsonElement? schema, TimeSpan? timeout,
@@ -283,6 +296,7 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
     {
         public readonly SemaphoreSlim AtWork = new(MaxAtWork, MaxAtWork);
         public readonly ConcurrentDictionary<string, (KeptSession Session, string? StepId)> Kept = new(StringComparer.OrdinalIgnoreCase);
+        public readonly ConcurrentDictionary<ModelTier, byte> WarnedTiers = new();
         public int Started;
         public long SpentTokens;
     }

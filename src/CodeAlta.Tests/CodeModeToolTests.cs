@@ -134,6 +134,53 @@ public sealed class CodeModeToolTests
         Assert.IsTrue(agents.Requests.All(static request => request.Parent == "session-1"));
     }
 
+    [TestMethod]
+    public async Task AWarningOfTheSessionsOfAScript_GoesToItsOutput_WhetherTheSessionAnsweredOrFailed()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var exec = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path },
+            new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Agents = new WarningAgents() }).Single(static tool => tool.Spec.Name == "exec");
+
+        var result = await InvokeAsync(exec, """
+            const answer = await agent("Look.", { tier: "quick" });
+            const failed = await agent("fail", { tier: "complex" }).catch(e => e.code);
+            const kept = await session({ tier: "standard" });
+            return [answer, failed, kept.id];
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        using (var value = ValueOf(result))
+        {
+            Assert.AreEqual("""["answer","failed","kept-1"]""", value.RootElement.GetRawText());
+        }
+
+        foreach (var tier in new[] { "quick", "complex", "standard" })
+        {
+            StringAssert.Contains(Text(result), $"tier `{tier}` is not set up: its sessions use this session's model (provider:model).");
+        }
+    }
+
+    // Sessions whose start says that their tier is not set up.
+    private sealed class WarningAgents : ICodeModeAgents
+    {
+        private static string Warning(CodeModeAgentRequest request) => $"tier `{request.Tier}` is not set up: its sessions use this session's model (provider:model).";
+
+        public Task<CodeModeAgentResult> RunAsync(string parentSessionId, CodeModeAgentRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(request.Prompt == "fail"
+                ? new CodeModeAgentResult("child-x", false, "failed", null, "it broke", Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero) { Warning = Warning(request) }
+                : new CodeModeAgentResult("child-1", true, "completed", "answer", null, Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero) { Warning = Warning(request) });
+
+        public Task<CodeModeAgentResult> OpenAsync(string parentSessionId, CodeModeAgentRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(new CodeModeAgentResult("kept-1", true, "opened", null, null, Orchestration.Runtime.SessionUsageTotals.None, TimeSpan.Zero) { Warning = Warning(request) });
+
+        public Task<CodeModeAgentResult> AskAsync(string runId, string sessionId, string prompt, JsonElement? schema, TimeSpan? timeout, CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+
+        public Task CloseAsync(string runId, string sessionId) => Task.CompletedTask;
+    }
+
     private sealed class FakeAgents : ICodeModeAgents
     {
         public System.Collections.Concurrent.ConcurrentBag<(string Parent, string Prompt, string? Tier, string? StepId, string RunId)> Requests { get; } = [];
@@ -369,6 +416,72 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task Discovery_FindsTheScriptsOfTheLibrary_ByWhatTheyDo_AndDescribesHowToRunThem()
+    {
+        using var root = TestTempDirectory.Create();
+        var project = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        var library = new CodeModeScriptLibrary(new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") });
+        Assert.IsNull(library.Save("triage", CodeModeScriptScope.Project, """
+            export const meta = { name: "triage", description: "Sorts the backlog.", whenToUse: "Every morning, on the open issues.", params: { limit: { type: "integer", default: 20 } } };
+            return args.limit;
+            """, project, null).Refusal);
+        await using var runs = new CodeModeRunRegistry(null);
+        var (exec, _) = Create(project, runs, library: library);
+
+        var result = await InvokeAsync(exec, """
+            const hits = await codemode.search({ query: "triage backlog" });
+            return { first: hits[0], declaration: await codemode.describe({ path: "workflow:triage" }), missing: await codemode.describe({ path: "workflow:nope" }).catch(e => e.message) };
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        using var value = ValueOf(result);
+        Assert.AreEqual("workflow:triage", value.RootElement.GetProperty("first").GetProperty("path").GetString(), "found by its description and when to use it");
+        StringAssert.Contains(value.RootElement.GetProperty("first").GetProperty("description").GetString(), "workflow(\"triage\", args)");
+        StringAssert.Contains(value.RootElement.GetProperty("declaration").GetString(), "declare function workflow(name: \"triage\", args: { limit?: number }): Promise<unknown>;");
+        StringAssert.Contains(value.RootElement.GetProperty("missing").GetString(), "No script `nope`");
+    }
+
+    [TestMethod]
+    public async Task AScriptWithMetaTool_IsADeferredToolOfTheSessionsOfItsProject_ThatRunsItThroughExec()
+    {
+        using var root = TestTempDirectory.Create();
+        var project = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") };
+        var library = new CodeModeScriptLibrary(options);
+        const string Tool = """
+            export const meta = { name: "review-pr", description: "Reviews a pull request.", tool: true, params: { pr: { type: "integer" } } };
+            return `reviewed ${args.pr}`;
+            """;
+        Assert.IsNull(library.Save("review-pr", CodeModeScriptScope.Project, Tool, project, null).Refusal);
+        Assert.IsNull(library.Save("mine", CodeModeScriptScope.Global, Tool.Replace("review-pr", "mine", StringComparison.Ordinal), null, null).Refusal);
+        Assert.IsNull(library.Save("plain", CodeModeScriptScope.Project, "export const meta = { name: \"plain\" };\nreturn 1;", project, null).Refusal);
+        File.WriteAllText(Path.Combine(options.GlobalRoot, "config.toml"), "[scripts.spaces]\nmine = [\"work\"]\n");
+        var (dispatcher, _) = Dispatcher(root.Path);
+        await using var runs = new CodeModeRunRegistry(null);
+        var codeMode = new CodeModeSessionTools(new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Library = library }, () => "on");
+        AgentToolDefinition[] others = [new(new AgentToolSpec("alta", "alta", Schema("{}")), static (_, _) => Task.FromResult(new AgentToolResult(true, [])))];
+        string[] Names(SpaceFilter? spaces) => [.. codeMode.Create(dispatcher, new AltaSessionToolOptions { WorkingDirectory = project, Spaces = spaces }, others).Select(static tool => tool.Spec.Name)];
+        var store = new CodeAltaConfigStore(options);
+
+        CollectionAssert.AreEqual(new[] { "alta", "exec", "wait", "review_pr" }, Names(null), "without the space of the session, the scripts of the project only");
+        CollectionAssert.AreEqual(new[] { "alta", "exec", "wait", "review_pr" }, Names(SpaceFilter.Load(store, "home")));
+        CollectionAssert.AreEqual(new[] { "alta", "exec", "wait", "mine", "review_pr" }, Names(SpaceFilter.Load(store, "work")));
+
+        var tool = codeMode.Create(dispatcher, new AltaSessionToolOptions { WorkingDirectory = project, CallerKind = "cli" }, others).Single(static tool => tool.Spec.Name == "review_pr");
+        Assert.IsTrue(tool.Spec.Deferred);
+        Assert.AreEqual("integer", tool.Spec.InputSchema.GetProperty("properties").GetProperty("pr").GetProperty("type").GetString(), "its schema is its params");
+        var called = await tool.Handler(new AgentToolInvocation(new ModelProviderId("provider"), "session-1", "call-9", "review_pr", Schema("""{"pr":31}""")) { Tools = new FakeTools() },
+            CancellationToken.None);
+
+        Assert.IsTrue(called.Success, Text(called));
+        using var value = ValueOf(called);
+        Assert.AreEqual("reviewed 31", value.RootElement.GetString());
+        Assert.AreEqual("review-pr", runs.List("session-1").Single().Title, "the run is named after the script");
+    }
+
+    [TestMethod]
     public void SessionTools_AddExecAndWait_OnlyWhileCodeModeIsOn()
     {
         using var root = TestTempDirectory.Create();
@@ -439,6 +552,8 @@ public sealed class CodeModeToolTests
         StringAssert.Contains(Text(resumed), "Resume: step `b` has no recorded result");
         var second = runs.List("session-1").Single(run => run.Id != runId);
         Assert.AreEqual("Two reads", second.Title, "the kept script runs with its own options");
+        // The store writes off the run's thread: what it keeps is read once written.
+        await runs.WhenKeptAsync(second.Id).WaitAsync(TimeSpan.FromSeconds(10));
         Assert.AreEqual(runId, runs.Store!.TryLoad(second.Id)?.ResumesRunId);
     }
 

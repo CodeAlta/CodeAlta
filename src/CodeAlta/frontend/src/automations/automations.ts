@@ -274,6 +274,9 @@ export type AutomationTemplate = Readonly<{
   key: string; icon: IconName; tone: string; name: MessageKey; description: MessageKey;
   /** Written in English, like the prompts of the application: the user edits it in the language of their choice. */
   prompt: string;
+  /** The script of the library it runs in place of its prompt, with its arguments as JSON; none for a prompt. */
+  script?: string;
+  scriptArguments?: string;
   triggers: readonly AutomationTriggerItem[];
   /** Whether it only makes sense in the repository of a project. */
   project: boolean;
@@ -290,6 +293,9 @@ export const automationTemplates: readonly AutomationTemplate[] = [
     triggers: [newTrigger("issue")], prompt: "A new issue was opened in this repository: it is named below. Read it, find the code it is about and say whether you can reproduce or confirm it. Report what you found and what a fix would involve. Do not push anything and do not comment on the issue." },
   { key: "pr-review", icon: "pullRequest", tone: "orange", name: "Pull request review", description: "Review each pull request when it is opened.", project: true,
     triggers: [newTrigger("pull_request")], prompt: "A pull request was opened in this repository: it is named below. Fetch it, read the change and review it: correctness first, then tests, then clarity. Report your findings ordered by importance, with the file and line of each one. Do not push anything and do not comment on the pull request." },
+  // The sample script reads the number of the pull request from what started the run.
+  { key: "pr-review-script", icon: "workflow", tone: "orange", name: "Pull request review in parallel", description: "Run the review-pr script on each pull request: one session per angle, then one merged review.",
+    project: true, triggers: [newTrigger("pull_request")], prompt: "", script: "review-pr" },
   { key: "changelog", icon: "notes", tone: "purple", name: "Changelog draft", description: "Draft the changelog of the week from the merged work.", project: true,
     triggers: [weekly("fri", "16:00")], prompt: "Draft the changelog of the last seven days of this repository from its commits and merged pull requests. Group the entries under Added, Changed and Fixed, one line each, written for a user of the project. Report the draft: do not edit any file." },
   { key: "test-health", icon: "checked", tone: "azure", name: "Test health", description: "Run the tests every morning and report what fails.", project: true,

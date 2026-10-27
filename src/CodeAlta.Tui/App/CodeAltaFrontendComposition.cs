@@ -158,9 +158,10 @@ internal sealed class CodeAltaFrontendComposition
         if (codeModeRuns is not null)
         {
             altaServices.Add(codeModeRuns);
-            var library = new CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary(catalogOptions);
+            var library = new CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary(catalogOptions, CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary.ShippedRoot);
             altaServices.Add(library);
-            altaServices.Add(CodeAlta.LiveTool.Scripts.CodeModeSessionTools.FromSettings(codeModeRuns, catalogOptions, runtimeService.ScratchpadRoot, codeModeAgents, library));
+            altaServices.Add(CodeAlta.LiveTool.Scripts.CodeModeSessionTools.FromSettings(codeModeRuns, catalogOptions, runtimeService.ScratchpadRoot, codeModeAgents, library)
+                .WithSpaces(async (sessionId, token) => await runtimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false)));
         }
         if (pluginHostBridge?.Runtime is { } pluginRuntime)
         {

@@ -357,7 +357,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             await WhenKeptAsync(runId).ConfigureAwait(false);
         }
 
-        var plan =CodeModeResume.TryPlan(Store, sessionId, code, options, id => _runs.TryGetValue(id, out var known) ? known.Running : null, out var refusal);
+        var plan = CodeModeResume.TryPlan(Store, sessionId, code, options, id => _runs.TryGetValue(id, out var known) ? known.Running : null, out var refusal);
         return (plan, refusal);
     }
 

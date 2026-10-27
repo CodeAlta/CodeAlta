@@ -37,6 +37,9 @@ public enum SearchKind : byte
 
     /// <summary>A section of the user guide, or a type of the plugin API.</summary>
     Doc = 11,
+
+    /// <summary>A script of the library of Code Mode: the samples, yours, and those of the projects.</summary>
+    Script = 12,
 }
 
 /// <summary>Who wrote a message.</summary>
@@ -97,18 +100,19 @@ public static class SearchNames
         ["plugin"] = SearchKind.Plugin, ["plugins"] = SearchKind.Plugin,
         ["command"] = SearchKind.Command, ["commands"] = SearchKind.Command,
         ["doc"] = SearchKind.Doc, ["docs"] = SearchKind.Doc,
+        ["script"] = SearchKind.Script, ["scripts"] = SearchKind.Script,
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets every kind, in the order they are listed.</summary>
     public static IReadOnlyList<SearchKind> AllKinds { get; } =
         [SearchKind.Message, SearchKind.Session, SearchKind.Note, SearchKind.Plan, SearchKind.Task, SearchKind.Skill,
-            SearchKind.Tool, SearchKind.Mcp, SearchKind.Plugin, SearchKind.Command, SearchKind.Doc];
+            SearchKind.Tool, SearchKind.Mcp, SearchKind.Plugin, SearchKind.Command, SearchKind.Doc, SearchKind.Script];
 
     /// <summary>Gets the kinds that are content of sessions and projects, which exclusions remove.</summary>
     public static IReadOnlyList<SearchKind> ContentKinds { get; } = [SearchKind.Message, SearchKind.Session, SearchKind.Note, SearchKind.Plan, SearchKind.Task];
 
     /// <summary>Gets the kinds that describe what is installed, which tool search serves.</summary>
-    public static IReadOnlyList<SearchKind> CatalogKinds { get; } = [SearchKind.Skill, SearchKind.Tool, SearchKind.Mcp, SearchKind.Plugin, SearchKind.Command, SearchKind.Doc];
+    public static IReadOnlyList<SearchKind> CatalogKinds { get; } = [SearchKind.Skill, SearchKind.Tool, SearchKind.Mcp, SearchKind.Plugin, SearchKind.Command, SearchKind.Doc, SearchKind.Script];
 
     /// <summary>Gets the name of a kind.</summary>
     /// <param name="kind">The kind.</param>
@@ -126,6 +130,7 @@ public static class SearchNames
         SearchKind.Plugin => "plugin",
         SearchKind.Command => "command",
         SearchKind.Doc => "doc",
+        SearchKind.Script => "script",
         _ => "unknown",
     };
 

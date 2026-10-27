@@ -56,6 +56,9 @@ public sealed record CodeModeAgentResult(string? SessionId, bool Succeeded, stri
 {
     /// <summary>Gets the JSON text of the answer that matched the schema of the request, or null.</summary>
     public string? Value { get; init; }
+
+    /// <summary>Gets what the script is told in its output about how the session was started, such as a tier that is not set up; null for nothing.</summary>
+    public string? Warning { get; init; }
 }
 
 /// <summary>

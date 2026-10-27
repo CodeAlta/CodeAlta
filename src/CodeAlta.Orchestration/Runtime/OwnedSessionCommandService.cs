@@ -259,8 +259,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// </remarks>
     public PluginOrchestrationBridge? Plugins { get; init; }
 
-    private IReadOnlyList<AgentToolDefinition> ToolsFor(string? sessionId, ProjectDescriptor? project, string workingDirectory, string providerKey)
-        => SessionTools?.Invoke(new(sessionId, project?.Id, workingDirectory, providerKey) { ProjectDirectory = project?.ProjectPath }) ?? [];
+    private IReadOnlyList<AgentToolDefinition> ToolsFor(string? sessionId, ProjectDescriptor? project, string workingDirectory, string providerKey, SpaceFilter? spaces = null)
+        => SessionTools?.Invoke(new(sessionId, project?.Id, workingDirectory, providerKey) { ProjectDirectory = project?.ProjectPath, Spaces = spaces }) ?? [];
 
     /// <summary>
     /// Gets whether one more command can be admitted: the owner keeps fewer receipts than it can, or one of them
@@ -1192,8 +1192,10 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             var policy = SessionExecutionPolicy.CaptureSession(
                 session, project, _catalog.GlobalRoot, default, modelId, effort,
                 selection?.AgentPromptId ?? session.AgentPromptId);
+            // The tools a space limits follow the space of the session as it is at this send.
+            var spaces = SessionTools is null ? null : await _runtime.GetSpaceFilterAsync(session.SpaceId, project, operation.Execution.Token).ConfigureAwait(false);
             var options = SessionExecutionPolicy.BuildOptions(
-                policy, ToolsFor(session.SessionId, project, project is null ? _catalog.GlobalRoot : WorkFolder(session, project), session.ResolvedProviderKey),
+                policy, ToolsFor(session.SessionId, project, project is null ? _catalog.GlobalRoot : WorkFolder(session, project), session.ResolvedProviderKey, spaces),
                 _runtime.Permissions.OwnedDefaultPermissionHandler,
                 _runtime.Permissions.OwnedDefaultUserInputHandler);
             if (Plugins is not null)

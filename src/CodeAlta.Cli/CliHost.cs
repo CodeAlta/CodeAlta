@@ -425,6 +425,7 @@ internal sealed class CliHost : IAsyncDisposable
                 DefaultMaxOutputRecords = 200,
                 DefaultMaxOutputBytes = 64 * 1024,
                 DefaultTimeout = TimeSpan.FromSeconds(120),
+                Spaces = request.Spaces,
             };
             var tool = AltaSessionToolFactory.Create(dispatcher, caller);
             AgentToolDefinition[] tools =
