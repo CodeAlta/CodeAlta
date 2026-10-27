@@ -586,6 +586,14 @@ public sealed class SessionViewQueuedPromptImage
     /// </summary>
     [JsonPropertyName("media_type")]
     public string? MediaType { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the attachment is a file the model reads in the form it can (a document as Markdown), not an image;
+    /// false for an image.
+    /// </summary>
+    [JsonPropertyName("file")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsFile { get; set; }
 }
 
 /// <summary>

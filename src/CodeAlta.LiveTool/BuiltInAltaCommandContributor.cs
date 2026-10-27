@@ -1064,18 +1064,20 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         AddPromptSelectionOptions(command, options);
         command.Add("queue-if-busy", "Queue instead of failing when the target is busy, if a queue service is available.", value => options.QueueIfBusy = value is not null);
         AddAttachmentsOption(command, options);
+        command.Add("no-wait", "Return once the prompt is handed over (its turn started, or it was queued), not when the turn ends.", value => options.NoWait = value is not null);
         command.Add(async (_, _) => await HandleSessionSendAsync(context, sessionId, options, PromptDispatchKind.Send).ConfigureAwait(false));
         AddHelpText(command, "Examples: `alta session send <session-id> --message \"Summarize status\"`; prefer `--stdin` for multi-line prompts.", "An agent sending to another running session steers its active turn; an idle session starts a new turn. Use --queue-if-busy to explicitly wait instead.", "Use `--prompt-id <id>` to select an agent prompt from `alta prompt list`; omit it to keep the current/default prompt selection.",
             "`--model`, `--reasoning` and `--permission-mode` choose what the composer of the window chooses, among what `alta session choices <session-id>` lists:",
             "the turn runs with them and the session keeps them. The provider stays the session's; what it does not offer is refused before anything is sent.",
             "They start a new turn: a session that is running is refused unless `--queue-if-busy` queues the prompt. A session that asks the user first gives no session a mode that asks less.",
             "Example: `alta session send <session-id> --model gpt-5.5 --reasoning high --permission-mode acceptEdits --stdin`.",
-            "`--attachments <file>` sends files and images with the prompt. Images need a model that reads them. A session that is working refuses them.");
+            "`--attachments <file>` sends files and images with the prompt. Images need a model that reads them. A session that is working refuses them, unless `--queue-if-busy` queues them with the prompt.",
+            "A person or a plugin waits for the end of the turn; `--no-wait` returns once the files are saved and the prompt is handed over, with what refused it.");
         return command;
     }
 
     private static void AddAttachmentsOption(Command command, PromptOptions options)
-        => command.Add("attachments=", "JSON file of attachments to send with the prompt (title, mediaType and base64), saved and given to the model as the desktop composer does. Refused unless this is a new prompt to an idle session.", value => options.AttachmentsPath = string.IsNullOrWhiteSpace(value) ? null : value);
+        => command.Add("attachments=", "JSON file of attachments to send with the prompt (title, mediaType and base64), saved and given to the model as the desktop composer does. Images need a model that reads them.", value => options.AttachmentsPath = string.IsNullOrWhiteSpace(value) ? null : value);
 
     private static void AddPromptSelectionOptions(Command command, PromptOptions options)
     {
@@ -1109,7 +1111,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var command = Leaf("steer", "Send steering input to an active run.");
         command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
         AddMessageOptions(command, options);
-        AddAttachmentsOption(command, options);
         command.Add(async (_, _) => await HandleSessionSendAsync(context, sessionId, options, PromptDispatchKind.Steer).ConfigureAwait(false));
         AddHelpText(command, "Example: `alta session steer <session-id> --message \"Please focus on tests first\"`; use only while the target is running.");
         return command;
@@ -1131,6 +1132,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "`--model`, `--reasoning`, `--prompt-id` and `--permission-mode` are chosen for the session when the prompt is queued, among what",
             "`alta session choices <session-id>` lists: the queued prompt and the next turns run with them. The permission mode applies at once,",
             "as the one chosen in the composer of the window, also to a turn in progress.",
+            "`--attachments <file>` saves files and images with the queued prompt, which gives them to the model with its text.",
             "Example: `alta session queue <session-id> --model gpt-5.5 --reasoning low --stdin`.");
         return command;
     }
@@ -3584,11 +3586,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         IReadOnlyList<AgentInputItem> attached = [];
         if (!string.IsNullOrWhiteSpace(options.AttachmentsPath))
         {
-            // Files join a new turn. They are not steered into the one that runs, and the text queue cannot keep them.
-            if (kind != PromptDispatchKind.Send)
-                return Unsupported(context, "session.attachments", "Attachments go with the next prompt, once the session is idle.");
-            if (await runtime.HasActiveRunAsync(info.Session, context.CancellationToken).ConfigureAwait(false))
-                return Unsupported(context, "session.running", "The session is working. Attachments wait until it is idle.");
+            // Files join a new turn, or wait with the prompt in the queue. They are never steered into a turn that runs.
+            if (kind is not (PromptDispatchKind.Send or PromptDispatchKind.Queue))
+                return Unsupported(context, "session.attachments", "Attachments go with a new prompt or a queued one.");
+            if (kind == PromptDispatchKind.Send && !options.QueueIfBusy && await runtime.HasActiveRunAsync(info.Session, context.CancellationToken).ConfigureAwait(false))
+                return Unsupported(context, "session.running", "The session is working. Attachments wait until it is idle, or go with --queue-if-busy.");
+            // Saved before the session is looked at again: a turn that starts meanwhile finds them ready to queue.
             var prepared = await PreparePromptAttachmentsAsync(context, info, selection, options.AttachmentsPath).ConfigureAwait(false);
             if (prepared.ExitCode != AltaExitCodes.Success) return prepared.ExitCode;
             attached = prepared.Items;
@@ -3621,6 +3624,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     inputText,
                     kind.ToString().ToLowerInvariant(),
                     CreateProvenance(context),
+                    attached,
                     context.CancellationToken).ConfigureAwait(false);
                 WritePromptResult(context, "alta.session.queued", info.Session, null, queueItem.QueueItemId, queued: true, kind, inputText);
                 return AltaExitCodes.Success;
@@ -3638,6 +3642,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     inputText,
                     kind.ToString().ToLowerInvariant(),
                     CreateProvenance(context),
+                    attached,
                     context.CancellationToken).ConfigureAwait(false);
                 WritePromptResult(context, "alta.session.queued", info.Session, null, queueItem.QueueItemId, queued: true, kind, inputText);
                 return AltaExitCodes.Success;
@@ -3705,6 +3710,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 }
             }
 
+            var detach = options.NoWait || ShouldDetachPromptSubmission(context);
             var sendTask = runtime.SendAsync(
                 info.Session,
                 executionOptions,
@@ -3713,9 +3719,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     Input = agentInput, SourceSessionId = IsAgentCaller(context) ? context.Caller.SourceSessionId : null,
                     Provenance = PromptProvenanceOf(context),
                 },
-                ShouldDetachPromptSubmission(context) ? CancellationToken.None : context.CancellationToken);
+                detach ? CancellationToken.None : context.CancellationToken);
 
-            if (ShouldDetachPromptSubmission(context) && await WaitForAgentSubmissionAckAsync(runtime, info.Session, sendTask, context.CancellationToken).ConfigureAwait(false) && !sendTask.IsCompleted)
+            if (detach && await WaitForAgentSubmissionAckAsync(runtime, info.Session, sendTask, context.CancellationToken).ConfigureAwait(false) && !sendTask.IsCompleted)
             {
                 _ = ObserveDetachedPromptSubmissionAsync(sendTask);
                 await runtime.PersistSessionLocalStateAsync(info.Session, CancellationToken.None).ConfigureAwait(false);
@@ -6953,10 +6959,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static bool ContainsField(IReadOnlySet<string> fields, string field)
         => fields.Contains(field);
 
-    // A user message names its files in the text. The phone gets the words and the names, never the paths.
+    // A user message names its files in its text, with their paths, and its metadata lists them: their titles, their types and
+    // the names of their saved copies, an id without a folder that a caller which must not see paths (the phone) can use.
     private static MappedEvent MapCompletedContent(AgentContentCompletedEvent content)
     {
-        var text = content.Content;
         object? metadata = null;
         if (content.Kind == AgentContentKind.User && content.Details is { } details)
         {
@@ -6964,15 +6970,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             var files = PromptImageHistory.ReadFiles(details);
             if (images.Count + files.Count > 0)
             {
-                text = PromptImageHistory.RemoveAttachmentLines(content.Content, details);
-                var names = new string[images.Count + files.Count];
-                for (var index = 0; index < images.Count; index++) names[index] = images[index].Title;
-                for (var index = 0; index < files.Count; index++) names[images.Count + index] = files[index].Title;
-                metadata = new { attachments = names };
+                var attachments = new object[images.Count + files.Count];
+                var index = 0;
+                foreach (var attachment in images.Concat(files))
+                    attachments[index++] = new { title = attachment.Title, mediaType = attachment.MediaType, id = attachment.Path[(attachment.Path.LastIndexOfAny(['/', '\\']) + 1)..] };
+                metadata = new { attachments };
             }
         }
 
-        return new MappedEvent(ContentKindToEventKind(content.Kind), ContentKindToRole(content.Kind), text, metadata);
+        return new MappedEvent(ContentKindToEventKind(content.Kind), ContentKindToRole(content.Kind), content.Content, metadata);
     }
 
     private static MappedEvent MapAgentEvent(AgentEvent agentEvent)
@@ -7720,6 +7726,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         /// <summary>A JSON file of attachments sent with the prompt.</summary>
         public string? AttachmentsPath { get; set; }
+
+        /// <summary>Whether a send returns once the prompt is handed over, as an agent's does, not when its turn ends.</summary>
+        public bool NoWait { get; set; }
     }
 
     private sealed class ReminderCreateOptions

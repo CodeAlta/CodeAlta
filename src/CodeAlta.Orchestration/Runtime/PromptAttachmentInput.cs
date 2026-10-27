@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
@@ -116,21 +115,29 @@ public static class PromptAttachmentInput
 
         if (!info.Exists || info.Length == 0 || info.Length > MaximumAttachmentsFileBytes)
             throw new ArgumentException("The attachments were not found.");
-        JsonNode? node;
-        try { node = JsonNode.Parse(await File.ReadAllBytesAsync(info.FullName, cancellationToken).ConfigureAwait(false)); }
-        catch (JsonException exception) { throw new ArgumentException("The attachments could not be read.", exception); }
-        if (node is not JsonArray rows) throw new ArgumentException("The attachments could not be read.");
-        var images = new List<OwnedPromptImage>(rows.Count);
-        foreach (var row in rows)
+        // The document keeps the UTF-8 of the file, and each attachment becomes a string only once.
+        JsonDocument document;
+        await using (var stream = new FileStream(info.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan))
         {
-            if (row is not JsonObject attachment
-                || attachment["title"] is not JsonValue titleValue || !titleValue.TryGetValue<string>(out var title)
-                || attachment["mediaType"] is not JsonValue typeValue || !typeValue.TryGetValue<string>(out var mediaType)
-                || attachment["base64"] is not JsonValue dataValue || !dataValue.TryGetValue<string>(out var data))
-                throw new ArgumentException("The attachments could not be read.");
-            images.Add(new OwnedPromptImage(title, mediaType, data));
+            try { document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false); }
+            catch (JsonException exception) { throw new ArgumentException("The attachments could not be read.", exception); }
         }
 
-        return images;
+        using (document)
+        {
+            if (document.RootElement.ValueKind != JsonValueKind.Array) throw new ArgumentException("The attachments could not be read.");
+            var images = new List<OwnedPromptImage>(document.RootElement.GetArrayLength());
+            foreach (var attachment in document.RootElement.EnumerateArray())
+            {
+                if (attachment.ValueKind != JsonValueKind.Object
+                    || !attachment.TryGetProperty("title", out var title) || title.ValueKind != JsonValueKind.String
+                    || !attachment.TryGetProperty("mediaType", out var mediaType) || mediaType.ValueKind != JsonValueKind.String
+                    || !attachment.TryGetProperty("base64", out var data) || data.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("The attachments could not be read.");
+                images.Add(new OwnedPromptImage(title.GetString()!, mediaType.GetString()!, data.GetString()!));
+            }
+
+            return images;
+        }
     }
 }

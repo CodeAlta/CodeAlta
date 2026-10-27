@@ -2889,11 +2889,18 @@ public sealed partial class AltaLiveToolTests
         Assert.IsFalse(provider.SentOptions[1].Input.Items.OfType<AgentInputItem.Text>().Any(), "Spaces are not a prompt.");
 
         var steered = await dispatcher.InvokeAsync(["session", "steer", sessionId, "--message", "now", "--attachments", path], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
-        Assert.AreEqual(AltaExitCodes.Unsupported, steered.ExitCode, steered.Stdout);
-        StringAssert.Contains(steered.Stdout, "session.attachments");
+        Assert.AreNotEqual(AltaExitCodes.Success, steered.ExitCode, "A steer has no attachments: files are never steered into a turn.");
+        Assert.HasCount(2, provider.SentOptions);
+        Assert.IsEmpty(provider.SteeredOptions);
+
+        // A queued prompt keeps its files: saved with the session, an image and a file, given to the model with its text.
         var queued = await dispatcher.InvokeAsync(["session", "queue", sessionId, "--message", "later", "--attachments", path], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
-        Assert.AreEqual(AltaExitCodes.Unsupported, queued.ExitCode, queued.Stdout);
-        StringAssert.Contains(queued.Stdout, "Attachments go with the next prompt, once the session is idle.");
+        Assert.AreEqual(AltaExitCodes.Success, queued.ExitCode, queued.Stdout + queued.Stderr);
+        var state = await ReadJournalStateAsync(new SessionViewCatalog(options), sessionId).ConfigureAwait(false);
+        var kept = state.QueuedPrompts.Single(static prompt => prompt.State == "queued");
+        Assert.AreEqual("later", kept.Prompt);
+        CollectionAssert.AreEqual(new[] { ("photo.png", false), ("notes.txt", true) }, kept.Images!.Select(static image => (image.Title!, image.IsFile)).ToArray());
+        CollectionAssert.AreEqual(png, await File.ReadAllBytesAsync(kept.Images![0].Path).ConfigureAwait(false));
 
         var invalid = Path.Combine(root.Path, "invalid.json");
         await File.WriteAllTextAsync(invalid, "{}").ConfigureAwait(false);
@@ -2974,8 +2981,98 @@ public sealed partial class AltaLiveToolTests
 
         Assert.AreEqual(AltaExitCodes.Success, events.ExitCode, events.Stderr);
         var record = ReadJsonLines(events.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.event");
-        Assert.AreEqual("Read these", record.GetProperty("content")[0].GetProperty("text").GetString());
-        CollectionAssert.AreEqual(new[] { "photo.png", "notes.txt" }, record.GetProperty("metadata").GetProperty("attachments").EnumerateArray().Select(static item => item.GetString()).ToArray());
+        Assert.AreEqual(content, record.GetProperty("content")[0].GetProperty("text").GetString(), "The history of alta keeps the lines that name the files.");
+        CollectionAssert.AreEqual(new[] { ("photo.png", "image/png", "photo.png"), ("notes.txt", "text/plain", "notes.txt") },
+            record.GetProperty("metadata").GetProperty("attachments").EnumerateArray()
+                .Select(static item => (item.GetProperty("title").GetString(), item.GetProperty("mediaType").GetString(), item.GetProperty("id").GetString())).ToArray(),
+            "Each file is listed with its type and the name of its copy, an id without a folder.");
+    }
+
+    [TestMethod]
+    public async Task SessionSend_QueueIfBusy_QueuesTheAttachments_WhenATurnStartsWhileTheyArePrepared()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var sessionCatalog = new SessionViewCatalog(options);
+        var providerId = new ModelProviderId("attach-race");
+        var blocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new StatefulProviderRuntime(providerId)
+        {
+            SendBlocker = blocker, PublishRunEventOnSend = true,
+            Models = [new AgentModelInfo("gpt-vision", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = true })],
+        };
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(providerId, "Attach"), () => provider);
+        var runtime = CreateRuntime(options, registry);
+        await using var _ = runtime.ConfigureAwait(false);
+        var models = new GatedModels(new ModelProviderInitializationService(registry));
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(sessionCatalog)
+            .Add(runtime)
+            .Add<IReadOnlyList<ModelProviderDescriptor>>(registry.ListProviders())
+            .Add<IModelProviderInitializationService>(models));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value, "--model", "gpt-vision"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var png = OnePixelPng();
+        var path = Path.Combine(root.Path, "attachments.json");
+        await File.WriteAllTextAsync(path, "[" +
+            "{\"title\":\"photo.png\",\"mediaType\":\"image/png\",\"base64\":\"" + Convert.ToBase64String(png) + "\"}," +
+            "{\"title\":\"notes.txt\",\"mediaType\":\"text/plain\",\"base64\":\"aGk=\"}]").ConfigureAwait(false);
+
+        // The send of the files reads the models of the provider to check the images: the session is idle then, and a turn of
+        // the computer starts before the files are ready.
+        var preparing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var prepared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        models.Gate = (preparing, prepared);
+        var withFiles = dispatcher.InvokeAsync(["session", "send", sessionId, "--stdin", "--queue-if-busy", "--attachments", path], stdin: "Look", caller: AltaCallerIdentity.Cli).AsTask();
+        await preparing.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        models.Gate = null;
+        var running = dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "work"], caller: AltaCallerIdentity.Cli).AsTask();
+        await WaitUntilAsync(() => provider.SentOptions.Count == 1).ConfigureAwait(false);
+        prepared.TrySetResult();
+
+        var queued = await withFiles.ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, queued.ExitCode, queued.Stdout + queued.Stderr);
+        Assert.AreEqual("alta.session.queued", ReadJsonLines(queued.Stdout).Single(static line => line.GetProperty("type").GetString()!.StartsWith("alta.session.", StringComparison.Ordinal)).GetProperty("type").GetString());
+        var state = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
+        var kept = state.QueuedPrompts.Single(static prompt => prompt.State == "queued");
+        CollectionAssert.AreEqual(new[] { ("photo.png", false), ("notes.txt", true) }, kept.Images!.Select(static image => (image.Title!, image.IsFile)).ToArray(), "The files wait with the prompt.");
+
+        // When the turn ends, the queued prompt goes with its files.
+        blocker.TrySetResult();
+        Assert.AreEqual(AltaExitCodes.Success, (await running.ConfigureAwait(false)).ExitCode);
+        provider.PublishIdle(sessionId, new AgentRunId("run-1"));
+        await WaitUntilAsync(() => provider.SentOptions.Count == 2).ConfigureAwait(false);
+        var items = provider.SentOptions[1].Input.Items;
+        Assert.AreEqual("Look", ((AgentInputItem.Text)items[0]).Value);
+        CollectionAssert.AreEqual(png, await File.ReadAllBytesAsync(((AgentInputItem.LocalImage)items[1]).Path).ConfigureAwait(false));
+        var file = (AgentInputItem.LocalFile)items[2];
+        Assert.AreEqual(("notes.txt", "text/plain", "hi"), (file.DisplayName, file.MediaType, await File.ReadAllTextAsync(file.Path).ConfigureAwait(false)));
+    }
+
+    [TestMethod]
+    public async Task SessionSend_NoWait_ReturnsOnceThePromptIsHandedOver()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("no-wait");
+        var blocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new StatefulProviderRuntime(providerId) { SendBlocker = blocker, PublishRunEventOnSend = true };
+        await using var runtime = CreateRuntime(options, provider);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(new SessionViewCatalog(options)).Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+
+        // The turn goes on (its provider holds it); the command of a plugin that asked not to wait has its answer.
+        var sent = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "work", "--no-wait"], caller: AltaCallerIdentity.Cli).AsTask().WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode, sent.Stdout + sent.Stderr);
+        Assert.AreEqual("alta.session.submitted", ReadJsonLines(sent.Stdout).Single(static line => line.GetProperty("type").GetString()!.StartsWith("alta.session.", StringComparison.Ordinal)).GetProperty("type").GetString());
+        Assert.HasCount(1, provider.SentOptions, "The provider has the prompt, and holds its turn: the command did not wait for its end.");
+        blocker.TrySetResult();
     }
 
     [TestMethod]
@@ -6835,6 +6932,31 @@ public sealed partial class AltaLiveToolTests
             });
     }
 
+    // The models of the providers, read through a gate a test opens: what reads them while the gate is set waits for it.
+    private sealed class GatedModels(IModelProviderInitializationService inner) : IModelProviderInitializationService
+    {
+        public (TaskCompletionSource Started, TaskCompletionSource Open)? Gate { get; set; }
+
+        public IReadOnlyList<ModelProviderStateSnapshot> CurrentStates => inner.CurrentStates;
+
+        public IAsyncEnumerable<ModelProviderStateChanged> StreamStateChangesAsync(CancellationToken cancellationToken = default) => inner.StreamStateChangesAsync(cancellationToken);
+
+        public Task InitializeAllAsync(CancellationToken cancellationToken = default) => inner.InitializeAllAsync(cancellationToken);
+
+        public Task RefreshProviderAsync(ModelProviderId providerId, CancellationToken cancellationToken = default) => inner.RefreshProviderAsync(providerId, cancellationToken);
+
+        public async Task<IReadOnlyList<AgentModelInfo>> GetModelsAsync(ModelProviderId providerId, CancellationToken cancellationToken = default)
+        {
+            if (Gate is { } gate)
+            {
+                gate.Started.TrySetResult();
+                await gate.Open.Task.ConfigureAwait(false);
+            }
+
+            return await inner.GetModelsAsync(providerId, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     private sealed class StatefulProviderRuntime(ModelProviderId providerId) : ITestModelProviderSessionRuntime
     {
         private readonly Dictionary<string, List<Action<AgentEvent>>> _subscriptions = new(StringComparer.Ordinal);
@@ -7017,7 +7139,7 @@ public sealed partial class AltaLiveToolTests
             owner.SentOptions.Add(options);
             if (owner.PublishRunEventOnSend)
             {
-                owner.PublishUserCompleted(sessionId, runId, ExtractText(options.Input));
+                owner.PublishUserCompleted(sessionId, runId, string.Concat(options.Input.Items.OfType<AgentInputItem.Text>().Select(static text => text.Value)));
             }
 
             if (owner.PublishIdleBeforeSendReturns)
