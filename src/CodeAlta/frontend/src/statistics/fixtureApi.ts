@@ -1,9 +1,9 @@
 import type { StatisticsApi, StatisticsEvent } from "./api";
 import { addDays, addMonths, allowedFrequencies, dayDistance, resolveFrequency } from "./frame";
-import { fixtureTools, generateFixtureData, type Cell, type FixtureData, type ToolCell } from "./fixtureData";
+import { fixtureHash, fixtureScripts, fixtureTools, generateFixtureData, scriptCellsOf, type Cell, type FixtureData, type ScriptCell, type ToolCell } from "./fixtureData";
 import type {
   BucketInfo, CalendarResult, CostAmount, DetailsResult, DistributionResult, DistributionStep, Frequency, HealthResult, HistoryChoice, McpToolUseRow, McpToolsResult, ModelRow, ModelsResult,
-  ProjectRow, ProjectsResult, QueryHeader, RankedRow, RecordEntry, RecordsResult, RunSample, RunsResult, SeriesLine, SeriesResult, SessionDetailResult, SessionEntry,
+  ProjectRow, ProjectsResult, QueryHeader, RankedRow, RecordEntry, RecordsResult, RunSample, RunsResult, ScriptRow, ScriptRunSample, ScriptsResult, SeriesLine, SeriesResult, SessionDetailResult, SessionEntry,
   SessionsResult, SkillRow, SkillsResult, StatisticsRequest, StatisticsStatus, SummaryResult, SummaryTile, ToolRow, ToolsResult, TopResult, WeekHourResult,
 } from "./types";
 
@@ -58,7 +58,7 @@ const dayOfWeek = (day: string) => new Date(`${day}T00:00:00Z`).getUTCDay();
 
 const aborted = () => Object.assign(new Error("The question was canceled."), { name: "AbortError" });
 
-type Family = "activity" | "usage" | "tools" | "content" | "cost";
+type Family = "activity" | "usage" | "tools" | "content" | "cost" | "scripts";
 type Range = Readonly<{ from: string; to: string }>;
 type Plan = Readonly<{ range: Range; frequency: Frequency; buckets: readonly BucketInfo[]; indexOf: (day: string, hour: number) => number }>;
 
@@ -111,6 +111,14 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
   const today = options.today ?? "2026-10-09";
   const data = options.data ?? generateFixtureData({ today, sessionCount: options.sessionCount, seed: options.seed });
   const total = { sessions: data.sessions.length, bytes: 10_840_000_000 };
+  // The runs of scripts, derived from the cells; and the calls scripts made of each tool, a share of its calls.
+  const scriptCells = scriptCellsOf(data.cells);
+  const scriptOfCell = new Map<Cell, ScriptCell>(scriptCells.map(item => [item.cell, item]));
+  const scriptShares: Readonly<Record<string, number>> = { "ToolCall:read_file": 0.18, "ToolCall:grep": 0.14, shell: 0.06, "ToolCall:webget": 0.3, "ToolCall:alta": 0.25 };
+  const scriptCallsOf = (tool: ToolCell) => Math.round(tool.calls * (scriptShares[tool.tool] ?? 0));
+  // Who created a session: a sub-agent was created by an agent or, for some, by a script.
+  const creatorOf = (cell: Cell): [string, string] => cell.delegated ? (fixtureHash(cell.session) < 0.35 ? ["script", "script"] : ["agent", "agent"])
+    : cell.origin === "automation" ? ["automation", "automation"] : ["you", "you"];
   const listeners = new Set<(event: StatisticsEvent) => void>();
   const failures: { method: string; message: string; count: number }[] = [];
   let latency = options.latencyMs ?? 0;
@@ -163,6 +171,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     cost: ["space", "project", "provider", "model", "effort"],
     tools: ["space", "project", "toolKind"],
     content: ["space", "project", "origin"],
+    scripts: ["space", "project", "provider", "model", "origin"],
   };
 
   function resolve(request: StatisticsRequest): Resolved {
@@ -244,6 +253,13 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
   function cellsOf(resolved: Resolved, family: Family, plan: Plan = resolved.plan): Cell[] {
     return data.cells.filter(cell => within(cell, plan.range) && accepts(cell, resolved.request, family));
   }
+  function scriptsIn(resolved: Resolved, plan: Plan = resolved.plan): ScriptCell[] {
+    return scriptCells.filter(item => within(item.cell, plan.range) && accepts(item.cell, resolved.request, "scripts"));
+  }
+  const scriptRunId = (item: ScriptCell, index: number) => `run-${item.cell.session.slice(0, 4)}${item.cell.day.slice(8)}${String(item.cell.hour).padStart(2, "0")}${index}`;
+  // The outcome of each run of a cell: the failed ones first, then the stopped, the interrupted and the completed ones.
+  const scriptStatusOf = (item: ScriptCell, index: number) => index < item.failed ? "failed" : index < item.failed + item.cancelled ? "cancelled"
+    : index < item.failed + item.cancelled + item.interrupted ? "interrupted" : "completed";
 
   // The key and the label of a group, as the plugin gives them: a group of a fixed list (who sent a prompt, how it came, the kind of
   // a tool) is keyed by its name, which is the value a filter takes.
@@ -259,11 +275,15 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
       case "tool": return [tool?.tool ?? "", tool?.tool ?? ""];
       case "kind": return [tool?.kind ?? "", tool?.kind ?? ""];
       case "unit": return [cell.costUnit ?? "none", cell.costUnit ?? "none"];
+      case "script": { const script = scriptOfCell.get(cell)?.script ?? ""; return [script, script]; }
+      case "script-kind": { const script = scriptOfCell.get(cell)?.script; const kind = script === "(inline)" ? "inline" : script === "(unknown)" ? "unknown" : "library"; return [kind, kind]; }
+      case "creator": return creatorOf(cell);
       default: return ["", ""];
     }
   };
 
-  type Metric = Readonly<{ family: Family; unit: string; value: (cell: Cell, tool?: ToolCell) => number; perTool?: boolean }>;
+  type Metric = Readonly<{ family: Family; unit: string; value: (cell: Cell, tool?: ToolCell) => number; perTool?: boolean; when?: (cell: Cell) => boolean }>;
+  const scriptMetric = (unit: string, value: (script: ScriptCell) => number): Metric => ({ family: "scripts", unit, when: cell => scriptOfCell.has(cell), value: cell => value(scriptOfCell.get(cell)!) });
   const sum = (items: readonly number[]) => items.reduce((total, value) => total + value, 0);
   const metrics: Record<string, Metric> = {
     runs: { family: "activity", unit: "count", value: cell => cell.runs },
@@ -299,6 +319,15 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     "prompt-directories": { family: "content", unit: "count", value: cell => cell.attachments[2] },
     answers: { family: "content", unit: "count", value: cell => cell.answers },
     cost: { family: "cost", unit: "cost", value: cell => cell.cost },
+    "script-calls": { family: "tools", unit: "count", perTool: true, value: (_, tool) => tool ? scriptCallsOf(tool) : 0 },
+    "script-runs": scriptMetric("count", script => script.runs),
+    "script-runs-completed": scriptMetric("count", script => script.completed),
+    "script-runs-failed": scriptMetric("count", script => script.failed),
+    "script-runs-cancelled": scriptMetric("count", script => script.cancelled),
+    "script-runs-interrupted": scriptMetric("count", script => script.interrupted),
+    "script-time": scriptMetric("ms", script => sum(script.durations)),
+    "script-wait-time": scriptMetric("ms", script => script.waitMs),
+    "script-sessions": scriptMetric("count", script => script.sessions),
   };
 
   function accumulate(plan: Plan, resolved: Resolved, metric: Metric, group: string | null, lines: Lines, previous: boolean) {
@@ -306,7 +335,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     const count = resolved.plan.buckets.length;
     for (const cell of cellsOf(resolved, family, plan)) {
       const at = plan.indexOf(cell.day, cell.hour);
-      if (at < 0 || at >= count) continue;
+      if (at < 0 || at >= count || (metric.when && !metric.when(cell))) continue;
       const rows: (readonly [Cell, ToolCell | undefined])[] = metric.perTool ? cell.tools.filter(tool => !(resolved.request.filter?.toolKind) || tool.kind === resolved.request.filter.toolKind).map(tool => [cell, tool] as const) : [[cell, undefined]];
       for (const [row, tool] of rows) {
         if (metric.family === "cost" && row.costUnit === null) continue;
@@ -491,7 +520,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
       list.forEach((item, index) => { const cell = cellOfTool.get(name)![index]; const at = resolved.plan.indexOf(cell.day, cell.hour); if (at >= 0) spark[at] += item.calls; });
       kinds.set(definition.kind, (kinds.get(definition.kind) ?? 0) + calls);
       return { kind: definition.kind, tool: name, calls, failures, failureRate: calls ? failures / calls : 0, timeMs: sum(list.map(item => item.timeMs)), p50Ms: definition.median, p90Ms: Math.round(definition.median * Math.exp(1.2816 * definition.spread)),
-        maxMs: Math.max(...list.map(item => item.maxMs)), bytesIn: sum(list.map(item => item.bytesIn)), bytesOut: sum(list.map(item => item.bytesOut)), spark };
+        maxMs: Math.max(...list.map(item => item.maxMs)), bytesIn: sum(list.map(item => item.bytesIn)), bytesOut: sum(list.map(item => item.bytesOut)), spark, scriptCalls: sum(list.map(scriptCallsOf)) };
     }).sort((a, b) => b.calls - a.calls);
     return { rows, kinds };
   }
@@ -607,7 +636,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
       const previousDistinct = resolved.compare ? new Set(cellsOf(resolved, "activity", resolved.compare).map(cell => cell.session)).size : undefined;
       const sessionTile: SummaryTile = { id: "sessions", unit: "count", value: distinct, ...(previousDistinct !== undefined ? { previous: previousDistinct } : {}), ...(previousDistinct ? { change: (distinct - previousDistinct) / previousDistinct } : {}), spark };
       const ids = ["runs", "active-time", "your-prompts", "requests", "tokens", "input-tokens", "output-tokens", "fresh-input-tokens", "cache-read-tokens", "cache-write-tokens", "reasoning-tokens",
-        "tool-calls", "tool-failures", "lines-added", "lines-removed", "files-changed", "errors", "compactions"];
+        "tool-calls", "tool-failures", "lines-added", "lines-removed", "files-changed", "errors", "compactions", "script-runs"];
       const tiles = [sessionTile, ...ids.map(id => tile(resolved, id, metrics[id]))];
       const costs: SummaryTile[] = [];
       const lines: Lines = new Map();
@@ -713,6 +742,9 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
         case "prompt-words": steps = stepsOfValues(cells.filter(cell => cell.promptsYou > 0).map(cell => Math.max(1, Math.round(cell.promptWords / cell.promptsYou)))); unit = "words"; break;
         case "run-cost": steps = lognormalSteps(cells.filter(cell => cell.costUnit && (!subject || cell.costUnit === subject)).length * 3, 700_000, 0.9); unit = "micro-unit"; break;
         case "run-tool-calls": steps = stepsOfValues(cells.map(cell => Math.max(1, Math.round(sum(cell.tools.map(tool => tool.calls)) / cell.runs)))); break;
+        case "script-run-duration": steps = stepsOfValues(scriptsIn(resolved).filter(item => !subject || item.script === subject).flatMap(item => item.durations)); unit = "ms"; break;
+        case "script-run-sessions": steps = stepsOfValues(scriptsIn(resolved).filter(item => !subject || item.script === subject).flatMap(item => new Array<number>(item.runs).fill(Math.round(item.sessions / item.runs)))); break;
+        case "script-run-calls": steps = stepsOfValues(scriptsIn(resolved).filter(item => !subject || item.script === subject).flatMap(item => new Array<number>(item.runs).fill(Math.round(item.calls / item.runs)))); break;
         default: throw new Error(`'${measure}' is not a distribution.`);
       }
       const count = sum(steps.map(step => step.count));
@@ -758,6 +790,11 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
       records.push({ measure: "largestPrompt", subject: "", value: Math.round(prompt.promptChars / Math.max(1, prompt.promptsYou)), unit: "chars", sessionId: prompt.session, at: iso(prompt.day, prompt.hour) });
       const tool = cellsOf(resolved, "tools").flatMap(cell => cell.tools.map(item => ({ cell, item }))).sort((a, b) => b.item.maxMs - a.item.maxMs)[0];
       if (tool) records.push({ measure: "longestTool", subject: tool.item.tool, value: tool.item.maxMs, unit: "ms", sessionId: tool.cell.session, at: iso(tool.cell.day, tool.cell.hour) });
+      const scripts = scriptsIn(resolved);
+      const longestScript = scripts.filter(item => item.durations.length > 0).sort((a, b) => Math.max(...b.durations) - Math.max(...a.durations))[0];
+      if (longestScript) records.push({ measure: "longestScriptRun", subject: "", value: Math.max(...longestScript.durations), unit: "ms", sessionId: longestScript.cell.session, runId: scriptRunId(longestScript, 0), at: iso(longestScript.cell.day, longestScript.cell.hour) });
+      const widest = scripts.filter(item => item.sessions > 0).sort((a, b) => b.sessions / b.runs - a.sessions / a.runs)[0];
+      if (widest) records.push({ measure: "widestScriptRun", subject: "", value: Math.round(widest.sessions / widest.runs), unit: "count", sessionId: widest.cell.session, runId: scriptRunId(widest, 0), at: iso(widest.cell.day, widest.cell.hour) });
       return { query: header(resolved, ["activity"]), records };
     }),
     health: (request, signal) => guard("health", signal, (): HealthResult => {
@@ -794,6 +831,18 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
         "prompt-provenance": [Math.round(sum(cellsOf(resolved, "activity").map(cell => cell.runs)) * 0.21), [["background-job", 0.33], ["agent-session", 0.29], ["reminder", 0.14], ["user-review", 0.1], ["user-answer", 0.09], ["automation", 0.05]]],
         "session-origin": [new Set(cellsOf(resolved, "activity").map(cell => cell.session)).size, [["you", 0.78], ["agent", 0.17], ["automation", 0.03], ["reminder", 0.02]]],
       };
+      if (list === "script-step-failed" || list === "script-error" || list === "script-called") {
+        const counts = new Map<string, number>();
+        for (const item of scriptsIn(resolved)) {
+          const library = !item.script.startsWith("(");
+          const name = list === "script-step-failed" ? (library && item.failedStep ? `${item.script}/${item.failedStep}` : null) : list === "script-error" ? item.error : library ? item.script : null;
+          if (name) counts.set(name, (counts.get(name) ?? 0) + (list === "script-called" ? item.runs : 1));
+        }
+        const total = sum([...counts.values()]);
+        const rows = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, count]) => ({ name, count, share: total ? count / total : 0 }));
+        const limit = resolved.limit ?? 50;
+        return { query: header(resolved, ["scripts"]), list, rows: rows.slice(0, limit), total, totalRows: rows.length, truncated: rows.length > limit };
+      }
       const entry = shares[list];
       if (!entry) throw new Error(`'${list}' is not a list.`);
       const rows = entry[1].map(([name, share]) => ({ name, count: Math.round(entry[0] * share), share })).filter(row => row.count > 0);
@@ -866,6 +915,80 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
       const sorted = all.sort((a, b) => key(b) - key(a));
       const limit = resolved.limit ?? 50;
       return { query: header(resolved, ["activity"]), sort, runs: sorted.slice(0, limit), totalRows: sorted.length, truncated: sorted.length > limit };
+    }),
+    scripts: (request, signal) => guard("scripts", signal, (): ScriptsResult => {
+      const resolved = resolve(request);
+      const items = scriptsIn(resolved);
+      const count = resolved.plan.buckets.length;
+      const ended = (item: ScriptCell) => item.completed + item.failed + item.cancelled + item.interrupted;
+      // The sessions a script started have tokens, and a cost in the unit of the model of the session that ran it.
+      const tokensOf = (item: ScriptCell) => item.sessions * 38_000;
+      const costsOfScripts = (list: readonly ScriptCell[]): CostAmount[] => {
+        const totals = new Map<string, number>();
+        for (const item of list) if (item.cell.costUnit && item.sessions > 0) totals.set(item.cell.costUnit, (totals.get(item.cell.costUnit) ?? 0) + item.sessions * (item.cell.costUnit === "usd" ? 0.35 : 4));
+        return [...totals].map(([unit, amount]) => ({ unit, total: round(amount) })).sort((a, b) => a.unit.localeCompare(b.unit));
+      };
+      const at = (item: ScriptCell) => resolved.plan.indexOf(item.cell.day, item.cell.hour);
+      const finished = sum(items.map(ended)), completed = sum(items.map(item => item.completed));
+      const totals = {
+        runs: sum(items.map(item => item.runs)), completed, failed: sum(items.map(item => item.failed)), cancelled: sum(items.map(item => item.cancelled)), interrupted: sum(items.map(item => item.interrupted)),
+        ...(finished ? { successRate: completed / finished } : {}), calls: sum(items.map(item => item.calls)), toolCalls: sum(cellsOf(resolved, "tools").flatMap(cell => cell.tools.map(scriptCallsOf))),
+        sessions: sum(items.map(item => item.sessions)), sessionTokens: sum(items.map(tokensOf)), sessionCosts: costsOfScripts(items), runMs: sum(items.flatMap(item => item.durations)),
+        waitMs: sum(items.map(item => item.waitMs)), steps: sum(items.map(item => item.steps)), stepsFailed: sum(items.map(item => item.stepsFailed)),
+      };
+      const byScript = new Map<string, ScriptCell[]>();
+      for (const item of items) (byScript.get(item.script) ?? byScript.set(item.script, []).get(item.script)!).push(item);
+      const all = [...byScript].map(([script, list]): ScriptRow => {
+        const spark = new Array<number>(count).fill(0);
+        for (const item of list) { const index = at(item); if (index >= 0) spark[index] += item.runs; }
+        const steps = stepsOfValues(list.flatMap(item => item.durations));
+        const failed = sum(list.map(item => item.failed)), done = sum(list.map(ended));
+        const last = list.reduce((latest, item) => `${item.cell.day}${String(item.cell.hour).padStart(2, "0")}` > `${latest.cell.day}${String(latest.cell.hour).padStart(2, "0")}` ? item : latest, list[0]);
+        const p50 = percentileOfSteps(steps, 0.5), p90 = percentileOfSteps(steps, 0.9);
+        return { script, runs: sum(list.map(item => item.runs)), failed, failureRate: done ? failed / done : 0, ...(p50 !== undefined ? { p50Ms: p50 } : {}), ...(p90 !== undefined ? { p90Ms: p90 } : {}),
+          sessions: sum(list.map(item => item.sessions)), sessionTokens: sum(list.map(tokensOf)), sessionCosts: costsOfScripts(list), lastRun: iso(last.cell.day, last.cell.hour), spark };
+      }).sort((a, b) => b.runs - a.runs || a.script.localeCompare(b.script));
+      const limit = resolved.limit ?? 50;
+      // The turns of each model, those that sent a script, and what a turn did with a script and without, from the cells.
+      const adoption = new Map<string, { provider: string; model: string; turns: number; turnsWithScript: number; scriptRuns: number; calls: number; ended: number }>();
+      type TurnGroup = { turns: number; toolCalls: number; requests: number; tokens: number; durationMs: number };
+      const withScripts: TurnGroup = { turns: 0, toolCalls: 0, requests: 0, tokens: 0, durationMs: 0 }, withoutScripts: TurnGroup = { turns: 0, toolCalls: 0, requests: 0, tokens: 0, durationMs: 0 };
+      for (const cell of cellsOf(resolved, "activity")) {
+        const key = `${cell.provider}/${cell.model}`;
+        const row = adoption.get(key) ?? adoption.set(key, { provider: cell.provider, model: cell.model, turns: 0, turnsWithScript: 0, scriptRuns: 0, calls: 0, ended: 0 }).get(key)!;
+        const script = scriptOfCell.get(cell);
+        const withScript = script && accepts(cell, resolved.request, "scripts") ? Math.min(cell.runs, script.runs) : 0;
+        row.turns += cell.runs;
+        row.turnsWithScript += withScript;
+        if (script && withScript) { row.scriptRuns += script.runs; row.calls += script.calls; row.ended += ended(script); }
+        const calls = sum(cell.tools.map(tool => tool.calls)), tokens = cell.fresh + cell.cacheRead + cell.cacheWrite + cell.output, time = sum(cell.runDurations);
+        const add = (group: TurnGroup, runs: number) => {
+          group.turns += runs;
+          group.toolCalls += calls / cell.runs * runs;
+          group.requests += cell.requests / cell.runs * runs;
+          group.tokens += tokens / cell.runs * runs;
+          group.durationMs += time / cell.runs * runs;
+        };
+        add(withScripts, withScript);
+        add(withoutScripts, cell.runs - withScript);
+      }
+      const average = (group: TurnGroup, withScript: boolean) => ({ withScript, turns: group.turns, toolCalls: group.turns ? round(group.toolCalls / group.turns) : 0,
+        requests: group.turns ? round(group.requests / group.turns) : 0, tokens: group.turns ? Math.round(group.tokens / group.turns) : 0, durationMs: group.turns ? Math.round(group.durationMs / group.turns) : 0 });
+      const later = (item: ScriptCell) => `${item.cell.day}${String(item.cell.hour).padStart(2, "0")}`;
+      const recent: ScriptRunSample[] = [...items].sort((a, b) => later(b).localeCompare(later(a))).slice(0, 20).flatMap(item => Array.from({ length: item.runs }, (_, index): ScriptRunSample => {
+        const status = scriptStatusOf(item, index);
+        const duration = status === "interrupted" ? undefined : item.durations[Math.min(index, item.durations.length - 1)];
+        const title = item.script.startsWith("(") ? undefined : data.sessions.find(session => session.id === item.cell.session)?.title;
+        return { sessionId: item.cell.session, runId: scriptRunId(item, index), script: item.script, ...(title ? { title } : {}), status, ...(status === "failed" && item.error ? { error: item.error } : {}),
+          origin: item.cell.origin, start: iso(item.cell.day, item.cell.hour, index * 11), ...(duration !== undefined ? { durationMs: duration } : {}), calls: Math.round(item.calls / item.runs),
+          steps: Math.round(item.steps / item.runs), sessions: Math.round(item.sessions / item.runs), model: item.cell.model };
+      })).slice(0, 20);
+      return {
+        query: header(resolved, ["scripts"]), buckets: resolved.plan.buckets, totals, scripts: all.slice(0, limit),
+        adoption: [...adoption.values()].sort((a, b) => b.turns - a.turns || a.model.localeCompare(b.model)).map(row => ({ provider: row.provider, model: row.model, turns: row.turns, turnsWithScript: row.turnsWithScript,
+          share: row.turns ? row.turnsWithScript / row.turns : 0, scriptRuns: row.scriptRuns, ...(row.ended ? { callsPerRun: round(row.calls / row.ended) } : {}) })),
+        turns: [average(withScripts, true), average(withoutScripts, false)].filter(row => row.turns > 0), recent, totalScripts: all.length, truncated: all.length > limit,
+      };
     }),
 
     status: signal => guard("status", signal, () => status),

@@ -633,6 +633,12 @@ public enum AgentWorkflowEventKind
     /// draws before they run. <see cref="AgentWorkflowEvent.Title"/> is the title of the script.
     /// </summary>
     StepsDeclared,
+
+    /// <summary>
+    /// <c>workflow("name")</c> resolved a script of the library: <see cref="AgentWorkflowEvent.ScriptName"/> and
+    /// <see cref="AgentWorkflowEvent.ScriptScope"/>. A run that writes none ran only the code sent to <c>exec</c>.
+    /// </summary>
+    ScriptLoaded,
 }
 
 /// <summary>A step a script declares in its <c>meta</c>, for the graph of its run.</summary>
@@ -719,6 +725,21 @@ public sealed record AgentWorkflowEvent(
 
     /// <summary>Gets the steps a script declares, for <see cref="AgentWorkflowEventKind.StepsDeclared"/>.</summary>
     public IReadOnlyList<AgentWorkflowStep>? Steps { get; init; }
+
+    /// <summary>Gets the name of the library script, for <see cref="AgentWorkflowEventKind.ScriptLoaded"/>.</summary>
+    public string? ScriptName { get; init; }
+
+    /// <summary>
+    /// Gets where the library script comes from (<c>project</c>, <c>user</c> or <c>sample</c>), for
+    /// <see cref="AgentWorkflowEventKind.ScriptLoaded"/>.
+    /// </summary>
+    public string? ScriptScope { get; init; }
+
+    /// <summary>
+    /// Gets whether the run writes a <see cref="AgentWorkflowEventKind.ScriptLoaded"/> record for each library script it
+    /// loads, for the start of a run: a run recorded before these records existed has none, and which script it ran is not known.
+    /// </summary>
+    public bool? RecordsScripts { get; init; }
 }
 
 /// <summary>

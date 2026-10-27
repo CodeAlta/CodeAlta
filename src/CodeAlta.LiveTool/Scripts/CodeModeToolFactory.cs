@@ -318,7 +318,8 @@ public static class CodeModeToolFactory
                 return host.RunAsync(source, handler, new CodeModeRunOptions
                 {
                     Limits = limits,
-                    ResolveScript = ResolveWith(invocation.Tools, options.Library, cwd, spaces),
+                    ResolveScript = ResolveWith(invocation.Tools, options.Library, cwd, spaces, script => options.Runs.Record(((CodeModeRunHandle)observer).Id,
+                        AgentWorkflowEventKind.ScriptLoaded, record => record with { ScriptName = script.Name, ScriptScope = ScopeName(script.Scope) })),
                     ArgumentsJson = plan?.Run.ArgumentsJson,
                     Replay = plan?.Replay,
                 }, observer, runCancellation);
@@ -407,9 +408,10 @@ public static class CodeModeToolFactory
     }
 
     // workflow({ scriptPath }) reads the file with the session's own read_file, so its sandbox and its tools apply.
-    // workflow("name") runs a script of the library, the project's before the user's.
+    // workflow("name") runs a script of the library, the project's before the user's; the run records which (Statistics counts
+    // runs by the library script they load).
     private static Func<CodeModeScriptReference, CancellationToken, ValueTask<CodeModeSource>> ResolveWith(IAgentRunToolInvoker? tools, CodeModeScriptLibrary? library, string? cwd,
-        SpaceFilter? spaces)
+        SpaceFilter? spaces, Action<CodeModeLibraryScript> loaded)
         => async (reference, cancellationToken) =>
         {
             if (reference.ScriptPath is not { Length: > 0 } path)
@@ -423,6 +425,7 @@ public static class CodeModeToolFactory
                 var projectRoot = CodeModeScriptLibrary.ProjectRootOf(cwd);
                 if (library.Find(name, projectRoot, spaces) is { } script)
                 {
+                    loaded(script);
                     return script.Source;
                 }
 
@@ -467,6 +470,14 @@ public static class CodeModeToolFactory
     }
 
     private static string SourceLine(string? sourcePath) => sourcePath is null ? string.Empty : $"Source: {sourcePath}\n";
+
+    // The scope of a library script as its record names it.
+    private static string ScopeName(CodeModeScriptScope scope) => scope switch
+    {
+        CodeModeScriptScope.Project => "project",
+        CodeModeScriptScope.Global => "user",
+        _ => "sample",
+    };
 
     // The source of each run is kept as a file, so that the model fixes a long script with its file tools.
     private static string? KeepSource(CodeModeToolOptions options, string sessionId, string runId, CodeModeSource source)

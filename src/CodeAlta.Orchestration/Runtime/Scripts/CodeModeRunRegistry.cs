@@ -418,7 +418,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             }
         }
 
-        handle.Record(AgentWorkflowEventKind.RunStarted, record => record with { Title = title, ResumesRunId = start?.ResumesRunId });
+        handle.Record(AgentWorkflowEventKind.RunStarted, record => record with { Title = title, ResumesRunId = start?.ResumesRunId, RecordsScripts = true });
         handle.Start(run, OnEndedAsync);
         refusal = null;
         return handle;

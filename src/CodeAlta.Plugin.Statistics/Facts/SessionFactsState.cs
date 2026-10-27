@@ -22,8 +22,10 @@ internal sealed class SessionFactsState
     /// an activation when it ends without failing, and names the MCP tool of every MCP call, those made through <c>alta</c> included.
     /// Version 7 takes the sender of a prompt from the provenance the host recorded it with, and counts the prompts by that provenance.
     /// Version 8 counts an <c>alta mcp skill activate</c> as a use of a skill of its MCP server (<c>mcp:&lt;server&gt;</c>).
+    /// Version 9 counts the runs of scripts of Code Mode from their records, the calls scripts make, the <c>exec</c> calls of a
+    /// run, <c>exec</c> and <c>wait</c> as tools of their own kind, and the run of the script that started a session.
     /// </summary>
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 9;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;
@@ -45,6 +47,9 @@ internal sealed class SessionFactsState
 
     /// <summary>The number of runs of the source of a fork that are remembered, so that a late record of one is not taken for a run of the fork.</summary>
     public const int MaxInheritedRuns = 32;
+
+    /// <summary>The number of runs of scripts without an end that are remembered.</summary>
+    public const int MaxOpenScripts = 64;
 
     /// <summary>Gets or sets the version of the facts this state belongs to.</summary>
     public int Version { get; set; } = CurrentVersion;
@@ -78,6 +83,9 @@ internal sealed class SessionFactsState
 
     /// <summary>Gets or sets the automation that created the session.</summary>
     public string? AutomationId { get; set; }
+
+    /// <summary>Gets or sets the run of the script that created the session.</summary>
+    public string? ScriptRunId { get; set; }
 
     /// <summary>Gets or sets the title, in the form it is kept in (<see cref="SessionTitles.Clean"/>).</summary>
     public string? Title { get; set; }
@@ -144,6 +152,9 @@ internal sealed class SessionFactsState
     /// what a rewind removed) inherited from the records that are its own. Null for a session that is not one: every record is its own.
     /// </summary>
     public InheritedRecordsState? Inherited { get; set; }
+
+    /// <summary>Gets or sets the runs of scripts that started and have not ended, oldest first.</summary>
+    public List<OpenScriptState> OpenScripts { get; set; } = [];
 
     /// <summary>Makes an independent copy of the state, so that a catch-up that is not saved leaves the saved one as it was.</summary>
     /// <returns>The copy.</returns>
@@ -290,6 +301,64 @@ internal sealed class OpenRunState
 
     /// <summary>Gets or sets the duration of the last costed record.</summary>
     public double? LastCostDuration { get; set; }
+
+    /// <summary>Gets or sets the <c>exec</c> calls of the run.</summary>
+    public long ExecCalls { get; set; }
+}
+
+/// <summary>A run of a script of Code Mode that started and has not ended, with what it did so far.</summary>
+internal sealed class OpenScriptState
+{
+    /// <summary>Gets or sets the run of the script.</summary>
+    public string RunId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets when it started.</summary>
+    public DateTimeOffset Start { get; set; }
+
+    /// <summary>Gets or sets the provider in force when it started.</summary>
+    public string Provider { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the model in force when it started.</summary>
+    public string Model { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets who sent the turn that started it.</summary>
+    public string Origin { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the script it is counted under; its start was counted under it.</summary>
+    public string Script { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets a value indicating whether a library script it loaded gave it its name.</summary>
+    public bool Named { get; set; }
+
+    /// <summary>Gets or sets the title, in the form titles are kept in.</summary>
+    public string? Title { get; set; }
+
+    /// <summary>Gets or sets the run it resumes.</summary>
+    public string? ResumesRunId { get; set; }
+
+    /// <summary>Gets or sets the steps that ended.</summary>
+    public long Steps { get; set; }
+
+    /// <summary>Gets or sets the steps that failed.</summary>
+    public long StepsFailed { get; set; }
+
+    /// <summary>Gets or sets the steps that were replayed.</summary>
+    public long StepsReplayed { get; set; }
+
+    /// <summary>Gets or sets the sessions it started.</summary>
+    public long Sessions { get; set; }
+
+    /// <summary>Gets or sets the asks of those sessions that failed.</summary>
+    public long AsksFailed { get; set; }
+
+    /// <summary>Gets or sets its sleeps.</summary>
+    public long Sleeps { get; set; }
+
+    /// <summary>Gets or sets the milliseconds it waited for the user, the wait that goes on apart.</summary>
+    public long WaitMs { get; set; }
+
+    /// <summary>Gets or sets when the wait for the user that goes on started; null when it does not wait.</summary>
+    public DateTimeOffset? WaitStart { get; set; }
 }
 
 /// <summary>A run that was closed as interrupted because its session had been quiet for long, with what its closing was counted under.</summary>

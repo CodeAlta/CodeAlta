@@ -1044,6 +1044,42 @@ public sealed class StatisticsEngineTests
     }
 
     [TestMethod]
+    public async Task AStoreOfVersion5_IsGivenTheTablesOfScripts_AndItsSessionsAreReadAgainForThem()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        harness.Journals.Set(ScriptFactsTests.ScriptJournal(), JournalBuilder.Time(2));
+        AddSession(harness, "plain", Today9, runs: 1);
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+
+        // The layout of version 5, with the facts of version 8: no table of scripts, no columns for them.
+        var prefix = harness.Store.Store.Prefix;
+        await harness.Store.Application.WriteAsync("test", async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"DROP TABLE {prefix}script_q; DROP TABLE {prefix}script_day; DROP TABLE {prefix}script_month; DROP TABLE {prefix}script_year; DROP TABLE {prefix}script_run; "
+                + $"ALTER TABLE {prefix}tool_q DROP COLUMN script_calls; ALTER TABLE {prefix}tool_day DROP COLUMN script_calls; ALTER TABLE {prefix}tool_month DROP COLUMN script_calls; ALTER TABLE {prefix}tool_year DROP COLUMN script_calls; "
+                + $"ALTER TABLE {prefix}run DROP COLUMN exec_calls; DROP INDEX {prefix}session_by_script_run; ALTER TABLE {prefix}session DROP COLUMN script_run_id; "
+                + $"UPDATE {prefix}journal SET facts_version = 8; UPDATE app_meta SET version = 5 WHERE owner = 'plugin:statistics';";
+            await command.ExecuteNonQueryAsync(token);
+        });
+        await harness.RestartAsync();
+        await harness.Engine.DrainAsync();
+
+        var request = new CodeAlta.Plugin.Statistics.Query.StatisticsRequest { Period = "all" };
+        var scripts = await harness.Engine.Queries.ScriptsAsync(request);
+        Assert.AreEqual(1, scripts.Totals.Runs);
+        Assert.AreEqual("review-pr", scripts.Scripts.Single().Script);
+        Assert.AreEqual("run-1", scripts.Recent.Single().RunId);
+        Assert.AreEqual(2, scripts.Totals.ToolCalls);
+        Assert.AreEqual(1, scripts.Adoption.Sum(static row => row.TurnsWithScript));
+        var journals = await harness.Store.Store.ListJournalsAsync();
+        Assert.IsTrue(journals.Values.All(static row => row.FactsVersion == SessionFactsState.CurrentVersion));
+        Assert.AreEqual(2, (await harness.Engine.Queries.RunsAsync(request, "recent")).Runs.Count, "The other session keeps its numbers.");
+        await harness.Store.VerifyRollupsAsync();
+    }
+
+    [TestMethod]
     public async Task StoppingBeforeAnythingIsRead_StartsTheStatisticsToday_AndMoreCanBeReadLater()
     {
         await using var harness = await EngineHarness.CreateAsync();

@@ -20,8 +20,8 @@ cards of a turn work in both applications; the store, the history and the canvas
 ## Facts: the model
 
 A fact is an addition to a measure, keyed by **session, quarter hour (UTC) and the key of its family** (activity,
-usage, cost, tools, content, details, histograms, extremes), plus one row per run and per session. Everything follows
-from three choices:
+usage, cost, tools, content, details, histograms, extremes, scripts), plus one row per run, per run of a script and per
+session. Everything follows from three choices:
 
 - **Facts are additive.** Every measure is a sum or a count; only largest values (fullest context, longest call,
   extremes) merge with `MAX`. Merging is addition, so reading a session in two halves gives exactly the facts of
@@ -36,7 +36,8 @@ from three choices:
   the program of a shell command, the first two words of an `alta` command, file extensions, a cleaned session
   title, and a hash of the folder of a session. No prompt, answer, tool argument, result or path is copied. A name taken out of a command is kept only when
   it is written as a name, because the rest of a command may hold a secret (`PGPASSWORD=… psql` counts `psql`; a quoted
-  value, a token-like word or an ambiguous shell construct counts nothing).
+  value, a token-like word or an ambiguous shell construct counts nothing). The same holds for scripts: the name of a
+  library script, the id of a step and the name of an error (`TypeError`) are kept only as identifiers, never a message.
 
 Definitions the reducer guarantees:
 
@@ -53,8 +54,15 @@ Definitions the reducer guarantees:
   its source's records; its header says from when its records are its own (`forked_from.counted_from`), and the
   inherited ones only carry the choices in force. Turns made outside CodeAlta (runs whose id starts with `external:`)
   count nothing. So the totals of a session and its forks are what was spent: nothing twice, nothing lost.
+- **A run of a script** ([Code Mode](codemode.md)) is read from its records, which belong to no turn. It is counted
+  when it starts, under the model in force and the sender of the turn it started in; what it did (its outcome,
+  duration, calls, steps, sessions, time waiting for the user) is counted when it ends, in the quarter of its end,
+  because a script may sleep for days. Its name is the first library script it loads; a run that loads none is
+  `(inline)`, and one recorded before the loads were recorded `(unknown)`. A session a script started records the run
+  (`workflow:<run>`), which gives the tokens and the cost of the sessions of each script at query time. The calls a
+  script makes are tool calls of the session marked as the script's, and `exec` and `wait` are tools of their own kind.
 
-`SessionFactsState.CurrentVersion` (8) versions the definitions. A new version rereads every session that still has
+`SessionFactsState.CurrentVersion` (9) versions the definitions. A new version rereads every session that still has
 its journal, one at a time, keeping the old numbers until each session's new rows are saved.
 
 ## Reading journals
@@ -105,7 +113,8 @@ start.
   database. That archive fails closed: integrity and digests are checked on every read, and a missing or damaged
   archive stops preservation instead of being recreated empty, since that would silently lose history. Preparation is
   best effort and never keeps a session from being deleted. A returning journal replaces saved facts only after a
-  strict full-source reread.
+  strict full-source reread. A saved copy is read with the tables of the version it was saved with; the metrics it did
+  not record are named as unavailable, never shown as zero.
 
 ## Questions
 

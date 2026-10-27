@@ -507,6 +507,103 @@ public sealed class StatisticsArchiveTests
         Assert.AreEqual(1, (await new StatisticsArchiveStore(harness.Root).ReadAsync()).Count);
     }
 
+    // The journal of a session that ran scripts: their records are written by the host, and are read like the others.
+    private static JournalBuilder ScriptJournal(int runs)
+    {
+        var journal = Journal();
+        for (var index = 0; index < runs; index++)
+        {
+            var at = JournalBuilder.Time(5 + index);
+            var run = "run-" + index;
+            journal.Workflow(at, AgentWorkflowEventKind.RunStarted, run, record => record with { Title = "Review the change", RecordsScripts = true })
+                .Workflow(at.AddSeconds(1), AgentWorkflowEventKind.ScriptLoaded, run, record => record with { ScriptName = "review-pr", ScriptScope = "project" })
+                .Workflow(at.AddSeconds(2), AgentWorkflowEventKind.StepEnded, run, record => record with { StepId = "read", Status = "failed", Message = "PRIVATE ERROR" })
+                .Workflow(at.AddSeconds(3), AgentWorkflowEventKind.RunEnded, run, record => record with { Status = "failed", Message = "TypeError: PRIVATE ERROR", DurationMs = 3000, Calls = 2 });
+        }
+
+        return journal;
+    }
+
+    [TestMethod]
+    public async Task ReturningJournalThatRanScripts_ReplacesTheSavedStatistics_AndTheSavedCopyKeepsItsScripts()
+    {
+        await using var harness = await StoreHarness.CreateAsync(archives: true);
+        var (engine, path) = await EngineAsync(harness, ScriptJournal(1).ToBytes());
+        await using var lifetime = engine;
+        await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
+        Assert.IsNotNull((await engine.PrepareAsync(SessionId)).Receipt);
+        File.Delete(path);
+        await engine.ResetAsync();
+        async Task<long> ScriptRunsAsync() => await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT COUNT(*) FROM {harness.Store.Table("script_run")}"));
+        Assert.AreEqual(1L, await ScriptRunsAsync(), "The saved copy keeps the run of its script.");
+        Assert.AreEqual(1L, await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT SUM(runs_failed) FROM {harness.Store.Table("script_q")}")));
+
+        await File.WriteAllBytesAsync(path, ScriptJournal(2).ToBytes());
+        await engine.ChooseHistoryAsync(HistoryChoice.All);
+        engine.Signal(SessionId);
+        await engine.DrainAsync();
+
+        Assert.AreEqual(2L, await ScriptRunsAsync(), "A journal whose records of scripts are read is no unknown source: it replaces the saved facts.");
+        Assert.AreEqual(0L, await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT effective FROM {harness.Store.Table("archive")} WHERE session_id = @p0", SessionId)));
+        var dump = await harness.DumpAsync("archive");
+        Assert.IsFalse(dump.Contains("PRIVATE", StringComparison.Ordinal), dump);
+    }
+
+    [TestMethod]
+    public async Task ASavedCopyOfTheFirstVersion_IsRestoredWithoutTheScriptsItNeverHad()
+    {
+        await using var harness = await StoreHarness.CreateAsync(archives: true);
+        var (engine, path) = await EngineAsync(harness, Journal().ToBytes());
+        await using var lifetime = engine;
+        await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
+        Assert.IsNotNull((await engine.PrepareAsync(SessionId)).Receipt);
+
+        // The copy as a build before the scripts saved it: version 1, the tables and columns it had, and the metrics of version 8.
+        var archives = new StatisticsArchiveStore(harness.Root);
+        var saved = (await archives.ReadAsync()).Single();
+        var payload = JsonNode.Parse(saved.Payload)!.AsObject();
+        payload["ArchiveVersion"] = 1;
+        payload["FactsVersion"] = 8;
+        JsonNode?[] metrics = payload["RecordedMetrics"]!.AsArray().Select(static node => node!.GetValue<string>())
+            .Where(static metric => !metric.StartsWith("script", StringComparison.Ordinal) && metric is not ("tool.script_calls" or "run.exec_calls" or "session.script_run"))
+            .Select(static metric => (JsonNode?)JsonValue.Create(metric)).ToArray();
+        payload["RecordedMetrics"] = new JsonArray(metrics);
+        var tables = payload["Tables"]!.AsArray();
+        foreach (var table in tables.ToArray())
+        {
+            var name = table!["Name"]!.GetValue<string>();
+            if (name is "script_q" or "script_run")
+            {
+                tables.Remove(table);
+                continue;
+            }
+
+            var columns = table["Columns"]!.AsArray();
+            var drop = columns.Select(static (column, index) => (Name: column!.GetValue<string>(), Index: index)).FirstOrDefault(static column => column.Name is "script_calls" or "exec_calls" or "script_run_id");
+            if (drop.Name is not null)
+            {
+                columns.RemoveAt(drop.Index);
+                foreach (var row in table["Rows"]!.AsArray())
+                {
+                    row!.AsArray().RemoveAt(drop.Index);
+                }
+            }
+        }
+
+        File.Delete(path);
+        await engine.ResetAsync();
+        await archives.SaveAsync(SessionId, System.Text.Encoding.UTF8.GetBytes(payload.ToJsonString()), saved.Source);
+        await engine.ResetAsync();
+
+        Assert.AreEqual(1234L, await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT SUM(input_tokens) FROM {harness.Store.Table("usage_q")}")));
+        var coverage = await engine.Queries.CoverageAsync(new StatisticsRequest { Period = "all" });
+        CollectionAssert.Contains(coverage.UnavailableSavedMetrics.ToList(), "script.runs_started");
+        CollectionAssert.Contains(coverage.UnavailableSavedMetrics.ToList(), "tool.script_calls");
+        Assert.IsFalse(coverage.UnavailableSavedMetrics.Contains("usage.input_tokens"));
+    }
+
     [TestMethod]
     public async Task RecoveryOfOlderApplicationProjection_DoesNotRollBackTheDurableGeneration()
     {

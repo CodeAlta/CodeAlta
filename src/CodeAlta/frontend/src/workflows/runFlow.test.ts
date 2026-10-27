@@ -28,6 +28,12 @@ function research(ended = false) {
   return scriptRunOf(list);
 }
 
+test("a record of a kind the card does not draw, such as the library script a run loaded, changes nothing of the run", () => {
+  const records = [record("RunStarted", 0, { text: "Review" }), record("StepStarted", 1, { activityId: "read" }), record("StepEnded", 2, { activityId: "read", phase: "completed" }), record("RunEnded", 3, { phase: "completed" })];
+  const loaded = [records[0], record("ScriptLoaded", 0, { details: { scriptName: "review-pr", scriptScope: "project" } }), ...records.slice(1)];
+  assert.deepEqual(scriptRunOf(loaded), scriptRunOf(records));
+});
+
 test("a run with steps or sessions has its block; a script that ran neither keeps its card", () => {
   assert.equal(hasWorkflowBlock(research()), true);
   assert.equal(hasWorkflowBlock(scriptRunOf([record("RunStarted", 0), record("RunEnded", 1, { phase: "completed" })])), false);

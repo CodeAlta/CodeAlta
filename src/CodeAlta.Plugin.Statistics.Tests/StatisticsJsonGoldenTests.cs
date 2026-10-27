@@ -22,7 +22,7 @@ public sealed class StatisticsJsonGoldenTests
 
     private static readonly IReadOnlyList<BucketInfo> Buckets = [new(0, "2026-10-08T00:00", "10-08"), new(1, "2026-10-09T00:00", "10-09")];
 
-    private static readonly ToolRow Tool = new("shell", "shell_command", 12, 2, 2d / 12, 34567, 2400, 16410, 81269, 1200, 98000, [3, 9]);
+    private static readonly ToolRow Tool = new("shell", "shell_command", 12, 2, 2d / 12, 34567, 2400, 16410, 81269, 1200, 98000, [3, 9]) { ScriptCalls = 4 };
 
     private static readonly SessionEntry Session = new("0123abcd-0000-0000-0000-000000000001", "Fix quoted keys", "proj-1", "CodeAlta", "claude", "claude-opus-5-5", "0123abcd-0000-0000-0000-000000000000",
         3, 123456, 456789, 21, [new CostAmount("usd", 1.25)], 1, "2026-10-09T12:40:00Z", false);
@@ -59,6 +59,15 @@ public sealed class StatisticsJsonGoldenTests
                 [new McpToolUseRow("github", "issue_read", 7, 3, "2026-10-09T12:00Z", [2, 5]), new McpToolUseRow("memory", "echo", 1, 1, null, [1, 0])],
                 [new NameCount("github", 7, 0.875), new NameCount("memory", 1, 0.125)], 8, 2, false)),
             ["RunsResult"] = StatisticsJson.Serialize(new RunsResult(Header, "recent", [new RunSample("0123abcd", "run-1", "2026-10-09T12:00:00Z", 90463, "completed", "you", "newturn", 250, 49, 12, 20, 2, 1000, 200, 500, 80, "claude", "claude-opus-5-5", "high")], 1, false)),
+            ["ScriptsResult"] = StatisticsJson.Serialize(new ScriptsResult(Header, Buckets,
+                new ScriptTotals(12, 9, 2, 1, 0, 0.75, 140, 96, 8, 456789, [new CostAmount("usd", 1.25)], 1_234_567, 45_000, 40, 3),
+                [new ScriptRow("review-pr", 7, 1, 1d / 7, 61000, 240000, 6, 400000, [new CostAmount("usd", 1.1)], "2026-10-09T12:00:00Z", [3, 4]),
+                    new ScriptRow("(inline)", 5, 1, 0.2, null, null, 2, 0, [], null, [5, 0])],
+                [new ScriptAdoptionRow("claude", "claude-opus-5-5", 40, 10, 0.25, 12, 11.7), new ScriptAdoptionRow("codex", "gpt-6.1-sol", 3, 0, 0, 0, null)],
+                [new ScriptTurnsRow(true, 10, 14.5, 6.2, 90000, 240000), new ScriptTurnsRow(false, 33, 9.1, 4, 50000, 120000)],
+                [new ScriptRunSample("0123abcd", "run-7f3c2a", "review-pr", "Review PR 231", "failed", "TypeError", "you", "2026-10-09T12:00:00Z", 61000, 14, 4, 2, "claude-opus-5-5"),
+                    new ScriptRunSample("0123abcd", "run-8a1b2c", "(inline)", null, "running", null, "automation", "2026-10-09T12:30:00Z", null, 0, 0, 0, "claude-opus-5-5")],
+                2, false)),
             ["StatisticsStatus"] = StatisticsJson.Serialize(new StatisticsStatus
             {
                 State = HistoryState.StoppedHere, Reason = "extended", Choice = "days:90", FloorDay = 20260714, SessionsTotal = 906, SessionsDone = 312, BytesTotal = 10_840_000_000, BytesDone = 3_000_000_000,

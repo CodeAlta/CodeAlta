@@ -19,6 +19,7 @@ export function pageLabel(t: Translate, page: PageId): string {
     case "tools": return t("Tools");
     case "prompts": return t("Prompts");
     case "agents": return t("Agents");
+    case "scripts": return t("Scripts");
     case "code": return t("Code");
     case "projects": return t("Projects");
     case "sessions": return t("Sessions");
@@ -113,6 +114,7 @@ export function filterValueLabel(t: Translate, key: FilterKey, value: string): s
       case "alta": return t("alta commands");
       case "mcp": return t("MCP servers");
       case "skill": return t("Skills");
+      case "script": return t("Scripts");
       case "other": return t("Other tools");
     }
   }
@@ -136,6 +138,48 @@ export function outcomeLabel(t: Translate, outcome: string): string {
     case "interrupted": return t("Interrupted");
     case "running": return t("Running");
     default: return outcome;
+  }
+}
+
+/** The name of how a run of a script ended: an outcome of a run, or stopped. */
+export function scriptStatusLabel(t: Translate, status: string): string {
+  return status === "cancelled" ? t("Stopped") : outcomeLabel(t, status);
+}
+
+/** The name of a script: a library script by its name, and the runs that loaded none. */
+export function scriptLabel(t: Translate, script: string): string {
+  switch (script) {
+    case "(inline)": return t("Inline scripts");
+    case "(unknown)": return t("Unknown scripts");
+    default: return script;
+  }
+}
+
+/** The name of a kind of script: `library`, `inline` or `unknown`. */
+export function scriptKindLabel(t: Translate, kind: string): string {
+  switch (kind) {
+    case "library": return t("Library scripts");
+    case "inline": return t("Inline scripts");
+    case "unknown": return t("Unknown scripts");
+    default: return kind;
+  }
+}
+
+/** Who started the turn a script ran in, or a resume of a run. */
+export function scriptOriginLabel(t: Translate, origin: string): string {
+  switch (origin) {
+    case "resume": return t("A resume");
+    case "unknown": return t("Unknown");
+    default: return senderLabel(t, origin);
+  }
+}
+
+/** Who created a session: you, an agent, a script, an automation, or another actor. */
+export function creatorLabel(t: Translate, creator: string): string {
+  switch (creator) {
+    case "script": return t("A script");
+    case "other": return t("Other");
+    default: return senderLabel(t, creator);
   }
 }
 
@@ -191,6 +235,8 @@ export function recordLabel(t: Translate, measure: string): string {
     case "longestTool": return t("Longest tool call");
     case "highestContextFill": return t("Fullest context");
     case "largestRequestInput": return t("Largest request");
+    case "longestScriptRun": return t("Longest script run");
+    case "widestScriptRun": return t("Most sessions in one script run");
     default: return measure;
   }
 }
@@ -214,6 +260,7 @@ export function tileLabel(t: Translate, id: string): string {
     case "input-tokens": return t("Input tokens");
     case "output-tokens": return t("Output tokens");
     case "reasoning-tokens": return t("Reasoning tokens");
+    case "script-runs": return t("Script runs");
     default: return id;
   }
 }

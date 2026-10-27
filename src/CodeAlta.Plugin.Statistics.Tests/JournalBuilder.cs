@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using CodeAlta.Agent;
 
 namespace CodeAlta.Plugin.Statistics.Tests;
 
@@ -68,7 +69,8 @@ internal sealed class JournalBuilder
         DateTimeOffset? countedFrom = null,
         string forkKind = "Fork",
         int rewindCount = 0,
-        string? spaceId = null)
+        string? spaceId = null,
+        string correlation = "c")
     {
         var raw = new StringBuilder("{\"schema_version\":1,");
         raw.Append(legacy ? $"\"thread_id\":\"{SessionId}\"," : $"\"session_id\":\"{SessionId}\",");
@@ -101,7 +103,7 @@ internal sealed class JournalBuilder
                 raw.Append($",\"AutomationId\":\"{automation}\"");
             }
 
-            raw.Append($",\"CorrelationId\":\"c\",\"CreatedAt\":\"{Json(time)}\"}}");
+            raw.Append($",\"CorrelationId\":{Text(correlation)},\"CreatedAt\":\"{Json(time)}\"}}");
         }
 
         if (countedFrom is { } from)
@@ -346,6 +348,22 @@ internal sealed class JournalBuilder
 
     public JournalBuilder LocalMessage(DateTimeOffset time, string run, string type = "local.assistantMessage")
         => AddRaw(type, "{\"role\":\"Assistant\",\"parts\":[{\"$type\":\"reasoning\",\"value\":\"…\"}]}", time, run);
+
+    /// <summary>A record of a run of a script, written by the serializer of the application: no run of the session, the host as its provider.</summary>
+    public JournalBuilder Workflow(DateTimeOffset time, AgentWorkflowEventKind kind, string scriptRun, Func<AgentWorkflowEvent, AgentWorkflowEvent>? fill = null, string callId = "exec-1")
+    {
+        var record = new AgentWorkflowEvent(new ModelProviderId("codealta"), SessionId, time, null, kind, scriptRun) { CallId = callId };
+        return Add((fill?.Invoke(record) ?? record).ToJson());
+    }
+
+    /// <summary>A call a script made from the <c>exec</c> call <paramref name="parent"/>: its start and its end, with the step of the script in its details.</summary>
+    public JournalBuilder ScriptCall(DateTimeOffset time, string? run, string parent, string id, string name, string step = "read")
+    {
+        var details = $"\"toolCallId\":\"{id}\",\"toolName\":\"{name}\",\"arguments\":{{}},\"readFiles\":[],\"modifiedFiles\":[]";
+        var script = $",\"script\":{{\"stepId\":\"{step}\"}}";
+        Add($"{{\"$type\":\"activity\",\"kind\":\"ToolCall\",\"phase\":\"Started\",\"activityId\":\"{id}\",\"parentActivityId\":\"{parent}\",\"name\":\"{name}\",\"details\":{{{details}{script}}},{Envelope(time, run)}");
+        return Add($"{{\"$type\":\"activity\",\"kind\":\"ToolCall\",\"phase\":\"Completed\",\"activityId\":\"{id}\",\"parentActivityId\":\"{parent}\",\"name\":\"{name}\",\"details\":{{{details},\"result\":{{\"success\":true,\"items\":[{{\"$type\":\"text\",\"value\":\"ok\"}}]}}{script}}},{Envelope(time.AddSeconds(1), run)}");
+    }
 
     /// <summary>The index of the first line of a run: where a fork or a rewind cuts the journal before that turn.</summary>
     public int FirstLineOf(string run)
