@@ -42,7 +42,8 @@ The agent phase is offline: the tasks set `[agent] network_mode = "no-network"`,
 | --- | --- | --- |
 | `reasoning_effort` | the model's | `none` ... `xhigh`, `max`: `-m provider:model@effort` |
 | `timeout_sec` | `3000` | The agent budget; `altacli --timeout` gets budget − 90 s, the in-sandbox `timeout` budget − 60 s |
-| `provider_type`, `api_key_env`, `api_url` | from `-m` | Another provider or endpoint (below) |
+| `provider_type`, `api_key_env`, `api_url` | from `-m` | Another provider or endpoint (below); `provider_type=claude-code` runs CodeAlta on the Claude Code CLI ([below](#codealta-on-the-claude-code-cli)) |
+| `claude_code_version` | CodeAlta's pin | The Claude Code CLI installed for `provider_type=claude-code` |
 | `prompt_id` | `default` | The CodeAlta agent prompt |
 | `disable_tools` | `web` | `--disable-tools` patterns |
 | `plugins` | `false` | `true` starts plugins and MCP servers |
@@ -61,6 +62,20 @@ Harbor's `-m <provider>/<model>` becomes a CodeAlta provider of a fresh profile,
 | other | `--ak provider_type=` (`openai-chat`, `mistral`, `xai`...) | `--ak api_key_env=` | the host of `--ak api_url=` |
 
 For `-m gemini/gemini-3.8-flash` the adapter runs `-c providers.gemini.type="google-genai" -c providers.gemini.api_key_env="GEMINI_API_KEY" -c chat.default_provider="gemini"` and `-m gemini:models/gemini-3.8-flash` (the Gemini API names its models `models/<id>`). The key is read from the host environment or `--ae`, and passed to the `altacli` process only.
+
+## CodeAlta on the Claude Code CLI
+
+`--ak provider_type=claude-code` runs CodeAlta's `claude-code` provider: CodeAlta drives the Claude Code CLI, which makes the model requests, instead of its own agent loop on the Messages API. It compares the two harnesses on the same CLI and model.
+
+```sh
+harbor run -p v2/tasks -e docker -n 4   -a locked_codealta:LockedCodeAlta -m anthropic/claude-opus-5-5 --ak reasoning_effort=xhigh --ak provider_type=claude-code   --allow-agent-host api.anthropic.com --job-name sbp-v2-codealta-cc-opus
+```
+
+- Setup installs the CLI to `/opt/claude-code/claude`: the version CodeAlta pins (`ClaudeCodePinnedCli.cs`, 2.1.309), from its GitHub release for the libc of the image and checked by sha256, else with Claude Code's native installer. `--ak claude_code_version=<version>` installs another version with the installer.
+- The provider runs that executable (`-c providers.anthropic.command=...`) and gives it `ANTHROPIC_API_KEY` (`anthropic_api_key = "use"`: billed to the API account of the key). The CLI reads that variable alone.
+- The provider offers the models the CLI lists, under their aliases: `-m anthropic/claude-opus-5-5` becomes `-m anthropic:opus`, the latest Opus of the pinned CLI. Another name (`-m anthropic/opus[1m]`) is passed as it is.
+- The CLI is started with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY` and `DISABLE_ERROR_REPORTING`: in the agent phase it reaches the model host alone.
+- `cost_usd` is the cost Claude Code reports.
 
 ## What it runs and writes
 
@@ -87,11 +102,12 @@ Under `jobs/<job>/<trial>/agent/`:
 
 CodeAlta's agents may commit their work, on a branch of their own. Before the capture, the adapter moves `HEAD` back to the base commit with `git reset --soft`: the work stays in the files, and the verifier, which restores the test files from `HEAD`, grades the same change in the sandbox as `patch_replay` does on a pristine image.
 
-`result.json` gets `n_input_tokens` (cached included), `n_cache_tokens`, `n_output_tokens` and `cost_usd` from the `_codealta/result` line; a value it does not give stays unset, never zero. Its `agent_result.metadata` holds the status, exit code, stop reason, failure and duration of the run.
+`result.json` gets `n_input_tokens` (cached included), `n_cache_tokens`, `n_output_tokens` and `cost_usd` from the `_codealta/result` line; a value it does not give stays unset, never zero. Its `agent_result.metadata` holds the session (`codealta_session`: provider, provider type, model, reasoning, agent prompt) and the status, exit code, stop reason, failure and duration of the run.
 
 ## Limits
 
-- Cost: providers that report no cost (Gemini, and others through `api_key_env`) leave `cost_usd` unset; compute it from the tokens.
+- Cost: providers that report no cost (OpenAI, Gemini, and others through `api_key_env`) leave `cost_usd` unset. `altacli` estimates one from the tokens and the public price of the model; it is in `agent_result.metadata.codealta_estimated_cost_usd`, at the base price (a long-context tier, such as GPT-6 Astra above 272k tokens, is not applied: the result line has the totals of the run, not the input of each request).
+- `provider_type=claude-code` on a musl image may need what Claude Code needs on Alpine (`libgcc`, `libstdc++`, `ripgrep`); the adapter does not install them.
 - A run killed by the in-sandbox `timeout` (it did not stop at `--timeout`) has no result line: no tokens, no cost.
 - The session journal is not kept (`--ephemeral`); `altacli.jsonl` is the trace.
 - `altacli` needs libssl and CA certificates: the adapter installs them during setup when an image lacks them.
