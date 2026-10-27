@@ -45,7 +45,13 @@ internal sealed partial class SessionFallbackCoordinator
     /// <summary>Gets the resumes that wait.</summary>
     public IReadOnlyList<SessionResumeSnapshot> PendingResumes
     {
-        get { lock (_gate) return [.. _resumes.Values.Select(static pending => pending.Snapshot)]; }
+        get
+        {
+            string[] sessions;
+            lock (_gate) sessions = [.. _resumes.Keys];
+            foreach (var sessionId in sessions) DropIfRanSince(sessionId);
+            lock (_gate) return [.. _resumes.Values.Select(static pending => pending.Snapshot)];
+        }
     }
 
     /// <summary>Gets the resume a session waits for.</summary>
@@ -54,7 +60,30 @@ internal sealed partial class SessionFallbackCoordinator
     public SessionResumeSnapshot? GetPendingResume(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        DropIfRanSince(sessionId);
         lock (_gate) return _resumes.TryGetValue(sessionId, out var pending) ? pending.Snapshot : null;
+    }
+
+    // A session that ran again since its run stopped on a limit (a queued prompt, the result of a job or of a child
+    // session, which are not sends of the user) no longer waits for a resume: that run answers, or fails on its own.
+    private bool DropIfRanSince(string sessionId)
+    {
+        PendingResume? pending;
+        lock (_gate)
+        {
+            if (!_resumes.TryGetValue(sessionId, out pending) || _runtime.LastRunIdOf(sessionId) is not { } last || pending.KnownRuns.Contains(last)) return false;
+            _resumes.Remove(sessionId);
+            pending.Timer?.Dispose();
+        }
+
+        pending.Held?.Replace();
+        Track(sessionId, async () =>
+        {
+            await ForgetAsync(pending).ConfigureAwait(false);
+            await WriteResumeCardAsync(pending, AgentSessionUpdateKind.Info, "Automatic resume cancelled: the session ran again since it stopped.", "cancelled")
+                .ConfigureAwait(false);
+        });
+        return true;
     }
 
     /// <summary>
@@ -132,7 +161,7 @@ internal sealed partial class SessionFallbackCoordinator
         var states = ProviderStates?.Invoke() ?? [];
         foreach (var record in records)
         {
-            var pending = new PendingResume(record, DisplayName(record.ProviderKey, states), held: null);
+            var pending = new PendingResume(record, DisplayName(record.ProviderKey, states), held: null, [_runtime.LastRunIdOf(record.SessionId)]);
             lock (_gate)
             {
                 if (_closing.IsCancellationRequested) return;
@@ -174,7 +203,7 @@ internal sealed partial class SessionFallbackCoordinator
         var (reset, providerKey) = EarliestReset(notice, tier, states, now);
         var record = new SessionResumeRecord(notice.SessionId, Guid.NewGuid().ToString("N"), reset + ResumeMargin, providerKey, attempt, from.Ref,
             failure.Kind.ToString());
-        var pending = new PendingResume(record, DisplayName(providerKey, states), held);
+        var pending = new PendingResume(record, DisplayName(providerKey, states), held, [notice.Error.RunId, _runtime.LastRunIdOf(notice.SessionId)]);
         PendingResume? replaced;
         lock (_gate)
         {
@@ -250,6 +279,8 @@ internal sealed partial class SessionFallbackCoordinator
     // Starts a resume that waits; false when that resume no longer waits.
     private bool Fire(string sessionId, string resumeId, bool manual)
     {
+        // The user asking to resume now is obeyed; a timer is not, once the session ran again by itself.
+        if (!manual && DropIfRanSince(sessionId)) return false;
         PendingResume? pending;
         lock (_gate)
         {
@@ -502,10 +533,16 @@ internal sealed partial class SessionFallbackCoordinator
             """;
 
     // A resume that waits. Its timer and its held failure are owned by the coordinator, under its gate.
-    private sealed class PendingResume(SessionResumeRecord record, string providerName, SessionRuntimeService.HeldRunFailure? held)
+    private sealed class PendingResume(SessionResumeRecord record, string providerName, SessionRuntimeService.HeldRunFailure? held, IReadOnlyList<AgentRunId?> knownRuns)
     {
         public SessionResumeRecord Record { get; } = record;
         public string ProviderName { get; } = providerName;
+
+        /// <summary>
+        /// The runs the session had when the resume was scheduled: the one that stopped on the limit and the last one seen
+        /// (they differ while the events of the failed run are still on their way). Any other run says it ran again since.
+        /// </summary>
+        public IReadOnlyList<AgentRunId?> KnownRuns { get; } = knownRuns;
 
         /// <summary>The failure held back from the parent while the resume waits; none after a restart.</summary>
         public SessionRuntimeService.HeldRunFailure? Held { get; } = held;

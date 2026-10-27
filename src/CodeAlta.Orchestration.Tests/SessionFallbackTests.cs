@@ -455,6 +455,37 @@ public sealed class SessionFallbackTests
     }
 
     [TestMethod]
+    public async Task HostPromptThatRunsWhileAResumeWaits_CancelsTheResume()
+    {
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        await using var f = await Fixture.CreateAsync(ResumingTiers, clock: clock);
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        await f.NextSendAsync(f.B);
+        await f.WaitForResumeAsync();
+        await clock.WaitForTimersAsync(1);
+
+        // The end of a background job is no send of the user, but it runs the session: the resume is no longer wanted.
+        await f.Host.RuntimeService.DeliverHostPromptAsync(f.Child.SessionId, "[CodeAlta background job]\nJob: job-1\nResult: succeeded", "background-job");
+        var sent = await f.NextSendAsync(f.B);
+        StringAssert.Contains(sent.Text, "[CodeAlta background job]");
+        // The events of that run arrive on their own: the resume goes once the session is seen running again.
+        for (var attempt = 0; f.Host.Commands.GetPendingResume(f.Child.SessionId) is not null; attempt++)
+        {
+            if (attempt > 500) Assert.Fail("The resume still waits after the session ran again.");
+            await Task.Delay(10);
+        }
+
+        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Info, "cancelled");
+        StringAssert.Contains(card.Message, "the session ran again since it stopped");
+        clock.Advance(TimeSpan.FromHours(1));
+        Assert.AreEqual(2, f.B.SendCount, "Nothing more is sent once the limit resets.");
+    }
+
+    [TestMethod]
     public async Task ResumeThatWaits_OutlivesARestartOfTheHost()
     {
         var clock = new ManualClock(DateTimeOffset.UtcNow);

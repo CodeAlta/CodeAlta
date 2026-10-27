@@ -3788,6 +3788,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// </summary>
     public CodeAlta.Catalog.Reviews.ReviewService? Reviews { get; set; }
 
+    /// <summary>
+    /// Gets the last run a session was seen to start, whatever started it (a send, a queued prompt, a fallback); null
+    /// for a session without one since its entry was made.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    internal AgentRunId? LastRunIdOf(string sessionId) => _entries.TryGetValue(sessionId, out var entry) ? entry.LastRunId : null;
+
     internal const string CommitRefusal = "The user reviews the changes of this session before they are committed, and no review approved the work tree as it is now. "
         + "Do not commit: when the work is done and verified, run `alta review request changes` and end your turn; commit after the review approves the changes, and only them.";
 

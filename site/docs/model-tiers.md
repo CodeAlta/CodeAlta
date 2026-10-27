@@ -79,7 +79,7 @@ Turn on **Resume when the limit resets**, under the fallback switch, and a sessi
 - The resume time is the reset time the provider gives, or 15 minutes later when it gives none.
 - At that time, the session takes its tier again in order: the first model whose provider is available, the preferred one first. It receives the same message as after a fallback, which asks the agent to continue the task and to check what an interrupted command or edit already did. A **Session resumed** card says which model it took.
 - If the limits are reached again, the next reset is waited for, at most the number of times in a row you set in **At most … times in a row** (5 by default). A prompt you send yourself starts the count again.
-- A prompt sent to the session while it waits, by you or by an agent, cancels the resume: the session works on that prompt instead. **Automatic resume cancelled** says so in the timeline.
+- A prompt sent to the session while it waits, by you or by an agent, cancels the resume: the session works on that prompt instead. So does any other run of the session meanwhile, such as the result of a background job or the message of a sub-agent. **Automatic resume cancelled** says so in the timeline.
 - Only a run that stopped on a limit is resumed: a session that ended its task never is.
 - A session that delegated the work waits as for a fallback: it gets the answer of the run that resumes, and hears of the failure only when the resume is cancelled or the resumes in a row are used up.
 - A resume that waits is kept when CodeAlta closes: it starts at its time after CodeAlta starts again, or at once when that time has passed.
