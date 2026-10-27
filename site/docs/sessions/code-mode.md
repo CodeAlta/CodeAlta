@@ -27,7 +27,7 @@ mode = "on"
 
 A session takes the change with its next prompt. It applies to the sessions of the window, to the sessions agents create, and to CodeAlta TUI. With `altacli`, `--code-mode` turns it on for `run` and `acp` (`--code-mode=only` for **Only**), whatever the file says.
 
-Agents of Claude Code get `exec` and `wait` through CodeAlta's MCP server, beside `alta`.
+Agents of Claude Code get `exec` and `wait` through CodeAlta's MCP server, beside `alta`. They and the [ACP agents](../model-providers/acp-agents.md) keep their own tools, so **Only** works as **On** for them.
 
 ## What a script can call
 

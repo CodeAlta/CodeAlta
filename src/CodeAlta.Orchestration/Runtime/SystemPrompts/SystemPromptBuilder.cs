@@ -835,7 +835,7 @@ public sealed class SystemPromptBuilder
         """;
 
     /// <summary>The line added for a session where <c>exec</c> takes over the other tools.</summary>
-    internal const string CodeModeOnlyGuidance = "Your other tools are called from scripts, as `tools.<name>(args)` in `exec`: batch them in one script instead of one `exec` per call.";
+    internal const string CodeModeOnlyGuidance = "The tools of CodeAlta that are not in your tool list are called from scripts, as `tools.<name>(args)` in `exec`: batch them in one script instead of one `exec` per call.";
 
     /// <summary>The line added for a session a script started: each level of sub-agents is a whole session more.</summary>
     internal const string CodeModeSubAgentGuidance = "You are a sub-agent of a script: do your part yourself, with direct calls or a script of tool calls; start sub-agents only when your part is itself large and splits.";

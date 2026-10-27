@@ -2175,7 +2175,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo, _pdfInputs).ToArray(),
             EarlierConversation = _earlierConversation,
             // The tools of scripts only are never offered to the model: a script calls them through its tool call.
-            Tools = ModelTools(tools),
+            Tools = ModelTools(tools, takesOver: _turnExecutor is not IAgentProviderToolHost),
             CanUseProviderContinuation = _allowProviderContinuation,
             State = _state,
         };
@@ -2184,10 +2184,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     }
 
     // The tools offered to the model: not those of scripts only, and, while a tool takes over the others (Code Mode's
-    // `only`), the tools of the model and those that stay direct alone.
-    private static AgentToolDefinition[] ModelTools(IReadOnlyList<AgentToolDefinition> tools)
+    // `only`), the tools of the model and those that stay direct alone. A provider that runs its own tools (Claude Code,
+    // the ACP agents) keeps its file and shell tools whatever CodeAlta offers, so it runs in `on`: taking `alta` from it
+    // only left it its own shell and sub-agents to delegate with.
+    private static AgentToolDefinition[] ModelTools(IReadOnlyList<AgentToolDefinition> tools, bool takesOver)
     {
-        var takeOver = tools.Any(static tool => tool.Spec.ScriptsTakeOver);
+        var takeOver = takesOver && tools.Any(static tool => tool.Spec.ScriptsTakeOver);
         return [.. tools.Where(tool => tool.Spec.Exposure != AgentToolExposure.Scripts
             && (!takeOver || tool.Spec.Exposure == AgentToolExposure.Model || tool.Spec.StaysDirect))];
     }
