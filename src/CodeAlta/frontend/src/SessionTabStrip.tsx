@@ -13,7 +13,7 @@ import type { ElsewhereKind } from "./sessionLeases/sessionLeases";
 import { createSessionTabModel, draftNodeId, draftTabAction, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, shownDraftNodeId, tabMiddleClickAction,
   type SessionTabView as Tabs } from "./sessionTabLayout";
 import { ProviderIcon } from "./ProviderIcon";
-import { emptyFileTabs, fileNodeId, isAutomationsTab, isWorkflowsTab, isClaudeCodeTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, isAutomationsTab, isWorkflowsTab, isWorkflowRunTab, isClaudeCodeTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { CanvasIcon } from "./canvases/CanvasIcon";
 import { terminalTabLabel } from "./terminal/terminals";
@@ -74,6 +74,8 @@ export function FileTabLabel({ tab, project, dirty, terminal, status }: {
   }
   if (isAutomationsTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Automations")}>{t("Automations")}</span></span>;
   if (isWorkflowsTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Workflows")}>{t("Workflows")}</span></span>;
+  if (isWorkflowRunTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={`${tab.name ?? tab.key ?? ""}
+${tab.key ?? ""}`}>{tab.name ?? tab.key}</span></span>;
   if (isWorkItemsTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Work items")}>{t("Work items")}</span></span>;
   if (isIssuesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Issues")}>{t("Issues")}</span></span>;
   if (isCanvasesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Canvases")}>{t("Canvases")}</span></span>;
@@ -203,6 +205,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   const fileLabel = (file: FileTab) => {
     if (isAutomationsTab(file)) return t("Automations");
     if (isWorkflowsTab(file)) return t("Workflows");
+    if (isWorkflowRunTab(file)) return `${file.name ?? file.key ?? ""} · ${t("Workflows")}`;
     if (isWorkItemsTab(file)) return t("Work items");
     if (isIssuesTab(file)) return t("Issues");
     if (isCanvasesTab(file)) return t("Canvases");
@@ -459,7 +462,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
           const look = isTerminalTab(file) ? { icon: "terminal" as const, tone: shown && !shown.running ? "muted" : "green" }
             : isChangesTab(file) ? { icon: "changes" as const, tone: "orange" }
             : isAutomationsTab(file) ? { icon: "automation" as const, tone: "gold" }
-            : isWorkflowsTab(file) ? { icon: "workflow" as const, tone: "blue" }
+            : isWorkflowsTab(file) || isWorkflowRunTab(file) ? { icon: "workflow" as const, tone: "blue" }
             : isWorkItemsTab(file) ? { icon: "task" as const, tone: "teal" }
             : isIssuesTab(file) ? { icon: "issueOpen" as const, tone: "green" }
             : isCanvasesTab(file) ? { icon: "canvases" as const, tone: "purple" }

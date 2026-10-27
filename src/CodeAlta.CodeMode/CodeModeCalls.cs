@@ -105,6 +105,10 @@ public interface ICodeModeRunObserver
     /// <param name="stepId">The step.</param>
     void StepStarted(string stepId) { }
 
+    /// <summary>A script of the run starts, which declares its steps (<c>meta.steps</c>): the run itself, or one <c>workflow()</c> runs.</summary>
+    /// <param name="descriptor">The descriptor of the script, with at least one step.</param>
+    void StepsDeclared(CodeModeDescriptor descriptor) { }
+
     /// <summary>A step ended.</summary>
     /// <param name="record">What the step did.</param>
     void StepEnded(CodeModeStepRecord record) { }

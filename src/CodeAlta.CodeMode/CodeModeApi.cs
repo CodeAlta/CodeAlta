@@ -180,6 +180,22 @@ public sealed class CodeModeApi
               }
               return host("codemode.ask", stringify(Object.assign({}, options, { question }))).then(unwrap).then((reply) => reply.answer);
             });
+            // store(key, value) and load(key): JSON values kept for the later scripts of the session; undefined removes one.
+            global("store", function (key, value) {
+              if (typeof key !== "string" || key.length === 0) return Promise.reject(new TypeError("store(key, value): the key is a non-empty string."));
+              let args;
+              try {
+                if (value !== undefined && stringify(value) === undefined) throw new TypeError("not JSON");
+                args = stringify(value === undefined ? { key } : { key, value });
+              } catch (e) {
+                return Promise.reject(new TypeError(`store("${key}", value): the value is not JSON: ${message(e)}`));
+              }
+              return host("codemode.store", args).then(unwrap).then(() => undefined);
+            });
+            global("load", function (key) {
+              if (typeof key !== "string" || key.length === 0) return Promise.reject(new TypeError("load(key): the key is a non-empty string."));
+              return host("codemode.load", stringify({ key })).then(unwrap).then((reply) => reply.found ? reply.value : undefined);
+            });
             // session(options): a session of its own the script keeps for several prompts; closed when the script ends.
             global("session", function (options) {
               if (options !== undefined && (options === null || typeof options !== "object" || Array.isArray(options))) {

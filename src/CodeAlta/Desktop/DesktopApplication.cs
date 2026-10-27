@@ -1035,7 +1035,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         var queued = await altaCommands.InvokeAsync(["session", "send", sessionId, "--stdin", "--queue-if-busy"], stdin: text,
                             caller: AltaCallerIdentity.Host, cancellationToken: token).ConfigureAwait(false);
                         return queued.ExitCode == 0 ? null : FirstLine(queued.Stderr.Length > 0 ? queued.Stderr : queued.Stdout);
-                    }, epoch, (project, token) => host.RuntimeService.GetSpaceFilterAsync(spaceView.ShownSpaceId, project, token)));
+                    }, epoch, (project, token) => host.RuntimeService.GetSpaceFilterAsync(spaceView.ShownSpaceId, project, token),
+                        // The tab of a run reads its records in the journal of its session, the one journal it reads.
+                        async (sessionId, runId, token) =>
+                            await host.RuntimeService.TryGetResumableSessionAsync(sessionId, token).ConfigureAwait(false) is { } session
+                            && await host.RuntimeService.TryReadStoredHistoryAsync(session, token).ConfigureAwait(false) is { } history
+                                ? [.. history.OfType<CodeAlta.Agent.AgentWorkflowEvent>().Where(record => record.WorkflowRunId == runId)]
+                                : []));
                     // The local search: the queries of the search window and of the Search canvas, in the space the window shows.
                     builder.AddLocalSearchService(new LocalSearchService(search,
                         async (spaceId, token) => await host.RuntimeService.GetSpaceFilterAsync(spaceId, null, token).ConfigureAwait(false),

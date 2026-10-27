@@ -29,6 +29,12 @@ public sealed record CodeModeRunInfo(string Id, string SessionId, string? Title,
     public string? Status { get; init; }
 }
 
+/// <summary>What the tab of a run shows besides its records.</summary>
+/// <param name="Info">The run.</param>
+/// <param name="Source">Its script, or null when it is not kept.</param>
+/// <param name="Result">What its session was given when it ended, or null while it runs or when it is not kept.</param>
+public sealed record CodeModeRunDetail(CodeModeRunInfo Info, string? Source, string? Result);
+
 /// <summary>
 /// The runs of the scripts of a host. <c>exec</c> waits for a run up to its yield; a run still going then goes on in the
 /// background, and its result comes back to its session as a prompt (provenance <c>workflow</c>) unless a <c>wait</c>
@@ -224,6 +230,63 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// <returns>The runs, running or not yet collected.</returns>
     public IReadOnlyList<CodeModeRunInfo> List(string? sessionId = null)
         => [.. _runs.Values.Where(run => sessionId is null || run.SessionId == sessionId).Select(static run => run.Info())];
+
+    /// <summary>
+    /// Lists the runs of a session, or of the host, that this process knows or the store keeps (<see cref="Store"/>): after
+    /// a restart, the runs that ended before it. The store is the index: nothing reads a journal.
+    /// </summary>
+    /// <param name="sessionId">The session, or null for every session.</param>
+    /// <returns>The runs, those of this process first.</returns>
+    public IReadOnlyList<CodeModeRunInfo> ListKnown(string? sessionId = null)
+    {
+        var known = List(sessionId).ToList();
+        if (Store is { } store)
+        {
+            var listed = known.Select(static run => run.Id).ToHashSet(StringComparer.Ordinal);
+            known.AddRange(store.List().Where(run => !listed.Contains(run.Id) && (sessionId is null || string.Equals(run.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)))
+                .Select(InfoOf));
+        }
+
+        return known;
+    }
+
+    /// <summary>
+    /// Reads what the tab of a run shows besides its records: the run, its script (the store keeps it), and what its session
+    /// was given once it ended.
+    /// </summary>
+    /// <param name="runId">The id of the run.</param>
+    /// <returns>The run, or null when neither this process nor the store knows it.</returns>
+    public async Task<CodeModeRunDetail?> ReadDetailAsync(string runId)
+    {
+        ArgumentNullException.ThrowIfNull(runId);
+        await WhenKeptAsync(runId).ConfigureAwait(false);
+        if (TryInfo(runId) is not { } info)
+        {
+            return null;
+        }
+
+        var source = Store?.TryLoad(runId)?.Source;
+        var result = FindAny(runId) is { Completion.IsCompletedSuccessfully: true } run
+            ? CodeModeResultFormatter.Format(run.Completion.Result, run.MaxOutputTokens)
+            : Store?.TryReadResult(runId);
+        return new CodeModeRunDetail(info, string.IsNullOrEmpty(source) ? null : source, result);
+    }
+
+    /// <summary>Describes a run this process knows, or one the store keeps.</summary>
+    /// <param name="runId">The id of the run.</param>
+    /// <returns>The run, or null when neither has it.</returns>
+    public CodeModeRunInfo? TryInfo(string runId)
+        => FindAny(runId)?.Info() ?? (Store?.TryLoad(runId) is { } stored ? InfoOf(stored) : null);
+
+    // A run of the store, which no longer runs here: one without an end ran when CodeAlta ended.
+    private static CodeModeRunInfo InfoOf(CodeModeStoredRun run)
+        => new(run.Id, run.SessionId, run.Title, (run.EndedAt ?? run.StartedAt) - run.StartedAt, 0, false)
+        {
+            StartedAt = run.StartedAt,
+            EndedAt = run.EndedAt ?? run.StartedAt,
+            CallId = run.CallId,
+            Status = run.EndedAt is null || run.Status == "running" ? "interrupted" : run.Status,
+        };
 
     /// <summary>Starts a run, unless a limit refuses it.</summary>
     /// <param name="sessionId">The session that runs it.</param>
@@ -501,7 +564,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
 
             if (run.Writer is { } writer)
             {
-                await writer.EndAsync(result.Status.ToString().ToLowerInvariant()).ConfigureAwait(false);
+                await writer.EndAsync(result.Status.ToString().ToLowerInvariant(), CodeModeResultFormatter.Format(result, run.MaxOutputTokens)).ConfigureAwait(false);
             }
 
             run.Record(AgentWorkflowEventKind.RunEnded, record => record with
@@ -622,6 +685,9 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
 
     // The most records of steps a run writes: a step in a loop of a thousand items writes the first ones.
     private const int MaxStepRecords = 200;
+
+    // The most steps of one script the record of its declaration keeps.
+    private const int MaxDeclaredSteps = 64;
     private readonly Lock _journalGate = new();
     private Task _journal = Task.CompletedTask;
     private int _stepRecords;
@@ -793,6 +859,14 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
     void ICodeModeRunObserver.CallEnded(CodeModeCallRecord record) => Writer?.CallEnded(record);
 
     void ICodeModeRunObserver.StepStarted(string stepId) => Record(AgentWorkflowEventKind.StepStarted, record => record with { StepId = stepId });
+
+    // The steps a script declares, which the graph of the run draws from its start: once per script of the run.
+    void ICodeModeRunObserver.StepsDeclared(CodeModeDescriptor descriptor)
+        => Record(AgentWorkflowEventKind.StepsDeclared, record => record with
+        {
+            Title = descriptor.Title ?? descriptor.Name,
+            Steps = [.. descriptor.Steps.Take(MaxDeclaredSteps).Select(static step => new AgentWorkflowStep(step.Id, step.Title) { After = step.After, Each = step.Each })],
+        });
 
     void ICodeModeRunObserver.StepEnded(CodeModeStepRecord record)
     {

@@ -82,6 +82,7 @@ public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<strin
             Agents = agents,
             Questions = questions,
             Library = library,
+            Values = new CodeModeValueStore(CodeModeValueStore.RootOf(catalog)),
             Runs = runs,
             Cache = new CodeModeScriptCache(),
             SourceFolder = scratchpadRoot is { Length: > 0 } scratchpad ? sessionId => Path.Combine(scratchpad, "codemode", sessionId) : null,

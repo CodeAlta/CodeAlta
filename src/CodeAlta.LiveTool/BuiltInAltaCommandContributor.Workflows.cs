@@ -111,7 +111,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? sessionId = null;
         var all = false;
         var running = false;
-        var command = Leaf("list", "List the runs of a session: the ones that run, then the ones that ended a short while ago.");
+        var command = Leaf("list", "List the runs of a session: the ones that run, then the ones that ended, which CodeAlta keeps for a while (the 100 newest, 14 days at most).");
         command.Add("session=", "Session whose runs are listed. Defaults to the calling session.", value => sessionId = value);
         command.Add("all", "List the runs of every session.", value => all = value is not null);
         command.Add("running", "List only the runs that go on.", value => running = value is not null);
@@ -123,10 +123,12 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         string? id = null;
         var profile = false;
-        var command = Leaf("show", "Show one run: its state, its calls, and its steps and the sessions it started, from the journal of its session.");
+        string? format = null;
+        var command = Leaf("show", "Show one run: its state, its calls, its graph (the steps its script declares, and how far each went), and the sessions it started, from the journal of its session.");
         command.Add("<run-id>", "Run id, such as run-7f3c2a, from `exec`, `wait` or `alta workflow list`.", value => id = value);
         command.Add("profile", "Add where the time of a run that ended went: each step, each function (calls, total, slowest, time queued) and the script's own time.", value => profile = value is not null);
-        command.Add(async (_, _) => await HandleWorkflowShowAsync(context, id, profile).ConfigureAwait(false));
+        command.Add("format=", "`json` (the default), or `mermaid`: the graph of the run as a Mermaid flowchart, in the `mermaid` field, as Copy as Mermaid gives it.", value => format = value);
+        command.Add(async (_, _) => await HandleWorkflowShowAsync(context, id, profile, format).ConfigureAwait(false));
         return command;
     }
 
@@ -157,7 +159,8 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         // A caller that is no session (the user's command line, an MCP client) sees the runs of every session.
         var scope = all ? null : NormalizeOptionalText(sessionId) ?? NormalizeOptionalText(context.Caller.SourceSessionId);
-        var listed = runs.List(scope).Where(run => !running || run.Running).OrderByDescending(static run => run.Running).ToArray();
+        // The runs of this process, then those the store keeps: listing never reads a journal.
+        var listed = runs.ListKnown(scope).Where(run => !running || run.Running).OrderByDescending(static run => run.Running).ThenByDescending(static run => run.StartedAt).ToArray();
         var limit = Math.Max(1, (context.MaxOutputRecords ?? 200) - 1);
         foreach (var run in listed.Take(limit))
         {
@@ -168,22 +171,39 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    private static async ValueTask<int> HandleWorkflowShowAsync(AltaCommandContext context, string? id, bool profile)
+    private static async ValueTask<int> HandleWorkflowShowAsync(AltaCommandContext context, string? id, bool profile, string? format)
     {
         if (context.Services.Get<CodeModeRunRegistry>() is not { } runs) return WorkflowsUnavailable(context);
         if (NormalizeOptionalText(id) is not { } runId) return UsageError(context, "usage.missingRun", "A run id is required.", "alta workflow show");
-        if (runs.FindAny(runId) is not { } run) return WorkflowNotFound(context, runId);
-        if (await RefuseRunToSandboxAsync(context, run).ConfigureAwait(false) is { } refused) return refused;
+        var mermaid = NormalizeOptionalText(format)?.ToLowerInvariant() switch { null or "json" => false, "mermaid" => true, _ => (bool?)null };
+        if (mermaid is null) return UsageError(context, "usage.invalidFormat", "--format is `json` or `mermaid`.", "alta workflow show");
+        // A run of this process, or one the store keeps: after a restart, the runs that ended before it.
+        var run = runs.FindAny(runId);
+        if ((run?.Info() ?? runs.TryInfo(runId)) is not { } info) return WorkflowNotFound(context, runId);
+        if (await RefuseRunToSandboxAsync(context, info.SessionId).ConfigureAwait(false) is { } refused) return refused;
 
-        var record = WorkflowRecord(context, "alta.workflow.show", run.Info(), run);
+        var records = new List<AgentWorkflowEvent>();
+        if (context.Services.Get<SessionRuntimeService>() is { } runtime
+            && await runtime.TryGetResumableSessionAsync(info.SessionId, context.CancellationToken).ConfigureAwait(false) is { } session
+            && await runtime.TryReadStoredHistoryAsync(session, context.CancellationToken).ConfigureAwait(false) is { } history)
+        {
+            records.AddRange(history.OfType<AgentWorkflowEvent>().Where(written => written.WorkflowRunId == runId));
+        }
+
+        var graph = CodeModeRunGraph.Read(records);
+        var record = WorkflowRecord(context, "alta.workflow.show", info, run);
+        if (mermaid == true)
+        {
+            record["mermaid"] = CodeModeRunGraph.ToMermaid(graph);
+            AltaJsonlWriter.WriteRecord(context.Stdout, record);
+            return AltaExitCodes.Success;
+        }
+
         // The steps and the sessions are in the journal of the session, written in order by the run.
         var steps = new List<Dictionary<string, object?>>();
         var sessions = new List<Dictionary<string, object?>>();
-        if (context.Services.Get<SessionRuntimeService>() is { } runtime
-            && await runtime.TryGetResumableSessionAsync(run.SessionId, context.CancellationToken).ConfigureAwait(false) is { } session
-            && await runtime.TryReadStoredHistoryAsync(session, context.CancellationToken).ConfigureAwait(false) is { } history)
         {
-            foreach (var written in history.OfType<AgentWorkflowEvent>().Where(written => written.WorkflowRunId == runId))
+            foreach (var written in records)
             {
                 switch (written.Kind)
                 {
@@ -206,7 +226,21 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         record["steps"] = steps;
         record["sessions"] = sessions;
-        if (profile && !run.Running && run.Completion.IsCompletedSuccessfully)
+        if (graph.Count > 0)
+        {
+            record["graph"] = graph.Select(static step => new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["id"] = step.Id,
+                ["title"] = step.Title,
+                ["after"] = step.After,
+                ["each"] = step.Each,
+                ["state"] = step.State,
+                ["sessions"] = step.Sessions,
+                ["declared"] = step.Declared,
+            }).ToArray();
+        }
+
+        if (profile && run is not null && !run.Running && run.Completion.IsCompletedSuccessfully)
         {
             record["profile"] = Profile(run.Completion.Result);
         }
@@ -219,8 +253,18 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         if (context.Services.Get<CodeModeRunRegistry>() is not { } runs) return WorkflowsUnavailable(context);
         if (NormalizeOptionalText(id) is not { } runId) return UsageError(context, "usage.missingRun", "A run id is required.", "alta workflow result");
-        if (runs.FindAny(runId) is not { } run) return WorkflowNotFound(context, runId);
-        if (await RefuseRunToSandboxAsync(context, run).ConfigureAwait(false) is { } refused) return refused;
+        if (runs.FindAny(runId) is not { } run)
+        {
+            // A run that ended before CodeAlta started again: the store kept what its session was given.
+            if (runs.TryInfo(runId) is not { } stored) return WorkflowNotFound(context, runId);
+            if (await RefuseRunToSandboxAsync(context, stored.SessionId).ConfigureAwait(false) is { } storedRefused) return storedRefused;
+            var kept = WorkflowRecord(context, "alta.workflow.result", stored, null);
+            kept["text"] = runs.Store?.TryReadResult(runId) ?? $"Run '{runId}' ended ({stored.Status}) before CodeAlta started again; its result was not kept.";
+            AltaJsonlWriter.WriteRecord(context.Stdout, kept);
+            return AltaExitCodes.Success;
+        }
+
+        if (await RefuseRunToSandboxAsync(context, run.SessionId).ConfigureAwait(false) is { } refused) return refused;
         if (run.Running)
         {
             AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "workflow.running", AltaExitCodes.Failure,
@@ -299,10 +343,10 @@ internal sealed partial class BuiltInAltaCommandContributor
     }
 
     // A sandboxed caller reads the runs of the sessions it reaches.
-    private static async Task<int?> RefuseRunToSandboxAsync(AltaCommandContext context, CodeModeRunHandle run)
-        => !IsCaller(context, run.SessionId)
+    private static async Task<int?> RefuseRunToSandboxAsync(AltaCommandContext context, string sessionId)
+        => !IsCaller(context, sessionId)
            && await AltaSandboxGate.OfCallerAsync(context).ConfigureAwait(false) is not null
-           && await ResolveSessionInfoAsync(context, run.SessionId).ConfigureAwait(false) is { ExitCode: not AltaExitCodes.Success } refused
+           && await ResolveSessionInfoAsync(context, sessionId).ConfigureAwait(false) is { ExitCode: not AltaExitCodes.Success } refused
             ? refused.ExitCode
             : null;
 
@@ -315,7 +359,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             ["correlationId"] = context.CorrelationId,
             ["id"] = info.Id,
             ["sessionId"] = info.SessionId,
-            ["state"] = info.Running ? "running" : run?.Outcome switch
+            ["state"] = info.Running ? "running" : run is null ? info.Status ?? "completed" : run.Outcome switch
             {
                 AgentBackgroundTaskOutcome.Completed => "completed",
                 AgentBackgroundTaskOutcome.Stopped => "cancelled",

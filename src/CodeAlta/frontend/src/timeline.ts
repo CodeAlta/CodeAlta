@@ -90,9 +90,19 @@ export type TimelineItem = Readonly<{
   scriptRun?: ScriptRun;
 }>;
 
-/** A run of a script of Code Mode, from its records (`workflow` entries of the journal). */
+/**
+ * A run of a script of Code Mode, from its records (`workflow` entries of the journal). `declared` lists the steps its
+ * scripts declare (`meta.steps`), which its graph draws from the start; `startedAt` is the time of its first record.
+ */
 export type ScriptRun = Readonly<{ runId: string; status: string | null; steps: ReadonlyArray<ScriptStep>; sessions: ReadonlyArray<ScriptSession>;
-  waiting?: ScriptWait | null; resumesAt?: string | null }>;
+  waiting?: ScriptWait | null; resumesAt?: string | null; declared?: ReadonlyArray<ScriptDeclaredStep>; startedAt?: string | null; endedAt?: string | null }>;
+
+/** A step a script of a run declares: `after` the steps it runs after (null: the one declared before it; empty: the start), `each` a fan-out. */
+export type ScriptDeclaredStep = Readonly<{ id: string; title: string; after: readonly string[] | null; each: boolean }>;
+
+/** A record of a run as the card reads it: a `workflow` row of the history, or a record the tab of the run reads from the host. */
+export type ScriptRunRecord = Readonly<{ kind?: string | null; activityId?: string | null; phase?: string | null; text?: string | null; details?: string | null;
+  name?: string | null; timestamp?: string | null }>;
 
 /**
  * What a running script waits for: the answer of an `ask()`, the approval of one of its calls, or the end of a `sleep()`
@@ -104,11 +114,12 @@ export type ScriptWait = Readonly<{ kind: "question" | "approval" | "sleep"; ste
  * A step of a run: its state, and how long it took once ended. `key` is what a rerun from it names (`merge#1`), once ended;
  * `replayed` says it gave the result a previous run recorded instead of running.
  */
-export type ScriptStep = Readonly<{ id: string; status: string; durationMs: number | null; key: string | null; replayed: boolean }>;
+export type ScriptStep = Readonly<{ id: string; status: string; durationMs: number | null; key: string | null; replayed: boolean;
+  startedAt?: string | null; endedAt?: string | null }>;
 
 /** A session a run started: its state, and what it spent once ended. */
 export type ScriptSession = Readonly<{ sessionId: string; title: string | null; stepId: string | null; status: string; durationMs: number | null;
-  inputTokens: number | null; outputTokens: number | null; message: string | null }>;
+  inputTokens: number | null; outputTokens: number | null; message: string | null; startedAt?: string | null; endedAt?: string | null }>;
 
 /** A call that the script of a tool call made: a line of the card of that call. */
 export type ScriptCall = Readonly<{ key: string; activityId: string; name: string; phase: string | null; startedAt: string | null; endedAt: string | null;
@@ -308,42 +319,58 @@ function lastIndex<T>(items: readonly T[], match: (item: T) => boolean): number 
 }
 
 // A run read from its records, kept while its records stay the same so that the row keeps its identity.
-const scriptRuns = new WeakMap<HistoryEntry, { count: number; run: ScriptRun }>();
-function scriptRunOf(records: ReadonlyArray<HistoryEntry>): ScriptRun {
+const scriptRuns = new WeakMap<ScriptRunRecord, { count: number; run: ScriptRun }>();
+
+/** Reads a run from its records, in their order: its steps, the sessions it started, what its scripts declare, and its times. */
+export function scriptRunOf(records: ReadonlyArray<ScriptRunRecord>, runId?: string): ScriptRun {
   const last = records[records.length - 1];
-  const known = scriptRuns.get(last);
+  const known = last ? scriptRuns.get(last) : undefined;
   if (known && known.count === records.length) return known.run;
   let status: string | null = "running";
   let waiting: ScriptWait | null = null;
   let resumesAt: string | null = null;
+  let endedAt: string | null = null;
   const steps: ScriptStep[] = [];
   const sessions: ScriptSession[] = [];
+  const declared: ScriptDeclaredStep[] = [];
   for (const record of records) {
-    const details = parseDetails(record.details);
+    const details = parseDetails(record.details ?? null);
     const number = (name: string) => { const value = details?.[name]; return typeof value === "number" ? value : null; };
+    const at = record.timestamp ?? null;
     switch (record.kind) {
+      case "StepsDeclared": {
+        const listed = details?.steps;
+        if (!Array.isArray(listed)) break;
+        for (const item of listed) {
+          if (!isObject(item) || typeof item.id !== "string" || declared.some(step => step.id === item.id)) continue;
+          const after = Array.isArray(item.after) ? item.after.filter((id): id is string => typeof id === "string") : null;
+          declared.push({ id: item.id, title: typeof item.title === "string" && item.title ? item.title : item.id, after, each: item.each === true });
+        }
+        break;
+      }
       case "StepStarted":
-        if (record.activityId) steps.push({ id: record.activityId, status: "running", durationMs: null, key: null, replayed: false });
+        if (record.activityId) steps.push({ id: record.activityId, status: "running", durationMs: null, key: null, replayed: false, startedAt: at, endedAt: null });
         break;
       case "StepEnded": {
         const index = lastIndex(steps, step => step.id === record.activityId && step.status === "running");
         const ended: ScriptStep = { id: record.activityId ?? "", status: record.phase ?? "completed", durationMs: number("durationMs"),
-          key: stringAt(details, "stepKey"), replayed: details?.replayed === true };
+          key: stringAt(details, "stepKey"), replayed: details?.replayed === true, startedAt: index >= 0 ? steps[index].startedAt ?? null : null, endedAt: at };
         if (index >= 0) steps[index] = ended; else steps.push(ended);
         break;
       }
       case "SessionStarted":
-        if (record.activityId) sessions.push({ sessionId: record.activityId, title: record.text, stepId: stringAt(details, "stepId"), status: "running",
-          durationMs: null, inputTokens: null, outputTokens: null, message: null });
+        if (record.activityId) sessions.push({ sessionId: record.activityId, title: record.text ?? null, stepId: stringAt(details, "stepId"), status: "running",
+          durationMs: null, inputTokens: null, outputTokens: null, message: null, startedAt: at, endedAt: null });
         break;
       case "SessionEnded": {
         const index = lastIndex(sessions, session => session.sessionId === record.activityId);
         if (index >= 0) sessions[index] = { ...sessions[index], status: record.phase ?? "completed", durationMs: number("durationMs"),
-          inputTokens: number("inputTokens"), outputTokens: number("outputTokens"), message: stringAt(details, "message") };
+          inputTokens: number("inputTokens"), outputTokens: number("outputTokens"), message: stringAt(details, "message"), endedAt: at };
         break;
       }
       case "RunEnded":
         status = record.phase ?? "completed";
+        endedAt = at;
         resumesAt = status === "interrupted" ? stringAt(details, "wakeAt") : null;
         break;
       case "WaitStarted":
@@ -367,8 +394,10 @@ function scriptRunOf(records: ReadonlyArray<HistoryEntry>): ScriptRun {
     for (let index = 0; index < steps.length; index++) if (steps[index].status === "running") steps[index] = { ...steps[index], status: "interrupted" };
     for (let index = 0; index < sessions.length; index++) if (sessions[index].status === "running") sessions[index] = { ...sessions[index], status: "interrupted" };
   }
-  const run: ScriptRun = { runId: last.name ?? "", status, steps, sessions, ...waiting ? { waiting } : {}, ...resumesAt ? { resumesAt } : {} };
-  scriptRuns.set(last, { count: records.length, run });
+  const startedAt = records[0]?.timestamp ?? null;
+  const run: ScriptRun = { runId: runId ?? last?.name ?? "", status, steps, sessions, ...waiting ? { waiting } : {}, ...resumesAt ? { resumesAt } : {},
+    ...declared.length > 0 ? { declared } : {}, ...startedAt ? { startedAt } : {}, ...endedAt ? { endedAt } : {} };
+  if (last) scriptRuns.set(last, { count: records.length, run });
   return run;
 }
 

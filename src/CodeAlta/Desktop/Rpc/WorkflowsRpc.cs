@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.WorkItems;
 using CodeAlta.Orchestration.Runtime.Scripts;
@@ -24,6 +25,7 @@ internal sealed class WorkflowsService
     private readonly ISessionStarter? _starter;
     private readonly Func<string, string, CancellationToken, Task<string?>>? _send;
     private readonly Func<ProjectDescriptor?, CancellationToken, Task<SpaceFilter>>? _spaceOf;
+    private readonly Func<string, string, CancellationToken, Task<IReadOnlyList<AgentWorkflowEvent>>>? _records;
     private readonly string? _epoch;
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
@@ -42,8 +44,12 @@ internal sealed class WorkflowsService
     /// Gives the space the window shows, for a project or none: the tab lists and runs only the scripts it has
     /// (<c>[scripts.spaces]</c>); null for every script.
     /// </param>
+    /// <param name="records">
+    /// Reads the records of a run in the journal of its session (the session, the run), for the tab of the run; null for none.
+    /// </param>
     internal WorkflowsService(CodeModeScriptLibrary scripts, CodeModeRunRegistry runs, ProjectCatalog projects, ISessionStarter starter,
-        Func<string, string, CancellationToken, Task<string?>> send, string epoch, Func<ProjectDescriptor?, CancellationToken, Task<SpaceFilter>>? spaceOf = null)
+        Func<string, string, CancellationToken, Task<string?>> send, string epoch, Func<ProjectDescriptor?, CancellationToken, Task<SpaceFilter>>? spaceOf = null,
+        Func<string, string, CancellationToken, Task<IReadOnlyList<AgentWorkflowEvent>>>? records = null)
     {
         ArgumentNullException.ThrowIfNull(scripts);
         ArgumentNullException.ThrowIfNull(runs);
@@ -51,7 +57,7 @@ internal sealed class WorkflowsService
         ArgumentNullException.ThrowIfNull(starter);
         ArgumentNullException.ThrowIfNull(send);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
-        (_scripts, _runs, _projects, _starter, _send, _epoch, _spaceOf) = (scripts, runs, projects, starter, send, epoch, spaceOf);
+        (_scripts, _runs, _projects, _starter, _send, _epoch, _spaceOf, _records) = (scripts, runs, projects, starter, send, epoch, spaceOf, records);
     }
 
     /// <summary>The scripts of the library a project sees, or yours and the samples without a project.</summary>
@@ -70,17 +76,39 @@ internal sealed class WorkflowsService
             [.. script.Steps.Select(static step => new WorkflowStepItem(step.Id, step.Title, step.After, step.Each))]))]);
     }
 
-    /// <summary>The runs of scripts of the host: running ones, and those that ended in the last minutes.</summary>
+    /// <summary>
+    /// The runs of scripts of the host: running ones, and those that ended, which the store keeps (the 100 newest, 14 days at
+    /// most), also from before CodeAlta started again. Listing reads the store, never a journal.
+    /// </summary>
     [NeoRpcMethod("runs")]
     public WorkflowRunsResponse Runs(WorkflowsRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, []);
-        return new("ok", [.. _runs!.List(null)
+        return new("ok", [.. _runs!.ListKnown(null)
             .OrderByDescending(static run => run.Running).ThenByDescending(static run => run.StartedAt)
-            .Select(static run => new WorkflowRunItem(run.Id, run.SessionId, run.Title, run.Running ? "running" : run.Status ?? "completed",
-                run.StartedAt, run.EndedAt, run.CallId, run.Calls))]);
+            .Select(ItemOf)]);
     }
+
+    /// <summary>
+    /// A run for its tab: the run, its records (the steps its script declares, its steps, the sessions it started), its
+    /// script, its result, and its graph as Mermaid. A run CodeAlta no longer knows is <c>not_found</c>.
+    /// </summary>
+    [NeoRpcMethod("runDetail")]
+    public async Task<WorkflowRunDetailResponse> RunDetailAsync(WorkflowRunDetailRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, [], null, null, null);
+        if (!RunId(request.RunId)) return new("invalid_request", null, [], null, null, null);
+        if (await _runs!.ReadDetailAsync(request.RunId).ConfigureAwait(false) is not { } detail) return new("not_found", null, [], null, null, null);
+        IReadOnlyList<AgentWorkflowEvent> records = _records is null ? [] : await _records(detail.Info.SessionId, request.RunId, cancellationToken).ConfigureAwait(false);
+        return new("ok", ItemOf(detail.Info), [.. records.Select(static record => new WorkflowRecordItem(record.Kind.ToString(), record.ChildSessionId ?? record.StepId,
+                record.Status, record.Title ?? record.Message, record.ToJson(), record.Timestamp))],
+            detail.Source, detail.Result, CodeModeRunGraph.ToMermaid(CodeModeRunGraph.Read(records)));
+    }
+
+    private static WorkflowRunItem ItemOf(CodeModeRunInfo run)
+        => new(run.Id, run.SessionId, run.Title, run.Running ? "running" : run.Status ?? "completed", run.StartedAt, run.EndedAt, run.CallId, run.Calls);
 
     /// <summary>Starts a script of the library in a new session of a project. The answer comes once the session exists, or says why it did not start.</summary>
     [NeoRpcMethod("run")]
@@ -201,6 +229,24 @@ internal sealed record WorkflowRunsResponse(string Status, IReadOnlyList<Workflo
 /// <param name="CallId">The <c>exec</c> call that runs it, or null.</param>
 /// <param name="Calls">The calls it made.</param>
 internal sealed record WorkflowRunItem(string Id, string SessionId, string? Title, string State, DateTimeOffset StartedAt, DateTimeOffset? EndedAt, string? CallId, int Calls);
+
+/// <summary>Asks for a run, for its tab.</summary>
+internal sealed record WorkflowRunDetailRequest(string? ExpectedEpoch, string RunId);
+
+/// <summary>A run for its tab.</summary>
+/// <param name="Records">Its records in the journal of its session, in their order, as the card of its call reads them.</param>
+/// <param name="Source">Its script, or null when it is not kept.</param>
+/// <param name="Result">What its session was given once it ended, or null.</param>
+/// <param name="Mermaid">Its graph as a Mermaid flowchart, as <c>alta workflow show --format mermaid</c> writes it.</param>
+internal sealed record WorkflowRunDetailResponse(string Status, WorkflowRunItem? Run, IReadOnlyList<WorkflowRecordItem> Records, string? Source, string? Result, string? Mermaid);
+
+/// <summary>A record of a run, as a row of the history of its session gives it to its card.</summary>
+/// <param name="Kind">What happened: <c>StepsDeclared</c>, <c>StepStarted</c>, <c>SessionEnded</c>...</param>
+/// <param name="ActivityId">The session it started, or its step.</param>
+/// <param name="Phase">Its status.</param>
+/// <param name="Text">Its title or its message.</param>
+/// <param name="Details">The record as JSON.</param>
+internal sealed record WorkflowRecordItem(string Kind, string? ActivityId, string? Phase, string? Text, string Details, DateTimeOffset Timestamp);
 
 /// <summary>Starts a script in a new session of a project.</summary>
 /// <param name="Arguments">Its arguments, a JSON object; null for none.</param>

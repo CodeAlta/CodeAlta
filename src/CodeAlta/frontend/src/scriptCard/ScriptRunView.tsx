@@ -1,29 +1,35 @@
-import { memo, useContext, useState } from "react";
+import { memo, useContext, useMemo, useState } from "react";
 import { Button, Menu, MenuItem, PopoverNext } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
-import { SessionLinksContext } from "../SessionReference";
 import { useShellLanguage } from "../shellLanguage";
-import type { ScriptRun, ScriptSession, ScriptStep, ScriptWait } from "../timeline";
+import type { ScriptRun, ScriptStep, ScriptWait } from "../timeline";
 import { formatDuration } from "../toolCall";
+import { OpenRunContext } from "../workflows/openRun";
+import { runGraph } from "../workflows/runGraph";
+import { RunGraphView } from "../workflows/RunGraphView";
 import { SaveAsScript, ScriptRunActionsContext } from "./SaveAsScript";
+import { ScriptSessionBox } from "./ScriptSessionBox";
 import { scriptMarkState as state, scriptRunOffers, scriptWaitTarget, wakeTime } from "./scriptRunOffers";
 
 type Rerun = Readonly<{ from?: string; all?: boolean }>;
 
 /**
- * The run of a script, under its tile: its steps in order, then a box for each session it started, which opens the
- * session. What the boxes say comes from the records of the run in the journal of the session. A run that ended offers,
- * where the session can be asked, Rerun with recorded results (Resume for a run CodeAlta ended during), Rerun from a step
- * on the menu of its mark, and Save as script….
+ * The run of a script, under its tile. A run whose scripts declare their steps (`meta.steps`) draws them as a graph from
+ * its start, each step with its state and the sessions it started; another one lists its steps in order, then a box for
+ * each session it started, which opens the session. What the boxes say comes from the records of the run in the journal
+ * of the session. A run that ended offers, where the session can be asked, Rerun with recorded results (Resume for a run
+ * CodeAlta ended during), Rerun from a step on the menu of its mark, and Save as script…. Open run opens its tab.
  */
-export const ScriptRunView = memo(function ScriptRunView({ run }: { run: ScriptRun }) {
+export const ScriptRunView = memo(function ScriptRunView({ run, title = null }: { run: ScriptRun; title?: string | null }) {
   const { t } = useShellLanguage();
   const actions = useContext(ScriptRunActionsContext);
+  const openRun = useContext(OpenRunContext);
   const offers = actions ? scriptRunOffers(run) : null;
+  const graph = useMemo(() => runGraph(run), [run]);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  if (run.steps.length === 0 && run.sessions.length === 0 && !offers?.saveAsScript && !run.waiting) return null;
+  if (run.steps.length === 0 && run.sessions.length === 0 && !offers?.saveAsScript && !run.waiting && !graph) return null;
   async function rerun(how: Rerun) {
     setBusy(true);
     setProblem(null);
@@ -33,7 +39,8 @@ export const ScriptRunView = memo(function ScriptRunView({ run }: { run: ScriptR
   }
   return <div className="script-run" role="group" aria-label={t("Steps and sessions of the script")}>
     {run.waiting && <ScriptWaitLine wait={run.waiting} />}
-    {run.steps.length > 0 && <ol className="script-run-steps">
+    {graph && <RunGraphView graph={graph} />}
+    {!graph && run.steps.length > 0 && <ol className="script-run-steps">
       {run.steps.map((step, index) => <li key={`${step.id}:${index}`} data-state={state(step.status)} data-replayed={step.replayed || undefined}
         title={stepTitle(step, t("Recorded result"))}>
         {offers?.rerunFromStep && step.key
@@ -46,10 +53,12 @@ export const ScriptRunView = memo(function ScriptRunView({ run }: { run: ScriptR
           : <StepMark step={step} />}
       </li>)}
     </ol>}
-    {run.sessions.length > 0 && <ul className="script-run-sessions">
+    {!graph && run.sessions.length > 0 && <ul className="script-run-sessions">
       {run.sessions.map(session => <li key={session.sessionId}><ScriptSessionBox session={session} /></li>)}
     </ul>}
+    {openRun && run.runId && !offers?.saveAsScript && <div className="script-run-actions"><OpenRunButton run={run} title={title} /></div>}
     {offers?.saveAsScript && <div className="script-run-actions">
+      {openRun && <OpenRunButton run={run} title={title} />}
       {offers.resume && wakeTime(run.resumesAt) && <span className="script-run-resumes" role="status">
         <AppIcon name="timer" size={12} />{t("Resumes by itself at {time}", { time: wakeTime(run.resumesAt)! })}</span>}
       {offers.resume && <Button size="small" variant="minimal" icon={<AppIcon name="play" size={13} />} text={t("Resume")} loading={busy}
@@ -61,6 +70,14 @@ export const ScriptRunView = memo(function ScriptRunView({ run }: { run: ScriptR
     </div>}
   </div>;
 });
+
+// Open run: the tab of the run, with its graph large, its sessions, its timeline, its script and its result.
+function OpenRunButton({ run, title }: { run: ScriptRun; title: string | null }) {
+  const { t } = useShellLanguage();
+  const openRun = useContext(OpenRunContext);
+  return <Button size="small" variant="minimal" icon={<AppIcon name="expand" size={13} />} text={t("Open run")} title={t("Open the run in a tab: its graph, its sessions, its timeline and its script.")}
+    onClick={event => { event.stopPropagation(); openRun?.({ runId: run.runId, title }); }} />;
+}
 
 function StepMark({ step }: { step: ScriptStep }) {
   const mark = state(step.status);
@@ -97,22 +114,4 @@ function ScriptWaitLine({ wait }: { wait: ScriptWait }) {
 function stepTitle(step: ScriptStep, recorded: string): string | undefined {
   const parts = [step.replayed ? recorded : null, step.durationMs !== null && !step.replayed ? formatDuration(step.durationMs) : null].filter(Boolean);
   return parts.length > 0 ? parts.join(" · ") : undefined;
-}
-
-function ScriptSessionBox({ session }: { session: ScriptSession }) {
-  const { t } = useShellLanguage();
-  const links = useContext(SessionLinksContext);
-  const title = links?.title(session.sessionId) ?? session.title ?? session.sessionId.slice(0, 8);
-  const tokens = session.inputTokens !== null || session.outputTokens !== null ? (session.inputTokens ?? 0) + (session.outputTokens ?? 0) : null;
-  const facts = [session.stepId, session.durationMs !== null ? formatDuration(session.durationMs) : null,
-    tokens !== null ? t("{count} tokens", { count: tokens.toLocaleString() }) : null].filter(Boolean).join(" · ");
-  const content = <>
-    <span className="script-session-mark">{state(session.status) === "running" ? <ActivitySpinner size={10} /> : <AppIcon name="childSession" size={12} />}</span>
-    <span className="script-session-text"><strong>{title}</strong>{facts && <small>{facts}</small>}</span>
-  </>;
-  const label = t("Open the session {title}", { title });
-  return links && links.title(session.sessionId) !== null
-    ? <button type="button" className="script-session" data-state={state(session.status)} title={session.message ?? label} aria-label={label}
-      onClick={event => { event.stopPropagation(); links.open(session.sessionId); }}>{content}</button>
-    : <span className="script-session" data-state={state(session.status)} title={session.message ?? undefined}>{content}</span>;
 }

@@ -60,3 +60,81 @@
 .script-run-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 2px 4px; }
 .script-run-problem { flex-basis: 100%; color: var(--red); font-size: 11.5px; text-align: end; }
 .script-save-form { min-width: 240px; }
+
+/* The graph of a run: its steps in columns from the start, each with its state and the sessions it started. A narrow card
+   stacks the columns: it never scrolls sideways. */
+.run-graph { container-type: inline-size; display: grid; gap: 6px; min-width: 0; }
+.run-graph-columns { display: flex; align-items: stretch; gap: 4px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.run-graph-column { flex: 1 1 0; min-width: 0; }
+.run-graph-column > ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.run-graph-edge { flex: none; display: grid; place-items: center; color: var(--muted); }
+.run-graph-step { --step-tone: var(--muted); display: grid; gap: 4px; min-width: 0; padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--step-tone) 45%, var(--line));
+  border-radius: 7px; background: color-mix(in srgb, var(--step-tone) 6%, var(--panel)); }
+.run-graph-step[data-state="completed"], .run-graph-other[data-state="completed"], .run-graph-group[data-state="completed"] { --step-tone: var(--green); }
+.run-graph-step[data-state="failed"], .run-graph-other[data-state="failed"], .run-graph-group[data-state="failed"] { --step-tone: var(--red); }
+.run-graph-step[data-state="running"], .run-graph-other[data-state="running"], .run-graph-group[data-state="running"] { --step-tone: var(--accent); }
+.run-graph-step:is([data-state="waiting"], [data-state="interrupted"]), .run-graph-other:is([data-state="waiting"], [data-state="interrupted"]) { --step-tone: var(--yellow); }
+/* What has not run yet is there from the start, dim: the card never jumps. */
+.run-graph-step[data-state="pending"] { border-style: dashed; background: transparent; color: var(--muted); }
+.run-graph-step[data-state="running"] { animation: run-graph-glow 1.8s ease-in-out infinite; }
+@keyframes run-graph-glow { 50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 12px -2px color-mix(in srgb, var(--accent) 45%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .run-graph-step[data-state="running"] { animation: none; } }
+/* A step that fans out looks like a stack of boxes. */
+.run-graph-step[data-each] { box-shadow: 3px 3px 0 -1px var(--panel), 3px 3px 0 0 color-mix(in srgb, var(--step-tone) 35%, var(--line)); }
+.run-graph-step-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.run-graph-step-head strong { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.run-graph-mark { flex: none; display: inline-flex; align-items: center; color: var(--step-tone); }
+.run-graph-pending-dot { width: 7px; height: 7px; border: 1.5px solid currentColor; border-radius: 50%; }
+.run-graph-each { color: var(--accent); font-weight: 600; }
+.run-graph-duration { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.run-graph-sessions { display: grid; gap: 4px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.run-graph-sessions .script-session { padding: 3px 6px; }
+/* More than six sessions in a step: one group with its counts and a dot per session, which a click opens. */
+.run-graph-group { --step-tone: var(--muted); display: grid; gap: 4px; min-width: 0; }
+.run-graph-group-head { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 3px 6px; border: 1px solid color-mix(in srgb, var(--step-tone) 40%, var(--line));
+  border-radius: 5px; background: color-mix(in srgb, var(--step-tone) 7%, transparent); color: var(--text); font: inherit; font-size: 11.5px; text-align: start; cursor: pointer; }
+.run-graph-group-summary { flex: 1; min-width: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.run-graph-group-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.run-graph-dots { display: flex; flex-wrap: wrap; gap: 2px; }
+.run-graph-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.run-graph-dots i[data-state="completed"] { background: var(--green); }
+.run-graph-dots i:is([data-state="running"], [data-state="waiting"]) { background: var(--accent); }
+.run-graph-dots i:is([data-state="failed"], [data-state="cancelled"], [data-state="interrupted"]) { background: var(--red); }
+.run-graph-others { display: grid; gap: 3px; }
+.run-graph-others h5 { margin: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.run-graph-others ul { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.run-graph-other { --step-tone: var(--muted); display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--step-tone) 40%, var(--line));
+  border-radius: 10px; font: 11px/16px var(--bp-typography-family-mono); }
+.run-graph[data-size="large"] .run-graph-columns { gap: 8px; }
+.run-graph[data-size="large"] .run-graph-step { padding: 9px 11px; }
+.run-graph[data-size="large"] .run-graph-step-head { font-size: 13px; }
+@container (max-width: 520px) {
+  .run-graph-columns { flex-direction: column; }
+  .run-graph-edge svg { transform: rotate(90deg); }
+}
+
+/* The tab of a run: its head, its graph large, its sessions, its timeline, its result and its script. */
+.workflow-run-tab { container-type: inline-size; display: flex; flex-direction: column; gap: 16px; height: 100%; min-width: 0; min-height: 0; overflow-y: auto; padding: 20px 24px 28px;
+  background: var(--bg); outline: none; }
+.workflow-run-tab > * { flex: none; width: 100%; max-width: 1480px; margin-inline: auto; }
+.workflow-run-tab h2, .workflow-run-tab h3, .workflow-run-tab p { margin: 0; }
+.workflow-run-tab h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.workflow-run-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.workflow-run-title { display: grid; gap: 3px; min-width: 0; }
+.workflow-run-title h2 { overflow: hidden; font-size: 18px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-run-title p { overflow: hidden; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-run-title code { font-family: var(--code-font); }
+.workflow-run-session { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; text-align: start; }
+.workflow-run-session:hover { text-decoration: underline; }
+.workflow-run-session:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+.workflow-run-sessions { width: 100%; font-size: 12px; }
+.workflow-run-sessions td.numeric { font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.workflow-run-sessions tr[data-state="running"] td:nth-child(3) { color: var(--accent); }
+.workflow-run-sessions tr[data-state="failed"] td:nth-child(3) { color: var(--red); }
+.workflow-run-sessions tr[data-state="completed"] td:nth-child(3) { color: var(--green); }
+.workflow-run-text { max-height: 420px; margin: 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+  color: var(--text); font: 12px/1.5 var(--code-font); white-space: pre-wrap; overflow-wrap: anywhere; }
+@container (max-width: 640px) {
+  .workflow-run-tab { padding: 14px 12px 20px; }
+  .workflow-run-sessions th:nth-child(2), .workflow-run-sessions td:nth-child(2) { display: none; }
+}

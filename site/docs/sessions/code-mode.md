@@ -43,6 +43,7 @@ A script is the body of an async function: it uses `await` and `return`, in plai
 | `sleep(duration)` | Wait: milliseconds, or `"30s"`, `"5m"`, `"2h"`, `"1d"`, up to 7 days. A sleeping script goes on in the background, and the time it sleeps does not count toward its time limit. If CodeAlta closes meanwhile, the script goes on by itself when it wakes |
 | `parallel(functions, { limit })`, `pipeline(items, ...stages)` | Run work at once: a failure is `null`, and a warning in the output |
 | `workflow("name", args)`, `workflow({ scriptPath }, args)` | Run a [script of the library](#scripts-of-the-library), or a script file read with the session's own `read_file` |
+| `store(key, value)`, `load(key)` | Keep a JSON value for the later scripts of the session, and read it back (`undefined` when there is none; `store(key, undefined)` removes it). A value takes at most 64 KB, the values of a session 1 MB. A step that a rerun replays does not store again. In `altacli`, a value lasts as long as its run |
 
 A call has the permissions of the session: a tool turned off is missing, a command that needs your approval asks, and a [sandboxed session](sandbox.md) runs its calls in its sandbox. Commands that wait for your answer, such as `alta ask`, are not available to scripts: they use `ask()`.
 
@@ -59,7 +60,13 @@ return read.map((r, i) => ({ file: files[i], lines: r.content.split("\n").length
 
 ## In the timeline
 
-A script shows as one card: `exec`, its title (the `title` of its first line), its state, and the calls it made, with the running and failed ones first. Click the card for its window:
+A script shows as one card: `exec`, its title (the `title` of its first line), its state, and the calls it made, with the running and failed ones first.
+
+A script that declares its steps (`meta.steps`) draws them as a small graph from its start: a box per step, laid out by `after` (the steps that run after the same ones side by side), dim until it runs, then running, done or failed. A step with `each: true` holds the sessions it started; above six, they fold into one group that says how many are done, running and failed, and a click lists them, the running and failed ones first. Each session opens with a click. A script without `meta.steps` lists its steps in a line.
+
+**Open run** opens the tab of the run: its graph large, the sessions it started (title, step, state, duration, tokens; each opens its session), a timeline of its steps and sessions, its result and its script. **Copy as Mermaid** copies the graph as a Mermaid `flowchart`, the text `alta workflow show <run-id> --format mermaid` gives. The tab is restored when CodeAlta starts again, while the run is still kept.
+
+Click the card for its window:
 
 - **Console**: the calls, and the result and output the model read.
 - **Script**: the code that ran.
@@ -69,7 +76,7 @@ A script shows as one card: `exec`, its title (the `title` of its first line), i
 
 `exec` waits 30 seconds for a script, or what its first line says (`yield_ms`). A script still running then goes on in the background: the agent can call `wait` for it, or end its turn. When it ends, its result comes back to the session as a **Workflow** message.
 
-Another session, or you from a terminal, reads a run with `alta workflow list`, `alta workflow show <run-id>` (its steps and the sessions it started) and `alta workflow result <run-id>`, and stops it with `alta workflow cancel <run-id>`.
+Another session, or you from a terminal, reads a run with `alta workflow list`, `alta workflow show <run-id>` (its steps and the sessions it started) and `alta workflow result <run-id>`, and stops it with `alta workflow cancel <run-id>`. CodeAlta Desktop and CodeAlta TUI keep the runs that ended, the 100 newest for 14 days at most, so these commands, the **Workflows** tab and the tab of a run still find them after CodeAlta starts again.
 
 The source of each script is kept in the scratchpad of the session, and its result says where. An agent fixes a long script by editing that file and running it again with `workflow({ scriptPath })`.
 
@@ -152,7 +159,7 @@ review-pr = ["work"]
 In CodeAlta Desktop, the **Workflows** button of the title bar (or **Workflows** in the command palette) opens a tab with the library and the runs:
 
 - **Library**: the scripts the project chosen at the top sees in the space the window shows, the project's, yours and the samples, each with its description, its parameters (`*` for a required one) and its steps drawn small. A step that runs once per item shows `×`.
-- **Runs**: the scripts running in CodeAlta and those that ended in the last minutes, the running ones first. Click a run to open its session.
+- **Runs**: the scripts running in CodeAlta and those it keeps that ended, the running ones first. Click a run to open its tab.
 
 To run a script, click **Run…** on it, fill in its parameters, choose the project it runs in, then click **Run**. A list or an object is written as JSON. The script runs in a new session of that project, which opens. That session has `exec` even when Code Mode is off.
 

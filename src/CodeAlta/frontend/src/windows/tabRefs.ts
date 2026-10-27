@@ -10,6 +10,7 @@ export const sessionTabRef = (sessionId: string) => `session:${sessionId}`;
 export function fileTabRef(tab: FileTab): string {
   if (isTerminalTab(tab)) return `terminal:${tab.terminalId ?? ""}`;
   if (isClaudeCodeTab(tab)) return `claudeCode:${tab.key ?? ""}`;
+  if (tab.view === "workflowRun") return `workflowRun:${tab.key ?? ""}`;
   if (isCanvasTab(tab)) return `canvas:${tab.pluginKey ?? ""}/${tab.canvasId ?? ""}/${tab.sessionId ? "" : tab.projectId}/${tab.sessionId ?? ""}/${tab.key ?? ""}`;
   // The tabs of a project, or of the folder of a plugin, a skill or a file a link named: one for each.
   if (tab.view === "editor" || tab.view === "changes") return `${tab.view}:${tab.projectId}`;

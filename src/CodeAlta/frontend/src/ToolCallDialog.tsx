@@ -155,7 +155,7 @@ export function ToolCallDialog({ item, reader, outputs, imageSource, current, on
       {error && <Callout compact intent="danger" className="tool-error">{error}</Callout>}
       <Tabs id={`${id}-tabs`} className="tool-tabs" selectedTabId={tab} onChange={value => setTab(String(value))} renderActiveTabPanelOnly>
         <Tab id="main" disabled={false} title={t(family === "shell" ? "Output" : family === "read" ? "File" : family === "edit" ? "Changes" : family === "script" ? "Console" : "Result")} panel={<div className="tool-panel" data-view={family}>
-          {family === "script" ? <>{item.scriptRun && <ScriptRunView run={item.scriptRun} />}{item.scriptCalls && <ScriptCalls calls={item.scriptCalls} />}<GenericView call={{ ...shown, arguments: null }} args={null} images={images} /></>
+          {family === "script" ? <>{item.scriptRun && <ScriptRunView run={item.scriptRun} title={item.scriptTitle ?? null} />}{item.scriptCalls && <ScriptCalls calls={item.scriptCalls} />}<GenericView call={{ ...shown, arguments: null }} args={null} images={images} /></>
             : family === "shell" ? <><ShellView call={shown} live={live} settled={settled} />{images}</>
             : family === "edit" ? <><EditView call={shown} args={args} />{images}</>
               : family === "read" ? <ReadView call={shown} args={args} images={images} />

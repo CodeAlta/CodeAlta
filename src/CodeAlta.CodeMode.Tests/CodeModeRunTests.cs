@@ -83,7 +83,11 @@ public sealed class CodeModeRunTests
         Assert.AreEqual("## Fan out", result.Output[0].Text);
         Assert.IsTrue(result.Output.Any(static entry => entry.Kind == CodeModeOutputKind.Warning && entry.Text.StartsWith("parallel: item 2 failed", StringComparison.Ordinal)));
         Assert.IsTrue(result.Output.Any(static entry => entry.Kind == CodeModeOutputKind.Warning && entry.Text.Contains("item 1 failed at stage 2: two", StringComparison.Ordinal)));
-        Assert.IsLessThanOrEqualTo(2, result.MaxCallsAtOnce, "the limit holds");
+
+        // The limit of parallel alone: the pipeline above has none, and its three calls overlap on a loaded machine.
+        var limited = await RunAsync("""return await parallel([1, 2, 3, 4, 5, 6].map((n) => () => tools.slow({ n })), { limit: 2 });""");
+        Assert.AreEqual(CodeModeRunStatus.Completed, limited.Status, limited.Error?.Message);
+        Assert.IsLessThanOrEqualTo(2, limited.MaxCallsAtOnce, "the limit holds");
     }
 
     [TestMethod]

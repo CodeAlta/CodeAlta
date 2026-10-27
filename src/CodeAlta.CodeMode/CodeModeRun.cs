@@ -95,6 +95,11 @@ internal sealed partial class CodeModeRun
         using var run = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _timeout.Token, _stall.Token);
         string? valueJson = null;
         CodeModeRunError? error = null;
+        if (_source.Descriptor is { Steps.Count: > 0 } declared)
+        {
+            _observer?.StepsDeclared(declared);
+        }
+
         try
         {
             var engine = CreateEngine(run.Token);

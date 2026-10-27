@@ -1,7 +1,7 @@
 // The page's link to the scripts of the library and to their runs, for the host of one epoch.
-import type { workflows, WorkflowRunItem, WorkflowScriptItem } from "#neoastra";
+import type { workflows, WorkflowRunDetailResponse, WorkflowRunItem, WorkflowScriptItem } from "#neoastra";
 
-export type WorkflowsApi = Pick<typeof workflows, "scripts" | "runs" | "run" | "saveAsScript" | "resume">;
+export type WorkflowsApi = Pick<typeof workflows, "scripts" | "runs" | "run" | "saveAsScript" | "resume" | "runDetail">;
 
 /** What the host said of a list; `available` is false in a window without a host of its own. A request that failed gives null. */
 export type WorkflowsList<T> = Readonly<{ available: boolean; items: readonly T[] }>;
@@ -26,6 +26,16 @@ export function createWorkflowsHub(api: WorkflowsApi, epoch: string) {
       try {
         const reply = await api.runs({ expectedEpoch: epoch }, { signal, timeoutMilliseconds: 15_000 });
         return reply.status === "ok" ? { available: true, items: reply.runs } : reply.status === "unavailable" ? { available: false, items: [] } : null;
+      } catch { return null; }
+    },
+    /**
+     * A run for its tab: its records, its script, its result and its graph as Mermaid. `gone` for a run the host no longer
+     * keeps; null when the request failed.
+     */
+    async runDetail(runId: string, signal?: AbortSignal): Promise<WorkflowRunDetailResponse | "gone" | null> {
+      try {
+        const reply = await api.runDetail({ expectedEpoch: epoch, runId }, { signal, timeoutMilliseconds: 30_000 });
+        return reply.status === "ok" ? reply : reply.status === "not_found" ? "gone" : null;
       } catch { return null; }
     },
     /** Starts a script in a new session of a project. The answer comes once the session exists. */

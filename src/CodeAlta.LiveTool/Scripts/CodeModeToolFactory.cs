@@ -43,6 +43,12 @@ public sealed record CodeModeToolOptions
     /// a space does not have is neither found nor run there.
     /// </summary>
     public Func<string, CancellationToken, Task<SpaceFilter?>>? SpaceOf { get; init; }
+
+    /// <summary>
+    /// Gets where <c>store(key, value)</c> keeps the values of a session for its later scripts, or null for a host that keeps
+    /// none (<c>altacli</c>): they then last as long as the run.
+    /// </summary>
+    public CodeModeValueStore? Values { get; init; }
 }
 
 /// <summary>
@@ -82,6 +88,7 @@ public static class CodeModeToolFactory
         - `ask(question, { choices, default })` asks the user and resolves with the answer; it throws an `AskError` (code `cancelled` or `unavailable`, as in an automation).
         - `sleep(duration)` waits (milliseconds, or "30s", "5m", "2h", "1d"; 7 days at most): a run CodeAlta ended during goes on by itself when it wakes.
         - `step(id, fn)` groups the calls of one part of the work; `log(...)`, `console.log(...)` and `text(...)` write output; `args` holds the arguments of the run.
+        - `store(key, value)` keeps a JSON value for the later scripts of this session, and `load(key)` reads it back (undefined when there is none).
 
         Calls run at the same time under `Promise.all`; tools that change files run one at a time. Await every call whose result matters: calls still pending when the script returns are cancelled. A failed call throws an error you can catch, and the calls made before a failure are not undone.
 
@@ -273,7 +280,7 @@ public static class CodeModeToolFactory
         var tools = invocation.Tools is { } invoker ? new ToolScriptBinding(invoker, ["alta", ExecToolName, WaitToolName]) : null;
         CodeModeApi? api = null;
         api = new CodeModeApi([.. alta.Functions, .. tools?.Functions ?? [], .. CodeModeDiscovery.Functions,
-            .. options.Agents is null ? [] : CodeModeAgentBinding.Functions, CodeModeAskBinding.Function]);
+            .. options.Agents is null ? [] : CodeModeAgentBinding.Functions, CodeModeAskBinding.Function, .. CodeModeValueBinding.Functions]);
         // The scripts of the library the run sees: those of its project, and of yours and the samples those its space has.
         var spaces = options.Library is null ? null
             : caller.Spaces ?? (options.SpaceOf is { } spaceOf ? await spaceOf(sessionId, cancellationToken).ConfigureAwait(false) : null);
@@ -296,10 +303,12 @@ public static class CodeModeToolFactory
             {
                 // The observer of a run is its handle: the sessions it starts know its id.
                 var agents = options.Agents is { } sessions ? new CodeModeAgentBinding(sessions, sessionId, () => ((CodeModeRunHandle)observer).Id, execOptions.BudgetTokens) : null;
+                var values = new CodeModeValueBinding(options.Values, sessionId);
                 var handler = new CodeModeCallRouter(
                 [
                     .. agents is null ? [] : CodeModeAgentBinding.Paths.Select(path => (path, (ICodeModeCallHandler)agents)),
                     (CodeModeAskBinding.Path, new CodeModeAskBinding(options.Questions, sessionId, () => ((CodeModeRunHandle)observer).Id)),
+                    .. CodeModeValueBinding.Paths.Select(path => (path, (ICodeModeCallHandler)values)),
                     (AltaScriptBinding.Namespace, new AltaScriptCallHandler(dispatcher, alta, identity, cwd)),
                     (ToolScriptBinding.ToolsNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),
                     (ToolScriptBinding.McpNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),

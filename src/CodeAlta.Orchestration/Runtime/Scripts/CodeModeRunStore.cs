@@ -80,7 +80,9 @@ public sealed record CodeModeStoredRun(string Id, string SessionId)
 /// <summary>
 /// The durable record of the runs of scripts, for a resume after a restart and the reruns over recorded results: under
 /// <c>codemode/runs/&lt;run-id&gt;/</c> of the state root, <c>run.json</c>, <c>source.js</c>, <c>steps.jsonl</c> (one line per
-/// step that ended, with its result) and <c>calls.jsonl</c> (the start and the end of each call that is not idempotent).
+/// step that ended, with its result), <c>calls.jsonl</c> (the start and the end of each call that is not idempotent) and
+/// <c>result.txt</c> (what its session was given when it ended). It is also the index of the runs: listing them reads
+/// only their <c>run.json</c>, never a journal.
 /// A run writes as it goes, in order, off the thread of its script. The store keeps the 100 most recent runs that ended,
 /// for 14 days at most, and a run that waits to resume by itself after a sleep until it did. A host whose state is thrown
 /// away (<c>altacli</c>) keeps none.
@@ -92,6 +94,7 @@ public sealed class CodeModeRunStore
     private const string StepsFile = "steps.jsonl";
     private const string CallsFile = "calls.jsonl";
     private const string SleepsFile = "sleeps.jsonl";
+    private const string ResultFile = "result.txt";
     private const int MaxArgumentCharacters = 160;
 
     private readonly int _maxEndedRuns;
@@ -171,6 +174,49 @@ public sealed class CodeModeRunStore
                 Sleeps = ReadSleeps(Path.Combine(folder, SleepsFile), out var sleepingUntil),
                 SleepingUntil = sleepingUntil,
             };
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Lists the runs the store keeps, the most recent first, from their <c>run.json</c> alone.</summary>
+    /// <returns>The runs, without their source and their steps.</returns>
+    public IReadOnlyList<CodeModeStoredRun> List()
+    {
+        var runs = new List<CodeModeStoredRun>();
+        foreach (var folder in Folders())
+        {
+            try
+            {
+                if (ReadInfo(folder) is { } info)
+                {
+                    runs.Add(info);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return [.. runs.OrderByDescending(static run => run.StartedAt)];
+    }
+
+    /// <summary>Reads what the session of a run was given when the run ended.</summary>
+    /// <param name="runId">The id of the run.</param>
+    /// <returns>The text, or null for a run that has not ended, is unknown, or ended before the store kept results.</returns>
+    public string? TryReadResult(string runId)
+    {
+        if (!IsRunId(runId))
+        {
+            return null;
+        }
+
+        var path = Path.Combine(Root, runId, ResultFile);
+        try
+        {
+            return File.Exists(path) ? File.ReadAllText(path) : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -669,13 +715,21 @@ public sealed class CodeModeRunStore
         }
 
         // The end of the run, then the runs past the retention go: a task that completes once both are written.
-        public Task EndAsync(string status)
+        public Task EndAsync(string status) => EndAsync(status, null);
+
+        // The end of the run with what its session was given, then the runs past the retention go.
+        public Task EndAsync(string status, string? result)
         {
             Enqueue(() =>
             {
                 _info = _info with { EndedAt = _store._time.GetUtcNow(), Status = status };
                 if (Directory.Exists(_folder))
                 {
+                    if (result is not null)
+                    {
+                        File.WriteAllText(Path.Combine(_folder, ResultFile), result);
+                    }
+
                     WriteInfo(_folder, _info);
                 }
 

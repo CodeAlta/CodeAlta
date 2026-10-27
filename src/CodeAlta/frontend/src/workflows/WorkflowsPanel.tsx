@@ -55,7 +55,7 @@ function RunMark({ state }: { state: string }) {
 }
 
 function RunList({ runs, sessions, now, onOpen }: {
-  runs: readonly WorkflowRunItem[]; sessions: ReadonlyMap<string, WorkspaceSession>; now: number; onOpen: (sessionId: string) => void;
+  runs: readonly WorkflowRunItem[]; sessions: ReadonlyMap<string, WorkspaceSession>; now: number; onOpen: (run: WorkflowRunItem) => void;
 }) {
   const { t, locale } = useShellLanguage();
   if (runs.length === 0) return <p className="automation-empty">{t("No run yet.")}</p>;
@@ -66,7 +66,7 @@ function RunList({ runs, sessions, now, onOpen }: {
       const facts = [session?.title ?? null, t(runStateLabel(run.state)), formatDuration(runDuration(run, now)),
         run.calls === 1 ? t("1 call") : run.calls > 1 ? t("{count} calls", { count: run.calls }) : null].filter(Boolean).join(" · ");
       return <li key={run.id} data-tone={runTone(run.state)}>
-        <button type="button" className="automation-run" title={t("Open the session")} onClick={() => onOpen(run.sessionId)}>
+        <button type="button" className="automation-run" title={t("Open run")} onClick={() => onOpen(run)}>
           <RunMark state={run.state} />
           <span className="automation-run-text"><strong>{run.title ?? run.id}</strong><span>{facts}</span></span>
           <time dateTime={when.dateTime} title={when.title}>{when.label}</time>
@@ -111,7 +111,7 @@ function useNow(visible: boolean, running: boolean) {
  * The Workflows tab: the scripts of the library a project sees, with their steps drawn small and Run…, and the runs of
  * scripts of CodeAlta, running first, each opening its session.
  */
-export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visible, onActivate, onOpenSession }: {
+export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visible, onActivate, onOpenSession, onOpenRun }: {
   api: WorkflowsApi;
   /** The epoch of the host of the window; null in a window without a host of its own, undefined while it is not known. */
   epoch: string | null | undefined;
@@ -123,6 +123,8 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
   visible: boolean;
   onActivate: () => void;
   onOpenSession: (sessionId: string) => void;
+  /** Opens the tab of a run; without it, a run opens its session. */
+  onOpenRun?: (run: Readonly<{ runId: string; title: string | null }>) => void;
 }) {
   const { t } = useShellLanguage();
   const hub = useMemo(() => epoch ? createWorkflowsHub(api, epoch) : null, [api, epoch]);
@@ -170,7 +172,8 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
       <aside className="automations-side">
         <section className="automation-detail" aria-label={t("Runs")}>
           <h4>{t("Runs")}</h4>
-          {runs === null ? <p className="automation-empty"><ActivitySpinner size={13} /></p> : <RunList runs={ordered} sessions={byId} now={now} onOpen={onOpenSession} />}
+          {runs === null ? <p className="automation-empty"><ActivitySpinner size={13} /></p> : <RunList runs={ordered} sessions={byId} now={now}
+            onOpen={run => onOpenRun ? onOpenRun({ runId: run.id, title: run.title }) : onOpenSession(run.sessionId)} />}
         </section>
       </aside>
     </div>

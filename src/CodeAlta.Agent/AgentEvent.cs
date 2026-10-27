@@ -627,6 +627,24 @@ public enum AgentWorkflowEventKind
 
     /// <summary>The run no longer waits for the user: the question was answered, dismissed or withdrawn.</summary>
     WaitEnded,
+
+    /// <summary>
+    /// A script of the run declares its steps (<c>meta.steps</c>): <see cref="AgentWorkflowEvent.Steps"/>, which its graph
+    /// draws before they run. <see cref="AgentWorkflowEvent.Title"/> is the title of the script.
+    /// </summary>
+    StepsDeclared,
+}
+
+/// <summary>A step a script declares in its <c>meta</c>, for the graph of its run.</summary>
+/// <param name="Id">The id that <c>step()</c> names.</param>
+/// <param name="Title">The title of its box.</param>
+public sealed record AgentWorkflowStep(string Id, string Title)
+{
+    /// <summary>Gets the steps it runs after: null for the step declared before it, empty for the start.</summary>
+    public IReadOnlyList<string>? After { get; init; }
+
+    /// <summary>Gets whether the step fans out: one instance per item at run time.</summary>
+    public bool Each { get; init; }
 }
 
 /// <summary>
@@ -692,6 +710,9 @@ public sealed record AgentWorkflowEvent(
     /// <c>sleep</c>), and for the end of an interrupted run that resumes by itself then.
     /// </summary>
     public DateTimeOffset? WakeAt { get; init; }
+
+    /// <summary>Gets the steps a script declares, for <see cref="AgentWorkflowEventKind.StepsDeclared"/>.</summary>
+    public IReadOnlyList<AgentWorkflowStep>? Steps { get; init; }
 }
 
 /// <summary>
