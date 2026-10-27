@@ -390,6 +390,12 @@ internal sealed partial class CodeModeRun
             return CodeModeCallResult.Failure(new CodeModeCallError(error.Name, $"{source.Name}{where}: {error.Message}") { Code = "codemode.workflowFailed" });
         }
 
+        // A library script says its parameters (meta.params): its arguments are checked before it runs.
+        if (source.Descriptor?.ParametersSchemaJson is { } parameters && CheckArguments(parameters, argumentsJson) is { } invalid)
+        {
+            return CodeModeCallResult.Failure(new CodeModeCallError("TypeError", $"workflow(\"{name ?? source.Name}\", args): {invalid}") { Code = "codemode.workflowArguments" });
+        }
+
         var nested = new CodeModeRun(_api, _cache, source, _handler, _options with { ArgumentsJson = argumentsJson, Depth = _options.Depth + 1 }, _observer);
         var result = await nested.ExecuteAsync(cancellationToken).ConfigureAwait(false);
         foreach (var entry in result.Output)
@@ -405,6 +411,54 @@ internal sealed partial class CodeModeRun
         var failure = result.Error!;
         var line = failure.Location is { } at ? $" (line {at.Line})" : string.Empty;
         return CodeModeCallResult.Failure(new CodeModeCallError(failure.Name, $"{source.Name}{line}: {failure.Message}") { Code = "codemode.workflowFailed" });
+    }
+
+    // The arguments of a script against the schema of its parameters: missing ones, unknown ones (with the nearest
+    // name), and values of the wrong type. Null when they fit.
+    internal static string? CheckArguments(string parametersSchemaJson, string argumentsJson)
+    {
+        using var schema = JsonDocument.Parse(parametersSchemaJson);
+        using var arguments = JsonDocument.Parse(argumentsJson);
+        var root = schema.RootElement;
+        var properties = root.TryGetProperty("properties", out var declared) && declared.ValueKind == JsonValueKind.Object ? declared : default;
+        if (root.TryGetProperty("required", out var required) && required.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var name in required.EnumerateArray())
+            {
+                if (name.ValueKind == JsonValueKind.String && !arguments.RootElement.TryGetProperty(name.GetString()!, out _))
+                {
+                    return $"the argument `{name.GetString()}` is missing.";
+                }
+            }
+        }
+
+        foreach (var argument in arguments.RootElement.EnumerateObject())
+        {
+            if (properties.ValueKind != JsonValueKind.Object || !properties.TryGetProperty(argument.Name, out var parameter))
+            {
+                var known = properties.ValueKind == JsonValueKind.Object ? properties.EnumerateObject().Select(static property => property.Name).ToArray() : [];
+                return known.Length == 0 ? $"the script takes no argument `{argument.Name}`."
+                    : $"the script takes no argument `{argument.Name}`: it takes {string.Join(", ", known.Select(static name => $"`{name}`"))}.";
+            }
+
+            if (parameter.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && !Fits(type.GetString()!, argument.Value))
+            {
+                return $"the argument `{argument.Name}` must be {type.GetString()}, not {argument.Value.ValueKind.ToString().ToLowerInvariant()}.";
+            }
+        }
+
+        return null;
+
+        static bool Fits(string type, JsonElement value) => type switch
+        {
+            "string" => value.ValueKind == JsonValueKind.String,
+            "number" => value.ValueKind == JsonValueKind.Number,
+            "integer" => value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out _),
+            "boolean" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+            "array" => value.ValueKind == JsonValueKind.Array,
+            "object" => value.ValueKind == JsonValueKind.Object,
+            _ => true,
+        };
     }
 
     private JsValue Output(JsValue self, JsValue[] arguments)

@@ -40,7 +40,7 @@ A script is the body of an async function: it uses `await` and `return`, in plai
 | `agent(prompt, { tier, model, title, schema })` | Start a session of its own for a part of the work, and get its final answer, or the JSON value it answered with `schema`. It is a sub-agent of the session, which you can open; 8 run at once, 50 per script |
 | `session({ tier, title })` | Keep a session for several prompts: `run(prompt)` sends one, `close()` ends it |
 | `parallel(functions, { limit })`, `pipeline(items, ...stages)` | Run work at once: a failure is `null`, and a warning in the output |
-| `workflow({ scriptPath }, args)` | Run a script file, read with the session's own `read_file` |
+| `workflow("name", args)`, `workflow({ scriptPath }, args)` | Run a [script of the library](#scripts-of-the-library), or a script file read with the session's own `read_file` |
 
 A call has the permissions of the session: a tool turned off is missing, a command that needs your approval asks, and a [sandboxed session](sandbox.md) runs its calls in its sandbox. Commands that wait for your answer, such as `alta ask`, are not available to scripts.
 
@@ -68,6 +68,37 @@ A script shows as one card: `exec`, its title (the `title` of its first line), i
 Another session, or you from a terminal, reads a run with `alta workflow list`, `alta workflow show <run-id>` (its steps and the sessions it started) and `alta workflow result <run-id>`, and stops it with `alta workflow cancel <run-id>`.
 
 The source of each script is kept in the scratchpad of the session, and its result says where. An agent fixes a long script by editing that file and running it again with `workflow({ scriptPath })`.
+
+## Scripts of the library
+
+A script worth keeping goes in the library, where any session runs it by its name with `workflow("name", args)`:
+
+- your scripts, in `~/.alta/scripts/<name>.js`;
+- the scripts of a project, in `.alta/scripts/<name>.js`, committed with it. A project script wins over yours of the same name.
+
+A library script starts by describing itself. Its `params` are checked before it runs: a missing argument, an unknown one or one of the wrong type stops the call with a message that says which.
+
+```js
+export const meta = {
+  name: "count-lines",
+  description: "Counts the lines of files.",
+  params: { files: { type: "array", description: "The paths" } },
+};
+const read = await Promise.all(args.files.map(path => tools.read_file({ path })));
+return read.map((r, i) => ({ file: args.files[i], lines: r.content.split("\n").length }));
+```
+
+Agents manage the library with `alta script`:
+
+| Command | What it does |
+| --- | --- |
+| `alta script list`, `alta script show <name>` | List the scripts, read one (`--declarations` for how to call it) |
+| `alta script edit <name>` | Copy a script into the scratchpad of the session, where the agent changes it with its file tools |
+| `alta script check <name-or-path>` | Check that a script parses and describes itself |
+| `alta script save <name> --from <path>` | Publish a script, in the project (`--scope global` for yours). With the `--hash` that `edit` gave, a save is refused when the library copy changed since |
+| `alta script delete <name>` | Delete a script |
+
+A [sandboxed session](sandbox.md) reads the library but does not save in it.
 
 ## Limits
 

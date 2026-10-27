@@ -24,6 +24,7 @@ public sealed record AltaCommandRegistryOptions
         "sandbox",
         "job",
         "workflow",
+        "script",
         "skill",
         "skills",
         "skills_activate",

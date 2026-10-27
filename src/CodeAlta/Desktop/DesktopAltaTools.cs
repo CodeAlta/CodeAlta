@@ -73,7 +73,7 @@ internal static class DesktopAltaTools
         ArgumentNullException.ThrowIfNull(reminders);
         // The tools of Code Mode, for the sessions of the window and those that alta commands create.
         var codeMode = CodeModeSessionTools.FromSettings(host.CodeModeRuns, host.CatalogOptions, host.RuntimeService.ScratchpadRoot,
-            new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents));
+            new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents), host.CodeModeScripts);
         var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search,
             reviews, reviewPolicy, windows, codeMode);
         pluginAlta?.SetDispatcher(dispatcher);
@@ -122,6 +122,7 @@ internal static class DesktopAltaTools
             .Add(host.PluginRuntime)
             // The runs of the scripts of Code Mode, for `alta workflow`.
             .Add(host.CodeModeRuns)
+            .Add(host.CodeModeScripts)
             // The bridge of the sends of the host: a send through `alta session send` gives the plugins what a send of the window does.
             .AddPluginRuntimeHooks(host.Commands.Plugins ?? new CodeAlta.Orchestration.Runtime.Plugins.PluginOrchestrationBridge(host.PluginRuntime.Adapter, () => host.PluginRuntime.ActivePlugins));
         if (changes is not null) services.Add(changes);

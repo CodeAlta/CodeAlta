@@ -102,6 +102,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("workflow show"),
         Read("workflow result"),
         Disruptive("workflow cancel"),
+        Read("script list"),
+        Read("script show"),
+        Read("script check"),
+        Mutating("script edit"),
+        Mutating("script save"),
+        Disruptive("script delete"),
         Read("skill list", supportsCatalogOnlyContext: true),
         Read("skill show", supportsCatalogOnlyContext: true),
         Mutating("skill activate"),
@@ -151,6 +157,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (context.Invocation.Services.Get<Orchestration.Runtime.Scripts.CodeModeRunRegistry>() is not null)
         {
             yield return CreateWorkflowCommand(context.Invocation);
+        }
+
+        // The library of scripts, in a host that keeps one.
+        if (context.Invocation.Services.Get<Orchestration.Runtime.Scripts.CodeModeScriptLibrary>() is not null)
+        {
+            yield return CreateScriptCommand(context.Invocation);
         }
 
         yield return CreateSkillCommand(context.Invocation);

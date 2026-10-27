@@ -178,6 +178,7 @@ internal sealed class CliHost : IAsyncDisposable
             {
                 Runs = host.CodeModeRuns,
                 Agents = new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents),
+                Library = host.CodeModeScripts,
                 Cache = new CodeAlta.CodeMode.CodeModeScriptCache(),
                 SourceFolder = sessionId => Path.Combine(storage.GlobalRoot, "scratchpad", "codemode", sessionId),
             }, () => codeMode) : null);
@@ -389,6 +390,7 @@ internal sealed class CliHost : IAsyncDisposable
             .Add(host.PluginRuntime)
             // The runs of the scripts of Code Mode, for `alta workflow`.
             .Add(host.CodeModeRuns)
+            .Add(host.CodeModeScripts)
             .AddPluginRuntimeHooks(host.Commands.Plugins ?? new PluginOrchestrationBridge(host.PluginRuntime.Adapter, () => host.PluginRuntime.ActivePlugins));
         var registry = new AltaCommandRegistry(listsSkills ? AltaCommandRegistryOptions.Cli : WithoutSkills(AltaCommandRegistryOptions.Cli));
         var dispatcher = new AltaCommandDispatcher(registry, services);

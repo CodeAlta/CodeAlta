@@ -29,6 +29,9 @@ public sealed record CodeModeToolOptions
 
     /// <summary>Gets the sessions scripts start with <c>agent()</c>, or null for a host whose scripts start none.</summary>
     public ICodeModeAgents? Agents { get; init; }
+
+    /// <summary>Gets the library of scripts that <c>workflow("name")</c> runs, or null for none.</summary>
+    public CodeModeScriptLibrary? Library { get; init; }
 }
 
 /// <summary>
@@ -162,7 +165,7 @@ public static class CodeModeToolFactory
                     (ToolScriptBinding.McpNamespace, (ICodeModeCallHandler?)tools ?? new CodeModeCallRouter([])),
                     (CodeModeDiscovery.Namespace, discovery),
                 ]);
-                return host.RunAsync(source, handler, new CodeModeRunOptions { Limits = limits, ResolveScript = ResolveWith(invocation.Tools) }, observer, runCancellation);
+                return host.RunAsync(source, handler, new CodeModeRunOptions { Limits = limits, ResolveScript = ResolveWith(invocation.Tools, options.Library, cwd) }, observer, runCancellation);
             }, out var refusal);
         if (run is null)
         {
@@ -238,12 +241,19 @@ public static class CodeModeToolFactory
     }
 
     // workflow({ scriptPath }) reads the file with the session's own read_file, so its sandbox and its tools apply.
-    private static Func<CodeModeScriptReference, CancellationToken, ValueTask<CodeModeSource>> ResolveWith(IAgentRunToolInvoker? tools)
+    // workflow("name") runs a script of the library, the project's before the user's.
+    private static Func<CodeModeScriptReference, CancellationToken, ValueTask<CodeModeSource>> ResolveWith(IAgentRunToolInvoker? tools, CodeModeScriptLibrary? library, string? cwd)
         => async (reference, cancellationToken) =>
         {
             if (reference.ScriptPath is not { Length: > 0 } path)
             {
-                throw new InvalidOperationException($"No script library yet: name a script file with workflow({{ scriptPath }}) instead of `{reference.Name}`.");
+                if (library is null)
+                {
+                    throw new InvalidOperationException($"This session has no library of scripts: name a script file with workflow({{ scriptPath }}) instead of `{reference.Name}`.");
+                }
+
+                return library.Find(reference.Name ?? string.Empty, CodeModeScriptLibrary.ProjectRootOf(cwd))?.Source
+                    ?? throw new InvalidOperationException($"No script `{reference.Name}` in the library: alta.script.list({{}}) lists them.");
             }
 
             if (tools is null)

@@ -335,6 +335,40 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task Workflow_RunsAScriptOfTheLibrary_TheProjectsFirst_AndChecksItsArguments()
+    {
+        using var root = TestTempDirectory.Create();
+        var project = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        var library = new CodeModeScriptLibrary(new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") });
+        const string Meta = """export const meta = { name: "review", description: "Reviews.", params: { pr: { type: "integer" } } };""";
+        Assert.IsNull(library.Save("review", CodeModeScriptScope.Global, Meta + "\nreturn `global ${args.pr}`;", null, null).Refusal);
+        Assert.IsNull(library.Save("review", CodeModeScriptScope.Project, Meta + "\nreturn `project ${args.pr}`;", project, null).Refusal);
+        await using var runs = new CodeModeRunRegistry(null);
+        var (exec, _) = Create(project, runs, library: library);
+
+        var result = await InvokeAsync(exec, """
+            const errors = [];
+            for (const args of [{}, { pr: "7" }, { pr: 7, depth: 2 }]) {
+              try { await workflow("review", args); } catch (e) { errors.push(`${e.code}: ${e.message}`); }
+            }
+            try { await workflow("nope"); } catch (e) { errors.push(e.code); }
+            return [await workflow("review", { pr: 7 }), ...errors];
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        using var value = ValueOf(result);
+        CollectionAssert.AreEqual(new[]
+        {
+            "project 7",
+            "codemode.workflowArguments: workflow(\"review\", args): the argument `pr` is missing.",
+            "codemode.workflowArguments: workflow(\"review\", args): the argument `pr` must be integer, not string.",
+            "codemode.workflowArguments: workflow(\"review\", args): the script takes no argument `depth`: it takes `pr`.",
+            "codemode.workflowNotFound",
+        }, value.RootElement.EnumerateArray().Select(static item => item.GetString()).ToArray());
+    }
+
+    [TestMethod]
     public void SessionTools_AddExecAndWait_OnlyWhileCodeModeIsOn()
     {
         using var root = TestTempDirectory.Create();
@@ -372,13 +406,15 @@ public sealed class CodeModeToolTests
         return (new AltaCommandDispatcher(registry, new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root }).Add(registry)), registry);
     }
 
-    private static (AgentToolDefinition Exec, AgentToolDefinition Wait) Create(string root, CodeModeRunRegistry runs, string? sourceFolder = null)
+    private static (AgentToolDefinition Exec, AgentToolDefinition Wait) Create(string root, CodeModeRunRegistry runs, string? sourceFolder = null,
+        CodeModeScriptLibrary? library = null)
     {
         var (dispatcher, _) = Dispatcher(root);
         var tools = CodeModeToolFactory.Create(dispatcher, new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root }, new CodeModeToolOptions
         {
             Runs = runs,
             Cache = new CodeModeScriptCache(),
+            Library = library,
             SourceFolder = sourceFolder is null ? null : _ => sourceFolder,
         });
         return (tools.Single(static tool => tool.Spec.Name == "exec"), tools.Single(static tool => tool.Spec.Name == "wait"));

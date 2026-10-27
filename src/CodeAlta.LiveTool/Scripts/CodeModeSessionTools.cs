@@ -42,6 +42,21 @@ public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<strin
     /// <returns>The tools.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="runs"/> or <paramref name="catalog"/> is null.</exception>
     public static CodeModeSessionTools FromSettings(CodeModeRunRegistry runs, CatalogOptions catalog, string? scratchpadRoot, ICodeModeAgents? agents)
+        => FromSettings(runs, catalog, scratchpadRoot, agents, library: null);
+
+    /// <summary>
+    /// Creates the Code Mode tools of a host that follows the user's file, whose scripts start sessions and run the scripts
+    /// of a library.
+    /// </summary>
+    /// <param name="runs">The runs of the host.</param>
+    /// <param name="catalog">The roots of the host, whose configuration file says the mode.</param>
+    /// <param name="scratchpadRoot">The scratchpad of the host, where the source of each run is kept; null keeps none.</param>
+    /// <param name="agents">The sessions scripts start with <c>agent()</c>, or null.</param>
+    /// <param name="library">The library <c>workflow("name")</c> runs from, or null.</param>
+    /// <returns>The tools.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="runs"/> or <paramref name="catalog"/> is null.</exception>
+    public static CodeModeSessionTools FromSettings(CodeModeRunRegistry runs, CatalogOptions catalog, string? scratchpadRoot, ICodeModeAgents? agents,
+        CodeModeScriptLibrary? library)
     {
         ArgumentNullException.ThrowIfNull(runs);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -49,6 +64,7 @@ public sealed class CodeModeSessionTools(CodeModeToolOptions options, Func<strin
         var options = new CodeModeToolOptions
         {
             Agents = agents,
+            Library = library,
             Runs = runs,
             Cache = new CodeModeScriptCache(),
             SourceFolder = scratchpadRoot is { Length: > 0 } scratchpad ? sessionId => Path.Combine(scratchpad, "codemode", sessionId) : null,

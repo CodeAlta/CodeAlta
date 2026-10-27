@@ -247,6 +247,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     private readonly Lazy<CodeModeAgents> _codeModeAgents;
 
+    /// <summary>Gets the library of the scripts of Code Mode: the user's scripts, and those of the projects.</summary>
+    public Runtime.Scripts.CodeModeScriptLibrary CodeModeScripts => _codeModeScripts ??= new Runtime.Scripts.CodeModeScriptLibrary(CatalogOptions);
+
+    private Runtime.Scripts.CodeModeScriptLibrary? _codeModeScripts;
+
     /// <summary>Gets the sessions the scripts of Code Mode start (<c>agent()</c>).</summary>
     public Runtime.Scripts.ICodeModeAgents CodeModeAgents => _codeModeAgents.Value;
 
