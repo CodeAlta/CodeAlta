@@ -24,6 +24,9 @@ namespace CodeAlta.Orchestration.Hosting;
 /// </remarks>
 public sealed class HeadlessSessionDriver : IAsyncDisposable
 {
+    // The times a run waits for its tree to settle again when the outcome it read says a run is still in flight.
+    private const int SettledRereads = 5;
+
     private readonly CodeAltaHost _host;
     private readonly HeadlessSessionDriverOptions _options;
     private readonly HeadlessPromptAttachmentService _attachments = new();
@@ -319,9 +322,26 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
 
         var runId = sent?.RunId;
         // A run aborted before its send returned has no known run: the events since the prompt are read instead.
-        var outcome = runId is { } run
-            ? await runtime.ReadOutcomeAsync(session.Descriptor, run, CancellationToken.None).ConfigureAwait(false)
-            : await runtime.ReadOutcomeSinceAsync(session.Descriptor, startedAt, CancellationToken.None).ConfigureAwait(false);
+        var outcome = await ReadOutcomeAsync().ConfigureAwait(false);
+        // A turn that starts as the tree is found settled (the answer to the result of a script that ended in the background)
+        // is still running when its outcome is read, and a read that races the journal finds nothing: the run waits for the
+        // tree to settle again and reads again, rather than ending without its answer.
+        for (var again = 0; abortReason is null && again < SettledRereads
+            && (outcome.Status == SessionOutcomeStatus.Running || outcome is { Status: SessionOutcomeStatus.Unknown, EventCount: 0 }); again++)
+        {
+            try
+            {
+                await runtime.WhenSettledAsync(session.SessionId, stop.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                abortReason = timer.IsCancellationRequested ? "timeout" : aborts.Reason ?? "cancelled";
+                await AbortAndWaitAsync(session.SessionId, abortReason, CancellationToken.None).ConfigureAwait(false);
+                aborts.End();
+            }
+
+            outcome = await ReadOutcomeAsync().ConfigureAwait(false);
+        }
         var usage = await ReadTreeUsageAsync(session.SessionId, outcome.Usage, startedAt).ConfigureAwait(false);
         // A send the driver admitted is cancelled by an abort of its tree (CancelAsync) before its run started, or by the host closing.
         abortReason ??= outcome.AbortReason ?? runtime.GetAbortReason(session.SessionId)
@@ -346,6 +366,10 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             SessionOutcomeStatus.Failed => Result(HeadlessRunStatus.Failed, runId, outcome, usage, null, outcome.FailureMessage),
             _ => Result(HeadlessRunStatus.Failed, runId, outcome, usage, null, "The run ended without an answer."),
         };
+
+        Task<SessionOutcome> ReadOutcomeAsync() => runId is { } run
+            ? runtime.ReadOutcomeAsync(session.Descriptor, run, CancellationToken.None)
+            : runtime.ReadOutcomeSinceAsync(session.Descriptor, startedAt, CancellationToken.None);
 
         HeadlessRunResult Result(HeadlessRunStatus status, AgentRunId? run, SessionOutcome? read, SessionUsageTotals? totals, string? reason, string? message)
             => new(status, session.SessionId, run, read?.FinalMessage, reason, read?.FailureKind, message ?? read?.FailureMessage,
