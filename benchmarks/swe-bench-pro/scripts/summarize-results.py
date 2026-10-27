@@ -1,8 +1,9 @@
 """Summarizes a HARD-51 run of run-hard51.ps1 into results/<run-id>-summary.md and .json.
 
 Scores come from the pristine replays (the -regrade jobs). Costs are estimated from the tokens at list prices for every
-run, the same way for all four: those prices reproduce Claude Code's own total_cost_usd and Harbor's Codex cost_usd
+run, the same way for all of them: those prices reproduce Claude Code's own total_cost_usd and Harbor's Codex cost_usd
 exactly. Harbor's reported cost is kept beside it: for Claude Code it misses the segments of a trial that restarted.
+The optional CodeAlta CC / Opus run (CodeAlta driving the Claude Code CLI) has a column when its job exists.
 
 A run made with -Runs (for example only the CodeAlta jobs) is summarized with the jobs it has; --baseline-run-id takes
 the missing jobs from an earlier run of the same jobs root, such as the native harnesses of a reference run.
@@ -28,7 +29,11 @@ RUNS = {
     "Claude Code / Opus": ("claude-code-opus55-xhigh", "claude-code", "opus"),
     "CodeAlta / Astra": ("codealta-astra-xhigh", "codealta", "astra"),
     "Codex / Astra": ("codex-astra-xhigh", "codex", "astra"),
+    "CodeAlta CC / Opus": ("codealta-cc-opus55-xhigh", "codealta", "opus"),
 }
+
+# Runs that are not in the default -Runs of run-hard51.ps1: summarized when they ran, skipped in silence otherwise.
+OPTIONAL_RUNS = {"CodeAlta CC / Opus"}
 
 # Per token: uncached input, cache read, cache write, output (Claude Opus 5.5; GPT-6 Astra under 272k tokens).
 PRICES = {
@@ -133,6 +138,8 @@ for label, (suffix, kind, model) in RUNS.items():
             source_run = candidate
             break
     if source_run is None:
+        if label in OPTIONAL_RUNS:
+            continue
         print(f"skipped {label}: no {run_id}-{suffix} job" + (f" nor {args.baseline_run_id}-{suffix}" if args.baseline_run_id else ""))
         continue
     model_job = jobs / f"{source_run}-{suffix}"
@@ -258,6 +265,7 @@ pairs = {}
 for name, codealta, native in (
     ("Opus", "CodeAlta / Opus", "Claude Code / Opus"),
     ("Astra", "CodeAlta / Astra", "Codex / Astra"),
+    ("Opus, CodeAlta on Claude Code", "CodeAlta CC / Opus", "Claude Code / Opus"),
 ):
     if codealta not in outcomes or native not in outcomes:
         continue
