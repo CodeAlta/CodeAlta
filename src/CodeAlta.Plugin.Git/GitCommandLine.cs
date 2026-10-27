@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using CodeAlta.Agent;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.Git;
 
@@ -121,19 +122,37 @@ internal static class GitCommandLine
     public static async Task<string?> TryReadTokenAsync(string cliName, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken,
         AgentProcessEnvironment? environment = null)
     {
+        // The log says why the requests go without credentials, never what the CLI printed on its output: the token.
+        var log = GitIssueLog.Log;
+        var commandLine = cliName + " " + string.Join(' ', arguments);
         try
         {
             if (GitCliLocator.Find(cliName) is not { } command)
             {
+                log?.Info($"'{cliName}' was not found on the PATH: its credentials are not used.");
                 return null;
             }
 
             var result = await RunAsync(command, arguments, Environment.CurrentDirectory, timeout, cancellationToken, environment).ConfigureAwait(false);
             var token = result.ExitCode == 0 ? result.Stdout.Trim() : string.Empty;
+            if (result.ExitCode != 0)
+            {
+                log?.Info($"'{commandLine}' exited with code {result.ExitCode}: {GitIssueLog.Bound(result.Stderr, 600)}");
+            }
+            else if (string.IsNullOrWhiteSpace(token))
+            {
+                log?.Info($"'{commandLine}' gave no token.");
+            }
+            else
+            {
+                log?.Debug($"Credentials read with '{commandLine}'.");
+            }
+
             return string.IsNullOrWhiteSpace(token) ? null : token;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            log?.Warn(ex, $"'{commandLine}' could not be run.");
             return null;
         }
     }

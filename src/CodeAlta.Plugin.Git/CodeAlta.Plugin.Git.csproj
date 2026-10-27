@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
   </ItemGroup>
 
   <ItemGroup>

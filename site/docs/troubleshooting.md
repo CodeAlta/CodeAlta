@@ -11,6 +11,18 @@ Use `Ctrl+G Ctrl+L` or `/logs`. Logs are the first place to look for provider, c
 - CodeAlta Desktop: `CodeAlta/desktop/logs` in the local application data folder, such as `%LOCALAPPDATA%\CodeAlta\desktop\logs` on Windows;
 - CodeAlta TUI: `~/.alta/logs/`.
 
+In CodeAlta Desktop, filter the logs by feature, and set **Log levels** to **Debug** for the feature that fails to see more of it: see [Logs and recovery](workspace/settings.md#logs-and-recovery).
+
+## An issue tracker shows an error
+
+When the [Issues tab](issues.md) or the `#` picker shows an error, the log says what failed:
+
+1. Open the logs, choose **Issue trackers** in the feature list and **Warnings**.
+2. The message names the service, the request, the status it answered and what it said, such as `401 Unauthorized ... Bad credentials`, or a sign-in page for Azure DevOps. It also says when the requests carried no credentials, and the messages before it say why: `az` or `gh` not found, or the command that failed with its error.
+3. For every request, set **Log levels > Issue trackers** to **Debug** and open the tab again.
+
+The log never holds your tokens. Sign in as the [Issues](issues.md) page says for your service, for example `az login` or `AZURE_DEVOPS_EXT_PAT` for Azure DevOps.
+
 ## The desktop app does not start
 
 When the window of `alta` cannot open, CodeAlta says why and what to do: in the terminal you started it from, in a message box on Windows, or in a notification on Linux and macOS when you started it from the applications menu or the Dock. The log has the full report.

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeAlta.Plugins.Abstractions;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.Jira;
 
@@ -39,10 +40,36 @@ internal sealed partial class JiraClient
 
     internal JiraClient(IJiraCli cli) => _cli = cli;
 
+    /// <summary>The name of the logger of Jira, of the Issue trackers feature of the log.</summary>
+    internal const string LoggerName = "CodeAlta.Issues.Jira";
+
+    // Every run of the CLI is in the log, and what it said when it failed. Never its input: a token is given there.
+    private async Task<JiraCliResult> RunAsync(IReadOnlyList<string> arguments, string? input, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var result = await _cli.RunAsync(arguments, input, timeout, cancellationToken).ConfigureAwait(false);
+        var elapsed = (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        // XenoAtom.Logging throws for a message with values before the log starts, as in a test.
+        var log = LogManager.IsInitialized ? LogManager.GetLogger(LoggerName) : null;
+        var command = Bound("acli " + string.Join(' ', arguments), 400);
+        if (result.Succeeded) log?.Debug($"'{command}' ended in {elapsed} ms.");
+        else log?.Info($"'{command}' exited with code {result.ExitCode} in {elapsed} ms: {Bound(result.Error.Length > 0 ? result.Error : result.Output, 600)}");
+        return result;
+    }
+
+    private static string Bound(string text, int maximum)
+    {
+        var line = WhitespacePattern().Replace(text, " ").Trim();
+        return line.Length <= maximum ? line : string.Concat(line.AsSpan(0, maximum), "…");
+    }
+
+    [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]
+    private static partial Regex WhitespacePattern();
+
     /// <summary>Says who the CLI is signed in as.</summary>
     public async Task<JiraAccount> GetAccountAsync(CancellationToken cancellationToken)
     {
-        var result = await _cli.RunAsync(["jira", "auth", "status"], null, Short, cancellationToken).ConfigureAwait(false);
+        var result = await RunAsync(["jira", "auth", "status"], null, Short, cancellationToken).ConfigureAwait(false);
         var text = result.Output + "\n" + result.Error;
         if (!result.Succeeded || Field(text, "Site") is not { } site) return new(false);
         return new(true, JiraSettings.NormalizeSite(site) ?? site, Field(text, "Email"), Field(text, "Authentication Type"));
@@ -50,26 +77,26 @@ internal sealed partial class JiraClient
 
     /// <summary>Makes the account of a site the one the CLI uses, when it has one.</summary>
     public async Task<bool> SwitchAsync(string site, CancellationToken cancellationToken)
-        => (await _cli.RunAsync(["jira", "auth", "switch", "--site", site], null, Short, cancellationToken).ConfigureAwait(false)).Succeeded;
+        => (await RunAsync(["jira", "auth", "switch", "--site", site], null, Short, cancellationToken).ConfigureAwait(false)).Succeeded;
 
     /// <summary>Signs in with an API token, which the CLI reads from its standard input.</summary>
     public async Task<string?> SignInWithTokenAsync(string site, string email, string token, CancellationToken cancellationToken)
     {
-        var result = await _cli.RunAsync(["jira", "auth", "login", "--site", site, "--email", email, "--token"], token + "\n", Long, cancellationToken).ConfigureAwait(false);
+        var result = await RunAsync(["jira", "auth", "login", "--site", site, "--email", email, "--token"], token + "\n", Long, cancellationToken).ConfigureAwait(false);
         return result.Succeeded ? null : result.Message is { Length: > 0 } message ? message : "Jira refused the API token.";
     }
 
     /// <summary>Signs in through the browser: the CLI opens the page of Atlassian and waits for the user there.</summary>
     public async Task<string?> SignInWithBrowserAsync(TimeSpan patience, CancellationToken cancellationToken)
     {
-        var result = await _cli.RunAsync(["jira", "auth", "login", "--web"], null, patience, cancellationToken).ConfigureAwait(false);
+        var result = await RunAsync(["jira", "auth", "login", "--web"], null, patience, cancellationToken).ConfigureAwait(false);
         return result.Succeeded ? null : result.ExitCode == -1 ? "The sign-in was not finished in the browser." : result.Message is { Length: > 0 } message ? message : "The sign-in did not complete.";
     }
 
     /// <summary>Lists the issues a query finds, in the order of the query.</summary>
     public async Task<JiraResult<IReadOnlyList<TrackedItem>>> SearchAsync(JiraSettings settings, string jql, int limit, CancellationToken cancellationToken)
     {
-        var result = await _cli.RunAsync(["jira", "workitem", "search", "--jql", jql, "--fields", ListFields, "--limit", limit.ToString(CultureInfo.InvariantCulture), "--json"],
+        var result = await RunAsync(["jira", "workitem", "search", "--jql", jql, "--fields", ListFields, "--limit", limit.ToString(CultureInfo.InvariantCulture), "--json"],
             null, Long, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return Failure<IReadOnlyList<TrackedItem>>(result);
         try
@@ -115,7 +142,7 @@ internal sealed partial class JiraClient
     /// <summary>Reads one issue with its description and its comments.</summary>
     public async Task<JiraResult<TrackedItemDetail>> ViewAsync(JiraSettings settings, string key, CancellationToken cancellationToken)
     {
-        var result = await _cli.RunAsync(["jira", "workitem", "view", key, "--fields", ViewFields, "--json"], null, Long, cancellationToken).ConfigureAwait(false);
+        var result = await RunAsync(["jira", "workitem", "view", key, "--fields", ViewFields, "--json"], null, Long, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return Failure<TrackedItemDetail>(result);
         try
         {
@@ -151,7 +178,7 @@ internal sealed partial class JiraClient
         var arguments = new List<string> { "jira", "workitem", "create", "--project", project, "--type", type, "--summary", summary, "--json" };
         if (!string.IsNullOrWhiteSpace(description)) arguments.AddRange(["--description", description]);
         if (labels.Count > 0) arguments.AddRange(["--label", string.Join(',', labels)]);
-        var result = await _cli.RunAsync(arguments, null, Long, cancellationToken).ConfigureAwait(false);
+        var result = await RunAsync(arguments, null, Long, cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded) return Failure<string>(result);
         try
         {
@@ -166,15 +193,15 @@ internal sealed partial class JiraClient
 
     /// <summary>Adds a comment to an issue.</summary>
     public async Task<string?> CommentAsync(string key, string body, CancellationToken cancellationToken)
-        => Problem(await _cli.RunAsync(["jira", "workitem", "comment", "create", "--key", key, "--body", body], null, Long, cancellationToken).ConfigureAwait(false));
+        => Problem(await RunAsync(["jira", "workitem", "comment", "create", "--key", key, "--body", body], null, Long, cancellationToken).ConfigureAwait(false));
 
     /// <summary>Moves an issue to a status of its workflow.</summary>
     public async Task<string?> TransitionAsync(string key, string status, CancellationToken cancellationToken)
-        => Problem(await _cli.RunAsync(["jira", "workitem", "transition", "--key", key, "--status", status, "--yes"], null, Long, cancellationToken).ConfigureAwait(false));
+        => Problem(await RunAsync(["jira", "workitem", "transition", "--key", key, "--status", status, "--yes"], null, Long, cancellationToken).ConfigureAwait(false));
 
     /// <summary>Assigns an issue: an email, an account id, or <c>@me</c>.</summary>
     public async Task<string?> AssignAsync(string key, string assignee, CancellationToken cancellationToken)
-        => Problem(await _cli.RunAsync(["jira", "workitem", "assign", "--key", key, "--assignee", assignee], null, Long, cancellationToken).ConfigureAwait(false));
+        => Problem(await RunAsync(["jira", "workitem", "assign", "--key", key, "--assignee", assignee], null, Long, cancellationToken).ConfigureAwait(false));
 
     /// <summary>Writes a text between the quotes of a JQL query.</summary>
     internal static string Quote(string text) => "\"" + text.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";

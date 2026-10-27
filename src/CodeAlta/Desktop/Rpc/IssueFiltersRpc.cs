@@ -58,6 +58,7 @@ internal sealed partial class IssuesService
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             var problem = $"{GitIssuesService.Clean(tracker.DisplayName, MaximumName)} did not give its filters.";
+            LogFailure(tracker, problem, exception);
             // The view is still named: the tab shows the one it lists by, even without its filters.
             return new("ok", [], [])
             {
@@ -86,6 +87,7 @@ internal sealed partial class IssuesService
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            LogFailure(tracker, "the fields of its issues could not be read.", exception);
             return new("failed", []);
         }
     }

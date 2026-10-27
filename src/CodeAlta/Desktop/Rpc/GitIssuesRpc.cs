@@ -3,6 +3,7 @@ using System.Text;
 using CodeAlta.Catalog;
 using CodeAlta.Plugin.Git;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Rpc;
 
@@ -133,23 +134,31 @@ internal sealed class GitIssuesService : IDisposable
             // The pull requests are found beside the issues: a provider that refuses them still shows its issues.
             IReadOnlyList<GitIssueReferenceItem> pulls = [];
             try { pulls = await lookup.QueryPullRequestsAsync(repository, request.Query, limit, cancellationToken).ConfigureAwait(false); }
-            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                Log?.Warn(exception, $"{repository.Provider.GetDisplayName()} {repository.FullName}: the pull requests of a # lookup could not be read.");
+            }
             var issues = Entries(Merge(result.Issues, pulls), repository.Host, limit);
             // Matches found beside a refused request (a rate-limited search) are still worth showing.
-            return issues.Count == 0 && result.FailureStatusCode is { } refusal
-                ? Refused("failed", repositoryName, string.Create(CultureInfo.InvariantCulture, $"{repository.Provider.GetDisplayName()} answered the request with HTTP {(int)refusal}."))
-                : new("ok", _epoch, provider, repositoryName, issues, null);
+            if (issues.Count > 0 || result.FailureStatusCode is not { } refusal) return new("ok", _epoch, provider, repositoryName, issues, null);
+            var problem = string.Create(CultureInfo.InvariantCulture, $"{repository.Provider.GetDisplayName()} answered the request with HTTP {(int)refusal}.");
+            Log?.Warn($"{repository.Provider.GetDisplayName()} {repository.FullName}: a # lookup shows: {problem} The requests are in the log at the Debug level of the issue trackers.");
+            return Refused("failed", repositoryName, problem);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            // Never serialize exception text: it can name local paths, hosts or request headers.
+            // Never serialize exception text to the page: it can name local paths, hosts or request headers. The log has it.
+            Log?.Warn(exception, $"A # lookup of {repositoryName ?? "the repository of a project"} failed.");
             return Refused("failed", repositoryName, "The repository host could not be reached or returned an unexpected answer.");
         }
     }
+
+    // XenoAtom.Logging throws for a message with values before the log starts, as in a test: nothing is logged then.
+    private static Logger? Log => LogManager.IsInitialized ? LogManager.GetLogger(IssuesService.LoggerName) : null;
 
     /// <inheritdoc />
     public void Dispose() => _client.Dispose();

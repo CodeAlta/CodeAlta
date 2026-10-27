@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.Git;
 
@@ -153,6 +154,7 @@ public sealed class GitIssueLookup
             {
                 if (ReadEnvironment(environment, "AZURE_DEVOPS_EXT_PAT") is { } personalAccessToken)
                 {
+                    GitIssueLog.Log?.Debug("Azure DevOps: the personal access token of AZURE_DEVOPS_EXT_PAT is used.");
                     return GitRemoteCredential.Basic(string.Empty, personalAccessToken);
                 }
 

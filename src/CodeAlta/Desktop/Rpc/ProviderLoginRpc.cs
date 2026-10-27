@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using CodeAlta.Catalog;
 using CodeAlta.Hosting;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Rpc;
 
@@ -77,6 +78,7 @@ internal sealed class ProviderLoginService
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            Log?.Warn(exception, $"The sign-in of the provider {key ?? ""} could not be read.");
             return new("read_failed", key, true, modes, false, null, null, null);
         }
     }
@@ -108,9 +110,13 @@ internal sealed class ProviderLoginService
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            Log?.Warn(exception, $"The provider {key ?? ""} could not be signed out.");
             return new("logout_failed", key, false);
         }
     }
+
+    // XenoAtom.Logging throws for a message with values before the log starts, as in a test: nothing is logged then.
+    private static Logger? Log => LogManager.IsInitialized ? LogManager.GetLogger("CodeAlta.Provider.Login") : null;
 
     /// <summary>Cancels a running sign-in, refuses new ones and waits for the canceled one to end.</summary>
     internal async Task CloseAsync()

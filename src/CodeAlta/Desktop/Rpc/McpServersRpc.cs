@@ -4,6 +4,7 @@ using System.Threading.Channels;
 using CodeAlta.Catalog;
 using CodeAlta.Plugin.Mcp;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Rpc;
 
@@ -128,6 +129,7 @@ internal sealed class McpServersService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            Log?.Warn(exception, "The MCP servers could not be read.");
             return Failed("read_failed"); // Never serialize exceptions, file paths or parser diagnostics.
         }
         finally
@@ -198,6 +200,7 @@ internal sealed class McpServersService
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                Log?.Warn(exception, $"The MCP server {key} is saved, but whether it is on could not be written.");
                 return new("policy_failed", null); // The definition is saved; only its enablement was not written.
             }
         }
@@ -211,6 +214,7 @@ internal sealed class McpServersService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            Log?.Warn(exception, "An MCP server could not be saved.");
             return new("write_failed", null);
         }
         finally
@@ -429,6 +433,9 @@ internal sealed class McpServersService
     }
 
     // The address a status message ends with, when it is an absolute http or https one.
+    // XenoAtom.Logging throws for a message with values before the log starts, as in a test: nothing is logged then.
+    private static Logger? Log => LogManager.IsInitialized ? LogManager.GetLogger("CodeAlta.Desktop.Mcp") : null;
+
     private static string? AuthorizationAddress(string? message)
     {
         if (string.IsNullOrWhiteSpace(message)) return null;
@@ -478,6 +485,7 @@ internal sealed class McpServersService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            Log?.Warn(exception, "An MCP server could not be saved.");
             return new("write_failed", null);
         }
         finally
@@ -685,6 +693,8 @@ internal static class SettingsProjectScope
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            // Shared by the pages of Settings: the page says the project could not be read, the log why.
+            if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Desktop").Warn(exception, "The project of a Settings page could not be read.");
             return ("read_failed", null);
         }
 
