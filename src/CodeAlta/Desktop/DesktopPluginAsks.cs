@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Runtime;
@@ -8,11 +9,24 @@ namespace CodeAlta.Desktop;
 /// <summary>
 /// The asks the plugins of the window read and answer for the user, as the window does: through the same service, so that
 /// the answer of a review request carries the round of the user's comments. Until the host is attached (while the plugins
-/// start), no session waits.
+/// start), no session waits. Only the built-in Mobile plugin gets them (<see cref="ForPlugin"/>): an answer is the user's, and
+/// a plugin of a folder can be written by an agent.
 /// </summary>
-internal sealed class DesktopPluginAsks : IPluginAskService
+internal sealed class DesktopPluginAsks : IPluginAskRuntimeService
 {
+    /// <summary>The runtime key of the plugin that answers asks: the built-in Mobile plugin, for the page of the phones.</summary>
+    internal const string MobileRuntimeKey = "builtin:mobile";
+
     private Attached? _attached;
+    // The answers and cancels on their way, by action id: one sent again before the first has its outcome waits for it.
+    private readonly ConcurrentDictionary<Guid, Flight> _flights = new();
+
+    /// <inheritdoc />
+    public IPluginAskService ForPlugin(string pluginRuntimeKey, bool builtIn)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginRuntimeKey);
+        return builtIn && pluginRuntimeKey == MobileRuntimeKey ? this : NoopPluginAskService.Instance;
+    }
 
     /// <summary>Gives the asks of the host once it runs.</summary>
     /// <param name="owner">The owner of the asks.</param>
@@ -30,8 +44,12 @@ internal sealed class DesktopPluginAsks : IPluginAskService
     public bool HasAsks => Volatile.Read(ref _attached) is { Owner.Enabled: true };
 
     /// <inheritdoc />
-    public ValueTask<IReadOnlyList<string>> ListAskingSessionsAsync(CancellationToken cancellationToken = default)
-        => ValueTask.FromResult(Volatile.Read(ref _attached) is { Owner.Enabled: true } attached ? attached.Owner.ListWaitingSessions() : (IReadOnlyList<string>)[]);
+    public ValueTask<IReadOnlyList<PluginAskSummary>> ListAskingAsync(CancellationToken cancellationToken = default)
+    {
+        if (Volatile.Read(ref _attached) is not { Owner.Enabled: true } attached) return ValueTask.FromResult<IReadOnlyList<PluginAskSummary>>([]);
+        return ValueTask.FromResult<IReadOnlyList<PluginAskSummary>>([.. attached.Owner.ListWaiting().Select(static head => new PluginAskSummary(
+            head.Handle.SessionId, head.Handle.AskId, head.Handle.ResponseGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture), State(head.State), head.Immediate))]);
+    }
 
     /// <inheritdoc />
     public async ValueTask<PluginAsk?> GetPendingAsync(string sessionId, CancellationToken cancellationToken = default)
@@ -69,9 +87,40 @@ internal sealed class DesktopPluginAsks : IPluginAskService
         return ActAsync(ask, [], null, true, cancellationToken);
     }
 
+    // One sent again while the first goes waits for the outcome of the first, and is never sent twice: the answer of a
+    // review request would otherwise record its round again. Another answer or cancel with the same id is a conflict.
+    private async ValueTask<PluginAskOutcome> ActAsync(PluginAskReference ask, IReadOnlyList<AltaAskAnswer> answers, SessionAskReview? review,
+        bool cancel, CancellationToken cancellationToken)
+    {
+        var flight = new Flight(ask, cancel);
+        if (!_flights.TryAdd(ask.ActionId, flight))
+        {
+            if (!_flights.TryGetValue(ask.ActionId, out var first)) return await ActAsync(ask, answers, review, cancel, cancellationToken).ConfigureAwait(false);
+            return first.Ask == ask && first.Cancel == cancel ? await first.Outcome.Task.WaitAsync(cancellationToken).ConfigureAwait(false) : new("conflict");
+        }
+
+        try
+        {
+            var outcome = await SendAsync(ask, answers, review, cancel, cancellationToken).ConfigureAwait(false);
+            flight.Outcome.TrySetResult(outcome);
+            return outcome;
+        }
+        catch (Exception exception)
+        {
+            flight.Outcome.TrySetException(exception);
+            throw;
+        }
+        finally
+        {
+            _flights.TryRemove(new(ask.ActionId, flight));
+            // Nobody else waits for it: the exception was thrown to the caller.
+            _ = flight.Outcome.Task.Exception;
+        }
+    }
+
     // The ask is read again: an answer goes only to the ask, in the revision, the user saw. One sent again after the
     // first reached the session finds the outcome of the first.
-    private async ValueTask<PluginAskOutcome> ActAsync(PluginAskReference ask, IReadOnlyList<AltaAskAnswer> answers, SessionAskReview? review,
+    private async ValueTask<PluginAskOutcome> SendAsync(PluginAskReference ask, IReadOnlyList<AltaAskAnswer> answers, SessionAskReview? review,
         bool cancel, CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _attached) is not { } attached) return new("unavailable");
@@ -101,7 +150,8 @@ internal sealed class DesktopPluginAsks : IPluginAskService
         SessionId = head.Handle.SessionId,
         AskId = head.Handle.AskId,
         Revision = head.Handle.ResponseGeneration,
-        State = head.State,
+        State = State(head.State),
+        Immediate = head.Immediate,
         Questions = [.. head.Request.Questions.Select(static question => new PluginAskQuestion
         {
             Title = question.Title ?? "",
@@ -115,5 +165,14 @@ internal sealed class DesktopPluginAsks : IPluginAskService
             : null,
     };
 
+    private static string State(string state) => state is "pending" or "submitting" ? state : "indeterminate";
+
     private sealed record Attached(OwnedSessionAskService Owner, SessionAsksService Window, string Epoch);
+
+    private sealed class Flight(PluginAskReference ask, bool cancel)
+    {
+        internal PluginAskReference Ask { get; } = ask;
+        internal bool Cancel { get; } = cancel;
+        internal TaskCompletionSource<PluginAskOutcome> Outcome { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 }

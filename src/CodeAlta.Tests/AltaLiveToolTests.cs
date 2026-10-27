@@ -1395,6 +1395,45 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task PluginAltaCommandContribution_GetsNoAsks_WhateverItsAltaService(bool runtimeAlta)
+    {
+        // An agent runs the commands of alta: through the asks it would answer what it asked the user.
+        IPluginAltaService alta = runtimeAlta ? new LoopbackPluginAltaRuntimeService() : NoopPluginServices.Create().Alta;
+        Assert.AreEqual(runtimeAlta, alta is IPluginAltaRuntimeService);
+        IPluginAskService? seen = null;
+        var catalog = new FakeAltaPluginCatalog(new AltaPluginCommandContribution
+        {
+            Plugin = CreatePluginDescriptor("asks-plugin"),
+            Services = new PluginServicesWithAlta(alta) { Asks = new AnsweringAsks() },
+            Scope = PluginScope.Global,
+            Command = new PluginAltaCommandContribution
+            {
+                Path = "peek-asks",
+                Description = "Reads the asks of the plugin's services.",
+                CreateCommandNode = pluginContext =>
+                {
+                    var command = new Command("peek-asks", "Reads the asks.") { new CommandUsage(), new HelpOption() };
+                    command.Add((_, _) =>
+                    {
+                        seen = pluginContext.Services.Asks;
+                        return ValueTask.FromResult(AltaExitCodes.Success);
+                    });
+                    return command;
+                },
+            },
+        });
+        var dispatcher = CreateDispatcher(catalog);
+        if (alta is LoopbackPluginAltaRuntimeService loopback) loopback.SetDispatcher(dispatcher);
+
+        var result = await dispatcher.InvokeAsync(["peek-asks"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stderr);
+        Assert.AreSame(NoopPluginAskService.Instance, seen);
+    }
+
+    [TestMethod]
     public async Task PluginAltaCommandContribution_MutatingCommandInvokesSessionCreateWithPluginProvenance()
     {
         using var root = TempDirectory.Create();
@@ -6530,6 +6569,24 @@ public sealed partial class AltaLiveToolTests
         public IPluginTaskService Tasks => _inner.Tasks;
 
         public IPluginAltaService Alta { get; } = alta;
+
+        public IPluginAskService Asks { get; init; } = NoopPluginAskService.Instance;
+    }
+
+    // An ask service that answers: what a plugin of the window gets, which its alta commands must not.
+    private sealed class AnsweringAsks : IPluginAskService
+    {
+        public bool HasAsks => true;
+
+        public ValueTask<IReadOnlyList<PluginAskSummary>> ListAskingAsync(CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<IReadOnlyList<PluginAskSummary>>([new("session", "ask", "0", "pending", false)]);
+
+        public ValueTask<PluginAsk?> GetPendingAsync(string sessionId, CancellationToken cancellationToken = default) => ValueTask.FromResult<PluginAsk?>(null);
+
+        public ValueTask<PluginAskOutcome> AnswerAsync(PluginAskReference ask, IReadOnlyList<PluginAskAnswer> answers, PluginAskReviewAnswer? review, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new PluginAskOutcome("admitted"));
+
+        public ValueTask<PluginAskOutcome> CancelAsync(PluginAskReference ask, CancellationToken cancellationToken = default) => ValueTask.FromResult(new PluginAskOutcome("cancelled"));
     }
 
     private sealed class CancellingContributor : IAltaCommandContributor

@@ -76,7 +76,7 @@ main { min-width: 0; max-width: 720px; margin: 0 auto; padding: .5rem calc(.75re
 @keyframes outline-pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) {
   .card:is(.running, .tools, .thinking)::before { background: var(--tone); animation: outline-pulse 2.4s ease-in-out infinite; }
-  .card .dot, .spinner { animation: none !important; }
+  .card .dot, .spinner, .ask-notice-spinner { animation: none !important; }
 }
 .card-link { display: block; min-width: 0; min-height: 44px; padding: .5rem .75rem; color: inherit; text-decoration: none; border-radius: inherit; -webkit-tap-highlight-color: transparent; }
 .card-link:active { background: var(--hover); }
@@ -322,6 +322,11 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .review-verdict[data-verdict="approved"][data-selected] { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); background: color-mix(in srgb, var(--green) 12%, var(--panel-2)); }
 .review-verdict[data-verdict="changes_requested"][data-selected] { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); background: color-mix(in srgb, var(--yellow) 12%, var(--panel-2)); }
 .ask-hint { color: var(--muted); font-size: .8125rem; }
+/* An answer on its way, or whose outcome is unknown: the card says it, and nothing can be changed. */
+.ask-notice { gap: .5rem; }
+.ask-notice-text { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: .875rem; line-height: 1.45; }
+.ask-notice-text .ico { flex: none; }
+.ask-notice-spinner { flex: none; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; }
 .ask-note { margin: 0; color: var(--red); font-size: .8125rem; overflow-wrap: anywhere; }
 .ask-note:empty { display: none; }
 .ask-actions { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; min-width: 0; padding-top: .5rem; border-top: 1px solid var(--line); }

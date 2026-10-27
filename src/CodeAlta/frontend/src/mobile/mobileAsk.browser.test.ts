@@ -26,6 +26,15 @@ const questions: Ask = {
   ],
 };
 
+// What the live stream says of the ask of a session.
+const mark = (ask: Ask) => ({ id: ask.id, revision: ask.revision, state: ask.state, immediate: !!ask.immediate });
+
+// A question of a script, which waits while its turn runs.
+const scripted: Ask = {
+  id: "ask4", revision: "0", state: "pending", immediate: true, review: null,
+  questions: [{ title: "Deploy", question: "Deploy the cache now?", description: null, choices: [{ title: "Yes", description: null }, { title: "Later", description: null }], freeform: { title: null, placeholder: null } }],
+};
+
 const review: Ask = {
   id: "ask2", revision: "3", state: "pending", questions: [],
   review: { kind: "file", path: "docs/plan.md", title: null, message: "Here is the plan of the **cache**.", comments: 0 },
@@ -39,12 +48,14 @@ test("the phone page answers the questions and the review requests of agents as 
   const script = bundle.outputFiles.find(file => file.path.endsWith(".js"))!.text, style = bundle.outputFiles.find(file => file.path.endsWith(".css"))!.text;
   const server = await startFixtureServer(await pageFiles(script, style));
   server.state.sessions = [
-    session("s1", "Cache the parser", "p1", 2, { kind: "assistant", line: "Two questions first.", asking: true }),
-    session("s2", "Plan the cache", "p1", 5, { kind: "assistant", line: "The plan is ready.", asking: true }),
+    session("s1", "Cache the parser", "p1", 2, { kind: "assistant", line: "Two questions first.", asking: mark(questions) }),
+    session("s2", "Plan the cache", "p1", 5, { kind: "assistant", line: "The plan is ready.", asking: mark(review) }),
     session("s3", "Write the docs", "p2", 30),
+    session("s4", "Deploy the cache", "p2", 40, { live: "running", kind: "assistant", line: "The script asks.", asking: mark(scripted) }),
   ];
   server.state.asks.set("s1", questions);
   server.state.asks.set("s2", review);
+  server.state.asks.set("s4", scripted);
   const failures: string[] = [];
   try {
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"],
@@ -98,12 +109,13 @@ test("the phone page answers the questions and the review requests of agents as 
     await command("Runtime.enable"); await command("Log.enable"); await command("Page.enable");
     await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: shots ? 3 : 2, mobile: true });
     await command("Page.navigate", { url: `${server.origin}/#k=${server.state.token}` });
-    await waitFor(`document.querySelectorAll("#sessions .row").length === 3`, "the list of sessions");
+    await waitFor(`document.querySelectorAll("#sessions .row").length === 4`, "the list of sessions");
     if (await evaluate<boolean>(shown("#install-bar"))) await click("#install-later");
 
     // The list says which sessions wait for an answer, as the tabs of the desktop do.
     assert.equal(await text('.row[data-id="s1"] .waiting-badge'), "Waits for your answer");
     assert.equal(await text('.row[data-id="s3"] .waiting-badge'), null);
+    assert.equal(await text('.row[data-id="s4"] .waiting-badge'), "Waits for your answer", "a question of a script, while its turn runs");
     await shot("01-list-asking.png");
 
     // The questions take the place of the composer: the badge, the steps, the question, its choices as numbered cards.
@@ -132,6 +144,7 @@ test("the phone page answers the questions and the review requests of agents as 
     assert.equal(await evaluate("document.activeElement?.dataset.field"), "text", "the focus in its field");
     assert.deepEqual(await evaluate("[...document.querySelectorAll('#ask [data-step]')].map(b => b.dataset.state)"), ["seen", "current"]);
     assert.equal(await text("#ask .ask-freeform > span"), "Answer");
+    assert.equal(await evaluate(`document.querySelector('#ask textarea[data-field="text"]').maxLength`), 8192 - "Keep it small".length, "the answers share one limit");
     assert.equal(await text("#ask .ask-answer"), "Submit");
     await typeInto('#ask textarea[data-field="text"]', "parser-cache");
     await click("#ask .ask-back");
@@ -154,15 +167,51 @@ test("the phone page answers the questions and the review requests of agents as 
     assert.equal(await evaluate("!!document.querySelector('#composer #foot')"), true);
 
     // A new question while a turn runs waits for the turn to end, then takes the place of the composer.
-    server.state.asks.set("s1", { ...questions, id: "ask3", questions: [questions.questions[0]] });
-    server.push({ ...server.state.sessions[0].live!, live: "running", asking: true });
+    const next: Ask = { ...questions, id: "ask3", questions: [questions.questions[0]] };
+    server.state.asks.set("s1", next);
+    server.push({ ...server.state.sessions[0].live!, live: "running", asking: mark(next) });
     await new Promise(resolve => setTimeout(resolve, 400));
     assert.equal(await evaluate("document.getElementById('ask').hidden"), true, "not while the turn runs");
-    server.push({ ...server.state.sessions[0].live!, live: "idle", asking: true });
+    server.push({ ...server.state.sessions[0].live!, live: "idle", asking: mark(next) });
     await waitFor(shown("#ask .ask-card"), "the new question once the turn ended");
     assert.equal((await text("#ask .ask-badge"))?.trim(), "A question for you");
     assert.equal(await evaluate("document.querySelectorAll('#ask .ask-steps').length"), 0, "one question has no steps");
     assert.equal(await text("#ask .ask-answer"), "Submit");
+
+    // A question of a script is answered while its turn runs. An answer the computer still sends shows read-only; the session
+    // does not take it, the ask waits again in a new revision, and the draft is still there to answer it again.
+    await evaluate(`location.hash = "#/session/s4"`);
+    await waitFor(shown("#ask .ask-card"), "the question of the script while the turn runs");
+    assert.equal(await evaluate("document.getElementById('composer').hidden"), true);
+    await click("#ask .ask-choice:nth-child(2) input");
+    await typeInto('#ask textarea[data-field="text"]', "After the release");
+    server.state.askResult = { ok: true, status: "submitting", pending: true, error: null };
+    server.state.askAfter = { ...scripted, state: "submitting" };
+    await click("#ask .ask-answer");
+    await waitFor(shown('#ask .ask-notice[data-mode="sending"]'), "the answer on its way, read-only");
+    assert.match(await text("#ask .ask-notice") ?? "", /Sending your answer/);
+    assert.equal(await evaluate("document.getElementById('composer').hidden"), true, "no composer while the answer goes");
+    const first = (posts("/api/sessions/s4/ask/answer")[0].body as { actionId: string }).actionId;
+    const again: Ask = { ...scripted, revision: "1" };
+    server.state.asks.set("s4", again);
+    server.push({ ...server.state.sessions[3].live!, asking: mark(again) });
+    await waitFor(shown("#ask .ask-answer"), "the question again, in its new revision");
+    assert.equal(await text("#ask .ask-note"), "The session did not take the answer. Try again.");
+    assert.equal(await evaluate(`document.querySelector('#ask textarea[data-field="text"]').value`), "After the release", "the draft is kept");
+    assert.equal(await evaluate("document.querySelector('#ask .ask-choice:nth-child(2)').hasAttribute('data-selected')"), true);
+    await click("#ask .ask-answer");
+    await waitFor(`document.getElementById('ask').hidden && !document.getElementById('composer').hidden`, "the composer once the session took it");
+    const retried = posts("/api/sessions/s4/ask/answer")[1].body as { actionId: string; revision: string };
+    assert.equal(retried.revision, "1");
+    assert.notEqual(retried.actionId, first, "a new answer for the new revision");
+
+    // An answer whose outcome the computer cannot tell: the card says to check on the computer.
+    const unknown: Ask = { ...scripted, id: "ask5", state: "indeterminate" };
+    server.state.asks.set("s4", unknown);
+    server.push({ ...server.state.sessions[3].live!, asking: mark(unknown) });
+    await waitFor(shown('#ask .ask-notice[data-mode="unknown"]'), "the outcome to check on the computer");
+    assert.match(await text("#ask .ask-notice") ?? "", /Check the session on the computer/);
+    assert.equal(await fits(), true, "nothing wider than the phone");
 
     // A review request: its message, where its comments are written, and the verdict of the desktop.
     await evaluate(`location.hash = "#/session/s2"`);

@@ -1,9 +1,9 @@
 import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
 import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
 import { coalesce, composerView } from "./composer";
-import { askAnswer, askDraftKey, askShown, newAskDraft, type AskDraft } from "./ask";
-import { createAskView } from "./askView";
-import { isBusy, type Ask, type AskResult, type Live, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
+import { askWaiting } from "./ask";
+import { createAskPanel } from "./askPanel";
+import { isBusy, type Live, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
 import { activityLine, el, icon, iconSvg, type IconName } from "./dom";
 import { createDrafts, newSessionDraft } from "./drafts";
 import { installedApp, setUpInstall } from "./install";
@@ -141,7 +141,7 @@ export function startMobile(window: Window & typeof globalThis) {
     const when = live?.at ?? view.lastActivity;
     const lineText = live?.line ?? view.summary;
     const space = showSpaces(sessions.spaces);
-    const asking = !!live?.asking && !isBusy(live.live);
+    const asking = askWaiting(live);
     const version = JSON.stringify([state, view.title, ago(when, now), live?.kind, lineText, live?.activity, sessionMeta(view, { space, live: true }), space, asking]);
     const element = make("div", `card ${state}`);
     const anchor = make("a", "card-link");
@@ -584,7 +584,7 @@ export function startMobile(window: Window & typeof globalThis) {
     bindComposer(id);
     showDetailHead();
     void readChoices(id);
-    void readAsk(id);
+    void askPanel.read(id);
     if (!sessions.listed(id) || !sessions.view(id)?.title) void readSessionAlone(id);
     void readDetail().then(() => { if (detail.id === id) toBottom(); });
   }
@@ -616,88 +616,17 @@ export function startMobile(window: Window & typeof globalThis) {
   const stopping = new Map<string, number>(), stoppedAt = new Map<string, number>();
 
   // ---- The ask a session waits on: in place of the composer once the run that asked ended, as on the desktop ----
-  // What is answered is kept per ask while the page lives; an answer carries an action id, sent again with it when it did not
-  // come back, so that it is never taken twice.
   const askBar = $("ask");
-  const asks = new Map<string, Ask | null>(), askDrafts = new Map<string, AskDraft>(), askStates = new Map<string, { sending: boolean; note: string }>();
-  const askReads = new Map<string, number>(), askingSeen = new Map<string, boolean>();
-  const askView = createAskView({
-    document, root: askBar,
+  const askPanel = createAskPanel({
+    document, window, root: askBar, cancelSheet: $("ask-cancel-sheet"), api, host,
+    current: () => detail.id,
+    live: id => sessions.view(id)?.live,
     markdown: (element, text) => { const fill = () => markdown.fill(element, text, fill); fill(); },
-    onSubmit: () => void answerAsk(),
-    onCancel: () => askCancelSheet.open($("ask-cancel-keep")),
+    onChange: () => showComposer(),
+    onSent: () => scheduleDetailRead(0),
     onResize: () => padComposer(),
   });
-  const askCancelSheet = createSheet(document, $("ask-cancel-sheet"));
-  const askStateOf = (id: string) => askStates.get(id) ?? (askStates.set(id, { sending: false, note: "" }), askStates.get(id)!);
-  function askDraftOf(id: string, ask: Ask): AskDraft {
-    const key = askDraftKey(id, ask);
-    const draft = askDrafts.get(key) ?? newAskDraft();
-    if (draft.index >= ask.questions.length) { draft.index = 0; draft.seen.add(0); }
-    askDrafts.set(key, draft);
-    return draft;
-  }
   const bottomBar = () => askBar.hidden ? composer : askBar;
-
-  async function readAsk(id: string) {
-    const read = (askReads.get(id) ?? 0) + 1;
-    askReads.set(id, read);
-    try {
-      const page = await api.ask(id);
-      if (askReads.get(id) !== read) return;
-      asks.set(id, page.ask ?? null);
-    } catch (error) {
-      if (askReads.get(id) !== read || error instanceof SignedOutError) return;
-      // An older CodeAlta has no asks: the composer stays.
-      if (error instanceof ApiError && error.status === 404) asks.set(id, null); else return;
-    }
-    if (detail.id === id) showComposer();
-  }
-
-  async function answerAsk() {
-    const id = detail.id, ask = id ? asks.get(id) : null;
-    if (!id || !ask) return;
-    const draft = askDraftOf(id, ask), state = askStateOf(id);
-    if (state.sending) return;
-    draft.actionId ??= window.crypto.randomUUID();
-    await sendAsk(id, ask, state, () => api.answerAsk(id, askAnswer(ask, draft, draft.actionId!)), () => { draft.actionId = null; }, "The answer was not sent");
-  }
-
-  async function cancelAsk() {
-    const id = detail.id, ask = id ? asks.get(id) : null;
-    if (!id || !ask) return;
-    const state = askStateOf(id);
-    if (state.sending) return;
-    const actionId = window.crypto.randomUUID();
-    await sendAsk(id, ask, state, () => api.cancelAsk(id, { actionId, askId: ask.id, revision: ask.revision }), () => {}, "The ask was not canceled");
-  }
-
-  async function sendAsk(id: string, ask: Ask, state: { sending: boolean; note: string }, send: () => Promise<AskResult>, refused: () => void, failed: string) {
-    state.sending = true;
-    state.note = "";
-    if (detail.id === id) showComposer();
-    try {
-      const result = await send();
-      if (result.ok) {
-        askDrafts.delete(askDraftKey(id, ask));
-        // The next ask may come before the stream says this one ended: it is read on the next "asking".
-        askingSeen.delete(id);
-        if (asks.get(id)?.id === ask.id) asks.set(id, null);
-      } else {
-        refused();
-        state.note = result.error ?? `${failed}.`;
-      }
-    } catch (error) {
-      if (error instanceof SignedOutError) return;
-      state.note = `${failed}: ${failureText(error, host)}`;
-    } finally {
-      state.sending = false;
-    }
-    if (detail.id === id) { showComposer(); scheduleDetailRead(0); }
-    void readAsk(id);
-  }
-  $("ask-cancel-keep").addEventListener("click", () => askCancelSheet.close());
-  $("ask-cancel-exit").addEventListener("click", () => { askCancelSheet.close(); void cancelAsk(); });
 
   function bindComposer(id: string | null) {
     if (composerFor) drafts.set(composerFor, promptBox.value);
@@ -740,15 +669,10 @@ export function startMobile(window: Window & typeof globalThis) {
   }
 
   function showAsk() {
-    const id = detail.id;
-    const ask = id ? asks.get(id) : null;
-    const state = id ? askStates.get(id) : undefined;
-    const shown = !!id && !!ask && (askShown(ask, sessions.view(id)?.live) || !!state?.sending);
     const was = !askBar.hidden;
-    askBar.hidden = !shown;
+    const shown = askPanel.show();
     composer.hidden = shown;
-    askView.show(shown ? ask! : null, shown ? askDraftOf(id!, ask!) : null, state ?? { sending: false, note: "" });
-    if (id && foot.parentElement !== bottomBar()) bottomBar().append(foot);
+    if (detail.id && foot.parentElement !== bottomBar()) bottomBar().append(foot);
     if (shown !== was) padComposer();
   }
 
@@ -1351,13 +1275,10 @@ export function startMobile(window: Window & typeof globalThis) {
     const decision = sessions.applyLive(update);
     if (decision === "reload") scheduleListRead(500);
     else if (decision === "listed" && !$("home").hidden) renderList();
-    if (update.asking !== undefined && askingSeen.get(update.id) !== update.asking) {
-      askingSeen.set(update.id, update.asking);
-      if (detail.id === update.id) void readAsk(update.id);
-    }
+    askPanel.onLive(update);
     if (detail.id === update.id) { showDetailHead(); drawTimeline(); scheduleDetailRead(400); }
   }
-  function readAgain() { void readList(); if (detail.id) { void readDetail(); void readAsk(detail.id); } }
+  function readAgain() { void readList(); if (detail.id) { void readDetail(); void askPanel.read(detail.id); } }
   const stream = createLiveStream({
     create: () => new window.EventSource("/api/events"),
     onSession,
@@ -1384,7 +1305,7 @@ export function startMobile(window: Window & typeof globalThis) {
     const button = event.currentTarget as HTMLButtonElement;
     button.classList.add("spin");
     if (signedOut) { button.classList.remove("spin"); return; }
-    try { await Promise.all([readList(), refreshDetail(), detail.id ? readAsk(detail.id) : null]); } finally { button.classList.remove("spin"); }
+    try { await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null]); } finally { button.classList.remove("spin"); }
   });
 
   // ---- Sign-in: the token of the QR link (#k=) gets the cookie; without it, the cookie or the kept token is used ----

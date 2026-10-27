@@ -27,9 +27,12 @@ export type Live = Readonly<{
   at: string | null;
   activity: ActivityFacts | null;
   canSteer: boolean;
-  /** The session waits for the user to answer a question or a review request (an older CodeAlta does not say). */
-  asking?: boolean;
+  /** The ask the session waits on, which the page reads again when it changes; null when it waits for none (an older CodeAlta does not say). */
+  asking?: AskMark | null;
 }>;
+
+/** The ask of a session, as the live stream says it: what changes when an answer goes, or did not reach the session. */
+export type AskMark = Readonly<{ id: string; revision: string; state: Ask["state"]; immediate: boolean }>;
 
 /** A space of the computer: its name, and the color and icon the desktop shows it with. */
 export type Space = Readonly<{ id: string; name: string; color: string | null; icon: string | null }>;
@@ -166,6 +169,8 @@ export type Ask = Readonly<{
   /** The revision an answer names: it changes when the ask waits again after an answer the session did not take. */
   revision: string;
   state: "pending" | "submitting" | "indeterminate";
+  /** A question of a script, which waits for the answer while its turn runs: shown at once (an older CodeAlta does not say). */
+  immediate?: boolean;
   questions: readonly AskQuestion[];
   review: AskReview | null;
 }>;

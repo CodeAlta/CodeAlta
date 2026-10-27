@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using CodeAlta.Agent;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugin.Mobile;
 
@@ -20,10 +21,13 @@ internal sealed class MobileLive
     private const int LineLength = 160;
     private readonly ConcurrentDictionary<string, Session> _sessions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Channel<string>, byte> _listeners = new();
-    // The sessions that wait for the user to answer a question or a review request, as the last flush read them.
-    private volatile FrozenSet<string> _asking = FrozenSet<string>.Empty;
+    // The sessions that wait for the user to answer a question or a review request, with their ask, as the last flush read them.
+    private volatile FrozenDictionary<string, PluginAskSummary> _asking = FrozenDictionary<string, PluginAskSummary>.Empty;
 
     internal int ListenerCount => _listeners.Count;
+
+    /// <summary>Gets the asks the sessions wait on, as the last flush read them.</summary>
+    internal IReadOnlyDictionary<string, PluginAskSummary> Asking => _asking;
 
     /// <summary>
     /// Whether a session can be steered now. alta steers a session when its runtime entry has an active run
@@ -47,7 +51,7 @@ internal sealed class MobileLive
     {
         ["id"] = sessionId, ["projectId"] = projectId, ["live"] = running ? Running : Idle, ["kind"] = null, ["line"] = null,
         // alta steers a session whose turn runs, as `isRunning` says it.
-        ["at"] = null, ["activity"] = null, ["canSteer"] = running, ["asking"] = _asking.Contains(sessionId),
+        ["at"] = null, ["activity"] = null, ["canSteer"] = running, ["asking"] = _asking.TryGetValue(sessionId, out var ask) ? MobileAsks.Mark(ask) : null,
     };
 
     /// <summary>Follows one event of a session.</summary>
@@ -129,12 +133,13 @@ internal sealed class MobileLive
 
     /// <summary>Pushes the sessions that changed since the last flush; called a few times a second.</summary>
     /// <param name="asking">
-    /// The sessions that wait for the user to answer a question or a review request, now; null keeps those of the last flush.
-    /// A session the plugin has not seen run is not told of: the list says it of each session the phone sees.
+    /// The asks the sessions wait on, now; null keeps those of the last flush. A session is pushed when its ask comes, goes,
+    /// or changes its revision or state. A session the plugin has not seen run is not told of: the list says it of each
+    /// session the phone sees.
     /// </param>
-    internal void Flush(IReadOnlyCollection<string>? asking = null)
+    internal void Flush(IReadOnlyCollection<PluginAskSummary>? asking = null)
     {
-        if (asking is not null) _asking = asking.ToFrozenSet(StringComparer.Ordinal);
+        if (asking is not null && !Same(_asking, asking)) _asking = asking.DistinctBy(static ask => ask.SessionId, StringComparer.Ordinal).ToFrozenDictionary(static ask => ask.SessionId, StringComparer.Ordinal);
         var waiting = _asking;
         foreach (var (id, session) in _sessions)
         {
@@ -142,8 +147,8 @@ internal sealed class MobileLive
             string? payload = null;
             lock (session)
             {
-                var asks = waiting.Contains(id);
-                if (session.Asking != asks) { session.Asking = asks; session.Dirty = true; }
+                var ask = waiting.GetValueOrDefault(id);
+                if (session.Asking != ask) { session.Asking = ask; session.Dirty = true; }
                 if (!session.Dirty) continue;
                 session.Dirty = false;
                 payload = session.ToJson(id).ToJsonString();
@@ -151,6 +156,18 @@ internal sealed class MobileLive
 
             Broadcast("session", payload);
         }
+    }
+
+    // Most flushes read the asks of the last one: they are kept, not built again.
+    private static bool Same(FrozenDictionary<string, PluginAskSummary> known, IReadOnlyCollection<PluginAskSummary> asking)
+    {
+        if (known.Count != asking.Count) return false;
+        foreach (var ask in asking)
+        {
+            if (!known.TryGetValue(ask.SessionId, out var same) || same != ask) return false;
+        }
+
+        return true;
     }
 
     // While a session is busy its steerability is asked again every 3 s, and once when it stops.
@@ -250,7 +267,8 @@ internal sealed class MobileLive
         internal bool Dirty;
         internal readonly HashSet<string> Tools = new(StringComparer.Ordinal);
         internal readonly MobileActivity Activity = new();
-        internal bool CanSteer, Probing, Asking;
+        internal bool CanSteer, Probing;
+        internal PluginAskSummary? Asking;
         internal int NotRunning;
         internal DateTimeOffset ProbedAt;
 
@@ -273,7 +291,7 @@ internal sealed class MobileLive
         {
             ["id"] = id, ["projectId"] = ProjectId, ["live"] = State, ["kind"] = Kind, ["line"] = Line, ["at"] = At == default ? null : At.ToString("O"),
             ["activity"] = Kind == "activity" ? Activity.ToJson(State != Idle) : null,
-            ["canSteer"] = CanSteer, ["asking"] = Asking,
+            ["canSteer"] = CanSteer, ["asking"] = Asking is { } ask ? MobileAsks.Mark(ask) : null,
         };
     }
 }

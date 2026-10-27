@@ -269,7 +269,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
         IPluginStateStore? state = null,
         IPluginDatabase? database = null,
         string? pluginId = null,
-        Func<CodeAlta.Catalog.SpaceAssignments>? spaceAssignments = null)
+        Func<CodeAlta.Catalog.SpaceAssignments>? spaceAssignments = null,
+        bool builtIn = false)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginRuntimeKey);
@@ -288,6 +289,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
         Spaces = scope == PluginScope.Global && spaceAssignments is not null
             ? new AssignedSpaces(pluginId ?? PluginContributionRegistry.PluginIdOf(pluginRuntimeKey, null), spaceAssignments)
             : inner.Spaces;
+        // Asks answer for the user: the host decides which plugin may, and a host that does not tell plugins apart gives none.
+        Asks = inner.Asks is IPluginAskRuntimeService asks ? asks.ForPlugin(pluginRuntimeKey, builtIn) : NoopPluginAskService.Instance;
     }
 
     public Logger Logger { get; }
@@ -321,7 +324,7 @@ internal sealed class PluginRuntimeServices : IPluginServices
 
     public IPluginAppFileService AppFiles => _inner.AppFiles;
 
-    public IPluginAskService Asks => _inner.Asks;
+    public IPluginAskService Asks { get; }
 
     // The spaces of the plugin as the global configuration says them when they are asked.
     private sealed class AssignedSpaces(string pluginId, Func<CodeAlta.Catalog.SpaceAssignments> read) : IPluginSpaceService

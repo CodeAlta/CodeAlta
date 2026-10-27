@@ -164,15 +164,9 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
             CancellationToken = invocation.CancellationToken,
         };
 
+    // Always wrapped, whatever the alta service: the services of a command an agent runs never answer asks.
     private static IPluginServices CreatePluginScopedServices(IPluginServices services, AltaPluginCommandContribution contribution)
-    {
-        if (services.Alta is not IPluginAltaRuntimeService runtimeService)
-        {
-            return services;
-        }
-
-        return new PluginScopedServices(services, new PluginScopedAltaService(runtimeService, contribution));
-    }
+        => new PluginScopedServices(services, services.Alta is IPluginAltaRuntimeService runtimeService ? new PluginScopedAltaService(runtimeService, contribution) : services.Alta);
 
     private static bool RootMatchesDeclaredPath(string commandName, string path)
         => string.Equals(commandName, GetRoot(path), StringComparison.OrdinalIgnoreCase);

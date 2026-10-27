@@ -11,10 +11,13 @@ public interface IPluginAskService
     /// <summary>Gets whether the host has asks a plugin can read and answer.</summary>
     bool HasAsks { get; }
 
-    /// <summary>Lists the sessions that wait for the user to answer a question or a review request.</summary>
+    /// <summary>
+    /// Lists the sessions that wait for the user to answer a question or a review request, with the ask each waits on: its
+    /// revision and state change when an answer goes, or did not reach the session and the ask waits again.
+    /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The ids of those sessions, each once; a reading that can be stale at once.</returns>
-    ValueTask<IReadOnlyList<string>> ListAskingSessionsAsync(CancellationToken cancellationToken = default);
+    /// <returns>One entry per session, its first ask; a reading that can be stale at once.</returns>
+    ValueTask<IReadOnlyList<PluginAskSummary>> ListAskingAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Reads the ask a session waits on: the first of its asks, the one the window shows.</summary>
     /// <param name="sessionId">The session.</param>
@@ -65,11 +68,35 @@ public sealed record PluginAsk
     /// </summary>
     public required string State { get; init; }
 
+    /// <summary>
+    /// Gets whether the ask is shown at once, while the turn of its session runs: a question of a script (<c>ask()</c> in
+    /// Code Mode), which waits for the answer. Any other ask is shown once the turn that asked has ended.
+    /// </summary>
+    public bool Immediate { get; init; }
+
     /// <summary>Gets the questions, in order; a review request may have none.</summary>
     public IReadOnlyList<PluginAskQuestion> Questions { get; init; } = [];
 
     /// <summary>Gets what the user is asked to review, or <see langword="null"/> for questions only.</summary>
     public PluginAskReview? Review { get; init; }
+}
+
+/// <summary>The ask a session waits on, as <see cref="IPluginAskService.ListAskingAsync"/> lists it.</summary>
+/// <param name="SessionId">The session that asks.</param>
+/// <param name="AskId">The ask, <see cref="PluginAsk.AskId"/>.</param>
+/// <param name="Revision">Its revision, <see cref="PluginAsk.Revision"/>.</param>
+/// <param name="State">Its state, <see cref="PluginAsk.State"/>.</param>
+/// <param name="Immediate">Whether it is shown while the turn runs, <see cref="PluginAsk.Immediate"/>.</param>
+public sealed record PluginAskSummary(string SessionId, string AskId, string Revision, string State, bool Immediate);
+
+/// <summary>The limits of an answer, those the host checks: an answer beyond them is <c>invalid</c>, or <c>review_failed</c> for the overall comment.</summary>
+public static class PluginAskLimits
+{
+    /// <summary>The most characters (UTF-16 units) of the text answers of an ask, all its questions together.</summary>
+    public const int AnswerText = 8192;
+
+    /// <summary>The most characters (UTF-16 units) of the overall comment of a review.</summary>
+    public const int OverallComment = 16384;
 }
 
 /// <summary>A question of an ask, answered with one of its choices, with text, or both.</summary>
@@ -162,6 +189,7 @@ public sealed record PluginAskReviewAnswer(string Verdict, string? Overall);
 /// <param name="Status">
 /// <list type="bullet">
 /// <item><c>admitted</c>: the session has the answer.</item>
+/// <item><c>submitting</c>: the answer goes to the session; the same answer sent again, with the same action id, waits for its outcome.</item>
 /// <item><c>cancelled</c>: the ask is cancelled.</item>
 /// <item><c>not_admitted</c>: the session did not take the answer; the ask waits again, with a new revision.</item>
 /// <item><c>indeterminate</c>: the answer went, and the host does not know whether the session has it.</item>
@@ -179,6 +207,22 @@ public sealed record PluginAskOutcome(string Status)
     public bool Succeeded => Status is "admitted" or "cancelled";
 }
 
+/// <summary>
+/// The ask service of a host that knows which plugin asks. The runtime asks the host for the service of each plugin it
+/// starts; a host that does not implement this interface gives no plugin asks. Asks answer for the user, so a host gives a
+/// working service only to the plugins of its own build that serve the user (the page of the phones), never to a plugin of
+/// a folder, which an agent can write.
+/// </summary>
+public interface IPluginAskRuntimeService : IPluginAskService
+{
+    /// <summary>Gets the service of one plugin.</summary>
+    /// <param name="pluginRuntimeKey">The runtime key of the plugin.</param>
+    /// <param name="builtIn">Whether the plugin is one of the application's own build, not of a folder.</param>
+    /// <returns>The service of that plugin: this one, or <see cref="NoopPluginAskService.Instance"/>.</returns>
+    /// <exception cref="ArgumentException"><paramref name="pluginRuntimeKey"/> is null, empty or whitespace.</exception>
+    IPluginAskService ForPlugin(string pluginRuntimeKey, bool builtIn);
+}
+
 /// <summary>The ask service of a host without asks: no session waits, and nothing can be answered.</summary>
 public sealed class NoopPluginAskService : IPluginAskService
 {
@@ -193,8 +237,8 @@ public sealed class NoopPluginAskService : IPluginAskService
     public bool HasAsks => false;
 
     /// <inheritdoc />
-    public ValueTask<IReadOnlyList<string>> ListAskingSessionsAsync(CancellationToken cancellationToken = default)
-        => ValueTask.FromResult<IReadOnlyList<string>>([]);
+    public ValueTask<IReadOnlyList<PluginAskSummary>> ListAskingAsync(CancellationToken cancellationToken = default)
+        => ValueTask.FromResult<IReadOnlyList<PluginAskSummary>>([]);
 
     /// <inheritdoc />
     public ValueTask<PluginAsk?> GetPendingAsync(string sessionId, CancellationToken cancellationToken = default)

@@ -9,8 +9,6 @@ namespace CodeAlta.Plugin.Mobile.Tests;
 [TestClass]
 public sealed class MobileServerTests
 {
-    private const string Token = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFG";
-
     [TestMethod]
     public async Task ThePage_IsServedFromTheFilesOfTheApplication_WithItsPolicy()
     {
@@ -33,27 +31,43 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
-    public async Task TheApi_NeedsTheTokenOfNow()
+    public async Task ThePairingToken_SignsAPhoneIn_WithAKeyOfItsOwn_AndTheResetSignsItOut()
     {
         await using var fixture = await Fixture.StartAsync();
         Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions")).StatusCode);
         Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.PostAsync("/api/login", new JsonObject { ["token"] = "wrong" })).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.PostAsync("/api/login", new JsonObject { ["token"] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFG" })).StatusCode, "A token of the right shape that is no pairing token.");
 
-        using var login = await fixture.PostAsync("/api/login", new JsonObject { ["token"] = Token });
-        Assert.AreEqual(HttpStatusCode.NoContent, login.StatusCode);
+        using var login = await fixture.PostAsync("/api/login", new JsonObject { ["token"] = fixture.Token });
+        Assert.AreEqual(HttpStatusCode.OK, login.StatusCode);
+        var key = (string)JsonNode.Parse(await login.Content.ReadAsStringAsync())!["key"]!;
+        Assert.IsTrue(MobileToken.IsValid(key) && key != fixture.Token, "The phone gets a key of its own.");
         var cookie = login.Headers.GetValues("Set-Cookie").Single();
-        StringAssert.Contains(cookie, MobileServer.CookieName + "=");
+        StringAssert.Contains(cookie, MobileServer.CookieName + "=" + key);
         StringAssert.Contains(cookie, "httponly");
         StringAssert.Contains(cookie, "samesite=strict");
         Assert.AreEqual(HttpStatusCode.OK, (await fixture.Client.GetAsync("/api/sessions")).StatusCode, "The cookie signs the phone in.");
+        // Without the cookie of the client.
+        using var bare = new HttpClient(new HttpClientHandler { UseCookies = false }) { BaseAddress = fixture.Client.BaseAddress };
+        Assert.AreEqual(HttpStatusCode.OK, (await bare.SendAsync(Bearer(key))).StatusCode, "So does its key.");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await bare.SendAsync(Bearer(fixture.Token))).StatusCode, "The pairing token only signs in.");
+        using var again = await fixture.PostAsync("/api/login", new JsonObject { ["token"] = key });
+        Assert.AreEqual(key, (string?)JsonNode.Parse(await again.Content.ReadAsStringAsync())!["key"], "The phone signs in again with its key, and keeps it.");
 
-        // A reset of the token disconnects every phone.
-        fixture.Token = "ZYXWVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkji";
+        // A reset signs every phone out.
+        var before = fixture.Token;
+        await fixture.Access.ResetAsync(CancellationToken.None);
         Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await bare.SendAsync(Bearer(key))).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.PostAsync("/api/login", new JsonObject { ["token"] = before })).StatusCode);
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.PostAsync("/api/login", new JsonObject { ["token"] = fixture.Token })).StatusCode, "The new code signs in.");
 
-        using var bearer = new HttpRequestMessage(HttpMethod.Get, "/api/sessions");
-        bearer.Headers.Authorization = new AuthenticationHeaderValue("Bearer", fixture.Token);
-        Assert.AreEqual(HttpStatusCode.OK, (await fixture.Client.SendAsync(bearer)).StatusCode);
+        static HttpRequestMessage Bearer(string value)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/sessions");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", value);
+            return request;
+        }
     }
 
     [TestMethod]
@@ -117,7 +131,7 @@ public sealed class MobileServerTests
             Freeform = new PluginAskFreeform { Title = "Why", Placeholder = "Optional" },
         });
         var ask = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/ask"))!["ask"]!;
-        Assert.AreEqual(("ask-7", "2", "pending"), ((string?)ask["id"], (string?)ask["revision"], (string?)ask["state"]));
+        Assert.AreEqual(("ask-7", "2", "pending", false), ((string?)ask["id"], (string?)ask["revision"], (string?)ask["state"], (bool)ask["immediate"]!));
         var question = ask["questions"]![0]!;
         Assert.AreEqual(("Database", "Which database?", "For the cache."), ((string?)question["title"], (string?)question["question"], (string?)question["description"]));
         Assert.AreEqual(("Postgres", "A server."), ((string?)question["choices"]![1]!["title"], (string?)question["choices"]![1]!["description"]));
@@ -175,6 +189,53 @@ public sealed class MobileServerTests
         var answered = JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/known/ask/answer", body)).Content.ReadAsStringAsync())!;
         Assert.AreEqual((true, true, "submitting"), ((bool)answered["ok"]!, (bool)answered["pending"]!, (string?)answered["status"]));
         fixture.Asks.Hold.SetResult();
+
+        // The host says the answer still goes (a retry while the first is on its way): it is pending too, never an error.
+        fixture.Asks.Hold = null;
+        fixture.Asks.Outcome = "submitting";
+        answered = JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/known/ask/answer", body)).Content.ReadAsStringAsync())!;
+        Assert.AreEqual((true, true, "submitting"), ((bool)answered["ok"]!, (bool)answered["pending"]!, (string?)answered["status"]));
+        Assert.IsNull(answered["error"]);
+    }
+
+    [TestMethod]
+    public async Task AnswersLongerThanTheHostTakes_AreRefused_WithWhatTheLimitIs()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("session status known", FakeAlta.Status("known", "p1", "personal"));
+        JsonObject Answer(params string[] texts) => new()
+        {
+            ["actionId"] = Guid.NewGuid().ToString(), ["askId"] = "ask-1", ["revision"] = "0",
+            ["answers"] = new JsonArray([.. texts.Select((text, index) => (JsonNode)new JsonObject { ["question"] = index, ["text"] = text })]),
+        };
+        var half = new string('a', PluginAskLimits.AnswerText / 2);
+
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.PostAsync("/api/sessions/known/ask/answer", Answer(half, half))).StatusCode, "The limit is that of all the answers together.");
+        using var tooLong = await fixture.PostAsync("/api/sessions/known/ask/answer", Answer(half, half + "a"));
+        Assert.AreEqual(HttpStatusCode.BadRequest, tooLong.StatusCode);
+        Assert.AreEqual(MobileAsks.AnswerTooLong, (string?)JsonNode.Parse(await tooLong.Content.ReadAsStringAsync())!["error"]);
+        StringAssert.Contains(MobileAsks.AnswerTooLong, "8192");
+
+        var review = Answer();
+        review["review"] = new JsonObject { ["verdict"] = "commented", ["overall"] = new string('b', PluginAskLimits.OverallComment) };
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.PostAsync("/api/sessions/known/ask/answer", review)).StatusCode, "An overall comment has the limit of the review store.");
+        review["actionId"] = Guid.NewGuid().ToString();
+        review["review"]!["overall"] = new string('b', PluginAskLimits.OverallComment + 1);
+        using var overall = await fixture.PostAsync("/api/sessions/known/ask/answer", review);
+        Assert.AreEqual(MobileAsks.OverallTooLong, (string?)JsonNode.Parse(await overall.Content.ReadAsStringAsync())!["error"]);
+    }
+
+    [TestMethod]
+    public async Task AQuestionOfAScript_IsSaidImmediate()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("session status known", FakeAlta.Status("known", "p1", "personal"));
+        fixture.Asks.Pending["known"] = FakeAsks.Ask("known", questions: new PluginAskQuestion { Title = "Go", Question = "Go on?", Freeform = new PluginAskFreeform() }) with { Immediate = true };
+
+        var ask = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/ask"))!["ask"]!;
+        Assert.IsTrue((bool)ask["immediate"]!, "the phone shows it while the turn runs");
     }
 
     [TestMethod]
@@ -216,7 +277,10 @@ public sealed class MobileServerTests
 
         internal int Port { get; }
 
-        internal string Token { get; set; } = MobileServerTests.Token;
+        internal required MobileAccess Access { get; init; }
+
+        /// <summary>The pairing token of the QR code.</summary>
+        internal string Token => Access.PairingToken!;
 
         internal static async Task<Fixture> StartAsync()
         {
@@ -229,16 +293,17 @@ public sealed class MobileServerTests
             var live = new MobileLive();
             var sessions = new MobileSessions(alta, new FakeSpaces(), live);
             var asks = new FakeAsks();
-            Fixture? fixture = null;
+            var access = await MobileAccess.LoadAsync(new MobileSettingsTests.MemoryState(), CancellationToken.None);
+            await access.PairAsync(CancellationToken.None);
             var server = new MobileServer(new MobileServerOptions
             {
-                Port = port, Token = () => fixture!.Token, Hosts = () => ["desk.tail1234.ts.net:2584"], Files = files, Sessions = sessions,
-                Api = new MobileApi(alta, sessions), Asks = new MobileAsks(asks, sessions), Live = live, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
+                Port = port, Access = access, Hosts = () => ["desk.tail1234.ts.net:2584"], Files = files, Sessions = sessions,
+                // An answer the session takes long to take is said pending at once: no test waits the seconds of a phone.
+                Api = new MobileApi(alta, sessions), Asks = new MobileAsks(asks, sessions, TimeSpan.FromMilliseconds(50)), Live = live, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
             });
             await server.StartAsync(default);
             var client = new HttpClient(new HttpClientHandler { UseCookies = true }) { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
-            fixture = new Fixture(server, client, alta, port) { Asks = asks };
-            return fixture;
+            return new Fixture(server, client, alta, port) { Asks = asks, Access = access };
         }
 
         internal Task<HttpResponseMessage> PostAsync(string path, JsonObject body)
@@ -247,7 +312,7 @@ public sealed class MobileServerTests
         internal async Task SignInAsync()
         {
             using var login = await PostAsync("/api/login", new JsonObject { ["token"] = Token });
-            Assert.AreEqual(HttpStatusCode.NoContent, login.StatusCode);
+            Assert.AreEqual(HttpStatusCode.OK, login.StatusCode);
         }
 
         public async ValueTask DisposeAsync()

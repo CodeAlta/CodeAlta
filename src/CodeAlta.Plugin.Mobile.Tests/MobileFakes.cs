@@ -117,8 +117,8 @@ internal sealed class FakeAsks : IPluginAskService
 
     public bool HasAsks => true;
 
-    public ValueTask<IReadOnlyList<string>> ListAskingSessionsAsync(CancellationToken cancellationToken = default)
-        => ValueTask.FromResult<IReadOnlyList<string>>([.. Pending.Keys]);
+    public ValueTask<IReadOnlyList<PluginAskSummary>> ListAskingAsync(CancellationToken cancellationToken = default)
+        => ValueTask.FromResult<IReadOnlyList<PluginAskSummary>>([.. Pending.Values.Select(static ask => new PluginAskSummary(ask.SessionId, ask.AskId, ask.Revision, ask.State, ask.Immediate))]);
 
     public ValueTask<PluginAsk?> GetPendingAsync(string sessionId, CancellationToken cancellationToken = default)
         => ValueTask.FromResult(Pending.GetValueOrDefault(sessionId));

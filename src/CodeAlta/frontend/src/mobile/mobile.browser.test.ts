@@ -122,7 +122,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     assert.equal(await evaluate("location.href"), `${server.origin}/`);
     // "Not now" on the offer to install the app.
     if (await evaluate<boolean>(shown("#install-bar"))) await click("#install-later");
-    assert.equal(await evaluate("localStorage.getItem('alta.token')"), "secret");
+    assert.equal(await evaluate("localStorage.getItem('alta.token')"), "key1", "the phone keeps the key the computer gave it, not the pairing token");
     assert.deepEqual(server.requests.filter(r => r.path === "/api/login").map(r => r.body), [{ token: "secret" }]);
     assert.ok(server.requests.every(r => !/[?&]t=/.test(r.query)), "the token never goes in a query");
     assert.deepEqual(await evaluate("[...document.querySelectorAll('#sessions .row')].map(r => r.dataset.id)"), ["s1", "s2"]);
@@ -409,9 +409,11 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     const logins = count("POST", "/api/login");
     await click("#refresh");
     await waitUntil(() => count("POST", "/api/login") === logins + 1, "a new sign-in with the kept token");
+    assert.deepEqual(server.requests.filter(r => r.path === "/api/login").at(-1)?.body, { token: "key1" }, "with the key of the phone");
     await waitFor(`document.querySelectorAll("#sessions .row").length >= 2`, "the list after signing in again");
     server.state.cookies.clear();
     server.state.token = "reset";
+    server.state.keys.clear();
     server.dropStreams();
     await click("#refresh");
     await waitFor(`document.getElementById('note').textContent.includes("no longer connected")`, "the signed-out message");

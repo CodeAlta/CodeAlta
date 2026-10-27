@@ -1,12 +1,25 @@
 import { questionTabTitle } from "../askReview";
 import {
-  askBadge, askChoice, askCommentsText, askGo, askPrimaryLabel, askReviewWhat, askReviewWhere, askSendable, askStep, askVerdict, askVerdicts, type AskDraft,
+  askBadge, askChoice, askCommentsText, askGo, askLimits, askPrimaryLabel, askReviewWhat, askReviewWhere, askSendable, askStep, askTextRoom, askVerdict, askVerdicts,
+  type AskDraft,
 } from "./ask";
 import type { Ask } from "./contract";
 import { el, icon, iconSvg } from "./dom";
 
 /** What the card of an ask shows besides the ask: an answer on its way, and why the last one did not go. */
 export type AskViewState = Readonly<{ sending: boolean; note: string }>;
+
+/** What the card is: the questions to answer, or a line read-only while an answer goes or when its outcome is unknown. */
+export type AskViewMode = "form" | "sending" | "unknown";
+
+/** What the read-only card says. */
+export const askNotices = {
+  sending: "Sending your answer to the session…",
+  unknown: "The answer was sent, but CodeAlta cannot tell whether the session got it. Check the session on the computer.",
+} as const;
+
+/** What the card says when the text answers reach their limit. */
+export const askTextLimitHint = `The answers hold ${askLimits.answerText} characters at most, all the questions together.`;
 
 /**
  * The card of an ask in place of the composer, as the desktop draws it: the badge, the steps of several questions, the
@@ -25,12 +38,31 @@ export function createAskView(options: Readonly<{
 }>) {
   const { document, root } = options;
   const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string | null, text?: string | number | null) => el(document, tag, className, text);
-  let shown: { ask: Ask; draft: AskDraft; state: AskViewState } | null = null;
+  let shown: { ask: Ask; draft: AskDraft; state: AskViewState; mode: AskViewMode } | null = null;
   let drawn = "";
+
+  // An answer on its way, or whose outcome is unknown: the badge and one line, nothing to change.
+  function drawNotice(ask: Ask, mode: Exclude<AskViewMode, "form">) {
+    const card = make("div", "ask-card ask-notice");
+    card.dataset.mode = mode;
+    card.setAttribute("role", "status");
+    card.setAttribute("aria-live", "polite");
+    const badge = make("span", "ask-badge");
+    badge.append(icon(document, ask.review ? "chat" : "ask"), document.createTextNode(askBadge(ask)));
+    const line = make("p", "ask-notice-text");
+    if (mode === "sending") line.append(make("span", "ask-notice-spinner"));
+    else line.append(icon(document, "computer"));
+    line.append(make("span", null, askNotices[mode]));
+    card.append(badge, line);
+    root.replaceChildren(card, ...Array.from(root.children).filter(child => child.id === "foot"));
+    drawn = key();
+    options.onResize();
+  }
 
   function draw() {
     if (!shown) return;
-    const { ask, draft } = shown;
+    const { ask, draft, mode } = shown;
+    if (mode !== "form") { drawNotice(ask, mode); return; }
     const count = ask.questions.length, question = ask.questions[draft.index], review = ask.review;
     const form = make("fieldset", "ask-card ask-form");
     form.dataset.review = review?.kind ?? "";
@@ -107,12 +139,12 @@ export function createAskView(options: Readonly<{
         const title = question.freeform.title ?? "Answer";
         const box = make("textarea");
         box.rows = 2;
-        box.maxLength = 8192;
+        box.maxLength = askTextRoom(ask, draft, draft.index);
         box.dataset.field = "text";
         box.setAttribute("aria-label", title);
         box.placeholder = question.freeform.placeholder ?? "";
         box.value = draft.text.get(draft.index) ?? "";
-        label.append(make("span", null, title), box);
+        label.append(make("span", null, title), box, make("small", "ask-hint ask-text-hint", askTextLimitHint));
         part.append(label);
       }
       form.append(part);
@@ -140,7 +172,7 @@ export function createAskView(options: Readonly<{
       const overall = make("label", "ask-freeform");
       const box = make("textarea");
       box.rows = 2;
-      box.maxLength = 8192;
+      box.maxLength = askLimits.overallComment;
       box.dataset.field = "overall";
       box.setAttribute("aria-label", "Overall comment (optional)");
       box.value = draft.overall;
@@ -202,7 +234,14 @@ export function createAskView(options: Readonly<{
     }
     const sendable = askSendable(ask, draft), step = askStep(ask, draft);
     const hint = form.querySelector<HTMLElement>(".ask-review-hint");
-    if (hint) hint.hidden = sendable;
+    if (hint) hint.hidden = sendable || !ask.review;
+    // The text answers share one limit: the box of a question has what the others left.
+    const text = form.querySelector<HTMLTextAreaElement>("textarea[data-field='text']");
+    if (text) {
+      const room = askTextRoom(ask, draft, draft.index);
+      text.maxLength = room;
+      form.querySelector<HTMLElement>(".ask-text-hint")!.hidden = text.value.length < room;
+    }
     const back = form.querySelector<HTMLButtonElement>(".ask-back");
     if (back) back.disabled = draft.index === 0;
     const primary = form.querySelector<HTMLButtonElement>(".ask-answer")!;
@@ -216,7 +255,7 @@ export function createAskView(options: Readonly<{
     options.onResize();
   }
 
-  const key = () => shown ? `${shown.ask.id}\n${shown.ask.revision}\n${shown.draft.index}\n${shown.ask.review?.comments ?? ""}` : "";
+  const key = () => shown ? `${shown.mode}\n${shown.ask.id}\n${shown.ask.revision}\n${shown.draft.index}\n${shown.ask.review?.comments ?? ""}` : "";
 
   // Another question: it is drawn, and the choice or the field it has takes the focus, as the tab it replaces had it.
   function go(index: number) {
@@ -253,11 +292,11 @@ export function createAskView(options: Readonly<{
   });
 
   return {
-    /** Shows an ask with its draft, or nothing. */
-    show(ask: Ask | null, draft: AskDraft | null, state: AskViewState) {
-      if (!ask || !draft) { shown = null; drawn = ""; root.querySelector("fieldset.ask-form")?.remove(); return; }
-      shown = { ask, draft, state };
-      if (key() !== drawn || !root.querySelector("fieldset.ask-form")) draw(); else sync();
+    /** Shows an ask with its draft, as a form or a read-only card, or nothing. */
+    show(ask: Ask | null, draft: AskDraft | null, state: AskViewState, mode: AskViewMode = "form") {
+      if (!ask || !draft) { shown = null; drawn = ""; root.querySelector(".ask-card")?.remove(); return; }
+      shown = { ask, draft, state, mode };
+      if (key() !== drawn || !root.querySelector(".ask-card")) draw(); else if (mode === "form") sync();
     },
   };
 }

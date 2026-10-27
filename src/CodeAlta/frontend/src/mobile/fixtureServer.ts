@@ -15,7 +15,10 @@ export type FixtureRequest = Readonly<{ method: string; path: string; query: str
  */
 export async function startFixtureServer(files: Readonly<Record<string, Readonly<{ type: string; body: string | Buffer }>>>) {
   const state = {
+    /** The pairing token of the QR code. */
     token: "secret",
+    /** The keys of the phones signed in, which sign them in again; the pairing token gives a new one. */
+    keys: new Set<string>(),
     cookies: new Set<string>(),
     sessions: [] as Session[],
     events: new Map<string, TimelineEvent[]>(),
@@ -32,10 +35,12 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     asks: new Map<string, Ask>(),
     /** What the next answer or cancel of an ask becomes; null: it goes. */
     askResult: null as AskResult | null,
+    /** What becomes of the ask when the next answer or cancel is refused or still goes; null leaves it as it is. */
+    askAfter: null as Ask | null,
   };
   const requests: FixtureRequest[] = [];
   const streams = new Set<ServerResponse>();
-  let cookieSeq = 0;
+  let cookieSeq = 0, keySeq = 0;
 
   const send = (response: ServerResponse, status: number, body?: unknown, headers: Record<string, string> = {}) => {
     response.writeHead(status, { "Content-Security-Policy": mobilePolicy, "Cache-Control": "no-store", ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...headers });
@@ -73,10 +78,13 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       return response.end(file.body);
     }
     if (path === "/api/login" && request.method === "POST") {
-      if ((body as { token?: string } | undefined)?.token !== state.token) return send(response, 401);
+      const given = (body as { token?: string } | undefined)?.token ?? "";
+      const key = state.keys.has(given) ? given : given === state.token ? `key${++keySeq}` : null;
+      if (!key) return send(response, 401);
+      state.keys.add(key);
       const cookie = `c${++cookieSeq}`;
       state.cookies.add(cookie);
-      return send(response, 204, undefined, { "Set-Cookie": `alta_mobile=${cookie}; Path=/; HttpOnly; SameSite=Strict` });
+      return send(response, 200, { key }, { "Set-Cookie": `alta_mobile=${cookie}; Path=/; HttpOnly; SameSite=Strict` });
     }
     if (!signedIn(request)) return send(response, 401);
     if (path === "/api/events") {
@@ -127,7 +135,9 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         const result = state.askResult ?? { ok: true, status: action === "ask/answer" ? "admitted" : "cancelled", error: null };
         state.askResult = null;
         const { askId } = body as { askId: string };
-        if (result.ok && state.asks.get(id)?.id === askId) state.asks.delete(id);
+        if (state.askAfter) state.asks.set(id, state.askAfter);
+        else if (result.ok && !result.pending && state.asks.get(id)?.id === askId) state.asks.delete(id);
+        state.askAfter = null;
         return send(response, 200, result);
       }
       if (action === "prompt") {
