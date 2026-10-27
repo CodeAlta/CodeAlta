@@ -13,6 +13,8 @@ import { useShellLanguage } from "../shellLanguage";
 import type { RunProvider, RunsWith } from "../workItems/runsWith";
 import { chooseEffort, chooseModel, chooseProvider, shownModel, switchDefaults, usesDefaults, type SessionSettings } from "./sessionSettings";
 import type { SessionSettingsApi, SessionSettingsModel } from "./sessionSettingsApi";
+import { SessionOptionsFields } from "./SessionOptionsFields";
+import { changedSessionOptions, sessionOptionsOf } from "./sessionOptions";
 
 // The answer of one read, for the key it was asked with: an answer for another key is not shown.
 type Keyed<T> = Readonly<{ key: string; value: T }>;
@@ -98,7 +100,8 @@ export function SessionSettingsChip({ id, providers, choices, value, onChange, d
       permission: permission === undefined ? null : { mode: permission, name: permissionName(permission) },
       review: choices.reviewSetting === null ? null : value.reviewBeforeCommit ?? choices.reviewSetting,
       sandbox: !choices.sandbox ? null : value.sandbox === null ? sessionSandboxSummary(choices.sandbox)
-        : { profile: value.sandbox.toLowerCase() === notSandboxed ? null : value.sandbox, source: "session", problem: null } }}
+        : { profile: value.sandbox.toLowerCase() === notSandboxed ? null : value.sandbox, source: "session", problem: null },
+      subSessions: sessionOptionsOf(value.options).subSessions }}
     agent={<HTMLSelect fill id={`composer-agent-${id}`} aria-label={t("Agent prompt")} value={agentId ?? ""} disabled={disabled || choices.prompts.length === 0}
       onChange={event => onChange({ ...value, agentPromptId: event.target.value === choices.defaultPromptId ? null : event.target.value || null })}>
       {!agentId && <option value="">{t(choices.loadingPrompts ? "Loading…" : "Default")}</option>}
@@ -121,5 +124,7 @@ export function SessionSettingsChip({ id, providers, choices, value, onChange, d
     review={choices.reviewSetting !== null && <ReviewBeforeCommitSelect id={`composer-review-${id}`} own={value.reviewBeforeCommit} setting={choices.reviewSetting} disabled={locked}
       onChange={reviewBeforeCommit => onChange({ ...value, reviewBeforeCommit })} />}
     sandbox={choices.sandbox && <SessionSandboxSelect id={`composer-sandbox-${id}`} own={value.sandbox} inherited={choices.sandbox.profile} choices={choices.sandbox.choices}
-      disabled={locked} onChange={sandbox => onChange({ ...value, sandbox })} />} />;
+      disabled={locked} onChange={sandbox => onChange({ ...value, sandbox })} />}
+    options={{ changed: changedSessionOptions(value.options),
+      content: <SessionOptionsFields id={id} value={value.options} disabled={disabled} onChange={options => onChange({ ...value, options })} /> }} />;
 }

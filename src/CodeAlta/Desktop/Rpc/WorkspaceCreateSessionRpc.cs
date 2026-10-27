@@ -14,12 +14,12 @@ internal sealed partial class WorkspaceService
     // The provider of a session that names none: the default of the configuration, as the page shows it.
     private readonly DesktopDefaultProvider? _defaultProvider;
     // Project, provider, title, the space of the session and its permission mode.
-    private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string?, string?, string?, Task<SessionViewDescriptor>>? _createSession;
+    private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string?, string?, string?, CodeAlta.Agent.AgentSessionOptions?, Task<SessionViewDescriptor>>? _createSession;
     // The spaces a new session can be created in: the one the page shows, which it names.
     private readonly SpaceCatalog? _sessionSpaces;
     // A session that works in a worktree: the worktree is created first, and removed again when no session comes of it.
     private readonly GitWorktreeService? _worktrees;
-    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string?, string, string?, string?, Task<SessionViewDescriptor>>? _createInWorktree;
+    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string?, string, string?, string?, CodeAlta.Agent.AgentSessionOptions?, Task<SessionViewDescriptor>>? _createInWorktree;
     // The permission modes a new session of a provider can be given; null where the host has no command owner.
     private readonly Func<string, OwnedPermissionModeChoices>? _newSessionPermissionModes;
     private readonly Func<OwnedProjectReferenceScope?, string?, CancellationToken, Task<OwnedDraftPrompts?>>? _draftPrompts;
@@ -44,10 +44,10 @@ internal sealed partial class WorkspaceService
     {
         _sessionProviders = host.ModelProviderRegistry;
         _defaultProvider = new(host.CatalogOptions);
-        _createSession = (project, provider, title, space, mode) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, null, space, mode);
+        _createSession = (project, provider, title, space, mode, options) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, null, space, mode, null, null, options);
         _sessionSpaces = host.SpaceCatalog;
         _worktrees = worktrees;
-        _createInWorktree = (project, provider, title, folder, space, mode) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space, mode);
+        _createInWorktree = (project, provider, title, folder, space, mode, options) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space, mode, null, null, options);
         _newSessionPermissionModes = host.Commands.GetNewSessionPermissionModes;
         _draftPrompts = host.Commands.GetDraftPromptsAsync;
         _renameSession = host.Commands.RenameSessionAsync;
@@ -109,7 +109,7 @@ internal sealed partial class WorkspaceService
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(createSession);
         _sessionProviders = providers;
-        _createSession = (project, provider, title, space, _) => createSession(project, provider, title, space);
+        _createSession = (project, provider, title, space, _, _) => createSession(project, provider, title, space);
         _sessionSpaces = new SpaceCatalog(catalog);
     }
 
@@ -353,8 +353,9 @@ internal sealed partial class WorkspaceService
         SessionViewDescriptor session;
         try
         {
-            session = worktree is null ? await _createSession!(project, provider, request.Title, request.SpaceId, request.PermissionMode).ConfigureAwait(false)
-                : await _createInWorktree!(project!, provider, request.Title, worktree.Folder!, request.SpaceId, request.PermissionMode).ConfigureAwait(false);
+            var options = SessionOptionsChoice.Record(request.Options);
+            session = worktree is null ? await _createSession!(project, provider, request.Title, request.SpaceId, request.PermissionMode, options).ConfigureAwait(false)
+                : await _createInWorktree!(project!, provider, request.Title, worktree.Folder!, request.SpaceId, request.PermissionMode, options).ConfigureAwait(false);
         }
         catch (Exception) when (worktree is not null)
         {
@@ -411,9 +412,10 @@ internal sealed partial class WorkspaceService
 /// for the same project and base branch. The session works there; a worktree that is unknown, discarded or taken by
 /// another session is replaced by a new one.
 /// </param>
+/// <param name="Options">The options the session is created with, such as whether it can start sessions of its own; null for the defaults.</param>
 internal sealed record WorkspaceCreateSessionRequest(string ExpectedHostEpoch, string Scope, string? ProjectId, string? ProjectPath, string? Title,
     string? ProviderId = null, bool Worktree = false, string? BaseBranch = null, string? SpaceId = null, string? RequestId = null,
-    string? PermissionMode = null, string? PreparedWorktreeId = null);
+    string? PermissionMode = null, string? PreparedWorktreeId = null, SessionOptionsChoice? Options = null);
 /// <param name="ExpectedHostEpoch">The host the page reads.</param>
 /// <param name="ProviderId">The provider the composer of the new session names.</param>
 internal sealed record WorkspaceDraftPermissionModesRequest(string ExpectedHostEpoch, string ProviderId);

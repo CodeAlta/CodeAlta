@@ -1138,6 +1138,15 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-reasoning-slider .bp6-slider-label { font-size: 11px; white-space: nowrap; }
 .composer-reasoning-static { color: var(--muted); font-size: 12px; }
 .composer-selection-links { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 -6px; padding-top: 8px; border-top: 1px solid var(--line); }
+/* The options of the session, behind More options at the end of the form: a quiet button, with how many are changed. */
+.composer-selection-more { margin: -4px -6px 8px; }
+.composer-selection-more-button.bp6-button { color: var(--muted); }
+.composer-selection-more-count { display: inline-block; min-width: 16px; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: var(--accent); color: var(--bg);
+  font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; }
+.composer-selection-more-body { padding: 6px 6px 0; }
+.composer-selection-more-body .composer-selection-option { margin: 0 0 4px; }
+.composer-selection-option .bp6-control { margin-bottom: 2px; }
+.composer-selection-option .composer-selection-label { text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--text); }
 .composer-send-group.bp6-button-group { flex: 0 0 auto; }
 .composer-send-group .composer-send-options.bp6-button { min-width: 22px; padding: 0 3px; }
 /* Explorer header and floating row menus (Blueprint Popover/Menu). */
@@ -2936,6 +2945,12 @@ span.workspace-chip-part.workspace-chip-changes { display: inline-flex; align-it
 .composer-selection-sandbox { margin-left: 6px; }
 .composer-selection-sandbox svg { color: var(--green); }
 .composer-selection-sandbox[data-problem] svg { color: var(--red); }
+/* A session without sub-sessions: the mark of the sub-agents, struck through, beside them. */
+.prompt-surface .composer-selection-no-sub-sessions { flex-shrink: 0; }
+.composer-selection-no-sub-sessions::before { content: none !important; }
+.composer-selection-no-sub-sessions { position: relative; margin-left: 6px; color: var(--muted); }
+.composer-selection-no-sub-sessions svg { color: var(--muted); }
+.composer-selection-no-sub-sessions::after { content: ""; position: absolute; top: 50%; left: -1px; right: -1px; border-top: 1.5px solid currentColor; transform: rotate(-45deg); }
 .prompt-surface .context-usage.bp6-button { height: 28px; min-height: 28px; padding: 0 8px; }
 .prompt-cache-countdown { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; cursor: default; }
 .prompt-cache-countdown[data-state="ending"] { color: var(--yellow); }

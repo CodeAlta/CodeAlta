@@ -109,7 +109,7 @@ internal sealed class SessionStarter : ISessionStarter
                 folder = existing;
             }
 
-            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space, model?.PermissionMode).ConfigureAwait(false);
+            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space, model?.PermissionMode, null, null, model?.SessionOptions).ConfigureAwait(false);
             sessionId = session.SessionId;
             // The review and the sandbox chosen for the session, before anything is sent to it.
             if (model?.ReviewBeforeCommit is { } review

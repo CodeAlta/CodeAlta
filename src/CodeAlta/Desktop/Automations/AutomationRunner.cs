@@ -135,7 +135,7 @@ internal sealed class AutomationRunner : IAutomationRunner
                 SourceProjectId = project?.Id,
                 CorrelationId = runId,
                 CreatedAt = DateTimeOffset.UtcNow,
-            }, null, spaceId, definition.PermissionMode).ConfigureAwait(false);
+            }, null, spaceId, definition.PermissionMode, null, null, definition.SessionOptions).ConfigureAwait(false);
             sessionId = session.SessionId;
             // The review and the sandbox the automation chose, before anything is sent to the session.
             if (definition.ReviewBeforeCommit is { } review

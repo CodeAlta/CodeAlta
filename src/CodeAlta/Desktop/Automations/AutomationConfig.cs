@@ -240,7 +240,7 @@ internal static class AutomationConfig
             || !TryText(table, "agent", out var agent, out problem) || !TryFlag(table, "enabled", true, out var enabled, out problem)
             || !TryFlag(table, "catch_up", false, out var catchUp, out problem) || !TryText(table, "permission_mode", out var permissionMode, out problem)
             || !TryText(table, "sandbox", out var sandbox, out problem) || !TryText(table, "script", out var script, out problem)
-            || !TryText(table, "script_args", out var scriptArguments, out problem)) return false;
+            || !TryText(table, "script_args", out var scriptArguments, out problem) || !TryFlag(table, "sub_sessions", true, out var subSessions, out problem)) return false;
         bool? review = null;
         if (table.ContainsKey("review_before_commit"))
         {
@@ -290,6 +290,7 @@ internal static class AutomationConfig
             PermissionMode = Blank(permissionMode),
             ReviewBeforeCommit = review,
             Sandbox = Blank(sandbox),
+            SessionOptions = AgentSessionOptions.Stored(new AgentSessionOptions { SubSessions = subSessions }),
             CatchUp = catchUp,
             Triggers = triggers,
         };
@@ -427,6 +428,8 @@ internal static class AutomationConfig
         if (definition.PermissionMode is { } mode) builder.Append("permission_mode = ").Append(Quote(mode)).Append(newline);
         if (definition.ReviewBeforeCommit is { } review) builder.Append("review_before_commit = ").Append(review ? "true" : "false").Append(newline);
         if (definition.Sandbox is { } sandbox) builder.Append("sandbox = ").Append(Quote(sandbox)).Append(newline);
+        // An option is written only when it is not its default.
+        if (AgentSessionOptions.Stored(definition.SessionOptions) is { SubSessions: false }) builder.Append("sub_sessions = false").Append(newline);
         if (definition.CatchUp) builder.Append("catch_up = true").Append(newline);
         if (definition.Triggers.Count > 0)
         {

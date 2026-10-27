@@ -16,7 +16,9 @@ import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectRefere
 import { IssuePicker } from "./IssuePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
-import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
+import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
+import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
+import { changedSessionOptions, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, sendAvailable, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -1174,6 +1176,27 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
 
     setReview({ key: reviewKey, own: result.own ?? null, effective: result.effective, setting: result.setting });
   }
+  // The options of the session (sub-sessions): read with the session, and changed from the form of the Agent chip. Its
+  // tools and its instructions follow them from its next prompt.
+  const [sessionOptions, setSessionOptions] = useState<Readonly<{ key: string; options: SessionOptionsChoice }> | null>(null);
+  useEffect(() => {
+    if (invalidEpoch) return;
+    const controller = new AbortController();
+    void sessions.options({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 8000 }).then(result => {
+      if (!controller.signal.aborted && result.status === "ok" && result.options) setSessionOptions({ key: reviewKey, options: result.options });
+    }).catch(() => { /* The section is shown once the options are known. */ });
+    return () => controller.abort();
+  }, [epoch, sessionId, reviewKey, invalidEpoch]);
+  const shownOptions = sessionOptions?.key === reviewKey ? sessionOptions.options : null;
+  async function applyOptions(value: SessionOptionsChoice | null) {
+    const result = await sessions.setOptions({ expectedEpoch: epoch, sessionId, options: sessionOptionsOf(value) }, { timeoutMilliseconds: 30_000 }).catch(() => null);
+    if (result?.status !== "ok" || !result.options) {
+      showToast({ message: t("The options were not changed ({status}).", { status: result?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
+
+    setSessionOptions({ key: reviewKey, options: result.options });
+  }
   // The sandbox the session runs in: read with the session and again after each turn (the settings may have changed
   // meanwhile), and changed at once from the form of the Agent chip. What the settings give is known while the session
   // follows them, and kept once it has a choice of its own.
@@ -1413,7 +1436,7 @@ ${value}` : value);
         provider: selectedProviderName, providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
         reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary, review: shownReview?.effective ?? null,
-        sandbox: sessionSandboxSummary(shownSandbox?.reply),
+        sandbox: sessionSandboxSummary(shownSandbox?.reply), subSessions: shownOptions?.subSessions ?? null,
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })
           : reasoning.note === "unused" ? `${t("Reasoning")}: ${selected?.reasoningEffort} · ${t("Not used")}` : null }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
@@ -1450,6 +1473,8 @@ ${value}` : value);
         disabled={invalidEpoch} onChange={value => void applyReview(value)} />}
       sandbox={shownSandbox && <SessionSandboxSelect id={`composer-sandbox-${sessionId}`} own={shownSandbox.reply.own} inherited={shownSandbox.inherited}
         choices={shownSandbox.reply.choices} disabled={invalidEpoch} onChange={value => void applySandbox(value)} />}
+      options={shownOptions && { changed: changedSessionOptions(shownOptions),
+        content: <SessionOptionsFields id={sessionId} value={shownOptions} disabled={invalidEpoch} onChange={value => void applyOptions(value)} /> }}
       permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
         disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined} /></>}

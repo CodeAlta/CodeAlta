@@ -73,3 +73,38 @@ test("the Agent chip marks a sandboxed session, and its Sandbox row follows the 
     assert.deepEqual(page.problems, []);
   }, options);
 });
+
+test("the options of a session are behind More options: the switch of sub-sessions, marked on the chip when it is off", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.composer-selection')`, "the chip");
+    assert.equal(await page.evaluate(`!!document.querySelector('.composer-selection-no-sub-sessions')`), false, "no mark with the defaults");
+    await page.click(".composer-selection");
+    await page.until(`document.querySelector('.composer-selection-more-button')`, "the form of the chip");
+    // Closed with the defaults: the form stays short, and the button says nothing changed.
+    assert.equal(await page.evaluate(`document.querySelector('.composer-selection-more-button').getAttribute('aria-expanded')`), "false");
+    assert.equal(await page.evaluate(`!!document.querySelector('#composer-sub-sessions-s')`), false);
+    assert.equal(await page.evaluate(`!!document.querySelector('.composer-selection-more-count')`), false);
+    await page.click(".composer-selection-more-button");
+    await page.until(`document.querySelector('#composer-sub-sessions-s')`, "the switch");
+    assert.equal(await page.evaluate(`document.querySelector('#composer-sub-sessions-s').checked`), true);
+    assert.equal(await page.evaluate(`document.querySelector('#composer-sub-sessions-s').closest('.bp6-form-group').querySelector('.bp6-form-helper-text').textContent`),
+      "The agent can start sessions of its own (sub-agents).");
+
+    // Off: the session records it, the button counts it, and the chip marks it.
+    await page.click("#composer-sub-sessions-s");
+    await page.until(`sandboxSessionFixture.optionsChosen.length === 1`, "the choice");
+    assert.deepEqual(await page.evaluate(`sandboxSessionFixture.optionsChosen[0]`), { subSessions: false });
+    await page.until(`document.querySelector('.composer-selection-more-count')?.textContent === '1'`, "the count");
+    assert.equal(await page.evaluate(`document.querySelector('#composer-sub-sessions-s').closest('.bp6-form-group').querySelector('.bp6-form-helper-text').textContent`),
+      "The agent does all the work itself: it starts no session.");
+    await page.until(`document.querySelector('.composer-selection-no-sub-sessions')?.title === 'Sub-sessions: Off'`, "the mark of the chip");
+    assert.ok((await page.evaluate<string>(`document.querySelector('.composer-selection').title`)).endsWith("\nSub-sessions: Off"));
+
+    // On again: the defaults, which a session records as nothing.
+    await page.click("#composer-sub-sessions-s");
+    await page.until(`sandboxSessionFixture.optionsChosen.length === 2`, "the second choice");
+    assert.equal(await page.evaluate(`sandboxSessionFixture.optionsChosen[1]`), null);
+    await page.until(`!document.querySelector('.composer-selection-no-sub-sessions')`, "the mark gone");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});

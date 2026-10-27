@@ -1,12 +1,17 @@
 // What a session started elsewhere than in a composer (an automation, a task, an issue) runs with, as the form of its
 // Agent chip chooses it. A part that is null is left to the defaults, which the form shows.
+import type { SessionOptionsChoice } from "#neoastra";
 import { runModel, runProvider, type RunModel, type RunProvider, type RunsWith } from "../workItems/runsWith";
 
-/** The choices of the form; null leaves a part to the defaults. */
+/**
+ * The choices of the form; null leaves a part to the defaults. The options (sub-sessions) are not models of the
+ * defaults: like the agent prompt, they keep their choice whether the defaults are used or not.
+ */
 export type SessionSettings = Readonly<{
   agentPromptId: string | null;
   providerId: string | null; modelId: string | null; reasoningEffort: string | null;
   permissionMode: string | null; reviewBeforeCommit: boolean | null; sandbox: string | null;
+  options: SessionOptionsChoice | null;
 }>;
 
 /** The provider, the model and the effort the form shows: what is chosen, else what the defaults give. */
@@ -33,7 +38,7 @@ export function shownModel(providers: readonly RunProvider[], models: readonly R
 
 /** Every part left to the defaults. */
 export const defaultSessionSettings: SessionSettings = Object.freeze({
-  agentPromptId: null, providerId: null, modelId: null, reasoningEffort: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null,
+  agentPromptId: null, providerId: null, modelId: null, reasoningEffort: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, options: null,
 });
 
 /** Whether the provider, the model, the effort, the permission mode, the review and the sandbox are the defaults. The agent prompt has its own default. */
@@ -43,11 +48,11 @@ export function usesDefaults(settings: SessionSettings): boolean {
 }
 
 /**
- * The switch of the defaults: on, every part but the agent prompt goes back to the defaults; off, what the defaults
- * give now becomes the choice of the user, who changes it from there.
+ * The switch of the defaults: on, every part but the agent prompt and the options goes back to the defaults; off, what
+ * the defaults give now becomes the choice of the user, who changes it from there.
  */
 export function switchDefaults(settings: SessionSettings, on: boolean, shown: ShownModel): SessionSettings {
-  if (on) return { ...defaultSessionSettings, agentPromptId: settings.agentPromptId };
+  if (on) return { ...defaultSessionSettings, agentPromptId: settings.agentPromptId, options: settings.options };
   return { ...settings, providerId: settings.providerId ?? shown.providerId, modelId: settings.modelId ?? shown.modelId,
     reasoningEffort: settings.reasoningEffort ?? (settings.modelId ?? shown.modelId ? shown.reasoningEffort : null) };
 }
@@ -72,7 +77,7 @@ export function chooseEffort(settings: SessionSettings, effort: string, shown: S
  * them; otherwise the provider, the model and the effort the form shows.
  */
 export function startRequest(settings: SessionSettings, shown: ShownModel): SessionStartRequest {
-  if (usesDefaults(settings)) return { ...defaultSessionSettings, agentPromptId: settings.agentPromptId };
+  if (usesDefaults(settings)) return { ...defaultSessionSettings, agentPromptId: settings.agentPromptId, options: settings.options };
   const providerId = settings.providerId ?? shown.providerId;
   const modelId = providerId ? settings.modelId ?? shown.modelId : null;
   return { ...settings, providerId, modelId, reasoningEffort: modelId ? settings.reasoningEffort ?? shown.reasoningEffort : null };

@@ -1,10 +1,11 @@
 // What the page knows of an automation without asking the host: how a trigger reads, what a form holds, the
 // templates a new one can start from.
-import type { AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem } from "#neoastra";
+import type { AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
 import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
 import { permissionModeName } from "../permissionModes";
 import { notSandboxed } from "../sandbox/sandboxChoices";
+import { sessionOptionsOf, storedSessionOptions } from "../sessionSettings/sessionOptions";
 import type { SessionSettings } from "../sessionSettings/sessionSettings";
 
 export type Translate = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => string;
@@ -131,20 +132,22 @@ export type AutomationForm = Readonly<{
   provider: string; model: string; effort: string; agent: string; catchUp: boolean;
   /** The permission mode, the review and the sandbox of its sessions; empty (null for the review) for the defaults. */
   permissionMode: string; reviewBeforeCommit: boolean | null; sandbox: string;
+  /** The options of its sessions (sub-sessions); null for the defaults. */
+  options: SessionOptionsChoice | null;
   triggers: readonly AutomationTriggerItem[];
 }>;
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
   return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
-    permissionMode: "", reviewBeforeCommit: null, sandbox: "", triggers: [] };
+    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, triggers: [] };
 }
 
 /** The form of an automation that exists. */
 export function formOf(item: AutomationItem): AutomationForm {
   return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
-    permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", triggers: item.triggers };
+    permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options), triggers: item.triggers };
 }
 
 /**
@@ -156,7 +159,8 @@ export function runsWithFacts(item: AutomationItem, t: Translate): readonly stri
   return [item.provider, item.model, item.effort, item.agent ? t("agent {name}", { name: item.agent }) : null,
     item.permissionMode ? `${t("Permissions")}: ${permission ? t(permission) : item.permissionMode}` : null,
     item.reviewBeforeCommit !== null ? `${t("Review before commit")}: ${t(item.reviewBeforeCommit ? "On" : "Off")}` : null,
-    item.sandbox ? `${t("Sandbox")}: ${item.sandbox.toLowerCase() === notSandboxed ? t("Off") : item.sandbox}` : null]
+    item.sandbox ? `${t("Sandbox")}: ${item.sandbox.toLowerCase() === notSandboxed ? t("Off") : item.sandbox}` : null,
+    !sessionOptionsOf(item.options).subSessions ? `${t("Sub-sessions")}: ${t("Off")}` : null]
     .filter((fact): fact is string => !!fact);
 }
 
@@ -164,13 +168,13 @@ export function runsWithFacts(item: AutomationItem, t: Translate): readonly stri
 export function sessionSettingsOf(form: AutomationForm): SessionSettings {
   const blank = (text: string) => text.trim() || null;
   return { agentPromptId: blank(form.agent), providerId: blank(form.provider), modelId: blank(form.model), reasoningEffort: blank(form.effort),
-    permissionMode: blank(form.permissionMode), reviewBeforeCommit: form.reviewBeforeCommit, sandbox: blank(form.sandbox) };
+    permissionMode: blank(form.permissionMode), reviewBeforeCommit: form.reviewBeforeCommit, sandbox: blank(form.sandbox), options: form.options };
 }
 
 /** The change of the form for what the form of its Agent chip chose. */
 export function formSettings(settings: SessionSettings): Partial<AutomationForm> {
   return { agent: settings.agentPromptId ?? "", provider: settings.providerId ?? "", model: settings.modelId ?? "", effort: settings.reasoningEffort ?? "",
-    permissionMode: settings.permissionMode ?? "", reviewBeforeCommit: settings.reviewBeforeCommit, sandbox: settings.sandbox ?? "" };
+    permissionMode: settings.permissionMode ?? "", reviewBeforeCommit: settings.reviewBeforeCommit, sandbox: settings.sandbox ?? "", options: storedSessionOptions(settings.options) };
 }
 
 /** What the form misses to be saved, as a message of the page; null when nothing. */
@@ -203,6 +207,7 @@ export function inputOf(form: AutomationForm): AutomationInput {
     scriptArguments: script ? form.scriptArguments.trim() || null : null, projectId: form.projectId,
     provider: provider || null, model: model || null, effort: model && form.effort ? form.effort : null, agent: form.agent.trim() || null,
     permissionMode: form.permissionMode.trim() || null, reviewBeforeCommit: form.reviewBeforeCommit, sandbox: form.sandbox.trim() || null,
+    options: storedSessionOptions(form.options),
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,
     triggers: form.triggers.map(trigger => ({ ...trigger, at: [...trigger.at].sort(), expression: trigger.type === "cron" ? (trigger.expression ?? "").trim() : null,

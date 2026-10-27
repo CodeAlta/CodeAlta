@@ -259,6 +259,9 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// <summary>The sandbox its sessions run in: a profile, or <c>off</c>; null for what the settings give.</summary>
     public string? Sandbox { get; init; }
 
+    /// <summary>The options of its sessions, such as whether they can start sessions of their own; null for the defaults.</summary>
+    public AgentSessionOptions? SessionOptions { get; init; }
+
     /// <summary>
     /// Whether what was missed while the application was not running is run when it starts: once for the times
     /// of a schedule, and for each issue or pull request an event trigger would have seen.
@@ -280,6 +283,8 @@ internal sealed record AutomationDefinition(string Id, string Name)
         // An automation without them keeps the fingerprint it was allowed with.
         if (PermissionMode is not null || ReviewBeforeCommit is not null || Sandbox is not null)
             text += "\n" + string.Join('\n', PermissionMode ?? string.Empty, ReviewBeforeCommit switch { true => "1", false => "0", null => string.Empty }, Sandbox ?? string.Empty);
+        // Nor without options of their own.
+        if (AgentSessionOptions.Stored(SessionOptions) is { } options) text += "\noptions\n" + (options.SubSessions ? "1" : "0");
         if (Script is not null) text += "\nscript\n" + Script + "\n" + (ScriptArguments ?? string.Empty);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }

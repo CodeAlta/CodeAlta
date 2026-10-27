@@ -42,6 +42,11 @@ test("the switch of the defaults: off takes what they give as the choice, on for
   const back = switchDefaults({ ...chosen, permissionMode: "acceptEdits", reviewBeforeCommit: true, sandbox: "off" }, true, shown);
   assert.deepEqual(back, settings({ agentPromptId: "plan" }));
   assert.equal(usesDefaults(back), true);
+  // The options are not models of the defaults: they keep their choice either way.
+  const leaf = settings({ options: { subSessions: false } });
+  assert.equal(usesDefaults(leaf), true);
+  assert.deepEqual(switchDefaults(leaf, false, shown).options, { subSessions: false });
+  assert.deepEqual(switchDefaults({ ...leaf, providerId: "codex" }, true, shown), leaf);
 });
 
 test("a change keeps what goes with it: another provider has its own model, effort and permission mode", () => {
@@ -59,4 +64,7 @@ test("a start asks nothing of the model with the defaults, and what the form sho
     settings({ providerId: "codex", modelId: "gpt-b", reasoningEffort: "low", reviewBeforeCommit: false }));
   // A model not read yet is left to the host, with its effort.
   assert.deepEqual(startRequest(settings({ providerId: "codex" }), { providerId: "codex", modelId: null, reasoningEffort: null }), settings({ providerId: "codex" }));
+  // The options go with the start, with the defaults or not.
+  assert.deepEqual(startRequest(settings({ options: { subSessions: false } }), shown), settings({ options: { subSessions: false } }));
+  assert.deepEqual(startRequest(settings({ providerId: "codex", options: { subSessions: false } }), shown).options, { subSessions: false });
 });

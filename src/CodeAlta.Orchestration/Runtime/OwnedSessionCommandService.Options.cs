@@ -13,6 +13,30 @@ public sealed record OwnedSessionOptionsResult(string Status, AgentSessionOption
 
 public sealed partial class OwnedSessionCommandService
 {
+    /// <summary>Reads the options of an owned session: those of its attachment while it is attached, else those saved with it.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns><c>ok</c> with the options; <c>unavailable</c> when the session is unknown; <c>closed</c> when the owner is closing.</returns>
+    /// <exception cref="ArgumentException">The session identity is empty.</exception>
+    /// <exception cref="OperationCanceledException">The read was cancelled.</exception>
+    public async Task<OwnedSessionOptionsResult> GetSessionOptionsAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        lock (_gate)
+        {
+            if (_closed || _retained) return new("closed", null);
+        }
+
+        try
+        {
+            var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            if (session is null || !string.Equals(session.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)) return new("unavailable", null);
+            return new("ok", await _runtime.GetSessionOptionsAsync(sessionId, cancellationToken).ConfigureAwait(false));
+        }
+        catch (ObjectDisposedException) { return new("closed", null); }
+        catch (InvalidOperationException) { return new("unavailable", null); }
+    }
+
     /// <summary>
     /// Changes the options of an owned session, as the user chooses them: they are saved with the session, and its
     /// tools and instructions follow them from its next prompt. A run in progress goes on with what it started with.

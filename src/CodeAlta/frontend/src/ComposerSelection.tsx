@@ -22,6 +22,8 @@ export type ComposerSelectionSummary = Readonly<{ agent: string; provider: strin
   review?: boolean | null;
   /** The sandbox the session runs in, shown as a small box when it is sandboxed; null where it is not known. */
   sandbox?: SessionSandboxSummary | null;
+  /** Whether the session can start sessions of its own, marked on the chip when it cannot; null where it is not known. */
+  subSessions?: boolean | null;
   /** What the tooltip says of the reasoning when the chip shows none ("Haiku 4.5 has no reasoning effort"). */
   reasoningNote?: string | null }>;
 
@@ -31,11 +33,17 @@ export type ComposerSelectionSummary = Readonly<{ agent: string; provider: strin
  */
 export type ComposerSelectionDefaults = Readonly<{ on: boolean; disabled?: boolean; onChange: (on: boolean) => void }>;
 
+/**
+ * The options of the session under More options, at the end of the form: `changed` counts those that differ from their
+ * default, which the button shows and which keep the section open.
+ */
+export type ComposerSelectionOptions = Readonly<{ content: ReactNode; changed: number }>;
+
 // Both draft and owned composers present their selection as one chip, the Agent chip, that opens this form; so do the
 // places that start a session of their own (an automation, a task, an issue), with the switch of the defaults.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
 // open while a control owns an admitted change (a provider switch) that must not be orphaned.
-export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, modelOptions, permission, review, sandbox, summary, locked = false, openRequest = 0, notice = null,
+export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, modelOptions, permission, review, sandbox, options = null, summary, locked = false, openRequest = 0, notice = null,
   defaults = null, disabled = false }: {
   sessionId: string;
   /** Opens a page of the catalog; the links to it are left out without it. */
@@ -49,6 +57,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
   review?: ReactNode;
   /** The sandbox the commands and the file tools of the session run in, where the host has one. */
   sandbox?: ReactNode;
+  /** The options of the session (sub-sessions), under More options; left out where they cannot be chosen. */
+  options?: ComposerSelectionOptions | null;
   summary: ComposerSelectionSummary; locked?: boolean;
   /** Opens the form each time it changes from what it was: the owner asks for another choice. */
   openRequest?: number;
@@ -81,6 +91,7 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       labelFor={`composer-sandbox-${sessionId}`} intent={summary.sandbox?.problem ? "danger" : "none"}
       helperText={summary.sandbox?.problem ? <span className="composer-selection-notice" role="alert">{summary.sandbox.problem}</span>
         : summary.sandbox ? sandboxSourceText(t, summary.sandbox) : undefined}>{sandbox}</FormGroup>}
+    {options && <ComposerMoreOptions sessionId={sessionId} options={options} />}
     {onOpenCatalog && <div className="composer-selection-links">
       <Button variant="minimal" size="small" icon={<AppIcon name="assistant" size={14} />} onClick={() => onOpenCatalog("prompts")}>{t("Browse agent prompts")}</Button>
       <Button variant="minimal" size="small" icon={<AppIcon name="model" size={14} />} onClick={() => onOpenCatalog("models")}>{t("Browse models")}</Button>
@@ -95,7 +106,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
         summary.reasoning ? `${t("Reasoning")}: ${summary.reasoning}` : summary.reasoningNote,
         summary.permission && `${t("Permissions")}: ${summary.permission.name}`,
         summary.review != null && `${t("Review before commit")}: ${t(summary.review ? "On" : "Off")}`,
-        summary.sandbox && sandboxTitle(t, summary.sandbox)].filter(Boolean).join("\n")}
+        summary.sandbox && sandboxTitle(t, summary.sandbox),
+        summary.subSessions === false && `${t("Sub-sessions")}: ${t("Off")}`].filter(Boolean).join("\n")}
       endIcon={<AppIcon name="chevronDown" size={14} />}>
       <span className="composer-selection-part composer-selection-agent"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
       {/* `<provider logo> Provider / <model logo> Model`: several accounts of one kind of provider (two of Claude Code) are
@@ -119,8 +131,26 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       {/* The commands of the session run in a sandbox: a small box, marked when its profile cannot be used. */}
       {summary.sandbox?.profile && <span className="composer-selection-part composer-selection-sandbox" data-problem={summary.sandbox.problem ? "true" : undefined}
         title={sandboxTitle(t, summary.sandbox)}><AppIcon name="sandbox" size={14} /></span>}
+      {/* The session starts no session of its own: the mark of the sub-agents, struck through. */}
+      {summary.subSessions === false && <span className="composer-selection-part composer-selection-no-sub-sessions" title={`${t("Sub-sessions")}: ${t("Off")}`}>
+        <AppIcon name="subAgents" size={14} /></span>}
     </Button>
   </PopoverNext>;
+}
+
+// The options of a session at the end of its form, behind a button: they are rarely changed, so the form stays short.
+// A section with an option that is not its default is open, and its button says how many are changed.
+function ComposerMoreOptions({ sessionId, options }: { sessionId: string; options: ComposerSelectionOptions }) {
+  const { t } = useShellLanguage();
+  const [open, setOpen] = useState(options.changed > 0);
+  const id = `composer-more-options-${sessionId}`;
+  return <div className="composer-selection-more">
+    <Button variant="minimal" size="small" className="composer-selection-more-button" aria-expanded={open} aria-controls={id}
+      icon={<AppIcon name={open ? "chevronDown" : "chevronRight"} size={13} />} onClick={() => setOpen(value => !value)}>
+      {t("More options")}{options.changed > 0 && <span className="composer-selection-more-count" title={t("{count} changed", { count: options.changed })}>{options.changed}</span>}
+    </Button>
+    {open && <div className="composer-selection-more-body" id={id}>{options.content}</div>}
+  </div>;
 }
 
 type Translate = ReturnType<typeof useShellLanguage>["t"];

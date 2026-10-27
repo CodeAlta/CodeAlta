@@ -243,6 +243,7 @@ internal sealed class AutomationsService
             {
                 Script = definition.Script,
                 ScriptArguments = definition.ScriptArguments,
+                Options = SessionOptionsChoice.Of(definition.SessionOptions),
             };
         }).ToArray();
         return new(status, _automations.Paused, snapshot.Scanned, items,
@@ -306,6 +307,7 @@ internal sealed class AutomationsService
             PermissionMode = Blank(input.PermissionMode),
             ReviewBeforeCommit = input.ReviewBeforeCommit,
             Sandbox = Blank(input.Sandbox),
+            SessionOptions = SessionOptionsChoice.Record(input.Options),
             CatchUp = input.CatchUp,
             Triggers = triggers,
         };
@@ -396,6 +398,9 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
 
     /// <summary>The arguments of its script, a JSON object; null for none.</summary>
     public string? ScriptArguments { get; init; }
+
+    /// <summary>The options of its sessions, such as whether they can start sessions of their own.</summary>
+    public SessionOptionsChoice? Options { get; init; }
 }
 
 /// <summary>Asks for the scripts an automation can run.</summary>
@@ -445,6 +450,9 @@ internal sealed record AutomationInput(string? Id, string Name, bool Enabled, st
 
     /// <summary>The arguments of its script, a JSON object; null for none.</summary>
     public string? ScriptArguments { get; init; }
+
+    /// <summary>The options of its sessions; null for the defaults, every option on.</summary>
+    public SessionOptionsChoice? Options { get; init; }
 }
 
 /// <param name="StoreProjectId">The project whose configuration holds it; null for the configuration of the user.</param>

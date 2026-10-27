@@ -229,7 +229,7 @@ import { storage } from "#neoastra";
 import { speech as speechApi } from "#neoastra";
 import { mcpApps as mcpAppsApi } from "#neoastra";
 import { createMcpAppsHost, McpAppsContext } from "./mcpApps/mcpAppHost";
-import type { SessionDisplayView, SpaceSessionResourcesResponse } from "#neoastra";
+import type { SessionDisplayView, SessionOptionsChoice, SpaceSessionResourcesResponse } from "#neoastra";
 import { globalConfig } from "#neoastra";
 import { windows as windowsApi, type WindowsCurrentResponse } from "#neoastra";
 import { createWindowsHub, readWindowPage, writeWindowPage, type WindowsRequest } from "./windows/windowsHub";
@@ -377,6 +377,8 @@ import { worktrees as worktreesApi } from "#neoastra";
 import { externalEditors as externalEditorsApi } from "#neoastra";
 import { sandboxSettings, type SandboxScopeItem, type SandboxSessionResponse } from "#neoastra";
 import { notSandboxed, sessionSandboxSummary } from "./sandbox/sandboxChoices";
+import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
+import { changedSessionOptions, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { SandboxSettings } from "./sandbox/SandboxSettings";
 import { SessionSandboxSelect } from "./sandbox/SessionSandboxSelect";
 import { createExternalOpener, ExternalOpenerContext } from "./externalEditors/externalEditors";
@@ -2916,6 +2918,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // session), unless the draft composer gives it a choice of its own, applied once it is created, before its first prompt.
   const [draftSandbox, setDraftSandbox] = useState<string | null>(null);
   const [draftSandboxScopes, setDraftSandboxScopes] = useState<SandboxSessionResponse | null>(null);
+  // The options of the new session (sub-sessions), sent with its creation; null for the defaults.
+  const [draftOptions, setDraftOptions] = useState<SessionOptionsChoice | null>(null);
   const draftSandboxProvider = draftChoices.value.providerKey || null, draftSandboxModel = draftChoices.value.modelId || null;
   useEffect(() => {
     if (!status?.hostEpoch || !owned) { setDraftSandboxScopes(null); return; }
@@ -4391,11 +4395,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           name: shownPermission === null ? t("The setting of the CLI") : permissionModeName(shownPermission) ? t(permissionModeName(shownPermission)!) : shownPermission },
         review: reviewSetting === null ? null : draftReview ?? reviewSetting,
         sandbox: !draftSandboxScopes ? null : draftSandbox === null ? sessionSandboxSummary(draftSandboxScopes)
-          : { profile: draftSandbox.toLowerCase() === notSandboxed ? null : draftSandbox, source: "session", problem: null } }}
+          : { profile: draftSandbox.toLowerCase() === notSandboxed ? null : draftSandbox, source: "session", problem: null },
+        subSessions: sessionOptionsOf(draftOptions).subSessions }}
       review={reviewSetting !== null && <ReviewBeforeCommitSelect id={`composer-review-${choiceId}`} own={draftReview} setting={reviewSetting} disabled={locked}
         onChange={next => setDraftReview(next)} />}
       sandbox={draftSandboxScopes && <SessionSandboxSelect id={`composer-sandbox-${choiceId}`} own={draftSandbox} inherited={draftSandboxScopes.profile}
         choices={draftSandboxScopes.choices} disabled={locked} onChange={next => setDraftSandbox(next)} />}
+      options={{ changed: changedSessionOptions(draftOptions),
+        content: <SessionOptionsFields id={choiceId} value={draftOptions} disabled={locked} onChange={next => setDraftOptions(next)} /> }}
       permission={permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${choiceId}`} value={value.permissionMode} modes={permissionModes}
         defaultMode={draftChoices.defaultPermissionMode} disabled={locked} onChange={next => change("permissionMode", next)} /> : undefined}
       agent={<HTMLSelect fill id={`composer-agent-${choiceId}`} aria-label={t("Agent prompt")} value={value.agentPromptId}
@@ -4501,7 +4508,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     })();
     try {
       const result = await createSession(epoch, target, title, capability, providerId, place, spacesState.available ? spaceId : null, requestId,
-        creationPermissionMode, preparedWorktreeId).finally(() => { creating = false; });
+        creationPermissionMode, preparedWorktreeId, draftOptions).finally(() => { creating = false; });
+      // The options were for this session: the next one starts with the defaults.
+      if (result.kind === "created") setDraftOptions(null);
       // The session took the worktree, or it is still free for the next one.
       if (worktreeProject !== null && preparedWorktreeId !== null) void preparedWorktrees.settle(worktreeProject, preparedWorktreeId);
       // A session that made its own worktree after a failure: the failure no longer stands under the next prompt.
