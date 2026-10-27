@@ -273,7 +273,6 @@ button.workflow-session:focus-visible { outline: 2px solid var(--accent); outlin
 .script-result-notes > summary { width: fit-content; color: var(--muted); cursor: pointer; }
 .script-result-notes > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
 .script-result-notes .markdown-content { margin-top: 4px; }
-.script-result-shortened { margin: 6px 0 0; color: var(--muted); font-size: 12px; font-style: italic; }
 .workflow-run-result { max-height: 520px; overflow: auto; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 /* The source of a script: its lines numbered and colored, in a frame of its own that scrolls both ways. */
 .workflow-script-source { display: flex; max-height: 420px; min-width: 0; }

@@ -84,10 +84,4 @@ export const workflowMessages = {
     "{characters} 文字のうち先頭と末尾だけを表示しています。",
     "仅显示 {characters} 个字符的开头和结尾。"],
   "Run details": ["Detalles de la ejecución", "Détails de l’exécution", "Details der Ausführung", "実行の詳細", "运行详情"],
-  "The message is too long to show here: Open run shows all of it.": [
-    "El mensaje es demasiado largo para mostrarlo aquí: Abrir ejecución lo muestra entero.",
-    "Le message est trop long pour être affiché ici : Ouvrir l’exécution le montre en entier.",
-    "Die Nachricht ist zu lang, um sie hier anzuzeigen: Ausführung öffnen zeigt sie ganz.",
-    "メッセージが長すぎてここには表示できません。「実行を開く」で全体を表示できます。",
-    "消息太长，无法在此显示：“打开运行”可显示全部内容。"],
 } as const;

@@ -18,7 +18,8 @@ namespace CodeAlta.Desktop.Rpc;
 /// and optionally the offset of the output record that the timeline attached to the call. Texts are served in
 /// parts of at most <see cref="ChunkCharacters"/> UTF-16 code units; a longer one is continued by position.
 /// Reading is not tied to a project: the calls of an archived project's sessions are served like any other.
-/// The system prompt records of a session are served the same way (<c>readPrompt</c>).
+/// The system prompt records of a session are served the same way (<c>readPrompt</c>), and the text of a message that its
+/// history row shows only the start of (<c>readMessage</c>).
 /// </remarks>
 [NeoRpcService("toolCalls", Version = 1)]
 internal sealed partial class ToolCallsService

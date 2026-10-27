@@ -69,6 +69,8 @@ export type TimelineItem = Readonly<{
   jobResult?: JobResult;
   /** The result of a script that ended in the background: its Markdown is the body, its facts and what it wrote are beside. */
   workflowResult?: WorkflowResult;
+  /** True when the history page gave only the start of the text of the record: the card reads the rest on demand. */
+  textShortened?: boolean;
   /** True for the message of a turn the provider started by itself: nobody wrote it, and it is not a prompt to continue from. */
   providerPrompt?: boolean;
   /**
@@ -683,6 +685,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     delegated: delegated ? true : undefined,
     jobResult: job ?? undefined,
     workflowResult: workflow ?? undefined,
+    textShortened: entry.textTruncated ? true : undefined,
     providerPrompt: category === "user" && (entry.contentId?.startsWith("provider:") || provenance === promptProvenanceIds.provider) ? true : undefined,
     provenance: category === "user" ? provenance ?? undefined : undefined,
     missingCliProvider: entry.eventType === "error" && entry.kind === "claude-code-not-found" && entry.providerId ? entry.providerId : undefined,
@@ -690,6 +693,18 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
     prompt,
   };
+}
+
+/**
+ * The body of a message from its whole text, as its row makes it from the start the history page gave: the result of
+ * a script without the facts of its run, the message of an agent without its envelope.
+ */
+export function wholeMessageBody(item: Pick<TimelineItem, "workflowResult" | "delegated">, text: string): string {
+  if (item.workflowResult) {
+    const read = parseWorkflowResult(text);
+    return read ? read.result ?? read.notes : text;
+  }
+  return item.delegated ? parseDelegatedMessage(text)?.body ?? text : text;
 }
 
 // The English title of a prompt of the host: the key of the translations of a known provenance, the words of another.

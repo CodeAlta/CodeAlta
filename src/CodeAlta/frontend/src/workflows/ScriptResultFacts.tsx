@@ -36,10 +36,3 @@ export function ScriptResultFacts({ result, run, onOpenLink }: {
     </details>}
   </div>;
 }
-
-/** The line under a result the timeline shows only the start of: where the rest is. */
-export function ScriptResultShortened() {
-  const { t } = useShellLanguage();
-  const openRun = useContext(OpenRunContext);
-  return <p className="script-result-shortened">{t(openRun ? "The message is too long to show here: Open run shows all of it." : "The rest is too long to show.")}</p>;
-}
