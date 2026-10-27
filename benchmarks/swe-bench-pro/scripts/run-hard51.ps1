@@ -15,6 +15,10 @@ param(
     # under pwsh -File, one comma-separated argument (-Runs codealta-opus,codealta-astra).
     [string[]]$Runs = @("codealta-opus", "claude-code-opus", "codealta-astra", "codex-astra"),
 
+    # More altacli run arguments for the CodeAlta jobs, as one string (the adapter's extra_args), for example
+    # "--code-mode=off"; recorded in the run manifest.
+    [string]$CodeAltaArgs,
+
     [ValidateRange(0, 3)]
     [int]$InfrastructureRetries = 1,
 
@@ -316,6 +320,7 @@ $manifest = [ordered]@{
     codealta_commit = $config.codealta_commit
     codealta_dirty = $config.codealta_dirty
     codealta_requested_revision = $config.codealta_requested_revision
+    codealta_args = if ([string]::IsNullOrWhiteSpace($CodeAltaArgs)) { $null } else { $CodeAltaArgs }
     altacli_sha256 = if ($config.PSObject.Properties["altacli_sha256"]) { $config.altacli_sha256 } else { $null }
     harbor_version = $config.harbor_version
     jobs_root = $jobsRoot
@@ -335,7 +340,11 @@ if ($DryRun) {
 foreach ($key in $selectedRuns) {
     $run = $runDefinitions[$key]
     $jobName = "$RunId-$($run.Name)"
-    Invoke-HarborJob -JobName $jobName -Agent $run.Agent -Model $run.Model -AllowedHost $run.Host -AgentKwargs $run.Kwargs
+    $kwargs = @($run.Kwargs)
+    if ($run.Agent -eq "locked_codealta:LockedCodeAlta" -and -not [string]::IsNullOrWhiteSpace($CodeAltaArgs)) {
+        $kwargs += "extra_args=$CodeAltaArgs"
+    }
+    Invoke-HarborJob -JobName $jobName -Agent $run.Agent -Model $run.Model -AllowedHost $run.Host -AgentKwargs $kwargs
     Invoke-HarborJob -JobName "$jobName-regrade" -Agent "patch_replay:PatchReplayAgent" -Model "replay" -SourceJob (Join-Path $jobsRoot $jobName)
 }
 
