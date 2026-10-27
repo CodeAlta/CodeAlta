@@ -513,14 +513,14 @@ public sealed class CodeModeToolTests
         await using var runs = new CodeModeRunRegistry(null);
         var codeMode = new CodeModeSessionTools(new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache(), Library = library }, () => "on");
         AgentToolDefinition[] others = [new(new AgentToolSpec("alta", "alta", Schema("{}")), static (_, _) => Task.FromResult(new AgentToolResult(true, [])))];
-        string[] Names(SpaceFilter? spaces) => [.. codeMode.Create(dispatcher, new AltaSessionToolOptions { WorkingDirectory = project, Spaces = spaces }, others).Select(static tool => tool.Spec.Name)];
+        string[] Names(SpaceFilter? spaces) => [.. codeMode.Create(dispatcher, new AltaSessionToolOptions { WorkingDirectory = project, Spaces = spaces }, others, null, null).Select(static tool => tool.Spec.Name)];
         var store = new CodeAltaConfigStore(options);
 
         CollectionAssert.AreEqual(new[] { "alta", "exec", "wait", "review_pr" }, Names(null), "without the space of the session, the scripts of the project only");
         CollectionAssert.AreEqual(new[] { "alta", "exec", "wait", "review_pr" }, Names(SpaceFilter.Load(store, "home")));
         CollectionAssert.AreEqual(new[] { "alta", "exec", "wait", "mine", "review_pr" }, Names(SpaceFilter.Load(store, "work")));
 
-        var tool = codeMode.Create(dispatcher, new AltaSessionToolOptions { WorkingDirectory = project, CallerKind = "cli" }, others).Single(static tool => tool.Spec.Name == "review_pr");
+        var tool = codeMode.Create(dispatcher, new AltaSessionToolOptions { WorkingDirectory = project, CallerKind = "cli" }, others, null, null).Single(static tool => tool.Spec.Name == "review_pr");
         Assert.IsTrue(tool.Spec.Deferred);
         Assert.AreEqual("integer", tool.Spec.InputSchema.GetProperty("properties").GetProperty("pr").GetProperty("type").GetString(), "its schema is its params");
         var called = await tool.Handler(new AgentToolInvocation(new ModelProviderId("provider"), "session-1", "call-9", "review_pr", Schema("""{"pr":31}""")) { Tools = new FakeTools() },
@@ -540,30 +540,65 @@ public sealed class CodeModeToolTests
         var mode = "off";
         var runs = new CodeModeRunRegistry(null);
         // A host without the tools of Code Mode gives no session exec, and its instructions speak of none.
-        Assert.AreEqual("off", runs.CodeModeOf("automation-session"));
+        Assert.AreEqual("off", runs.CodeModeOf("automation-session", null, null));
         var codeMode = new CodeModeSessionTools(new CodeModeToolOptions { Runs = runs, Cache = new CodeModeScriptCache() }, () => mode);
         AgentToolDefinition[] others = [new(new AgentToolSpec("alta", "alta", Schema("{}")), static (_, _) => Task.FromResult(new AgentToolResult(true, [])))];
 
-        var off = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
-        Assert.AreEqual("off", runs.CodeModeOf("automation-session"));
+        var off = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others, null, null);
+        Assert.AreEqual("off", runs.CodeModeOf("automation-session", null, null));
         // The session of an automation that runs a script has exec while the setting is off, and the instructions say so.
         runs.RequireCodeMode("automation-session");
-        Assert.AreEqual("on", runs.CodeModeOf("automation-session"));
-        Assert.AreEqual("off", runs.CodeModeOf("other"));
+        Assert.AreEqual("on", runs.CodeModeOf("automation-session", null, null));
+        Assert.AreEqual("off", runs.CodeModeOf("other", null, null));
         CollectionAssert.AreEqual(new[] { "alta", "exec", "wait" },
-            codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionIdProvider = static () => "automation-session" }, others).Select(static tool => tool.Spec.Name).ToArray());
-        CollectionAssert.AreEqual(new[] { "alta" }, codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionId = "other" }, others).Select(static tool => tool.Spec.Name).ToArray());
+            codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionIdProvider = static () => "automation-session" }, others, null, null).Select(static tool => tool.Spec.Name).ToArray());
+        CollectionAssert.AreEqual(new[] { "alta" }, codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionId = "other" }, others, null, null).Select(static tool => tool.Spec.Name).ToArray());
         mode = "on";
-        var with = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
+        var with = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others, null, null);
         mode = "only";
-        var only = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others);
-        Assert.AreEqual("only", runs.CodeModeOf("other"));
+        var only = codeMode.Create(dispatcher, new AltaSessionToolOptions(), others, null, null);
+        Assert.AreEqual("only", runs.CodeModeOf("other", null, null));
 
         CollectionAssert.AreEqual(new[] { "alta" }, off.Select(static tool => tool.Spec.Name).ToArray());
         CollectionAssert.AreEqual(new[] { "alta", "exec", "wait" }, with.Select(static tool => tool.Spec.Name).ToArray());
         Assert.IsTrue(with.Skip(1).All(static tool => tool.Spec.Exposure == AgentToolExposure.Model), "a script does not run scripts through exec");
         Assert.IsFalse(with.Any(static tool => tool.Spec.ScriptsTakeOver));
         Assert.IsTrue(only.Single(static tool => tool.Spec.Name == "exec").Spec.ScriptsTakeOver, "in only, exec takes over the other tools");
+    }
+
+    [TestMethod]
+    public void SessionTools_AndInstructions_AgreeOnTheModeOfEachProviderAndModel()
+    {
+        using var root = TestTempDirectory.Create();
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var catalog = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "home") };
+        Directory.CreateDirectory(catalog.GlobalRoot);
+        var config = Path.Combine(catalog.GlobalRoot, "config.toml");
+        File.WriteAllText(config, "[providers.copilot]\ntype = \"openai-chat\"\n");
+        var runs = new CodeModeRunRegistry(null);
+        var codeMode = CodeModeSessionTools.FromSettings(runs, catalog, null);
+        AgentToolDefinition[] others = [new(new AgentToolSpec("alta", "alta", Schema("{}")), static (_, _) => Task.FromResult(new AgentToolResult(true, [])))];
+        string Tools(string session, string model) => string.Join(",", codeMode.Create(dispatcher, new AltaSessionToolOptions { SourceSessionId = session }, others, "copilot", model)
+            .Select(static tool => tool.Spec.Name));
+        void Agree(string session, string model, string mode, string tools)
+        {
+            Assert.AreEqual(tools, Tools(session, model), $"{model}: its tools");
+            Assert.AreEqual(mode, runs.CodeModeOf(session, "copilot", model), $"{model}: its instructions");
+        }
+
+        // Without a setting, Code Mode is on.
+        Agree("gpt", "gpt-6.1-sol", "on", "alta,exec,wait");
+        Agree("haiku", "claude-haiku-4.5", "on", "alta,exec,wait");
+
+        // A model turned off, beside one of the same provider that is not.
+        File.WriteAllText(config, "[providers.copilot]\ntype = \"openai-chat\"\n\n[providers.copilot.model_overrides.\"claude-haiku-4.5\"]\ncode_mode = \"off\"\n");
+        Agree("gpt", "gpt-6.1-sol", "on", "alta,exec,wait");
+        Agree("haiku", "claude-haiku-4.5", "off", "alta");
+
+        // The model of a provider wins over the provider, which wins over every session.
+        File.WriteAllText(config, "[code_mode]\nmode = \"only\"\n\n[providers.copilot]\ntype = \"openai-chat\"\ncode_mode = \"off\"\n\n[providers.copilot.model_overrides.\"claude-haiku-4.5\"]\ncode_mode = \"on\"\n");
+        Agree("gpt", "gpt-6.1-sol", "off", "alta");
+        Agree("haiku", "claude-haiku-4.5", "on", "alta,exec,wait");
     }
 
     [TestMethod]

@@ -37,7 +37,7 @@ internal class CliCommonOptions
 
     public bool NoSkills { get; set; }
 
-    // --code-mode[=on|only]: the mode of Code Mode, whatever [code_mode] of the configuration says; null for the configuration.
+    // --code-mode[=on|only|off]: the mode of Code Mode of every session, whatever the configuration says; null for the configuration (on by default).
     public string? CodeMode { get; set; }
 
     // The sandbox profile of the sessions of run and acp, or `off`; null for what the settings decide.

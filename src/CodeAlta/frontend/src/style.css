@@ -1242,13 +1242,13 @@ dialog::backdrop { background: var(--scrim); }
 .provider-model-picker .bp6-menu-item-label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .provider-settings-wide { grid-column: 1 / -1; }
 /* The sandbox of a provider, then the models that have one of their own, a row each. */
-.provider-sandbox { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
-.provider-sandbox > .sandbox-scope-select { flex: 0 1 260px; min-width: 0; }
-.provider-sandbox-models { display: grid; flex: 1 0 100%; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.provider-sandbox-models > li { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.provider-sandbox-model { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
-.provider-sandbox-models .sandbox-scope-select { flex: 0 1 220px; min-width: 0; }
-.provider-sandbox-add.bp6-html-select { flex: 0 1 260px; }
+.provider-sandbox, .provider-code-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.provider-sandbox > .sandbox-scope-select, .provider-code-mode > .code-mode-scope-select { flex: 0 1 260px; min-width: 0; }
+.provider-sandbox-models, .provider-code-mode-models { display: grid; flex: 1 0 100%; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.provider-sandbox-models > li, .provider-code-mode-models > li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.provider-sandbox-model, .provider-code-mode-model { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.provider-sandbox-models .sandbox-scope-select, .provider-code-mode-models .code-mode-scope-select { flex: 0 1 220px; min-width: 0; }
+.provider-sandbox-add.bp6-html-select, .provider-code-mode-add.bp6-html-select { flex: 0 1 260px; }
 .provider-settings-footer.bp6-section-card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .provider-settings-spacer { flex: 1 1 auto; }
 .provider-settings-problem { flex: 1 0 100%; color: var(--red); font-size: 12px; }
@@ -1543,7 +1543,8 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .sandbox-profile-problem { margin-bottom: 8px; }
 .sandbox-profile-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .sandbox-profile-spacer { flex: 1 1 auto; }
-.sandbox-scopes-none { margin: 0; color: var(--muted); }
+.sandbox-scopes-none, .code-mode-scopes-none { margin: 0; color: var(--muted); }
+.code-mode-scope-mode.bp6-tag { flex: none; }
 .sandbox-scope-list { display: grid; gap: 2px; margin: 8px 0 0; padding: 0; list-style: none; }
 .sandbox-scope-list > li { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .sandbox-scope-link.bp6-button { min-width: 0; }

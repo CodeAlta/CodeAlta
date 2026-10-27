@@ -46,7 +46,11 @@ paths of the functions, their schemas) and an `ICodeModeCallHandler` (what runs 
 ## Hosts
 
 `exec` and `wait` (`CodeModeToolFactory`, in `CodeAlta.LiveTool`) are tools of the session, given by the host beside
-`alta` while `[code_mode] mode` is `on` or `only` (`CodeModeSessionTools`, read at each send). In `only`, `exec` takes
+`alta` while the mode of the session is `on` or `only` (`CodeModeSessionTools`, read at each send). The mode depends on
+the provider and the model of the send, by one rule (`CodeModeScopes`, in `CodeAlta.Catalog`): the model's
+`code_mode`, its provider's, `[code_mode] mode`, else `on`; only the user's file decides it. Every host passes the
+provider and the model to the tools, and the prompt builder passes the same to `CodeModeOf`, so both resolve the same
+mode. In `only`, `exec` takes
 over (`AgentToolSpec.ScriptsTakeOver`): the model is offered only the tools of exposure `Model` and those that stay
 direct (`view_image`), and calls the others from scripts. Each `exec` binds the functions of
 its run: the session's tools through `AgentToolInvocation.Tools` (`ToolScriptBinding`: `tools.*`, `mcp.<server>.*`), the

@@ -207,7 +207,7 @@ internal static class DesktopAltaTools
                 },
                 toolSearch,
             ];
-            return codeMode?.Create(dispatcher, caller, tools) ?? tools;
+            return codeMode?.Create(dispatcher, caller, tools, request.ProviderKey, request.ModelId) ?? tools;
         };
     }
 

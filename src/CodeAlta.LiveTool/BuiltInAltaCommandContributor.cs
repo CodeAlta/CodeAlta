@@ -5200,7 +5200,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             Sandbox = sandbox,
             AgentPromptId = NormalizeOptionalText(promptId),
             // The commands of the session resolve paths from the folder it works in.
-            Tools = CreateAltaSessionTools(context, selection.ProviderKey, sourceSessionIdProvider, sourceProjectId, worktreeDirectory ?? workingDirectory, workingDirectory),
+            Tools = CreateAltaSessionTools(context, selection.ProviderKey, selection.ProviderKey, selection.ModelId, sourceSessionIdProvider, sourceProjectId,
+                worktreeDirectory ?? workingDirectory, workingDirectory),
             OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
@@ -5245,7 +5246,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ReasoningEffort = reasoning,
             AgentPromptId = NormalizeOptionalText(promptId) ?? NormalizeOptionalText(info.Session.AgentPromptId),
             // The session works where it records: its worktree while that folder exists, the folder of its project otherwise.
-            Tools = CreateAltaSessionTools(context, info.Session.ProviderId, () => info.Session.SessionId, info.Session.ProjectRef,
+            Tools = CreateAltaSessionTools(context, info.Session.ProviderId, info.Session.ResolvedProviderKey, modelId, () => info.Session.SessionId, info.Session.ProjectRef,
                 info.Session.WorktreeDirectory is { Length: > 0 } worktree && Directory.Exists(worktree) ? worktree : workingDirectory, workingDirectory),
             OnPermissionRequest = InteractionDefaults(context).OnPermissionRequest,
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
@@ -5272,6 +5273,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static IReadOnlyList<AgentToolDefinition>? CreateAltaSessionTools(
         AltaCommandContext context,
         string ProviderId,
+        string? providerKey,
+        string? modelId,
         Func<string?>? sourceSessionIdProvider,
         string? sourceProjectId,
         string? workingDirectory,
@@ -5300,7 +5303,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         };
         IReadOnlyList<AgentToolDefinition> tools = [AltaSessionToolFactory.Create(dispatcher, caller)];
         // A session that an alta command creates gets the tools of Code Mode as the sessions of the window do.
-        return context.Services.Get<Scripts.CodeModeSessionTools>()?.Create(dispatcher, caller, tools) ?? tools;
+        return context.Services.Get<Scripts.CodeModeSessionTools>()?.Create(dispatcher, caller, tools, providerKey, modelId) ?? tools;
     }
 
     private static Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath = "alta model resolve")
