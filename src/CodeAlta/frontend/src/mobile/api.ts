@@ -1,4 +1,4 @@
-import type { ActionResult, AskAnswerRequest, AskPage, AskResult, EventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
+import type { ActionResult, AskAnswerRequest, AskPage, AskResult, EventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
 
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
@@ -151,9 +151,9 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
       return result;
     },
     choices: (id: string) => call<SessionChoices>("GET", `${session(id)}/choices`),
-    /** Sends a prompt; a send or a queue carries what was chosen of the session (a steer takes nothing). */
-    prompt: (id: string, text: string, mode: PromptMode, selection: PromptSelection = {}) =>
-      command<ActionResult>(`${session(id)}/prompt`, { text, mode, ...(mode === "steer" ? {} : selection) }),
+    /** Sends a prompt; a send or a queue carries what was chosen of the session (a steer takes nothing). Files go with a send. */
+    prompt: (id: string, text: string, mode: PromptMode, selection: PromptSelection = {}, attachments: readonly PromptAttachment[] = []) =>
+      command<ActionResult>(`${session(id)}/prompt`, { text, mode, ...(attachments.length ? { attachments } : {}), ...(mode === "steer" ? {} : selection) }),
     abort: (id: string) => command<ActionResult>(`${session(id)}/abort`),
     archive: (id: string) => command<ActionResult>(`${session(id)}/archive`),
     restore: (id: string) => command<ActionResult>(`${session(id)}/restore`),

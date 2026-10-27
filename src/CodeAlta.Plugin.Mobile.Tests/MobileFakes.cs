@@ -10,7 +10,7 @@ namespace CodeAlta.Plugin.Mobile.Tests;
 /// <summary>An <c>alta</c> that answers each command with the records a test gives, and remembers what it was asked.</summary>
 internal sealed class FakeAlta : IPluginAltaService
 {
-    private readonly List<(string Prefix, Func<IReadOnlyList<string>, string?, string> Answer)> _answers = [];
+    private readonly List<(string Prefix, Func<IReadOnlyList<string>, string?, Task<string>> Answer)> _answers = [];
 
     internal ConcurrentQueue<(string[] Args, string? Stdin)> Calls { get; } = new();
 
@@ -19,8 +19,12 @@ internal sealed class FakeAlta : IPluginAltaService
 
     /// <summary>Answers the commands that start with a prefix with a transcript of its own.</summary>
     internal FakeAlta Answer(string prefix, Func<IReadOnlyList<string>, string?, string> answer)
+        => Answer(prefix, (args, stdin) => Task.FromResult(answer(args, stdin)));
+
+    /// <summary>Answers the commands that start with a prefix when a task ends: a command that takes its time.</summary>
+    internal FakeAlta Answer(string prefix, Func<IReadOnlyList<string>, string?, Task<string>> answer)
     {
-        _answers.Insert(0, (prefix, answer));
+        lock (_answers) _answers.Insert(0, (prefix, answer));
         return this;
     }
 
@@ -35,19 +39,21 @@ internal sealed class FakeAlta : IPluginAltaService
         return text.ToString();
     }
 
-    public ValueTask<PluginAltaCommandResult> InvokeAsync(IReadOnlyList<string> args, string? stdin = null, PluginAltaInvocationOptions? options = null, CancellationToken cancellationToken = default)
+    public async ValueTask<PluginAltaCommandResult> InvokeAsync(IReadOnlyList<string> args, string? stdin = null, PluginAltaInvocationOptions? options = null, CancellationToken cancellationToken = default)
     {
         Calls.Enqueue(([.. args], stdin));
         var line = string.Join(' ', args);
-        foreach (var (prefix, answer) in _answers)
+        (string Prefix, Func<IReadOnlyList<string>, string?, Task<string>> Answer)[] answers;
+        lock (_answers) answers = [.. _answers];
+        foreach (var (prefix, answer) in answers)
         {
             if (!line.StartsWith(prefix, StringComparison.Ordinal)) continue;
-            var transcript = answer(args, stdin);
+            var transcript = await answer(args, stdin).ConfigureAwait(false);
             var failed = transcript.Contains("\"alta.error\"", StringComparison.Ordinal);
-            return ValueTask.FromResult(new PluginAltaCommandResult { ExitCode = failed ? 1 : 0, TranscriptJsonl = transcript });
+            return new PluginAltaCommandResult { ExitCode = failed ? 1 : 0, TranscriptJsonl = transcript };
         }
 
-        return ValueTask.FromResult(new PluginAltaCommandResult { ExitCode = 0, TranscriptJsonl = Transcript(0) });
+        return new PluginAltaCommandResult { ExitCode = 0, TranscriptJsonl = Transcript(0) };
     }
 
     internal static JsonObject Session(string id, string projectId, string spaceId, string lastActiveAt, string title = "A session", bool running = false, string state = "idle")
@@ -170,5 +176,74 @@ internal static class FreePort
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+}
+
+/// <summary>A clock a test moves: the timers it made fire when their time comes.</summary>
+internal sealed class ManualClock : TimeProvider
+{
+    private readonly object _gate = new();
+    private readonly List<ManualTimer> _timers = [];
+    private DateTimeOffset _now = new(2026, 10, 27, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>Completes when a timer is made: the code under test waits from then.</summary>
+    internal TaskCompletionSource TimerCreated { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public override DateTimeOffset GetUtcNow()
+    {
+        lock (_gate) return _now;
+    }
+
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+    {
+        ManualTimer timer;
+        lock (_gate)
+        {
+            timer = new ManualTimer(this, callback, state, dueTime == Timeout.InfiniteTimeSpan ? DateTimeOffset.MaxValue : _now + dueTime);
+            _timers.Add(timer);
+        }
+
+        TimerCreated.TrySetResult();
+        return timer;
+    }
+
+    /// <summary>Moves the clock, and fires the timers whose time came.</summary>
+    internal void Advance(TimeSpan by)
+    {
+        ManualTimer[] due;
+        lock (_gate)
+        {
+            _now += by;
+            due = [.. _timers.Where(timer => timer.Due <= _now)];
+            foreach (var timer in due) _timers.Remove(timer);
+        }
+
+        foreach (var timer in due) timer.Fire();
+    }
+
+    private void Remove(ManualTimer timer)
+    {
+        lock (_gate) _timers.Remove(timer);
+    }
+
+    private sealed class ManualTimer(ManualClock clock, TimerCallback callback, object? state, DateTimeOffset due) : ITimer
+    {
+        internal DateTimeOffset Due { get; private set; } = due;
+
+        internal void Fire() => callback(state);
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            Due = dueTime == Timeout.InfiniteTimeSpan ? DateTimeOffset.MaxValue : clock.GetUtcNow() + dueTime;
+            return true;
+        }
+
+        public void Dispose() => clock.Remove(this);
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+            return ValueTask.CompletedTask;
+        }
     }
 }

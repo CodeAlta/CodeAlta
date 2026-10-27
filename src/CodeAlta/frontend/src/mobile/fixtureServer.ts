@@ -31,6 +31,8 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     created: 0,
     /** What the next `POST /api/sessions` answers besides its id. */
     createAnswer: {} as Record<string, unknown>,
+    /** The next prompt fails with this text, once. */
+    promptError: null as string | null,
     /** The asks the sessions wait on: an answer or a cancel that goes ends it. */
     asks: new Map<string, Ask>(),
     /** What the next answer or cancel of an ask becomes; null: it goes. */
@@ -141,6 +143,11 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         return send(response, 200, result);
       }
       if (action === "prompt") {
+        if (state.promptError) {
+          const error = state.promptError;
+          state.promptError = null;
+          return send(response, 200, { ok: false, error });
+        }
         // A send or a queue that carries a selection: the session runs on it now, as alta would say.
         const { mode, model, reasoning, agent, permissionMode } = body as { mode: string } & PromptSelection;
         if (mode !== "steer" && (model || reasoning || agent || permissionMode)) {
@@ -200,7 +207,7 @@ export function session(id: string, title: string, projectId: string, minutesAgo
 export const fixtureChoices: Omit<SessionChoices, "current"> = {
   models: [
     { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", efforts: ["low", "medium", "high"], startEffort: "medium" },
-    { id: "gpt-6.1-argon", name: "GPT-6.1 Argon", efforts: ["medium", "high", "xhigh"], startEffort: "high" },
+    { id: "gpt-6.1-argon", name: "GPT-6.1 Argon", efforts: ["medium", "high", "xhigh"], startEffort: "high", imageInput: true },
     { id: "gpt-5.5", name: "GPT-5.5", efforts: ["low", "medium", "high"], startEffort: "medium" },
   ],
   prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }, { id: "review", name: "Review" }],
