@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
+import type { Ask, AskResult, Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
 
 /** The policy the plugin's server sets on the page (the contract of the phone page). */
 export const mobilePolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -28,6 +28,10 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     created: 0,
     /** What the next `POST /api/sessions` answers besides its id. */
     createAnswer: {} as Record<string, unknown>,
+    /** The asks the sessions wait on: an answer or a cancel that goes ends it. */
+    asks: new Map<string, Ask>(),
+    /** What the next answer or cancel of an ask becomes; null: it goes. */
+    askResult: null as AskResult | null,
   };
   const requests: FixtureRequest[] = [];
   const streams = new Set<ServerResponse>();
@@ -98,7 +102,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     }
     if (path === "/api/projects") return send(response, 200, { projects: state.projects, default: "p1", error: null });
     if (path === "/api/options") return send(response, 200, state.options);
-    const found = /^\/api\/sessions\/([^/]+)(?:\/(events|prompt|abort|archive|restore|choices))?$/.exec(path);
+    const found = /^\/api\/sessions\/([^/]+)(?:\/(events|prompt|abort|archive|restore|choices|ask|ask\/answer|ask\/cancel))?$/.exec(path);
     if (found) {
       const id = decodeURIComponent(found[1]), action = found[2];
       // An archived session is out of the list, and can still be restored.
@@ -118,6 +122,14 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         return send(response, 200, { since: Math.max(since, ...events.map(e => e.seq)), events, error: null });
       }
       if (action === "choices") return send(response, 200, choicesOf(target));
+      if (action === "ask") return send(response, 200, { ask: state.asks.get(id) ?? null, error: null });
+      if (action === "ask/answer" || action === "ask/cancel") {
+        const result = state.askResult ?? { ok: true, status: action === "ask/answer" ? "admitted" : "cancelled", error: null };
+        state.askResult = null;
+        const { askId } = body as { askId: string };
+        if (result.ok && state.asks.get(id)?.id === askId) state.asks.delete(id);
+        return send(response, 200, result);
+      }
       if (action === "prompt") {
         // A send or a queue that carries a selection: the session runs on it now, as alta would say.
         const { mode, model, reasoning, agent, permissionMode } = body as { mode: string } & PromptSelection;

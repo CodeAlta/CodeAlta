@@ -271,6 +271,77 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 /* What only a screen reader hears: the state of the composer, which the empty box shows as its placeholder. */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
+/* The ask a session waits on, in place of the composer: the desktop's ask card, its choices one under the other. */
+.ask-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; flex-direction: column; gap: .5rem; overflow-y: auto; overscroll-behavior: contain;
+  padding: .5rem calc(.75rem + var(--safe-right)) calc(.5rem + env(safe-area-inset-bottom)) calc(.75rem + var(--safe-left)); background: var(--panel); border-top: 1px solid var(--line); }
+.ask-bar footer#foot { justify-content: flex-start; margin: 0; padding: 0; }
+.ask-card { display: flex; flex-direction: column; gap: .625rem; min-width: 0; margin: 0; padding: .75rem .75rem .625rem; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 12px; background: var(--panel); }
+.ask-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .875rem; min-width: 0; }
+.ask-badge { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; color: var(--accent); font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.ask-badge .ico svg { width: 14px; height: 14px; }
+.ask-review-what { min-width: 0; color: var(--text); letter-spacing: normal; text-transform: none; overflow-wrap: anywhere; }
+.ask-steps { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.ask-steps button { display: inline-flex; align-items: center; gap: 6px; max-width: 14rem; min-height: 36px; padding: 3px 10px 3px 4px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: .8125rem; cursor: pointer; }
+.ask-steps button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-steps button[data-state="current"] { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ask-steps button[data-state="seen"] { color: var(--text); }
+.ask-step-mark { display: grid; flex: none; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--panel-2); font-size: .6875rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.ask-steps button[data-state="current"] .ask-step-mark { background: var(--accent); color: var(--bg); }
+.ask-steps button[data-state="seen"] .ask-step-mark { background: color-mix(in srgb, var(--green) 26%, transparent); color: var(--green); }
+.ask-step-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-review-message { font-size: .9375rem; }
+.ask-review-where { display: flex; gap: 6px; margin: 0; color: var(--muted); font-size: .8125rem; line-height: 1.45; }
+.ask-review-where .ico { margin-top: .15em; }
+.ask-question { display: grid; gap: .5rem; overflow-wrap: anywhere; }
+.ask-question h4 { margin: 0; font-size: 1rem; font-weight: 650; line-height: 1.4; }
+.ask-question p { margin: 0; }
+.ask-question .detail { color: var(--muted); font-size: .8125rem; line-height: 1.5; }
+.ask-choices { display: grid; gap: .5rem; }
+.ask-choice { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: .625rem; min-height: 48px; padding: .625rem .75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); cursor: pointer; -webkit-tap-highlight-color: transparent; transition: border-color 120ms, background 120ms; }
+.ask-choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-choice[data-selected] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); box-shadow: 0 0 0 1px var(--accent); }
+.ask-form:disabled .ask-choice, .ask-form:disabled .review-verdict { cursor: default; opacity: .7; }
+.ask-choice-number { display: grid; place-items: center; min-width: 24px; height: 24px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--panel); color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.ask-choice[data-selected] .ask-choice-number { border-color: var(--accent); color: var(--accent); }
+.ask-choice-text { display: grid; gap: 2px; min-width: 0; }
+.ask-choice-text strong { font-size: .9375rem; font-weight: 600; }
+.ask-choice-text small { color: var(--muted); font-size: .8125rem; line-height: 1.45; }
+.ask-choice-check { margin-top: .2em; color: var(--accent); visibility: hidden; }
+.ask-choice-check svg { width: 18px; height: 18px; }
+.ask-choice[data-selected] .ask-choice-check { visibility: visible; }
+.ask-freeform { display: grid; gap: 4px; color: var(--muted); font-size: .8125rem; }
+.ask-freeform textarea { max-height: 40vh; color: var(--text); }
+.ask-review-verdict { display: grid; gap: .5rem; padding-top: .5rem; border-top: 1px solid var(--line); }
+.ask-review-counts { color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.review-verdicts { display: grid; gap: .375rem; }
+.review-verdict { display: grid; gap: 1px; min-height: 48px; padding: .5rem .75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.review-verdict:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.review-verdict strong { font-size: .9375rem; font-weight: 600; }
+.review-verdict small { color: var(--muted); font-size: .8125rem; }
+.review-verdict[data-selected] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); box-shadow: 0 0 0 1px var(--accent); }
+.review-verdict[data-verdict="approved"][data-selected] { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); background: color-mix(in srgb, var(--green) 12%, var(--panel-2)); }
+.review-verdict[data-verdict="changes_requested"][data-selected] { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); background: color-mix(in srgb, var(--yellow) 12%, var(--panel-2)); }
+.ask-hint { color: var(--muted); font-size: .8125rem; }
+.ask-note { margin: 0; color: var(--red); font-size: .8125rem; overflow-wrap: anywhere; }
+.ask-note:empty { display: none; }
+.ask-actions { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; min-width: 0; padding-top: .5rem; border-top: 1px solid var(--line); }
+.ask-actions .ask-cancel { margin-right: auto; }
+.ask-actions .ghost { padding: 0 10px; }
+
+/* "Waits for your answer" on the card of a session that asks the user, as on the desktop. */
+.waiting-badge { display: inline-flex; align-items: center; gap: 4px; margin-top: .3125rem; padding: 2px 8px; border-radius: 999px; background: var(--yellow); color: #1c1300; font-size: .75rem; font-weight: 700; }
+.waiting-badge .ico svg { width: 13px; height: 13px; }
+
+/* A confirmation: its text, then its buttons on one line. */
+.confirm-panel { display: grid; gap: .5rem; }
+.confirm-panel h2 { margin: .25rem 0 0; color: var(--text); font-size: 1.05rem; letter-spacing: 0; text-transform: none; }
+.confirm-panel p { margin: 0; }
+.confirm-detail { color: var(--muted); font-size: .875rem; }
+.confirm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: .5rem; }
+.sheet-panel .confirm-actions button { flex: 1 1 auto; width: auto; align-items: center; justify-content: center; min-height: 44px; font-weight: 600; text-align: center; }
+.sheet-panel .confirm-actions .ghost { border: 1px solid var(--line); background: var(--panel-2); }
+.sheet-panel .confirm-actions .danger { background: var(--red); color: #fff; }
+
 /* The selection of a prompt, on the line of its buttons: a chip with the model and its effort (it opens the model sheet), and "⋯"
    with the agent prompt when it is not the default one and a mark of what else is set (it opens the options). The chip shrinks
    first; while a turn runs with text typed, the buttons go to a line of their own. Accent: picked, sent with the next prompt. */
