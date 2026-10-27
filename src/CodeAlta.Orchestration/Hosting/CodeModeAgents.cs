@@ -160,6 +160,7 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         if (request.Schema is { } asked && StructuredAnswer.Inspect(asked) is { Count: > 0 } problems) return Refused(SchemaRefusal(problems));
         if (request.Sandbox is { } sandbox && await RefuseSandboxAsync(parentSessionId, sandbox, cancellationToken).ConfigureAwait(false) is { } sandboxRefusal)
             return Refused(sandboxRefusal);
+        if (await RefuseWiderToolsAsync(parent, request.AgentPromptId, cancellationToken).ConfigureAwait(false) is { } toolRefusal) return Refused(toolRefusal);
 
         ModelTier? tier = null;
         if (request.Tier is { } tierName && (tier = ModelTiers.Parse(tierName)) is null)
@@ -221,6 +222,27 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         return (new KeptSession(created) { Worktree = worktree }, null, warning);
 
         static (KeptSession?, CodeModeAgentResult?, string?) Refused(string message) => (null, new(null, false, "refused", null, message, SessionUsageTotals.None, TimeSpan.Zero), null);
+    }
+
+    // A child takes the tools its parent does without by the command line of its run (the patterns of OpenChildAsync),
+    // and is refused, as `alta session create` refuses it, when its own settings would give it one of the others.
+    private async Task<string?> RefuseWiderToolsAsync(SessionViewDescriptor parent, string? agentPromptId, CancellationToken cancellationToken)
+    {
+        var runtime = _host.RuntimeService;
+        var own = await runtime.GetDisabledToolsAsync(parent.SessionId, cancellationToken).ConfigureAwait(false);
+        if (own.Count == 0) return null;
+        var prompt = agentPromptId ?? AgentPromptCatalog.DefaultPromptName;
+        var child = new SessionViewDescriptor
+        {
+            ProjectRef = parent.ProjectRef,
+            ParentSessionId = parent.SessionId,
+            CreatedBy = new AltaActorProvenance { Kind = AltaActorProvenance.WorkflowKind, SourceSessionId = parent.SessionId },
+        };
+        var theirs = await runtime.GetDisabledToolsAsync(child, prompt, cancellationToken).ConfigureAwait(false);
+        var wider = own.Where(tool => !theirs.Contains(tool)).Order(StringComparer.Ordinal).ToArray();
+        return wider.Length == 0 ? null
+            : $"This session does without {string.Join(", ", wider.Select(static tool => $"`{tool}`"))} (in the settings of the user, of its space or of its agent prompt), " +
+              $"and a session under the agent prompt '{prompt}' would have {(wider.Length == 1 ? "it" : "them")}: name an agent prompt that does without them too (`agent`), or do the work here.";
     }
 
     private Task<HeadlessSessionOpenResult> OpenChildAsync(SessionViewDescriptor parent, ProjectDescriptor? project, string? worktreeDirectory, CodeModeAgentRequest request,

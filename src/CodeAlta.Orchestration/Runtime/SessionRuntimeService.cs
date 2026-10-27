@@ -3969,7 +3969,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Gets the built-in tools a session would do without under an agent prompt, as the settings of the user, of its
     /// space and of that prompt say them now: a session given another prompt, or one about to be created, whose
-    /// descriptor names its project and its space.
+    /// descriptor names its project and its space. One about to be created (no <see cref="SessionViewDescriptor.SessionId"/>)
+    /// also does without what the patterns it takes from its parent or its creator name (<see cref="SetDisabledToolPatterns"/>),
+    /// when its descriptor names them (<see cref="SessionViewDescriptor.ParentSessionId"/>, <see cref="SessionViewDescriptor.CreatedBy"/>).
     /// </summary>
     /// <param name="session">The session, or what a session about to be created records.</param>
     /// <param name="agentPromptId">The agent prompt; <see langword="null"/> for the one the session records.</param>
@@ -3981,7 +3983,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(session);
         var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
-        return _instructionTemplateProvider.ResolveDisabledTools(session, project, NormalizeOptionalText(agentPromptId) ?? session.AgentPromptId);
+        var disabled = _instructionTemplateProvider.ResolveDisabledTools(session, project, NormalizeOptionalText(agentPromptId) ?? session.AgentPromptId);
+        if (!string.IsNullOrWhiteSpace(session.SessionId) || InheritedPatternTools(session) is not { Count: > 0 } inherited) return disabled;
+        var union = new HashSet<string>(disabled, StringComparer.Ordinal);
+        union.UnionWith(inherited);
+        return union;
     }
 
     /// <summary>

@@ -369,14 +369,17 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
-    public async Task AScript_CreatesNoSessionWithAToolItsSessionDoesWithout_AsTheModelsOwnCall()
+    public async Task ASessionThatDoesWithoutTools_CreatesAndForksSessionsThatDoWithoutThemToo_FromAScriptAsDirectly()
     {
         await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: true).ConfigureAwait(false);
         var parent = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
-        fixture.Runtime.SetDisabledToolPatterns(Id(parent), ["shell_command"]);
+        // What `altacli run --disable-tools` gives the session of its run: the sessions it creates take the same patterns.
+        fixture.Runtime.SetDisabledToolPatterns(Id(parent), ["shell_command", "web"]);
         var identity = Agent(parent) with { ScriptRunId = "run-narrow" };
         var binding = new CodeAlta.LiveTool.Scripts.AltaScriptBinding(fixture.Dispatcher.Describe(identity, null));
         var direct = await fixture.Dispatcher.InvokeAsync(["session", "create", "--global"], caller: Agent(parent)).ConfigureAwait(false);
+        var named = await fixture.Dispatcher.InvokeAsync(["session", "create", "--global", "--prompt-id", "default"], caller: Agent(parent)).ConfigureAwait(false);
+        var fork = await fixture.Dispatcher.InvokeAsync(["session", "fork", Id(parent)], caller: Agent(parent)).ConfigureAwait(false);
 
         var result = await new CodeAlta.CodeMode.CodeModeHost(new CodeAlta.CodeMode.CodeModeApi(binding.Functions), new CodeAlta.CodeMode.CodeModeScriptCache())
             .RunAsync(CodeAlta.CodeMode.CodeModeSource.Prepare("""
@@ -386,8 +389,24 @@ public sealed partial class AltaLiveToolTests
 
         Assert.AreEqual(CodeAlta.CodeMode.CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
         using var value = JsonDocument.Parse(result.ValueJson!);
-        AssertSandboxRefused(direct, "session.widerTools");
-        Assert.AreEqual("session.widerTools", value.RootElement.GetProperty("refused").GetString(), "the script is refused as the model's own call is");
+        Assert.IsFalse(value.RootElement.TryGetProperty("refused", out var refused), "the script creates it as the model's own call does: " + refused);
+        var children = new[]
+        {
+            CreatedId(direct, "alta.session.created"), CreatedId(named, "alta.session.created"), CreatedId(fork, "alta.session.forked"),
+            value.RootElement.GetProperty("created").GetString()!,
+        };
+        foreach (var child in children)
+        {
+            var disabled = await fixture.Runtime.GetDisabledToolsAsync(child).ConfigureAwait(false);
+            foreach (var tool in new[] { "shell_command", "webget", "web_search", "web_fetch" })
+                Assert.IsTrue(disabled.Contains(tool), $"{child} does without {tool}, as the session that created it does");
+        }
+
+        static string CreatedId(AltaCommandResult result, string type)
+        {
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stdout + result.Stderr);
+            return ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString() == type).GetProperty("sessionId").GetString()!;
+        }
     }
 
     [TestMethod]
