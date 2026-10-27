@@ -24,8 +24,9 @@ const scenarios = [
   { name: "composer asks for another provider when the one of the session is not in its space", mac: false, permission: false, outside: true, removed: false, options: false },
   { name: "composer switches a session whose provider was removed to the default provider", mac: false, permission: false, outside: false, removed: true, options: false },
   { name: "composer sets the options of the model of the session", mac: false, permission: false, outside: false, removed: false, options: true },
+  { name: "composer compacts only an attached idle session, says why not otherwise, and shows a failed compaction", mac: false, permission: false, outside: false, removed: false, options: false, compaction: true },
 ];
-for (const { name, mac, permission, outside, removed, options } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
+for (const { name, mac, permission, outside, removed, options, compaction = false } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -144,6 +145,42 @@ for (const { name, mac, permission, outside, removed, options } of scenarios) te
       assert.equal(await wait("fixture.sendCalls.length===1"), true);
       assert.equal(await evaluate("fixture.sendCalls[0].selection?.providerKey"), "fixture-provider");
       assert.deepEqual(await evaluate("window.fixtureRemoved.switched"), ["fixture-provider"]);
+      assert.deepEqual(exceptions, []);
+      return;
+    }
+
+    if (compaction) {
+      // The control the Compact command presses, in the menu of the composer: it says why it does nothing, and does nothing.
+      const compact = "document.querySelector('[data-composer-command=\"compact\"]')";
+      const status = "document.querySelector('.composer-foreground-text')?.textContent";
+      const unattached = "Available once the session has started: send it a prompt first.";
+      await evaluate("fixture.attach(false)");
+      assert.equal(await wait(`${compact}?.disabled && ${compact}.dataset.unavailable===${JSON.stringify(unattached)}`), true);
+      assert.equal(await evaluate(`${compact}.title.endsWith(${JSON.stringify(unattached)})`), true, "the control tells why in its tooltip");
+      await evaluate(`${compact}.click()`);
+      assert.equal(await evaluate("fixture.compactCalls.length"), 0);
+      assert.equal(await evaluate("fixture.sendCalls.length"), 0, "a compaction is never turned into a Send");
+      // Attached, it compacts while idle only.
+      await evaluate("fixture.attach(true)");
+      assert.equal(await wait(`!${compact}.disabled && !${compact}.dataset.unavailable`), true);
+      await evaluate("fixture.startRun()");
+      assert.equal(await wait(`${compact}.disabled && ${compact}.dataset.unavailable==='Available once the session is idle.'`), true);
+      await evaluate("fixture.finishRun()");
+      assert.equal(await wait(`!${compact}.disabled`), true);
+      // A compaction the host takes and then fails ends with a visible failure, without anything else to recover.
+      await evaluate(`${compact}.click()`);
+      assert.equal(await wait(`fixture.compactCalls.length===1 && ${status}==='Compacting…'`), true);
+      assert.equal(await wait(`${compact}.disabled && ${compact}.dataset.unavailable==='The conversation is being compacted.'`), true);
+      await evaluate("fixture.settleCompaction('Failed','compact_failed')");
+      assert.equal(await wait(`${status}==='The compaction failed. The timeline says why.'`), true);
+      assert.equal(await evaluate("document.querySelector('.composer-foreground-status').dataset.tone"), "danger");
+      assert.equal(await wait(`!${compact}.disabled`), true, "it can be asked again");
+      assert.equal(await evaluate("document.querySelector('.retained-send-recovery')"), null);
+      // The next prompt replaces the failure in the status line.
+      await write("after the failure"); await enter();
+      assert.equal(await wait(`fixture.sendCalls.length===1 && ${status}!=='The compaction failed. The timeline says why.'`), true);
+      assert.deepEqual(await sends(), ["after the failure"]);
+      assert.equal(await evaluate("fixture.compactCalls.length"), 1);
       assert.deepEqual(exceptions, []);
       return;
     }

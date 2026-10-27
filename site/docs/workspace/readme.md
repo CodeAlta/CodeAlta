@@ -72,7 +72,7 @@ Press `Ctrl+P` to search and run any command. In CodeAlta Desktop, `Ctrl+P` or t
 
 - the **sessions** of every project and your chats, then the Claude Code conversations not in CodeAlta yet;
 - the **projects**, and the **files** of the current project;
-- the **commands**, each with its slash command and its shortcut;
+- the **commands**, each with its slash command and its shortcut. A command that cannot run now is dimmed, and when the session in front knows why, the reason replaces its description;
 - the **skills** of the current project.
 
 `Tab` switches between **All**, **Sessions**, **Conversations**, **Projects**, **Files**, **Commands**, **Skills**, **Docs**, **Tools** and **Archived** (`Enter` restores an archived session). **Conversations**, **Docs** and **Tools** come from the [search index](../search.md). Start with `/` for a command or a skill.

@@ -258,6 +258,27 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     await evaluate(`[...document.querySelectorAll('.session-dock [data-session-node]')].find(n=>n.textContent.startsWith('one -')).closest('[role=tab]').click()`);
     assert.equal(await wait("!!document.querySelector('#session-prompt')"), true);
     await evaluate("document.querySelector('#session-prompt').focus()");
+    // The search of the window offers Compact exactly when the Compact control of the composer in front acts, and
+    // otherwise says why in the words of that control.
+    await key("p", "KeyP", 80, true);
+    assert.equal(await wait("document.activeElement?.id==='search-input'"), true);
+    await command("Input.insertText", { text: "/compact" });
+    const compactRow = `[...document.querySelectorAll('.global-search-row')].find(row=>row.querySelector('.global-search-slash')?.textContent==='/compact')`;
+    assert.equal(await wait(`!!${compactRow}`), true);
+    const picker = await evaluate(`(()=>{const control=document.querySelector('[data-composer-command="compact"]');const row=${compactRow};
+      return {control:!!control,disabled:control?.disabled,row:row.getAttribute('aria-disabled'),detail:row.querySelector('.global-search-detail').textContent,
+        reason:control?.dataset.unavailable??null}})()`);
+    assert.equal(picker.control, true, "the composer in front marks its Compact control");
+    assert.equal(picker.row, String(picker.disabled), JSON.stringify(picker));
+    if (picker.disabled) assert.equal(picker.detail, picker.reason, JSON.stringify(picker));
+    await key("Escape", "Escape", 27);
+    assert.equal(await wait("!document.querySelector('dialog[open]')"), true);
+    await evaluate("document.querySelector('#session-prompt').focus()");
+    // Its shortcut says the same in a notice when the command cannot run.
+    if (picker.disabled) {
+      await key("F11", "F11", 122, true);
+      assert.equal(await wait(`[...document.querySelectorAll('.bp6-toast')].some(toast=>toast.textContent.includes(${JSON.stringify(`Compact: ${picker.reason}`)}))`), true);
+    }
     await open(); await filter("Other project"); await key("Enter", "Enter", 13);
     await opened("/fixture/other");
     assert.equal(await evaluate("document.querySelector('#catalog-prompt').textContent.replaceAll('\\u00a0',' ').includes('preserved project draft')"), true);

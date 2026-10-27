@@ -304,6 +304,7 @@ import { askPluginComposer, noPluginContributions, pluginCommandAvailable, plugi
   findPluginCommand, type PluginComposerRequest, type PluginContributionsView, type PluginPane, type PluginUiValue, pluginsChangedEvent } from "./pluginUi";
 import { CommandHelp } from "./CommandHelp";
 import { commandDefinitions, commandKeys, resolveCommandKey, type CommandId } from "./commandRegistry";
+import { composerCommandBlock, composerControlState, isComposerControlCommand, type ComposerControlCommand } from "./composerCommands";
 import { landingCanvasId, landingPluginKey, LandingShellContext } from "./landing/landingShell";
 import { useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
 import { createPaletteFocusRestoration } from "./paletteActions";
@@ -3217,7 +3218,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     switch (command) {
       case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": return session;
       case "bookmarkPrevious": case "bookmarkNext": case "bookmarkSession": return ownedSession && bookmarkHost.hub.getSnapshot().available;
-      case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
+      case "usage": case "reminders": case "nextPrompt": case "modelSelector": case "steer": return ownedSession;
+      // The control of the composer in front decides: the command runs exactly when pressing it would.
+      case "send": case "abort": case "clearQueue": case "compact":
+        return ownedSession && composerCommandBlock(command, composerControlState(composerControl(command)), t) === null;
       case "fork": case "rewind": return ownedSession && currentProjectWritable();
       case "reviewChanges": return ownedSession && !!selectedSession?.projectId;
       case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
@@ -3258,15 +3262,42 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
   }
 
+  // Why a command that is not offered now cannot run, when the composer in front knows it: the picker shows it on the
+  // entry, a shortcut in a notice.
+  function commandUnavailableReason(command: CommandId): string | null {
+    if (!isComposerControlCommand(command) || view !== "workspace" || !selectedSession || fileTabs.active || !owned) return null;
+    return composerCommandBlock(command, composerControlState(composerControl(command)), t);
+  }
+  function notifyCommandUnavailable(command: CommandId) {
+    const reason = commandUnavailableReason(command);
+    const definition = commandDefinitions.find(item => item.id === command);
+    if (reason && definition) showToast({ message: t("{command}: {reason}", { command: t(definition.label), reason }), intent: "warning",
+      icon: "warning-sign", timeout: 6000 }, `command-unavailable:${command}`);
+  }
+  // The Compact control of the session in front, under the identity it was rendered for.
+  function compactControl() {
+    const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId, selectedSessionId.current, selectedScope.current);
+    const trigger = compactTrigger.current;
+    return view === "workspace" && owned && currentProjectWritable() && status?.hostEpoch && mutation?.capability.canMutate()
+      && selection && trigger?.isConnected && trigger.dataset.epoch === status.hostEpoch && trigger.dataset.sessionId === selection.sessionId
+      && trigger.dataset.projectId === (selection.projectId ?? "") ? trigger : null;
+  }
+  // The control of the composer in front that carries out a command; only the active composer marks its controls.
+  function composerControl(command: ComposerControlCommand) {
+    return command === "compact" ? compactControl()
+      : workspaceShell.current?.querySelector<HTMLButtonElement>(`[data-composer-command="${command}"]`) ?? null;
+  }
+
   // Commands the active session's composer carries out itself.
-  function composerCommand(command: "send" | "abort" | "clearQueue" | "nextPrompt") {
+  function composerCommand(command: "nextPrompt") {
     window.dispatchEvent(new CustomEvent("codealta:composer", { detail: command }));
   }
   const activeComposerControl = (selector: string) => Array.from(workspaceShell.current?.querySelectorAll<HTMLButtonElement>(selector) ?? [])
     .find(button => button.offsetParent !== null);
 
   function runCommand(command: CommandId) {
-    if (!commandAvailable(command)) return;
+    // Only a shortcut gets here with a command that is not offered: it is told why, as the picker shows it.
+    if (!commandAvailable(command)) { notifyCommandUnavailable(command); return; }
     if (command === "exit") { exitApplication(); return; }
     // The host zooms the window's view and keeps the zoom for the next starts; an open window does not stop it.
     if (command === "zoomIn" || command === "zoomOut" || command === "resetZoom") {
@@ -3346,7 +3377,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "dictate": invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#dictate-prompt")); break;
       case "searchSessions": openSearch({ category: "sessions" }); break;
       case "refreshStatuses": runtimeObservationControls().refresh(tabs.open); break;
-      case "send": case "abort": case "clearQueue": case "nextPrompt": composerCommand(command); break;
+      case "send": case "abort": case "clearQueue": case "compact": invokeComposerControl(composerControl(command)); break;
+      case "nextPrompt": composerCommand(command); break;
       case "steer": break;
       case "fork": case "rewind": openSessionBranch(command); break;
       case "reviewChanges": if (selectedSession) reviewSessionChanges(selectedSession); break;
@@ -3480,15 +3512,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     }
     else if (action === "sessionInfo") invokeComposerControl(sessionInfoTrigger.current);
     else if (action === "reminders") invokeComposerControl(remindersTrigger.current);
-    else if (action === "compact") {
-      const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
-        selectedSessionId.current, selectedScope.current);
-      const trigger = compactTrigger.current;
-      if (view === "workspace" && owned && currentProjectWritable() && status?.hostEpoch && mutation?.capability.canMutate()
-        && selection && trigger?.isConnected && !trigger.disabled
-        && trigger.dataset.epoch === status.hostEpoch && trigger.dataset.sessionId === selection.sessionId
-        && trigger.dataset.projectId === (selection.projectId ?? "")) invokeComposerControl(trigger);
-    }
+    else if (action === "compact") invokeComposerControl(compactControl());
     else if (action === "expandPrompt") {
       if (!dialog) invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#expand-session-prompt"));
     }
@@ -5769,7 +5793,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     {archivedInfo && catalog.current && (row => row && <SessionInfoDialog info={sessionInfoView(catalog.current!, row, row.projectId)}
       demo={demoMode} onClose={() => setArchivedInfo(null)} />)(catalog.current.sessions.find(session => session.id === archivedInfo))}
     {searchStart && <GlobalSearch snapshot={snapshot ?? null} favorites={projectTree.favorites} start={searchStart} files={searchedFiles()} note={notice}
-      available={commandAvailable} onCommand={id => chooseSearch({ kind: "command", id })}
+      available={commandAvailable} unavailableReason={commandUnavailableReason} onCommand={id => chooseSearch({ kind: "command", id })}
       pluginCommands={pluginContributed.commands} onPluginCommand={id => chooseSearch({ kind: "plugin", id })}
       canvases={owned ? canvasCatalog : []} canvasAvailable={item => !!defaultCanvasTarget(item, canvasSelection)}
       onCanvas={item => chooseSearch({ kind: "canvas", pluginKey: item.pluginKey, id: item.id })}

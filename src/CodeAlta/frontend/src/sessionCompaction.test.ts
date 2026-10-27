@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionAdmission, SessionCompactRequest, SessionReceiptPage, SessionRuntimeStateResponse } from "#neoastra";
 import { createMutationCapability } from "./sessionOperations";
-import { captureCompaction, createCompactionSubmissions, hasPendingCompaction, watchCompaction } from "./sessionCompaction";
+import { captureCompaction, compactControlBlock, compactControlBlockMessages, compactionAdmissionFailure, compactionBlock, createCompactionSubmissions, hasPendingCompaction,
+  settledCompactionFailure, watchCompaction, watchedCompactionFailure } from "./sessionCompaction";
+import { messages } from "./localization";
 
 const observation: SessionRuntimeStateResponse = {
   status: "ok", hostEpoch: "epoch", sessionId: "session", runtimeInstanceId: "runtime", coordinatorTransitionInProgress: false,
@@ -30,6 +32,68 @@ test("compact captures immutable attachment eligibility only from an explicit id
     { ...observation, entry: { ...observation.entry!, queueDrainInProgress: true } },
     { ...observation, entry: { ...observation.entry!, isRetiring: true } }, { ...observation, entry: { ...observation.entry!, isTerminated: true } }])
     assert.equal(captureCompaction("epoch", "session", unavailable, "key"), null);
+});
+
+test("the reason a session cannot be compacted names what it waits for, and capture follows it exactly", () => {
+  const cases: [SessionRuntimeStateResponse | undefined, ReturnType<typeof compactionBlock>][] = [
+    [undefined, "unknown"], [{ ...observation, status: "unavailable" }, "unknown"], [{ ...observation, hostEpoch: "old" }, "unknown"],
+    [{ ...observation, sessionId: "other" }, "unknown"],
+    // A saved session that has not attached to the runtime yet: nothing runs, and nothing can be compacted.
+    [{ ...observation, runtimeInstanceId: null, entry: null }, "unattached"], [{ ...observation, entry: null }, "unattached"],
+    [{ ...observation, coordinatorTransitionInProgress: true }, "changing"], [{ ...observation, coordinatorTransitionInProgress: null }, "changing"],
+    [{ ...observation, entry: { ...observation.entry!, isRetiring: true } }, "closing"],
+    [{ ...observation, entry: { ...observation.entry!, isTerminated: true } }, "closing"],
+    [{ ...observation, entry: { ...observation.entry!, activeRunId: "run" } }, "running"],
+    [{ ...observation, entry: { ...observation.entry!, queueDrainInProgress: true } }, "running"],
+    [observation, null],
+  ];
+  for (const [value, block] of cases) {
+    assert.equal(compactionBlock("epoch", "session", value), block);
+    assert.equal(captureCompaction("epoch", "session", value, "key") === null, block !== null);
+  }
+});
+
+test("the Compact control is enabled exactly when compact() would submit, and says why not otherwise", () => {
+  const can = () => true, cannot = () => false;
+  const busy = { ...observation, entry: { ...observation.entry!, activeRunId: "run" } };
+  const block = (state: Partial<Parameters<typeof compactControlBlock>[0]>, value: SessionRuntimeStateResponse | undefined = observation) =>
+    compactControlBlock({ invalidEpoch: false, compacting: false, retained: null, canSubmit: can, ...state }, "epoch", "session", value);
+  assert.equal(block({}), null);
+  assert.equal(block({}, busy), "running");
+  assert.equal(block({}, { ...observation, entry: null }), "unattached");
+  assert.equal(block({ compacting: true }), "compacting");
+  assert.equal(block({ invalidEpoch: true }, busy), "reload");
+  assert.equal(block({ canSubmit: cannot }), "reload");
+  // A retained request is retried exactly, whatever the session is now observed to do; the host decides.
+  assert.equal(block({ retained: request() }, busy), null);
+  assert.equal(block({ retained: request(), canSubmit: cannot }, busy), "reload");
+  assert.equal(block({ retained: request(), compacting: true }), "compacting");
+  for (const key of Object.values(compactControlBlockMessages)) assert.ok(Object.hasOwn(messages, key) || key === "Reload required.", key);
+});
+
+test("a compaction that did not complete is told from its admission or its settled receipt, and a completed one is not", () => {
+  const row = (outcome: string | null, code: string | null = null, state = "terminal") => ({ ...page().rows[0], state, outcome, code });
+  assert.equal(settledCompactionFailure(row("Completed")), null);
+  assert.equal(settledCompactionFailure(row(null, null, "pending")), null);
+  assert.equal(settledCompactionFailure(row("Failed", "compact_failed"))?.key, "The compaction failed. The timeline says why.");
+  assert.equal(settledCompactionFailure(row("Failed", "compact_unsuccessful"))?.key, "The compaction failed. The timeline says why.");
+  assert.equal(settledCompactionFailure(row("Failed", "compact_busy"))?.key, "The session is busy: compact it once it is idle.");
+  assert.equal(settledCompactionFailure(row("Failed", "compact_unsupported"))?.key, "This provider cannot compact the conversation.");
+  assert.equal(settledCompactionFailure(row("Cancelled"))?.key, "The compaction was cancelled.");
+  assert.equal(compactionAdmissionFailure({ status: "accepted", epoch: "epoch", receipt: page().rows[0] }), null);
+  assert.equal(compactionAdmissionFailure({ status: "accepted", epoch: "epoch", receipt: row("Failed", "compact_failed") })?.key, "The compaction failed. The timeline says why.");
+  assert.equal(compactionAdmissionFailure({ status: "busy", epoch: "epoch", receipt: null })?.key, "The session is busy: compact it once it is idle.");
+  assert.equal(compactionAdmissionFailure({ status: "uncertain", epoch: "epoch", receipt: null })?.key, "CodeAlta did not confirm the compaction. Check the timeline before compacting again.");
+  assert.equal(compactionAdmissionFailure({ status: "stale_epoch", epoch: "epoch", receipt: null })?.key, "CodeAlta restarted. Reload the window to continue.");
+  assert.deepEqual(compactionAdmissionFailure({ status: "capacity", epoch: "epoch", receipt: null }), { key: "The compaction was not accepted ({status}).", parameters: { status: "capacity" } });
+  // The watch of the composer finds the end of its own request only.
+  const watch = { key: "key", listed: true };
+  const settled = (value: ReturnType<typeof row>): SessionReceiptPage => ({ ...page(), rows: [value] });
+  assert.equal(watchedCompactionFailure(watch, "session", settled(row("Failed", "compact_failed")))?.key, "The compaction failed. The timeline says why.");
+  assert.equal(watchedCompactionFailure(watch, "session", settled({ ...row("Failed", "compact_failed"), clientRequestId: "other" })), null);
+  assert.equal(watchedCompactionFailure(watch, "session", settled({ ...row("Failed", "compact_failed"), kind: "Send" })), null);
+  assert.equal(watchedCompactionFailure(watch, "session", settled(row("Completed"))), null);
+  assert.equal(watchedCompactionFailure(watch, "session", undefined), null);
 });
 
 test("uncertain compact survives remount, requires exact explicit retry and only Compact-kind reconciliation", async () => {
