@@ -10,7 +10,7 @@ import { ConfirmPopover } from "../ConfirmPopover";
 import { MarkdownLinksContext } from "../MarkdownContent";
 import { RunScriptWindow } from "./RunScriptWindow";
 import { ScriptWindow } from "./ScriptWindow";
-import { filterScripts, projectScriptPath, runDuration, runStateLabel, runTone, runsRefreshMilliseconds, scopeLabel, sortRuns, stepColumns } from "./workflows";
+import { filterScripts, projectScriptPath, restoreSamplesShown, runDuration, runStateLabel, runTone, runsRefreshMilliseconds, samplesShownKey, scopeLabel, sortRuns, stepColumns } from "./workflows";
 import { createWorkflowsHub, type WorkflowsApi, type WorkflowsHub, type WorkflowsList } from "./workflowsHub";
 import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import type { RunProvider } from "../workItems/runsWith";
@@ -213,7 +213,14 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
   const ordered = useMemo(() => sortRuns(runs?.items ?? []), [runs]);
   const now = Math.max(useNow(visible, ordered.some(run => run.state === "running")), Date.now());
   const byId = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
-  const shown = useMemo(() => filterScripts(scripts?.items ?? [], query), [scripts, query]);
+  // The samples show until the user hides them, a choice the window keeps.
+  const [samples, setSamples] = useState(() => restoreSamplesShown(() => localStorage.getItem(samplesShownKey)));
+  const toggleSamples = () => setSamples(current => {
+    try { localStorage.setItem(samplesShownKey, String(!current)); } catch { /* Kept for this window only. */ }
+    return !current;
+  });
+  const sampleCount = scripts?.items.filter(script => script.scope === "builtin").length ?? 0;
+  const shown = useMemo(() => filterScripts((scripts?.items ?? []).filter(script => samples || script.scope !== "builtin"), query), [scripts, query, samples]);
   // The library is read again when the tab shows, for another project, or on Reload.
   useEffect(() => {
     if (!hub || !visible) return;
@@ -238,21 +245,27 @@ export function WorkflowsPanel({ api, epoch, projects, sessions, projectId, visi
       <section className="automations-main workflow-library" aria-label={t("Library")}>
         <div className="automation-list-head workflow-library-head">
           <h3>{t("Library")}<span className="count">{scripts.items.length}</span></h3>
+          {sampleCount > 0 && <Button size="small" variant="minimal" className="workflow-samples-toggle" aria-pressed={samples}
+            icon={<AppIcon name={samples ? "hide" : "eye"} size={13} />} onClick={toggleSamples}>{t(samples ? "Hide samples" : "Show samples")}</Button>}
           <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={query} placeholder={t("Search scripts")}
             aria-label={t("Search scripts")} onChange={event => setQuery(event.target.value)} />
         </div>
         {/* Workflows are written by agents, not by hand: how to get one. */}
         <p className="workflow-library-how">{t("Agents write workflows: ask for one in a session, or click Save as script… on the card of a run that went well.")}</p>
         {query && shown.length === 0 ? <p className="automation-empty">{t("No script matches.")}</p>
-          : libraryScopes.filter(part => part.scope !== "project" || chosen).map(part => {
+          : libraryScopes.filter(part => (part.scope !== "project" || chosen) && (part.scope !== "builtin" || samples)).map(part => {
             const items = shown.filter(script => script.scope === part.scope);
             if (query && items.length === 0) return null;
+            const caption = t(part.caption, { project: chosen?.name ?? "" });
+            // One line for a part: its name, its count, where its scripts are, and that it has none yet.
             return <section key={part.scope} className="workflow-scope-section" data-scope={part.scope} aria-label={t(part.title)}>
-              <h4>{t(part.title)}<span className="count">{items.length}</span></h4>
-              <p className="workflow-scope-caption">{t(part.caption, { project: chosen?.name ?? "" })}</p>
-              {items.length === 0 ? <p className="automation-empty">{t("None yet.")}</p>
-                : <ul className="workflow-cards">{items.map(script => <ScriptCard key={`${script.scope}:${script.name}`} script={script}
-                  onShow={() => setShowing(script)} onRun={() => setRunning(script)} onEdit={editOf(script)} onDelete={deleteOf(script)} />)}</ul>}
+              <div className="workflow-scope-line">
+                <h4>{t(part.title)}<span className="count">{items.length}</span></h4>
+                <span className="workflow-scope-caption" title={caption}>{caption}</span>
+                {items.length === 0 && <span className="workflow-scope-empty">{t("None yet.")}</span>}
+              </div>
+              {items.length > 0 && <ul className="workflow-cards">{items.map(script => <ScriptCard key={`${script.scope}:${script.name}`} script={script}
+                onShow={() => setShowing(script)} onRun={() => setRunning(script)} onEdit={editOf(script)} onDelete={deleteOf(script)} />)}</ul>}
             </section>;
           })}
       </section>

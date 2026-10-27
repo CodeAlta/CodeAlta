@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkflowRunItem, WorkflowScriptItem, WorkflowScriptParameter, WorkflowStepItem } from "#neoastra";
-import { argumentsOf, fieldKind, fieldsOf, filterScripts, initialValues, projectScriptPath, runDuration, runsRefreshMilliseconds, sortRuns, stepColumns } from "./workflows";
+import { argumentsOf, fieldKind, fieldsOf, filterScripts, initialValues, projectScriptPath, restoreSamplesShown, runDuration, runsRefreshMilliseconds, sortRuns, stepColumns } from "./workflows";
+
+test("the library shows the samples until they are hidden, a choice kept as written", () => {
+  assert.equal(restoreSamplesShown(() => null), true);
+  assert.equal(restoreSamplesShown(() => "true"), true);
+  assert.equal(restoreSamplesShown(() => "false"), false);
+  assert.equal(restoreSamplesShown(() => { throw new Error("no storage"); }), true);
+});
 
 test("a script of the project opens in its code editor by its path there; yours and the samples do not", () => {
   assert.equal(projectScriptPath({ scope: "project", path: "C:\\code\\App\\.alta\\scripts\\triage.js" }, "C:\\code\\App"), ".alta/scripts/triage.js");

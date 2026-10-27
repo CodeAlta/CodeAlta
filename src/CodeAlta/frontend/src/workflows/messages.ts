@@ -109,6 +109,8 @@ export const workflowMessages = {
   "They come with CodeAlta, to run or to start from.": ["Vienen con CodeAlta, para ejecutarlos o partir de ellos.", "Ils sont fournis avec CodeAlta, à lancer ou à prendre comme point de départ.",
     "Sie werden mit CodeAlta geliefert, zum Ausführen oder als Ausgangspunkt.", "CodeAlta に付属しています。そのまま実行するか、出発点にします。", "随 CodeAlta 提供，可直接运行或作为起点。"],
   "None yet.": ["Ninguno todavía.", "Aucun pour l’instant.", "Noch keine.", "まだありません。", "暂无。"],
+  "Show samples": ["Mostrar ejemplos", "Afficher les exemples", "Beispiele anzeigen", "サンプルを表示", "显示示例"],
+  "Hide samples": ["Ocultar ejemplos", "Masquer les exemples", "Beispiele ausblenden", "サンプルを非表示", "隐藏示例"],
   "Delete this script?": ["¿Eliminar este script?", "Supprimer ce script ?", "Dieses Skript löschen?", "このスクリプトを削除しますか?", "删除此脚本？"],
   "Its file is deleted from the .alta/scripts folder of the project.": ["Su archivo se elimina de la carpeta .alta/scripts del proyecto.",
     "Son fichier est supprimé du dossier .alta/scripts du projet.", "Seine Datei wird aus dem Ordner .alta/scripts des Projekts gelöscht.",

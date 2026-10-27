@@ -31,6 +31,14 @@ export function projectScriptPath(script: Readonly<{ scope: string; path: string
   return within ? file.slice(root.length) : null;
 }
 
+/** Where the window keeps whether the library shows the samples. */
+export const samplesShownKey = "codealta.workflows.samplesShown";
+
+/** Whether the library shows the samples: it does, until the user hides them. */
+export function restoreSamplesShown(read: () => string | null): boolean {
+  try { return read() !== "false"; } catch { return true; }
+}
+
 /** The scripts whose name, title or description has every word of a query. */
 export function filterScripts(scripts: readonly WorkflowScriptItem[], query: string): readonly WorkflowScriptItem[] {
   const words = query.toLowerCase().split(/\s+/u).filter(Boolean);

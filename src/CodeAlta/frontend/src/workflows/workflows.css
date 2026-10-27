@@ -7,7 +7,10 @@
 .workflows-header { grid-template-columns: auto minmax(0, 1fr) minmax(120px, 220px) auto; }
 .workflows-emblem { background: linear-gradient(135deg, #7ee2c2, #4fa3f5 55%, #9b7cf5); box-shadow: 0 6px 18px -8px #4fa3f5; }
 .workflow-library { align-content: start; gap: 10px; }
-.workflow-library-head { grid-template-columns: minmax(0, 1fr) minmax(140px, 220px); }
+.workflow-library-head { grid-template-columns: minmax(0, 1fr) auto minmax(140px, 220px); }
+/* Discreet: a word beside the search, which shows the samples again or hides them. */
+.workflow-samples-toggle { font-size: 12px; color: var(--muted) !important; }
+.workflow-samples-toggle:hover { color: var(--text) !important; }
 @container (max-width: 980px) {
   .workflows-header { grid-template-columns: auto minmax(0, 1fr) minmax(100px, 180px) auto; }
   .workflows-header p { display: none; }
@@ -15,11 +18,15 @@
 
 /* How a workflow is made, then the library by where its scripts are: the project's, yours, the samples. */
 .workflow-library-how { font-size: 12px; line-height: 1.45; color: var(--muted); }
-.workflow-scope-section { display: grid; gap: 6px; margin-top: 8px; }
-.workflow-scope-section h4 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.workflow-scope-section { display: grid; gap: 8px; }
+.workflow-scope-section + .workflow-scope-section:has(.workflow-cards) { margin-top: 6px; }
+/* A part is one line: its name and count, where its scripts are (cut, whole on hover), and that it has none yet. */
+.workflow-scope-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.workflow-scope-section h4 { display: flex; flex: none; align-items: center; gap: 8px; margin: 0; }
 .workflow-scope-section[data-scope="project"] h4 { color: #e0a83a; }
 .workflow-scope-section[data-scope="global"] h4 { color: #58c2a8; }
-.workflow-scope-caption { margin-bottom: 4px !important; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.workflow-scope-caption { flex: 0 1 auto; min-width: 0; overflow: hidden; font-size: 12px; line-height: 1.45; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-scope-empty { flex: none; font-size: 12px; font-style: italic; color: var(--muted); opacity: .8; }
 .workflow-card-actions { position: relative; }
 .workflow-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
 .workflow-card { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
