@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -8,6 +9,8 @@ public sealed partial class SessionRuntimeService
 {
     // How many times a read of the last turn starts again when the journal grew while it was read.
     private const int LastTurnReadAttempts = 3;
+
+    private static readonly Logger OutcomeLog = LogManager.GetLogger("CodeAlta.SessionOutcome");
 
     /// <summary>
     /// Gets one recoverable user-facing session by its identifier, as <see cref="ListRecoverableSessionsAsync(CancellationToken)"/>
@@ -226,19 +229,36 @@ public sealed partial class SessionRuntimeService
         => _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated && (entry.HasActiveRun || entry.QueueDrainInProgress);
 
     // The records from the first one of a run to the end of the journal; the whole history from that run when the turns
-    // of the index do not name it.
+    // of the index do not name it, or name a start that does not begin with a record of the run.
     private async Task<IReadOnlyList<AgentEvent>?> TryReadStoredHistoryFromRunOwnedBodyAsync(SessionViewDescriptor session, AgentRunId runId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(session.SessionId)) return null;
         var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+        var why = "history_changed";
         for (var attempt = 0; attempt < LastTurnReadAttempts; attempt++)
         {
             try
             {
                 var turns = await store.ReadTurnsAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
                 var turn = turns.Turns.FirstOrDefault(candidate => string.Equals(candidate.RunId, runId.Value, StringComparison.Ordinal));
-                if (turn is null) break;
-                return await ReadFromOffsetAsync(store, session.SessionId, turns.Revision, turn.StartOffset, cancellationToken).ConfigureAwait(false);
+                if (turn is null)
+                {
+                    why = "turn_not_indexed";
+                    break;
+                }
+
+                // A turn starts at the first record of its run: a start at or past the end of the journal, or one whose first
+                // record is of another run, is not where the run is, and a read from there would miss its answer.
+                if (turn.StartOffset >= turns.Revision.Length)
+                {
+                    why = "turn_starts_past_the_end";
+                    break;
+                }
+
+                var events = await ReadFromOffsetAsync(store, session.SessionId, turns.Revision, turn.StartOffset, cancellationToken).ConfigureAwait(false);
+                if (events.Count > 0 && string.Equals(events[0].RunId?.Value, runId.Value, StringComparison.Ordinal)) return events;
+                why = "turn_start_not_of_the_run";
+                break;
             }
             catch (AgentSessionHistoryException error) when (error.Code == "history_changed")
             {
@@ -246,12 +266,23 @@ public sealed partial class SessionRuntimeService
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
+                why = error.GetType().Name;
                 break;
             }
         }
 
         var history = await TryReadStoredHistoryOwnedBodyAsync(session, null, cancellationToken).ConfigureAwait(false);
-        return history is null ? null : SessionOutcome.SelectFromRun(history, runId);
+        var fromRun = history is null ? null : SessionOutcome.SelectFromRun(history, runId);
+        if (LogManager.IsInitialized)
+        {
+            // A turn the index places wrong is a fault of the index, told on standard error with altacli --verbose.
+            var message = $"The outcome of run {runId.Value} of session {session.SessionId} was read from the whole journal ({why}): "
+                + (history is null ? "the journal could not be read." : $"{fromRun!.Count} of {history.Count} events from the run.");
+            if (why is "turn_starts_past_the_end" or "turn_start_not_of_the_run") OutcomeLog.Warn(message);
+            else OutcomeLog.Info(message);
+        }
+
+        return fromRun;
     }
 
     // The events of the records from an offset to the end of the journal, read a page at a time from the end.

@@ -210,6 +210,33 @@ public sealed class SessionJobServiceTests
     }
 
     [TestMethod]
+    public async Task AJobOfARunWithADeadline_IsGivenTheTimeLeftLessAMargin_WithOrWithoutATimeout()
+    {
+        var shell = new FakeShell();
+        var now = new DateTimeOffset(2026, 10, 28, 12, 0, 0, TimeSpan.Zero);
+        await using var jobs = new SessionJobService(start: shell.Start, timeProvider: new FixedClock(now));
+        Assert.IsNull(jobs.CapToDeadline(null), "Without a deadline, a job has no time unless it is given one.");
+        Assert.AreEqual(TimeSpan.FromHours(3), jobs.CapToDeadline(TimeSpan.FromHours(3)));
+
+        jobs.Deadline = now + TimeSpan.FromMinutes(30);
+        Assert.AreEqual(TimeSpan.FromMinutes(28), jobs.CapToDeadline(null), "Two minutes are left to read the result and answer.");
+        Assert.AreEqual(TimeSpan.FromMinutes(28), jobs.CapToDeadline(TimeSpan.FromMinutes(40)));
+        Assert.AreEqual(TimeSpan.FromMinutes(10), jobs.CapToDeadline(TimeSpan.FromMinutes(10)), "A job that ends in time keeps its timeout.");
+        Assert.AreEqual(TimeSpan.FromMinutes(28), jobs.Start(Request("session-a", "npx jest") with { Timeout = TimeSpan.FromMinutes(40) }).Job!.Timeout);
+        Assert.AreEqual(TimeSpan.FromMinutes(28), jobs.Start(Request("session-a", "npx jest")).Job!.Timeout);
+
+        jobs.Deadline = now + TimeSpan.FromSeconds(20);
+        Assert.AreEqual(TimeSpan.FromSeconds(15), jobs.CapToDeadline(null), "A short run keeps a quarter of what is left.");
+        jobs.Deadline = now - TimeSpan.FromSeconds(5);
+        Assert.AreEqual(TimeSpan.FromSeconds(1), jobs.CapToDeadline(null), "A job started after the deadline still ends at once.");
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    [TestMethod]
     public async Task WhatAJobWrites_IsFollowedWhileItRuns_AndAfterItEnded()
     {
         var shell = new FakeShell();

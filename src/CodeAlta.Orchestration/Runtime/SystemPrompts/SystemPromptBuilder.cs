@@ -730,6 +730,14 @@ public sealed class SystemPromptBuilder
             sessionLines.Add($"- Parent session: {request.Session.ParentSessionId}");
         }
 
+        // A headless run with a time limit is ended then, whatever is left: the agent sizes its work to it.
+        if (request.RunDeadline is { } deadline)
+        {
+            sessionLines.Add($"- Run deadline: this run is ended at {deadline.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC, whatever is left to do. "
+                + "Size your work and your commands to the time left (a shell command such as `date -u` gives the time), and give your final answer before then. "
+                + "A job of `alta job start` is ended before the run, with or without `--timeout`, so that its result comes back to you in time.");
+        }
+
         lines.Add($"- Session kind: {request.Session.Kind.ToString().ToLowerInvariant()}");
         if (request.Space is { } space)
         {
@@ -1556,6 +1564,12 @@ public sealed class SystemPromptBuildRequest
     /// <c>exec</c> takes over its other tools. The instructions tell a session with <c>exec</c> when to use it.
     /// </summary>
     public string CodeMode { get; init; } = "off";
+
+    /// <summary>
+    /// Gets when the headless run the session belongs to ends, when it has a time limit: the Session Context tells it, so
+    /// that the agent sizes its work and its commands to the time left. Null for no limit.
+    /// </summary>
+    public DateTimeOffset? RunDeadline { get; init; }
 
     /// <summary>Gets active-skills markdown restored from session state.</summary>
     public string? ActiveSkillsMarkdown { get; init; }

@@ -128,6 +128,30 @@ public sealed class CliAcpTests
     }
 
     [TestMethod]
+    public async Task Prompt_OfASessionAUserWorksIn_IsNotToldThatNoUserIsAvailable()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        await using var acp = await AcpHarness.StartAsync(root, provider);
+        var sessionId = (await acp.Client.SessionNewAsync(new NewSessionRequest { Cwd = root.ProjectRoot }).WaitAsync(Timeout)).SessionId.Value;
+
+        Assert.AreEqual("end_turn", (await acp.PromptAsync(sessionId, "hello")).StopReason.Value.GetString());
+
+        var request = provider.Requests.Last();
+        var prompt = request.SystemMessage + "\n" + request.DeveloperInstructions + "\n" + request.SessionInstructions;
+        foreach (var part in new[] { "## Headless run", "No user is available", "Nobody reads what you write between tool calls" })
+        {
+            Assert.DoesNotContain(part, prompt, part);
+        }
+
+        // What altacli does not offer is still not asked for.
+        foreach (var part in new[] { "alta ask --stdin", "alta reminder create", "## Review by the user" })
+        {
+            Assert.DoesNotContain(part, prompt, part);
+        }
+    }
+
+    [TestMethod]
     public async Task Prompt_TakesImagesResourcesAndLinks()
     {
         using var root = new CliTestRoot();

@@ -6,6 +6,7 @@ using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Prompts;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Orchestration.Hosting;
 
@@ -27,6 +28,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     // The times a run waits for its tree to settle again when the outcome it read says a run is still in flight.
     private const int SettledRereads = 5;
 
+    private static readonly Logger Log = LogManager.GetLogger("CodeAlta.HeadlessSessionDriver");
+
     private readonly CodeAltaHost _host;
     private readonly HeadlessSessionDriverOptions _options;
     private readonly HeadlessPromptAttachmentService _attachments = new();
@@ -39,6 +42,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
     private readonly ConcurrentDictionary<FlushMarker, TaskCompletionSource> _flushes = new();
     // The run in progress of each session, which CancelAsync asks to abort.
     private readonly ConcurrentDictionary<string, RunAbort> _runs = new(StringComparer.OrdinalIgnoreCase);
+    // What the reader saw of the session of each run in progress: how the run ends when its journal cannot tell it.
+    private readonly ConcurrentDictionary<string, RunObservation> _observations = new(StringComparer.OrdinalIgnoreCase);
     private readonly Task _reader;
     // The events the runtime stream dropped while the reader read it (DroppedEventCount).
     private long _droppedEventCount;
@@ -279,19 +284,22 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         using var timer = timeout is { } span ? new CancellationTokenSource(span) : new CancellationTokenSource();
         using var aborts = new RunAbort();
         _runs[session.SessionId] = aborts;
+        var observation = new RunObservation();
+        _observations[session.SessionId] = observation;
         try
         {
-            return await RunAsync(session, prompt, timeout, attachments, timer, aborts, stopwatch, startedAt, cancellationToken).ConfigureAwait(false);
+            return await RunAsync(session, prompt, timeout, attachments, timer, aborts, observation, stopwatch, startedAt, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
+            _observations.TryRemove(new KeyValuePair<string, RunObservation>(session.SessionId, observation));
             _runs.TryRemove(new KeyValuePair<string, RunAbort>(session.SessionId, aborts));
             aborts.End();
         }
     }
 
     private async Task<HeadlessRunResult> RunAsync(HeadlessSession session, HeadlessPrompt prompt, TimeSpan? timeout, IReadOnlyList<AgentInputItem>? attachments,
-        CancellationTokenSource timer, RunAbort aborts, Stopwatch stopwatch, DateTimeOffset startedAt, CancellationToken cancellationToken)
+        CancellationTokenSource timer, RunAbort aborts, RunObservation observation, Stopwatch stopwatch, DateTimeOffset startedAt, CancellationToken cancellationToken)
     {
         var runtime = _host.RuntimeService;
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(timer.Token, cancellationToken, _closing.Token, aborts.Token);
@@ -342,6 +350,20 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
 
             outcome = await ReadOutcomeAsync().ConfigureAwait(false);
         }
+
+        // A journal read that finds neither an answer nor an error of the run is not how it ended when the reader saw the
+        // session answer: what it saw is reported, with the usage it saw.
+        if (abortReason is null && outcome.Status == SessionOutcomeStatus.Unknown && _options.Observer is not null)
+        {
+            await FlushEventsAsync(CancellationToken.None).ConfigureAwait(false);
+            if (SessionOutcome.From(observation.Events, isRunning: false) is { Status: SessionOutcomeStatus.Completed or SessionOutcomeStatus.Failed } observed)
+            {
+                if (LogManager.IsInitialized)
+                    Log.Warn($"The journal of session {session.SessionId} did not tell how run {runId?.Value ?? "(not known)"} ended: the {observed.Status.ToString().ToLowerInvariant()} run the driver saw is reported.");
+                outcome = observed;
+            }
+        }
+
         var usage = await ReadTreeUsageAsync(session.SessionId, outcome.Usage, startedAt).ConfigureAwait(false);
         // A send the driver admitted is cancelled by an abort of its tree (CancelAsync) before its run started, or by the host closing.
         abortReason ??= outcome.AbortReason ?? runtime.GetAbortReason(session.SessionId)
@@ -354,7 +376,10 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
 
         if (sent is { Outcome: not OwnedSessionCommandOutcome.Completed, Code: SessionRuntimeService.SessionInUseCode } && runId is null)
             return Result(HeadlessRunStatus.SessionInUse, null, outcome, usage, null, $"Session '{session.SessionId}' is in use by another process.");
-        if (sent is { Outcome: not OwnedSessionCommandOutcome.Completed } && runId is null && outcome.FinalError is null)
+        // A send whose run failed has no run id (an in-process provider fails the send with its run); a run that the answer
+        // of a child started after it may still have completed the work, and is how the run ended.
+        if (sent is { Outcome: not OwnedSessionCommandOutcome.Completed } && runId is null && outcome.FinalError is null
+            && outcome.Status != SessionOutcomeStatus.Completed)
             return Result(HeadlessRunStatus.Failed, null, outcome, usage, null, $"The prompt could not be sent ({sent.Code ?? sent.Outcome.ToString().ToLowerInvariant()}).");
 
         return outcome.Status switch
@@ -367,9 +392,10 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             _ => Result(HeadlessRunStatus.Failed, runId, outcome, usage, null, "The run ended without an answer."),
         };
 
-        Task<SessionOutcome> ReadOutcomeAsync() => runId is { } run
-            ? runtime.ReadOutcomeAsync(session.Descriptor, run, CancellationToken.None)
-            : runtime.ReadOutcomeSinceAsync(session.Descriptor, startedAt, CancellationToken.None);
+        Task<SessionOutcome> ReadOutcomeAsync() => _options.ReadOutcome is { } read ? read(session.Descriptor, runId, startedAt)
+            : runId is { } run
+                ? runtime.ReadOutcomeAsync(session.Descriptor, run, CancellationToken.None)
+                : runtime.ReadOutcomeSinceAsync(session.Descriptor, startedAt, CancellationToken.None);
 
         HeadlessRunResult Result(HeadlessRunStatus status, AgentRunId? run, SessionOutcome? read, SessionUsageTotals? totals, string? reason, string? message)
             => new(status, session.SessionId, run, read?.FinalMessage, reason, read?.FailureKind, message ?? read?.FailureMessage,
@@ -663,12 +689,42 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         public void Dispose() => _requested.Dispose();
     }
 
-    // The usage of the root with what the sessions it started used since the prompt.
+    // The events of the session of a run that tell how it ends (its prompts, its answers, its errors, its usage and an
+    // abort), as the reader saw them: a few per request to the model, not the whole stream.
+    private sealed class RunObservation
+    {
+        private readonly Lock _gate = new();
+        private readonly List<AgentEvent> _events = [];
+
+        public IReadOnlyList<AgentEvent> Events
+        {
+            get
+            {
+                lock (_gate) return [.. _events];
+            }
+        }
+
+        public void Add(AgentEvent agentEvent)
+        {
+            var kept = agentEvent switch
+            {
+                AgentContentCompletedEvent content => content.Kind is AgentContentKind.Assistant or AgentContentKind.User,
+                AgentErrorEvent => true,
+                AgentSessionUpdateEvent update => update.Usage is not null || SessionOutcome.AbortReasonOf(update) is not null,
+                _ => false,
+            };
+            if (!kept) return;
+            lock (_gate) _events.Add(agentEvent);
+        }
+    }
+
+    // The usage of the root with what the sessions it started used since the prompt: those that ended too, which the
+    // runtime may no longer hold.
     private async Task<SessionUsageTotals> ReadTreeUsageAsync(string rootSessionId, SessionUsageTotals root, DateTimeOffset since)
     {
         var runtime = _host.RuntimeService;
         var updates = new List<AgentSessionUpdateEvent>();
-        foreach (var sessionId in runtime.GetSessionTree(rootSessionId).Skip(1))
+        foreach (var sessionId in (await runtime.ListSessionTreeAsync(rootSessionId, CancellationToken.None).ConfigureAwait(false)).Skip(1))
         {
             if (await runtime.TryGetResumableSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is not { } child) continue;
             var history = await runtime.TryReadStoredHistoryAsync(child, null, CancellationToken.None).ConfigureAwait(false) ?? [];
@@ -718,6 +774,9 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
                 }
 
                 if (RootOf(runtimeEvent.SessionId) is not { } root) continue;
+                if (runtimeEvent is SessionAgentEvent { Event: var agentEvent } && string.Equals(runtimeEvent.SessionId, root, StringComparison.OrdinalIgnoreCase)
+                    && _observations.TryGetValue(root, out var observation))
+                    observation.Add(agentEvent);
                 var gap = unreported;
                 unreported = 0;
                 try

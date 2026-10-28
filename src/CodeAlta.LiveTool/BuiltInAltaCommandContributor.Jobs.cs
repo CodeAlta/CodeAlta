@@ -258,12 +258,21 @@ internal sealed partial class BuiltInAltaCommandContributor
         }
 
         var record = JobRecord(context, "alta.job.started", job);
-        record["nextStep"] = notification switch
+        var nextStep = notification switch
         {
             SessionJobNotification.Never => $"The job runs. Nothing is sent when it ends: read it with `alta job status {job.Id}` and `alta job output {job.Id}`.",
             SessionJobNotification.Success => $"The job runs. Its result is sent to the session as a prompt when the command succeeds (exit code 0): go on with other work or end your turn, do not poll. A command that fails sends nothing: `alta job status {job.Id}` says how it ended.",
             _ => "The job runs. Its result (exit code and the end of its output) is sent to the session as a prompt when the command ends, whether it succeeds or fails: go on with other work or end your turn, do not poll.",
         };
+        // A run with a deadline ends its jobs before it: the agent is told the time its job was given.
+        if (job.Timeout is { } cut && cut != timeout && runtime?.RunDeadline is { } deadline)
+        {
+            nextStep += $" Its timeout was cut to {cut.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture)}: the run is ended at "
+                + $"{deadline.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC, and the job ends before it so that its result reaches you.";
+        }
+
+        record["nextStep"] = nextStep;
+
         AltaJsonlWriter.WriteRecord(context.Stdout, record);
         return AltaExitCodes.Success;
     }

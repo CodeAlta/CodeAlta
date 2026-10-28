@@ -148,6 +148,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _sessionViewCatalog.JournalStore.StateAppended += OnSessionStateAppended;
         instructionTemplateProvider.SessionToolPatterns = GetDisabledToolPatterns;
         instructionTemplateProvider.CodeModeOf = (sessionId, providerKey, modelId) => ScriptRuns?.CodeModeOf(sessionId, providerKey, modelId) ?? "off";
+        instructionTemplateProvider.RunDeadline = () => RunDeadline;
         _events.Published = PulseSettlement;
     }
 
@@ -183,6 +184,27 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// changes before commit, whatever the setting or its own choice. Default false.
     /// </summary>
     public bool Headless { get; init; }
+
+    /// <summary>
+    /// Gets or initializes whether no session of this runtime reviews its changes before commit, whatever the setting or
+    /// its own choice, while their prompt says nothing of a headless run: a host that offers no review to a user who works
+    /// with its sessions (<c>altacli acp</c>). <see cref="Headless"/> implies it. Default false.
+    /// </summary>
+    public bool WithoutReviews { get; init; }
+
+    // Whether the sessions of this runtime never review their changes before commit.
+    internal bool NeverReviews => Headless || WithoutReviews;
+
+    /// <summary>
+    /// Gets or sets when the headless run of this runtime ends, when it has a time limit (<c>altacli run --timeout</c>):
+    /// the Session Context of the sessions attached afterwards tells it, and the jobs they start end before it
+    /// (<see cref="SessionJobService.Deadline"/>). Null, the default, for no limit. Set it before the sessions attach.
+    /// </summary>
+    public DateTimeOffset? RunDeadline
+    {
+        get => Jobs.Deadline;
+        set => Jobs.Deadline = value;
+    }
 
     /// <summary>
     /// The paragraph that ends the system prompt of a session of a headless runtime (<see cref="Headless"/>). It never
@@ -3703,13 +3725,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     /// <summary>
     /// Reads the setting <c>[review] before_commit</c> as it applies to the sessions of this runtime: off in a headless
-    /// runtime (<see cref="Headless"/>), where nobody reviews.
+    /// runtime (<see cref="Headless"/>), where nobody reviews, and in one without reviews (<see cref="WithoutReviews"/>).
     /// </summary>
     /// <returns>Whether sessions that follow the setting review their changes before commit.</returns>
-    internal bool LoadReviewBeforeCommitSetting() => !Headless && _configStore.LoadGlobalReviewBeforeCommit();
+    internal bool LoadReviewBeforeCommitSetting() => !NeverReviews && _configStore.LoadGlobalReviewBeforeCommit();
 
-    // What applies of a session's own choice: the choice, else the setting; never a review in a headless runtime.
-    private bool EffectiveReviewBeforeCommit(bool? own) => !Headless && (own ?? _configStore.LoadGlobalReviewBeforeCommit());
+    // What applies of a session's own choice: the choice, else the setting; never a review in a runtime without reviews.
+    private bool EffectiveReviewBeforeCommit(bool? own) => !NeverReviews && (own ?? _configStore.LoadGlobalReviewBeforeCommit());
 
     /// <summary>
     /// Gets the own choice of an attached session about the review before commit; null when it follows the setting or
