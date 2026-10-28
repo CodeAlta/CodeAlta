@@ -72,15 +72,12 @@ internal sealed class CodexCliRuntimeOptions
             return CodexAppServerCommand.FromUserCommand(command)
                 ?? throw new AgentProviderFailureException(
                     $"{command} was not found: {ProviderName} cannot start. Install Codex, or clear its command in Settings > Providers to use the version CodeAlta downloads.",
-                    new AgentFailureInfo(AgentFailureKind.Unavailable)) { Data = { ["category"] = CodexCliFailures.NotFoundCategory } };
+                    new AgentFailureInfo(AgentFailureKind.Unavailable));
         }
 
         if (Installer is null)
         {
-            throw new AgentProviderFailureException($"{ProviderName} has no command, and no Codex can be downloaded here.", new AgentFailureInfo(AgentFailureKind.Unavailable))
-            {
-                Data = { ["category"] = CodexCliFailures.NotFoundCategory },
-            };
+            throw new AgentProviderFailureException($"{ProviderName} has no command, and no Codex can be downloaded here.", new AgentFailureInfo(AgentFailureKind.Unavailable));
         }
 
         try
@@ -89,10 +86,7 @@ internal sealed class CodexCliRuntimeOptions
         }
         catch (CodexInstallException exception)
         {
-            throw new AgentProviderFailureException(exception.Message, new AgentFailureInfo(AgentFailureKind.Unavailable), exception)
-            {
-                Data = { ["category"] = CodexCliFailures.NotFoundCategory },
-            };
+            throw new AgentProviderFailureException(exception.Message, new AgentFailureInfo(AgentFailureKind.Unavailable), exception);
         }
     }
 }

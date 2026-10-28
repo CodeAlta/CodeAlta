@@ -15,12 +15,12 @@ public sealed class TerminalPluginHostTests
     {
         foreach (var definition in CodeAltaBuiltInPlugins.All)
         {
-            var expected = definition.Id is "git" or "jira" or "mcp" or "acp" ? PluginFrontends.All | PluginFrontends.Cli : PluginFrontends.All;
+            var expected = definition.Id is "git" or "jira" or "mcp" or "acp" or "codex-cli" ? PluginFrontends.All | PluginFrontends.Cli : PluginFrontends.All;
             Assert.AreEqual(expected, definition.CreateDescriptor().Frontends, definition.Id);
             Assert.AreEqual(expected, PluginDescriptorFactory.FromType(definition.ResolvePluginType()).Frontends, definition.Id);
         }
 
-        CollectionAssert.AreEquivalent(new[] { "git", "jira", "mcp", "statistics", "acp" }, CodeAltaBuiltInPlugins.All.Select(static definition => definition.Id).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "git", "jira", "mcp", "statistics", "acp", "codex-cli" }, CodeAltaBuiltInPlugins.All.Select(static definition => definition.Id).ToArray());
     }
 
     [TestMethod]

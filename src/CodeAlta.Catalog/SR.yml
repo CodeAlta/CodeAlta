@@ -1632,6 +1632,12 @@
   fr: "Exécute les agents de l'Agent Client Protocol (ACP) comme fournisseurs de modèles."
   ja: "Agent Client Protocol (ACP) のエージェントをモデルプロバイダーとして実行します。"
   zh: "将 Agent Client Protocol (ACP) 的代理作为模型提供方运行。"
+"Runs OpenAI's Codex app-server as a model provider.":
+  de: "Führt den Codex-App-Server von OpenAI als Modellanbieter aus."
+  es: "Ejecuta el servidor de aplicaciones Codex de OpenAI como proveedor de modelos."
+  fr: "Exécute le serveur d'application Codex d'OpenAI comme fournisseur de modèles."
+  ja: "OpenAI の Codex アプリサーバーをモデルプロバイダーとして実行します。"
+  zh: "将 OpenAI 的 Codex 应用服务器作为模型提供方运行。"
 "The issues of a Jira project, for the projects whose configuration names one.":
   de: "Die Vorgänge eines Jira-Projekts, für Projekte, deren Konfiguration eines nennt."
   es: "Las incidencias de un proyecto de Jira, para los proyectos cuya configuración indica uno."

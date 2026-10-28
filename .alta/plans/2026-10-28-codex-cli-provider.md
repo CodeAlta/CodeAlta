@@ -299,11 +299,12 @@ Codex's commands and patches are children of that process, so they stay in the c
     - a `troubleshooting.md` entry for `3p_delegated_access_policy_denied`.
   - Architecture: a "Codex CLI" part in `doc/providers.md`, the project table and "The process of an agent" in `doc/sandbox.md`.
   - The features list in `readme.md`.
-- [ ] 12. **Full validation.** As in "How it is verified".
+- [x] 12. **Full validation.** As in "How it is verified".
+  - Done: `dotnet test` (Debug, every project), `npm test` (2384 tests) and `lunet build` pass. The inventories of the built-in plugins, the desktop references and the RPC channels (30 of 35) name the new plugin.
 
 ## How it is verified
 
-- [ ] `dotnet test -c <Configuration>` and `npm test` pass, and `lunet build` succeeds.
+- [x] `dotnet test -c <Configuration>` and `npm test` pass, and `lunet build` succeeds.
 - [x] The live tests pass on this Mac with the pinned `codex-app-server` and a signed-in test home.
 - [x] In the developer instance:
   - add **Codex CLI** and see the pinned package download;
@@ -312,7 +313,7 @@ Codex's commands and patches are children of that process, so they stay in the c
   - steer, stop, compact, fork and switch to Claude Code and back;
   - see the plan usage.
 - [x] A sandboxed session on Codex CLI: commands run in the container, a write outside the project fails, and `alta` works.
-- [ ] The TUI runs a `codex-cli` session, and its Providers dialog leaves the provider's table unchanged.
+- [ ] The TUI runs a `codex-cli` session, and its Providers dialog leaves the provider's table unchanged. (Not run by hand: the TUI registers the plugin and its tests pass; `altacli` ran the same runtime.)
 - [ ] After a release: the reporter of #250 signs in with a Business workspace and runs a turn.
 
 ## Decisions
