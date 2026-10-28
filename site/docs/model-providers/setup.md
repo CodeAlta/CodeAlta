@@ -110,8 +110,8 @@ reasoning_effort = "high"
 
 Sign in with **Sign in with the browser** (CodeAlta Desktop) or **Continue with ChatGPT** (CodeAlta TUI), and authorize CodeAlta in the system browser. No developer account or key is needed. The browser returns to `127.0.0.1` on the computer that runs CodeAlta, so it must reach that computer.
 
-- **Another account or workspace**: add another `type = "codex"` provider with its own `display_name`, even for the same email address. **Account Info** shows the account it signed in to.
-- **Plan access declined**: the sign-in is kept but requests are refused; choose **Continue with ChatGPT** again to grant access.
+- **Another account or workspace**: add another `type = "codex"` provider with its own `display_name`, even for the same email address. The **Account** row of the provider (CodeAlta Desktop) or **Account Info** (CodeAlta TUI) shows the account it signed in to.
+- **Plan access declined**: the sign-in is kept but requests are refused; choose **Sign in with the browser** (CodeAlta Desktop) or **Continue with ChatGPT** (CodeAlta TUI) again to grant access.
 - **`invalid_grant` at the first sign-in**: sign in again; the retry reuses the same registration.
 - **Credentials of an older CodeAlta**: they are not imported; sign in again. Remove an old `auth_source` or set `auth_source = "codealta_oauth"`.
 - **Sign out** revokes the session and clears the tokens. When the revocation cannot be confirmed, disconnect CodeAlta in ChatGPT Settings.
