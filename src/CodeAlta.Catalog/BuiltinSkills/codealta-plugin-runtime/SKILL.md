@@ -133,7 +133,7 @@ Override only what the plugin needs.
 | `OnAgentEventAsync` | Sees the events of the sessions | yes | yes |
 | `OnToolCallAsync`, `OnToolResultAsync` | Hooks: see, block or change every tool call of a session (see "Tool hooks") | yes | yes |
 | `OnAgentRunEndedAsync` | Hook: continues a session whose run ended, with a prompt | yes | yes |
-| `GetPromptProcessors()`, `OnPromptSubmittingAsync` | Changes a prompt before it is sent | no | yes |
+| `GetPromptProcessors()`, `OnPromptSubmittingAsync` | Changes, answers or stops a prompt of the user before it is sent (see "Change the prompt before it is sent") | yes | yes |
 | `GetCompactionContributions()` | Hooks of a manual compaction | no | yes |
 | `GetCommandLineContributions()` | Commands of the `altatui` command line | no | yes |
 
@@ -554,6 +554,20 @@ public override IEnumerable<PluginSystemPromptContribution> GetSystemPromptContr
 ```
 
 A dynamic text is asked for each prompt of each session; return null to add nothing. Keep it stable: a text that changes replaces the prompt of the session.
+
+## Change the prompt before it is sent
+
+```csharp
+public override ValueTask<PluginPromptResult?> OnPromptSubmittingAsync(PluginPromptSubmittingContext context, CancellationToken cancellationToken = default)
+    => ValueTask.FromResult<PluginPromptResult?>(context.Text.StartsWith("/ticket ", StringComparison.Ordinal)
+        ? PluginPromptResult.Handled("Opened the ticket.")    // or Cancel("why"), Replace(text, attachments); null: send it as it is
+        : null);
+```
+
+- It sees each prompt the user sends, as typed (`context.Text`, before `@` references are resolved), with `context.Attachments`. The prompts CodeAlta sends itself (reminders, job results, the continuation of `OnAgentRunEndedAsync`) do not go through it, nor, in CodeAlta Desktop, a prompt that steers a turn that runs.
+- `Replace(text, attachments)` sends another text. Return some of `context.Attachments`, in any order, to drop or reorder them (in CodeAlta Desktop each has an `id` in `Metadata`); return none to keep them all.
+- `Handled(message)` and `Cancel(message)` send nothing: the status line under the prompt in CodeAlta Desktop says that a plugin handled or cancelled the prompt, with the message.
+- `TemporaryPromptContributions` of the result add text to the instructions of that prompt's run only.
 
 ## Data, background work and logs
 

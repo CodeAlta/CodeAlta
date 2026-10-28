@@ -20,7 +20,7 @@ import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations
 import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
 import { changedSessionOptions, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { activateSessionModels } from "./activateSessionModels";
-import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, sendAvailable, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
+import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, pluginPromptOutcome, refreshSubmissions, sendAvailable, type PluginPromptOutcome, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, compactControlBlock, compactControlBlockMessages, compactionAdmissionFailure, hasPendingCompaction, watchCompaction, watchedCompactionFailure,
   type CompactionFailure, type CompactionWatch, type createCompactionSubmissions } from "./sessionCompaction";
@@ -174,6 +174,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   function editText(value: string) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted) return;
     setSendFailure("");
+    setPluginOutcome(null);
     recall.current = noPromptRecall;
     inputRevision.current++;
     latestText.current = value;
@@ -229,6 +230,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const hostReads = useContext(HostReadsContext);
   // What a Send that was not taken says, in the status line: a prompt is never answered with a toast.
   const [sendFailure, setSendFailure] = useState("");
+  // A Send a plugin answered itself (handled or cancelled): nothing reached the agent, and the status line says so.
+  const [pluginOutcome, setPluginOutcome] = useState<PluginPromptOutcome | null>(null);
   // Asks the form of the session configuration to open: a send that needs another provider opens it.
   const [selectionOpenRequest, setSelectionOpenRequest] = useState(0);
   const [retryTick, setRetryTick] = useState(0);
@@ -474,7 +477,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   useEffect(() => {
     if (!submittedThinking) return;
     const receipt = page?.rows.find(row => row.sessionId === sessionId && row.clientRequestId === submittedThinking.key && row.kind === "Send");
-    if (invalidEpoch || receipt?.state === "terminal") { setSubmittedThinking(null); return; }
+    if (invalidEpoch || receipt?.state === "terminal") {
+      if (receipt && !invalidEpoch) settlePluginOutcome(receipt);
+      setSubmittedThinking(null); return;
+    }
     if (runtimeState?.kind !== "ready") return;
     const runId = runtimeState.snapshot.entry?.activeRunId ?? null;
     if (runId && !submittedThinking.runId) setSubmittedThinking({ ...submittedThinking, runId });
@@ -584,6 +590,13 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     setSendFailure("");
     return true;
   }
+  // The prompt of a Send a plugin answered itself never reaches the conversation: its echo leaves the timeline.
+  function settlePluginOutcome(row: SessionReceiptView) {
+    const outcome = row.sessionId === sessionId ? pluginPromptOutcome(row) : null;
+    if (!outcome) return;
+    setPluginOutcome(outcome);
+    submissions.acknowledgeOutgoing([outgoingKey({ expectedEpoch: epoch, sessionId, clientRequestId: row.clientRequestId })]);
+  }
   function retryLater() {
     holdUntil.current = Date.now() + 1200;
     window.setTimeout(() => setRetryTick(value => value + 1), 1300);
@@ -596,7 +609,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       observeEpoch(result);
       const accepted = result.status === "accepted" || result.status === "replay";
       if (!accepted || result.receipt?.state === "terminal") setSubmittedThinking(current => current?.key === key ? null : current);
-      if (accepted) { selections.sent(epoch, sessionId, request.selection); queue.composer.sent(id); promptAccepted.current(); }
+      if (accepted) {
+        selections.sent(epoch, sessionId, request.selection); queue.composer.sent(id); promptAccepted.current();
+        if (result.receipt) settlePluginOutcome(result.receipt);
+      }
       else if (result.status === "uncertain" || result.status === "stale_epoch") queue.composer.uncertain(id, "reason" in result && result.reason ? result.reason : result.status);
       // The session was working after all: the prompt keeps its place and leaves at the next idle moment.
       else if (result.status === "busy" || result.status === "capacity") { queue.composer.release(id); retryLater(); }
@@ -739,9 +755,11 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
     setMessage("Ready to send to this owned session.");
     setSendFailure("");
+    setPluginOutcome(null);
     setCompactFailure(null);
     void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
+      if (["accepted", "replay"].includes(result.status) && result.receipt) settlePluginOutcome(result.receipt);
       if (!["accepted", "replay"].includes(result.status) || result.receipt?.state === "terminal") setSubmittedThinking(null);
       const unchanged = (inputRevision.current === revision || latestText.current === request.text) && imageOwner.get(imageKey) === capturedImages;
       // The session started working between the keystroke and the host: the prompt joins the queue instead,
@@ -1420,11 +1438,13 @@ ${value}` : value);
     <ClaudeCliFirstUse epoch={epoch} providerKey={selected?.providerKey ?? observedProvider} />
     {!expanded && attachmentStrip}
     <ComposerSurface busy={composerBusy || compacting} status={<>
-      <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem) ? "danger" : undefined}>
-        {stopShown ? <AppIcon name="error" size={14} /> : composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem ? "error" : "prompt"} size={14} />}
+      <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem || pluginOutcome?.cancelled) ? "danger"
+        : !composerBusy && !compacting && pluginOutcome ? "notice" : undefined}>
+        {stopShown ? <AppIcon name="error" size={14} /> : composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem || pluginOutcome?.cancelled ? "error" : pluginOutcome ? "plugin" : "prompt"} size={14} />}
         <span className="composer-foreground-text">{stopShown ? t(stopShown.key, stopShown.parameters) : composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
           : compacting ? t("Compacting…")
           : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem
+          : !invalidEpoch && pluginOutcome ? t(pluginOutcome.key, pluginOutcome.parameters)
           : !invalidEpoch && compactFailure ? t(compactFailure.key, compactFailure.parameters) : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span></span>
       {/* A prompt that waits for a reload offers it: the window would otherwise have no way out. */}
       {invalidEpoch && !composerBusy && !compacting && <Button variant="minimal" size="small" intent="danger" className="composer-reload"

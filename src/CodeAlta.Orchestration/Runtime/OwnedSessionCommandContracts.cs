@@ -233,7 +233,15 @@ public enum OwnedSessionCommandOutcome
 /// <param name="Outcome">Terminal outcome.</param>
 /// <param name="RunId">Run identity when submission returned successfully.</param>
 /// <param name="Code">Stable failure or no-op code; null for ordinary success.</param>
-public sealed record OwnedSessionCommandResult(OwnedSessionCommandOutcome Outcome, AgentRunId? RunId = null, string? Code = null);
+public sealed record OwnedSessionCommandResult(OwnedSessionCommandOutcome Outcome, AgentRunId? RunId = null, string? Code = null)
+{
+    /// <summary>
+    /// Gets what a plugin told the user of a send it handled or cancelled itself
+    /// (<see cref="OwnedSessionCommandService.PluginHandledCode"/>, <see cref="OwnedSessionCommandService.PluginCancelledCode"/>);
+    /// null when it said nothing, and for every other result. It is the plugin's text, not the host's.
+    /// </summary>
+    public string? Message { get; init; }
+}
 
 /// <summary>Admission result; replay returns the original receipt object. Rejections have no receipt.</summary>
 /// <param name="Kind">Admission decision.</param>

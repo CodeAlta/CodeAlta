@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, noOutgoing, outgoingKey, refreshSubmissions, sendAvailable } from "./sessionOperations";
+import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, noOutgoing, outgoingKey, pluginPromptOutcome, refreshSubmissions, sendAvailable } from "./sessionOperations";
+import { translate } from "./localization";
 import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptView, SessionSendRequest } from "#neoastra";
 
 const operation = "abcdefab-1234-5678-9abc-abcdefabcdef";
@@ -83,6 +84,33 @@ test("a prompt leaving the queue shows its echo only once the host took it", asy
   assert.deepEqual(store.outgoing("epoch", "session").map(echo => echo.state), ["accepted", "failed"]);
   store.acknowledgeOutgoing([outgoingKey(send("third"))]);
   assert.equal(store.outgoing("epoch", "session").length, 1);
+});
+test("a Send a plugin answered itself says so in the composer, with the plugin's message, and never looks sent", async () => {
+  const settled = (code: string, message?: string): SessionReceiptView => ({ ...row(), state: "terminal",
+    outcome: code === "plugin_handled" ? "Completed" : "Cancelled", code, ...(message === undefined ? {} : { message }) });
+  const text = (value: SessionReceiptView, locale = "en") => {
+    const outcome = pluginPromptOutcome(value);
+    return outcome && [translate(locale, outcome.key, outcome.parameters), outcome.cancelled];
+  };
+  assert.deepEqual(text(settled("plugin_handled", "Opened the ticket.")), ["A plugin handled this prompt: Opened the ticket.", false]);
+  assert.deepEqual(text(settled("plugin_handled")), ["A plugin handled this prompt: nothing was sent to the agent.", false]);
+  assert.deepEqual(text(settled("plugin_cancelled", "Secrets are not sent.")), ["A plugin cancelled this prompt: Secrets are not sent.", true]);
+  assert.deepEqual(text(settled("plugin_cancelled")), ["A plugin cancelled this prompt: nothing was sent to the agent.", true]);
+  assert.deepEqual(text(settled("plugin_cancelled", "{status}"), "fr"), ["Une extension a annulé ce prompt : {status}", true], "The plugin's text is not a template.");
+  // Any other Send, a pending one, or another kind of command, is not a plugin's answer.
+  const failed: SessionReceiptView = { ...settled("preparation_failed"), outcome: "Failed" };
+  assert.equal(pluginPromptOutcome(failed), null);
+  assert.equal(pluginPromptOutcome({ ...settled("plugin_handled"), state: "pending" }), null);
+  assert.equal(pluginPromptOutcome({ ...settled("plugin_handled"), kind: "Steer" }), null);
+
+  // The message travels on the receipt in the place of a run id, within its bound.
+  const capability = createMutationCapability("epoch");
+  const pages: SessionReceiptPage[] = [];
+  const read = (value: SessionReceiptView) => refreshSubmissions(async () => page(value), "epoch", 0, new AbortController().signal, result => pages.push(result), capability);
+  await read(settled("plugin_handled", "Opened the ticket."));
+  await read({ ...settled("plugin_handled", "Opened the ticket."), runId: "run" });
+  await read(settled("plugin_handled", "x".repeat(257)));
+  assert.deepEqual(pages.map(value => value.status), ["ok", "invalid_response", "invalid_response"]);
 });
 const control = "abcdefab-1234-5678-9abc-abcdefabcdee";
 function row(): SessionReceiptView {

@@ -2847,7 +2847,8 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .composer-foreground-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-status-line[data-busy="true"] .composer-foreground-status { color: var(--accent); font-weight: 500; }
 .composer-foreground-status[data-tone="danger"] { color: var(--red); }
-.composer-foreground-status[data-tone="danger"] .composer-foreground-text { white-space: normal; }
+.composer-foreground-status[data-tone="danger"] .composer-foreground-text,
+.composer-foreground-status[data-tone="notice"] .composer-foreground-text { white-space: normal; }
 .prompt-surface-top .observation-status { padding: 0; font-size: 12px; }
 .prompt-surface .background-tasks-status.bp6-button { gap: 5px; height: 22px; min-height: 22px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 14%, transparent); font-size: 12px; }
 .prompt-surface .background-tasks-status.bp6-button[data-running="true"] { background: color-mix(in srgb, var(--green) 14%, transparent); font-weight: 400; }

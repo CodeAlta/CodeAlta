@@ -71,7 +71,7 @@ Contribution areas, all virtual methods of `PluginBase`:
 
 | For agents | For the window |
 | --- | --- |
-| Agent tools (`AgentTool`), `alta` command roots (`GetAltaCommands`), static and dynamic prompt parts, final instruction processors, before-run, tool-call, tool-result and run-end hooks, agent-event observers, model provider types (`GetModelProviders`), resource roots (skills), issue trackers (`IIssueTrackerSource`) | Commands with key bindings, status items and region content, dialogs, prompt pickers, buttons, canvases, landing cards, timeline cards (session-event projections), command-line options and prompt processors (terminal) |
+| Agent tools (`AgentTool`), `alta` command roots (`GetAltaCommands`), static and dynamic prompt parts, final instruction processors, prompt-submit, before-run, tool-call, tool-result and run-end hooks, agent-event observers, model provider types (`GetModelProviders`), resource roots (skills), issue trackers (`IIssueTrackerSource`) | Commands with key bindings, status items and region content, dialogs, prompt pickers, buttons, canvases, landing cards, timeline cards (session-event projections), command-line options (terminal) |
 
 Two rules protect the host from a plugin:
 
@@ -115,6 +115,14 @@ run that ended with its idle event, never one that failed or was stopped, asks t
 delivered as a host prompt of provenance `plugin`. A session is continued at most three times in a row; a prompt of any
 other provenance resets the count, so a plugin cannot keep a session running by itself. The hooks run beside the events,
 never in their way.
+
+The prompt-submit hooks (`GetPromptProcessors`, `OnPromptSubmittingAsync`) run where a prompt of the user is sent: the
+owned send of `OwnedSessionCommandService` (the desktop, the command line; not its steering of a running turn) and the
+terminal's own dispatch. They see a prompt only when it has no provenance, that is when the user typed it: a host prompt
+(a reminder, a job result, a fallback, a run-end continuation) never goes through them, so a plugin's continuation is
+not rewritten in a loop. They run before the prompt's references are resolved and before anything is saved or attached;
+a prompt they handle or cancel settles its send with `plugin_handled` or `plugin_cancelled` and the plugin's message,
+and their prompt parts join those of the before-run hooks for that run only.
 
 ## Source plugins: build and load
 

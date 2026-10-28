@@ -166,7 +166,7 @@ Override only the methods the plugin needs. A `Get…()` method is called once w
 | `OnAgentEventAsync` | Sees the events of the sessions | yes | yes |
 | `OnToolCallAsync`, `OnToolResultAsync` | Sees, blocks or changes every tool call: see [Tool hooks](#tool-hooks) | yes | yes |
 | `OnAgentRunEndedAsync` | Continues a session whose run ended, with a prompt of the plugin | yes | yes |
-| `GetPromptProcessors()` | Changes a prompt before it is sent | no | yes |
+| `GetPromptProcessors()`, `OnPromptSubmittingAsync` | Changes, answers or stops a prompt of the user before it is sent | yes | yes |
 | `GetCompactionContributions()` | Hooks of a manual compaction | no | yes |
 | `GetCommandLineContributions()` | Commands of the `altatui` command line | no | yes |
 
@@ -307,7 +307,7 @@ public sealed class PwshCheckPlugin : PluginBase
 ## Prompts and resources
 
 - `GetSystemPromptContributions()` adds text to the system or developer prompt: `Prompt.Developer("…")`. Keep it short: it uses context on every turn.
-- `GetPromptProcessors()` can change or cancel the user's prompt before it is sent, in CodeAlta TUI.
+- `GetPromptProcessors()` and `OnPromptSubmittingAsync` see each prompt the user sends, as typed, before it is sent. `PluginPromptResult.Replace(text, attachments)` sends another text (return some of the attachments to drop or reorder them; in CodeAlta Desktop each has an `id` in `Metadata`). `Handled(message)` and `Cancel(message)` send nothing: in CodeAlta Desktop the status line under the prompt says that a plugin handled or cancelled it, with the message. `TemporaryPromptContributions` add text to the instructions of that run only. The prompts CodeAlta sends itself (reminders, job results, a continuation of `OnAgentRunEndedAsync`) do not go through them, nor, in CodeAlta Desktop, a prompt that steers a turn that runs.
 - `GetInstructionProcessors()` can change the final instructions after CodeAlta composed them. CodeAlta records which plugin changed them.
 - `GetResources()` ships skills with the plugin. Paths are relative to the plugin folder; the resources of a project plugin apply to that project only.
 

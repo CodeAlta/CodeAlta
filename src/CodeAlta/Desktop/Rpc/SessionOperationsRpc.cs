@@ -784,12 +784,35 @@ internal sealed class SessionOperationsService
         {
             QueueInsertion = receipt.Kind != OwnedSessionCommandKind.Queue ? null
                 : insertion is null ? new("pending", null, null) : new("terminal", insertion.Accepted, insertion.Code),
+            Message = result is { RunId: null, Message: { } message } ? ReceiptMessage(message) : null,
         };
     }
 
+    // What a plugin said of a send it answered itself, cut to the place a run id takes on the wire.
+    internal static string? ReceiptMessage(string message)
+    {
+        // A lone surrogate would make the whole row invalid on the wire.
+        var characters = message.ToCharArray();
+        for (var i = 0; i < characters.Length; i++)
+        {
+            if (!char.IsSurrogate(characters[i])) continue;
+            if (char.IsHighSurrogate(characters[i]) && i + 1 < characters.Length && char.IsLowSurrogate(characters[i + 1])) i++;
+            else characters[i] = '\uFFFD';
+        }
+        var text = new string(characters).Trim();
+        if (text.Length == 0) return null;
+        if (text.Length <= MaximumReceiptMessage) return text;
+        var cut = MaximumReceiptMessage - 1;
+        if (char.IsHighSurrogate(text[cut - 1])) cut--;
+        return string.Concat(text.AsSpan(0, cut).TrimEnd(), "…");
+    }
+
+    private const int MaximumReceiptMessage = 256;
+
     internal static SessionReceiptPage ProjectPage(string epoch, SessionReceiptView[] rows, int? next)
     {
-        // <=64 * 6400 + 8192 = 417792 bytes, below the 448 KiB response budget.
+        // <=64 * 6400 + 8192 = 417792 bytes, below the 448 KiB response budget. A row has a message only in place of a
+        // run id, of the same bound.
         // Worst-case escaping is six bytes per UTF-16 unit; each row includes property overhead.
         // The 8192 allowance covers page properties, escaped epoch, cursor and the RPC envelope.
         // The window's host sets no MaximumResultBytes (file reads are larger): this is validated payload accounting,
@@ -805,6 +828,7 @@ internal sealed class SessionOperationsService
         && (row.Outcome is null or "Completed" or "Cancelled" or "Failed")
         && (row.Code is null || Identity(row.Code, 64, trim: false))
         && (row.RunId is null || Identity(row.RunId, 256, trim: false))
+        && (row.Message is null || row.RunId is null && Identity(row.Message, MaximumReceiptMessage))
         && (row.Kind is "Queue" or "CancelQueue" ? ValidQueueRow(row)
             : row.Kind is "Send" or "Abort" or "Steer" or "Compact" or "AbortRun" && row.QueueInsertion is null);
 
@@ -954,6 +978,9 @@ internal sealed record SessionReceiptView(string ClientRequestId, string Session
     string Kind, string State, string? Outcome, string? Code, string? RunId)
 {
     public SessionQueueInsertionView? QueueInsertion { get; init; }
+    /// <summary>What a plugin said of a Send it handled or cancelled itself (<c>plugin_handled</c>, <c>plugin_cancelled</c>); left out otherwise.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Message { get; init; }
 }
 internal sealed record SessionQueueInsertionView(string State, bool? Accepted, string? Code);
 internal sealed record SessionClaudeCodeRequest(string ExpectedEpoch, string SessionId);

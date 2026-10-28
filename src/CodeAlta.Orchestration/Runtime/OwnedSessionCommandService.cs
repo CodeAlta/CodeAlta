@@ -1021,10 +1021,15 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             operation.PreparationInvocation.Launch(() => operation.Preparation = PrepareAsync(operation));
             if (await operation.PreparationInvocation.Outcome.ConfigureAwait(false) is { } preparationFailure) ExceptionDispatchInfo.Throw(preparationFailure);
             var prepared = await operation.Preparation!.ConfigureAwait(false);
-            operation.Attachment.TrySetResult(prepared);
+            // A send a plugin answered attached nothing: there is no run to abort.
+            operation.Attachment.TrySetResult(prepared?.Settled is null ? prepared : null);
             if (prepared is null)
             {
                 result = new(OwnedSessionCommandOutcome.Failed, Code: "preparation_failed");
+            }
+            else if (prepared.Settled is { } settled)
+            {
+                result = settled;
             }
             else
             {
@@ -1146,19 +1151,12 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (session is null || !string.Equals(session.SessionId, operation.SessionId, StringComparison.OrdinalIgnoreCase)) return null;
             var project = string.IsNullOrWhiteSpace(session.ProjectRef) ? null
                 : await _projects.GetByIdAsync(session.ProjectRef, CancellationToken.None).ConfigureAwait(false);
-            var input = AgentInput.Text(operation.Request.Text);
             if (operation.Request.References is { } referenceScope)
             {
                 project = await ResolveReferenceProjectAsync(referenceScope, operation.Execution.Token).ConfigureAwait(false);
                 if (!ReferenceScopeMatches(referenceScope, project) || session.ProjectRef != referenceScope.ProjectId
                     || session.WorkingDirectory != project!.ProjectPath || session.SessionId != operation.SessionId) return null;
-                // Once per admitted original, before any provider creation. Replays retain the
-                // original receipt/work and never resolve mutable filesystem metadata again.
-                input = _references.Resolve(operation.Request.Text, WorkFolder(session, project), operation.Execution.Token);
             }
-            // Preserve exact empty request identity without inventing a textual provider prompt.
-            if (operation.Request.Text.Length == 0) input = new AgentInput([]);
-            if (operation.Request.Attachments is { Count: > 0 } attached) input = new AgentInput([.. input.Items, .. attached]);
             var selection = operation.Request.Selection;
             // An image needs a model that reads images; a file is given to any model in a form it reads.
             var hasImages = operation.Request.Images?.Any(OwnedPromptImages.IsImage) == true;
@@ -1169,19 +1167,16 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 if (choices is null || !IsValidSelection(choices, selection))
                     throw new ArgumentException("The selected session configuration is no longer available.");
             }
-            if (operation.Request.Images is { Count: > 0 } images)
+            AgentModelInfo? imageModel = null;
+            if (operation.Request.Images is { Count: > 0 })
             {
-                var model = ObservedImageModels?.Invoke(new ModelProviderId(session.ResolvedProviderKey))
+                imageModel = ObservedImageModels?.Invoke(new ModelProviderId(session.ResolvedProviderKey))
                     .SingleOrDefault(model => model.Id == selection!.ModelId);
-                if (selection?.ProviderKey != session.ResolvedProviderKey || hasImages && AgentImageInputCapability.Read(model) != true)
+                if (selection?.ProviderKey != session.ResolvedProviderKey || hasImages && AgentImageInputCapability.Read(imageModel) != true)
                     throw new ArgumentException("Image input capability is unknown, unsupported, or no longer available.");
                 if (project is { Archived: true } || (!string.IsNullOrWhiteSpace(session.ProjectRef)
                     && (project is null || operation.Request.References is null)))
                     throw new ArgumentException("Image Send requires the exact current project scope.");
-                var items = new List<AgentInputItem>(input.Items);
-                items.AddRange(await PromptAttachmentInput.SaveAsync(session, _catalog, images, operation.Receipt.OperationId.ToString("N"),
-                    model, Documents, operation.Execution.Token).ConfigureAwait(false));
-                input = new AgentInput(items);
             }
             // A selection without a model keeps the model the session already runs with. A send never leaves
             // without a model while its provider lists one: a session that has none starts with the provider's.
@@ -1204,11 +1199,33 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                     session.Options, spaces),
                 _runtime.Permissions.OwnedDefaultPermissionHandler,
                 _runtime.Permissions.OwnedDefaultUserInputHandler);
+            // The space decides which plugins apply to the session.
+            var spaceId = Plugins is null ? null
+                : (await _runtime.ResolveSpaceAsync(session.SpaceId, project, operation.Execution.Token).ConfigureAwait(false)).Id;
+            // The plugins see the prompt as it was typed, before its references are resolved; one that answers it itself
+            // settles the send here, before anything is saved or sent.
+            var prompt = await SubmitPromptAsync(operation, session, options, spaceId).ConfigureAwait(false);
+            if (prompt.Settled is not null) return new Prepared(session, options, new AgentInput([]), prompt.Settled);
+            var input = AgentInput.Text(prompt.Text);
+            // Once per admitted original, before any provider creation. Replays retain the
+            // original receipt/work and never resolve mutable filesystem metadata again.
+            if (operation.Request.References is not null)
+                input = _references.Resolve(prompt.Text, WorkFolder(session, project!), operation.Execution.Token);
+            // Preserve exact empty request identity without inventing a textual provider prompt.
+            if (prompt.Text.Length == 0) input = new AgentInput([]);
+            if (prompt.Attachments is { Count: > 0 } attached) input = new AgentInput([.. input.Items, .. attached]);
+            if (prompt.Images is { Count: > 0 } images)
+            {
+                var items = new List<AgentInputItem>(input.Items);
+                items.AddRange(await PromptAttachmentInput.SaveAsync(session, _catalog, images, operation.Receipt.OperationId.ToString("N"),
+                    imageModel, Documents, operation.Execution.Token).ConfigureAwait(false));
+                input = new AgentInput(items);
+            }
             if (Plugins is not null)
             {
                 // Contacts the MCP servers the session activated, so it follows the send's cancellation.
-                var space = await _runtime.ResolveSpaceAsync(session.SpaceId, project, operation.Execution.Token).ConfigureAwait(false);
-                var augmented = await Plugins.AugmentRunAsync(options, input, session.ProjectRef, session.SessionId, space.Id, operation.Execution.Token).ConfigureAwait(false);
+                var augmented = await Plugins.AugmentRunAsync(options, input, session.ProjectRef, session.SessionId, spaceId, prompt.Contributions,
+                    operation.Execution.Token).ConfigureAwait(false);
                 if (augmented.CancelReason is not null) throw new InvalidOperationException("A plugin cancelled the run: " + augmented.CancelReason);
                 (options, input) = (augmented.ExecutionOptions, augmented.Input);
             }
@@ -1549,7 +1566,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         OwnedTextSteerRequest? Steer = null, OwnedCompactRequest? Compact = null, OwnedAbortRunRequest? AbortRun = null,
         OwnedTextQueueRequest? Queue = null, OwnedCancelQueueRequest? CancelQueue = null, OwnedAskSubmission? Ask = null,
         DependencyReleaseDecision? Release = null);
-    private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options, AgentInput Input);
+    // Settled is the result of a send a plugin answered itself (PluginHandledCode, PluginCancelledCode): nothing is sent.
+    private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options, AgentInput Input, OwnedSessionCommandResult? Settled = null);
 
     private sealed class QueueOperation(OwnedTextQueueRequest request, OwnedSessionCommandReceipt receipt)
     {
