@@ -46,4 +46,5 @@ This guide applies to the two apps. Screenshots have a **Desktop / TUI** switch,
 - [UI Tools and MCP](ui-tools.md): an agent sees and drives the window of CodeAlta Desktop.
 - [Plugins](plugins/readme.md): the built-in plugins, MCP servers, plugins of your own.
 - [Principles](principles.md): the ideas CodeAlta is built on.
+- [Harness Benchmark](benchmark.md): CodeAlta against Claude Code and Codex on hard tasks of real projects, with the same models.
 - [Troubleshooting](troubleshooting.md): logs, broken configuration, sign-in and startup problems.

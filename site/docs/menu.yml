@@ -3,6 +3,7 @@ doc:
   - {path: getting-started.md, title: "<i class='bi bi-rocket-takeoff' aria-hidden='true'></i> Getting Started"}
   - {path: desktop-and-tui.md, title: "<i class='bi bi-window-split' aria-hidden='true'></i> Desktop and TUI"}
   - {path: principles.md, title: "<i class='bi bi-compass' aria-hidden='true'></i> Principles"}
+  - {path: benchmark.md, title: "<i class='bi bi-speedometer2' aria-hidden='true'></i> Harness Benchmark"}
   - {path: model-providers/readme.md, title: "<i class='bi bi-cpu' aria-hidden='true'></i> Model Providers", folder: true}
   - {path: model-tiers.md, title: "<i class='bi bi-layers' aria-hidden='true'></i> Model Tiers"}
   - {path: prompts.md, title: "<i class='bi bi-chat-square-text' aria-hidden='true'></i> Agent Prompts"}
