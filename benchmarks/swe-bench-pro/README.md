@@ -112,7 +112,7 @@ pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-opus,codealta
 - **Order:** the jobs run one after the other, in the order of the table above, each followed by its replay. `codealta-cc-opus` needs `ANTHROPIC_API_KEY`.
 - **Concurrency:** 8 task sandboxes at a time (`-Concurrency`).
 - **Retries:** one retry, for `NetworkConnectionError` only.
-- **Stop on error:** a job that has any errored trial stops the run. Harbor can exit with 0 while its trials failed, so the script checks each job's `result.json`.
+- **Stop on error:** a job that has any errored trial stops the run. Harbor can exit with 0 while its trials failed, so the script checks each job's `result.json`. With `-AllowErroredTrials`, the run goes on after a model job whose errored trials failed after their patch was captured: they are listed, and the replay grades their patch. Summarize such a run with `--allow-errored`.
 - **Cost:** the reference run cost about $497 for all four jobs, of which about $279 for the two CodeAlta jobs. It took about 5 h 50 min, preflights and replays included.
 - **Progress:** Harbor shows the completed tasks, their phases, the time left and the mean reward so far. Each job's `result.json` under `jobs\<run-id>-<job>\` is updated as it goes, and `.\workspace\harbor-venv\Scripts\harbor.exe view .\jobs --jobs` opens a browser view.
 - **Dry run:** `-DryRun` prints the Harbor commands without running anything.
@@ -133,6 +133,8 @@ It writes `results\<run-id>-summary.md` and `.json`, and covers:
 - costs.
 
 **Costs** are estimated from the tokens at list prices, the same way for every run. Those prices reproduce exactly Claude Code's own `total_cost_usd` and Harbor's Codex `cost_usd`. Harbor's reported cost is shown beside the estimate: for Claude Code it misses the segments of a trial that restarted, and CodeAlta reports one only on the Claude Code CLI (the estimate `altacli` makes for the other providers is in the metadata of each trial, not in Harbor's cost). The provider's billing is the final word.
+
+**Errored trials:** the summary refuses a model job with errored trials unless it is given `--allow-errored`; it then lists them in their own section.
 
 **Partial runs:** a run made with `-Runs` is summarized with the jobs it has. `--baseline-run-id` takes the missing jobs from an earlier run in the same `jobs\` folder, or in `--baseline-jobs-root` when that run is kept elsewhere. That compares new CodeAlta jobs with the native jobs of a reference run, but runs made on different days or machines can differ for reasons outside the harness.
 
