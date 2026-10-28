@@ -31,13 +31,13 @@ test("the badge of a session follows the indicators by itself, for the selected 
   assert.doesNotMatch(render("one", "one"), /Edited draft/);
 });
 
-test("typing in the selected session never changes what its badge follows", () => {
+test("typing in the selected session never changes what its badge follows, and tells it only when the mark changes", () => {
   const indicators = createDraftIndicators();
   const shown: boolean[] = [];
   // What useDraftIndicator reads at each publication: a component is rendered again only when it differs.
   const unsubscribe = indicators.subscribe(() => shown.push(indicators.visible("one", "one")));
   for (const text of ["d", "dr", "dra", "draf", "draft"]) indicators.persisted("one", indicators.edit("one", text, ""), true);
   unsubscribe();
-  assert.ok(shown.length >= 5);
-  assert.ok(shown.every(value => value));
+  // The first key marks the draft and its first write keeps it: the other keys are told to no one.
+  assert.deepEqual(shown, [true, true]);
 });

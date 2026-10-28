@@ -125,6 +125,23 @@ test("render admission is observable only after ack and is revoked synchronously
   assert.ok(observed >= 2);
 });
 
+test("a publication that the host acknowledges with no new claim renders nothing", async () => {
+  // The window renders again on each notification: a draft or a storage event must not render it for nothing.
+  let ids = ["open"];
+  const owner = createSessionRetention(async () => ({ accepted: true, reason: null }), () => ({ complete: true, sessionIds: ids }), "page");
+  let observed = 0;
+  owner.subscribe(() => { observed++; });
+  await owner.publish("epoch");
+  const after = observed;
+  await owner.publish("epoch");
+  await owner.publish("epoch");
+  assert.equal(observed, after);
+  ids = ["open", "draft"];
+  await owner.publish("epoch");
+  assert.equal(observed, after + 1);
+  assert.equal(owner.hasClaim("epoch", "draft"), true);
+});
+
 test("a synchronous lifetime change during acknowledgement notification cannot expose an admission", async () => {
   const owner = createSessionRetention(async () => ({ accepted: true, reason: null }), empty, "page");
   owner.subscribe(() => { if (owner.hasClaim("epoch", "saved")) owner.invalidate(); });
