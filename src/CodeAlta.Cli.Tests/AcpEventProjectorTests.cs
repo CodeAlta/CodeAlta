@@ -195,13 +195,26 @@ public sealed class AcpEventProjectorTests
         StringAssert.Contains(rewritten[0].GetProperty("content").GetProperty("text").GetString(), "+three");
     }
 
+    [TestMethod]
+    public async Task ALongToolOutput_IsCutInTheUpdate_WhichSaysHowLongTheWholeIs()
+    {
+        var sink = new CaptureSink();
+        var projector = new AcpEventProjector(sink);
+
+        var content = await ToolOutputAsync(projector, sink, "call-1", "exec", """{"toolName":"exec","arguments":{}}""", new string('x', 12_000));
+
+        var text = content.Single().GetProperty("content").GetProperty("text").GetString()!;
+        StringAssert.EndsWith(text, "\n[truncated in this update: 8,192 of 12,000 characters]");
+        Assert.AreEqual(AcpEventProjector.MaximumToolOutput, text.IndexOf('\n', StringComparison.Ordinal));
+    }
+
     // The content of the update a tool output became.
-    private static async Task<List<JsonElement>> ToolOutputAsync(AcpEventProjector projector, CaptureSink sink, string callId, string tool, string details)
+    private static async Task<List<JsonElement>> ToolOutputAsync(AcpEventProjector projector, CaptureSink sink, string callId, string tool, string details, string output = "Done.")
     {
         var now = DateTimeOffset.UtcNow;
         var json = JsonDocument.Parse(details).RootElement.Clone();
         await projector.ProjectAsync(Of(new AgentActivityEvent(Provider, Root, now, null, AgentActivityKind.ToolCall, AgentActivityPhase.Started, callId, null, tool, null, json)), default);
-        await projector.ProjectAsync(Of(new AgentContentCompletedEvent(Provider, Root, now, null, AgentContentKind.ToolOutput, callId + "-output", callId, "Done.", json)), default);
+        await projector.ProjectAsync(Of(new AgentContentCompletedEvent(Provider, Root, now, null, AgentContentKind.ToolOutput, callId + "-output", callId, output, json)), default);
         var update = sink.Updates[^1].Update.Value;
         Assert.AreEqual("tool_call_update", update.GetProperty("sessionUpdate").GetString());
         return [.. update.GetProperty("content").EnumerateArray()];
