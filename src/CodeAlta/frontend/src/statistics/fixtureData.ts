@@ -67,20 +67,20 @@ export type FixtureData = Readonly<{
   cells: readonly Cell[];
 }>;
 
-/** The tools the fixture knows, keyed as the plugin keys them (the kind of activity and the name, `shell` for every shell tool), with their kind and typical duration (median, in ms) and failure rate. */
+/** The tools the fixture knows, keyed as the plugin keys them (the kind of activity and the name, `shell` for every shell tool), with their kind, their share of the calls, and typical duration (median, in ms) and failure rate. */
 export const fixtureTools = [
-  { tool: "ToolCall:read_file", kind: "files", median: 40, spread: 0.7, failure: 0.01 },
-  { tool: "ToolCall:apply_patch", kind: "files", median: 120, spread: 0.8, failure: 0.04 },
-  { tool: "ToolCall:write_file", kind: "files", median: 90, spread: 0.7, failure: 0.01 },
-  { tool: "ToolCall:grep", kind: "search", median: 260, spread: 0.9, failure: 0.015 },
-  { tool: "ToolCall:list_dir", kind: "search", median: 35, spread: 0.6, failure: 0.005 },
-  { tool: "shell", kind: "shell", median: 2400, spread: 1.5, failure: 0.12 },
-  { tool: "ToolCall:webget", kind: "web", median: 1300, spread: 1, failure: 0.06 },
-  { tool: "ToolCall:alta", kind: "alta", median: 480, spread: 0.9, failure: 0.03 },
-  { tool: "ToolCall:mcp__github__issue_read", kind: "mcp", median: 900, spread: 0.8, failure: 0.05 },
-  { tool: "Skill:alta", kind: "skill", median: 70, spread: 0.5, failure: 0.0 },
+  { tool: "ToolCall:read_file", kind: "files", share: 0.22, median: 40, spread: 0.7, failure: 0.01 },
+  { tool: "ToolCall:apply_patch", kind: "files", share: 0.1, median: 120, spread: 0.8, failure: 0.04 },
+  { tool: "ToolCall:write_file", kind: "files", share: 0.03, median: 90, spread: 0.7, failure: 0.01 },
+  { tool: "ToolCall:grep", kind: "search", share: 0.16, median: 260, spread: 0.9, failure: 0.015 },
+  { tool: "ToolCall:list_dir", kind: "search", share: 0.08, median: 35, spread: 0.6, failure: 0.005 },
+  { tool: "shell", kind: "shell", share: 0.2, median: 2400, spread: 1.5, failure: 0.12 },
+  { tool: "ToolCall:webget", kind: "web", share: 0.03, median: 1300, spread: 1, failure: 0.06 },
+  { tool: "ToolCall:alta", kind: "alta", share: 0.06, median: 480, spread: 0.9, failure: 0.03 },
+  { tool: "ToolCall:mcp__github__issue_read", kind: "mcp", share: 0.07, median: 900, spread: 0.8, failure: 0.05 },
+  { tool: "Skill:alta", kind: "skill", share: 0.05, median: 70, spread: 0.5, failure: 0.0 },
   // The same tool of an MCP server, recorded as another kind of activity: the pages show it as one tool.
-  { tool: "McpToolCall:mcp__github__issue_read", kind: "mcp", median: 900, spread: 0.8, failure: 0.05 },
+  { tool: "McpToolCall:mcp__github__issue_read", kind: "mcp", share: 0.02, median: 900, spread: 0.8, failure: 0.05 },
 ] as const;
 
 export const fixtureProjects: readonly FixtureProject[] = [
@@ -260,9 +260,8 @@ function makeCell(random: () => number, base:Readonly<{ session: string; day: st
   const promptKinds: [number, number, number, number] = [Math.max(1, promptsYou + promptsOther - 1), random() < 0.3 ? 1 : 0, random() < 0.2 ? 1 : 0, random() < 0.15 ? 1 : 0];
   const words = Math.round(promptsYou * logNormal(random, 48, 0.9));
   const toolCount = Math.round(runs * (4 + random() * 22));
-  const tools = fixtureTools.flatMap((definition, index) => {
-    const share = [0.22, 0.1, 0.03, 0.16, 0.08, 0.2, 0.03, 0.06, 0.07, 0.05][index];
-    const calls = Math.round(toolCount * share * (0.5 + random()));
+  const tools = fixtureTools.flatMap(definition => {
+    const calls = Math.round(toolCount * definition.share * (0.5 + random()));
     if (calls === 0) return [];
     const failures = Math.round(calls * definition.failure * (0.5 + random()));
     const timeMs = Math.round(calls * definition.median * (1.2 + random() * 0.8));

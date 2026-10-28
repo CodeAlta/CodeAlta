@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { messages, translate, locales } from "../localization";
 import { createFixtureApi } from "./fixtureApi";
+import { fixtureTools, generateFixtureData } from "./fixtureData";
 import { filterChipValue, filterChoices, ignoredKinds, unsetFilters } from "./filters";
 import { createFormatter, dayOfNumber, etaParts, sentenceCase } from "./format";
 import {
@@ -582,10 +583,20 @@ test("the runs of scripts add up the same in the question of the page, its serie
   assert.ok(steps.rows.length > 0 && steps.rows.every(row => /^[a-z][a-z-]*\/[a-z]+$/.test(row.name)));
   // The calls scripts made of a tool are a part of its calls.
   const tools = await api.tools({ ...request, limit: 50 });
-  assert.ok(tools.rows.some(row => row.scriptCalls > 0) && tools.rows.filter(row => Number.isFinite(row.calls)).every(row => row.scriptCalls <= row.calls));
+  assert.ok(tools.rows.some(row => row.scriptCalls > 0) && tools.rows.every(row => row.scriptCalls <= row.calls));
   // A filter of the origin keeps the runs of the turns it started.
   const yours = await api.scripts({ ...request, filter: { origin: "you" } });
   assert.ok(yours.totals.runs < scripts.totals.runs && yours.query.ignoredFilters.length === 0);
+});
+
+test("every tool of the fixture has a share of the calls: no cell and no row of the tools reads NaN", async () => {
+  const numbers = (row: object) => Object.values(row).filter(value => typeof value === "number");
+  const data = generateFixtureData({ today: "2026-10-09", sessionCount: 300 });
+  for (const cell of data.cells) for (const tool of cell.tools) assert.ok(numbers(tool).every(Number.isFinite), `${tool.tool} in ${cell.session}`);
+  assert.deepEqual(new Set(data.cells.flatMap(cell => cell.tools.map(tool => tool.tool))), new Set(fixtureTools.map(tool => tool.tool)), "every tool is called");
+  const tools = await createFixtureApi({ sessionCount: 300 }).tools({ period: "all", frequency: "week", comparison: "none", limit: 50 });
+  assert.ok(tools.rows.length > 0);
+  for (const row of tools.rows) assert.ok(numbers(row).every(Number.isFinite), row.tool);
 });
 
 test("the names of the scripts, of their kinds, of their outcomes and of who started them read in every language", () => {
