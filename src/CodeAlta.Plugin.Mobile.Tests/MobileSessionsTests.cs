@@ -489,9 +489,13 @@ public sealed class MobileSessionsTests
     {
         var directory = Path.Combine(Path.GetTempPath(), "alta-mobile-stale-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
+        System.Diagnostics.Process? other = null;
         try
         {
-            using var other = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("sleep", "30") { UseShellExecute = false })!;
+            // A command of every system that waits about 30 seconds: Windows has no `sleep` without Git's usr/bin on its PATH.
+            other = System.Diagnostics.Process.Start(OperatingSystem.IsWindows()
+                ? new System.Diagnostics.ProcessStartInfo("ping", "-n 31 127.0.0.1") { UseShellExecute = false, RedirectStandardOutput = true }
+                : new System.Diagnostics.ProcessStartInfo("sleep", "30") { UseShellExecute = false })!;
             string Write(string name)
             {
                 var path = Path.Combine(directory, name);
@@ -515,16 +519,23 @@ public sealed class MobileSessionsTests
             Assert.IsTrue(File.Exists(mine), "A file of this process: the plugin restarted while a prompt was handed over.");
             Assert.IsFalse(File.Exists(forgotten), "A day old: no command waits that long.");
             Assert.IsTrue(File.Exists(kept));
-            other.Kill();
         }
         finally
         {
+            if (other is not null)
+            {
+                if (!other.HasExited) other.Kill();
+                other.Dispose();
+            }
+
             Directory.Delete(directory, recursive: true);
         }
 
         static int ExitedProcessId()
         {
-            using var ended = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("true") { UseShellExecute = false })!;
+            using var ended = System.Diagnostics.Process.Start(OperatingSystem.IsWindows()
+                ? new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c exit 0") { UseShellExecute = false }
+                : new System.Diagnostics.ProcessStartInfo("true") { UseShellExecute = false })!;
             ended.WaitForExit();
             return ended.Id;
         }
