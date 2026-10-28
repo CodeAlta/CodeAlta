@@ -130,8 +130,10 @@ export function createSessionRetention(publish: (request: RetentionPublication) 
       }
       if (reply?.accepted !== true || captured !== generation || !current()) return false;
       if (restoration) restored = true;
+      const claimed = acknowledged.size;
       for (const id of sessionIds) acknowledged.add(id);
-      changed();
+      // The window renders again when a claim is added: a publication that adds none, as most do, changes nothing it shows.
+      if (acknowledged.size !== claimed) changed();
       // Subscribers may synchronously unmount/change the originating lifetime.
       if (captured !== generation || !current()) return false;
       expose();
