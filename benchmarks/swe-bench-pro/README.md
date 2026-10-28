@@ -14,7 +14,7 @@ CodeAlta runs through its adapter, [`../harbor/locked_codealta.py`](../harbor/RE
 
 `codealta-cc-opus` is CodeAlta driving the Claude Code CLI (`--ak provider_type=claude-code`): the adapter installs the version of Claude Code that CodeAlta pins during setup, and the CLI makes the model requests with `ANTHROPIC_API_KEY`. Beside `claude-code-opus`, it tells what CodeAlta adds or costs on top of Claude Code's own loop. It is not in the default `-Runs`: name it (`-Runs codealta-cc-opus`, alone or with the others). See [CodeAlta on the Claude Code CLI](../harbor/README.md#codealta-on-the-claude-code-cli).
 
-Each model job is followed by a pristine replay of its captured patches, which gives the authoritative score. The reference run, its results and its analysis are in [`reference-20261026-162310.md`](reference-20261026-162310.md) and [`../2026-10-26-swe-bench-pro-v2-hard51.md`](../2026-10-26-swe-bench-pro-v2-hard51.md).
+Each model job is followed by a pristine replay of its captured patches, which gives the authoritative score. The summaries of a run are written under `results\` (see [Summary](#summary)); the repository keeps only the final report of the benchmark, beside this folder.
 
 Results vary between attempts: compare runs, not single numbers.
 
