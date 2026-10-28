@@ -4,6 +4,7 @@
 using System.ClientModel;
 using System.ClientModel.Primitives;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text.Json;
@@ -112,6 +113,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
             // The Codex endpoint can drop long-lived response streams, and an API-key provider reports a throttle or an
             // outage in the stream, so retry a small turn-level budget before surfacing the failure.
             const int retryBudget = 6;
+            // A connection that cannot be made or breaks is asked again on a budget of its own, long enough to outlast
+            // a network outage of a minute (TransportRetryDelaySeconds).
+            var transportRetries = 0;
             var refreshedCredentialAfterUnauthorized = false;
             var activatedHttpFallbackAfterWebSocketRetries = false;
             for (var attempt = 1; ; attempt++)
@@ -170,6 +174,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     async Task ProcessStreamAsync(OpenAIResponsesTransport transport)
                     {
                         lastTransport = transport;
+                        attemptState.Transport = transport;
                         await foreach (var protocolEvent in CreateResponseStreamingEventsAsync(
                                 client,
                                 request,
@@ -530,6 +535,27 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         .ConfigureAwait(false);
                     attempt = 0;
                 }
+                catch (Exception ex) when (ShouldRetryTransportFailure(
+                    ex,
+                    attemptState,
+                    attemptState.Transport ?? initialTransport,
+                    transportRetries,
+                    cancellationToken,
+                    out var delay))
+                {
+                    transportRetries++;
+                    ClearLiveContinuation(request.SessionId);
+                    if (LogManager.IsInitialized)
+                    {
+                        Logger.Warn($"Responses transport retry provider={provider.ProviderKey} session={request.SessionId} run={request.RunId.Value} retry={transportRetries}/{TransportRetryDelaySeconds.Length} reason={GetRetryReason(ex)} delay={(long)delay.TotalMilliseconds}ms: {AgentErrorData.RedactText(ex.Message)}");
+                    }
+
+                    await onSessionUpdate(
+                            CreateTransportRetrySessionUpdate(provider, request, attemptState, transportRetries, ex, delay),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    await DelayRetryAsync(delay, cancellationToken).ConfigureAwait(false);
+                }
                 catch (Exception ex) when (ShouldRetryCodexSubscriptionRequest(
                     provider,
                     ex,
@@ -563,7 +589,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         Logger.Info($"ChatGPT/Codex retry session={request.SessionId} run={request.RunId.Value} attempt={attempt} transport={initialTransport}: {AgentErrorData.RedactText(ex.Message)}");
                     }
 
-                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                    await DelayRetryAsync(delay, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ShouldRetryApiKeyStreamError(
                     provider,
@@ -584,7 +610,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                             CreateStreamErrorRetrySessionUpdate(provider.ProviderKey, request, attemptState, attempt, retryBudget, ex, initialTransport, failureKind, delay),
                             cancellationToken)
                         .ConfigureAwait(false);
-                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                    await DelayRetryAsync(delay, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -3130,6 +3156,112 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return false;
     }
 
+    // The waits before the turn asks again after a connection failure, in seconds: 90 s in all, so that a network outage
+    // of a minute (a DNS gap, a Wi-Fi that reconnects) does not end the turn.
+    private static ReadOnlySpan<int> TransportRetryDelaySeconds => [2, 4, 8, 16, 30, 30];
+
+    // A connection to the endpoint that could not be made (a name that does not resolve, a connection refused or reset,
+    // a TLS failure) or a stream that ended before its terminal response, over HTTP, on either provider: asked again
+    // while nothing of the attempt was committed, after the waits of TransportRetryDelaySeconds. An answer of the
+    // endpoint (an HTTP status, an error event: authentication, an invalid request, a quota) is not a connection failure.
+    // A WebSocket keeps its own retries and its fallback to HTTP.
+    private static bool ShouldRetryTransportFailure(
+        Exception exception,
+        CodexStreamAttemptState attemptState,
+        OpenAIResponsesTransport transport,
+        int transportRetries,
+        CancellationToken cancellationToken,
+        out TimeSpan delay)
+    {
+        delay = TimeSpan.Zero;
+        if (transport != OpenAIResponsesTransport.Http ||
+            !attemptState.CanRetrySafely ||
+            transportRetries >= TransportRetryDelaySeconds.Length ||
+            cancellationToken.IsCancellationRequested ||
+            exception is AgentTurnExecutionException ||
+            exception is OperationCanceledException && !IsTransportAbortedOperationCanceled(exception) ||
+            GetHttpStatusCode(exception) is not null ||
+            !IsTransportFailure(exception))
+        {
+            return false;
+        }
+
+        delay = GetRetryAfterDelay(exception) ?? TimeSpan.FromSeconds(TransportRetryDelaySeconds[transportRetries]);
+        return true;
+    }
+
+    private static bool IsTransportFailure(Exception exception)
+        => TryGetConnectionFailureReason(exception, out _) || IsPrematureResponseEnded(exception);
+
+    // Why a connection could not be made, from the errors .NET gives for it.
+    private static bool TryGetConnectionFailureReason(Exception exception, [NotNullWhen(true)] out string? reason)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            reason = current switch
+            {
+                HttpRequestException { HttpRequestError: HttpRequestError.NameResolutionError } => "name_resolution_failed",
+                HttpRequestException { HttpRequestError: HttpRequestError.ConnectionError or HttpRequestError.ProxyTunnelError } => "connection_failed",
+                HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError } => "tls_failed",
+                System.Security.Authentication.AuthenticationException => "tls_failed",
+                System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.HostNotFound or System.Net.Sockets.SocketError.TryAgain or System.Net.Sockets.SocketError.NoData } => "name_resolution_failed",
+                System.Net.Sockets.SocketException
+                {
+                    SocketErrorCode: System.Net.Sockets.SocketError.ConnectionRefused
+                        or System.Net.Sockets.SocketError.ConnectionReset
+                        or System.Net.Sockets.SocketError.ConnectionAborted
+                        or System.Net.Sockets.SocketError.HostUnreachable
+                        or System.Net.Sockets.SocketError.HostDown
+                        or System.Net.Sockets.SocketError.NetworkUnreachable
+                        or System.Net.Sockets.SocketError.NetworkDown
+                        or System.Net.Sockets.SocketError.NetworkReset
+                        or System.Net.Sockets.SocketError.TimedOut,
+                } => "connection_failed",
+                _ => null,
+            };
+            if (reason is not null)
+            {
+                return true;
+            }
+        }
+
+        reason = null;
+        return false;
+    }
+
+    private static AgentTurnSessionUpdate CreateTransportRetrySessionUpdate(
+        OpenAIProviderOptions provider,
+        AgentTurnRequest request,
+        CodexStreamAttemptState attemptState,
+        int transportRetry,
+        Exception exception,
+        TimeSpan delay)
+    {
+        var seconds = Math.Max(1, (int)Math.Ceiling(delay.TotalSeconds));
+        var reason = TryGetConnectionFailureReason(exception, out _)
+            ? "The connection to the provider failed"
+            : "The response of the provider was cut off";
+        var target = provider.CodexSubscription is not null ? "ChatGPT/Codex" : "the provider";
+        return new AgentTurnSessionUpdate
+        {
+            Kind = AgentSessionUpdateKind.Reconnecting,
+            Message = string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"{reason}: reconnecting to {target} in {seconds} s... {transportRetry}/{TransportRetryDelaySeconds.Length}"),
+            Details = CreateCodexReconnectDetails(
+                provider.CodexSubscription is not null ? "codex" : provider.ProviderKey,
+                request,
+                attemptState,
+                transportRetry,
+                TransportRetryDelaySeconds.Length + 1,
+                exception,
+                OpenAIResponsesTransport.Http),
+        };
+    }
+
+    private Task DelayRetryAsync(TimeSpan delay, CancellationToken cancellationToken)
+        => provider.RetryDelayAsync?.Invoke(delay, cancellationToken) ?? Task.Delay(delay, cancellationToken);
+
     // A provider other than a Codex subscription (Azure OpenAI with an API key) reports a throttle or an outage as an
     // `error` event of a stream that started with HTTP 200, where the SDK's own retries of a 429 or a 5xx never apply.
     // Such an error, `RateLimited` or
@@ -3393,6 +3525,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
         if (TryGetResponsesErrorCode(exception, out var errorCode))
         {
             return errorCode;
+        }
+
+        if (TryGetConnectionFailureReason(exception, out var connectionFailure))
+        {
+            return connectionFailure;
         }
 
         return "retryable_stream_error";
@@ -4192,6 +4329,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
         // The request continued a response the provider kept (previous_response_id) and sent only the new input.
         public bool SentContinuation { get; set; }
+
+        // The transport of the stream the attempt opened last; null before it opens one.
+        public OpenAIResponsesTransport? Transport { get; set; }
 
         public bool HasEmittedVisibleDelta => EmittedAssistantDelta || EmittedReasoningDelta;
 

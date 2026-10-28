@@ -210,6 +210,9 @@ public sealed class OpenAIProviderOptions
     internal Func<CancellationToken, ValueTask>? CodexSubscriptionCredentialRefreshAsync { get; set; }
 
     internal Func<CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? ModelListAsync { get; set; }
+
+    // The wait before a turn asks again after a failure; Task.Delay when null.
+    internal Func<TimeSpan, CancellationToken, Task>? RetryDelayAsync { get; set; }
 }
 
 /// <summary>

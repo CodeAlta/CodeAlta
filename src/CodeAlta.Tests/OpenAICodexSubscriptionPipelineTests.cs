@@ -1048,6 +1048,108 @@ public sealed class OpenAICodexSubscriptionPipelineTests
                 new CodexTurnState()));
     }
 
+    // A real refused connection (a port nothing listens on), then a stream that ends before its response, then the answer.
+    [TestMethod]
+    public async Task HttpTurn_AsksAgainAfterARefusedConnectionAndACutStream()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        const string message = """{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Answered.","annotations":[]}]}""";
+        var handler = new ScriptedHttpMessageHandler(
+            ScriptedHttpMessageHandler.Refuse,
+            static () => CreateSseResponse(
+                "data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_cut\",\"object\":\"response\",\"created_at\":1,\"model\":\"gpt-5.3-codex\",\"status\":\"in_progress\",\"output\":[]}}\n\n"),
+            static () => CreateSseResponse(
+                $"data: {{\"type\":\"response.output_item.done\",\"sequence_number\":0,\"output_index\":0,\"item\":{message}}}\n\n" +
+                $"data: {{\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{{\"id\":\"resp_http\",\"object\":\"response\",\"created_at\":1,\"model\":\"gpt-5.3-codex\",\"status\":\"completed\",\"output\":[{message}]}}}}\n\n"));
+        using var httpClient = new HttpClient(handler);
+        var delays = new List<TimeSpan>();
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            BaseUri = new Uri("https://api.openai.com/v1"),
+            StateRootPath = temp.Path,
+            HttpClient = httpClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "http" },
+            RetryDelayAsync = (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            },
+        });
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+            new AgentTurnRequest
+            {
+                Provider = CreateProviderDescriptor(),
+                ProviderId = new ModelProviderId("openai-responses"),
+                SessionId = "session-http",
+                RunId = new AgentRunId("run-http"),
+                ModelId = "gpt-5.3-codex",
+                Conversation = [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Hello")])],
+                Tools = [],
+                State = new AgentSessionState { SessionId = "session-http", ProtocolFamily = "codex", ProviderKey = "codex", UpdatedAt = DateTimeOffset.UtcNow },
+            },
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) =>
+            {
+                sessionUpdates.Add(update);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+
+        Assert.AreEqual(3, handler.Requests);
+        Assert.AreEqual("Answered.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        CollectionAssert.AreEqual(new[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4) }, delays);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "The connection to the provider failed: reconnecting to ChatGPT/Codex in 2 s... 1/6",
+                "The response of the provider was cut off: reconnecting to ChatGPT/Codex in 4 s... 2/6",
+            },
+            sessionUpdates.Where(static update => update.Kind == AgentSessionUpdateKind.Reconnecting).Select(static update => update.Message).ToArray());
+    }
+
+    private static HttpResponseMessage CreateSseResponse(string events)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(events) };
+        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
+        return response;
+    }
+
+    // Answers each request with the next step of its script; a step that is null connects to a port nothing listens on,
+    // which .NET reports as it reports a server that refuses the connection.
+    private sealed class ScriptedHttpMessageHandler(params Func<HttpResponseMessage>?[] steps) : HttpMessageHandler
+    {
+        public static readonly Func<HttpResponseMessage>? Refuse = null;
+
+        private int _requests;
+
+        public int Requests => _requests;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var index = Interlocked.Increment(ref _requests) - 1;
+            if (index < steps.Length && steps[index] is { } step)
+            {
+                return step();
+            }
+
+            if (index >= steps.Length)
+            {
+                throw new InvalidOperationException($"No answer is scripted for request {index + 1}.");
+            }
+
+            using var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+            using var invoker = new HttpMessageInvoker(new SocketsHttpHandler());
+            using var probe = new HttpRequestMessage(HttpMethod.Post, new Uri($"http://127.0.0.1:{port}/responses"));
+            return await invoker.SendAsync(probe, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
 
     [TestMethod]
     public async Task WebSocketSession_SignOutStopsNewTurnsOnAnExistingConnection()
