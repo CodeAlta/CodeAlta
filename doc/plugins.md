@@ -124,6 +124,14 @@ not rewritten in a loop. They run before the prompt's references are resolved an
 a prompt they handle or cancel settles its send with `plugin_handled` or `plugin_cancelled` and the plugin's message,
 and their prompt parts join those of the before-run hooks for that run only.
 
+The compaction hooks (`GetCompactionContributions`) run around a manual compaction only: the desktop runs them in
+`OwnedSessionCommandService`, the TUI in `PluginHostBridge`. In the desktop the before-hooks come first, and a cancel
+settles the compaction with a stable code (`compact_plugin_cancelled`) while its reason is recorded in the journal; the
+instruction text goes with the compaction (`AgentCompactionOptions`) to the summary request, or after the `/compact` of
+an agent that compacts its own context; the after-hooks run once it settled, before its receipt does. A compaction a
+session makes by itself inside a run is not hooked: it recovers a context that is full, so it can neither wait for a
+plugin nor be refused.
+
 ## Source plugins: build and load
 
 ```mermaid

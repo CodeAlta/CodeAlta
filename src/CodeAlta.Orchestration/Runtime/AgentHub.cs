@@ -399,11 +399,27 @@ public sealed partial class AgentHub : IAsyncDisposable
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     /// <exception cref="ObjectDisposedException">The hub or session is disposed.</exception>
     /// <exception cref="Exception">The actual provider compaction failed.</exception>
-    public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(AgentSessionHandleId sessionHandleId, CancellationToken cancellationToken = default)
+    public Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(AgentSessionHandleId sessionHandleId, CancellationToken cancellationToken = default)
+        => TryCompactWhenIdleAsync(sessionHandleId, AgentCompactionOptions.Default, cancellationToken);
+
+    /// <summary>Attempts settled idle compaction on this exact attachment without waiting for run admission, with options.</summary>
+    /// <param name="sessionHandleId">The existing session attachment; never replaced or acquired from a catalog.</param>
+    /// <param name="options">What the compaction is given besides the conversation, such as instructions for its summary.</param>
+    /// <param name="cancellationToken">Cancels admission or actual compaction.</param>
+    /// <returns>Null only for busy refusal without starting compaction; otherwise the actual settled outcome.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The handle is not active.</exception>
+    /// <exception cref="NotSupportedException">The session does not support idle compaction, or the instructions; unconditional compaction is never used.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    /// <exception cref="ObjectDisposedException">The hub or session is disposed.</exception>
+    /// <exception cref="Exception">The actual provider compaction failed.</exception>
+    public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(AgentSessionHandleId sessionHandleId, AgentCompactionOptions options,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(options);
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
         return await ExecuteReferencedAsync(entry,
-            () => entry.Coordinator.TryCompactWhenIdleAsync(cancellationToken)).ConfigureAwait(false);
+            () => entry.Coordinator.TryCompactWhenIdleAsync(options, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1038,14 +1054,17 @@ public sealed partial class AgentHub : IAsyncDisposable
             }
         }
 
-        public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(CancellationToken cancellationToken)
+        public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(AgentCompactionOptions options, CancellationToken cancellationToken)
         {
             if (!await _runGate.WaitAsync(0, cancellationToken).ConfigureAwait(false)) return null;
             try
             {
                 if (_session is not IAgentIdleCompactionProvider provider)
                     throw new NotSupportedException("The session does not support idle compaction.");
-                return await InvokeOriginalAsync(() => provider.TryCompactWhenIdleAsync(cancellationToken)).ConfigureAwait(false);
+                // A compaction given nothing more goes through the original member, which every implementation has.
+                return await InvokeOriginalAsync(() => string.IsNullOrWhiteSpace(options.Instructions)
+                    ? provider.TryCompactWhenIdleAsync(cancellationToken)
+                    : provider.TryCompactWhenIdleAsync(options, cancellationToken)).ConfigureAwait(false);
             }
             finally { _runGate.Release(); }
         }

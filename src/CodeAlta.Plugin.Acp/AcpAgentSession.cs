@@ -216,7 +216,7 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
             }
 
             var response = await connection.Client.SessionPromptAsync(
-                    new PromptRequest { SessionId = new SessionId { Value = connection.AgentSessionId }, Prompt = [AcpPrompts.Text("/compact")] },
+                    new PromptRequest { SessionId = new SessionId { Value = connection.AgentSessionId }, Prompt = [AcpPrompts.Text(string.IsNullOrWhiteSpace(request.CompactionInstructions) ? "/compact" : "/compact " + request.CompactionInstructions.Trim())] },
                     cancellationToken)
                 .ConfigureAwait(false);
             DrainEvents(connection);

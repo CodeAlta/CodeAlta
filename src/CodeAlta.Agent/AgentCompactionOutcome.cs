@@ -15,7 +15,14 @@ public sealed record AgentCompactionOutcome(
     int? MessagesRemoved = null,
     long? TokensRemoved = null,
     long? PreCompactionTokens = null,
-    long? PostCompactionTokens = null);
+    long? PostCompactionTokens = null)
+{
+    /// <summary>
+    /// Gets the summary a successful compaction wrote of the conversation, when the session compacted it itself;
+    /// <see langword="null"/> when a provider compacted the context it keeps, or when nothing was compacted.
+    /// </summary>
+    public string? Summary { get; init; }
+}
 
 /// <summary>
 /// Optional session capability that exposes a synchronous manual compaction outcome.

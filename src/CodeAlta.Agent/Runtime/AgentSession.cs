@@ -1580,7 +1580,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await CompactGateHeldAsync(cancellationToken).ConfigureAwait(false);
+            return await CompactGateHeldAsync(instructions: null, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -1589,8 +1589,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     }
 
     /// <inheritdoc />
-    public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(CancellationToken cancellationToken = default)
+    public Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(CancellationToken cancellationToken = default)
+        => TryCompactWhenIdleAsync(AgentCompactionOptions.Default, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(AgentCompactionOptions options, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(options);
         using var operation = EnterOperation();
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!await _stateGate.WaitAsync(0, cancellationToken).ConfigureAwait(false)) return null;
@@ -1598,19 +1603,20 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_activeRun is not null) return null;
-            return await CompactGateHeldAsync(cancellationToken).ConfigureAwait(false);
+            return await CompactGateHeldAsync(options.Instructions, cancellationToken).ConfigureAwait(false);
         }
         finally { _stateGate.Release(); }
     }
 
-    private async Task<AgentCompactionOutcome> CompactGateHeldAsync(CancellationToken cancellationToken)
+    private async Task<AgentCompactionOutcome> CompactGateHeldAsync(string? instructions, CancellationToken cancellationToken)
     {
+        instructions = string.IsNullOrWhiteSpace(instructions) ? null : instructions.Trim();
         var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills, SessionInstructions(SuggestsNextPrompt()));
         await AppendInstructionWarningsAsync(instructionBundle, null, cancellationToken).ConfigureAwait(false);
         var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
         if (_turnExecutor is IAgentProviderCompaction providerCompaction)
         {
-            return await CompactProviderContextAsync(providerCompaction, instructionBundle, modelInfo, cancellationToken).ConfigureAwait(false);
+            return await CompactProviderContextAsync(providerCompaction, instructionBundle, modelInfo, instructions, cancellationToken).ConfigureAwait(false);
         }
 
         AgentCompactionOutcome? outcome;
@@ -1622,6 +1628,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     systemMessage: instructionBundle.SystemMessage,
                     developerInstructions: instructionBundle.DeveloperInstructions,
                     modelInfo: modelInfo,
+                    instructions: instructions,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -1643,7 +1650,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             MessagesRemoved: outcome.MessagesRemoved,
             TokensRemoved: outcome.TokensRemoved,
             PreCompactionTokens: outcome.PreCompactionTokens,
-            PostCompactionTokens: outcome.PostCompactionTokens);
+            PostCompactionTokens: outcome.PostCompactionTokens) { Summary = outcome.Summary };
     }
 
     private async Task RecordManualCompactionFailureAsync(Exception failure)
@@ -1672,6 +1679,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         IAgentProviderCompaction providerCompaction,
         AgentInstructionBundle instructionBundle,
         AgentModelInfo? modelInfo,
+        string? instructions,
         CancellationToken cancellationToken)
     {
         var started = new AgentSessionUpdateEvent(
@@ -1692,7 +1700,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 CombineDeveloperInstructions(instructionBundle.DeveloperInstructions, instructionBundle.RuntimeContext),
                 instructionBundle.SessionInstructions,
                 modelInfo,
-                tools: []);
+                tools: []) with { CompactionInstructions = instructions };
             outcome = await providerCompaction.CompactAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -3326,6 +3334,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         systemMessage,
                         developerInstructions,
                         modelInfo,
+                        instructions: null,
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -3398,6 +3407,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 systemMessage,
                 developerInstructions,
                 modelInfo,
+                instructions: null,
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -3408,6 +3418,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         string? systemMessage,
         string? developerInstructions,
         AgentModelInfo? modelInfo,
+        string? instructions,
         CancellationToken cancellationToken)
     {
         var settings = Provider.Compaction ?? AgentCompactionSettings.Default;
@@ -3545,6 +3556,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     _history,
                     latestUserRequest,
                     summarizerMaxOutputTokens,
+                    instructions,
                     cancellationToken)
                 .ConfigureAwait(false);
             summaryResult = summaryResult with
@@ -3649,6 +3661,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         latestUserRequest,
                         checkpointTargetTokens,
                         summarizerMaxOutputTokens,
+                        instructions,
                         cancellationToken)
                     .ConfigureAwait(false);
                 (summaryCallCount, summaryPromptInputTokens) = (summaryResult.SummaryCallCount, summaryResult.SummaryPromptInputTokens);
@@ -3798,7 +3811,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             MessagesRemoved: result.MessagesSummarized,
             TokensRemoved: tokensRemoved,
             PreCompactionTokens: result.TokensBefore,
-            PostCompactionTokens: result.TokensAfter);
+            PostCompactionTokens: result.TokensAfter) { Summary = checkpoint.Summary };
     }
 
     // A summary request of a compaction is an operation of the session: its usage is recorded when it answers, so

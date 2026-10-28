@@ -732,12 +732,27 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     {
         await operation.Launch.Task.ConfigureAwait(false);
         OwnedSessionCommandResult result;
+        CompactionHooks? hooks = null;
+        // What the after-hooks of plugins are told, once a compaction their before-hooks let through settled.
+        (bool Succeeded, string? Summary)? settled = null;
         try
         {
-            var outcome = await operation.RuntimeInvocation.RunAsync(() => _runtime.CompactOwnedCommandAsync(operation.Request, operation.Execution.Token)).ConfigureAwait(false);
-            result = outcome is null ? new(OwnedSessionCommandOutcome.Failed, Code: "compact_busy")
-                : outcome.Success ? new(OwnedSessionCommandOutcome.Completed)
-                : new(OwnedSessionCommandOutcome.Failed, Code: "compact_unsuccessful");
+            if (Plugins is not null) hooks = await BeforeCompactionHooksAsync(Plugins, operation).ConfigureAwait(false);
+            if (hooks?.Preparation.CancelReason is { } reason)
+            {
+                await RecordPluginCancelledCompactionAsync(hooks, reason).ConfigureAwait(false);
+                result = new(OwnedSessionCommandOutcome.Failed, Code: CompactPluginCancelledCode);
+            }
+            else
+            {
+                var options = hooks?.Preparation.Instructions is { } instructions ? new AgentCompactionOptions { Instructions = instructions } : AgentCompactionOptions.Default;
+                var outcome = await operation.RuntimeInvocation.RunAsync(() => _runtime.CompactOwnedCommandAsync(operation.Request, options, operation.Execution.Token)).ConfigureAwait(false);
+                settled = outcome is null ? (false, "The session was busy: nothing was compacted.")
+                    : outcome.Success ? (true, outcome.Summary) : (false, outcome.Message);
+                result = outcome is null ? new(OwnedSessionCommandOutcome.Failed, Code: "compact_busy")
+                    : outcome.Success ? new(OwnedSessionCommandOutcome.Completed)
+                    : new(OwnedSessionCommandOutcome.Failed, Code: "compact_unsuccessful");
+            }
         }
         catch (OperationCanceledException failure) when (operation.Execution.IsCancellationRequested)
         {
@@ -747,13 +762,18 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         catch (NotSupportedException failure)
         {
             RecordFailure(failure, cleanup: false, operation.ReleaseDecision);
+            settled = (false, failure.Message);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "compact_unsupported");
         }
         catch (Exception ex)
         {
             RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
+            settled = (false, ex.Message);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "compact_failed");
         }
+        // Before the receipt settles, so that a compaction that follows does not overtake them.
+        if (hooks is not null && hooks.Preparation.CancelReason is null && settled is { } end)
+            await AfterCompactionHooksAsync(hooks, end.Succeeded, end.Summary, operation.Execution.Token).ConfigureAwait(false);
         lock (_gate)
         {
             operation.ReleaseDecision.Complete();

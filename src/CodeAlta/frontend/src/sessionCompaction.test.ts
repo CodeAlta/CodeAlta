@@ -80,6 +80,9 @@ test("a compaction that did not complete is told from its admission or its settl
   assert.equal(settledCompactionFailure(row("Failed", "compact_busy"))?.key, "The session is busy: compact it once it is idle.");
   assert.equal(settledCompactionFailure(row("Failed", "compact_unsupported"))?.key, "This provider cannot compact the conversation.");
   assert.equal(settledCompactionFailure(row("Cancelled"))?.key, "The compaction was cancelled.");
+  // The reason a plugin gave is its own text: the host records it in the timeline, the composer points there.
+  assert.equal(settledCompactionFailure(row("Failed", "compact_plugin_cancelled"))?.key, "A plugin cancelled the compaction. The timeline says why.");
+  assert.ok(Object.hasOwn(messages, "A plugin cancelled the compaction. The timeline says why."));
   assert.equal(compactionAdmissionFailure({ status: "accepted", epoch: "epoch", receipt: page().rows[0] }), null);
   assert.equal(compactionAdmissionFailure({ status: "accepted", epoch: "epoch", receipt: row("Failed", "compact_failed") })?.key, "The compaction failed. The timeline says why.");
   assert.equal(compactionAdmissionFailure({ status: "busy", epoch: "epoch", receipt: null })?.key, "The session is busy: compact it once it is idle.");

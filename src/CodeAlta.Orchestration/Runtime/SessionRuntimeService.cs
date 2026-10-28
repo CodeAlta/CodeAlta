@@ -3171,9 +3171,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // Recorded idleness only permits a provider attempt. The provider gate proves idle against
     // intervening sends; neither this route nor its mailbox query publishes a started event.
     internal Task<AgentCompactionOutcome?> CompactOwnedCommandAsync(OwnedCompactRequest request, CancellationToken executionCancellationToken)
-        => AdmitAsync(() => CompactOwnedCommandBodyAsync(request, executionCancellationToken), CancellationToken.None);
+        => CompactOwnedCommandAsync(request, AgentCompactionOptions.Default, executionCancellationToken);
 
-    private async Task<AgentCompactionOutcome?> CompactOwnedCommandBodyAsync(OwnedCompactRequest request, CancellationToken executionCancellationToken)
+    internal Task<AgentCompactionOutcome?> CompactOwnedCommandAsync(OwnedCompactRequest request, AgentCompactionOptions options, CancellationToken executionCancellationToken)
+        => AdmitAsync(() => CompactOwnedCommandBodyAsync(request, options, executionCancellationToken), CancellationToken.None);
+
+    private async Task<AgentCompactionOutcome?> CompactOwnedCommandBodyAsync(OwnedCompactRequest request, AgentCompactionOptions options, CancellationToken executionCancellationToken)
     {
         executionCancellationToken.ThrowIfCancellationRequested();
         if (request.ExpectedRuntimeInstanceId != _runtimeInstanceId || !_sessionActors.TryGet(request.SessionId, out var actor))
@@ -3194,7 +3197,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }, CancellationToken.None).ConfigureAwait(false);
             if (handle is null) return null;
             var lifetime = new RuntimeCommandLifetime(new { Runtime = this, Use = handleUse });
-            return await lifetime.RunAsync(token => _agentHub.TryCompactWhenIdleAsync(handle.Value, token),
+            return await lifetime.RunAsync(token => _agentHub.TryCompactWhenIdleAsync(handle.Value, options, token),
                 executionCancellationToken, handleUse!.Attachment.Cancellation.Token).ConfigureAwait(false);
         }
         catch (Exception failure) when (OwnedProviderEventForwarding.HasRetention(failure))

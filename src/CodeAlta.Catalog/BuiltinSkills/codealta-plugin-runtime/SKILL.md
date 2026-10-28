@@ -134,7 +134,7 @@ Override only what the plugin needs.
 | `OnToolCallAsync`, `OnToolResultAsync` | Hooks: see, block or change every tool call of a session (see "Tool hooks") | yes | yes |
 | `OnAgentRunEndedAsync` | Hook: continues a session whose run ended, with a prompt | yes | yes |
 | `GetPromptProcessors()`, `OnPromptSubmittingAsync` | Changes, answers or stops a prompt of the user before it is sent (see "Change the prompt before it is sent") | yes | yes |
-| `GetCompactionContributions()` | Hooks of a manual compaction | no | yes |
+| `GetCompactionContributions()` | Hooks of a manual compaction: cancel it with a reason, add instructions to its summary, see its end (`Succeeded`, `Summary`); not the automatic compactions of a full context | yes | yes |
 | `GetCommandLineContributions()` | Commands of the `altatui` command line | no | yes |
 
 `[Plugin("id", Frontends = PluginFrontends.Desktop)]` (or `Terminal`) starts the plugin in one application only. `Context.Host.Frontend` says which application runs.

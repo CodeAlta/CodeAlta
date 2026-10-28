@@ -167,7 +167,7 @@ Override only the methods the plugin needs. A `Get…()` method is called once w
 | `OnToolCallAsync`, `OnToolResultAsync` | Sees, blocks or changes every tool call: see [Tool hooks](#tool-hooks) | yes | yes |
 | `OnAgentRunEndedAsync` | Continues a session whose run ended, with a prompt of the plugin | yes | yes |
 | `GetPromptProcessors()`, `OnPromptSubmittingAsync` | Changes, answers or stops a prompt of the user before it is sent | yes | yes |
-| `GetCompactionContributions()` | Hooks of a manual compaction | no | yes |
+| `GetCompactionContributions()` | Hooks of a manual compaction: see [Compaction hooks](#compaction-hooks) | yes | yes |
 | `GetCommandLineContributions()` | Commands of the `altatui` command line | no | yes |
 
 The factories `Command`, `PluginUi`, `PluginTui`, `Prompt`, `AgentTool`, `Resources` and `Startup` build the common contributions.
@@ -303,6 +303,16 @@ public sealed class PwshCheckPlugin : PluginBase
 ### Continue after a run
 
 `OnAgentRunEndedAsync` is called when a run of a session ended normally: the agent answered and calls no more tools. It is not called for a run that failed or that the user stopped. Return `PluginAgentRunEndedResult.Continue(prompt)` to give the session a new prompt, which it shows as a prompt of a plugin: a check that the tests ran, for example. `context.LastAssistantMessage` is the last answer of the run. A session is continued at most 3 times in a row (`context.Continuations`, `context.MaxContinuations`); a prompt of anybody else starts the count again.
+
+### Compaction hooks
+
+`GetCompactionContributions()` returns a `PluginCompactionContribution` whose hooks run when the user compacts a session (the **Compact** button or command):
+
+- `BeforeCompaction` runs first. `PluginBeforeCompactionResult.CancelWithReason("…")` stops the compaction. In CodeAlta Desktop the reason is in the timeline of the session and the prompt bar says that a plugin cancelled it; CodeAlta TUI shows it in its status line.
+- `Instructions` returns text for the summary of the compaction, such as "Keep the list of open tasks". In CodeAlta Desktop the summary request follows it; with Claude Code or an ACP agent, the text goes after its `/compact` command.
+- `AfterCompaction` runs once the compaction ended: `context.Succeeded`, and `context.Summary`, the summary CodeAlta wrote (null when the agent compacted its own context) or the message of a failure.
+
+The compactions a session makes by itself when its context is full, during a run, do not call these hooks.
 
 ## Prompts and resources
 

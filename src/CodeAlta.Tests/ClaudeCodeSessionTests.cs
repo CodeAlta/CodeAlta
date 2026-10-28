@@ -1883,6 +1883,44 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task Compaction_GivesItsInstructionsToTheCommandOfTheCli()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var texts = new System.Collections.Concurrent.ConcurrentQueue<string?>();
+        cli.OnUserMessage = (process, user) =>
+        {
+            var text = ClaudeCodeFakeProcess.UserText(user);
+            texts.Enqueue(text);
+            if (text?.StartsWith("/compact", StringComparison.Ordinal) == true)
+            {
+                process.Emit(new JsonObject
+                {
+                    ["type"] = "system",
+                    ["subtype"] = "compact_boundary",
+                    ["session_id"] = process.SessionId,
+                    ["compact_metadata"] = new JsonObject { ["trigger"] = "manual", ["pre_tokens"] = 50000, ["post_tokens"] = 4000 },
+                });
+                process.EmitResult(string.Empty, user);
+                return Task.CompletedTask;
+            }
+
+            process.EmitTextTurn("msg_1", "ok", user);
+            return Task.CompletedTask;
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
+
+        var outcome = await ((IAgentIdleCompactionProvider)session)
+            .TryCompactWhenIdleAsync(new AgentCompactionOptions { Instructions = " Keep the TODO list. " }).WaitAsync(Timeout);
+
+        Assert.IsNotNull(outcome);
+        Assert.IsTrue(outcome.Success);
+        CollectionAssert.AreEqual(new[] { "hello", "/compact Keep the TODO list." }, texts.ToArray());
+    }
+
+    [TestMethod]
     public async Task SteeringMessage_IsSentToTheRunningCli()
     {
         using var directory = TestTempDirectory.Create();

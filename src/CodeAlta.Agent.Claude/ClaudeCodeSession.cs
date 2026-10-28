@@ -300,7 +300,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
             ResetRunState();
             await EnsureConnectionAsync(request, cancellationToken).ConfigureAwait(false);
-            await SendUserTextAsync("/compact", cancellationToken).ConfigureAwait(false);
+            // The command of the CLI takes the instructions of its summary after it.
+            await SendUserTextAsync(string.IsNullOrWhiteSpace(request.CompactionInstructions) ? "/compact" : "/compact " + request.CompactionInstructions.Trim(),
+                cancellationToken).ConfigureAwait(false);
             return await ReadCompactionAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

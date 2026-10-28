@@ -451,6 +451,13 @@ public sealed record AgentTurnRequest
     public int? MaxOutputTokens { get; init; }
 
     /// <summary>
+    /// Gets or initializes the instructions of a manual compaction for a provider that compacts the context it keeps
+    /// (<see cref="IAgentProviderCompaction.CompactAsync" />): what its summary must keep. <see langword="null" /> for
+    /// none, and for every request that is not a compaction.
+    /// </summary>
+    public string? CompactionInstructions { get; init; }
+
+    /// <summary>
     /// Gets or initializes the replayable conversation.
     /// </summary>
     public required IReadOnlyList<AgentConversationMessage> Conversation { get; init; }
