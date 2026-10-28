@@ -295,12 +295,37 @@ public abstract class PluginBase : IAsyncDisposable
         return new ValueTask<PluginToolResult?>((PluginToolResult?)null);
     }
 
+    /// <summary>
+    /// A hook called when a run of a session ended normally: the agent answered and calls no more tools. It is not called
+    /// for a run that failed or that was stopped.
+    /// </summary>
+    /// <remarks>
+    /// A hook that returns <see cref="PluginAgentRunEndedResult.Continue"/> gives the session a new prompt, recorded as a
+    /// prompt of a plugin, which starts the next run: a check that the work is complete, for example. The first plugin
+    /// that asks to continue is the one whose prompt is sent. A session continues at most
+    /// <see cref="PluginAgentRunEndedContext.MaxContinuations"/> times in a row this way; a prompt from anybody else
+    /// starts the count again. A hook that times out (<see cref="HookTimeout"/>) or throws is logged and the session stays
+    /// idle. A plugin that does not override this method is not called.
+    /// </remarks>
+    /// <param name="context">The run-end context.</param>
+    /// <param name="cancellationToken">Cancelled when the hook times out or the host closes.</param>
+    /// <returns><see langword="null"/> or <see cref="PluginAgentRunEndedResult.Done"/> to leave the session idle.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is <see langword="null"/>.</exception>
+    public virtual ValueTask<PluginAgentRunEndedResult?> OnAgentRunEndedAsync(
+        PluginAgentRunEndedContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return new ValueTask<PluginAgentRunEndedResult?>((PluginAgentRunEndedResult?)null);
+    }
+
     /// <summary>Gets the time CodeAlta waits for a hook of a plugin by default: 10 seconds.</summary>
     public static TimeSpan DefaultHookTimeout { get; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Gets how long CodeAlta waits for a tool hook (<see cref="OnToolCallAsync"/>, <see cref="OnToolResultAsync"/>) of
-    /// the plugin before it goes on without its answer; the hook's token is cancelled then. <see cref="DefaultHookTimeout"/> by default; a value is kept between 100 milliseconds and
+    /// Gets how long CodeAlta waits for a tool hook (<see cref="OnToolCallAsync"/>, <see cref="OnToolResultAsync"/>) or a
+    /// run-end hook (<see cref="OnAgentRunEndedAsync"/>) of the plugin before it goes on without its answer; the hook's
+    /// token is cancelled then. <see cref="DefaultHookTimeout"/> by default; a value is kept between 100 milliseconds and
     /// 10 minutes. The host reads it once, when the plugin is activated.
     /// </summary>
     public virtual TimeSpan HookTimeout => DefaultHookTimeout;

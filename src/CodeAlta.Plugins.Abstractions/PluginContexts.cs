@@ -436,6 +436,19 @@ public sealed class PluginToolResultContext : PluginOperationContext
     public bool CanChangeResult => (Capabilities & PluginToolHookCapabilities.ChangeResult) != 0;
 }
 
+/// <summary>Context of a run-end hook (<see cref="PluginBase.OnAgentRunEndedAsync"/>).</summary>
+public sealed class PluginAgentRunEndedContext : PluginOperationContext
+{
+    /// <summary>Gets the last answer of the agent in the run, when there is one.</summary>
+    public string? LastAssistantMessage { get; init; }
+
+    /// <summary>Gets how many runs in a row plugins already continued before this one ended.</summary>
+    public int Continuations { get; init; }
+
+    /// <summary>Gets how many runs in a row plugins may continue; a hook is not called once the session reached it.</summary>
+    public int MaxContinuations { get; init; }
+}
+
 /// <summary>Context for normalized agent event observation.</summary>
 public sealed class PluginAgentEventContext : PluginOperationContext
 {

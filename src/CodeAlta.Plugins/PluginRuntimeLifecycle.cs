@@ -103,6 +103,7 @@ public sealed partial class ActivePluginInstance : IAsyncDisposable
         return new PluginHookSettings(
             Overrides(nameof(PluginBase.OnToolCallAsync), typeof(PluginToolCallContext)),
             Overrides(nameof(PluginBase.OnToolResultAsync), typeof(PluginToolResultContext)),
+            Overrides(nameof(PluginBase.OnAgentRunEndedAsync), typeof(PluginAgentRunEndedContext)),
             timeout < PluginHookSettings.MinimumTimeout ? PluginHookSettings.MinimumTimeout
                 : timeout > PluginHookSettings.MaximumTimeout ? PluginHookSettings.MaximumTimeout : timeout,
             failClosed);
@@ -451,9 +452,10 @@ public sealed class PluginRuntimeActivator
 /// <summary>The hooks a plugin overrides, and how the host waits for them.</summary>
 /// <param name="ToolCalls">Whether it overrides <see cref="PluginBase.OnToolCallAsync"/>.</param>
 /// <param name="ToolResults">Whether it overrides <see cref="PluginBase.OnToolResultAsync"/>.</param>
+/// <param name="RunEnded">Whether it overrides <see cref="PluginBase.OnAgentRunEndedAsync"/>.</param>
 /// <param name="Timeout">How long a hook is waited for.</param>
 /// <param name="FailClosed">Whether a tool call is blocked when its hook fails.</param>
-internal sealed record PluginHookSettings(bool ToolCalls, bool ToolResults, TimeSpan Timeout, bool FailClosed)
+internal sealed record PluginHookSettings(bool ToolCalls, bool ToolResults, bool RunEnded, TimeSpan Timeout, bool FailClosed)
 {
     internal static readonly TimeSpan MinimumTimeout = TimeSpan.FromMilliseconds(100);
     internal static readonly TimeSpan MaximumTimeout = TimeSpan.FromMinutes(10);

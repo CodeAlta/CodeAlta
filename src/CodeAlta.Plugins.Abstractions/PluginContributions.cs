@@ -543,3 +543,35 @@ public enum PluginToolHookCapabilities
 /// <param name="Command">The command line, as the agent wrote it.</param>
 /// <param name="WorkingDirectory">The full path of the folder it runs in.</param>
 public sealed record PluginShellCommand(string Command, string WorkingDirectory);
+
+/// <summary>Describes the result of a run-end hook (<see cref="PluginBase.OnAgentRunEndedAsync"/>).</summary>
+public sealed record PluginAgentRunEndedResult
+{
+    /// <summary>Gets the result that leaves the session idle.</summary>
+    public static PluginAgentRunEndedResult Done { get; } = new();
+
+    /// <summary>Gets the hook disposition.</summary>
+    public PluginAgentRunEndedDisposition Disposition { get; init; }
+
+    /// <summary>Gets the prompt the session continues with when <see cref="Disposition"/> is <see cref="PluginAgentRunEndedDisposition.Continue"/>.</summary>
+    public string? Prompt { get; init; }
+
+    /// <summary>Creates a result that continues the session with a new prompt.</summary>
+    /// <param name="prompt">The prompt, which the agent reads as a prompt of the plugin.</param>
+    /// <returns>The hook result.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="prompt"/> is <see langword="null"/>, empty or white space.</exception>
+    public static PluginAgentRunEndedResult Continue(string prompt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        return new PluginAgentRunEndedResult { Disposition = PluginAgentRunEndedDisposition.Continue, Prompt = prompt };
+    }
+}
+
+/// <summary>Identifies run-end hook disposition.</summary>
+public enum PluginAgentRunEndedDisposition
+{
+    /// <summary>The session stays idle.</summary>
+    Done,
+    /// <summary>The session continues with a prompt of the plugin.</summary>
+    Continue,
+}

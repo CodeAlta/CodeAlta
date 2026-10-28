@@ -39,7 +39,20 @@ public sealed record PluginToolResultAdapterResult
     public IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics { get; init; } = [];
 }
 
-// The hooks of tool calls: each plugin in turn, each with its own time limit; a hook that fails or
+/// <summary>What the run-end hooks of the plugins decided.</summary>
+public sealed record PluginAgentRunEndedAdapterResult
+{
+    /// <summary>Gets the prompt the session continues with, or <see langword="null"/> to leave it idle.</summary>
+    public string? Prompt { get; init; }
+
+    /// <summary>Gets the plugin that asked to continue.</summary>
+    public PluginDescriptor? ContinuedBy { get; init; }
+
+    /// <summary>Gets diagnostics raised while invoking plugins.</summary>
+    public IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics { get; init; } = [];
+}
+
+// The hooks of tool calls and of the end of runs: each plugin in turn, each with its own time limit; a hook that fails or
 // does not answer is logged, and the operation goes on without it (or the call is blocked, for a plugin that fails closed).
 public sealed partial class PluginContributionAdapterService
 {
@@ -56,6 +69,21 @@ public sealed partial class PluginContributionAdapterService
         foreach (var active in activePlugins)
         {
             if (active.Hooks.ToolCalls || active.Hooks.ToolResults) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Gets whether a plugin of a snapshot hooks the end of runs.</summary>
+    /// <param name="activePlugins">The active plugins.</param>
+    /// <returns><see langword="true"/> when a plugin overrides <see cref="PluginBase.OnAgentRunEndedAsync"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="activePlugins"/> is <see langword="null"/>.</exception>
+    public static bool HasRunEndHooks(IReadOnlyList<ActivePluginInstance> activePlugins)
+    {
+        ArgumentNullException.ThrowIfNull(activePlugins);
+        foreach (var active in activePlugins)
+        {
+            if (active.Hooks.RunEnded) return true;
         }
 
         return false;
@@ -248,6 +276,62 @@ public sealed partial class PluginContributionAdapterService
     {
         var result = await RunToolResultHooksAsync(activePlugins, template, options, cancellationToken).ConfigureAwait(false);
         return (result.Changed ? PluginToolResult.Replace(result.Result) : null, result.Diagnostics);
+    }
+
+    /// <summary>Runs the run-end hooks until one asks the session to continue.</summary>
+    /// <param name="activePlugins">The active plugins.</param>
+    /// <param name="template">The context of the run that ended.</param>
+    /// <param name="options">Operation scope options.</param>
+    /// <param name="cancellationToken">Cancels the hooks.</param>
+    /// <returns>The prompt to continue with, or none.</returns>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public async ValueTask<PluginAgentRunEndedAdapterResult> OnAgentRunEndedAsync(
+        IReadOnlyList<ActivePluginInstance> activePlugins,
+        PluginAgentRunEndedContext template,
+        PluginAdapterOperationOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(activePlugins);
+        ArgumentNullException.ThrowIfNull(template);
+        var diagnostics = new List<PluginRuntimeDiagnostic>();
+        foreach (var active in GetApplicableActivePlugins(activePlugins, options))
+        {
+            if (!active.Hooks.RunEnded) continue;
+            var context = new PluginAgentRunEndedContext
+            {
+                Plugin = active.Descriptor,
+                Services = active.RuntimeContext.Services,
+                Scope = active.RuntimeContext.Scope,
+                ScopeProjectId = active.RuntimeContext.ScopeProjectId,
+                ScopeProjectPath = active.RuntimeContext.ScopeProjectPath,
+                ProjectId = options?.ProjectId ?? template.ProjectId,
+                ProjectPath = options?.ProjectPath ?? template.ProjectPath,
+                SessionId = options?.SessionId ?? template.SessionId,
+                SpaceId = options?.SpaceId ?? template.SpaceId,
+                RunId = options?.RunId ?? template.RunId,
+                ProviderId = options?.ProviderId ?? template.ProviderId,
+                Model = options?.Model ?? template.Model,
+                LastAssistantMessage = template.LastAssistantMessage,
+                Continuations = template.Continuations,
+                MaxContinuations = template.MaxContinuations,
+                CancellationToken = cancellationToken,
+            };
+            var outcome = await InvokeHookAsync(active, token => active.Instance!.OnAgentRunEndedAsync(context, token), cancellationToken).ConfigureAwait(false);
+            context.Invalidate();
+            if (outcome.Failure is { } failure)
+            {
+                diagnostics.Add(ReportHookFailure(active, outcome.TimedOut ? "Run-end hook did not answer in time." : "Run-end hook failed.", failure));
+                continue;
+            }
+
+            if (outcome.Value is { Disposition: PluginAgentRunEndedDisposition.Continue, Prompt: { } prompt } && !string.IsNullOrWhiteSpace(prompt))
+            {
+                return new PluginAgentRunEndedAdapterResult { Prompt = prompt, ContinuedBy = active.Descriptor, Diagnostics = diagnostics };
+            }
+        }
+
+        return new PluginAgentRunEndedAdapterResult { Diagnostics = diagnostics };
     }
 
     private void RecordToolPlugin(ActivePluginInstance active, IReadOnlyList<AgentToolDefinition> tools)

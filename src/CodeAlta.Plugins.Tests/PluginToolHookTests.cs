@@ -4,7 +4,7 @@ using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugins.Tests;
 
-// The hooks of tool calls, as the adapter composes them: each plugin in turn, with its own limit.
+// The hooks of tool calls and of the end of runs, as the adapter composes them: each plugin in turn, with its own limit.
 [TestClass]
 public sealed class PluginToolHookTests
 {
@@ -188,6 +188,44 @@ public sealed class PluginToolHookTests
     }
 
     [TestMethod]
+    public async Task RunEndHooks_TheFirstThatContinues_GivesThePrompt()
+    {
+        var (registry, plugins) = await ActivateAsync(typeof(FirstHookPlugin), typeof(SecondHookPlugin), typeof(ThirdHookPlugin));
+        var adapter = new PluginContributionAdapterService(registry);
+        var asked = new List<string>();
+        Hooks<FirstHookPlugin>(plugins).OnRunEnded = context =>
+        {
+            asked.Add("first:" + context.LastAssistantMessage + ":" + context.Continuations);
+            return PluginAgentRunEndedResult.Done;
+        };
+        Hooks<SecondHookPlugin>(plugins).OnRunEnded = _ =>
+        {
+            asked.Add("second");
+            return PluginAgentRunEndedResult.Continue("The tests were not run: run them.");
+        };
+        Hooks<ThirdHookPlugin>(plugins).OnRunEnded = _ =>
+        {
+            asked.Add("third");
+            return PluginAgentRunEndedResult.Continue("other");
+        };
+
+        var result = await adapter.OnAgentRunEndedAsync(plugins, new PluginAgentRunEndedContext
+        {
+            Plugin = plugins[0].Descriptor,
+            Services = plugins[0].RuntimeContext.Services,
+            LastAssistantMessage = "Done.",
+            Continuations = 1,
+            MaxContinuations = 3,
+        });
+
+        Assert.AreEqual("The tests were not run: run them.", result.Prompt);
+        Assert.AreEqual("Second hook", result.ContinuedBy!.DisplayName);
+        CollectionAssert.AreEqual(new[] { "first:Done.:1", "second" }, asked);
+        Assert.IsTrue(PluginContributionAdapterService.HasRunEndHooks(plugins));
+        await DeactivateAsync(plugins);
+    }
+
+    [TestMethod]
     public void HookSettings_AreReadFromThePlugin_AndKeptWithinTheirBounds()
     {
         Assert.AreEqual(PluginBase.DefaultHookTimeout, TimeSpan.FromSeconds(10));
@@ -252,11 +290,16 @@ public sealed class PluginToolHookTests
 
         public Func<PluginToolResultContext, CancellationToken, ValueTask<PluginToolResult?>>? OnResultAsync { get; set; }
 
+        public Func<PluginAgentRunEndedContext, PluginAgentRunEndedResult?>? OnRunEnded { get; set; }
+
         public override ValueTask<PluginToolCallResult?> OnToolCallAsync(PluginToolCallContext context, CancellationToken cancellationToken = default)
             => OnCallAsync is { } asynchronous ? asynchronous(context, cancellationToken) : ValueTask.FromResult(OnCall?.Invoke(context));
 
         public override ValueTask<PluginToolResult?> OnToolResultAsync(PluginToolResultContext context, CancellationToken cancellationToken = default)
             => OnResultAsync is { } asynchronous ? asynchronous(context, cancellationToken) : ValueTask.FromResult(OnResult?.Invoke(context));
+
+        public override ValueTask<PluginAgentRunEndedResult?> OnAgentRunEndedAsync(PluginAgentRunEndedContext context, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(OnRunEnded?.Invoke(context));
     }
 
     [Plugin("first-hook", DisplayName = "First hook")]
