@@ -260,8 +260,10 @@ Codex's commands and patches are children of that process, so they stay in the c
 
 - [x] 1. **Generator and protocol library.** Check the latest stable Codex release first, and move the pin if a newer one than 0.165.0 is out. Port the generator into `src/CodeAlta.CodexAppServer.Generator` with the scope list, then generate `src/CodeAlta.CodexAppServer/generated/` from the pinned tag. Write the transport, client and process. Add both projects to `CodeAlta.slnx`. Tests: port the old generator tests, add ACP's pattern, and add a round trip of captured app-server JSON lines with an unknown `ThreadItem` kind.
   - Done: 0.165.0 is still the latest stable release (2026-10-28). The generator reads the schema with `git archive` at the tag (no checkout, paths combined segment by segment for Windows) and keeps the 215 types the 47 methods of `codex-app-server-methods.json` reach. Beyond the plan, enums read an unknown value as `UnrecognizedValue`, and the pinned package, its installer and the command resolution are in the library already (step 4 uses them).
-- [ ] 2. **Fake app-server for tests.** Add `CodexAppServerFake.cs`, a scripted JSON-RPC peer like `AcpFakeAgent.cs`, that records what it receives.
-- [ ] 3. **Plugin skeleton.** Contribution, settings and validation, registration in the three hosts, the `CODEX_HOME` helper, and the `config.toml` writer. Tests: registration, validation, and the exact `config.toml` written.
+- [x] 2. **Fake app-server for tests.** Add `CodexAppServerFake.cs`, a scripted JSON-RPC peer like `AcpFakeAgent.cs`, that records what it receives.
+  - Done: `CodexAppServerFake` scripts turns (text, reasoning, commands, file changes, approvals, MCP calls over HTTP, plans, steers, failures) and keeps its threads for resume and fork.
+- [x] 3. **Plugin skeleton.** Contribution, settings and validation, registration in the three hosts, the `CODEX_HOME` helper, and the `config.toml` writer. Tests: registration, validation, and the exact `config.toml` written.
+  - Done: the `codex-cli` plugin, its settings (`command`, `codex_home`, `env`; `~/.codex` and `CODEX_HOME` refused), the three hosts, and the `config.toml` writer. A live check found `features.plugin_discovery_prefetch` unknown to 0.165.0: it is left out.
 - [ ] 4. **Probe, models, sign-in and download.**
   - Probe categories and `model/list`.
   - The pinned package with its hashes, and its automatic download from the catalog entry and at first use, with the `codex-path` folder put on `PATH`.
@@ -273,9 +275,12 @@ Codex's commands and patches are children of that process, so they stay in the c
   - the download: verified by hash, refused on a wrong hash or a `codex-package.json` that does not match, done once when two providers start together, and reported when offline;
   - the sign-in against the fake: the prompt for each method, completion, cancel and failure;
   - the default overload of the contract.
-- [ ] 5. **Session and executor.** Start or resume the thread, turns, steer, stop, the event reducer, the tool bridge, the MCP endpoint, instructions and their updates, and the provider state. Tests with the fake: a turn with text, reasoning, a command and an MCP call; a resume after a new process; an instructions update; a journal the thread does not hold.
-- [ ] 6. **Approvals and permission modes.** The approval mapping and the `approvalPolicy` of each mode. Tests with the fake for each mode. A live test settles the policy that asks for commands and patches.
-- [ ] 7. **Fork, rewind, compaction and failures.** `thread/fork`, `thread/compact/start`, and failure classification. Tests with the fake for each.
+- [x] 5. **Session and executor.** Start or resume the thread, turns, steer, stop, the event reducer, the tool bridge, the MCP endpoint, instructions and their updates, and the provider state. Tests with the fake: a turn with text, reasoning, a command and an MCP call; a resume after a new process; an instructions update; a journal the thread does not hold.
+  - Done: one app-server and thread per session; resume in a new process, a new thread told the conversation when Codex lost the thread, instruction updates, steering of the running turn (its next turn when Codex refuses the steer).
+- [x] 6. **Approvals and permission modes.** The approval mapping and the `approvalPolicy` of each mode. Tests with the fake for each mode. A live test settles the policy that asks for commands and patches.
+  - Done: `untrusted` for `default` and `acceptEdits`, `never` for `bypassPermissions`. The live test confirms that Codex asks before a command that writes a file under `untrusted` with its sandbox off.
+- [x] 7. **Fork, rewind, compaction and failures.** `thread/fork`, `thread/compact/start`, and failure classification. Tests with the fake for each.
+  - Done: a rewind or a fork forks the thread at the turn the point ends (`lastTurnId`), from the last 100 turns kept in the provider state. The live test confirms that the developer instructions survive the compaction of Codex: they are part of its turn context, rebuilt at each turn.
 - [ ] 8. **Sandbox.** `StartsInSandbox`, plus the launch with its folders, protected paths, hosts and port. Tests: a sibling of `SessionSandboxTests` for `codex-cli`. A manual run of a sandboxed session on macOS.
 - [ ] 9. **Desktop.** Problem codes, the signed-out banner, the plugin sign-in prompt in the provider form, plan usage with the standalone executable, and the icon. Tests: siblings in `ProviderUsageRpcTests`, `ConfiguredProviderUsageTests`, `PluginsRpcTests` (the sign-in channel) and `providerForm.test.ts`.
 - [ ] 10. **Live tests.** `CodexCliLiveTests`, gated by:

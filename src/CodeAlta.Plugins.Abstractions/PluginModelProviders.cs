@@ -216,14 +216,14 @@ public interface IPluginModelCatalog
 }
 
 /// <summary>A way to sign in to the account a provider uses.</summary>
-/// <param name="Id">The identifier of the method, given back to <see cref="IPluginProviderAccount.SignInAsync" />.</param>
+/// <param name="Id">The identifier of the method, given back to <see cref="IPluginProviderAccount.SignInAsync(PluginProviderSettings, string, Func{PluginProviderSignInPrompt, CancellationToken, ValueTask}, CancellationToken)" />.</param>
 /// <param name="Label">The label of its button.</param>
 /// <param name="Description">A sentence that says what it does, or <see langword="null" />.</param>
 public sealed record PluginProviderSignInMethod(string Id, string Label, string? Description)
 {
     /// <summary>
     /// Gets the command the user runs in a terminal to sign in, when the method is one: the window opens a terminal
-    /// on it instead of calling <see cref="IPluginProviderAccount.SignInAsync" />; <see langword="null" /> otherwise.
+    /// on it instead of calling <see cref="IPluginProviderAccount.SignInAsync(PluginProviderSettings, string, Func{PluginProviderSignInPrompt, CancellationToken, ValueTask}, CancellationToken)" />; <see langword="null" /> otherwise.
     /// </summary>
     public IReadOnlyList<string>? TerminalCommand { get; init; }
 
@@ -231,9 +231,29 @@ public sealed record PluginProviderSignInMethod(string Id, string Label, string?
     public IReadOnlyDictionary<string, string>? TerminalEnvironment { get; init; }
 }
 
+/// <summary>What the user opens, and for a device flow enters, to continue a sign-in a plugin runs.</summary>
+/// <param name="Uri">The address of the sign-in, or of the page where the code is entered.</param>
+/// <param name="UserCode">The code to enter at <paramref name="Uri" /> for a device flow; <see langword="null" /> for a sign-in in the browser.</param>
+/// <param name="ExpiresAt">When the code expires, or <see langword="null" />.</param>
+public sealed record PluginProviderSignInPrompt(Uri Uri, string? UserCode, DateTimeOffset? ExpiresAt);
+
 /// <summary>The sign-in of the account a provider of a plugin uses.</summary>
 public interface IPluginProviderAccount
 {
+    /// <summary>
+    /// Signs in with a method that is not a terminal command, and shows the user what to open: the window opens the
+    /// browser on the address of a prompt, or shows its code. A plugin whose sign-in shows nothing implements the
+    /// overload without <paramref name="onPrompt" /> only, which this one calls.
+    /// </summary>
+    /// <param name="settings">The settings of the provider.</param>
+    /// <param name="methodId">The identifier of the method.</param>
+    /// <param name="onPrompt">Shows what the user opens; called once a sign-in has its address, and awaited before the sign-in waits for the user.</param>
+    /// <param name="cancellationToken">A token to cancel the sign-in.</param>
+    /// <returns>A task that ends once the sign-in ended.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the sign-in fails; its message is shown.</exception>
+    Task SignInAsync(PluginProviderSettings settings, string methodId, Func<PluginProviderSignInPrompt, CancellationToken, ValueTask> onPrompt, CancellationToken cancellationToken)
+        => SignInAsync(settings, methodId, cancellationToken);
+
     /// <summary>Lists the ways to sign in to the account of a provider.</summary>
     /// <param name="settings">The settings of the provider.</param>
     /// <param name="cancellationToken">A token to cancel the reading.</param>
