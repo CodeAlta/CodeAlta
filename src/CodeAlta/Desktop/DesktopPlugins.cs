@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Acp;
+using CodeAlta.Plugin.CodexCli;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugin.Mobile;
@@ -61,6 +62,13 @@ internal static class DesktopPlugins
             Id = AcpPlugin.PluginId, DisplayName = "ACP",
             Description = "Runs the agents of the Agent Client Protocol (ACP) as model providers: the agents of the ACP registry, installed in one step.",
             PluginType = typeof(AcpPlugin), Factory = static () => new AcpPlugin(),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
+        },
+        new()
+        {
+            Id = CodexCliPlugin.PluginId, DisplayName = "Codex CLI",
+            Description = "Runs OpenAI's Codex app-server as a model provider, signed in with Codex's own ChatGPT sign-in.",
+            PluginType = typeof(CodexCliPlugin), Factory = static () => new CodexCliPlugin(),
             Frontends = PluginFrontends.All | PluginFrontends.Cli,
         },
     ];

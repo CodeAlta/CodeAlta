@@ -10,6 +10,7 @@ using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Acp;
+using CodeAlta.Plugin.CodexCli;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Jira;
 using CodeAlta.Plugin.Mcp;
@@ -277,6 +278,13 @@ internal sealed class CliHost : IAsyncDisposable
             Id = AcpPlugin.PluginId, DisplayName = "ACP",
             Description = "Runs the agents of the Agent Client Protocol (ACP) as model providers.",
             PluginType = typeof(AcpPlugin), Factory = static () => new AcpPlugin(),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
+        });
+        plugins.Add(new()
+        {
+            Id = CodexCliPlugin.PluginId, DisplayName = "Codex CLI",
+            Description = "Runs OpenAI's Codex app-server as a model provider.",
+            PluginType = typeof(CodexCliPlugin), Factory = static () => new CodexCliPlugin(),
             Frontends = PluginFrontends.All | PluginFrontends.Cli,
         });
         return plugins;

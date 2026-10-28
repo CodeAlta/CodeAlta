@@ -64,7 +64,7 @@ public sealed class DesktopPluginsTests
     public void BuiltIns_AreTheTerminalPluginsWithoutTheirTerminalPresentation()
     {
         // The ids are what [plugins.<id>] in the configuration names, in both frontends.
-        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics", "acp" }, DesktopPlugins.BuiltIns.Select(static plugin => plugin.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics", "acp", "codex-cli" }, DesktopPlugins.BuiltIns.Select(static plugin => plugin.Id).ToArray());
         foreach (var definition in DesktopPlugins.BuiltIns)
         {
             var plugin = definition.Factory();
@@ -79,7 +79,7 @@ public sealed class DesktopPluginsTests
     [TestMethod]
     public void BuiltIns_ThatNeedNoWindow_SupportTheCommandLineApplication()
     {
-        string[] headless = ["git", "jira", "mcp", "acp"];
+        string[] headless = ["git", "jira", "mcp", "acp", "codex-cli"];
         BuiltInPluginDefinition[] definitions = [.. DesktopPlugins.BuiltIns, DesktopPlugins.MobileDefinition, DesktopLandingPlugin.Definition()];
         foreach (var definition in definitions)
         {

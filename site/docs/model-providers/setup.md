@@ -152,6 +152,39 @@ service_tier = "priority" # "fast" is an alias
 
 CodeAlta offers the reasoning efforts Codex lists for each model; GPT-5.6 Sol, Terra and Luna go up to `max`. Codex's `ultra` level is not offered. A model can ask for several tool calls in one answer; CodeAlta runs them one after the other.
 
+## Codex CLI
+
+The `codex-cli` provider runs OpenAI's Codex agent itself, with your ChatGPT plan. Codex signs in with its own ChatGPT sign-in, which ChatGPT Business and Enterprise workspaces accept. Choose it when the [Codex (ChatGPT)](#codex-chatgpt) provider is refused with `3p_delegated_access_policy_denied`, or when you want Codex's own agent and tools.
+
+| | Codex (ChatGPT) | Codex CLI |
+| --- | --- | --- |
+| Runs the model loop | CodeAlta | Codex |
+| Tools | CodeAlta's | Codex's shell, `apply_patch` and web search, with the tools of CodeAlta (`alta`, plugins, MCP) |
+| Sign-in | CodeAlta's ChatGPT sign-in | Codex's ChatGPT sign-in, run by CodeAlta |
+| Business and Enterprise workspaces | refused by most | accepted |
+
+To add it in CodeAlta Desktop: **Settings > Providers > Add provider > Codex CLI…**, then **Add**. CodeAlta downloads the version of Codex it is tested with (Codex 0.165.0, about 100 MB) and adds the provider. Then **Sign in** in its form:
+
+- **Sign in with ChatGPT** opens the ChatGPT sign-in in the browser.
+- **Sign in with a device code** shows a code to enter on the page it opens, for a computer whose browser cannot return to CodeAlta.
+
+Then **Test selected provider** to see its models. Codex keeps its sign-in in its own folder; CodeAlta never reads it.
+
+```toml
+[providers.codex-cli]
+type = "codex-cli"
+display_name = "Codex CLI"
+# codex_home = "~/.codex-work"   # its folder: sign-in and threads (default: ~/.alta/plugin-data/codex-cli/<key>)
+# command = "/opt/homebrew/bin/codex"   # a codex or codex-app-server you installed, instead of the one CodeAlta downloads
+```
+
+- **Its own folder.** Each provider has a Codex folder of its own (`CODEX_HOME`), separate from the `~/.codex` of your Codex CLI: CodeAlta writes the settings of that folder, so your own settings, MCP servers and skills do not apply. Several accounts are several providers. `~/.codex` cannot be used.
+- **CodeAlta's way.** Codex gets CodeAlta's instructions and tools. Its own sub-agents, skills, plugins, hooks and memories are off: sub-agents are CodeAlta sessions you see, skills are CodeAlta's. The AGENTS.md of the project reaches it with CodeAlta's instructions.
+- **Permissions.** `default` asks you before the commands and edits Codex asks for, `acceptEdits` allows the edits, `bypassPermissions` allows everything. Codex's own sandbox is off: a [sandboxed session](../sessions/sandbox.md#providers) runs Codex in CodeAlta's sandbox.
+- **Sessions.** A session keeps its Codex thread: it goes on after a restart, and a fork or a rewind continues from the same point of the thread. Codex compacts its own context. A message sent while Codex works steers its turn.
+- **The version.** A provider without `command` runs the version CodeAlta is tested with, and moves to the next one with CodeAlta. A program you name runs as it is; its status says when it is another version.
+- **Workspace policies.** A Business or Enterprise workspace can forbid what CodeAlta runs Codex with (full access, with its own sandbox off). The session then says that the configuration could not be loaded.
+
 ## Copilot
 
 ```toml

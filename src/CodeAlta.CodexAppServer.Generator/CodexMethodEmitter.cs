@@ -1,0 +1,142 @@
+using System.Text;
+
+namespace CodeAlta.CodexAppServer.Generator;
+
+/// <summary>Emits the typed methods of the client and the parsing of what the server sends, from the method map.</summary>
+internal static class CodexMethodEmitter
+{
+    /// <summary>Emits one method of <c>CodexAppServerClient</c> for each request.</summary>
+    public static string EmitClientMethods(CodexMethodMap map, string clientNamespace, string protocolNamespace, string contextName)
+    {
+        var sb = Header(clientNamespace, protocolNamespace);
+        sb.AppendLine("public sealed partial class CodexAppServerClient");
+        sb.AppendLine("{");
+        foreach (var request in map.Requests)
+        {
+            var name = ToMethodName(request.Method);
+            var result = request.ResultType!;
+            sb.AppendLine($"    /// <summary>Sends <c>{request.Method}</c>.</summary>");
+            sb.AppendLine("    /// <exception cref=\"CodexJsonRpcException\">The server answered with an error.</exception>");
+            sb.AppendLine("    /// <exception cref=\"CodexConnectionClosedException\">The server stopped before it answered.</exception>");
+            if (request.ParamsType is null)
+            {
+                sb.AppendLine($"    public Task<{result}> {name}Async(CancellationToken cancellationToken = default)");
+                sb.AppendLine($"        => SendRequestAsync(\"{request.Method}\", {contextName}.Default.{result}, cancellationToken);");
+            }
+            else
+            {
+                var parameters = request.ParamsOptional ? $"{request.ParamsType}? parameters = null" : $"{request.ParamsType} parameters";
+                sb.AppendLine($"    public Task<{result}> {name}Async({parameters}, CancellationToken cancellationToken = default)");
+                sb.AppendLine($"        => SendRequestAsync(\"{request.Method}\", parameters, {contextName}.Default.{request.ParamsType}, {contextName}.Default.{result}, cancellationToken);");
+            }
+
+            sb.AppendLine();
+        }
+
+        TrimLastBlankLine(sb);
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    /// <summary>Emits the names of the methods and the parsing of the notifications and requests of the server.</summary>
+    public static string EmitServerMessages(CodexMethodMap map, string clientNamespace, string protocolNamespace, string contextName)
+    {
+        var sb = Header(clientNamespace, protocolNamespace);
+        sb.AppendLine("/// <summary>The methods of the protocol CodeAlta uses, and the parsing of what the server sends.</summary>");
+        sb.AppendLine("public static partial class CodexMethods");
+        sb.AppendLine("{");
+        foreach (var method in map.Requests.Concat(map.Notifications).Concat(map.ServerRequests))
+        {
+            sb.AppendLine($"    /// <summary><c>{method.Method}</c>.</summary>");
+            sb.AppendLine($"    public const string {ToMethodName(method.Method)} = \"{method.Method}\";");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Reads the parameters of a notification, or returns <see langword=\"null\"/> for a method CodeAlta does not use.</summary>");
+        sb.AppendLine("    /// <exception cref=\"JsonException\">The parameters do not match their type.</exception>");
+        sb.AppendLine("    public static object? ParseNotification(string method, JsonElement parameters) => method switch");
+        sb.AppendLine("    {");
+        foreach (var notification in map.Notifications.Where(static item => item.ParamsType is not null))
+        {
+            sb.AppendLine($"        \"{notification.Method}\" => parameters.Deserialize({contextName}.Default.{notification.ParamsType}),");
+        }
+
+        sb.AppendLine("        _ => null,");
+        sb.AppendLine("    };");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Reads the parameters of a request of the server, or returns <see langword=\"null\"/> for a method CodeAlta does not answer.</summary>");
+        sb.AppendLine("    /// <exception cref=\"JsonException\">The parameters do not match their type.</exception>");
+        sb.AppendLine("    public static object? ParseServerRequest(string method, JsonElement parameters) => method switch");
+        sb.AppendLine("    {");
+        foreach (var request in map.ServerRequests.Where(static item => item.ParamsType is not null))
+        {
+            sb.AppendLine($"        \"{request.Method}\" => parameters.Deserialize({contextName}.Default.{request.ParamsType}),");
+        }
+
+        sb.AppendLine("        _ => null,");
+        sb.AppendLine("    };");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    /// <summary>Emits what the types were generated from.</summary>
+    public static string EmitProtocolInfo(string clientNamespace, CodexSchemaSource source)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {clientNamespace};");
+        sb.AppendLine();
+        sb.AppendLine("/// <summary>What the types of the protocol were generated from.</summary>");
+        sb.AppendLine("public static partial class CodexAppServerProtocol");
+        sb.AppendLine("{");
+        sb.AppendLine("    /// <summary>The tag of the Codex repository whose schema the types come from, or <see langword=\"null\"/>.</summary>");
+        sb.AppendLine($"    public const string? SourceRef = {Literal(source.SourceRef)};");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>The commit of that tag, or <see langword=\"null\"/>.</summary>");
+        sb.AppendLine($"    public const string? SourceCommit = {Literal(source.Commit)};");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    /// <summary>Turns <c>account/rateLimits/read</c> into <c>AccountRateLimitsRead</c>.</summary>
+    public static string ToMethodName(string method)
+    {
+        var builder = new StringBuilder();
+        foreach (var segment in method.Split('/', '_', '-'))
+        {
+            if (segment.Length > 0)
+            {
+                builder.Append(char.ToUpperInvariant(segment[0])).Append(segment.AsSpan(1));
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string Literal(string? value) => value is null ? "null" : $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+
+    private static StringBuilder Header(string clientNamespace, string protocolNamespace)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine();
+        sb.AppendLine("using System.Text.Json;");
+        sb.AppendLine($"using {protocolNamespace};");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {clientNamespace};");
+        sb.AppendLine();
+        return sb;
+    }
+
+    private static void TrimLastBlankLine(StringBuilder sb)
+    {
+        var newLine = Environment.NewLine;
+        if (sb.Length >= newLine.Length * 2 && sb.ToString(sb.Length - newLine.Length * 2, newLine.Length * 2) == newLine + newLine)
+        {
+            sb.Length -= newLine.Length;
+        }
+    }
+}

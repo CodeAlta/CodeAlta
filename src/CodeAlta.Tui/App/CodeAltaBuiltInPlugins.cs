@@ -1,5 +1,6 @@
 using CodeAlta.Catalog;
 using CodeAlta.Plugin.Acp;
+using CodeAlta.Plugin.CodexCli;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
 using CodeAlta.Plugin.Jira;
@@ -63,6 +64,16 @@ internal static class CodeAltaBuiltInPlugins
             EnabledByDefault = true,
             PluginType = typeof(AcpPlugin),
             Factory = static () => new AcpPlugin(),
+            Frontends = PluginFrontends.All | PluginFrontends.Cli,
+        });
+        registry.Add(new BuiltInPluginDefinition
+        {
+            Id = CodexCliPlugin.PluginId,
+            DisplayName = "Codex CLI",
+            Description = SR.T("Runs OpenAI's Codex app-server as a model provider."),
+            EnabledByDefault = true,
+            PluginType = typeof(CodexCliPlugin),
+            Factory = static () => new CodexCliPlugin(),
             Frontends = PluginFrontends.All | PluginFrontends.Cli,
         });
         return registry;

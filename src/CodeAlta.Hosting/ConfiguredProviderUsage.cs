@@ -3,6 +3,7 @@ using CodeAlta.Agent.Claude;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.OpenAI.Codex;
 using CodeAlta.Catalog;
+using CodeAlta.CodexAppServer;
 
 namespace CodeAlta.Hosting;
 
@@ -15,8 +16,34 @@ public static class ConfiguredProviderUsage
 {
     /// <summary>Gets whether a provider type is a subscription whose usage can be read.</summary>
     /// <param name="providerType">The provider type of a definition.</param>
-    /// <returns>True for Codex, Copilot and Claude Code.</returns>
-    public static bool Supports(string? providerType) => providerType is "codex" or "copilot" or "claude-code";
+    /// <returns>True for Codex, Codex CLI, Copilot and Claude Code.</returns>
+    public static bool Supports(string? providerType) => providerType is "codex" or "codex-cli" or "copilot" or "claude-code";
+
+    /// <summary>
+    /// Describes a provider of a type of a built-in plugin whose usage can be read (<c>codex-cli</c>) as a definition,
+    /// from the settings of its section; null for any other provider of a plugin.
+    /// </summary>
+    /// <param name="provider">The section of the provider.</param>
+    /// <returns>The definition, or <see langword="null"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is null.</exception>
+    public static CodeAltaProviderDocument? DescribePluginProvider(CodeAltaExternalProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        if (!string.Equals(provider.ProviderType, "codex-cli", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string? Value(string name) => provider.Values.TryGetValue(name, out var value) && value is string text && !string.IsNullOrWhiteSpace(text) ? text.Trim() : null;
+        return new CodeAltaProviderDocument
+        {
+            ProviderKey = provider.ProviderKey,
+            ProviderType = provider.ProviderType,
+            Enabled = provider.Values.TryGetValue("enabled", out var enabled) && enabled is bool flag ? flag : null,
+            Command = Value("command"),
+            CodexHome = Value("codex_home"),
+        };
+    }
 
     /// <summary>Asks the provider of a definition for the usage of its subscription.</summary>
     /// <param name="definition">The type-completed provider definition.</param>
@@ -49,6 +76,16 @@ public static class ConfiguredProviderUsage
                 return OpenAICodexSubscriptionLoginManager.IsRegistration(credential) && !string.IsNullOrWhiteSpace(credential.AccessToken)
                     ? await CodexAccountUsage.ReadAsync(credential.Email ?? credential.AccountLabel, Text(definition.CodexHome), cancellationToken).ConfigureAwait(false)
                     : AgentSubscriptionUsageReading.NotSignedIn;
+            case "codex-cli":
+                // The app-server of the provider, in its own CODEX_HOME: the pinned one CodeAlta downloaded, else the
+                // command its settings name. Its sign-in is the one of that home, so any account of it is shown.
+                var command = Text(definition.Command) is { } named
+                    ? CodexAppServerCommand.FromUserCommand(named)?.FileName
+                    : new CodexAppServerInstaller(Path.Combine(stateRootPath, "cache", "codex-cli")).Installed?.Executable;
+                return command is null
+                    ? AgentSubscriptionUsageReading.NoTool
+                    : await CodexAccountUsage.ReadAsync(expectedAccount: null, CodexAppServerHome.Resolve(Text(definition.CodexHome), stateRootPath, definition.ProviderKey), cancellationToken, command)
+                        .ConfigureAwait(false);
             case "copilot":
                 var source = Text(definition.AuthSource) ?? CopilotDirectAuthSources.GitHubDeviceFlow;
                 // A Copilot token of the environment comes without the GitHub account that has the quotas.

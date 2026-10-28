@@ -65,7 +65,9 @@ internal sealed class ProviderUsageService : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
         var http = _http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         _operations = new(
-            () => store.LoadGlobalProviderDefinitions(includeDisabled: true),
+            // The providers of a built-in plugin whose usage is read too (Codex CLI) are sections of their own type.
+            () => [.. store.LoadGlobalProviderDefinitions(includeDisabled: true),
+                .. store.LoadGlobalExternalProviders().Select(ConfiguredProviderUsage.DescribePluginProvider).OfType<CodeAltaProviderDocument>()],
             (definition, cancellationToken) => ConfiguredProviderUsage.ReadAsync(definition, stateRoot, http, cancellationToken));
         _epoch = epoch;
     }
@@ -174,7 +176,7 @@ internal sealed class ProviderUsageService : IDisposable
     // The tool a provider type is asked through: its own command-line program.
     private static string? ToolOf(string? providerType) => providerType switch
     {
-        "codex" => "Codex CLI",
+        "codex" or "codex-cli" => "Codex CLI",
         "claude-code" => "Claude Code",
         _ => null,
     };

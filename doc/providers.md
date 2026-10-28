@@ -13,6 +13,7 @@ provider and come back (see [runtime](runtime.md)).
 | `src/CodeAlta.Agent.Copilot`, `.Xai` | `copilot` and `xai`: direct HTTP with their own sign-in, dispatched to the executors above |
 | `src/CodeAlta.Agent.Claude` | `claude-code`: the Claude Code CLI as a child process |
 | `src/CodeAlta.Acp`, `src/CodeAlta.Plugin.Acp` | The ACP protocol and client; the built-in plugin that adds the type `acp` |
+| `src/CodeAlta.CodexAppServer`, `src/CodeAlta.Plugin.CodexCli` | The Codex app-server protocol, client and pinned release; the built-in plugin that adds the type `codex-cli` |
 | `src/CodeAlta.Hosting` | Composition: `ConfiguredModelProviderRegistryBuilder`, sign-in and inspection workflows (`Configured*`), `PluginModelProviderTypes`, bundled `ProviderDefaults/provider_defaults.toml` |
 | `src/CodeAlta.Catalog` | The `[providers.*]` configuration (`CodeAltaConfigStore`) |
 
@@ -192,6 +193,34 @@ schema types, JSON-RPC transport, client, process, registry and installer) and n
 - Regenerate the protocol types from the ACP repository cloned beside this one:
   `dotnet run --project src/CodeAlta.Acp.Generator -- --acp-repo-dir ../agent-client-protocol --surface unstable --source-ref <tag>`
   (`unstable` because CodeAlta uses `session/resume`, `session/close` and `systemPrompt`).
+
+#### Codex CLI
+
+The built-in plugin `codex-cli` runs OpenAI's standalone `codex-app-server` (JSON-RPC over stdio), so that the model
+loop is Codex's and its sign-in is Codex's own: ChatGPT Business workspaces refuse the sign-in of the `codex` type
+(`3p_delegated_access_policy_denied`), not Codex's. `src/CodeAlta.CodexAppServer` holds the protocol only and no
+CodeAlta runtime type; `src/CodeAlta.Plugin.CodexCli` uses only the public plugin contracts and the harness toolkit.
+
+- **The release is pinned** (`CodexPinnedRelease`): the latest stable release when it was pinned, never a pre-release,
+  with the SHA-256 of the `codex-app-server-package-<target>.tar.gz` of each platform. It is downloaded the first time
+  a provider without `command` needs it, into `~/.alta/cache/codex-cli` (`CodexAppServerInstaller`, over
+  `PinnedDownloader`). The protocol types are generated from the schema Codex checks in at the same tag, scoped to the
+  methods of `codex-app-server-methods.json`; enums and unions accept the values and kinds a later Codex adds. Bump
+  both together: `dotnet run --project src/CodeAlta.CodexAppServer.Generator -- --codex-repo-dir ../codex --source-ref <tag>`,
+  then the live tests (`CodexCliLiveTests`, `CODEALTA_TEST_CODEX_CLI`, `CODEALTA_TEST_CODEX_HOME`, `CODEALTA_TEST_CODEX_TURN=1`).
+- **A home of CodeAlta's per provider** (`CODEX_HOME`, `CodexAppServerHome`), never `~/.codex`: CodeAlta writes its
+  `config.toml` before each start (`CodexCliHomeConfig`), with Codex's sandbox, sub-agents, skills, plugins, hooks,
+  apps, memories and reviewer off. What depends on the session goes with each `thread/start`, `thread/resume` and
+  `thread/fork`, since Codex does not keep it: the MCP server of the session's tools (the harness loopback endpoint,
+  approved by CodeAlta), web search, and the trust of the folder (`untrusted`: CodeAlta gives AGENTS.md itself).
+- **CodeAlta adds, never replaces**: its instructions are `developerInstructions`, part of the turn context Codex
+  rebuilds at each turn and after a compaction; a change goes with the next prompt (`HarnessInstructions.CreateUpdate`).
+- **One app-server and one thread per session** (`CodexCliSession`), resumed in a new process, forked at the turn a
+  rewind or a fork ends (`CodexCliProviderState` keeps the last turns), or started again told the conversation. A
+  message sent during a turn steers it (`turn/steer`). The approvals of Codex are answered by the permission mode or
+  the user (`untrusted` asks for what is not plainly safe, `never` in `bypassPermissions`).
+- **The sign-in runs in CodeAlta**: `account/login/start` (browser or device code) in a short-lived app-server of the
+  home, shown to the user through the prompt of `IPluginProviderAccount.SignInAsync`.
 
 #### Provider types of plugins
 

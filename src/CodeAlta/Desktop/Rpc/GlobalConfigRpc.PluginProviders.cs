@@ -443,22 +443,75 @@ internal sealed partial class GlobalConfigService
                 method.TerminalEnvironment is { Count: > 0 } environment ? [.. environment.Take(32).Select(static pair => new GlobalConfigPluginMapEntry(Bound(pair.Key)!, Bound(pair.Value)!))] : null))]);
     }
 
-    /// <summary>Signs a provider of a plugin in with a method that is not a terminal command, and tests it again.</summary>
+    /// <summary>Opens an https address of a sign-in in the browser of the system; tests replace it.</summary>
+    internal Func<Uri, bool> OpenSignInBrowser { get; init; } = ProviderLoginService.OpenBrowser;
+
+    /// <summary>
+    /// Signs a provider of a plugin in with a method that is not a terminal command. The stream gives what the user
+    /// opens, once the sign-in has it (the browser is opened on its address), then how the sign-in ended; closing the
+    /// stream cancels the sign-in.
+    /// </summary>
     [NeoRpcMethod("pluginProviderSignIn")]
-    public async Task<GlobalConfigPluginSignInResponse> PluginProviderSignInAsync(GlobalConfigPluginSignInRequest request, CancellationToken cancellationToken)
+    public NeoRpcChannel<GlobalConfigPluginSignInEvent> PluginProviderSignIn(GlobalConfigPluginSignInRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (_store is null) return new("unavailable", null);
-        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null);
-        if (FindPluginProvider(request.Key) is not { Contribution.Account: { } account } found || string.IsNullOrWhiteSpace(request.MethodId)) return new("not_found", null);
+        return new(SignInAsync(request, cancellationToken), DesktopJsonContext.Default.GlobalConfigPluginSignInEvent);
+    }
+
+    internal async IAsyncEnumerable<GlobalConfigPluginSignInEvent> SignInAsync(GlobalConfigPluginSignInRequest request, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (_store is null) { yield return GlobalConfigPluginSignInEvent.Failed("unavailable", null); yield break; }
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) { yield return GlobalConfigPluginSignInEvent.Failed("stale_epoch", null); yield break; }
+        if (FindPluginProvider(request.Key) is not { Contribution.Account: { } account } found || string.IsNullOrWhiteSpace(request.MethodId))
+        {
+            yield return GlobalConfigPluginSignInEvent.Failed("not_found", null);
+            yield break;
+        }
+
+        var events = Channel.CreateUnbounded<GlobalConfigPluginSignInEvent>(new UnboundedChannelOptions { SingleReader = true });
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var prompts = 0;
+        var work = Task.Run(async () =>
+        {
+            try
+            {
+                await account.SignInAsync(found.Settings, request.MethodId!, (prompt, _) =>
+                {
+                    if (Interlocked.Increment(ref prompts) > 4) return ValueTask.CompletedTask;
+                    var address = prompt.Uri.IsAbsoluteUri ? prompt.Uri.AbsoluteUri : null;
+                    // A device code is entered on the page: the browser is opened on it all the same.
+                    var opened = address is not null && prompt.Uri.Scheme == Uri.UriSchemeHttps && OpenSignInBrowser(prompt.Uri);
+                    events.Writer.TryWrite(new GlobalConfigPluginSignInEvent("prompt", address?.Length <= 4096 ? address : null, Bound(prompt.UserCode), prompt.ExpiresAt, opened, null, null));
+                    return ValueTask.CompletedTask;
+                }, cancellation.Token).ConfigureAwait(false);
+                events.Writer.TryWrite(new GlobalConfigPluginSignInEvent("completed", null, null, null, false, null, "ok"));
+            }
+            catch (OperationCanceledException)
+            {
+                events.Writer.TryWrite(GlobalConfigPluginSignInEvent.Failed("canceled", null));
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                events.Writer.TryWrite(GlobalConfigPluginSignInEvent.Failed("failed", Bound(exception.Message)));
+            }
+            finally
+            {
+                events.Writer.TryComplete();
+            }
+        }, CancellationToken.None);
+
         try
         {
-            await account.SignInAsync(found.Settings, request.MethodId!, cancellationToken).ConfigureAwait(false);
-            return new("ok", null);
+            await foreach (var item in events.Reader.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                yield return item;
+            }
         }
-        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+        finally
         {
-            return new("failed", Bound(exception.Message));
+            // Closing the stream cancels the sign-in: the plugin frees what it waited with (a port of the browser flow).
+            cancellation.Cancel();
+            await work.ConfigureAwait(false);
         }
     }
 
@@ -647,5 +700,15 @@ internal sealed record GlobalConfigPluginSignInMethod(string Id, string Label, s
 
 internal sealed record GlobalConfigPluginSignInRequest(string? ExpectedEpoch, string? Key, string? MethodId);
 
-/// <param name="Status"><c>ok</c>, <c>failed</c>, <c>not_found</c>, <c>unavailable</c> or <c>stale_epoch</c>.</param>
-internal sealed record GlobalConfigPluginSignInResponse(string Status, string? Message);
+/// <summary>One step of the sign-in of a provider of a plugin.</summary>
+/// <param name="Kind"><c>prompt</c>: what the user opens, and enters for a device code; <c>completed</c> or <c>failed</c>: how it ended.</param>
+/// <param name="Url">The address of the sign-in, for a prompt.</param>
+/// <param name="UserCode">The code to enter at <paramref name="Url"/>, for a device flow.</param>
+/// <param name="ExpiresAt">When the code expires, or null.</param>
+/// <param name="BrowserOpened">Whether the browser was opened on <paramref name="Url"/>.</param>
+/// <param name="Message">Why the sign-in failed, as the plugin says it.</param>
+/// <param name="Status"><c>ok</c>, <c>failed</c>, <c>canceled</c>, <c>not_found</c>, <c>unavailable</c> or <c>stale_epoch</c> once it ended.</param>
+internal sealed record GlobalConfigPluginSignInEvent(string Kind, string? Url, string? UserCode, DateTimeOffset? ExpiresAt, bool BrowserOpened, string? Message, string? Status)
+{
+    public static GlobalConfigPluginSignInEvent Failed(string status, string? message) => new("failed", null, null, null, false, message, status);
+}

@@ -20,11 +20,12 @@ internal static class SandboxedProviders
     public static bool RunsCodeAltaTools(string? providerType)
         => providerType is not null && (CodeAltaDrivenTypes.Contains(providerType) || providerType.StartsWith("openai-", StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Gets whether a provider that runs its own tools starts its process in the sandbox of the session (Claude Code, ACP agents).</summary>
+    /// <summary>Gets whether a provider that runs its own tools starts its process in the sandbox of the session (Claude Code, ACP agents, Codex CLI).</summary>
     /// <param name="providerType">The type of the provider, or null when it is not known.</param>
     /// <returns>True for the types whose process the sandbox starts.</returns>
     public static bool StartsInSandbox(string? providerType)
-        => string.Equals(providerType, "claude-code", StringComparison.OrdinalIgnoreCase) || string.Equals(providerType, "acp", StringComparison.OrdinalIgnoreCase);
+        => string.Equals(providerType, "claude-code", StringComparison.OrdinalIgnoreCase) || string.Equals(providerType, "acp", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(providerType, "codex-cli", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Gets whether a sandboxed session can run on a provider type: its tools run in the sandbox either way.</summary>
     /// <param name="providerType">The type of the provider, or null when it is not known.</param>
