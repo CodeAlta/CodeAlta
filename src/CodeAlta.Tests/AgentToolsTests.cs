@@ -1001,6 +1001,49 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public async Task ShellCommandTool_MaxOutputTokens_LowersTheBudgetOfTheOutput_AndNeverRaisesIt()
+    {
+        using var temp = TestTempDirectory.Create();
+        var outputFolder = Path.Combine(temp.Path, "tool-output");
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(new AgentBuiltInToolOptions
+            {
+                ProviderId = ModelProviderIds.OpenAIResponses,
+                SessionId = "session-1",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                MaxShellCommandOutputCharacters = 8_000,
+                ResolveToolOutputDirectoryAsync = _ => ValueTask.FromResult<string?>(outputFolder),
+            })
+            .Single(static tool => tool.Spec.Name == "shell_command");
+        StringAssert.Contains(tool.Spec.InputSchema.GetProperty("properties").GetProperty("max_output_tokens").GetProperty("description").GetString(), "8000 characters");
+        var command = OperatingSystem.IsWindows()
+            ? "1..2000 | ForEach-Object { \"line-$_\" }"
+            : "seq -f 'line-%g' 1 2000";
+
+        async Task<AgentToolResult> RunAsync(int? maxOutputTokens)
+        {
+            using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":60000{{(maxOutputTokens is { } tokens ? $",\"max_output_tokens\":{tokens}" : "")}}}""");
+            return await tool.Handler(
+                new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", $"call-{maxOutputTokens}", tool.Spec.Name, args.RootElement.Clone()),
+                CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(90)).ConfigureAwait(false);
+        }
+
+        var lowered = Assert.IsInstanceOfType<AgentToolResultItem.Text>((await RunAsync(500)).Items.Single()).Value;
+        var raised = await RunAsync(100_000);
+        var floor = Assert.IsInstanceOfType<AgentToolResultItem.Text>((await RunAsync(1)).Items.Single()).Value;
+
+        Assert.IsLessThanOrEqualTo(2_000, lowered.Length, "500 tokens are about 2,000 characters");
+        StringAssert.Contains(lowered, "line-1" + Environment.NewLine);
+        Assert.IsTrue(lowered.TrimEnd().Contains("line-2000", StringComparison.Ordinal));
+        StringAssert.Contains(lowered, "output_truncated: ");
+        var whole = Assert.IsInstanceOfType<AgentToolResultItem.Text>(raised.Items.Single()).Value;
+        Assert.IsLessThanOrEqualTo(8_000, whole.Length, "a budget above the default does not raise it");
+        StringAssert.Contains(raised.Display, "line-1000", "the user still sees the whole output");
+        Assert.IsLessThanOrEqualTo(1_000, floor.Length);
+        StringAssert.Contains(floor, "output_truncated: ", "the least budget still names the file of the whole output");
+    }
+
+    [TestMethod]
     public async Task ShellCommandTool_LeavesAShortOutputWhole()
     {
         using var temp = TestTempDirectory.Create();

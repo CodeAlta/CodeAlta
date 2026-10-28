@@ -35,6 +35,9 @@ public static partial class AgentBuiltInToolFactory
         "Rename or move a file or directory. Will not overwrite an existing destination.";
     private const string ApplyPatchToolDescription =
         "Use the `apply_patch` tool to edit files.";
+    private const string ShellMaxOutputTokensArgument = "max_output_tokens";
+    // The least output a call of shell_command can ask for: the head and the tail of each stream, and the note.
+    private const int MinimumShellCommandOutputCharacters = 1_000;
     private const string ViewImageToolName = "view_image";
     private const string ViewImageToolDescription =
         "Look at a local image file, such as a screenshot, a diagram, a mockup or a photo. The image is attached to the result so that you see it. PNG, JPEG, GIF, WebP and BMP files are supported; a large image is scaled down. Use this tool instead of read_file for image files.";
@@ -214,7 +217,7 @@ public static partial class AgentBuiltInToolFactory
                 new AgentToolSpec(
                     "shell_command",
                     $"Execute a local shell command or short shell script using the platform shell, subject to host approval. Some hosts may auto-approve. Returns exit_code, working_directory, stdout, and stderr as emitted by the shell and child processes; child commands may still include ANSI/control sequences. On Windows, pwsh runs with -NoProfile and preserves the final external command exit code when that command fails.{DescribeShellCommandOutputLimit(options)}",
-                    CreateShellCommandSchema()) { OutputSchema = ShellCommandOutputSchema },
+                    CreateShellCommandSchema(options)) { OutputSchema = ShellCommandOutputSchema },
                 (invocation, cancellationToken) => ShellCommandAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
@@ -899,10 +902,11 @@ public static partial class AgentBuiltInToolFactory
         var structured = CreateShellCommandValue(process.ExitCode, stdout, stderr, workdir);
         // A long output keeps its head and tail for the model; the user and a script have the whole of it.
         string? display = null;
-        if (options.MaxShellCommandOutputCharacters > 0 && output.Length > options.MaxShellCommandOutputCharacters)
+        var limit = ShellCommandOutputLimit(options, GetOptionalInt(invocation.Arguments, ShellMaxOutputTokensArgument));
+        if (limit > 0 && output.Length > limit)
         {
             display = output;
-            output = await CutShellCommandOutputAsync(options, invocation.ToolCallId, process.ExitCode, stdout, stderr, workdir, output, cancellationToken)
+            output = await CutShellCommandOutputAsync(options, limit, invocation.ToolCallId, process.ExitCode, stdout, stderr, workdir, output, cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -918,8 +922,22 @@ public static partial class AgentBuiltInToolFactory
         return new AgentToolResult(true, [new AgentToolResultItem.Text(output)]) { Structured = structured, Display = display };
     }
 
+    // The characters of the output the model is given: the limit of the options, which the call can lower (never raise)
+    // with a budget in tokens of about four characters, down to a floor that still shows the head, the tail and the note.
+    private static int ShellCommandOutputLimit(AgentBuiltInToolOptions options, int? maxOutputTokens)
+    {
+        if (maxOutputTokens is not > 0)
+        {
+            return options.MaxShellCommandOutputCharacters;
+        }
+
+        var asked = (int)Math.Clamp(maxOutputTokens.Value * 4L, MinimumShellCommandOutputCharacters, int.MaxValue);
+        return options.MaxShellCommandOutputCharacters > 0 ? Math.Min(asked, options.MaxShellCommandOutputCharacters) : asked;
+    }
+
     private static async Task<string> CutShellCommandOutputAsync(
         AgentBuiltInToolOptions options,
+        int limit,
         string toolCallId,
         int exitCode,
         string stdout,
@@ -943,7 +961,7 @@ public static partial class AgentBuiltInToolFactory
 
         var overhead = FormatShellCommandOutput(exitCode, string.Empty, string.Empty, workdir, note).Length;
         // Each marker of a cut takes about 80 characters of the budget.
-        var budget = Math.Max(options.MaxShellCommandOutputCharacters - overhead - 200, 0);
+        var budget = Math.Max(limit - overhead - 200, 0);
         var stdoutBudget = budget;
         var stderrBudget = budget;
         if (stdout.Length + stderr.Length > budget)
@@ -1962,21 +1980,27 @@ public static partial class AgentBuiltInToolFactory
             }
             """);
 
-    private static JsonElement CreateShellCommandSchema()
+    private static JsonElement CreateShellCommandSchema(AgentBuiltInToolOptions options)
         => ParseSchema(
-            """
+            $$"""
             {
               "type": "object",
               "properties": {
                 "command": { "type": "string", "description": "Shell command or short shell script to execute." },
                 "workdir": { "type": "string", "description": "Optional working directory override. Defaults to the session working directory." },
                 "timeoutMs": { "type": "integer", "description": "Optional timeout in milliseconds, covering shell execution and output collection. Omit for no deadline.", "minimum": 1 },
-                "login": { "type": "boolean", "description": "Whether to use login-shell semantics on Unix shells that support it. Ignored on Windows, where pwsh always runs with -NoProfile for predictable output." }
+                "login": { "type": "boolean", "description": "Whether to use login-shell semantics on Unix shells that support it. Ignored on Windows, where pwsh always runs with -NoProfile for predictable output." },
+                "{{ShellMaxOutputTokensArgument}}": { "type": "integer", "description": "{{DescribeShellMaxOutputTokens(options)}}", "minimum": 1 }
               },
               "required": ["command"],
               "additionalProperties": false
             }
             """);
+
+    private static string DescribeShellMaxOutputTokens(AgentBuiltInToolOptions options)
+        => options.MaxShellCommandOutputCharacters > 0
+            ? FormattableString.Invariant($"Optional budget of the output you are given, in tokens of about 4 characters, to get less than the default of {options.MaxShellCommandOutputCharacters} characters; it cannot raise it. A longer output keeps the head and the tail of each stream, and the whole output is saved to a file the result names.")
+            : "Optional budget of the output you are given, in tokens of about 4 characters. A longer output keeps the head and the tail of each stream, and the whole output is saved to a file the result names.";
 
     private static bool IsSupportedWebContentType(string mediaType)
         => mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ||
