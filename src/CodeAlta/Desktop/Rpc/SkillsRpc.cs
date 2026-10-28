@@ -127,14 +127,26 @@ internal sealed partial class SkillsService
             var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false)).Skills;
             var (status, skill) = FindSkill(descriptors, request, source);
             if (skill is null) return Failed(status);
-            // The document lookup refuses a skill file reached through a link.
-            var document = await _management.GetFileDocumentAsync(skill.SkillFilePath, null, project.Root, cancellationToken).ConfigureAwait(false);
+            // A skill reached through a link (a library shared with other tools) is shown, read where the link leads; the
+            // document lookup of the editor refuses it, so it is not given to the code editor: it is edited in its own folder.
+            var linked = false;
+            string path;
+            try
+            {
+                path = (await _management.GetFileDocumentAsync(skill.SkillFilePath, null, project.Root, cancellationToken).ConfigureAwait(false)).FullPath;
+            }
+            catch (IOException)
+            {
+                (linked, path) = (true, skill.SkillFilePath);
+            }
+
             string? content = null;
             var truncated = false;
-            var file = new FileInfo(document.FullPath);
+            var file = new FileInfo(path);
+            if (file.LinkTarget is not null && file.ResolveLinkTarget(returnFinalTarget: true) is FileInfo target) file = target;
             if (file.Exists && file.Length <= MaximumSkillFileBytes)
             {
-                content = await File.ReadAllTextAsync(document.FullPath, cancellationToken).ConfigureAwait(false);
+                content = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
                 truncated = content.Length > MaximumContentLength;
                 if (truncated) content = content[..(char.IsHighSurrogate(content[MaximumContentLength - 1]) ? MaximumContentLength - 1 : MaximumContentLength)];
             }
@@ -146,12 +158,12 @@ internal sealed partial class SkillsService
                 content, truncated || content is null && file.Exists,
                 [.. related.Take(MaximumRelatedFiles).Select(static item => new SkillsRelatedFile(Bound(item.Category, 64), Bound(item.RelativePath, 512)))],
                 [.. skill.Diagnostics.Take(MaximumDiagnostics).Select(static item => new SkillsDiagnostic(item.Severity.ToString(), Bound(item.Code, 64), Bound(item.Message, MaximumMessageLength)))],
-                Math.Max(0, related.Count - MaximumRelatedFiles), EditorFolderOf(skill, descriptors, request.ProjectId, project.Root));
+                Math.Max(0, related.Count - MaximumRelatedFiles), linked ? null : EditorFolderOf(skill, descriptors, request.ProjectId, project.Root)) { Linked = linked };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             Log(exception, "The details of a skill could not be read.");
-            return Failed("read_failed"); // Includes a skill file that is reached through a link.
+            return Failed("read_failed");
         }
     }
 
@@ -280,6 +292,10 @@ internal sealed partial class SkillsService
             {
                 return new("read_only", 0, null);
             }
+
+            // As for the details, the document lookup refuses a skill reached through a link: discovery follows links,
+            // management does not act through them.
+            _ = await _management.GetFileDocumentAsync(skill.SkillFilePath, null, project.Root, cancellationToken).ConfigureAwait(false);
         }
         catch (InvalidDataException)
         {
@@ -451,7 +467,11 @@ internal sealed record SkillsDetailRequest(string? ExpectedEpoch, string? Projec
 /// </summary>
 internal sealed record SkillsDetailResponse(string Status, string? Name, string? Source, string? SkillFilePath, string? SkillRootPath, string? SourceId,
     string? ShadowedBy, bool ModelVisible, string? License, string? Compatibility, string? AllowedTools, string? Content, bool ContentTruncated,
-    IReadOnlyList<SkillsRelatedFile> RelatedFiles, IReadOnlyList<SkillsDiagnostic> Diagnostics, int RelatedFilesOmitted, string? Folder = null);
+    IReadOnlyList<SkillsRelatedFile> RelatedFiles, IReadOnlyList<SkillsDiagnostic> Diagnostics, int RelatedFilesOmitted, string? Folder = null)
+{
+    // The skill is reached through a symbolic link: it is shown, and edited or removed in its own folder only.
+    public bool Linked { get; init; }
+}
 internal sealed record SkillsRelatedFile(string Category, string Path);
 internal sealed record SkillsDiagnostic(string Severity, string Code, string Message);
 internal sealed record SkillsSetEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Name, bool Enabled);

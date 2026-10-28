@@ -14,7 +14,7 @@ text from outside: a plugin cannot break the window it runs in, and nothing a pl
 | `src/CodeAlta.Plugins.Abstractions` | The public authoring API: `PluginBase`, contribution records, contexts, `IPluginServices`, `PluginHtml`, `PluginScript`, canvas RPC. No dependency on a frontend, NeoAstra or terminal UI |
 | `src/CodeAlta.Plugins.Tui` | Optional terminal authoring types (`PluginTui`: native visuals, dialogs, prompt-editor hosts, key mapping) |
 | `src/CodeAlta.Plugins` | Discovery, generated build files, builds, loading, activation, the contribution registry and adapters, diagnostics, reload (`PluginRuntimeManager`), state and database services, `PluginApiReference` |
-| `src/CodeAlta.Orchestration/Runtime/Plugins` | `PluginOrchestrationBridge`: plugin tools, prompt parts and hooks for agent runs |
+| `src/CodeAlta.Orchestration/Runtime/Plugins` | `PluginOrchestrationBridge`: plugin tools, prompt parts and hooks for agent runs, the tool hooks of sessions; `PluginRunEndHooks` |
 | `src/CodeAlta.Hosting` | `PluginModelProviderTypes`: providers of plugin types in the provider registry |
 | `src/CodeAlta/Desktop` | The desktop host: `DesktopPlugins` (built-ins), `DesktopPluginUi`, `DesktopCanvases`, `DesktopCanvasRpc`, `DesktopPluginModules` |
 | `src/CodeAlta/frontend/src` | The page side: `PluginHtml.tsx`, `pluginHtmlSanitizer.ts`, `pluginScript/`, `lent/`, `canvases/`, `pluginButtons/` |
@@ -71,7 +71,7 @@ Contribution areas, all virtual methods of `PluginBase`:
 
 | For agents | For the window |
 | --- | --- |
-| Agent tools (`AgentTool`), `alta` command roots (`GetAltaCommands`), static and dynamic prompt parts, final instruction processors, before-run, tool-call and tool-result hooks, agent-event observers, model provider types (`GetModelProviders`), resource roots (skills), issue trackers (`IIssueTrackerSource`) | Commands with key bindings, status items and region content, dialogs, prompt pickers, buttons, canvases, landing cards, timeline cards (session-event projections), command-line options and prompt processors (terminal) |
+| Agent tools (`AgentTool`), `alta` command roots (`GetAltaCommands`), static and dynamic prompt parts, final instruction processors, prompt-submit, before-run, tool-call, tool-result and run-end hooks, agent-event observers, model provider types (`GetModelProviders`), resource roots (skills), issue trackers (`IIssueTrackerSource`) | Commands with key bindings, status items and region content, dialogs, prompt pickers, buttons, canvases, landing cards, timeline cards (session-event projections), command-line options (terminal) |
 
 Two rules protect the host from a plugin:
 
@@ -85,6 +85,54 @@ Two rules protect the host from a plugin:
 Instruction processors run after the whole prompt is composed and before it is hashed and sent; the host records what
 each changed in the prompt manifest, without the text. They are an audit and extensibility hook for trusted code, not a
 security boundary.
+
+### Tool hooks
+
+`OnToolCallAsync` and `OnToolResultAsync` see every tool call of a session, whoever provides the tool. The session owns
+the one place they run: `AgentSession` wraps each tool of its table with the `AgentToolInterceptor` of its options
+(built-ins, plugin and MCP tools, tools registered during a run, the nested calls of Code Mode, the tools of CodeAlta an
+agent CLI calls over MCP), and `SessionRuntimeService` makes it from `PluginOrchestrationBridge.CreateToolInterceptor`
+for every host. A plugin tool's own wrapper keeps only its checks (`StartsPrograms`, `SafeInSandbox`), so its hooks run
+once. A turn executor whose agent runs its own tools asks the same interceptor before them: Claude Code from a
+`PreToolUse` callback for every tool (block only, the model reads why), an ACP agent when it asks permission (block
+only; the protocol carries no reason). Their results are not hooked.
+
+The order is an invariant: **plugin before-hooks → host guards (`AgentCommandGuard`, `AgentWriteGuard`, disabled
+tools, `StartsPrograms`) → permission prompt → sandbox router → the tool → plugin after-hooks.** The guards and the
+prompt live in the handlers of the tools, below the interceptor, so arguments a hook replaces go through all of them: a
+plugin can make the policy stricter, never looser. That is also why there is no hook that answers a permission prompt:
+one that could allow would be the only way around the guards.
+
+The adapter calls only the plugins that override a hook (read once at activation), one after the other: the first block
+wins, replaced arguments are the next hook's input, each result hook sees the result the one before left, and details a
+hook attaches go on `AgentToolResult.Details` under its plugin id, recorded with the call and never sent to the model.
+Each hook runs with the plugin's `HookTimeout` and its own failure handling: a hook that throws or times out is a
+diagnostic of its plugin and does not decide (fail open), unless the plugin declares `ToolHooksFailClosed`, for checks
+that must not be skipped. A hook the host stops waiting for is left running and observed, never awaited.
+
+`OnAgentRunEndedAsync` follows the published events (`PluginRunEndHooks`, beside `RuntimePluginAgentEventObserver`): a
+run that ended with its idle event, never one that failed or was stopped, asks the plugins, and the first prompt is
+delivered as a host prompt of provenance `plugin`. A session is continued at most three times in a row; a prompt of any
+other provenance resets the count, so a plugin cannot keep a session running by itself. The hooks run beside the events,
+never in their way.
+
+The prompt-submit hooks (`GetPromptProcessors`, `OnPromptSubmittingAsync`) run where a prompt of the user is sent: the
+owned send of `OwnedSessionCommandService` (the desktop, the command line), its steering of a running turn (the
+desktop) and the terminal's own dispatch. They see a prompt only when it has no provenance, that is when the user typed
+it: a host prompt (a reminder, a job result, a fallback, a run-end continuation) never goes through them, so a plugin's
+continuation is not rewritten in a loop. They run before the prompt's references are resolved and before anything is saved or attached;
+a prompt they handle or cancel settles its send or its steer with `plugin_handled` or `plugin_cancelled` and the
+plugin's message, and their prompt parts join those of the before-run hooks for that run only: a steer carries its text
+alone, so the instructions of the turn it joins do not change.
+
+The compaction hooks (`GetCompactionContributions`) run around a manual compaction only: the desktop runs them in
+`OwnedSessionCommandService`, the TUI in `PluginHostBridge`. The before-hooks come first; in the desktop a cancel
+settles the compaction with a stable code (`compact_plugin_cancelled`) while its reason is recorded in the journal. In
+both, the instruction text goes with the compaction (`AgentCompactionOptions`) to the summary request, or after the
+`/compact` of an agent that compacts its own context, never into the instructions of the session; the after-hooks run
+once it settled (in the desktop before its receipt does) with the summary of `AgentCompactionOutcome`. A compaction a
+session makes by itself inside a run is not hooked: it recovers a context that is full, so it can neither wait for a
+plugin nor be refused.
 
 ## Source plugins: build and load
 

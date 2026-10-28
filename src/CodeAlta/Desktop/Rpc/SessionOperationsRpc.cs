@@ -20,8 +20,6 @@ internal sealed class SessionOperationsService
     private readonly Func<OwnedTextSteerRequest, CancellationToken, OwnedSessionCommandAdmission>? _steer;
     private readonly Func<OwnedCompactRequest, CancellationToken, OwnedSessionCommandAdmission>? _compact;
     private readonly Func<OwnedAbortRunRequest, CancellationToken, OwnedSessionCommandAdmission>? _abortRun;
-    private readonly Func<OwnedTextQueueRequest, CancellationToken, OwnedSessionCommandAdmission>? _queue;
-    private readonly Func<OwnedCancelQueueRequest, CancellationToken, OwnedSessionCommandAdmission>? _cancelQueue;
     private readonly Dictionary<Guid, LinkedListNode<OwnedSessionCommandReceipt>> _receipts = [];
     // In the order of their admission, the oldest first.
     private readonly LinkedList<OwnedSessionCommandReceipt> _kept = new();
@@ -49,8 +47,6 @@ internal sealed class SessionOperationsService
         _steer = commands.AdmitSteer;
         _compact = commands.AdmitCompact;
         _abortRun = commands.AdmitAbortRun;
-        _queue = commands.AdmitQueue;
-        _cancelQueue = commands.AdmitCancelQueue;
         _choices = commands.GetObservedSelectionChoicesAsync;
         _describeShared = commands.GetSharedConversationAsync;
         _releaseShared = commands.ReleaseSharedConversationAsync;
@@ -87,14 +83,6 @@ internal sealed class SessionOperationsService
     internal SessionOperationsService(string epoch, Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send,
         Func<OwnedAbortRequest, OwnedSessionCommandAdmission> abort, Func<OwnedTextSteerRequest, OwnedSessionCommandAdmission>? steer,
         Func<OwnedCompactRequest, OwnedSessionCommandAdmission> compact, Func<OwnedAbortRunRequest, OwnedSessionCommandAdmission> abortRun)
-        : this(epoch, send, abort, steer, compact, abortRun,
-            _ => throw new InvalidOperationException("No queue callback configured."),
-            _ => throw new InvalidOperationException("No queue cancellation callback configured.")) { }
-
-    internal SessionOperationsService(string epoch, Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send,
-        Func<OwnedAbortRequest, OwnedSessionCommandAdmission> abort, Func<OwnedTextSteerRequest, OwnedSessionCommandAdmission>? steer,
-        Func<OwnedCompactRequest, OwnedSessionCommandAdmission> compact, Func<OwnedAbortRunRequest, OwnedSessionCommandAdmission> abortRun,
-        Func<OwnedTextQueueRequest, OwnedSessionCommandAdmission> queue, Func<OwnedCancelQueueRequest, OwnedSessionCommandAdmission> cancelQueue)
     {
         _epoch = epoch;
         _send = (request, _) => send(request);
@@ -102,8 +90,6 @@ internal sealed class SessionOperationsService
         _steer = steer is null ? null : (request, _) => steer(request);
         _compact = (request, _) => compact(request);
         _abortRun = (request, _) => abortRun(request);
-        _queue = (request, _) => queue(request);
-        _cancelQueue = (request, _) => cancelQueue(request);
     }
 
     [NeoRpcMethod("send")]
@@ -675,46 +661,6 @@ internal sealed class SessionOperationsService
         }
     }
 
-    [NeoRpcMethod("queue")]
-    public SessionAdmission Queue(SessionQueueRequest request, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        lock (_gate)
-        {
-            var denied = CheckEpoch(request.ExpectedEpoch);
-            if (denied is not null) return new(denied, _epoch, null);
-            if (!Identity(request.ClientRequestId, 256) || !Identity(request.SessionId, 256)
-                || !CanonicalGuid(request.ExpectedRuntimeInstanceId, out var runtime) || runtime == Guid.Empty
-                || !long.TryParse(request.ExpectedAttachmentGeneration, NumberStyles.None, CultureInfo.InvariantCulture, out var attachment)
-                || attachment <= 0 || attachment.ToString(CultureInfo.InvariantCulture) != request.ExpectedAttachmentGeneration
-                || !Identity(request.Text, 32768, trim: false))
-                return new("invalid_request", _epoch, null);
-            cancellationToken.ThrowIfCancellationRequested();
-            try { return Retain(_queue!(new(request.ClientRequestId, request.SessionId, runtime, attachment, request.Text), cancellationToken)); }
-            catch (ArgumentException) { return new("invalid_request", _epoch, null); }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception) { return new("admission_failed", _epoch, null); }
-        }
-    }
-
-    [NeoRpcMethod("cancelQueue")]
-    public SessionAdmission CancelQueue(SessionCancelQueueRequest request, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        lock (_gate)
-        {
-            var denied = CheckEpoch(request.ExpectedEpoch);
-            if (denied is not null) return new(denied, _epoch, null);
-            if (!Identity(request.ClientRequestId, 256) || !CanonicalGuid(request.TargetOperationId, out var target) || target == Guid.Empty)
-                return new("invalid_request", _epoch, null);
-            cancellationToken.ThrowIfCancellationRequested();
-            try { return Retain(_cancelQueue!(new(request.ClientRequestId, target), cancellationToken)); }
-            catch (ArgumentException) { return new("invalid_request", _epoch, null); }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception) { return new("admission_failed", _epoch, null); }
-        }
-    }
-
     [NeoRpcMethod("receipts")]
     public SessionReceiptPage Receipts(SessionReceiptRequest request)
     {
@@ -776,20 +722,38 @@ internal sealed class SessionOperationsService
     private static SessionReceiptView ProjectReceipt(OwnedSessionCommandReceipt receipt)
     {
         var result = receipt.Completion.IsCompletedSuccessfully ? receipt.Completion.GetAwaiter().GetResult() : null;
-        // Completion must be sampled first: insertion settles before completion. A pending execution
-        // with a settled (even refused) insertion is a valid racing snapshot, never the reverse.
-        var insertion = receipt.QueueInsertion is { IsCompletedSuccessfully: true } task ? task.GetAwaiter().GetResult() : null;
         return new(receipt.ClientRequestId, receipt.SessionId, receipt.OperationId.ToString("D"), receipt.TargetOperationId?.ToString("D"),
             receipt.Kind.ToString(), result is null ? "pending" : "terminal", result?.Outcome.ToString(), result?.Code, result?.RunId?.ToString())
         {
-            QueueInsertion = receipt.Kind != OwnedSessionCommandKind.Queue ? null
-                : insertion is null ? new("pending", null, null) : new("terminal", insertion.Accepted, insertion.Code),
+            Message = result is { RunId: null, Message: { } message } ? ReceiptMessage(message) : null,
         };
     }
 
+    // What a plugin said of a send it answered itself, cut to the place a run id takes on the wire.
+    internal static string? ReceiptMessage(string message)
+    {
+        // A lone surrogate would make the whole row invalid on the wire.
+        var characters = message.ToCharArray();
+        for (var i = 0; i < characters.Length; i++)
+        {
+            if (!char.IsSurrogate(characters[i])) continue;
+            if (char.IsHighSurrogate(characters[i]) && i + 1 < characters.Length && char.IsLowSurrogate(characters[i + 1])) i++;
+            else characters[i] = '\uFFFD';
+        }
+        var text = new string(characters).Trim();
+        if (text.Length == 0) return null;
+        if (text.Length <= MaximumReceiptMessage) return text;
+        var cut = MaximumReceiptMessage - 1;
+        if (char.IsHighSurrogate(text[cut - 1])) cut--;
+        return string.Concat(text.AsSpan(0, cut).TrimEnd(), "…");
+    }
+
+    private const int MaximumReceiptMessage = 256;
+
     internal static SessionReceiptPage ProjectPage(string epoch, SessionReceiptView[] rows, int? next)
     {
-        // <=64 * 6400 + 8192 = 417792 bytes, below the 448 KiB response budget.
+        // <=64 * 6400 + 8192 = 417792 bytes, below the 448 KiB response budget. A row has a message only in place of a
+        // run id, of the same bound.
         // Worst-case escaping is six bytes per UTF-16 unit; each row includes property overhead.
         // The 8192 allowance covers page properties, escaped epoch, cursor and the RPC envelope.
         // The window's host sets no MaximumResultBytes (file reads are larger): this is validated payload accounting,
@@ -805,29 +769,8 @@ internal sealed class SessionOperationsService
         && (row.Outcome is null or "Completed" or "Cancelled" or "Failed")
         && (row.Code is null || Identity(row.Code, 64, trim: false))
         && (row.RunId is null || Identity(row.RunId, 256, trim: false))
-        && (row.Kind is "Queue" or "CancelQueue" ? ValidQueueRow(row)
-            : row.Kind is "Send" or "Abort" or "Steer" or "Compact" or "AbortRun" && row.QueueInsertion is null);
-
-    private static bool ValidQueueRow(SessionReceiptView row)
-    {
-        if (!CanonicalGuid(row.OperationId, out var operation) || operation == Guid.Empty) return false;
-        if (row.State == "pending" && (row.Outcome is not null || row.Code is not null || row.RunId is not null)) return false;
-        if (row.State == "terminal" && (row.Outcome is null || !Identity(row.Code, 64, trim: false))) return false;
-        if (row.Kind == "CancelQueue")
-            return row.QueueInsertion is null && row.RunId is null
-                && CanonicalGuid(row.TargetOperationId, out var target) && target != Guid.Empty && target != operation
-                && (row.State == "pending" || row.Outcome == "Failed"
-                    || row.Outcome == "Completed" && row.Code is "queue_cancellation_signalled" or "already_terminal");
-        if (row.TargetOperationId is not null || row.QueueInsertion is not { } insertion) return false;
-        if (insertion.State == "pending")
-            return row.State == "pending" && insertion.Accepted is null && insertion.Code is null;
-        if (insertion.State != "terminal" || insertion.Accepted is null || !Identity(insertion.Code, 64, trim: false)
-            || (insertion.Accepted.Value ? insertion.Code != "queue_accepted" : insertion.Code == "queue_accepted")) return false;
-        if (row.State == "pending") return true;
-        return row.Outcome == "Completed"
-            ? insertion.Accepted == true && row.Code == "queue_dispatched" && row.RunId is not null
-            : row.RunId is null && (row.Outcome == "Failed" || row.Outcome == "Cancelled" && row.Code == "queue_cancelled");
-    }
+        && (row.Message is null || row.RunId is null && Identity(row.Message, MaximumReceiptMessage))
+        && row.Kind is "Send" or "Abort" or "Steer" or "Compact" or "AbortRun";
 
     // Lowercase D format only. Guid parsing alone accepts padding and is not a wire bound.
     private static bool CanonicalGuid(string? value, out Guid parsed)
@@ -944,18 +887,16 @@ internal sealed record SessionCompactRequest(string ExpectedEpoch, string Client
     string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration);
 internal sealed record SessionAbortRunRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
     string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string ExpectedRunId);
-internal sealed record SessionQueueRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
-    string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string Text);
-internal sealed record SessionCancelQueueRequest(string ExpectedEpoch, string ClientRequestId, string TargetOperationId);
 internal sealed record SessionReceiptRequest(string ExpectedEpoch, int Offset);
 internal sealed record SessionAdmission(string Status, string? Epoch, SessionReceiptView? Receipt);
 internal sealed record SessionReceiptPage(string Status, string? Epoch, SessionReceiptView[] Rows, int? Next);
 internal sealed record SessionReceiptView(string ClientRequestId, string SessionId, string OperationId, string? TargetOperationId,
     string Kind, string State, string? Outcome, string? Code, string? RunId)
 {
-    public SessionQueueInsertionView? QueueInsertion { get; init; }
+    /// <summary>What a plugin said of a Send it handled or cancelled itself (<c>plugin_handled</c>, <c>plugin_cancelled</c>); left out otherwise.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Message { get; init; }
 }
-internal sealed record SessionQueueInsertionView(string State, bool? Accepted, string? Code);
 internal sealed record SessionClaudeCodeRequest(string ExpectedEpoch, string SessionId);
 /// <summary>
 /// The conversation of the Claude Code CLI a session continues. <paramref name="Status"/> is <c>ok</c>, or why there is

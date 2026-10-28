@@ -216,7 +216,7 @@ public sealed partial class SessionRuntimeService
         {
             if (_transitions.ContainsKey(sessionId)) return ValueTask.FromResult((Status: "session_in_use", Work: (Task?)null));
             if (!_entries.TryGetValue(sessionId, out var entry)) return ValueTask.FromResult((Status: "ok", Work: (Task?)null));
-            if (entry.HasActiveRun || entry.QueueDrainInProgress || entry.OwnedQueue is not null || entry.Attachment.IsRetiring)
+            if (entry.HasActiveRun || entry.QueueDrainInProgress || entry.Attachment.IsRetiring)
                 return ValueTask.FromResult((Status: "session_in_use", Work: (Task?)null));
             if (entry.BackgroundTasks.Any(static task => task.Outcome is null)) return ValueTask.FromResult((Status: "background_work", Work: (Task?)null));
             var retirement = _forwarding.RetireAsync(entry.Attachment);

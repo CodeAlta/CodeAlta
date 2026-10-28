@@ -964,6 +964,79 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task TheToolHooksOfTheSession_SeeTheToolsOfTheCli_AndDenyWhatTheyBlock()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var answers = new List<JsonElement>();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            foreach (var (id, tool, input) in new[]
+            {
+                ("toolu_1", "PowerShell", new JsonObject { ["command"] = "Get-ChildItem 'x" }),
+                ("toolu_2", "Write", new JsonObject { ["file_path"] = "notes.txt", ["content"] = "hi" }),
+                ("toolu_3", "mcp__codealta__alta", new JsonObject { ["args"] = new JsonArray("session", "list") }),
+            })
+            {
+                process.EmitAssistant("msg_" + id, new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock(id, tool, (JsonObject)input.DeepClone())));
+                answers.Add(await process.RequestAsync(new JsonObject
+                {
+                    ["subtype"] = "hook_callback",
+                    ["callback_id"] = "codealta_tool_hooks",
+                    ["tool_use_id"] = id,
+                    ["input"] = new JsonObject { ["hook_event_name"] = "PreToolUse", ["tool_name"] = tool, ["tool_use_id"] = id, ["cwd"] = directory.Path,
+                        ["tool_input"] = input.DeepClone() },
+                }));
+                process.EmitToolResult(id, "Done.", isError: false);
+            }
+
+            process.EmitResult("Done.", user);
+        };
+        var hooks = new BlockingToolHooks();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = runtime.Descriptor.ProviderId.Value,
+            WorkingDirectory = directory.Path,
+            PermissionMode = "bypassPermissions",
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            ToolInterceptor = hooks,
+        });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("work") }).WaitAsync(Timeout);
+
+        // One callback for every tool, before the permissions of the CLI.
+        var registered = SessionProcess(cli).InitializeRequest.GetProperty("hooks").GetProperty("PreToolUse");
+        Assert.IsTrue(registered.EnumerateArray().Any(static hook => hook.GetProperty("hookCallbackIds")[0].GetString() == "codealta_tool_hooks" && !hook.TryGetProperty("matcher", out _)));
+        var denied = answers[0].GetProperty("response").GetProperty("hookSpecificOutput");
+        Assert.AreEqual(("deny", "Blocked by Shell check: missing closing quote."), (denied.GetProperty("permissionDecision").GetString(), denied.GetProperty("permissionDecisionReason").GetString()));
+        Assert.IsFalse(answers[1].TryGetProperty("response", out var allowed) && allowed.ValueKind == JsonValueKind.Object && allowed.TryGetProperty("hookSpecificOutput", out _),
+            "a call the hooks let through gets no decision: the permissions of the CLI decide.");
+
+        // The tools of the CLI are told as such, a shell command and the files of a write in typed form; a tool of
+        // CodeAlta runs its hooks when the session runs it, not here.
+        var calls = hooks.Calls.ToArray();
+        CollectionAssert.AreEqual(new[] { "PowerShell", "Write" }, calls.Select(static call => call.Invocation.ToolName).ToArray());
+        Assert.IsTrue(calls.All(static call => call is { RunByAgent: true, Capabilities: AgentToolHookCapabilities.Block, Spec: null }));
+        Assert.AreEqual(("Get-ChildItem 'x", directory.Path), (calls[0].ShellCommand!.Command, calls[0].ShellCommand!.WorkingDirectory));
+        CollectionAssert.AreEqual(new[] { Path.Combine(directory.Path, "notes.txt") }, calls[1].ModifiedFiles.ToArray());
+    }
+
+    private sealed class BlockingToolHooks : AgentToolInterceptor
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<AgentToolHookCall> Calls { get; } = new();
+
+        public override ValueTask<AgentToolCallDecision> BeforeToolCallAsync(AgentToolHookCall call, CancellationToken cancellationToken)
+        {
+            Calls.Enqueue(call);
+            return ValueTask.FromResult(call.ShellCommand is { Command: var command } && command.Count(static c => c == '\'') % 2 == 1
+                ? AgentToolCallDecision.Block("Blocked by Shell check: missing closing quote.")
+                : AgentToolCallDecision.Allow);
+        }
+    }
+
+    [TestMethod]
     public async Task PlanModeOfClaudeCode_CanBeLeftWhenTheSessionWasNotMadeToPlan()
     {
         using var directory = TestTempDirectory.Create();
@@ -1807,6 +1880,44 @@ public sealed class ClaudeCodeSessionTests
         var completed = events.Snapshot().OfType<AgentSessionUpdateEvent>().Single(static e => e.Kind == AgentSessionUpdateKind.CompactionCompleted);
         Assert.AreEqual(4000, completed.Usage!.Window!.CurrentTokens);
         Assert.AreEqual(2, SessionProcess(cli).UserMessages.Count, "The command went to the process of the session.");
+    }
+
+    [TestMethod]
+    public async Task Compaction_GivesItsInstructionsToTheCommandOfTheCli()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var texts = new System.Collections.Concurrent.ConcurrentQueue<string?>();
+        cli.OnUserMessage = (process, user) =>
+        {
+            var text = ClaudeCodeFakeProcess.UserText(user);
+            texts.Enqueue(text);
+            if (text?.StartsWith("/compact", StringComparison.Ordinal) == true)
+            {
+                process.Emit(new JsonObject
+                {
+                    ["type"] = "system",
+                    ["subtype"] = "compact_boundary",
+                    ["session_id"] = process.SessionId,
+                    ["compact_metadata"] = new JsonObject { ["trigger"] = "manual", ["pre_tokens"] = 50000, ["post_tokens"] = 4000 },
+                });
+                process.EmitResult(string.Empty, user);
+                return Task.CompletedTask;
+            }
+
+            process.EmitTextTurn("msg_1", "ok", user);
+            return Task.CompletedTask;
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
+
+        var outcome = await ((IAgentIdleCompactionProvider)session)
+            .TryCompactWhenIdleAsync(new AgentCompactionOptions { Instructions = " Keep the TODO list. " }).WaitAsync(Timeout);
+
+        Assert.IsNotNull(outcome);
+        Assert.IsTrue(outcome.Success);
+        CollectionAssert.AreEqual(new[] { "hello", "/compact Keep the TODO list." }, texts.ToArray());
     }
 
     [TestMethod]

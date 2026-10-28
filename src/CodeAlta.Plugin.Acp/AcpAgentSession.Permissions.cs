@@ -77,10 +77,19 @@ internal sealed partial class AcpAgentSession
 
         string? permissionMode;
         AgentProviderRunContext? run;
+        CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? interceptor;
         lock (_gate)
         {
             permissionMode = _permissionMode;
             run = _run;
+            interceptor = _toolInterceptor;
+        }
+
+        // The tool hooks of the session decide before the permission mode does: a call they block is refused, in every mode.
+        if (interceptor is not null && await BlockedByToolHooksAsync(connection, interceptor, toolCall, callId, cancellationToken).ConfigureAwait(false) is { } blocked)
+        {
+            _logger?.Info($"A tool call of {_options.AgentName} was refused by a tool hook: {Limit(blocked)}");
+            return AcpPermissionOptions.Select(parameters, "reject_once", "reject_always");
         }
 
         if (AcpPermissionOptions.AllowsWithoutAsking(permissionMode, kind))
@@ -108,6 +117,31 @@ internal sealed partial class AcpAgentSession
             AgentPermissionDecisionKind.Cancel => null,
             _ => AcpPermissionOptions.Select(parameters, "reject_once", "reject_always"),
         };
+    }
+
+    // The protocol only says that the call is refused: the agent does not read the reason of the hook.
+    private async Task<string?> BlockedByToolHooksAsync(Connection connection, CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor interceptor,
+        JsonElement toolCall, string? callId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (name, arguments, _) = AcpToolCalls.Map(toolCall, ExposedTools, connection.WorkingDirectory);
+            AcpJson.TryGetObject(toolCall, "rawInput", out var input);
+            var call = CodeAlta.Agent.Runtime.Tools.AgentToolHookCall.Create(
+                new AgentToolInvocation(_providerId, _sessionId, callId ?? Guid.NewGuid().ToString("N"), name, arguments),
+                spec: null,
+                connection.WorkingDirectory,
+                CodeAlta.Agent.Runtime.Tools.AgentToolHookCapabilities.Block,
+                runByAgent: true,
+                commandDirectory: AcpJson.GetString(input, "cwd"));
+            return (await interceptor.BeforeToolCallAsync(call, cancellationToken).ConfigureAwait(false)).BlockMessage;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException)
+        {
+            // Hooks that fail leave the decision to the permission mode, as without hooks.
+            _logger?.Warn($"The tool hooks of a call of {_options.AgentName} failed: {ex.Message}");
+            return null;
+        }
     }
 
     private AgentPermissionRequest CreatePermissionRequest(Connection connection, JsonElement toolCall, string? kind, string interactionId, JsonElement parameters)

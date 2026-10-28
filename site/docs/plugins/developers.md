@@ -144,9 +144,9 @@ Most of the API is portable: each app shows it its own way. Where the look matte
 
 The desktop ignores terminal controls and the TUI ignores HTML, so a result with both forms works in both.
 
-## Contribution points
+## Contribution points and hooks
 
-Override only the methods the plugin needs. Each is called once when the plugin starts.
+Override only the methods the plugin needs. A `Get…()` method is called once when the plugin starts. An `On…Async` method is a hook: CodeAlta calls it each time its moment comes (a tool call, the end of a run, an event), and calls only the plugins that override it.
 
 {.table}
 | Method | Adds | Desktop | TUI |
@@ -164,16 +164,17 @@ Override only the methods the plugin needs. Each is called once when the plugin 
 | `GetResources()` | Skills shipped with the plugin | yes | yes |
 | `OnBeforeAgentRunAsync` | Tools and messages for one run; can cancel the run | yes | yes |
 | `OnAgentEventAsync` | Sees the events of the sessions | yes | yes |
-| `OnToolCallAsync`, `OnToolResultAsync` | Sees and changes calls of plugin tools | yes | yes |
-| `GetPromptProcessors()` | Changes a prompt before it is sent | no | yes |
-| `GetCompactionContributions()` | Hooks of a manual compaction | no | yes |
+| `OnToolCallAsync`, `OnToolResultAsync` | Sees, blocks or changes every tool call: see [Tool hooks](#tool-hooks) | yes | yes |
+| `OnAgentRunEndedAsync` | Continues a session whose run ended, with a prompt of the plugin | yes | yes |
+| `GetPromptProcessors()`, `OnPromptSubmittingAsync` | Changes, answers or stops a prompt of the user before it is sent | yes | yes |
+| `GetCompactionContributions()` | Hooks of a manual compaction: see [Compaction hooks](#compaction-hooks) | yes | yes |
 | `GetCommandLineContributions()` | Commands of the `altatui` command line | no | yes |
 
 The factories `Command`, `PluginUi`, `PluginTui`, `Prompt`, `AgentTool`, `Resources` and `Startup` build the common contributions.
 
 `OnAgentEventAsync` receives the events of every session, including a delta for each streamed fragment. A plugin that reads only finished content returns `false` from `ObservesContentDeltas` and is spared those calls. A plugin that does not override `OnAgentEventAsync` gets no events.
 
-## Commands
+## Commands and dialogs
 
 ```csharp
 yield return Command.Shell("note-add", "Adds a note.", AddNoteAsync) with
@@ -189,7 +190,7 @@ yield return Command.Shell("note-add", "Adds a note.", AddNoteAsync) with
 - `context.Sessions` and `context.Prompts` give the session and the prompt draft the command started from.
 - A key binding is one stroke, or `Ctrl+G` then a second stroke. A key CodeAlta already uses keeps its meaning. On the desktop, a single letter needs `Ctrl` or `Alt`.
 
-## Dialogs
+### Dialogs
 
 The portable dialogs work in both apps:
 
@@ -213,7 +214,7 @@ var response = await context.Ui.ShowDialogForResultAsync(request, cancellationTo
 
 ## Agent tools and alta
 
-`GetAgentTools()` adds tools the model can call: wrap an `AgentToolDefinition` with `AgentTool.Create`. `OnToolCallAsync` and `OnToolResultAsync` see and change the calls of plugin tools.
+`GetAgentTools()` adds tools the model can call: wrap an `AgentToolDefinition` with `AgentTool.Create`. Its calls go through the [tool hooks](#tool-hooks) of every plugin, as the calls of any other tool do.
 
 A session has the tools of a plugin from its next prompt. The session that created or reloaded the plugin has them in the same turn.
 
@@ -223,10 +224,100 @@ A session has the tools of a plugin from its next prompt. The session that creat
 var result = await Services.Alta.InvokeAsync(["session", "create", "--project", projectId], cancellationToken: cancellationToken);
 ```
 
+## Tool hooks
+
+`OnToolCallAsync` is called before every tool call of a session, and `OnToolResultAsync` after it, with its result: the tools of CodeAlta (`shell_command`, `write_file`, `apply_patch`, `alta`, `exec`…), the tools of plugins and MCP servers, the calls a Code Mode script makes, and the tools an agent CLI runs itself. A hook that cares about some tools only checks `context.ToolName`.
+
+{.table}
+| The context gives | |
+|---|---|
+| `ToolName`, `Arguments` | The tool and its JSON arguments, as the hooks before this one left them |
+| `ToolKind`, `ToolPluginId` | `BuiltIn`, `Plugin`, `Mcp` or `Agent` (a tool the agent CLI runs itself), and the plugin that provides it |
+| `ShellCommand` | For a shell tool (`shell_command`, the `Bash` and `PowerShell` of Claude Code, the commands of an ACP agent): the command and the folder it runs in, already read from the arguments |
+| `ModifiedFiles` | The files a file tool writes, deletes or moves |
+| `SessionId`, `ProjectPath`, `WorkingDirectory`, `ParentToolCallId` | The session, its folder, and the tool call of the script that makes this call |
+| `CanBlock`, `CanModifyArguments`, `CanChangeResult` | What applies to this call, which depends on who runs the tool |
+
+A hook returns `null` to let the call go on, or:
+
+- `PluginToolCallResult.Block(reason)`: the tool does not run, and the model reads `Blocked by <plugin>: <reason>` as its failed result.
+- `PluginToolCallResult.ReplaceArguments(json)`: the call runs with other arguments, which the next plugin's hook sees.
+- `PluginToolResult.Replace(result)`, `PluginToolResult.Append(text)` (a diagnostic or a reminder for the model), or `PluginToolResult.AttachDetails(json)`: details recorded with the call for timeline cards and `OnAgentEventAsync`, never sent to the model.
+
+The hooks of the plugins run one after the other; the first that blocks ends the call. They run **before** the checks of CodeAlta, the [permission prompt](../workspace/settings.md#tool-permissions) and the sandbox, which still apply to the arguments the hooks leave: a hook makes the rules stricter, never looser. A hook has `HookTimeout` to answer (10 seconds unless the plugin overrides it). A hook that throws or does not answer in time is logged in the plugin's errors (`alta plugin status <id>`) and the call goes on, unless the plugin overrides `ToolHooksFailClosed` to return `true`: the call is then blocked.
+
+{.table}
+| Provider of the session | Before a call | After a call |
+|---|---|---|
+| Models CodeAlta runs (OpenAI, Anthropic, Google, Copilot…) | Every tool: block or change | Every tool |
+| Claude Code | Its own tools (`Bash`, `Edit`, `Write`…): block only, the model reads why. The tools of CodeAlta: as above | The tools of CodeAlta only |
+| ACP agents | The calls the agent asks permission for: block only, and the agent is only told no. The tools of CodeAlta: as above | The tools of CodeAlta only |
+
+This plugin checks the syntax of each PowerShell command before it runs, and gives the errors to the model:
+
+```csharp
+using System.Diagnostics;
+using CodeAlta.Plugins.Abstractions;
+
+[Plugin("pwsh-check", DisplayName = "PowerShell check", Frontends = PluginFrontends.All | PluginFrontends.Cli)]
+public sealed class PwshCheckPlugin : PluginBase
+{
+    private const string ParseScript = """
+        $errors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$null, [ref]$errors)
+        $errors | ForEach-Object { "$($_.Extent.StartLineNumber):$($_.Extent.StartColumnNumber) $($_.Message)" }
+        """;
+
+    // A check that must not be skipped: a command is blocked when pwsh does not answer.
+    public override bool ToolHooksFailClosed => true;
+
+    public override async ValueTask<PluginToolCallResult?> OnToolCallAsync(PluginToolCallContext context, CancellationToken cancellationToken = default)
+    {
+        // The shell of CodeAlta is PowerShell on Windows; Claude Code has a PowerShell tool of its own.
+        if (context.ShellCommand is not { } shell || !(OperatingSystem.IsWindows() || context.ToolName == "PowerShell")) return null;
+        var errors = await ParseAsync(shell.Command, cancellationToken);
+        return errors.Length == 0 ? null : PluginToolCallResult.Block("the command has syntax errors:\n" + errors);
+    }
+
+    private static async Task<string> ParseAsync(string command, CancellationToken cancellationToken)
+    {
+        var start = new ProcessStartInfo("pwsh") { RedirectStandardInput = true, RedirectStandardOutput = true };
+        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-Command", ParseScript }) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        try
+        {
+            await process.StandardInput.WriteAsync(command);
+            process.StandardInput.Close();
+            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+            return output.Trim();
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill();
+        }
+    }
+}
+```
+
+### Continue after a run
+
+`OnAgentRunEndedAsync` is called when a run of a session ended normally: the agent answered and calls no more tools. It is not called for a run that failed or that the user stopped. Return `PluginAgentRunEndedResult.Continue(prompt)` to give the session a new prompt, which it shows as a prompt of a plugin: a check that the tests ran, for example. `context.LastAssistantMessage` is the last answer of the run. A session is continued at most 3 times in a row (`context.Continuations`, `context.MaxContinuations`); a prompt of anybody else starts the count again.
+
+### Compaction hooks
+
+`GetCompactionContributions()` returns a `PluginCompactionContribution` whose hooks run when the user compacts a session (the **Compact** button or command):
+
+- `BeforeCompaction` runs first. `PluginBeforeCompactionResult.CancelWithReason("…")` stops the compaction. In CodeAlta Desktop the reason is in the timeline of the session and the prompt bar says that a plugin cancelled it; CodeAlta TUI shows it in its status line.
+- `Instructions` returns text for the summary of the compaction, such as "Keep the list of open tasks". The summary request follows it, in CodeAlta Desktop and CodeAlta TUI; with Claude Code or an ACP agent, the text goes after its `/compact` command. It does not change the instructions of the session.
+- `AfterCompaction` runs once the compaction ended: `context.Succeeded`, and `context.Summary`, the summary CodeAlta wrote (null when the agent compacted its own context) or the message of a failure.
+
+The compactions a session makes by itself when its context is full, during a run, do not call these hooks.
+
 ## Prompts and resources
 
 - `GetSystemPromptContributions()` adds text to the system or developer prompt: `Prompt.Developer("…")`. Keep it short: it uses context on every turn.
-- `GetPromptProcessors()` can change or cancel the user's prompt before it is sent, in CodeAlta TUI.
+- `GetPromptProcessors()` and `OnPromptSubmittingAsync` see each prompt the user sends, as typed, before it is sent. `PluginPromptResult.Replace(text, attachments)` sends another text (return some of the attachments to drop or reorder them; in CodeAlta Desktop each has an `id` in `Metadata`). `Handled(message)` and `Cancel(message)` send nothing: in CodeAlta Desktop the status line under the prompt says that a plugin handled or cancelled it, with the message. `TemporaryPromptContributions` add text to the instructions of that run only, for a prompt that is sent: a prompt that steers a turn that runs goes through the hooks too, but the instructions of that turn do not change. The prompts CodeAlta sends itself (reminders, job results, a continuation of `OnAgentRunEndedAsync`) do not go through them.
 - `GetInstructionProcessors()` can change the final instructions after CodeAlta composed them. CodeAlta records which plugin changed them.
 - `GetResources()` ships skills with the plugin. Paths are relative to the plugin folder; the resources of a project plugin apply to that project only.
 

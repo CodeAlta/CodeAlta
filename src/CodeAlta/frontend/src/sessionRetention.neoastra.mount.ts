@@ -19,7 +19,7 @@ Object.assign(window, { retentionPlugins: { answers, sends, delivered,
     const { request, resolve } = sends[index];
     resolve({ status: "accepted", epoch: request.expectedEpoch, receipt: { clientRequestId: request.clientRequestId,
       sessionId: request.sessionId, operationId: "abcdefab-1234-5678-9abc-abcdefabcdef", targetOperationId: null,
-      kind: "Send", state: terminal ? "terminal" : "pending", outcome: terminal ? "Completed" : null, code: null, runId: null, queueInsertion: null } });
+      kind: "Send", state: terminal ? "terminal" : "pending", outcome: terminal ? "Completed" : null, code: null, runId: null } });
   },
 } });
 export const sessionOperations = { ...operations,

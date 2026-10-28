@@ -463,8 +463,24 @@ public sealed record PluginToolResult
     /// <summary>Gets a replacement tool result.</summary>
     public AgentToolResult? ReplacementResult { get; init; }
 
-    /// <summary>Gets structured UI details.</summary>
+    /// <summary>
+    /// Gets structured details for the host, recorded with the call under the id of the plugin
+    /// (<see cref="AgentToolResult.Details"/>); the model never sees them.
+    /// </summary>
     public JsonElement? Details { get; init; }
+
+    /// <summary>Gets the text appended to the result for the model when <see cref="Disposition"/> is <see cref="PluginToolResultDisposition.Append"/>.</summary>
+    public string? AppendedText { get; init; }
+
+    /// <summary>Creates a result that appends text to the result of the call, for the model: a diagnostic, a reminder.</summary>
+    /// <param name="text">The text.</param>
+    /// <returns>The hook result.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="text"/> is <see langword="null"/>, empty or white space.</exception>
+    public static PluginToolResult Append(string text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        return new PluginToolResult { Disposition = PluginToolResultDisposition.Append, AppendedText = text };
+    }
 
     /// <summary>Creates a replacement-result hook result.</summary>
     /// <param name="result">The replacement result.</param>
@@ -490,4 +506,72 @@ public enum PluginToolResultDisposition
     Replace,
     /// <summary>Attach structured details.</summary>
     AttachDetails,
+    /// <summary>Append text to the result.</summary>
+    Append,
+}
+
+/// <summary>Who provides a tool that a tool hook sees.</summary>
+public enum PluginToolKind
+{
+    /// <summary>A tool of CodeAlta: <c>shell_command</c>, the file tools, <c>alta</c>, <c>exec</c>...</summary>
+    BuiltIn,
+    /// <summary>A tool of a plugin (<see cref="PluginToolCallContext.ToolPluginId"/> names it).</summary>
+    Plugin,
+    /// <summary>A tool of an MCP server, given by the MCP plugin.</summary>
+    Mcp,
+    /// <summary>A tool the agent CLI of the session runs itself (the <c>Bash</c> or <c>Edit</c> of Claude Code, the tools of an ACP agent).</summary>
+    Agent,
+}
+
+/// <summary>What the tool hooks can do with a call: it depends on who runs the tool.</summary>
+[Flags]
+public enum PluginToolHookCapabilities
+{
+    /// <summary>The hooks only see the call.</summary>
+    None = 0,
+    /// <summary>A hook can block the call (<see cref="PluginToolCallResult.Block"/>).</summary>
+    Block = 1,
+    /// <summary>A hook can replace its arguments (<see cref="PluginToolCallResult.ReplaceArguments"/>).</summary>
+    ModifyArguments = 2,
+    /// <summary>A hook can change its result (<see cref="PluginBase.OnToolResultAsync"/>).</summary>
+    ChangeResult = 4,
+    /// <summary>Everything: a tool CodeAlta runs.</summary>
+    All = Block | ModifyArguments | ChangeResult,
+}
+
+/// <summary>The shell command of a tool call.</summary>
+/// <param name="Command">The command line, as the agent wrote it.</param>
+/// <param name="WorkingDirectory">The full path of the folder it runs in.</param>
+public sealed record PluginShellCommand(string Command, string WorkingDirectory);
+
+/// <summary>Describes the result of a run-end hook (<see cref="PluginBase.OnAgentRunEndedAsync"/>).</summary>
+public sealed record PluginAgentRunEndedResult
+{
+    /// <summary>Gets the result that leaves the session idle.</summary>
+    public static PluginAgentRunEndedResult Done { get; } = new();
+
+    /// <summary>Gets the hook disposition.</summary>
+    public PluginAgentRunEndedDisposition Disposition { get; init; }
+
+    /// <summary>Gets the prompt the session continues with when <see cref="Disposition"/> is <see cref="PluginAgentRunEndedDisposition.Continue"/>.</summary>
+    public string? Prompt { get; init; }
+
+    /// <summary>Creates a result that continues the session with a new prompt.</summary>
+    /// <param name="prompt">The prompt, which the agent reads as a prompt of the plugin.</param>
+    /// <returns>The hook result.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="prompt"/> is <see langword="null"/>, empty or white space.</exception>
+    public static PluginAgentRunEndedResult Continue(string prompt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        return new PluginAgentRunEndedResult { Disposition = PluginAgentRunEndedDisposition.Continue, Prompt = prompt };
+    }
+}
+
+/// <summary>Identifies run-end hook disposition.</summary>
+public enum PluginAgentRunEndedDisposition
+{
+    /// <summary>The session stays idle.</summary>
+    Done,
+    /// <summary>The session continues with a prompt of the plugin.</summary>
+    Continue,
 }

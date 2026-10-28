@@ -16,16 +16,15 @@ import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectRefere
 import { IssuePicker } from "./IssuePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
-import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
+import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionSteerRequest, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
 import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
 import { changedSessionOptions, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { activateSessionModels } from "./activateSessionModels";
-import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, sendAvailable, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
+import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, pluginPromptOutcome, refreshSubmissions, sendAvailable, type PluginPromptOutcome, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, compactControlBlock, compactControlBlockMessages, compactionAdmissionFailure, hasPendingCompaction, watchCompaction, watchedCompactionFailure,
   type CompactionFailure, type CompactionWatch, type createCompactionSubmissions } from "./sessionCompaction";
 import { abortRunAdmissionFailure, captureAbortRun, watchedStopFailure, type createAbortRunSubmissions, type StopFailure } from "./sessionAbortRun";
-import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancellationStatus, type createQueueSubmissions } from "./sessionQueue";
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel, permissionSkillReader } from "./CommandPermissionPanel";
@@ -64,7 +63,7 @@ import { SessionUsageInspector } from "./SessionUsageInspector";
 import { ComposerQueueStrip } from "./ComposerQueueStrip";
 import { reasoningShown } from "./promptSurface/promptSurface";
 import { ClaudeCliFirstUse } from "./claudeCli/ClaudeCliFirstUse";
-import { queuePreview, type ComposerQueueItem } from "./composerQueue";
+import { queuePreview, type ComposerQueueItem, type createComposerQueue } from "./composerQueue";
 import { ActiveProviderStatus, type ActiveProviderState } from "./ActiveProviderStatus";
 import { ObservationStatus } from "./ObservationStatus";
 import type { UsageTarget } from "./sessionUsage";
@@ -124,7 +123,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   steering: ReturnType<typeof createSteeringSubmissions>;
   compaction: ReturnType<typeof createCompactionSubmissions>;
   abortRuns: ReturnType<typeof createAbortRunSubmissions>;
-  queue: ReturnType<typeof createQueueSubmissions>;
+  queue: ReturnType<typeof createComposerQueue>;
   draftIndicators: ReturnType<typeof createDraftIndicators>;
   selections: ReturnType<typeof createNextSendSelectionStore>;
   configuration?: ConfigurationSnapshot;
@@ -174,6 +173,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   function editText(value: string) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted) return;
     setSendFailure("");
+    setPluginOutcome(null);
     recall.current = noPromptRecall;
     inputRevision.current++;
     latestText.current = value;
@@ -221,21 +221,23 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const [enqueue, setEnqueue] = useState(false);
   const [providerBusy, setProviderBusy] = useState(false);
   const [receiptUnavailable, setReceiptUnavailable] = useState(false);
-  const stagedRevision = useSyncExternalStore(queue.composer.subscribe, queue.composer.getSnapshot);
-  const staged = queue.composer.list(epoch, sessionId);
+  const stagedRevision = useSyncExternalStore(queue.subscribe, queue.getSnapshot);
+  const staged = queue.list(epoch, sessionId);
   // A session with prompts waiting is followed even while its tab is hidden: they leave when it is idle.
   const watching = observing || staged.length > 0;
   // The receipts are those of the window: the panes that read them at the same time share one read.
   const hostReads = useContext(HostReadsContext);
   // What a Send that was not taken says, in the status line: a prompt is never answered with a toast.
   const [sendFailure, setSendFailure] = useState("");
+  // A Send or a steering prompt a plugin answered itself (handled or cancelled): nothing reached the agent, and the status
+  // line says so, also while the turn it was steered into goes on (runId).
+  const [pluginOutcome, setPluginOutcome] = useState<(PluginPromptOutcome & { runId: string | null }) | null>(null);
   // Asks the form of the session configuration to open: a send that needs another provider opens it.
   const [selectionOpenRequest, setSelectionOpenRequest] = useState(0);
   const [retryTick, setRetryTick] = useState(0);
   const holdUntil = useRef(0);
   // The user messages on screen when a steering prompt left: a later one with its text is the agent taking it up.
   const steerBaseline = useRef(new Map<string, Set<string>>());
-  const queueRevision = useSyncExternalStore(queue.subscribe, queue.getSnapshot);
   const steeringRevision = useSyncExternalStore(steering.subscribe, steering.getSnapshot);
   const [choices, setChoices] = useState<SessionChoicesResponse>();
   const [selection, setSelection] = useState<SessionSelection | null>(null);
@@ -309,18 +311,6 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // A Stop that did not stop the run says so in the status line, while the run goes on; its key, while its receipt waits.
   const [stopFailure, setStopFailure] = useState<StopFailure | null>(null);
   const [submittedStop, setSubmittedStop] = useState<string | null>(null);
-  const [queueText, setQueueText] = useState(() => queue.draft(epoch, sessionId));
-  function editQueueText(value: string) {
-    if (!canAdmit() || !scope.current || scope.current.signal.aborted) return;
-    queue.editDraft(epoch, sessionId, value);
-    setQueueText(value);
-  }
-  function clearSubmittedQueueDraft(source: "composer" | "editor", revision: number | null) {
-    // Neither toolbar-originated recovery nor a later secondary edit is the submitted editor draft.
-    if (source !== "editor" || revision !== queue.draftRevision(epoch, sessionId)) return;
-    editQueueText("");
-  }
-  const [queueMessage, setQueueMessage] = useState("Refresh runtime state explicitly before queueing text in this host.");
   const [message, setMessage] = useState("Ready to send to this owned session.");
   const [page, setPage] = useState<SessionReceiptPage>();
   const [submittedThinking, setSubmittedThinking] = useState<{ key: string; runId: string | null } | null>(null);
@@ -342,7 +332,6 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     catalogObservation.current = signature;
     setChoicesRevision(value => value + 1);
   }, [runtimeState, observedProvider, observedTransition, epoch, sessionId]);
-  const queueReviewRuntime = useRef(runtimeState); queueReviewRuntime.current = runtimeState;
   const runtimeScope = useRef<ReturnType<typeof runtimeReader.forSelection> | null>(null);
   const [observedInvalidEpoch, setInvalidEpoch] = useState(!capability.canMutate());
   const canMutate = useSyncExternalStore(capability.subscribe, capability.canMutate);
@@ -386,10 +375,6 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     latestText.current = restored;
     setDraft({ text: restored, editGeneration: null });
     setSteerText(steering.pending(sessionId)?.request.text ?? "");
-    setQueueText(queue.draft(epoch, sessionId));
-    setQueueMessage(queue.pending(sessionId) || queue.cancellations(sessionId).length
-      ? "Retained queue/cancellation intent exists. Manually refresh receipts or explicitly retry the exact request after its original waiter settles."
-      : "Refresh runtime state explicitly before queueing text in this host.");
     setSteerMessage(steering.pending(sessionId)
       ? "A retained steering request exists. Refresh submissions to reconcile it, or explicitly retry its exact key and target once the previous wait settles."
       : "Refresh runtime state explicitly before targeting a run.");
@@ -446,7 +431,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // A queued prompt on its way is not the composer's own request: the editor stays the user's.
   function ownPending() {
     const retained = submissions.pending(sessionId);
-    return retained && queue.composer.list(epoch, sessionId).some(item => item.request?.clientRequestId === retained.request.clientRequestId) ? undefined : retained;
+    return retained && queue.list(epoch, sessionId).some(item => item.request?.clientRequestId === retained.request.clientRequestId) ? undefined : retained;
   }
   const retainedSend = submissions.pending(sessionId);
   const pending = ownPending();
@@ -458,10 +443,13 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const pendingSteer = steering.pending(sessionId);
   const pendingCompact = compaction.pending(sessionId);
   const pendingAbortRun = abortRuns.pending(sessionId);
-  const pendingQueue = queue.pending(sessionId);
-  const pendingQueueCancellations = queue.cancellations(sessionId);
   const observedTarget = runtimeState?.kind === "ready" ? runtimeState.snapshot : undefined;
   const runtimeConfiguration = observedTarget?.entry;
+  // What a plugin answered belongs to the turn it came in: a turn that starts after it has the status line to itself.
+  const activeRunId = observedTarget?.entry?.activeRunId ?? null;
+  useEffect(() => {
+    if (activeRunId) setPluginOutcome(current => current && current.runId !== activeRunId ? null : current);
+  }, [activeRunId]);
   // Presentation only: live run updates never authorize composer operations.
   const currentLive = liveState?.hostEpoch === epoch && liveState.sessionId === sessionId ? liveState : null;
   const liveConnected = currentLive?.kind === "connected" && !currentLive.snapshot?.isClosed;
@@ -474,7 +462,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   useEffect(() => {
     if (!submittedThinking) return;
     const receipt = page?.rows.find(row => row.sessionId === sessionId && row.clientRequestId === submittedThinking.key && row.kind === "Send");
-    if (invalidEpoch || receipt?.state === "terminal") { setSubmittedThinking(null); return; }
+    if (invalidEpoch || receipt?.state === "terminal") {
+      if (receipt && !invalidEpoch) settlePluginOutcome(receipt);
+      setSubmittedThinking(null); return;
+    }
     if (runtimeState?.kind !== "ready") return;
     const runId = runtimeState.snapshot.entry?.activeRunId ?? null;
     if (runId && !submittedThinking.runId) setSubmittedThinking({ ...submittedThinking, runId });
@@ -576,12 +567,21 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // for the running turn. Only the composer's own text takes its images along.
   function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
     if (pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted) return false;
-    if (!queue.composer.add(kind, epoch, sessionId, value, attached.length ? attached : null)) return false;
+    if (!queue.add(kind, epoch, sessionId, value, attached.length ? attached : null)) return false;
     if (value === latestText.current) {
       inputRevision.current++; clearText();
       if (attached.length) imageOwner.replace(imageKey, attached, []);
     }
     setSendFailure("");
+    return true;
+  }
+  // The prompt of a Send a plugin answered itself never reaches the conversation: its echo leaves the timeline. A steering
+  // prompt has no echo; runId is the turn it was for.
+  function settlePluginOutcome(row: SessionReceiptView, runId: string | null = null): boolean {
+    const outcome = row.sessionId === sessionId ? pluginPromptOutcome(row) : null;
+    if (!outcome) return false;
+    setPluginOutcome({ ...outcome, runId });
+    if (row.kind === "Send") submissions.acknowledgeOutgoing([outgoingKey({ expectedEpoch: epoch, sessionId, clientRequestId: row.clientRequestId })]);
     return true;
   }
   function retryLater() {
@@ -596,40 +596,47 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       observeEpoch(result);
       const accepted = result.status === "accepted" || result.status === "replay";
       if (!accepted || result.receipt?.state === "terminal") setSubmittedThinking(current => current?.key === key ? null : current);
-      if (accepted) { selections.sent(epoch, sessionId, request.selection); queue.composer.sent(id); promptAccepted.current(); }
-      else if (result.status === "uncertain" || result.status === "stale_epoch") queue.composer.uncertain(id, "reason" in result && result.reason ? result.reason : result.status);
+      if (accepted) {
+        selections.sent(epoch, sessionId, request.selection); queue.sent(id); promptAccepted.current();
+        if (result.receipt) settlePluginOutcome(result.receipt);
+      }
+      else if (result.status === "uncertain" || result.status === "stale_epoch") queue.uncertain(id, "reason" in result && result.reason ? result.reason : result.status);
       // The session was working after all: the prompt keeps its place and leaves at the next idle moment.
-      else if (result.status === "busy" || result.status === "capacity") { queue.composer.release(id); retryLater(); }
-      else queue.composer.fail(id, result.status);
+      else if (result.status === "busy" || result.status === "capacity") { queue.release(id); retryLater(); }
+      else queue.fail(id, result.status);
     };
   }
-  function settleSteering(id: string) {
+  function settleSteering(id: string, runId: string) {
     return (result: SubmissionResult) => {
       observeEpoch(result);
-      if (result.status === "accepted" || result.status === "replay") queue.composer.sent(id);
-      else if (result.status === "uncertain") queue.composer.uncertain(id, "uncertain");
-      else if (result.status === "busy") { queue.composer.release(id); retryLater(); }
+      if (result.status === "accepted" || result.status === "replay") {
+        queue.sent(id);
+        // A plugin answered it already (a replay of a settled request): it never reaches the turn, and leaves the list.
+        if (result.receipt && settlePluginOutcome(result.receipt, runId)) queue.delivered(id);
+      }
+      else if (result.status === "uncertain") queue.uncertain(id, "uncertain");
+      else if (result.status === "busy") { queue.release(id); retryLater(); }
       // A request the host no longer keeps the receipt of was delivered earlier: it is not sent a second time.
-      else if (result.status === "closed" || result.status === "stale_epoch" || result.status === "expired") queue.composer.fail(id, result.status);
+      else if (result.status === "closed" || result.status === "stale_epoch" || result.status === "expired") queue.fail(id, result.status);
       // The turn cannot be steered: the prompt is sent as the next one instead.
-      else queue.composer.requeue(id);
+      else queue.requeue(id);
     };
   }
   function retryStaged(item: ComposerQueueItem) {
     if (invalidEpoch) return;
-    if (item.state === "failed") { queue.composer.release(item.id); return; }
+    if (item.state === "failed") { queue.release(item.id); return; }
     if (item.state !== "uncertain" || !item.request) return;
     // Only the retained request itself is sent again: the same key, so the host cannot run it twice.
     if (item.kind === "Queue") {
       const retained = submissions.pending(sessionId);
-      if (retained?.request.clientRequestId !== item.request.clientRequestId) queue.composer.sent(item.id);
+      if (retained?.request.clientRequestId !== item.request.clientRequestId) queue.sent(item.id);
       else if (!retained.inFlight && capability.canSubmit(retained.request))
-        void submissions.submit(retained.request, queue.composer.signal, capability, settleQueued(item.id, retained.request), "whenAccepted");
+        void submissions.submit(retained.request, queue.signal, capability, settleQueued(item.id, retained.request), "whenAccepted");
     } else {
       const retained = steering.pending(sessionId);
-      if (retained?.request.clientRequestId !== item.request.clientRequestId) queue.composer.sent(item.id);
+      if (retained?.request.clientRequestId !== item.request.clientRequestId) queue.sent(item.id);
       else if (!retained.inFlight && capability.canSubmit(retained.request))
-        void steering.submit(retained.request, queue.composer.signal, capability, settleSteering(item.id));
+        void steering.submit(retained.request, queue.signal, capability, settleSteering(item.id, retained.request.expectedRunId));
     }
   }
   const liveTexts = liveConnected ? currentLive.snapshot?.session?.text : undefined;
@@ -647,7 +654,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       const taken = userRows.some(row => !baseline?.has(row.contentId) && queuePreview(row.text) === queuePreview(item.text));
       if (taken || runId !== (item.request as { expectedRunId?: string } | undefined)?.expectedRunId) {
         steerBaseline.current.delete(item.id);
-        queue.composer.delivered(item.id);
+        queue.delivered(item.id);
       }
     }
     // A pending next-turn agent prompt is consumed by Send, not a reason to hold an idle queue.
@@ -658,41 +665,55 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (steerItem && !steering.pending(sessionId) && !staged.some(item => item.kind === "Steer" && (item.state === "sending" || item.state === "uncertain"))) {
       const request = captureSteering(epoch, sessionId, target, steerItem.text, crypto.randomUUID());
       if (request && capability.canSubmit(request)) {
-        const claimed = queue.composer.claim(steerItem, request);
+        const claimed = queue.claim(steerItem, request);
         if (claimed) {
           steerBaseline.current.set(claimed.id, new Set(userRows.map(row => row.contentId)));
-          void steering.submit(request, queue.composer.signal, capability, settleSteering(claimed.id));
+          void steering.submit(request, queue.signal, capability, settleSteering(claimed.id, request.expectedRunId));
         }
       // Nothing runs any more: the prompt is the next one sent.
-      } else if (idle) queue.composer.requeue(steerItem.id);
+      } else if (idle) queue.requeue(steerItem.id);
       return;
     }
     const next = staged.find(item => item.kind === "Queue" && item.state === "waiting");
-    if (!next || !idle || loadingChoices || queue.composer.isHeld(next)
+    if (!next || !idle || loadingChoices || queue.isHeld(next)
       || staged.some(item => item.kind === "Queue" && (item.state === "sending" || item.state === "uncertain"))) return;
     // The prompt leaves as a Send of this moment: the selection, the project references and the images of one.
     const chosen = selections.current(epoch, sessionId) ?? selection;
     const usable = chosen && activeChoices && validSelection(activeChoices, chosen) ? chosen : null;
     const sendSelection = next.selection ?? usable ?? (next.images ? activeChoices?.current ?? null : null);
     if (next.selection && (!activeChoices || !validSelection(activeChoices, next.selection))) {
-      queue.composer.fail(next.id, "invalid_selection"); return;
+      queue.fail(next.id, "invalid_selection"); return;
     }
     // A file goes to any model; an image needs one that reads images.
     if (next.images && (!sendSelection || next.images.some(isImageAttachment)
       && activeChoices?.models.find(model => model.id === sendSelection.modelId)?.imageInput !== true)) {
-      queue.composer.fail(next.id, "image_unsupported"); return;
+      queue.fail(next.id, "image_unsupported"); return;
     }
     const references = referenceScope?.expectedEpoch === epoch && referenceScope.sessionId === sessionId
       ? { projectId: referenceScope.projectId, projectPath: referenceScope.projectPath } : null;
     const request = captureSubmission(epoch, sessionId, next.text, crypto.randomUUID(), sendSelection, references, next.images);
-    if (!request) { queue.composer.fail(next.id, "invalid_request"); return; }
+    if (!request) { queue.fail(next.id, "invalid_request"); return; }
     if (!capability.canSubmit(request)) return;
-    const claimed = queue.composer.claim(next, request);
+    const claimed = queue.claim(next, request);
     if (!claimed) return;
     promptHistory.add(sessionId, request.text);
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
-    void submissions.submit(request, queue.composer.signal, capability, settleQueued(claimed.id, request), "whenAccepted");
+    setPluginOutcome(null);
+    void submissions.submit(request, queue.signal, capability, settleQueued(claimed.id, request), "whenAccepted");
   }, [stagedRevision, steeringRevision, runtimeState, invalidEpoch, !!retainedSend, composerBusy, epoch, sessionId, liveTexts, loadingChoices, retryTick, selection, choices]);
+  // A steering prompt a plugin answered itself never shows in the timeline: its settled receipt says so, and its row
+  // leaves the list without waiting for the turn to end.
+  useEffect(() => {
+    if (invalidEpoch || !page) return;
+    for (const item of staged) {
+      const request = item.kind === "Steer" && item.state === "delivering" ? item.request as SessionSteerRequest | undefined : undefined;
+      const row = request && page.rows.find(value => value.kind === "Steer" && value.sessionId === sessionId && value.clientRequestId === request.clientRequestId);
+      if (row && settlePluginOutcome(row, request!.expectedRunId)) {
+        steerBaseline.current.delete(item.id);
+        queue.delivered(item.id);
+      }
+    }
+  }, [page, stagedRevision, invalidEpoch, sessionId]);
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
@@ -739,15 +760,17 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
     setMessage("Ready to send to this owned session.");
     setSendFailure("");
+    setPluginOutcome(null);
     setCompactFailure(null);
     void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
+      if (["accepted", "replay"].includes(result.status) && result.receipt) settlePluginOutcome(result.receipt);
       if (!["accepted", "replay"].includes(result.status) || result.receipt?.state === "terminal") setSubmittedThinking(null);
       const unchanged = (inputRevision.current === revision || latestText.current === request.text) && imageOwner.get(imageKey) === capturedImages;
       // The session started working between the keystroke and the host: the prompt joins the queue instead,
       // without a failed message in the timeline.
       if (result.status === "busy" && !retained && canAdmit() && !signal.aborted
-        && queue.composer.add("Queue", epoch, sessionId, request.text, request.images?.length ? request.images : null)) {
+        && queue.add("Queue", epoch, sessionId, request.text, request.images?.length ? request.images : null)) {
         submissions.acknowledgeOutgoing([outgoingKey(request)]);
         if (!signal.aborted && unchanged) { clearText(); imageOwner.replace(imageKey, capturedImages, []); }
         return;
@@ -804,12 +827,12 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       if (!command || steering.pending(sessionId)) return false;
       await steering.submit(command, signal, capability, received);
     } else if (request.kind === "enqueue" || composerBusy || enqueue
-      || queue.composer.list(epoch, sessionId).some(item => item.kind === "Queue" && item.state !== "failed")) {
+      || queue.list(epoch, sessionId).some(item => item.kind === "Queue" && item.state !== "failed")) {
       const chosen = selections.current(epoch, sessionId) ?? selected;
       if (chosen && (!activeChoices || !validSelection(activeChoices, chosen))) return false;
       // Enqueue has always meant a deferred Send, including when this saved session is unattached.
       // Keep the requested next-send selection and await the row's original downstream receipt.
-      return await queue.composer.admit(epoch, sessionId, value, signal, chosen);
+      return await queue.admit(epoch, sessionId, value, signal, chosen);
     } else {
       const chosen = selections.current(epoch, sessionId) ?? selected;
       if (chosen && (!activeChoices || !validSelection(activeChoices, chosen))) return false;
@@ -827,7 +850,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       // the deferred Send. Close/unmount after the refusal conclusively prevents the new attempt.
       if (becameBusy && !signal.aborted && canAdmit() && capability.canMutate()) {
         submissions.acknowledgeOutgoing([outgoingKey(command)]);
-        return await queue.composer.admit(epoch, sessionId, value, signal, chosen);
+        return await queue.admit(epoch, sessionId, value, signal, chosen);
       }
     }
     return result;
@@ -874,7 +897,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       setReceiptUnavailable(result.status !== "ok");
       if (result.status !== "ok") return; // Keep the last receipts; a missed read is not settlement.
       setPage(result);
-      queue.composer.reconcile(result);
+      queue.reconcile(result);
       const recoveringImages = !!submissions.pending(sessionId)?.request.images?.length;
       const recovered = submissions.reconcile(sessionId, result, capability);
       // Receipt recovery cannot prove a remounted image draft's original input revision.
@@ -888,13 +911,6 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       compaction.reconcile(sessionId, result, capability);
       if (abortRuns.reconcile(sessionId, result, capability))
         setAbortRunMessage("Exact cancellation receipt recovered. Review its outcome; cancellation signalling is not run completion.");
-      const retainedQueue = queue.pending(sessionId);
-      const recoveredQueue = queue.reconcile(sessionId, result, capability);
-      if (recoveredQueue.queueRecovered && retainedQueue)
-        clearSubmittedQueueDraft(retainedQueue.source, retainedQueue.draftRevision);
-      if (recoveredQueue.queueRecovered || recoveredQueue.cancellationsRecovered > 0) {
-        setQueueMessage("Queue/cancellation receipt reconciled. Review reservation, host-only insertion and execution/cleanup separately.");
-      }
     }, capability);
   }
   // The explicit Steer button targets the running turn; without one the prompt is sent.
@@ -903,8 +919,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (pending || invalidEpoch) return;
     if (afterDictation(actions => actions.steerFromComposer())) return;
     if (!latestText.current.trim() && !images.length) {
-      const next = staged.find(item => item.kind === "Queue" && item.state === "waiting" && !queue.composer.isHeld(item));
-      if (next && composerBusy) queue.composer.steerNow(next);
+      const next = staged.find(item => item.kind === "Queue" && item.state === "waiting" && !queue.isHeld(item));
+      if (next && composerBusy) queue.steerNow(next);
       return;
     }
     if (!composerBusy) { submit(); return; }
@@ -980,46 +996,6 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       setAbortRunMessage(result.status === "accepted" || result.status === "replay"
         ? "Cancellation request accepted. Refresh submissions for signalling outcome; run completion is not confirmed."
         : `Exact cancellation: ${result.status}. Uncertain requests retain their original run and key. No automatic retry.`);
-    });
-  }
-  function queueTextInHost(fromComposer: boolean) {
-    if (!canAdmit()) return;
-    if (images.length || pending?.request.images?.length) { setImageNotice("Queue refuses image attachments. Use normal Send or remove attachments first."); return; }
-    const signal = scope.current?.signal;
-    if (!signal || signal.aborted || !capability.canMutate()) return;
-    const retained = queue.pending(sessionId);
-    // Only the secondary editor can explicitly retry its retained exact request.
-    if (fromComposer && (submissions.pending(sessionId) || retained)) return;
-    const request = retained?.request ?? captureQueue(epoch, sessionId, observedTarget, fromComposer ? text : queueText, crypto.randomUUID());
-    if (!request || retained?.inFlight || !capability.canSubmit(request)) return;
-    const source = retained?.source ?? (fromComposer ? "composer" : "editor");
-    const draftRevision = retained?.draftRevision ?? queue.draftRevision(epoch, sessionId);
-    setQueueMessage("Owner reservation pending; host-only insertion and execution are not yet confirmed.");
-    if (fromComposer) setMessage("Owner queue reservation pending; composer draft retained.");
-    void queue.submit(request, signal, capability, result => {
-      observeEpoch(result);
-      if (result.status === "accepted" || result.status === "replay") {
-        clearSubmittedQueueDraft(source, draftRevision);
-        setQueueMessage(`Owner reservation accepted. Refresh submissions manually for host-only insertion and execution/cleanup; neither durability nor run completion is implied.${fromComposer ? " Composer draft is retained." : ""}`);
-      } else setQueueMessage(`Queue: ${result.status}. Uncertain requests retain exact text, key and attachment. No automatic retry.`);
-      if (fromComposer) setMessage(result.status === "accepted" || result.status === "replay"
-        ? "Queue reservation accepted; composer draft retained. Host-only insertion, durability and execution are not confirmed. Refresh receipts manually."
-        : `Queue: ${result.status}. Composer draft retained. Review the exact queue request in the separate controls; no automatic retry.`);
-    }, source);
-  }
-  function cancelQueued(row?: SessionReceiptView, retainedOperationId?: string) {
-    if (!canAdmit()) return;
-    const signal = scope.current?.signal;
-    if (!signal || signal.aborted || !capability.canMutate()) return;
-    const retained = queue.cancelPending(retainedOperationId ?? row?.operationId ?? "");
-    const intent = retained?.intent ?? (page && row ? captureQueueCancellation(epoch, sessionId, page, row, crypto.randomUUID()) : null);
-    if (!intent || retained?.inFlight || !capability.canSubmit(intent.request)) return;
-    setQueueMessage("Cancellation owner reservation pending for the original queued operation only.");
-    void queue.cancel(intent, signal, capability, result => {
-      observeEpoch(result);
-      setQueueMessage(result.status === "accepted" || result.status === "replay"
-        ? "Cancellation reservation accepted. Refresh receipts manually. Signalling is not rollback, cleanup completion or run completion; previously accepted decisions remain accepted."
-        : `Queued-operation cancellation: ${result.status}. Uncertainty retains the original operation, session and key. No automatic retry.`);
     });
   }
   function abort(row?: SessionReceiptView, retainedOperationId?: string) {
@@ -1409,22 +1385,23 @@ ${value}` : value);
       showSkill={showPermissionSkill} />}
     <WaitingSubSessionsPanel sessions={waitingSubSessions} epoch={epoch} createReviewer={createSubSessionReviewer}
       canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} onAnswered={() => promptInput.current?.focus()} showSkill={showPermissionSkill} />
-    <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} commandTarget={active} />
+    <ComposerQueueStrip owner={queue} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} commandTarget={active} />
     {pendingSteer && !staged.some(item => item.request?.clientRequestId === pendingSteer.request.clientRequestId) &&
       <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>
         <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingSteer.inFlight} onClick={() => steer()} /></div>}
-    {pendingQueue &&
-      <div className="composer-queue-row"><AppIcon name="queue" size={15} /><span className="composer-queue-preview">{pendingQueue.request.text}</span>
-        <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingQueue.inFlight} onClick={() => queueTextInHost(false)} /></div>}
     {/* A Claude Code provider without a CLI proposes its download where it is chosen. */}
     <ClaudeCliFirstUse epoch={epoch} providerKey={selected?.providerKey ?? observedProvider} />
     {!expanded && attachmentStrip}
     <ComposerSurface busy={composerBusy || compacting} status={<>
-      <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem) ? "danger" : undefined}>
-        {stopShown ? <AppIcon name="error" size={14} /> : composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem ? "error" : "prompt"} size={14} />}
-        <span className="composer-foreground-text">{stopShown ? t(stopShown.key, stopShown.parameters) : composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
+      <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem) || !compacting && !invalidEpoch && pluginOutcome?.cancelled ? "danger"
+        : !compacting && !invalidEpoch && pluginOutcome ? "notice" : undefined}>
+        {stopShown ? <AppIcon name="error" size={14} /> : composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem || pluginOutcome?.cancelled ? "error" : pluginOutcome ? "plugin" : "prompt"} size={14} />}
+        {/* A steering prompt a plugin answered says so while its turn goes on. */}
+        <span className="composer-foreground-text">{stopShown ? t(stopShown.key, stopShown.parameters) : composerBusy && !invalidEpoch && !compacting && pluginOutcome ? t(pluginOutcome.key, pluginOutcome.parameters)
+          : composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
           : compacting ? t("Compacting…")
           : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem
+          : !invalidEpoch && pluginOutcome ? t(pluginOutcome.key, pluginOutcome.parameters)
           : !invalidEpoch && compactFailure ? t(compactFailure.key, compactFailure.parameters) : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span></span>
       {/* A prompt that waits for a reload offers it: the window would otherwise have no way out. */}
       {invalidEpoch && !composerBusy && !compacting && <Button variant="minimal" size="small" intent="danger" className="composer-reload"
@@ -1571,18 +1548,9 @@ ${value}` : value);
       canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} onStop={abortRun}
       stopDisabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
         ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))} />}
-    {pendingQueueCancellations.map(value => <Button key={value.intent.request.clientRequestId} icon={<AppIcon name="refresh" size={14} />}
-      disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>
-      {t("Retry exact queued-operation cancellation")}</Button>)}
     {pendingAborts.length > 0 && <div className="retained-send-recovery">
     {(Array.isArray(page?.rows) ? page.rows : []).filter(row => row && typeof row.sessionId === "string" && row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
-      {row.kind === "Queue" ? <><p>Queue · {row.operationId}</p>
-        {queueReceiptPhases(row)?.map((phase, index) => <p key={index}>{index + 1}. {phase}</p>) ?? <p>{t("Malformed queue receipt; not actionable.")}</p>}</>
-        : row.kind === "CancelQueue" ? <p>CancelQueue · {queueCancellationStatus(row) ?? t("Malformed cancellation receipt; not actionable.")} · {t("target")} {row.targetOperationId}</p>
-        : <p>{row.kind} · {t(row.outcome === "Completed" ? (row.kind === "Abort" ? "Original Send control settled; not rollback, decision retraction or run termination" : row.kind === "AbortRun" ? "Cancellation signalled; run completion is not confirmed" : row.kind === "Compact" ? "compaction settled successfully" : row.kind === "Steer" ? "steering input submitted" : "submission submitted") : row.outcome === "Failed" ? "operation failed" : row.outcome === "Cancelled" ? "operation cancelled" : "operation pending")} {row.code ?? ""} · {row.operationId}</p>}
-      {row.kind === "Queue" && <button type="button" disabled={invalidEpoch || !!queue.cancelPending(row.operationId)
-        || (!!pendingQueue?.inFlight && pendingQueue.request.clientRequestId === row.clientRequestId)
-        || !page || captureQueueCancellation(epoch, sessionId, page, row, "availability") === null} onClick={() => cancelQueued(row)}>{t("Cancel this queued operation")}</button>}
+      <p>{row.kind} · {t(row.outcome === "Completed" ? (row.kind === "Abort" ? "Original Send control settled; not rollback, decision retraction or run termination" : row.kind === "AbortRun" ? "Cancellation signalled; run completion is not confirmed" : row.kind === "Compact" ? "compaction settled successfully" : row.kind === "Steer" ? "steering input submitted" : "submission submitted") : row.outcome === "Failed" ? "operation failed" : row.outcome === "Cancelled" ? "operation cancelled" : "operation pending")} {row.code ?? ""} · {row.operationId}</p>
       {row.kind === "Send" && row.state === "pending" && <button type="button" disabled={invalidEpoch || !!submissions.abortPending(row.operationId)
         || (!!pending?.inFlight && pending.request.clientRequestId === row.clientRequestId)
         || !page || captureSubmissionAbort(epoch, sessionId, page, row, "availability") === null} onClick={() => abort(row)}>{t("Abort original Send operation")}</button>}

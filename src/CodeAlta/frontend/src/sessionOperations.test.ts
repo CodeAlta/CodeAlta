@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, noOutgoing, outgoingKey, refreshSubmissions, sendAvailable } from "./sessionOperations";
+import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, noOutgoing, outgoingKey, pluginPromptOutcome, refreshSubmissions, sendAvailable } from "./sessionOperations";
+import { translate } from "./localization";
 import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptView, SessionSendRequest } from "#neoastra";
 
 const operation = "abcdefab-1234-5678-9abc-abcdefabcdef";
@@ -73,7 +74,7 @@ test("a prompt leaving the queue shows its echo only once the host took it", asy
   await store.submit(send("first"), new AbortController().signal, capability, result => results.push(result.status), "whenAccepted");
   assert.deepEqual([results, store.outgoing("epoch", "session").length, store.pending("session")], [["busy"], 0, undefined]);
   answer = { status: "accepted", epoch: "epoch", receipt: { clientRequestId: "second", sessionId: "session", operationId: operation,
-    targetOperationId: null, kind: "Send", state: "pending", outcome: null, code: null, runId: null, queueInsertion: null } };
+    targetOperationId: null, kind: "Send", state: "pending", outcome: null, code: null, runId: null } };
   await store.submit(send("second"), new AbortController().signal, capability, result => results.push(result.status), "whenAccepted");
   assert.deepEqual(store.outgoing("epoch", "session").map(echo => [echo.text, echo.state]), [["queued", "accepted"]]);
   assert.equal(store.outgoing("epoch", "session")[0].key, outgoingKey(send("second")));
@@ -84,10 +85,41 @@ test("a prompt leaving the queue shows its echo only once the host took it", asy
   store.acknowledgeOutgoing([outgoingKey(send("third"))]);
   assert.equal(store.outgoing("epoch", "session").length, 1);
 });
+test("a Send or a steering prompt a plugin answered itself says so in the composer, with the plugin's message, and never looks sent", async () => {
+  const settled = (code: string, message?: string): SessionReceiptView => ({ ...row(), state: "terminal",
+    outcome: code === "plugin_handled" ? "Completed" : "Cancelled", code, ...(message === undefined ? {} : { message }) });
+  const text = (value: SessionReceiptView, locale = "en") => {
+    const outcome = pluginPromptOutcome(value);
+    return outcome && [translate(locale, outcome.key, outcome.parameters), outcome.cancelled];
+  };
+  assert.deepEqual(text(settled("plugin_handled", "Opened the ticket.")), ["A plugin handled this prompt: Opened the ticket.", false]);
+  assert.deepEqual(text(settled("plugin_handled")), ["A plugin handled this prompt: nothing was sent to the agent.", false]);
+  assert.deepEqual(text(settled("plugin_cancelled", "Secrets are not sent.")), ["A plugin cancelled this prompt: Secrets are not sent.", true]);
+  assert.deepEqual(text(settled("plugin_cancelled")), ["A plugin cancelled this prompt: nothing was sent to the agent.", true]);
+  assert.deepEqual(text(settled("plugin_cancelled", "{status}"), "fr"), ["Une extension a annulé ce prompt : {status}", true], "The plugin's text is not a template.");
+  // Any other Send, a pending one, or another kind of command, is not a plugin's answer.
+  const failed: SessionReceiptView = { ...settled("preparation_failed"), outcome: "Failed" };
+  assert.equal(pluginPromptOutcome(failed), null);
+  assert.equal(pluginPromptOutcome({ ...settled("plugin_handled"), state: "pending" }), null);
+  assert.equal(pluginPromptOutcome({ ...settled("plugin_handled"), kind: "Compact" }), null);
+  // A steering prompt a plugin answered says the same as a Send.
+  assert.deepEqual(text({ ...settled("plugin_handled", "Opened the ticket."), kind: "Steer" }), ["A plugin handled this prompt: Opened the ticket.", false]);
+  assert.deepEqual(text({ ...settled("plugin_cancelled"), kind: "Steer" }), ["A plugin cancelled this prompt: nothing was sent to the agent.", true]);
+  assert.equal(pluginPromptOutcome({ ...settled("plugin_cancelled"), kind: "Steer", state: "pending" }), null);
+
+  // The message travels on the receipt in the place of a run id, within its bound.
+  const capability = createMutationCapability("epoch");
+  const pages: SessionReceiptPage[] = [];
+  const read = (value: SessionReceiptView) => refreshSubmissions(async () => page(value), "epoch", 0, new AbortController().signal, result => pages.push(result), capability);
+  await read(settled("plugin_handled", "Opened the ticket."));
+  await read({ ...settled("plugin_handled", "Opened the ticket."), runId: "run" });
+  await read(settled("plugin_handled", "x".repeat(257)));
+  assert.deepEqual(pages.map(value => value.status), ["ok", "invalid_response", "invalid_response"]);
+});
 const control = "abcdefab-1234-5678-9abc-abcdefabcdee";
 function row(): SessionReceiptView {
   return { clientRequestId: "key", sessionId: "session", operationId: operation, targetOperationId: null, kind: "Send",
-    state: "pending", outcome: null, code: null, runId: null, queueInsertion: null };
+    state: "pending", outcome: null, code: null, runId: null };
 }
 function page(...rows: SessionReceiptView[]): SessionReceiptPage { return { status: "ok", epoch: "epoch", rows, next: null }; }
 function request() { return captureSubmission("epoch", "session", "  exact\ntext  ", "key")!; }
@@ -344,7 +376,7 @@ test("malformed admissions and mixed receipt pages fail closed while legacy null
     { ...row(), operationId: operation.toUpperCase() }, { ...row(), operationId: "00000000-0000-0000-0000-000000000000" },
     { ...row(), clientRequestId: "\ud800" }, { ...row(), state: "unknown" }, { ...row(), outcome: "unknown" },
     { ...row(), code: "x".repeat(65) }, { ...row(), runId: "\udc00" },
-    { ...row(), queueInsertion: { state: "pending", accepted: null, code: null } },
+    { ...row(), kind: "Queue" },
   ];
   const invalidPages: SessionReceiptPage[] = [
     { ...page(row()), rows: null as unknown as SessionReceiptView[] }, page(...Array.from({ length: 65 }, row)), page(row(), row()),
@@ -369,7 +401,7 @@ test("malformed admissions and mixed receipt pages fail closed while legacy null
   await f.wait(refreshSubmissions(() => f.keep(Promise.resolve(invalidPages[0])), "epoch", 0, signal, value => readResults.push(value), capability));
   assert.deepEqual(readResults, [{ status: "invalid_response", epoch: "epoch", rows: [], next: null }]);
   for (const wrong of [{ ...row(), sessionId: "SESSION" }, { ...row(), state: "terminal" }, { ...row(), targetOperationId: control },
-    { ...row(), kind: "AbortRun" }, { ...row(), kind: "Queue", queueInsertion: { state: "pending", accepted: null, code: null } }]) {
+    { ...row(), kind: "AbortRun" }]) {
     const value = page(wrong); assert.equal(captureSubmissionAbort("epoch", "session", value, wrong, "abort"), null);
   }
   const valid = page(row()); assert.equal(captureSubmissionAbort("epoch", "session", valid, { ...valid.rows[0] }, "abort"), null);
@@ -379,11 +411,10 @@ test("malformed admissions and mixed receipt pages fail closed while legacy null
   assert.ok(captureSubmissionAbort("epoch", "session", full, full.rows[0], "abort"));
   assert.equal(captureSubmissionAbort("epoch", "session", { ...full, next: 320 }, full.rows[0], "abort"), null);
   const mixed = page(row(), { ...abortRow(), kind: "AbortRun" },
-    { ...row(), kind: "Queue", operationId: "abcdefab-1234-5678-9abc-abcdefabcded", clientRequestId: "queue",
-      queueInsertion: { state: "terminal", accepted: false, code: "queue_target_unavailable" } });
+    { ...row(), kind: "Compact", operationId: "abcdefab-1234-5678-9abc-abcdefabcded", clientRequestId: "compact" });
   assert.ok(captureSubmissionAbort("epoch", "session", mixed, mixed.rows[0], "abort"));
   assert.deepEqual(store.reconcile("session", mixed, capability), { sendRecovered: true, abortsRecovered: 0 });
-  // Legacy wire validation permits nullable outcome/code/run even in terminal rows. Do not apply Queue phases.
+  // Legacy wire validation permits nullable outcome/code/run even in terminal rows.
   response = accepted({ ...row(), state: "terminal" });
   await f.wait(store.submit(request(), signal, capability, value => published.push(value)));
   assert.equal(store.pending("session"), undefined); assert.equal(published.at(-1)?.status, "accepted");

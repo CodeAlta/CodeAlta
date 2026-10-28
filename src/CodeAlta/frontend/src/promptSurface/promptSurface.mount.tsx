@@ -10,7 +10,7 @@ import { createMutationCapability, createOwnedSubmissions } from "../sessionOper
 import { createSteeringSubmissions } from "../sessionSteering";
 import { createCompactionSubmissions } from "../sessionCompaction";
 import { createAbortRunSubmissions } from "../sessionAbortRun";
-import { createQueueSubmissions } from "../sessionQueue";
+import { createComposerQueue } from "../composerQueue";
 import { createRuntimeStateReader } from "../runtimeState";
 import { createDraftIndicators } from "../promptDraft";
 import { createNextSendSelectionStore } from "../nextSendSelection";
@@ -44,10 +44,10 @@ const change = (next: Partial<typeof state>) => { state = { ...state, ...next };
 const submissions = createOwnedSubmissions(async (request): Promise<SessionAdmission> => {
   run = "run-1";
   return { status: "accepted", epoch: request.expectedEpoch, receipt: { kind: "Send", clientRequestId: request.clientRequestId,
-    sessionId: request.sessionId, operationId: operationId(), targetOperationId: null, state: "pending", outcome: null, code: null, runId: null, queueInsertion: null } };
+    sessionId: request.sessionId, operationId: operationId(), targetOperationId: null, state: "pending", outcome: null, code: null, runId: null } };
 }, unavailable);
 const shared = {
-  epoch, submissions, steering: createSteeringSubmissions(unavailable), queue: createQueueSubmissions(unavailable, unavailable),
+  epoch, submissions, steering: createSteeringSubmissions(unavailable), queue: createComposerQueue(),
   compaction: createCompactionSubmissions(unavailable), abortRuns: createAbortRunSubmissions(unavailable),
   capability: createMutationCapability(epoch), draftIndicators: createDraftIndicators(), permissionReviewer: null,
   selections: createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)),

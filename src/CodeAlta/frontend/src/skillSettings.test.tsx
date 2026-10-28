@@ -17,7 +17,7 @@ const detail = (skill: SkillsEntry, change: Partial<SkillsDetailResponse> = {}):
   skillFilePath: `/skills/${skill.name}/SKILL.md`, skillRootPath: `/skills/${skill.name}`, sourceId: "source", shadowedBy: null, modelVisible: true, license: null,
   // The instructions are Markdown, which only a browser renders: the text of the file is left out.
   compatibility: null, allowedTools: null, content: null, contentTruncated: false, relatedFiles: [{ category: "scripts", path: "scripts/run.ps1" }],
-  diagnostics: [], relatedFilesOmitted: 0, folder: `skill:global:${skill.source}:${skill.name}`, ...change });
+  diagnostics: [], relatedFilesOmitted: 0, folder: `skill:global:${skill.source}:${skill.name}`, linked: false, ...change });
 function render(skill: SkillsEntry, value: SkillsDetailResponse | undefined, change: { locale?: typeof locales[number]; edit?: boolean } = {}) {
   const locale = change.locale ?? "en";
   return renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
@@ -208,4 +208,14 @@ test("the details of a skill of an MCP server say its fields, allowed-tools igno
   }
   // Without a host to read from or to write to, the details have no button.
   assert.ok(!inLocale("en", createElement(McpSkillDetail, { skill: mcpEntry("billing", "refunds", { approval: "approved" }) })).includes("<button"));
+});
+
+test("a skill reached through a symbolic link says it is linked, and is neither edited nor removed through its link", () => {
+  for (const locale of locales) {
+    const skill = entry("shared", "UserAlta");
+    const html = render(skill, detail(skill, { linked: true, folder: null }), { locale });
+    assert.ok(html.includes(`>${translate(locale, "Linked")}<`), html);
+    assert.ok(!html.includes(`>${translate(locale, "Edit")}<`), html);
+    assert.ok(!render(skill, detail(skill), { locale }).includes(`>${translate(locale, "Linked")}<`));
+  }
 });

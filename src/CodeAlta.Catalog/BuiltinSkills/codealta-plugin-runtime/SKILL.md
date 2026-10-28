@@ -1,6 +1,6 @@
 ---
 name: codealta-plugin-runtime
-description: Use this skill to create, change, build, reload, test or troubleshoot a CodeAlta plugin - C# code that adds commands, dialogs, status items, agent tools, alta commands, prompt text or timeline cards to CodeAlta.
+description: Use this skill to create, change, build, reload, test or troubleshoot a CodeAlta plugin - C# code that adds commands, dialogs, status items, agent tools, alta commands, prompt text or timeline cards to CodeAlta, or hooks that check, block or change the tool calls of sessions (a check of each shell command before it runs) and continue a session when its run ends.
 ---
 
 # CodeAlta plugins
@@ -131,9 +131,10 @@ Override only what the plugin needs.
 | `GetResources()` | Skills shipped with the plugin: `Resources.SkillRoot("skills")` | yes | yes |
 | `OnBeforeAgentRunAsync` | Tools and messages for one run; can cancel the run | yes | yes |
 | `OnAgentEventAsync` | Sees the events of the sessions | yes | yes |
-| `OnToolCallAsync`, `OnToolResultAsync` | Sees and changes the calls of the tools that plugins add | yes | yes |
-| `GetPromptProcessors()`, `OnPromptSubmittingAsync` | Changes a prompt before it is sent | no | yes |
-| `GetCompactionContributions()` | Hooks of a manual compaction | no | yes |
+| `OnToolCallAsync`, `OnToolResultAsync` | Hooks: see, block or change every tool call of a session (see "Tool hooks") | yes | yes |
+| `OnAgentRunEndedAsync` | Hook: continues a session whose run ended, with a prompt | yes | yes |
+| `GetPromptProcessors()`, `OnPromptSubmittingAsync` | Changes, answers or stops a prompt of the user before it is sent (see "Change the prompt before it is sent") | yes | yes |
+| `GetCompactionContributions()` | Hooks of a manual compaction: cancel it with a reason, add instructions to its summary, see its end (`Succeeded`, `Summary`); not the automatic compactions of a full context | yes | yes |
 | `GetCommandLineContributions()` | Commands of the `altatui` command line | no | yes |
 
 `[Plugin("id", Frontends = PluginFrontends.Desktop)]` (or `Terminal`) starts the plugin in one application only. `Context.Host.Frontend` says which application runs.
@@ -492,6 +493,33 @@ public override IEnumerable<PluginAgentToolContribution> GetAgentTools()
 - A tool that starts a program with the arguments the model gives (a command line tool that takes any arguments) is one more shell: say so with `new PluginAgentToolContribution { Definition = …, ActivationPolicy = new PluginToolActivationPolicy { StartsPrograms = true } }`. A session whose `shell_command` the user turned off is then refused it.
 - To try the tool: `alta plugin reload <id>`, then call it in the same turn.
 
+## Tool hooks
+
+`OnToolCallAsync` runs before **every** tool call of a session: the built-in tools (`shell_command`, `write_file`, `apply_patch`, `alta`, `exec`…), plugin and MCP tools, the calls of Code Mode scripts, and the tools Claude Code or an ACP agent runs itself. `OnToolResultAsync` runs after the tools CodeAlta runs. Filter by `context.ToolName`; read a shell command from `context.ShellCommand` (`Command`, `WorkingDirectory`) and the files a call changes from `context.ModifiedFiles`, instead of parsing `context.Arguments`.
+
+```csharp
+public override bool ToolHooksFailClosed => true;              // block the call when this hook throws or times out
+public override TimeSpan HookTimeout => TimeSpan.FromSeconds(15); // 10 seconds by default
+
+public override async ValueTask<PluginToolCallResult?> OnToolCallAsync(PluginToolCallContext context, CancellationToken cancellationToken = default)
+{
+    if (context.ShellCommand is not { } shell) return null;    // null: let the call go on
+    var errors = await CheckAsync(shell.Command, cancellationToken);
+    return errors is null ? null : PluginToolCallResult.Block(errors); // the model reads "Blocked by <plugin>: <errors>"
+}
+
+public override ValueTask<PluginToolResult?> OnToolResultAsync(PluginToolResultContext context, CancellationToken cancellationToken = default)
+    => ValueTask.FromResult<PluginToolResult?>(context.ToolName == "shell_command" && !context.Result.Success
+        ? PluginToolResult.Append("Hint: run the tests with `dotnet test`.")  // or Replace(result), AttachDetails(json)
+        : null);
+```
+
+- The hooks of the plugins run in turn; the first `Block` ends the call; `ReplaceArguments(json)` gives the next hook the new arguments.
+- They run before the checks of CodeAlta, the permission prompt and the sandbox, which still apply to the new arguments: a hook cannot allow what CodeAlta refuses.
+- `context.CanBlock`, `CanModifyArguments`, `CanChangeResult` say what applies: the own tools of Claude Code and of ACP agents (`ToolKind` `Agent`) can only be blocked, and ACP agents only ask about some calls.
+- A hook that throws or does not answer in time is listed by `alta plugin status <id>`; the call goes on unless `ToolHooksFailClosed` is true.
+- `OnAgentRunEndedAsync` returns `PluginAgentRunEndedResult.Continue(prompt)` to give a session whose run ended normally a new prompt (at most 3 times in a row).
+
 ## Commands of the alta tool
 
 A session runs them as `alta <root> <command>`. See `samples/alta-command`.
@@ -526,6 +554,20 @@ public override IEnumerable<PluginSystemPromptContribution> GetSystemPromptContr
 ```
 
 A dynamic text is asked for each prompt of each session; return null to add nothing. Keep it stable: a text that changes replaces the prompt of the session.
+
+## Change the prompt before it is sent
+
+```csharp
+public override ValueTask<PluginPromptResult?> OnPromptSubmittingAsync(PluginPromptSubmittingContext context, CancellationToken cancellationToken = default)
+    => ValueTask.FromResult<PluginPromptResult?>(context.Text.StartsWith("/ticket ", StringComparison.Ordinal)
+        ? PluginPromptResult.Handled("Opened the ticket.")    // or Cancel("why"), Replace(text, attachments); null: send it as it is
+        : null);
+```
+
+- It sees each prompt the user sends, as typed (`context.Text`, before `@` references are resolved), with `context.Attachments`, and each prompt the user steers into a turn that runs (text only). The prompts CodeAlta sends itself (reminders, job results, the continuation of `OnAgentRunEndedAsync`) do not go through it.
+- `Replace(text, attachments)` sends another text. Return some of `context.Attachments`, in any order, to drop or reorder them (in CodeAlta Desktop each has an `id` in `Metadata`); return none to keep them all.
+- `Handled(message)` and `Cancel(message)` send nothing: the status line under the prompt in CodeAlta Desktop says that a plugin handled or cancelled the prompt, with the message.
+- `TemporaryPromptContributions` of the result add text to the instructions of that prompt's run only. They apply to a prompt that is sent: the instructions of a turn that a prompt steers do not change.
 
 ## Data, background work and logs
 

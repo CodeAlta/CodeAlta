@@ -16,9 +16,8 @@ public sealed partial class OwnedSessionCommandService
             if (_closed || _retained) return Task.FromResult("closed");
             if (_deleteWork is not null || _active.ContainsKey(candidate.SessionId) || _steering.Contains(candidate.SessionId)
                 || _compacting.Contains(candidate.SessionId) || _abortingRuns.Contains(candidate.SessionId)
-                || _queueing.Contains(candidate.SessionId) || _remoteControlling.ContainsKey(candidate.SessionId)
+                || _remoteControlling.ContainsKey(candidate.SessionId)
                 || _operations.Values.Any(operation => !operation.Released && string.Equals(operation.SessionId, candidate.SessionId, StringComparison.OrdinalIgnoreCase))
-                || _queues.Values.Any(operation => !operation.Released && string.Equals(operation.Request.SessionId, candidate.SessionId, StringComparison.OrdinalIgnoreCase))
                 || Asks.List(candidate.SessionId).Head is not null)
                 return Task.FromResult("busy");
             completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -53,7 +52,7 @@ public sealed partial class OwnedSessionCommandService
     private bool Reserved(string sessionId)
         => _deleteWork is not null && (_retiringSessionId is null || Retiring(sessionId));
 
-    // Called under the gate. Steering or stopping the run of a session, or cancelling its queued prompt, changes no
+    // Called under the gate. Steering or stopping the run of a session changes no
     // catalog: an archive, a deletion, a move or a provider change refuses a session at work, and the runtime checks the
     // exact target on the actor of the session. So only the retirement of that very session holds them, not a
     // reservation for the others (an archive retires the attachments of its sessions one after the other, and they

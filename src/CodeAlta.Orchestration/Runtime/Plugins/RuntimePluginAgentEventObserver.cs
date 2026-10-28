@@ -92,6 +92,11 @@ public sealed class RuntimePluginAgentEventObserver
         _failurePolicy = failurePolicy;
     }
 
+    /// <summary>
+    /// Gets or sets the run-end hooks of the plugins, which follow the events observed here; <see langword="null"/> for none.
+    /// </summary>
+    public PluginRunEndHooks? RunEndHooks { get; set; }
+
     /// <summary>Observes an event without caller cancellation.</summary>
     /// <param name="envelope">The supplied event and captured context.</param>
     /// <returns>Adapter diagnostics, or an empty result when the explicit policy handles an escaping failure.</returns>
@@ -117,6 +122,8 @@ public sealed class RuntimePluginAgentEventObserver
         ArgumentNullException.ThrowIfNull(envelope);
         try
         {
+            // The hooks of a run that ended run beside the events: their work is not awaited here.
+            _ = RunEndHooks?.Observe(envelope);
             var active = _manager.ActivePlugins;
             if (active.Count == 0) return [];
             var seed = active[0];

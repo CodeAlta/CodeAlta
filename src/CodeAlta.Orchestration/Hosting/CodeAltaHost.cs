@@ -94,6 +94,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
             ModelOptions = modelProviderInitializationService.SetModelOptionAsync,
         };
         Commands.Fallback.ProviderStates = () => modelProviderInitializationService.CurrentStates;
+        // Every tool call of a session goes through the tool hooks of the plugins, whatever runs the session.
+        if (Commands.Plugins is { } toolHooks) runtimeService.ToolInterceptorOf = toolHooks.CreateToolInterceptor;
+        // A plugin can continue a session whose run ended, with a prompt of its own.
+        if (runtimeService.PluginEventObserver is { } pluginEvents)
+            pluginEvents.RunEndHooks = new PluginRunEndHooks(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins,
+                (sessionId, prompt, token) => runtimeService.DeliverHostPromptAsync(sessionId, prompt, AgentPromptProvenance.Plugin, token));
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
         // A script that went on in the background gives its result to its session as a prompt.
         CodeModeRuns = new Runtime.Scripts.CodeModeRunRegistry(

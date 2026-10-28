@@ -8,8 +8,8 @@ using CodeAlta.Orchestration.Runtime.Prompts;
 namespace CodeAlta.Orchestration.Runtime;
 
 /// <summary>
-/// Host-owned, bounded send/abort/steer/idle-compaction/exact-cancellation/volatile-queue admission. Owns tasks, not runtime dependencies.
-/// One send and independently one steer, compact, abort-run and volatile queue operation per session are reserved.
+/// Host-owned, bounded send/abort/steer/idle-compaction/exact-cancellation admission. Owns tasks, not runtime dependencies.
+/// One send and independently one steer, compact and abort-run operation per session are reserved.
 /// No durable queue or event reader is created.
 /// </summary>
 /// <remarks>
@@ -86,8 +86,6 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private readonly HashSet<string> _compacting = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<AbortRunOperation> _abortRuns = [];
     private readonly HashSet<string> _abortingRuns = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<Guid, QueueOperation> _queues = [];
-    private readonly HashSet<string> _queueing = new(StringComparer.OrdinalIgnoreCase);
     // The requests of remote control under way, by session: they may attach it.
     private readonly Dictionary<string, int> _remoteControlling = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Exception> _cleanupFailures = [];
@@ -216,16 +214,15 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     // test orders itself by. Null in the application.
     internal Func<string, CancellationToken, Task>? SendStarting { get; set; }
 
-    // Whether a command of this owner for a session is under way (a send, a queued prompt, a steer, a compaction, an
+    // Whether a command of this owner for a session is under way (a send, a steer, a compaction, an
     // abort), or a fallback that continues its failed run: the settlement of the session waits for it.
     private bool HasWork(string sessionId)
     {
         lock (_gate)
         {
             if (!_closed && (_active.ContainsKey(sessionId) || _steering.Contains(sessionId) || _compacting.Contains(sessionId)
-                || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId)
-                || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId)
-                || _queues.Values.Any(operation => !operation.Released && operation.Request.SessionId == sessionId)))
+                || _abortingRuns.Contains(sessionId)
+                || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId)))
                 return true;
         }
 
@@ -324,7 +321,6 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         switch (receipt.Kind)
         {
             case OwnedSessionCommandKind.Send: _operations.Remove(receipt.OperationId); break;
-            case OwnedSessionCommandKind.Queue: _queues.Remove(receipt.OperationId); break;
             case OwnedSessionCommandKind.Steer: _steers.RemoveAll(operation => ReferenceEquals(operation.Receipt, receipt)); break;
             case OwnedSessionCommandKind.Compact: _compacts.RemoveAll(operation => ReferenceEquals(operation.Receipt, receipt)); break;
             case OwnedSessionCommandKind.AbortRun: _abortRuns.RemoveAll(operation => ReferenceEquals(operation.Receipt, receipt)); break;
@@ -573,7 +569,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 request = request with { Images = OwnedPromptImages.Freeze(request.Images) };
             }
             if (_active.ContainsKey(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
-            if (request.Selection is not null && (_queueing.Contains(request.SessionId) || _compacting.Contains(request.SessionId)
+            if (request.Selection is not null && (_compacting.Contains(request.SessionId)
                 || _steering.Contains(request.SessionId) || _abortingRuns.Contains(request.SessionId)))
                 return new(OwnedSessionCommandAdmissionKind.Busy);
 
@@ -635,6 +631,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     }
 
     /// <summary>Reserves exact-target text steering independently of an in-flight owned send.</summary>
+    /// <remarks>The text goes through the prompt-submit hooks of plugins first, as a send does: a plugin may replace it,
+    /// or answer it itself (<see cref="PluginHandledCode"/>, <see cref="PluginCancelledCode"/>), and then nothing reaches the turn.</remarks>
     /// <exception cref="ArgumentNullException">The request is null.</exception>
     /// <exception cref="ArgumentException">An identity or text is blank, an identity is padded, or the runtime/attachment identity is invalid.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested before acceptance.</exception>
@@ -674,8 +672,18 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         OwnedSessionCommandResult result;
         try
         {
-            var runId = await operation.RuntimeInvocation.RunAsync(() => _runtime.SteerOwnedCommandAsync(operation.Request, operation.Execution.Token)).ConfigureAwait(false);
-            result = new(OwnedSessionCommandOutcome.Completed, runId);
+            // The plugins see the prompt as it was typed; one that answers it itself settles the steer: nothing reaches the turn.
+            var prompt = await SubmitSteeringPromptAsync(operation).ConfigureAwait(false);
+            if (prompt.Settled is { } settled)
+            {
+                result = settled;
+            }
+            else
+            {
+                var request = prompt.Text == operation.Request.Text ? operation.Request : operation.Request with { Text = prompt.Text };
+                var runId = await operation.RuntimeInvocation.RunAsync(() => _runtime.SteerOwnedCommandAsync(request, operation.Execution.Token)).ConfigureAwait(false);
+                result = new(OwnedSessionCommandOutcome.Completed, runId);
+            }
         }
         catch (OperationCanceledException failure) when (operation.Execution.IsCancellationRequested)
         {
@@ -732,12 +740,27 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     {
         await operation.Launch.Task.ConfigureAwait(false);
         OwnedSessionCommandResult result;
+        CompactionHooks? hooks = null;
+        // What the after-hooks of plugins are told, once a compaction their before-hooks let through settled.
+        (bool Succeeded, string? Summary)? settled = null;
         try
         {
-            var outcome = await operation.RuntimeInvocation.RunAsync(() => _runtime.CompactOwnedCommandAsync(operation.Request, operation.Execution.Token)).ConfigureAwait(false);
-            result = outcome is null ? new(OwnedSessionCommandOutcome.Failed, Code: "compact_busy")
-                : outcome.Success ? new(OwnedSessionCommandOutcome.Completed)
-                : new(OwnedSessionCommandOutcome.Failed, Code: "compact_unsuccessful");
+            if (Plugins is not null) hooks = await BeforeCompactionHooksAsync(Plugins, operation).ConfigureAwait(false);
+            if (hooks?.Preparation.CancelReason is { } reason)
+            {
+                await RecordPluginCancelledCompactionAsync(hooks, reason).ConfigureAwait(false);
+                result = new(OwnedSessionCommandOutcome.Failed, Code: CompactPluginCancelledCode);
+            }
+            else
+            {
+                var options = hooks?.Preparation.Instructions is { } instructions ? new AgentCompactionOptions { Instructions = instructions } : AgentCompactionOptions.Default;
+                var outcome = await operation.RuntimeInvocation.RunAsync(() => _runtime.CompactOwnedCommandAsync(operation.Request, options, operation.Execution.Token)).ConfigureAwait(false);
+                settled = outcome is null ? (false, "The session was busy: nothing was compacted.")
+                    : outcome.Success ? (true, outcome.Summary) : (false, outcome.Message);
+                result = outcome is null ? new(OwnedSessionCommandOutcome.Failed, Code: "compact_busy")
+                    : outcome.Success ? new(OwnedSessionCommandOutcome.Completed)
+                    : new(OwnedSessionCommandOutcome.Failed, Code: "compact_unsuccessful");
+            }
         }
         catch (OperationCanceledException failure) when (operation.Execution.IsCancellationRequested)
         {
@@ -747,174 +770,23 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         catch (NotSupportedException failure)
         {
             RecordFailure(failure, cleanup: false, operation.ReleaseDecision);
+            settled = (false, failure.Message);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "compact_unsupported");
         }
         catch (Exception ex)
         {
             RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
+            settled = (false, ex.Message);
             result = new(OwnedSessionCommandOutcome.Failed, Code: "compact_failed");
         }
+        // Before the receipt settles, so that a compaction that follows does not overtake them.
+        if (hooks is not null && hooks.Preparation.CancelReason is null && settled is { } end)
+            await AfterCompactionHooksAsync(hooks, end.Succeeded, end.Summary, operation.Execution.Token).ConfigureAwait(false);
         lock (_gate)
         {
             operation.ReleaseDecision.Complete();
             _compacting.Remove(operation.Request.SessionId);
             operation.Receipt.Complete(result);
-        }
-    }
-
-    /// <summary>Reserves one volatile deferred text operation. Actual insertion and eventual dispatch
-    /// have separate retained results; acceptance here only reserves ownership and replay protection.</summary>
-    /// <exception cref="ArgumentNullException">The request is null.</exception>
-    /// <exception cref="ArgumentException">An identity or text is invalid or exceeds its bound.</exception>
-    /// <exception cref="OperationCanceledException">The caller cancelled before reservation.</exception>
-    public OwnedSessionCommandAdmission AdmitQueue(OwnedTextQueueRequest request, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        request.Validate();
-        QueueOperation operation;
-        lock (_gate)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (Known(request.ClientRequestId, previous => previous.Queue == request) is { } known) return known;
-            if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
-            if (Reserved(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
-            if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
-            if (_queueing.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
-            var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Queue, request.SessionId);
-            // The policy of this queued send, fixed here as it is for a direct one.
-            var queueReview = _runtime.SessionPermissionModes || _reviewPermissions();
-            if (queueReview) _permissionsUsed = true;
-            operation = new(request, receipt) { ReviewPermissions = queueReview };
-            Keep(new(receipt, Queue: request, Release: operation.ReleaseDecision));
-            _queues.Add(receipt.OperationId, operation);
-            _queueing.Add(request.SessionId);
-            operation.Work = RunQueueAsync(operation);
-        }
-        operation.Launch.TrySetResult();
-        return new(OwnedSessionCommandAdmissionKind.Accepted, operation.Receipt);
-    }
-
-    /// <summary>Reserves cancellation of an original queue operation. Caller cancellation after
-    /// reservation abandons only its waiter. No runtime-wide or latest-run abort is invoked.</summary>
-    /// <exception cref="ArgumentNullException">The request is null.</exception>
-    /// <exception cref="ArgumentException">The key is invalid or the operation identity is empty.</exception>
-    /// <exception cref="OperationCanceledException">The caller cancelled before reservation.</exception>
-    public OwnedSessionCommandAdmission AdmitCancelQueue(OwnedCancelQueueRequest request, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        OwnedTextQueueRequest.ValidateIdentity(request.ClientRequestId);
-        if (request.TargetOperationId == Guid.Empty) throw new ArgumentException("Queue cancellation requires an operation identity.", nameof(request));
-        QueueOperation operation;
-        OwnedSessionCommandReceipt receipt;
-        lock (_gate)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (Known(request.ClientRequestId, previous => previous.CancelQueue == request) is { } known) return known;
-            if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
-            if (_queues.TryGetValue(request.TargetOperationId, out var targeted) && Retiring(targeted.Request.SessionId))
-                return new(OwnedSessionCommandAdmissionKind.Busy);
-            if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
-            if (!_queues.TryGetValue(request.TargetOperationId, out var target)) return new(OwnedSessionCommandAdmissionKind.UnknownTarget);
-            operation = target;
-            receipt = new(request.ClientRequestId, OwnedSessionCommandKind.CancelQueue, operation.Request.SessionId, request.TargetOperationId);
-            Keep(new(receipt, CancelQueue: request));
-            if (operation.Released) receipt.Complete(new(OwnedSessionCommandOutcome.Completed, Code: "already_terminal"));
-            else
-            {
-                operation.CancelReceipts.Add(receipt);
-                EnsureQueueCancellation(operation);
-                if (operation.CancelResult is { } result) receipt.Complete(result);
-            }
-        }
-        StartQueueCancellation(operation);
-        return new(OwnedSessionCommandAdmissionKind.Accepted, receipt);
-    }
-
-    private async Task RunQueueAsync(QueueOperation operation)
-    {
-        await operation.Launch.Task.ConfigureAwait(false);
-        OwnedSessionCommandResult result;
-        try
-        {
-            Task<OwnedSessionCommandResult>? runtimeOriginal = null;
-            operation.RuntimeInvocation.Launch(() => runtimeOriginal = _runtime.QueueOwnedCommandAsync(operation.Request, operation.Receipt, operation.ReviewPermissions,
-                operation.Execution.Token, _enableUserInput));
-            if (await operation.RuntimeInvocation.Outcome.ConfigureAwait(false) is { } failure) ExceptionDispatchInfo.Throw(failure);
-            result = await runtimeOriginal!.ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
-            result = new(OwnedSessionCommandOutcome.Failed, Code: "queue_failed");
-        }
-        // Also covers runtime admission refusal before its original body starts.
-        operation.Receipt.CompleteQueueInsertion(new(false, result.Code ?? "queue_failed"));
-        operation.RuntimeResult = result;
-        operation.RuntimeSettled.TrySetResult();
-        Task? cancellation;
-        lock (_gate)
-        {
-            cancellation = operation.Cancellation;
-            if (cancellation is null) { ReleaseQueue(operation, result); return; }
-        }
-        await cancellation.ConfigureAwait(false);
-        lock (_gate) ReleaseQueue(operation, result);
-    }
-
-    private void ReleaseQueue(QueueOperation operation, OwnedSessionCommandResult result)
-    {
-        operation.ReleaseDecision.Complete();
-        operation.Released = operation.ReleaseDecision.Released;
-        _queueing.Remove(operation.Request.SessionId);
-        operation.Receipt.Complete(operation.CancellationFailed
-            ? new(OwnedSessionCommandOutcome.Failed, Code: "queue_cancel_failed") : result);
-    }
-
-    // Called only under the owner gate; the original control cannot start until its launch opens.
-    private void EnsureQueueCancellation(QueueOperation operation)
-    {
-        if (!operation.Released && operation.Cancellation is null)
-            operation.Cancellation = CancelQueueAsync(operation);
-    }
-
-    private void StartQueueCancellation(QueueOperation operation)
-    {
-        lock (_gate)
-        {
-            if (operation.Cancellation is null || operation.CancellationInitiated) return;
-            operation.CancellationInitiated = true;
-        }
-        operation.CancellationInvocation.Launch(() => operation.SourceCancellation = operation.Execution.CancelAsync());
-        operation.CancelLaunch.TrySetResult();
-    }
-
-    private async Task CancelQueueAsync(QueueOperation operation)
-    {
-        await operation.CancelLaunch.Task.ConfigureAwait(false);
-        try
-        {
-            // Runtime owns the exact execution cancellation, registrations and send. Its callback
-            // only signals that owner; joining this source alone would falsely report settled control.
-            if (await operation.CancellationInvocation.Outcome.ConfigureAwait(false) is { } failure)
-            {
-                if (operation.CancellationInvocation.Original is null)
-                    throw new AgentDependencyRetentionException("queue command", "cancellation launch", [failure], operation);
-                ExceptionDispatchInfo.Throw(failure);
-            }
-        }
-        catch (Exception ex)
-        {
-            operation.CancellationFailed = true;
-            RecordFailure(ex, cleanup: true, operation.ReleaseDecision);
-        }
-        await operation.RuntimeSettled.Task.ConfigureAwait(false);
-        if (operation.RuntimeResult?.Code is "queue_cleanup_failed" or "queue_cancel_failed") operation.CancellationFailed = true;
-        var result = new OwnedSessionCommandResult(operation.CancellationFailed ? OwnedSessionCommandOutcome.Failed : OwnedSessionCommandOutcome.Completed,
-            Code: operation.CancellationFailed ? "queue_cancel_failed" : "queue_cancellation_signalled");
-        lock (_gate)
-        {
-            operation.CancelResult = result;
-            foreach (var receipt in operation.CancelReceipts) receipt.Complete(result);
         }
     }
 
@@ -1021,10 +893,15 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             operation.PreparationInvocation.Launch(() => operation.Preparation = PrepareAsync(operation));
             if (await operation.PreparationInvocation.Outcome.ConfigureAwait(false) is { } preparationFailure) ExceptionDispatchInfo.Throw(preparationFailure);
             var prepared = await operation.Preparation!.ConfigureAwait(false);
-            operation.Attachment.TrySetResult(prepared);
+            // A send a plugin answered attached nothing: there is no run to abort.
+            operation.Attachment.TrySetResult(prepared?.Settled is null ? prepared : null);
             if (prepared is null)
             {
                 result = new(OwnedSessionCommandOutcome.Failed, Code: "preparation_failed");
+            }
+            else if (prepared.Settled is { } settled)
+            {
+                result = settled;
             }
             else
             {
@@ -1146,19 +1023,12 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (session is null || !string.Equals(session.SessionId, operation.SessionId, StringComparison.OrdinalIgnoreCase)) return null;
             var project = string.IsNullOrWhiteSpace(session.ProjectRef) ? null
                 : await _projects.GetByIdAsync(session.ProjectRef, CancellationToken.None).ConfigureAwait(false);
-            var input = AgentInput.Text(operation.Request.Text);
             if (operation.Request.References is { } referenceScope)
             {
                 project = await ResolveReferenceProjectAsync(referenceScope, operation.Execution.Token).ConfigureAwait(false);
                 if (!ReferenceScopeMatches(referenceScope, project) || session.ProjectRef != referenceScope.ProjectId
                     || session.WorkingDirectory != project!.ProjectPath || session.SessionId != operation.SessionId) return null;
-                // Once per admitted original, before any provider creation. Replays retain the
-                // original receipt/work and never resolve mutable filesystem metadata again.
-                input = _references.Resolve(operation.Request.Text, WorkFolder(session, project), operation.Execution.Token);
             }
-            // Preserve exact empty request identity without inventing a textual provider prompt.
-            if (operation.Request.Text.Length == 0) input = new AgentInput([]);
-            if (operation.Request.Attachments is { Count: > 0 } attached) input = new AgentInput([.. input.Items, .. attached]);
             var selection = operation.Request.Selection;
             // An image needs a model that reads images; a file is given to any model in a form it reads.
             var hasImages = operation.Request.Images?.Any(OwnedPromptImages.IsImage) == true;
@@ -1169,19 +1039,16 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 if (choices is null || !IsValidSelection(choices, selection))
                     throw new ArgumentException("The selected session configuration is no longer available.");
             }
-            if (operation.Request.Images is { Count: > 0 } images)
+            AgentModelInfo? imageModel = null;
+            if (operation.Request.Images is { Count: > 0 })
             {
-                var model = ObservedImageModels?.Invoke(new ModelProviderId(session.ResolvedProviderKey))
+                imageModel = ObservedImageModels?.Invoke(new ModelProviderId(session.ResolvedProviderKey))
                     .SingleOrDefault(model => model.Id == selection!.ModelId);
-                if (selection?.ProviderKey != session.ResolvedProviderKey || hasImages && AgentImageInputCapability.Read(model) != true)
+                if (selection?.ProviderKey != session.ResolvedProviderKey || hasImages && AgentImageInputCapability.Read(imageModel) != true)
                     throw new ArgumentException("Image input capability is unknown, unsupported, or no longer available.");
                 if (project is { Archived: true } || (!string.IsNullOrWhiteSpace(session.ProjectRef)
                     && (project is null || operation.Request.References is null)))
                     throw new ArgumentException("Image Send requires the exact current project scope.");
-                var items = new List<AgentInputItem>(input.Items);
-                items.AddRange(await PromptAttachmentInput.SaveAsync(session, _catalog, images, operation.Receipt.OperationId.ToString("N"),
-                    model, Documents, operation.Execution.Token).ConfigureAwait(false));
-                input = new AgentInput(items);
             }
             // A selection without a model keeps the model the session already runs with. A send never leaves
             // without a model while its provider lists one: a session that has none starts with the provider's.
@@ -1204,11 +1071,33 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                     session.Options, spaces),
                 _runtime.Permissions.OwnedDefaultPermissionHandler,
                 _runtime.Permissions.OwnedDefaultUserInputHandler);
+            // The space decides which plugins apply to the session.
+            var spaceId = Plugins is null ? null
+                : (await _runtime.ResolveSpaceAsync(session.SpaceId, project, operation.Execution.Token).ConfigureAwait(false)).Id;
+            // The plugins see the prompt as it was typed, before its references are resolved; one that answers it itself
+            // settles the send here, before anything is saved or sent.
+            var prompt = await SubmitPromptAsync(operation, session, options, spaceId).ConfigureAwait(false);
+            if (prompt.Settled is not null) return new Prepared(session, options, new AgentInput([]), prompt.Settled);
+            var input = AgentInput.Text(prompt.Text);
+            // Once per admitted original, before any provider creation. Replays retain the
+            // original receipt/work and never resolve mutable filesystem metadata again.
+            if (operation.Request.References is not null)
+                input = _references.Resolve(prompt.Text, WorkFolder(session, project!), operation.Execution.Token);
+            // Preserve exact empty request identity without inventing a textual provider prompt.
+            if (prompt.Text.Length == 0) input = new AgentInput([]);
+            if (prompt.Attachments is { Count: > 0 } attached) input = new AgentInput([.. input.Items, .. attached]);
+            if (prompt.Images is { Count: > 0 } images)
+            {
+                var items = new List<AgentInputItem>(input.Items);
+                items.AddRange(await PromptAttachmentInput.SaveAsync(session, _catalog, images, operation.Receipt.OperationId.ToString("N"),
+                    imageModel, Documents, operation.Execution.Token).ConfigureAwait(false));
+                input = new AgentInput(items);
+            }
             if (Plugins is not null)
             {
                 // Contacts the MCP servers the session activated, so it follows the send's cancellation.
-                var space = await _runtime.ResolveSpaceAsync(session.SpaceId, project, operation.Execution.Token).ConfigureAwait(false);
-                var augmented = await Plugins.AugmentRunAsync(options, input, session.ProjectRef, session.SessionId, space.Id, operation.Execution.Token).ConfigureAwait(false);
+                var augmented = await Plugins.AugmentRunAsync(options, input, session.ProjectRef, session.SessionId, spaceId, prompt.Contributions,
+                    operation.Execution.Token).ConfigureAwait(false);
                 if (augmented.CancelReason is not null) throw new InvalidOperationException("A plugin cancelled the run: " + augmented.CancelReason);
                 (options, input) = (augmented.ExecutionOptions, augmented.Input);
             }
@@ -1399,7 +1288,6 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         SteerOperation[] steers;
         CompactOperation[] compacts;
         AbortRunOperation[] abortRuns;
-        QueueOperation[] queues;
         Task<string>? deleteWork;
         TaskCompletionSource launch;
         Task disposal;
@@ -1411,13 +1299,11 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             steers = [.. _steers];
             compacts = [.. _compacts];
             abortRuns = [.. _abortRuns];
-            queues = [.. _queues.Values];
             deleteWork = _deleteWork;
-            foreach (var queue in queues) EnsureQueueCancellation(queue);
             foreach (var operation in operations)
                 if (!operation.Released) EnsureControl(operation);
             launch = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            _disposeTask = DisposeCoreAsync(operations, steers, compacts, abortRuns, queues, deleteWork, launch.Task);
+            _disposeTask = DisposeCoreAsync(operations, steers, compacts, abortRuns, deleteWork, launch.Task);
             disposal = _disposeTask;
             // Stops any folder traversal still feeding the reference index; it completes synchronously.
             _ = _indexedReferences?.DisposeAsync().AsTask();
@@ -1431,7 +1317,6 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             RecordFailure(new AgentDependencyRetentionException("command owner", "ask admission closure", [failure], this), cleanup: true);
         }
         foreach (var operation in operations) StartControl(operation);
-        foreach (var queue in queues) StartQueueCancellation(queue);
         foreach (var steer in steers)
         {
             // Start every independent cancellation before any dependent join. No callbacks under _gate.
@@ -1458,7 +1343,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     }
 
     private async Task DisposeCoreAsync(SendOperation[] operations, SteerOperation[] steers, CompactOperation[] compacts,
-        AbortRunOperation[] abortRuns, QueueOperation[] queues, Task<string>? deleteWork, Task launch)
+        AbortRunOperation[] abortRuns, Task<string>? deleteWork, Task launch)
     {
         await launch.ConfigureAwait(false);
         if (deleteWork is not null) await deleteWork.ConfigureAwait(false);
@@ -1502,16 +1387,6 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             catch (Exception ex) { RecordFailure(ex, cleanup: true); }
             await ObserveCancellationAsync(abortRun.CancellationInvocation, abortRun.ReleaseDecision).ConfigureAwait(false);
         }
-        foreach (var queue in queues)
-        {
-            try { await queue.Work.ConfigureAwait(false); }
-            catch (Exception ex) { RecordFailure(ex, cleanup: true); }
-            if (queue.Cancellation is { } cancellation)
-            {
-                try { await cancellation.ConfigureAwait(false); }
-                catch (Exception ex) { RecordFailure(ex, cleanup: true); }
-            }
-        }
         _askDrain.Launch(Asks.DrainAsync);
         if (await _askDrain.Outcome.ConfigureAwait(false) is { } askFailure)
             RecordFailure(_askDrain.Original is null
@@ -1525,8 +1400,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             foreach (var source in operations.Select(static operation => operation.Execution)
                 .Concat(steers.Select(static operation => operation.Execution))
                 .Concat(compacts.Select(static operation => operation.Execution))
-                .Concat(abortRuns.Select(static operation => operation.Execution))
-                .Concat(queues.Select(static operation => operation.Execution)))
+                .Concat(abortRuns.Select(static operation => operation.Execution)))
             {
                 try { source.Dispose(); }
                 catch (Exception failure)
@@ -1547,34 +1421,10 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     // Release is the decision of the work of the command; null for a control of the work of another command.
     private sealed record ReceiptEntry(OwnedSessionCommandReceipt Receipt, OwnedTextSendRequest? Send = null, OwnedAbortRequest? Abort = null,
         OwnedTextSteerRequest? Steer = null, OwnedCompactRequest? Compact = null, OwnedAbortRunRequest? AbortRun = null,
-        OwnedTextQueueRequest? Queue = null, OwnedCancelQueueRequest? CancelQueue = null, OwnedAskSubmission? Ask = null,
+        OwnedAskSubmission? Ask = null,
         DependencyReleaseDecision? Release = null);
-    private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options, AgentInput Input);
-
-    private sealed class QueueOperation(OwnedTextQueueRequest request, OwnedSessionCommandReceipt receipt)
-    {
-        internal DependencyReleaseDecision ReleaseDecision { get; } = new();
-        internal OriginalInvocation RuntimeInvocation { get; } = new();
-        internal OriginalInvocation CancellationInvocation { get; } = new();
-        internal OwnedTextQueueRequest Request { get; } = request;
-        internal OwnedSessionCommandReceipt Receipt { get; } = receipt;
-
-        /// <summary>Whether this queued send runs under explicit permission review, as its admission decided.</summary>
-        internal bool ReviewPermissions { get; init; }
-        internal CancellationTokenSource Execution { get; } = new();
-        internal TaskCompletionSource Launch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal TaskCompletionSource CancelLaunch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal TaskCompletionSource RuntimeSettled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal Task Work { get; set; } = Task.CompletedTask;
-        internal Task? Cancellation { get; set; }
-        internal Task? SourceCancellation { get; set; }
-        internal bool CancellationInitiated { get; set; }
-        internal List<OwnedSessionCommandReceipt> CancelReceipts { get; } = [];
-        internal OwnedSessionCommandResult? CancelResult { get; set; }
-        internal OwnedSessionCommandResult? RuntimeResult { get; set; }
-        internal bool Released { get; set; }
-        internal bool CancellationFailed { get; set; }
-    }
+    // Settled is the result of a send a plugin answered itself (PluginHandledCode, PluginCancelledCode): nothing is sent.
+    private sealed record Prepared(SessionViewDescriptor Session, SessionExecutionOptions Options, AgentInput Input, OwnedSessionCommandResult? Settled = null);
 
     private sealed class AbortRunOperation(OwnedAbortRunRequest request, OwnedSessionCommandReceipt receipt)
     {

@@ -14,9 +14,9 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class OwnedSessionUserInputRuntimeTests
 {
     [TestMethod]
-    public async Task IsolatedRuntime_OrdinaryAskResponseAndClaimedQueueBindInputOnly()
+    public async Task IsolatedRuntime_OrdinaryAndAskResponseBindInputOnly()
     {
-        foreach (var route in new[] { "ordinary", "ask-response", "claimed-queue" })
+        foreach (var route in new[] { "ordinary", "ask-response" })
             await RuntimeFixture.Run(route);
     }
 
@@ -260,16 +260,8 @@ public sealed class OwnedSessionUserInputRuntimeTests
                 Status = SessionViewStatus.Active, Title = "Input fixture", WorkingDirectory = work, CreatedAt = DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch, LastActiveAt = DateTimeOffset.UnixEpoch };
             var executionOptions = new SessionExecutionOptions { ProviderId = new("input-inert"), ProviderKey = "input-inert", Model = "fixture", WorkingDirectory = work, ProjectRoots = [work],
                 OnPermissionRequest = _runtime.Permissions.OwnedDefaultPermissionHandler, OnUserInputRequest = _runtime.Permissions.OwnedDefaultUserInputHandler };
-            Task send; Task<OwnedSessionCommandResult>? queueSend = null; Task<OwnedAskDisposition>? answer = null;
-            if (_route == "claimed-queue")
-            {
-                await Keep(() => _runtime.EnsureOwnedCoordinatorSessionAsync(session, executionOptions));
-                var state = await Keep(() => _runtime.GetCurrentStateAsync(session.SessionId));
-                var receipt = new OwnedSessionCommandReceipt("queue", OwnedSessionCommandKind.Queue, session.SessionId);
-                Assert.IsNotNull(state.Entry);
-                send = queueSend = Keep(() => _runtime.QueueOwnedCommandAsync(new("queue", session.SessionId, state.RuntimeInstanceId, state.Entry.AttachmentGeneration, "inert"), receipt, false, _cancel.Token, true));
-            }
-            else if (_route == "ask-response")
+            Task send; Task<OwnedAskDisposition>? answer = null;
+            if (_route == "ask-response")
             {
                 // Real owner preparation requires persisted identity; only this explicit fixture store is seeded.
                 var store = catalog.JournalStore.CreateSessionStore();
@@ -297,7 +289,6 @@ public sealed class OwnedSessionUserInputRuntimeTests
             Assert.IsNull(page.Entries[0].Handle.RunId);
             Assert.IsTrue(await Keep(() => _runtime.Permissions.ResolveOwnedUserInputAsync(page.Entries[0].Handle, [new("q", "literal")], default).AsTask()));
             await send;
-            if (queueSend is not null) Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await queueSend).Outcome);
             if (answer is not null) { Assert.AreEqual("admitted", (await answer).Status); Assert.IsNotNull((await answer).RunId); }
             Assert.AreEqual(0, (await Keep(() => _runtime.Permissions.ListOwnedUserInputsAsync(session.SessionId, default).AsTask())).Entries.Count);
             Assert.IsTrue(noRoots.Calls > 0); Assert.IsTrue(_providerPreparations > 0);

@@ -85,19 +85,7 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual("ok", await f.Observe(f.Host.Commands.DeleteCatalogProjectAsync(
             idle.Id, idle.ProjectPath, idle.DisplayName, idle.Archived)));
         Assert.IsNull(await f.Observe(f.Host.ProjectCatalog.GetByIdAsync(idle.Id)));
-        var state = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
-        var queued = f.Host.Commands.AdmitQueue(new("retained-queue", f.SessionId,
-            state.RuntimeInstanceId, state.Entry!.AttachmentGeneration, "queued input"));
-        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, queued.Kind);
-        Assert.AreEqual("busy", await f.Observe(f.Host.Commands.DeleteCatalogSessionAsync(
-            f.SessionId, project.Id, f.ProjectRoot, "Owned fixture")));
-        Assert.AreEqual("session_in_use", await f.Observe(f.Host.Commands.DeleteCatalogProjectAsync(
-            project.Id, f.ProjectRoot, project.DisplayName, project.Archived)));
         Assert.IsNotNull(await f.Observe(f.Host.SessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(f.SessionId)));
-        var cancellation = f.Host.Commands.AdmitCancelQueue(new("cancel-retained", queued.Receipt!.OperationId));
-        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, cancellation.Kind);
-        await f.Observe(cancellation.Receipt!.Completion);
-        await f.Observe(queued.Receipt.Completion);
         f.Provider.ReleaseSend.TrySetResult();
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(receipt.Completion)).Outcome);
     });
@@ -1760,34 +1748,23 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
-    public Task AbortRunAndQueueCancellation_AreAdmittedWhileAnotherSessionHoldsTheCatalogReservation() => Fixture.RunAsync(async f =>
+    public Task AbortRun_IsAdmittedWhileAnotherSessionHoldsTheCatalogReservation() => Fixture.RunAsync(async f =>
     {
         f.Provider.SupportExactAbort = true;
         f.Provider.HoldExactAbort = true;
         var send = f.Send();
         await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "exact send");
         var request = await f.AbortRunRequest();
-        var queued = f.Host.Commands.AdmitQueue(new("reserved-queue", f.SessionId,
-            request.ExpectedRuntimeInstanceId, request.ExpectedAttachmentGeneration, "queued input"));
-        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, queued.Kind);
-        _ = f.Track(queued.Receipt!.Completion);
-        // The retirement of this very session holds them.
+        // The retirement of this very session holds it.
         using (f.HoldCatalogReservation(retiring: f.SessionId))
-        {
             Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitAbortRun(request with { ClientRequestId = "retiring" }).Kind);
-            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy,
-                f.Host.Commands.AdmitCancelQueue(new("cancel-retiring", queued.Receipt.OperationId)).Kind);
-        }
-        // An archive of another tree retires its attachments one after the other: the stop button and the
-        // cancellation of a queued prompt of a running session were refused as busy all that time.
+        // An archive of another tree retires its attachments one after the other: the stop button of a running
+        // session was refused as busy all that time.
         using (f.HoldCatalogReservation())
         {
             Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitSend(new("reserved-send", f.SessionId, "text")).Kind);
             var abort = f.Accept(f.AdmitAbortRun(request));
             await f.ObserveReadiness(f.Provider.ExactAbortStarted.Task, abort, "exact cancellation");
-            var cancellation = f.Accept(f.Host.Commands.AdmitCancelQueue(new("cancel-reserved", queued.Receipt.OperationId)));
-            await f.Observe(cancellation.Completion);
-            await f.Observe(queued.Receipt.Completion);
             f.Provider.ReleaseExactAbort.TrySetResult();
             Assert.AreEqual("cancellation_signalled", (await f.Observe(abort.Completion)).Code);
         }

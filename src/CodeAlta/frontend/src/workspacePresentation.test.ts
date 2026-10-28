@@ -5,7 +5,6 @@ import type { DisplayState } from "./sessionDisplay";
 import type { AskPage } from "./sessionAsks";
 import type { SessionDisplayView, SessionRuntimeStateResponse } from "#neoastra";
 import { captureSteering } from "./sessionSteering";
-import { captureQueue } from "./sessionQueue";
 
 const empty: DisplayState = { kind: "connected", hostEpoch: "host", sessionId: "session", code: null, cleanupBlocked: false, snapshot: null };
 const noAsks: AskPage = { head: null, latest: null, hasMore: false };
@@ -56,14 +55,9 @@ test("contextual controls appear only for an eligible observation or a retained 
       reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null, activity: null } };
   const eligibleSteer = (value: SessionRuntimeStateResponse | undefined) => showContextAction(
     captureSteering("epoch", "session", value, "x", "availability") !== null, false);
-  const eligibleQueue = (value: SessionRuntimeStateResponse | undefined) => showContextAction(
-    captureQueue("epoch", "session", value, "x", "availability") !== null, false);
   assert.equal(eligibleSteer(observed), true);
-  assert.equal(eligibleQueue(observed), true);
   assert.equal(eligibleSteer({ ...observed, entry: { ...observed.entry!, activeRunId: null } }), false);
-  assert.equal(eligibleQueue({ ...observed, entry: { ...observed.entry!, pendingAgentPromptId: "pending" } }), false);
   assert.equal(eligibleSteer({ ...observed, hostEpoch: "other" }), false);
-  assert.equal(eligibleQueue(undefined), false);
   assert.equal(showContextAction(eligibleSteer(undefined), true), true);
 });
 

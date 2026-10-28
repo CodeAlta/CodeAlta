@@ -18,8 +18,8 @@ public interface ISessionArchive
 public sealed partial class OwnedSessionCommandService : ISessionArchive
 {
     /// <inheritdoc/>
-    /// <remarks>Uses the exclusive catalog-mutation reservation shared with deletion and moves: send and queue admission
-    /// and shutdown honor and drain it. Refuses a session that runs, waits for an answer or has a send of this owner
+    /// <remarks>Uses the exclusive catalog-mutation reservation shared with deletion and moves: send admission and
+    /// shutdown honor and drain it. Refuses a session that runs, waits for an answer or has a send of this owner
     /// under way, rather than stopping it. No automatic retry is performed.</remarks>
     public Task<SessionArchiveResult> SetSessionArchivedAsync(string sessionId, bool archived, bool withChildren)
     {

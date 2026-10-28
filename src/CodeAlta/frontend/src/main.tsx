@@ -98,7 +98,7 @@ import { ownPermissionChoice } from "./CommandPermissionPanel";
 import { createSteeringSubmissions } from "./sessionSteering";
 import { createCompactionSubmissions } from "./sessionCompaction";
 import { createAbortRunSubmissions } from "./sessionAbortRun";
-import { createQueueSubmissions } from "./sessionQueue";
+import { createComposerQueue } from "./composerQueue";
 import { AskPanel, type AskMode } from "./AskPanel";
 import { askWireRequest, createAskActions } from "./sessionAsks";
 import { SessionNotesOverlay } from "./SessionNotesOverlay";
@@ -881,11 +881,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [steering] = useState(() => createSteeringSubmissions(sessionOperations.steer));
   const [compaction] = useState(() => createCompactionSubmissions(sessionOperations.compact));
   const [abortRuns] = useState(() => createAbortRunSubmissions(sessionOperations.abortRun));
-  const [queue] = useState(() => createQueueSubmissions(sessionOperations.queue, sessionOperations.cancelQueue));
+  const [queue] = useState(() => createComposerQueue());
   // A session whose tab closes, or is taken by another session, while prompts wait above its composer keeps its pane,
   // out of sight: the pane is what sends them once the session is idle, as the pane of a tab that is not in front does.
   // The window follows the waiting prompts for that only.
-  useSyncExternalStore(queue.composer.subscribe, queue.composer.getSnapshot);
+  useSyncExternalStore(queue.subscribe, queue.getSnapshot);
   const [askActions] = useState(() => createAskActions(
     request => sessionAsks.answer(askWireRequest(request), { timeoutMilliseconds: 8000 }),
     request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
@@ -1928,7 +1928,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function unmovable(tab: MovedTab): MessageKey | null {
     if ("session" in tab) {
       const id = tab.session.sessionId, epoch = status?.hostEpoch;
-      return submissions.pending(id) || (epoch && queue.composer.sessions(epoch).includes(id)) ? "A prompt is being sent in this session: the tab moves once it is sent." : null;
+      return submissions.pending(id) || (epoch && queue.sessions(epoch).includes(id)) ? "A prompt is being sent in this session: the tab moves once it is sent." : null;
     }
     return fileEditors.dirty(fileTabKey(tab.file)) ? "Save the files of this editor before moving it." : null;
   }
@@ -5080,7 +5080,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const presented = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
   // A secondary window starts no session: it has no tab for the prompt of a new one, but while it holds nothing else.
   const tabView = secondary && presented.open.length + fileTabs.open.length > 0 ? { ...presented, noPrompt: true } : presented;
-  const backgroundTabs = snapshot && status?.hostEpoch ? backgroundSessionTabs(snapshot, queue.composer.sessions(status.hostEpoch), tabView.open) : undefined;
+  const backgroundTabs = snapshot && status?.hostEpoch ? backgroundSessionTabs(snapshot, queue.sessions(status.hostEpoch), tabView.open) : undefined;
   // A rewind made here is known before the list of sessions says it; one made elsewhere (the alta tool) comes with the list.
   const paneRewinds = (id: string, rewindCount: number) => Math.max(rewindCount, rewoundHere.get(id) ?? 0);
   // The owners of the panes that are no longer mounted go once the dock has let them go.
@@ -6069,7 +6069,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   steering: ReturnType<typeof createSteeringSubmissions>;
   compaction: ReturnType<typeof createCompactionSubmissions>;
   abortRuns: ReturnType<typeof createAbortRunSubmissions>;
-  queue: ReturnType<typeof createQueueSubmissions>;
+  queue: ReturnType<typeof createComposerQueue>;
   draftIndicators: ReturnType<typeof createDraftIndicators>;
   askActions: ReturnType<typeof createAskActions>;
   display: ReturnType<typeof createSessionDisplayStore>;
@@ -6383,7 +6383,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
               reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.")
                 : heldElsewhere ? t(elsewhereLabel(heldElsewhere.kind)) : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}
-            steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue}
+            steering={steering} compaction={compaction} abortRuns={abortRuns}
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}

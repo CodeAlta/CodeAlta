@@ -30,6 +30,7 @@ public sealed partial class ActivePluginInstance : IAsyncDisposable
     {
         _instance = instance;
         (ObservesAgentEvents, ObservesContentDeltas) = ReadEventObservation(instance);
+        Hooks = ReadHooks(instance);
         Descriptor = descriptor;
         SourcePackage = sourcePackage;
         _loadContext = loadContext;
@@ -65,6 +66,47 @@ public sealed partial class ActivePluginInstance : IAsyncDisposable
             // What cannot be read is assumed: the plugin is given every event, as before.
             return (true, true);
         }
+    }
+
+    // The hooks the plugin overrides, read once: a plugin that does not hook tool calls is not called for each of them.
+    internal PluginHookSettings Hooks { get; }
+
+    private static PluginHookSettings ReadHooks(PluginBase instance)
+    {
+        var type = instance.GetType();
+        bool Overrides(string name, Type contextType)
+        {
+            try
+            {
+                var method = type.GetMethod(name, [contextType, typeof(CancellationToken)]);
+                return method is null || method.DeclaringType != typeof(PluginBase);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // What cannot be read is assumed: the plugin is called.
+                return true;
+            }
+        }
+
+        TimeSpan timeout;
+        bool failClosed;
+        try
+        {
+            timeout = instance.HookTimeout;
+            failClosed = instance.ToolHooksFailClosed;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            (timeout, failClosed) = (PluginBase.DefaultHookTimeout, false);
+        }
+
+        return new PluginHookSettings(
+            Overrides(nameof(PluginBase.OnToolCallAsync), typeof(PluginToolCallContext)),
+            Overrides(nameof(PluginBase.OnToolResultAsync), typeof(PluginToolResultContext)),
+            Overrides(nameof(PluginBase.OnAgentRunEndedAsync), typeof(PluginAgentRunEndedContext)),
+            timeout < PluginHookSettings.MinimumTimeout ? PluginHookSettings.MinimumTimeout
+                : timeout > PluginHookSettings.MaximumTimeout ? PluginHookSettings.MaximumTimeout : timeout,
+            failClosed);
     }
 
     /// <summary>Gets the plugin descriptor.</summary>
@@ -405,4 +447,16 @@ public sealed class PluginRuntimeActivator
                 pluginId));
         }
     }
+}
+
+/// <summary>The hooks a plugin overrides, and how the host waits for them.</summary>
+/// <param name="ToolCalls">Whether it overrides <see cref="PluginBase.OnToolCallAsync"/>.</param>
+/// <param name="ToolResults">Whether it overrides <see cref="PluginBase.OnToolResultAsync"/>.</param>
+/// <param name="RunEnded">Whether it overrides <see cref="PluginBase.OnAgentRunEndedAsync"/>.</param>
+/// <param name="Timeout">How long a hook is waited for.</param>
+/// <param name="FailClosed">Whether a tool call is blocked when its hook fails.</param>
+internal sealed record PluginHookSettings(bool ToolCalls, bool ToolResults, bool RunEnded, TimeSpan Timeout, bool FailClosed)
+{
+    internal static readonly TimeSpan MinimumTimeout = TimeSpan.FromMilliseconds(100);
+    internal static readonly TimeSpan MaximumTimeout = TimeSpan.FromMinutes(10);
 }

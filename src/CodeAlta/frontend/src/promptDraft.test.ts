@@ -72,6 +72,24 @@ test("edited indicator follows live edits, successful persistence, clearing and 
   assert.ok(observed.length >= 4);
 });
 
+test("the keystrokes of a draft already marked edited tell its listeners nothing", () => {
+  // Each notification makes the window publish its retained sessions to the host and render again.
+  const indicators = createDraftIndicators();
+  let notified = 0;
+  indicators.subscribe(() => { notified++; });
+  indicators.persisted("one", indicators.edit("one", "d", ""), true);
+  assert.equal(notified, 2);
+  for (const text of ["dr", "dra", "draf", "draft"]) indicators.persisted("one", indicators.edit("one", text, ""), true);
+  assert.equal(notified, 2);
+  assert.equal(indicators.visible("one", "other"), true);
+  // What changes the mark is still told: a write that fails, then the end of the draft.
+  indicators.persisted("one", indicators.edit("one", "drafts", ""), false);
+  assert.equal(notified, 3);
+  assert.equal(indicators.visible("one", "other"), false);
+  indicators.edit("one", "", "");
+  assert.equal(notified, 4);
+});
+
 test("restored, invalid, whitespace, oversized and uncertain retained drafts never receive a badge", () => {
   const indicators = createDraftIndicators();
   indicators.edit("one", "restored", "restored");

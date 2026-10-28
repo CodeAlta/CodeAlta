@@ -432,6 +432,27 @@ public sealed class SessionRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task CompactAsync_WithInstructions_ReturnsTheOutcome_OrIsRefusedBySessionsThatCannotFollowThem()
+    {
+        using var temp = new TempDirectory();
+        var providerId = new ModelProviderId("compaction-outcome-provider");
+        var outcome = new AgentCompactionOutcome(true, "Compacted.") { Summary = "The summary." };
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(
+            new ModelProviderDescriptor(new ModelProviderId(providerId.Value), "Compaction Outcome Provider") { DefaultModelId = "test-model" },
+            () => new CompactionProviderRuntime(providerId, outcome.Message!, emitAgentCompletion: false, outcome));
+        await using var hub = new AgentHub(registry, temp.Path);
+        await using var runtime = CreateRuntime(temp.Path, hub);
+        var session = CreateSession("session-1", providerId, temp.Path);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        Assert.AreSame(outcome, await runtime.CompactAsync(session, CreateOptions(providerId, temp.Path), AgentCompactionOptions.Default, cts.Token));
+        // This session implements no compaction with options: it does not compact without the instructions it was given.
+        await Assert.ThrowsExactlyAsync<NotSupportedException>(() => runtime.CompactAsync(
+            session, CreateOptions(providerId, temp.Path), new AgentCompactionOptions { Instructions = "Keep the TODO list." }, cts.Token));
+    }
+
+    [TestMethod]
     public async Task EnsureCoordinatorSessionAsync_RecreatesSessionWhenToolSchemaChanges()
     {
         using var temp = new TempDirectory();
