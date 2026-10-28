@@ -1,9 +1,10 @@
 using System.Text.Json;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Desktop.Tests;
 
-/// <summary>What a plugin said of a Send it answered itself travels on the receipt, within the bounds of the page.</summary>
+/// <summary>What a plugin said of a Send or a Steer it answered itself travels on the receipt, within the bounds of the page.</summary>
 [TestClass]
 public sealed class SessionReceiptMessageTests
 {
@@ -28,6 +29,41 @@ public sealed class SessionReceiptMessageTests
         // A row without a message leaves it out.
         var json = JsonSerializer.Serialize(handled with { Message = null }, DesktopJsonContext.Default.SessionReceiptView);
         Assert.IsFalse(json.Contains("\"message\"", StringComparison.Ordinal), json);
+    }
+
+    [TestMethod]
+    public void ASteerAPluginAnsweredCarriesItsCodeAndMessage()
+    {
+        var receipt = new OwnedSessionCommandReceipt("key", OwnedSessionCommandKind.Steer, "session");
+        receipt.Complete(new(OwnedSessionCommandOutcome.Cancelled, Code: OwnedSessionCommandService.PluginCancelledCode) { Message = "Secrets are not sent." });
+        OwnedTextSteerRequest? steered = null;
+        var service = new SessionOperationsService("epoch", _ => throw new AssertFailedException("Unexpected send"),
+            _ => throw new AssertFailedException("Unexpected abort"), request => { steered = request; return new(OwnedSessionCommandAdmissionKind.Accepted, receipt); });
+
+        var admission = service.Steer(new("epoch", "key", "session", Guid.NewGuid().ToString("D"), "1", "run", "my password"), CancellationToken.None);
+
+        Assert.AreEqual("accepted", admission.Status);
+        Assert.AreEqual("my password", steered!.Text);
+        Assert.AreEqual("Steer", admission.Receipt!.Kind);
+        Assert.AreEqual("terminal", admission.Receipt.State);
+        Assert.AreEqual("Cancelled", admission.Receipt.Outcome);
+        Assert.AreEqual(OwnedSessionCommandService.PluginCancelledCode, admission.Receipt.Code);
+        Assert.AreEqual("Secrets are not sent.", admission.Receipt.Message);
+        Assert.IsNull(admission.Receipt.RunId);
+    }
+
+    [TestMethod]
+    public void ASendOfTheWindow_HasNoProvenance_SoAQueuedPromptGoesThroughThePromptHooks()
+    {
+        // The composer keeps the prompts queued while a turn runs and sends each one as a Send of the window when the
+        // session is idle: a prompt without provenance is one the user typed, which the prompt-submit hooks see.
+        OwnedTextSendRequest? sent = null;
+        var service = new SessionOperationsService("epoch", request => { sent = request; return new(OwnedSessionCommandAdmissionKind.Busy); },
+            _ => throw new AssertFailedException("Unexpected abort"));
+
+        Assert.AreEqual("busy", service.Send(new("epoch", "key", "session", "queued prompt"), CancellationToken.None).Status);
+        Assert.AreEqual("queued prompt", sent!.Text);
+        Assert.IsNull(sent.Provenance);
     }
 
     [TestMethod]

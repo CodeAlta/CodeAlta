@@ -117,12 +117,13 @@ other provenance resets the count, so a plugin cannot keep a session running by 
 never in their way.
 
 The prompt-submit hooks (`GetPromptProcessors`, `OnPromptSubmittingAsync`) run where a prompt of the user is sent: the
-owned send of `OwnedSessionCommandService` (the desktop, the command line; not its steering of a running turn) and the
-terminal's own dispatch. They see a prompt only when it has no provenance, that is when the user typed it: a host prompt
-(a reminder, a job result, a fallback, a run-end continuation) never goes through them, so a plugin's continuation is
-not rewritten in a loop. They run before the prompt's references are resolved and before anything is saved or attached;
-a prompt they handle or cancel settles its send with `plugin_handled` or `plugin_cancelled` and the plugin's message,
-and their prompt parts join those of the before-run hooks for that run only.
+owned send of `OwnedSessionCommandService` (the desktop, the command line), its steering of a running turn (the
+desktop) and the terminal's own dispatch. They see a prompt only when it has no provenance, that is when the user typed
+it: a host prompt (a reminder, a job result, a fallback, a run-end continuation) never goes through them, so a plugin's
+continuation is not rewritten in a loop. They run before the prompt's references are resolved and before anything is saved or attached;
+a prompt they handle or cancel settles its send or its steer with `plugin_handled` or `plugin_cancelled` and the
+plugin's message, and their prompt parts join those of the before-run hooks for that run only: a steer carries its text
+alone, so the instructions of the turn it joins do not change.
 
 The compaction hooks (`GetCompactionContributions`) run around a manual compaction only: the desktop runs them in
 `OwnedSessionCommandService`, the TUI in `PluginHostBridge`. In the desktop the before-hooks come first, and a cancel

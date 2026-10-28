@@ -10,7 +10,7 @@ using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Orchestration.Tests;
 
-/// <summary>The prompt-submit hooks of plugins see the prompts the user sends through the host's command owner.</summary>
+/// <summary>The prompt-submit hooks of plugins see the prompts the user sends or steers through the host's command owner.</summary>
 [TestClass]
 public sealed class OwnedSessionPromptHookTests
 {
@@ -113,6 +113,71 @@ public sealed class OwnedSessionPromptHookTests
     }
 
     [TestMethod]
+    public async Task OwnedSteer_APluginThatReplacesThePrompt_SteersItsTextIntoTheTurn()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Plugin.Handler = context => context.Text == "steer me" ? PluginPromptResult.Replace("STEERED") : null;
+
+        var (runId, result) = await fixture.SteerAsync("steer me");
+
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
+        Assert.AreEqual(runId, result.RunId?.Value);
+        // The turn goes on with the replaced text, never the typed one.
+        Assert.AreEqual("STEERED", (await fixture.NextTurnAsync()).UserText);
+        var seen = fixture.Plugin.Seen.ToArray();
+        Assert.AreEqual("steer me", seen[^1].Text);
+        Assert.AreEqual(0, seen[^1].Attachments.Count);
+        Assert.AreEqual(fixture.Session.SessionId, seen[^1].SessionId);
+    }
+
+    [TestMethod]
+    public async Task OwnedSteer_APluginThatHandlesThePrompt_SteersNothingAndCompletesWithItsMessage()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Plugin.Handler = context => context.Text == "/ticket 42" ? PluginPromptResult.Handled("Opened the ticket.") : null;
+
+        var (_, result) = await fixture.SteerAsync("/ticket 42");
+
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome);
+        Assert.AreEqual(OwnedSessionCommandService.PluginHandledCode, result.Code);
+        Assert.AreEqual("Opened the ticket.", result.Message);
+        Assert.IsNull(result.RunId);
+        await fixture.AssertNoMoreTurnsAsync();
+    }
+
+    [TestMethod]
+    public async Task OwnedSteer_APluginThatCancelsThePrompt_SteersNothingAndIsCancelledWithItsMessage()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Plugin.Handler = context => context.Text == "my password is hunter2" ? PluginPromptResult.Cancel("  Secrets are not sent.  ") : null;
+
+        var (_, result) = await fixture.SteerAsync("my password is hunter2");
+
+        Assert.AreEqual(OwnedSessionCommandOutcome.Cancelled, result.Outcome);
+        Assert.AreEqual(OwnedSessionCommandService.PluginCancelledCode, result.Code);
+        Assert.AreEqual("Secrets are not sent.", result.Message);
+        Assert.IsNull(result.RunId);
+        await fixture.AssertNoMoreTurnsAsync();
+    }
+
+    [TestMethod]
+    public async Task OwnedSteer_ThePromptPartsOfAHook_DoNotChangeTheTurnThatRuns()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        const string Part = "Answer this one in French.";
+        fixture.Plugin.Handler = context => context.Text == "steer me"
+            ? PluginPromptResult.Continue with { TemporaryPromptContributions = [Prompt.Static(PluginPromptChannel.Developer, Part)] }
+            : null;
+
+        var (_, result) = await fixture.SteerAsync("steer me");
+
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
+        var steered = await fixture.NextTurnAsync();
+        Assert.AreEqual("steer me", steered.UserText);
+        Assert.IsFalse(steered.DeveloperInstructions.Contains(Part, StringComparison.Ordinal), steered.DeveloperInstructions);
+    }
+
+    [TestMethod]
     public async Task HeadlessRun_APromptAPluginAnswers_EndsWithWhatThePluginSaid()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -179,6 +244,46 @@ public sealed class OwnedSessionPromptHookTests
             return await receipt.Completion.WaitAsync(TestDeadlines.Hang);
         }
 
+        // Starts a turn that holds, steers the text into it, then lets the turn go on: the send of that turn settles with
+        // its run. Returns the run that was steered and the result of the steer; the first turn is already read.
+        public async Task<(string RunId, OwnedSessionCommandResult Result)> SteerAsync(string text)
+        {
+            var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Provider.HoldNextTurn(hold);
+            var send = Host.Commands.AdmitSend(new("start", Session.SessionId, "start")).Receipt;
+            Assert.IsNotNull(send);
+            try
+            {
+                using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
+                Assert.AreEqual("start", (await Provider.Turns.Reader.ReadAsync(timeout.Token)).UserText);
+                var state = await Host.RuntimeService.GetCurrentStateAsync(Session.SessionId, timeout.Token);
+                while (state.Entry?.ActiveRunId is null)
+                {
+                    await Task.Delay(20, timeout.Token);
+                    state = await Host.RuntimeService.GetCurrentStateAsync(Session.SessionId, timeout.Token);
+                }
+                var runId = state.Entry.ActiveRunId;
+                var receipt = Host.Commands.AdmitSteer(new("steer", Session.SessionId, state.RuntimeInstanceId, state.Entry.AttachmentGeneration, runId, text)).Receipt;
+                Assert.IsNotNull(receipt);
+                var result = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+                hold.TrySetResult();
+                Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WaitAsync(TestDeadlines.Hang)).Outcome);
+                return (runId, result);
+            }
+            finally
+            {
+                hold.TrySetResult();
+            }
+        }
+
+        // The steered turn ended without a turn more: nothing reached it.
+        public async Task AssertNoMoreTurnsAsync()
+        {
+            using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
+            while (await Host.RuntimeService.HasActiveRunAsync(Session, timeout.Token)) await Task.Delay(20, timeout.Token);
+            Assert.IsFalse(Provider.Turns.Reader.TryRead(out var turn), turn?.UserText);
+        }
+
         public async Task<RecordedTurn> NextTurnAsync()
         {
             using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
@@ -229,7 +334,12 @@ public sealed class OwnedSessionPromptHookTests
 
     private sealed class RecordingProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
     {
+        private TaskCompletionSource? _hold;
+
         public Channel<RecordedTurn> Turns { get; } = Channel.CreateUnbounded<RecordedTurn>();
+
+        // The next turn waits for this before it answers, so that it can be steered.
+        public void HoldNextTurn(TaskCompletionSource hold) => Volatile.Write(ref _hold, hold);
 
         public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("fake-prompt-hooks"), "Fake Prompt Hooks") { DefaultModelId = "fake-model" };
 
@@ -257,15 +367,16 @@ public sealed class OwnedSessionPromptHookTests
                 SelectedModelId = "fake-model",
             });
 
-        public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
+        public async Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
         {
             var user = request.Conversation.Last(static message => message.Role == AgentConversationRole.User);
             Turns.Writer.TryWrite(new(string.Join("\n", user.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value)),
                 request.DeveloperInstructions ?? string.Empty));
-            return Task.FromResult(new AgentTurnResponse
+            if (Interlocked.Exchange(ref _hold, null) is { } hold) await hold.Task.WaitAsync(cancellationToken);
+            return new AgentTurnResponse
             {
                 AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("done")]),
-            });
+            };
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

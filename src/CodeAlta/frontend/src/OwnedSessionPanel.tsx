@@ -16,7 +16,7 @@ import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectRefere
 import { IssuePicker } from "./IssuePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
-import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
+import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionSteerRequest, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
 import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
 import { changedSessionOptions, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { activateSessionModels } from "./activateSessionModels";
@@ -230,8 +230,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const hostReads = useContext(HostReadsContext);
   // What a Send that was not taken says, in the status line: a prompt is never answered with a toast.
   const [sendFailure, setSendFailure] = useState("");
-  // A Send a plugin answered itself (handled or cancelled): nothing reached the agent, and the status line says so.
-  const [pluginOutcome, setPluginOutcome] = useState<PluginPromptOutcome | null>(null);
+  // A Send or a steering prompt a plugin answered itself (handled or cancelled): nothing reached the agent, and the status
+  // line says so, also while the turn it was steered into goes on (runId).
+  const [pluginOutcome, setPluginOutcome] = useState<(PluginPromptOutcome & { runId: string | null }) | null>(null);
   // Asks the form of the session configuration to open: a send that needs another provider opens it.
   const [selectionOpenRequest, setSelectionOpenRequest] = useState(0);
   const [retryTick, setRetryTick] = useState(0);
@@ -465,6 +466,11 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const pendingQueueCancellations = queue.cancellations(sessionId);
   const observedTarget = runtimeState?.kind === "ready" ? runtimeState.snapshot : undefined;
   const runtimeConfiguration = observedTarget?.entry;
+  // What a plugin answered belongs to the turn it came in: a turn that starts after it has the status line to itself.
+  const activeRunId = observedTarget?.entry?.activeRunId ?? null;
+  useEffect(() => {
+    if (activeRunId) setPluginOutcome(current => current && current.runId !== activeRunId ? null : current);
+  }, [activeRunId]);
   // Presentation only: live run updates never authorize composer operations.
   const currentLive = liveState?.hostEpoch === epoch && liveState.sessionId === sessionId ? liveState : null;
   const liveConnected = currentLive?.kind === "connected" && !currentLive.snapshot?.isClosed;
@@ -590,12 +596,14 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     setSendFailure("");
     return true;
   }
-  // The prompt of a Send a plugin answered itself never reaches the conversation: its echo leaves the timeline.
-  function settlePluginOutcome(row: SessionReceiptView) {
+  // The prompt of a Send a plugin answered itself never reaches the conversation: its echo leaves the timeline. A steering
+  // prompt has no echo; runId is the turn it was for.
+  function settlePluginOutcome(row: SessionReceiptView, runId: string | null = null): boolean {
     const outcome = row.sessionId === sessionId ? pluginPromptOutcome(row) : null;
-    if (!outcome) return;
-    setPluginOutcome(outcome);
-    submissions.acknowledgeOutgoing([outgoingKey({ expectedEpoch: epoch, sessionId, clientRequestId: row.clientRequestId })]);
+    if (!outcome) return false;
+    setPluginOutcome({ ...outcome, runId });
+    if (row.kind === "Send") submissions.acknowledgeOutgoing([outgoingKey({ expectedEpoch: epoch, sessionId, clientRequestId: row.clientRequestId })]);
+    return true;
   }
   function retryLater() {
     holdUntil.current = Date.now() + 1200;
@@ -619,10 +627,14 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       else queue.composer.fail(id, result.status);
     };
   }
-  function settleSteering(id: string) {
+  function settleSteering(id: string, runId: string) {
     return (result: SubmissionResult) => {
       observeEpoch(result);
-      if (result.status === "accepted" || result.status === "replay") queue.composer.sent(id);
+      if (result.status === "accepted" || result.status === "replay") {
+        queue.composer.sent(id);
+        // A plugin answered it already (a replay of a settled request): it never reaches the turn, and leaves the list.
+        if (result.receipt && settlePluginOutcome(result.receipt, runId)) queue.composer.delivered(id);
+      }
       else if (result.status === "uncertain") queue.composer.uncertain(id, "uncertain");
       else if (result.status === "busy") { queue.composer.release(id); retryLater(); }
       // A request the host no longer keeps the receipt of was delivered earlier: it is not sent a second time.
@@ -645,7 +657,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       const retained = steering.pending(sessionId);
       if (retained?.request.clientRequestId !== item.request.clientRequestId) queue.composer.sent(item.id);
       else if (!retained.inFlight && capability.canSubmit(retained.request))
-        void steering.submit(retained.request, queue.composer.signal, capability, settleSteering(item.id));
+        void steering.submit(retained.request, queue.composer.signal, capability, settleSteering(item.id, retained.request.expectedRunId));
     }
   }
   const liveTexts = liveConnected ? currentLive.snapshot?.session?.text : undefined;
@@ -677,7 +689,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         const claimed = queue.composer.claim(steerItem, request);
         if (claimed) {
           steerBaseline.current.set(claimed.id, new Set(userRows.map(row => row.contentId)));
-          void steering.submit(request, queue.composer.signal, capability, settleSteering(claimed.id));
+          void steering.submit(request, queue.composer.signal, capability, settleSteering(claimed.id, request.expectedRunId));
         }
       // Nothing runs any more: the prompt is the next one sent.
       } else if (idle) queue.composer.requeue(steerItem.id);
@@ -707,8 +719,22 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (!claimed) return;
     promptHistory.add(sessionId, request.text);
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
+    setPluginOutcome(null);
     void submissions.submit(request, queue.composer.signal, capability, settleQueued(claimed.id, request), "whenAccepted");
   }, [stagedRevision, steeringRevision, runtimeState, invalidEpoch, !!retainedSend, composerBusy, epoch, sessionId, liveTexts, loadingChoices, retryTick, selection, choices]);
+  // A steering prompt a plugin answered itself never shows in the timeline: its settled receipt says so, and its row
+  // leaves the list without waiting for the turn to end.
+  useEffect(() => {
+    if (invalidEpoch || !page) return;
+    for (const item of staged) {
+      const request = item.kind === "Steer" && item.state === "delivering" ? item.request as SessionSteerRequest | undefined : undefined;
+      const row = request && page.rows.find(value => value.kind === "Steer" && value.sessionId === sessionId && value.clientRequestId === request.clientRequestId);
+      if (row && settlePluginOutcome(row, request!.expectedRunId)) {
+        steerBaseline.current.delete(item.id);
+        queue.composer.delivered(item.id);
+      }
+    }
+  }, [page, stagedRevision, invalidEpoch, sessionId]);
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
@@ -1438,10 +1464,12 @@ ${value}` : value);
     <ClaudeCliFirstUse epoch={epoch} providerKey={selected?.providerKey ?? observedProvider} />
     {!expanded && attachmentStrip}
     <ComposerSurface busy={composerBusy || compacting} status={<>
-      <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem || pluginOutcome?.cancelled) ? "danger"
-        : !composerBusy && !compacting && pluginOutcome ? "notice" : undefined}>
+      <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem) || !compacting && !invalidEpoch && pluginOutcome?.cancelled ? "danger"
+        : !compacting && !invalidEpoch && pluginOutcome ? "notice" : undefined}>
         {stopShown ? <AppIcon name="error" size={14} /> : composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem || pluginOutcome?.cancelled ? "error" : pluginOutcome ? "plugin" : "prompt"} size={14} />}
-        <span className="composer-foreground-text">{stopShown ? t(stopShown.key, stopShown.parameters) : composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
+        {/* A steering prompt a plugin answered says so while its turn goes on. */}
+        <span className="composer-foreground-text">{stopShown ? t(stopShown.key, stopShown.parameters) : composerBusy && !invalidEpoch && !compacting && pluginOutcome ? t(pluginOutcome.key, pluginOutcome.parameters)
+          : composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
           : compacting ? t("Compacting…")
           : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem
           : !invalidEpoch && pluginOutcome ? t(pluginOutcome.key, pluginOutcome.parameters)

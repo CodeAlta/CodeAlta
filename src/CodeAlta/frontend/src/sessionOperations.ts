@@ -80,15 +80,15 @@ function validSend(request: SessionSendRequest, checkAttachments = true): boolea
       && (request.selection.reasoningEffort === null || identity(request.selection.reasoningEffort, 32))
       && (request.selection.permissionMode == null || identity(request.selection.permissionMode, 256)));
 }
-/** What the composer says of a Send a plugin answered itself, so that it never looks sent: a message and its parameters. */
+/** What the composer says of a Send or a steering prompt a plugin answered itself, so that it never looks sent: a message and its parameters. */
 export type PluginPromptOutcome = Readonly<{ key: MessageKey; parameters?: Readonly<Record<string, string>>; cancelled: boolean }>;
 
 /**
- * The outcome of a settled Send that a plugin handled (`plugin_handled`) or cancelled (`plugin_cancelled`) before anything
- * was sent to the agent, with what the plugin said; null for any other row.
+ * The outcome of a settled Send or Steer that a plugin handled (`plugin_handled`) or cancelled (`plugin_cancelled`) before
+ * anything was sent to the agent, with what the plugin said; null for any other row.
  */
 export function pluginPromptOutcome(row: Pick<SessionReceiptView, "kind" | "state" | "code" | "message">): PluginPromptOutcome | null {
-  if (row.kind !== "Send" || row.state !== "terminal") return null;
+  if (row.kind !== "Send" && row.kind !== "Steer" || row.state !== "terminal") return null;
   const message = row.message ?? null;
   if (row.code === "plugin_handled") return message
     ? { key: "A plugin handled this prompt: {message}", parameters: { message }, cancelled: false }

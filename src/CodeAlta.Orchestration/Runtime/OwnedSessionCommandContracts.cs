@@ -236,7 +236,7 @@ public enum OwnedSessionCommandOutcome
 public sealed record OwnedSessionCommandResult(OwnedSessionCommandOutcome Outcome, AgentRunId? RunId = null, string? Code = null)
 {
     /// <summary>
-    /// Gets what a plugin told the user of a send it handled or cancelled itself
+    /// Gets what a plugin told the user of a send or a steer it handled or cancelled itself
     /// (<see cref="OwnedSessionCommandService.PluginHandledCode"/>, <see cref="OwnedSessionCommandService.PluginCancelledCode"/>);
     /// null when it said nothing, and for every other result. It is the plugin's text, not the host's.
     /// </summary>

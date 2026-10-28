@@ -564,10 +564,10 @@ public override ValueTask<PluginPromptResult?> OnPromptSubmittingAsync(PluginPro
         : null);
 ```
 
-- It sees each prompt the user sends, as typed (`context.Text`, before `@` references are resolved), with `context.Attachments`. The prompts CodeAlta sends itself (reminders, job results, the continuation of `OnAgentRunEndedAsync`) do not go through it, nor, in CodeAlta Desktop, a prompt that steers a turn that runs.
+- It sees each prompt the user sends, as typed (`context.Text`, before `@` references are resolved), with `context.Attachments`, and each prompt the user steers into a turn that runs (text only). The prompts CodeAlta sends itself (reminders, job results, the continuation of `OnAgentRunEndedAsync`) do not go through it.
 - `Replace(text, attachments)` sends another text. Return some of `context.Attachments`, in any order, to drop or reorder them (in CodeAlta Desktop each has an `id` in `Metadata`); return none to keep them all.
 - `Handled(message)` and `Cancel(message)` send nothing: the status line under the prompt in CodeAlta Desktop says that a plugin handled or cancelled the prompt, with the message.
-- `TemporaryPromptContributions` of the result add text to the instructions of that prompt's run only.
+- `TemporaryPromptContributions` of the result add text to the instructions of that prompt's run only. They apply to a prompt that is sent: the instructions of a turn that a prompt steers do not change.
 
 ## Data, background work and logs
 

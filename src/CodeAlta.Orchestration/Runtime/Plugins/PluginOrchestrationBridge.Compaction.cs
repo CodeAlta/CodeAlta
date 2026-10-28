@@ -21,7 +21,7 @@ public sealed partial class PluginOrchestrationBridge
     {
         ArgumentNullException.ThrowIfNull(session);
         return _getActivePlugins().Count > 0
-            && _adapter.GetContributions<PluginCompactionContribution>(PluginPoint.Compaction, CompactionScope(session, spaceId)).Count > 0;
+            && _adapter.GetContributions<PluginCompactionContribution>(PluginPoint.Compaction, SessionScope(session, spaceId)).Count > 0;
     }
 
     /// <summary>
@@ -48,7 +48,7 @@ public sealed partial class PluginOrchestrationBridge
             return PluginCompactionPreparation.Empty;
         }
 
-        var options = CompactionScope(session, spaceId);
+        var options = SessionScope(session, spaceId);
         var seed = activePlugins[0];
         var planSummary = $"Manual compaction requested for '{session.Title}'.";
         var before = await _adapter.RunCompactionAsync(
@@ -155,7 +155,7 @@ public sealed partial class PluginOrchestrationBridge
             return;
         }
 
-        var options = CompactionScope(session, spaceId);
+        var options = SessionScope(session, spaceId);
         var seed = activePlugins[0];
         await _adapter.RunCompactionAsync(
             after: new PluginAfterCompactionContext
@@ -180,18 +180,6 @@ public sealed partial class PluginOrchestrationBridge
             options: options,
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
-
-    private static PluginAdapterOperationOptions CompactionScope(SessionViewDescriptor session, string? spaceId)
-        => MarkHeadless(new PluginAdapterOperationOptions
-        {
-            ProjectId = session.ProjectRef,
-            ProjectPath = session.WorkingDirectory,
-            SessionId = session.SessionId,
-            SpaceId = spaceId,
-            ProviderId = session.ResolvedProviderKey,
-            Model = session.ModelId,
-            IsCodeAltaManagedProvider = IsCodeAltaManagedProvider(new ModelProviderId(session.ResolvedProviderKey)),
-        });
 
     private static Dictionary<string, string> Metadata(SessionViewDescriptor session)
         => new(StringComparer.Ordinal)

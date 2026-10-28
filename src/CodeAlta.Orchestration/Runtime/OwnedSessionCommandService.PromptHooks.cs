@@ -7,14 +7,14 @@ namespace CodeAlta.Orchestration.Runtime;
 public sealed partial class OwnedSessionCommandService
 {
     /// <summary>
-    /// The code of a send that a plugin handled itself (<see cref="PluginPromptDisposition.Handled"/>): the receipt completed
-    /// without a run, nothing was sent to the agent, and <see cref="OwnedSessionCommandResult.Message"/> is what the plugin said.
+    /// The code of a send or a steer that a plugin handled itself (<see cref="PluginPromptDisposition.Handled"/>): the receipt
+    /// completed without a run, nothing was sent to the agent, and <see cref="OwnedSessionCommandResult.Message"/> is what the plugin said.
     /// </summary>
     public const string PluginHandledCode = "plugin_handled";
 
     /// <summary>
-    /// The code of a send that a plugin cancelled (<see cref="PluginPromptDisposition.Cancel"/>): the receipt is cancelled,
-    /// nothing was sent to the agent, and <see cref="OwnedSessionCommandResult.Message"/> is what the plugin said.
+    /// The code of a send or a steer that a plugin cancelled (<see cref="PluginPromptDisposition.Cancel"/>): the receipt is
+    /// cancelled, nothing was sent to the agent, and <see cref="OwnedSessionCommandResult.Message"/> is what the plugin said.
     /// </summary>
     public const string PluginCancelledCode = "plugin_cancelled";
 
@@ -22,12 +22,12 @@ public sealed partial class OwnedSessionCommandService
     // keep, drop or reorder the attachments it was given.
     private const string PromptAttachmentIdKey = "id";
 
-    /// <summary>The prompt of a send once the prompt-submit hooks of the plugins saw it.</summary>
+    /// <summary>The prompt of a send or a steer once the prompt-submit hooks of the plugins saw it.</summary>
     /// <param name="Text">The text to send: the typed one, or the one a plugin replaced it with.</param>
     /// <param name="Attachments">The attachments given by reference that are sent.</param>
     /// <param name="Images">The attached files and images that are sent.</param>
     /// <param name="Contributions">The prompt parts the plugins gave this run only.</param>
-    /// <param name="Settled">The result of a send a plugin handled or cancelled: nothing is sent.</param>
+    /// <param name="Settled">The result of a prompt a plugin handled or cancelled: nothing is sent.</param>
     private sealed record SubmittedPrompt(string Text, IReadOnlyList<AgentInputItem>? Attachments, IReadOnlyList<OwnedPromptImage>? Images,
         IReadOnlyList<PluginSystemPromptContribution> Contributions, OwnedSessionCommandResult? Settled = null);
 
@@ -47,15 +47,38 @@ public sealed partial class OwnedSessionCommandService
         for (var index = 0; index < images.Count; index++) given[attachments.Count + index] = Describe(images[index], "image-" + (index + 1));
         var processed = await Plugins.ProcessPromptSubmittingAsync(options, request.Text, given, session.ProjectRef, session.SessionId, spaceId,
             operation.Execution.Token).ConfigureAwait(false);
-        var result = processed.Result;
+        return Submitted(processed.Result, request.Text, attachments, images);
+    }
+
+    // A prompt the user steers into the running turn goes through the same hooks as one they send. It has no attachments,
+    // and the prompt parts of a hook are dropped: the instructions of a turn that runs do not change.
+    private async Task<SubmittedPrompt> SubmitSteeringPromptAsync(SteerOperation operation)
+    {
+        var request = operation.Request;
+        if (Plugins is null) return new(request.Text, null, null, []);
+        var token = operation.Execution.Token;
+        var session = await _runtime.ResolveOwnedSessionAsync(request.SessionId, token).ConfigureAwait(false);
+        // A session that is no longer owned is refused by the steering itself.
+        if (session is null || !string.Equals(session.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase))
+            return new(request.Text, null, null, []);
+        var project = string.IsNullOrWhiteSpace(session.ProjectRef) ? null
+            : await _projects.GetByIdAsync(session.ProjectRef, token).ConfigureAwait(false);
+        var spaceId = (await _runtime.ResolveSpaceAsync(session.SpaceId, project, token).ConfigureAwait(false)).Id;
+        var processed = await Plugins.ProcessSteeringPromptAsync(session, request.Text, spaceId, token).ConfigureAwait(false);
+        return Submitted(processed.Result, request.Text, [], []);
+    }
+
+    private static SubmittedPrompt Submitted(PluginPromptResult result, string typed, IReadOnlyList<AgentInputItem> attachments,
+        IReadOnlyList<OwnedPromptImage> images)
+    {
         switch (result.Disposition)
         {
             case PluginPromptDisposition.Handled:
-                return new(request.Text, null, null, [], new(OwnedSessionCommandOutcome.Completed, Code: PluginHandledCode) { Message = MessageOf(result) });
+                return new(typed, null, null, [], new(OwnedSessionCommandOutcome.Completed, Code: PluginHandledCode) { Message = MessageOf(result) });
             case PluginPromptDisposition.Cancel:
-                return new(request.Text, null, null, [], new(OwnedSessionCommandOutcome.Cancelled, Code: PluginCancelledCode) { Message = MessageOf(result) });
+                return new(typed, null, null, [], new(OwnedSessionCommandOutcome.Cancelled, Code: PluginCancelledCode) { Message = MessageOf(result) });
             case PluginPromptDisposition.Replace:
-                var text = result.ReplacementText ?? request.Text;
+                var text = result.ReplacementText ?? typed;
                 if (!TryKeep(result.ReplacementAttachments, attachments, images, out var keptAttachments, out var keptImages))
                     (keptAttachments, keptImages) = (attachments, images);
                 if (string.IsNullOrWhiteSpace(text) && keptAttachments.Count == 0 && keptImages.Count == 0)
@@ -63,7 +86,7 @@ public sealed partial class OwnedSessionCommandService
                 return new(text, keptAttachments.Count == 0 ? null : keptAttachments, keptImages.Count == 0 ? null : keptImages,
                     result.TemporaryPromptContributions);
             default:
-                return new(request.Text, request.Attachments, request.Images, result.TemporaryPromptContributions);
+                return new(typed, attachments.Count == 0 ? null : attachments, images.Count == 0 ? null : images, result.TemporaryPromptContributions);
         }
     }
 

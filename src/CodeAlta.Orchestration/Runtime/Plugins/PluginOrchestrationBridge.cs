@@ -1,5 +1,6 @@
 using System.Text;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 
@@ -114,6 +115,29 @@ public sealed partial class PluginOrchestrationBridge
         ArgumentNullException.ThrowIfNull(executionOptions);
         ArgumentNullException.ThrowIfNull(text);
         return ProcessPromptSubmittingAsync(text, attachments, ScopeOf(executionOptions, projectId, sessionId, spaceId), cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs the prompt submission hooks (<see cref="PluginBase.GetPromptProcessors"/>, then
+    /// <see cref="PluginBase.OnPromptSubmittingAsync"/>) for a prompt the user steers into the turn a session runs, in
+    /// the scope of the session. A steered prompt has no attachments, and the prompt parts a hook gives
+    /// (<see cref="PluginPromptResult.TemporaryPromptContributions"/>) cannot change the instructions of a turn that runs.
+    /// </summary>
+    /// <param name="session">The session whose turn is steered.</param>
+    /// <param name="text">The prompt as the user typed it.</param>
+    /// <param name="spaceId">The space of the session; <see langword="null"/> applies no space.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What the hooks decided: continue, replace, handled or cancelled.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when the session or the text are <see langword="null" />.</exception>
+    public ValueTask<PluginPromptAdapterResult> ProcessSteeringPromptAsync(
+        SessionViewDescriptor session,
+        string text,
+        string? spaceId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(text);
+        return ProcessPromptSubmittingAsync(text, [], SessionScope(session, spaceId), cancellationToken);
     }
 
     /// <summary>
@@ -436,6 +460,19 @@ public sealed partial class PluginOrchestrationBridge
             Model = executionOptions.Model,
             IsCodeAltaManagedProvider = IsCodeAltaManagedProvider(executionOptions.ProviderId),
         };
+
+    // The scope of a session outside a run: its provider and model as the session records them.
+    private static PluginAdapterOperationOptions SessionScope(SessionViewDescriptor session, string? spaceId)
+        => MarkHeadless(new PluginAdapterOperationOptions
+        {
+            ProjectId = session.ProjectRef,
+            ProjectPath = session.WorkingDirectory,
+            SessionId = session.SessionId,
+            SpaceId = spaceId,
+            ProviderId = session.ResolvedProviderKey,
+            Model = session.ModelId,
+            IsCodeAltaManagedProvider = IsCodeAltaManagedProvider(new ModelProviderId(session.ResolvedProviderKey)),
+        });
 
     /// <summary>
     /// Gets plugin-contributed transient session event projectors applicable to an orchestration scope.

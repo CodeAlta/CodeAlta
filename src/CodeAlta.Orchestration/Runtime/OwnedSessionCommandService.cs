@@ -635,6 +635,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     }
 
     /// <summary>Reserves exact-target text steering independently of an in-flight owned send.</summary>
+    /// <remarks>The text goes through the prompt-submit hooks of plugins first, as a send does: a plugin may replace it,
+    /// or answer it itself (<see cref="PluginHandledCode"/>, <see cref="PluginCancelledCode"/>), and then nothing reaches the turn.</remarks>
     /// <exception cref="ArgumentNullException">The request is null.</exception>
     /// <exception cref="ArgumentException">An identity or text is blank, an identity is padded, or the runtime/attachment identity is invalid.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested before acceptance.</exception>
@@ -674,8 +676,18 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         OwnedSessionCommandResult result;
         try
         {
-            var runId = await operation.RuntimeInvocation.RunAsync(() => _runtime.SteerOwnedCommandAsync(operation.Request, operation.Execution.Token)).ConfigureAwait(false);
-            result = new(OwnedSessionCommandOutcome.Completed, runId);
+            // The plugins see the prompt as it was typed; one that answers it itself settles the steer: nothing reaches the turn.
+            var prompt = await SubmitSteeringPromptAsync(operation).ConfigureAwait(false);
+            if (prompt.Settled is { } settled)
+            {
+                result = settled;
+            }
+            else
+            {
+                var request = prompt.Text == operation.Request.Text ? operation.Request : operation.Request with { Text = prompt.Text };
+                var runId = await operation.RuntimeInvocation.RunAsync(() => _runtime.SteerOwnedCommandAsync(request, operation.Execution.Token)).ConfigureAwait(false);
+                result = new(OwnedSessionCommandOutcome.Completed, runId);
+            }
         }
         catch (OperationCanceledException failure) when (operation.Execution.IsCancellationRequested)
         {

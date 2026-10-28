@@ -85,7 +85,7 @@ test("a prompt leaving the queue shows its echo only once the host took it", asy
   store.acknowledgeOutgoing([outgoingKey(send("third"))]);
   assert.equal(store.outgoing("epoch", "session").length, 1);
 });
-test("a Send a plugin answered itself says so in the composer, with the plugin's message, and never looks sent", async () => {
+test("a Send or a steering prompt a plugin answered itself says so in the composer, with the plugin's message, and never looks sent", async () => {
   const settled = (code: string, message?: string): SessionReceiptView => ({ ...row(), state: "terminal",
     outcome: code === "plugin_handled" ? "Completed" : "Cancelled", code, ...(message === undefined ? {} : { message }) });
   const text = (value: SessionReceiptView, locale = "en") => {
@@ -101,7 +101,11 @@ test("a Send a plugin answered itself says so in the composer, with the plugin's
   const failed: SessionReceiptView = { ...settled("preparation_failed"), outcome: "Failed" };
   assert.equal(pluginPromptOutcome(failed), null);
   assert.equal(pluginPromptOutcome({ ...settled("plugin_handled"), state: "pending" }), null);
-  assert.equal(pluginPromptOutcome({ ...settled("plugin_handled"), kind: "Steer" }), null);
+  assert.equal(pluginPromptOutcome({ ...settled("plugin_handled"), kind: "Compact" }), null);
+  // A steering prompt a plugin answered says the same as a Send.
+  assert.deepEqual(text({ ...settled("plugin_handled", "Opened the ticket."), kind: "Steer" }), ["A plugin handled this prompt: Opened the ticket.", false]);
+  assert.deepEqual(text({ ...settled("plugin_cancelled"), kind: "Steer" }), ["A plugin cancelled this prompt: nothing was sent to the agent.", true]);
+  assert.equal(pluginPromptOutcome({ ...settled("plugin_cancelled"), kind: "Steer", state: "pending" }), null);
 
   // The message travels on the receipt in the place of a run id, within its bound.
   const capability = createMutationCapability("epoch");
