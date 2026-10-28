@@ -148,6 +148,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _sessionViewCatalog.JournalStore.StateAppended += OnSessionStateAppended;
         instructionTemplateProvider.SessionToolPatterns = GetDisabledToolPatterns;
         instructionTemplateProvider.CodeModeOf = (sessionId, providerKey, modelId) => ScriptRuns?.CodeModeOf(sessionId, providerKey, modelId) ?? "off";
+        instructionTemplateProvider.RunDeadline = () => RunDeadline;
         _events.Published = PulseSettlement;
     }
 
@@ -183,6 +184,17 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// changes before commit, whatever the setting or its own choice. Default false.
     /// </summary>
     public bool Headless { get; init; }
+
+    /// <summary>
+    /// Gets or sets when the headless run of this runtime ends, when it has a time limit (<c>altacli run --timeout</c>):
+    /// the Session Context of the sessions attached afterwards tells it, and the jobs they start end before it
+    /// (<see cref="SessionJobService.Deadline"/>). Null, the default, for no limit. Set it before the sessions attach.
+    /// </summary>
+    public DateTimeOffset? RunDeadline
+    {
+        get => Jobs.Deadline;
+        set => Jobs.Deadline = value;
+    }
 
     /// <summary>
     /// The paragraph that ends the system prompt of a session of a headless runtime (<see cref="Headless"/>). It never

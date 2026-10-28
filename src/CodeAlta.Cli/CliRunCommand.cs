@@ -111,6 +111,9 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
             AbortGrace = environment.AbortGrace ?? new HeadlessSessionDriverOptions().AbortGrace,
         };
         await using var driver = new HeadlessSessionDriver(host.Host, driverOptions);
+        // The sessions are told when the run is ended, and their jobs end before it: counted from now, before the session
+        // opens, the deadline comes no later than the one the run is given.
+        if (timeout is { } runLimit) host.Host.RuntimeService.RunDeadline = DateTimeOffset.UtcNow + runLimit;
         var opened = await driver.OpenAsync(request, processToken).ConfigureAwait(false);
         if (opened.Session is not { } session)
         {

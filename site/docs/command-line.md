@@ -27,7 +27,7 @@ altacli run - < task.md
 - `-m provider:model[@reasoning]` chooses the model, `--tier complex|standard|quick` a [model tier](model-tiers.md), `--reasoning` the effort, `--prompt-id` the [agent prompt](prompts.md) (`default`, `plan`...).
 - The prompt is the words given. `-` reads it from standard input; when standard input is piped and words are given too, it is added after them in a `<stdin>...</stdin>` block. `-f FILE` attaches a file or an image.
 - `--resume ID` continues a session; `--session-id ID` opens the session `ID`, or creates it with this id.
-- `--timeout DURATION` (seconds, or `hh:mm:ss`) stops the run when the time is up.
+- `--timeout DURATION` (seconds, or `hh:mm:ss`) stops the run when the time is up. The agent is told when the run ends, and its background jobs are stopped a little before then, so that their results still reach it.
 - `altacli models` lists the models of the providers that are ready; `altacli auth check --provider ID` tells whether one is ready.
 - `altacli --help` lists the commands; `altacli <command> --help` gives all a command does, takes and writes, with examples: enough for an agent that uses `altacli` on its own.
 

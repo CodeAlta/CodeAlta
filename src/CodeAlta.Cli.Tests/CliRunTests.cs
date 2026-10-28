@@ -359,6 +359,29 @@ public sealed class CliRunTests
     }
 
     [TestMethod]
+    public async Task Timeout_IsToldToTheSession_AndAJobThatWouldOutliveTheRunEndsBeforeIt_WithItsResultBack()
+    {
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        // A job without a timeout that would run far longer than the run, then a turn that ends to wait for it.
+        provider.Turns.Enqueue(FakeProvider.CallTool("alta", """{"args":["job","start","--command","sleep 300","--title","Slow tests"]}"""));
+        provider.Turns.Enqueue(FakeProvider.Reply("Waiting for the background job Slow tests."));
+        provider.Turns.Enqueue((request, _, _) => Task.FromResult(FakeProvider.Answer(
+            request.Conversation[^1].Parts.OfType<AgentMessagePart.Text>().Any(static part => part.Value.Contains("timed out", StringComparison.Ordinal))
+                ? "The tests did not end in time." : "No result of the job.")));
+
+        var run = await root.RunAsync(provider, ["run", Plain, "--no-mcp", "--format", "jsonl", "--timeout", "12", "run the tests"]);
+
+        var result = Result(run);
+        Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, $"{result.GetRawText()}\n{run.Stderr}");
+        Assert.AreEqual("The tests did not end in time.", result.GetProperty("finalMessage").GetString(), "The result of the job came back before the run ended.");
+        var first = provider.Requests.First();
+        StringAssert.Contains(first.SessionInstructions, "- Run deadline: this run is ended at ");
+        var started = provider.Requests.ElementAt(1).Conversation.SelectMany(static message => message.Parts).OfType<AgentMessagePart.ToolResult>().Single();
+        StringAssert.Contains(string.Concat(started.Result.Items.OfType<AgentToolResultItem.Text>().Select(static item => item.Value)), "Its timeout was cut to");
+    }
+
+    [TestMethod]
     public async Task Timeout_AbortsTheRun_AndExitsWithFour()
     {
         using var root = new CliTestRoot();

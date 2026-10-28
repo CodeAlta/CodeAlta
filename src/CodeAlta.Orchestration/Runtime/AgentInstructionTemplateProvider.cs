@@ -85,6 +85,9 @@ public sealed class AgentInstructionTemplateProvider
     // The mode of Code Mode the runtime gives a session on a provider and a model (ISessionScriptRuns.CodeModeOf); off without a runtime.
     internal Func<string?, string?, string?, string>? CodeModeOf { get; set; }
 
+    // When the headless run of the runtime ends (SessionRuntimeService.RunDeadline); null without a runtime or a limit.
+    internal Func<DateTimeOffset?>? RunDeadline { get; set; }
+
     /// <summary>
     /// Gets how the prompt lists the skills of a session of a project and a space: <c>full</c> (every skill with its
     /// description), <c>compact</c> (names and titles) or <c>auto</c> (full while there are few). Null, or a host whose
@@ -322,6 +325,7 @@ public sealed class AgentInstructionTemplateProvider
             ModelResume = tiers.Fallback is { Enabled: true, OnQuota: true, Resume: true },
             // The provider and the model of this send, as its tools resolve them.
             CodeMode = CodeModeOf?.Invoke(session.SessionId, session.ResolvedProviderKey, model) ?? "off",
+            RunDeadline = RunDeadline?.Invoke(),
         });
     }
 

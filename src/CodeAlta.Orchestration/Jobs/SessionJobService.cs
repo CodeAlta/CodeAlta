@@ -45,6 +45,9 @@ public sealed class SessionJobService : IAsyncDisposable
     private const int ResultLines = 60;
     private const int ResultCharacters = 6000;
     private static readonly TimeSpan CloseWait = TimeSpan.FromSeconds(5);
+    // The time a job ends before the deadline at most, and the least time a job is given.
+    private static readonly TimeSpan DeadlineMargin = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan MinimumCappedTimeout = TimeSpan.FromSeconds(1);
 
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _jobs = new(StringComparer.OrdinalIgnoreCase);
@@ -73,9 +76,31 @@ public sealed class SessionJobService : IAsyncDisposable
     /// <summary>Gets or sets what starts a command. Tests of a host that creates the jobs itself replace it.</summary>
     internal ShellCommandStarter Starter { get; set; }
 
+    /// <summary>
+    /// Gets or sets when the jobs must have ended: the end of a headless run that has a time limit, after which nobody
+    /// reads their result. A job started before it is given at most the time left, less a margin to read its result and
+    /// answer (<see cref="CapToDeadline"/>), also one started without a timeout. Null, the default, for no deadline.
+    /// </summary>
+    public DateTimeOffset? Deadline { get; set; }
+
+    /// <summary>
+    /// Gets the timeout a job started now is given: the one asked, cut to the time left before <see cref="Deadline"/> less
+    /// a margin (two minutes, or a quarter of the time left when that is shorter), and at least one second.
+    /// </summary>
+    /// <param name="timeout">The timeout asked; null for none.</param>
+    /// <returns>The timeout of the job; null without a deadline and without a timeout asked.</returns>
+    public TimeSpan? CapToDeadline(TimeSpan? timeout)
+    {
+        if (Deadline is not { } deadline) return timeout;
+        var left = deadline - _time.GetUtcNow();
+        var margin = TimeSpan.FromTicks(Math.Min(DeadlineMargin.Ticks, Math.Max(0, left.Ticks / 4)));
+        var cap = left - margin < MinimumCappedTimeout ? MinimumCappedTimeout : left - margin;
+        return timeout is { } asked && asked <= cap ? asked : cap;
+    }
+
     /// <summary>Starts a command in the background for a session.</summary>
     /// <param name="request">What to run, where, and for which session.</param>
-    /// <returns>The job with the status <c>ok</c>, or the reason there is none.</returns>
+    /// <returns>The job with the status <c>ok</c>, or the reason there is none. Its timeout is cut to the <see cref="Deadline"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
     /// <exception cref="ArgumentException">The session, the command or the folder is blank, the command is too long, or the timeout is not positive or longer than <see cref="MaxTimeout"/>.</exception>
     public SessionJobStart Start(SessionJobRequest request)
@@ -88,6 +113,8 @@ public sealed class SessionJobService : IAsyncDisposable
         if (request.Command.Length > MaxCommandCharacters) throw new ArgumentException("The command line is too long.", nameof(request));
         if (request.Timeout is { } timeout && (timeout <= TimeSpan.Zero || timeout > MaxTimeout)) throw new ArgumentException("The timeout is not a time a job can be given.", nameof(request));
         if (!Directory.Exists(request.Folder)) return new("no_folder", null);
+        // A job of a run that has a deadline tells its end before the run ends, so that its session reads it.
+        request = request with { Timeout = CapToDeadline(request.Timeout) };
 
         Entry entry;
         lock (_gate)
