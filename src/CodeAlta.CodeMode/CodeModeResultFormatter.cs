@@ -18,6 +18,16 @@ public enum CodeModeResultKind
     Scalar,
 }
 
+/// <summary>A long text of lines inside a JSON result, such as the <c>stdout</c> of a command, kept in a file of its own.</summary>
+/// <param name="Path">Where it is in the result: the names of the properties and the indexes of the items, from the root.</param>
+/// <param name="Text">The text.</param>
+public sealed record CodeModeResultTextPart(IReadOnlyList<string> Path, string Text)
+{
+    /// <summary>Gets how the result header names it: <c>stdout</c>, <c>runs[2].stdout</c>.</summary>
+    public string DisplayName => string.Concat(Path.Select(static (segment, index) =>
+        segment.Length > 0 && segment.All(char.IsAsciiDigit) ? "[" + segment + "]" : (index == 0 ? segment : "." + segment)));
+}
+
 /// <summary>The value a script returned as it is read: its text and how it reads.</summary>
 /// <param name="Text">The text.</param>
 /// <param name="Kind">How it reads.</param>
@@ -50,6 +60,8 @@ public static class CodeModeResultFormatter
     private const int CharactersPerToken = 4;
 
     private static readonly JsonSerializerOptions s_relaxedJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    private static readonly JsonSerializerOptions s_indentedJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, WriteIndented = true };
 
     /// <summary>Reads the JSON of the value a script returned as the text the result shows.</summary>
     /// <param name="valueJson">The JSON of the value.</param>
@@ -101,8 +113,107 @@ public static class CodeModeResultFormatter
         }
 
         var text = Present(value);
-        return Shown(text).Length > ResultBudget(result, Budget(maxOutputTokens)) ? text : null;
+        return Shown(text).Length > ResultBudget(result, Budget(maxOutputTokens)) ? Kept(text) : null;
     }
+
+    // The text of the file that keeps a whole result: JSON indented, so that it reads by line (read_file, grep) as the
+    // header of the result counts it.
+    private static CodeModeResultText Kept(CodeModeResultText text)
+    {
+        if (text.Kind != CodeModeResultKind.Json)
+        {
+            return text;
+        }
+
+        try
+        {
+            return text with { Text = JsonNode.Parse(text.Text)!.ToJsonString(s_indentedJson) };
+        }
+        catch (JsonException)
+        {
+            return text;
+        }
+    }
+
+    private static int LineCount(string text) => text.Length == 0 ? 0 : 1 + text.AsSpan(0, text[^1] == '\n' ? text.Length - 1 : text.Length).Count('\n');
+
+    /// <summary>
+    /// Gives the long texts of lines a JSON result holds, such as the <c>stdout</c> of a command: a JSON file keeps each on
+    /// one line, so each is also kept in a text file of its own (<see cref="TextPartPath"/>), which reads by line.
+    /// </summary>
+    /// <param name="kept">The result kept whole (<see cref="ResultToKeep"/>).</param>
+    /// <returns>The texts, the longest first, at most three; none for a result that is not JSON.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="kept"/> is null.</exception>
+    public static IReadOnlyList<CodeModeResultTextPart> TextParts(CodeModeResultText kept)
+    {
+        ArgumentNullException.ThrowIfNull(kept);
+        if (kept.Kind != CodeModeResultKind.Json)
+        {
+            return [];
+        }
+
+        JsonNode? root;
+        try
+        {
+            root = JsonNode.Parse(kept.Text);
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+
+        var parts = new List<CodeModeResultTextPart>();
+        Visit(root, []);
+        return parts.OrderByDescending(static part => part.Text.Length).Take(MaxTextParts).ToList();
+
+        void Visit(JsonNode? node, List<string> path)
+        {
+            switch (node)
+            {
+                case JsonObject obj:
+                    foreach (var (key, child) in obj)
+                    {
+                        Visit(child, [.. path, key]);
+                    }
+
+                    break;
+                case JsonArray array:
+                    for (var index = 0; index < array.Count; index++)
+                    {
+                        Visit(array[index], [.. path, index.ToString(CultureInfo.InvariantCulture)]);
+                    }
+
+                    break;
+                case JsonValue value when value.TryGetValue<string>(out var text) && text.Length >= TextPartMinCharacters && LineCount(text) >= TextPartMinLines:
+                    parts.Add(new CodeModeResultTextPart(path.ToArray(), text));
+                    break;
+            }
+        }
+    }
+
+    /// <summary>Gives the file that keeps a long text of a JSON result, beside the file of the whole result.</summary>
+    /// <param name="fullResultPath">The file of the whole result.</param>
+    /// <param name="part">The text.</param>
+    /// <returns>The path: the one of the result, with <c>.&lt;name&gt;.txt</c> in the place of its extension.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="fullResultPath"/> or <paramref name="part"/> is null.</exception>
+    public static string TextPartPath(string fullResultPath, CodeModeResultTextPart part)
+    {
+        ArgumentNullException.ThrowIfNull(fullResultPath);
+        ArgumentNullException.ThrowIfNull(part);
+        var name = string.Concat(string.Join('.', part.Path).Select(static c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-' ? c : '_'));
+        if (name.Length > 60)
+        {
+            name = name[..60];
+        }
+
+        return Path.ChangeExtension(fullResultPath, null) + "." + (name.Length == 0 ? "text" : name) + ".txt";
+    }
+
+    private const int MaxTextParts = 3;
+
+    private const int TextPartMinCharacters = 2_000;
+
+    private const int TextPartMinLines = 20;
 
     /// <summary>Formats a finished run.</summary>
     /// <param name="result">The result of the run.</param>
@@ -213,27 +324,105 @@ public static class CodeModeResultFormatter
             return;
         }
 
-        // A result kept whole in a file gives a preview of its start and its end, as Claude Code does with a long output: the
-        // session reads the file for the rest. Without a file, the excerpt has the whole budget.
+        // A result kept whole in a file gives a preview of its start and its end, as Claude Code does with a long output, and
+        // says which lines of the file it shows: the session reads only the others. Without a file, the excerpt has the
+        // whole budget.
         if (fullResultPath is not null)
         {
             budget = Math.Min(budget, PreviewCharacters);
-            builder.Append(FullResultPrefix).Append(fullResultPath).Append(" (")
-                .Append(text.Text.Length.ToString("N0", CultureInfo.InvariantCulture))
-                .Append(" characters; a preview of its start and its end is below, read the file for the rest)\n");
         }
 
-        builder.Append("Result:\n");
         if (text.Kind == CodeModeResultKind.Markdown)
         {
-            builder.Append(CodeModeMarkdownExcerpt.Cut(text.Text, budget, fullResultPath is null ? null : "they are in the full result")).Append('\n');
+            var excerpt = CodeModeMarkdownExcerpt.Cut(text.Text, budget, fullResultPath is null ? null : "they are in the full result", out var lines);
+            if (fullResultPath is not null)
+            {
+                builder.Append(FullResultPrefix).Append(fullResultPath).Append(" (")
+                    .Append(Count(lines.TotalLines, "line")).Append(", ").Append(Count(text.Text.Length, "character"))
+                    .Append("; shown below: ").Append(ShownLines(lines)).Append(")\n");
+            }
+
+            builder.Append("Result:\n").Append(excerpt).Append('\n');
         }
         else
         {
             // JSON keeps its shape: the longest values lose their end, and the model still reads valid JSON.
             var json = CodeModeJsonTruncation.Truncate(text.Text, Math.Max(200, budget - 12));
-            builder.Append(text.Kind == CodeModeResultKind.Json ? "```json\n" + json + "\n```" : json).Append('\n');
+            if (fullResultPath is not null)
+            {
+                var kept = Kept(text);
+                builder.Append(FullResultPrefix).Append(fullResultPath).Append(" (")
+                    .Append(Count(LineCount(kept.Text), "line")).Append(" of indented JSON, ").Append(Count(kept.Text.Length, "character"))
+                    .Append("; the JSON below is cut inside: read_file or grep the file for the rest");
+                // A long text of lines is on one line of the JSON: its own file reads by line, from the first line not shown.
+                foreach (var part in TextParts(kept))
+                {
+                    builder.Append("; `").Append(part.DisplayName).Append("` (").Append(Count(LineCount(part.Text), "line"));
+                    if (ShownLinesOf(json, part.Path) is { } shownLines)
+                    {
+                        builder.Append(shownLines == 0 ? "; none shown" : "; lines 1–" + shownLines.ToString("N0", CultureInfo.InvariantCulture) + " shown");
+                    }
+
+                    builder.Append(") is in ").Append(TextPartPath(fullResultPath, part));
+                }
+
+                builder.Append(")\n");
+            }
+
+            builder.Append("Result:\n").Append(text.Kind == CodeModeResultKind.Json ? "```json\n" + json + "\n```" : json).Append('\n');
         }
+    }
+
+    // The whole lines of a text that the cut JSON still shows, or null when the cut JSON no longer has it.
+    private static int? ShownLinesOf(string json, IReadOnlyList<string> path)
+    {
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        foreach (var segment in path)
+        {
+            node = node switch
+            {
+                JsonObject obj => obj[segment],
+                JsonArray array when int.TryParse(segment, NumberStyles.None, CultureInfo.InvariantCulture, out var index) && index < array.Count => array[index],
+                _ => null,
+            };
+        }
+
+        if (node is not JsonValue value || !value.TryGetValue<string>(out var text))
+        {
+            return null;
+        }
+
+        var marker = text.LastIndexOf("…[", StringComparison.Ordinal);
+        var shown = marker >= 0 && text.EndsWith(" characters cut]", StringComparison.Ordinal) ? text[..marker] : text;
+        // A line cut in its middle is not shown whole.
+        return shown.Length == text.Length ? LineCount(text) : shown.AsSpan().Count('\n');
+    }
+
+    private static string Count(int count, string unit)
+        => count.ToString("N0", CultureInfo.InvariantCulture) + " " + unit + (count == 1 ? string.Empty : "s");
+
+    private static string ShownLines(CodeModeExcerptLines lines)
+    {
+        var head = lines.HeadLastLine > 0 ? "lines 1–" + lines.HeadLastLine.ToString("N0", CultureInfo.InvariantCulture) : null;
+        var tail = lines.TailFirstLine <= lines.TotalLines
+            ? "lines " + lines.TailFirstLine.ToString("N0", CultureInfo.InvariantCulture) + "–" + lines.TotalLines.ToString("N0", CultureInfo.InvariantCulture)
+            : null;
+        return (head, tail) switch
+        {
+            ({ } h, { } t) => h + " and " + t[6..],
+            ({ } h, null) => h,
+            (null, { } t) => t,
+            _ => "none",
+        };
     }
 
     /// <summary>Formats a run that goes on in the background after <c>exec</c> stopped waiting for it.</summary>

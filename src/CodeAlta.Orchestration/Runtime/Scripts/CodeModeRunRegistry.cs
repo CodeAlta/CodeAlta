@@ -126,6 +126,12 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, $"script-{run.Id}-result{whole.FileExtension}");
             await File.WriteAllTextAsync(path, whole.Text).ConfigureAwait(false);
+            // A long text of lines in a JSON result is on one line of its file: it is also kept alone, to read by line.
+            foreach (var part in CodeModeResultFormatter.TextParts(whole))
+            {
+                await File.WriteAllTextAsync(CodeModeResultFormatter.TextPartPath(path, part), part.Text).ConfigureAwait(false);
+            }
+
             return path;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

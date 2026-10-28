@@ -60,7 +60,8 @@ public sealed class CodeModeToolTests
         var whole = File.ReadAllText(path);
         StringAssert.StartsWith(whole, "- line 0 with `code`\n");
         StringAssert.EndsWith(whole, "- line 399 with `code`");
-        StringAssert.Contains(text, "characters left out: they are in the full result …");
+        StringAssert.Contains(text, " characters): they are in the full result …");
+        StringAssert.Contains(line, " (400 lines, ");
         StringAssert.EndsWith(text, "- line 399 with `code`\n");
         Assert.IsFalse(text.Contains("\\u0060", StringComparison.Ordinal), text);
         // The source is named under the header: the result is the end of the text.

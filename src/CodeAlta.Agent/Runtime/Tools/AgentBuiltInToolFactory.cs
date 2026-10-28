@@ -994,17 +994,25 @@ public static partial class AgentBuiltInToolFactory
         CancellationToken cancellationToken)
     {
         string note;
+        var saved = false;
+        var outputLines = LineCount(output);
         try
         {
             var path = await SaveToolOutputAsync(options, "shell", toolCallId, output, cancellationToken).ConfigureAwait(false);
             note = FormattableString.Invariant(
-                $"the output has {output.Length:#,0} characters: the head and the tail of each stream are shown, and the whole output is in {path}; read it with read_file (offset, limit) or grep.");
+                $"the output has {outputLines:#,0} lines ({output.Length:#,0} characters): the head and the tail of each stream are shown, and the whole output is in {path}; read the lines cut with read_file (offset, limit) or grep.");
+            saved = true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             note = FormattableString.Invariant(
-                $"the output has {output.Length:#,0} characters: the head and the tail of each stream are shown; the whole output could not be saved ({ex.Message}).");
+                $"the output has {outputLines:#,0} lines ({output.Length:#,0} characters): the head and the tail of each stream are shown; the whole output could not be saved ({ex.Message}).");
         }
+
+        // Where each stream starts in the saved output: after "exit_code:", "working_directory:" and "stdout:" for the
+        // first, after the first and "stderr:" for the second (an empty stream is one line, "(empty)").
+        var stdoutFirstLine = saved ? 4 : 0;
+        var stderrFirstLine = saved ? stdoutFirstLine + Math.Max(1, LineCount(stdout)) + 1 : 0;
 
         var overhead = FormatShellCommandOutput(exitCode, string.Empty, string.Empty, workdir, note).Length;
         // Each marker of a cut takes about 80 characters of the budget.
@@ -1019,12 +1027,15 @@ public static partial class AgentBuiltInToolFactory
                 : (half, budget - half);
         }
 
-        return FormatShellCommandOutput(exitCode, KeepHeadAndTail(stdout, stdoutBudget), KeepHeadAndTail(stderr, stderrBudget), workdir, note);
+        return FormatShellCommandOutput(exitCode, KeepHeadAndTail(stdout, stdoutBudget, stdoutFirstLine), KeepHeadAndTail(stderr, stderrBudget, stderrFirstLine), workdir, note);
     }
 
+    private static int LineCount(string text) => text.Length == 0 ? 0 : 1 + text.AsSpan(0, text[^1] == '\n' ? text.Length - 1 : text.Length).Count('\n');
+
     // Keeps two fifths of the budget from the start of the text and the rest from its end, cut at line ends where it can:
-    // what a command prints last (errors, a summary) often matters most.
-    private static string KeepHeadAndTail(string text, int maxCharacters)
+    // what a command prints last (errors, a summary) often matters most. When the whole output is saved, the marker names
+    // the lines cut in the saved file (the text starts at its line firstLineInFile), so that only those are read again.
+    private static string KeepHeadAndTail(string text, int maxCharacters, int firstLineInFile)
     {
         if (text.Length <= maxCharacters)
         {
@@ -1049,12 +1060,28 @@ public static partial class AgentBuiltInToolFactory
             tailStart++;
         }
 
-        var cut = text.AsSpan(headEnd, tailStart - headEnd);
-        var cutLines = cut.Count('\n');
-        return string.Concat(
-            text.AsSpan(0, headEnd).TrimEnd(),
-            FormattableString.Invariant($"{Environment.NewLine}[... {cut.Length:#,0} characters ({cutLines:#,0} lines) cut ...]{Environment.NewLine}"),
-            text.AsSpan(tailStart));
+        var head = text.AsSpan(0, headEnd).TrimEnd();
+        var cutCharacters = tailStart - head.Length;
+        // The line breaks at the edges of the cut belong to the lines around it.
+        var first = head.Length;
+        while (first < tailStart && text[first] is '\n' or '\r')
+        {
+            first++;
+        }
+
+        var last = tailStart - 1;
+        while (last > first && text[last] is '\n' or '\r')
+        {
+            last--;
+        }
+
+        var firstCut = text.AsSpan(0, first).Count('\n');
+        var lastCut = text.AsSpan(0, Math.Max(first, last)).Count('\n');
+        var cutLines = lastCut - firstCut + 1;
+        var marker = firstLineInFile > 0
+            ? FormattableString.Invariant($"[... lines {firstLineInFile + firstCut:#,0}–{firstLineInFile + lastCut:#,0} of the saved output cut ({cutLines:#,0} lines, {cutCharacters:#,0} characters) ...]")
+            : FormattableString.Invariant($"[... {cutLines:#,0} lines ({cutCharacters:#,0} characters) cut ...]");
+        return string.Concat(head, Environment.NewLine + marker + Environment.NewLine, text.AsSpan(tailStart));
     }
 
     // Saves the whole output of a call to a file of the session's tool output folder, and returns its path.

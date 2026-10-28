@@ -25,6 +25,17 @@ test("a long result names the file that keeps the whole of it", () => {
   assert.match(read!.result!, /^start\n\n… 40,000 characters left out/);
 });
 
+test("a long result names its file with the lines it has and the lines it shows", () => {
+  const read = parseScriptResult("Script completed · 2.0 s · no calls\nFull result: C:\\Users\\me (x)\\script-run-1-result.md (930 lines, 52,341 characters; shown below: lines 1–60 and 873–930)\n"
+    + "Result:\nstart\n\n… lines 61–872 left out (812 lines, 45,210 characters): they are in the full result …\n\nend\n");
+  const json = parseScriptResult("Script completed · 2.0 s · no calls\nFull result: C:\\out\\script-run-2-result.json (1,204 lines of indented JSON, 30,000 characters; the JSON below is cut inside: read_file or grep the file for the rest)\n"
+    + "Result:\n```json\n{\"a\":1}\n```\n");
+
+  assert.deepEqual(read?.fullResult, { path: "C:\\Users\\me (x)\\script-run-1-result.md", characters: "52,341" });
+  assert.equal(read?.notes, "");
+  assert.deepEqual(json?.fullResult, { path: "C:\\out\\script-run-2-result.json", characters: "30,000" });
+});
+
 test("an object is indented, a failure has no result, another text is not a result", () => {
   assert.equal(parseScriptResult("Script completed · 1 ms · no calls\nResult:\n```json\n{\"files\":3}\n```\n")?.result, "```json\n{\n  \"files\": 3\n}\n```");
   const failed = parseScriptResult("Script failed at line 3:1 · 4 ms · no calls\nTypeError: x is undefined\n   3 | return x.a;\n");

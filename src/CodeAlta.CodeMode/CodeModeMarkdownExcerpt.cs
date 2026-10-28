@@ -3,6 +3,52 @@ using System.Text;
 
 namespace CodeAlta.CodeMode;
 
+/// <summary>The lines of a text a cut kept, numbered from 1 as <c>read_file</c> numbers them.</summary>
+/// <param name="TotalLines">The lines of the whole text.</param>
+/// <param name="HeadLastLine">The last line of the start that is shown, 0 when none is.</param>
+/// <param name="TailFirstLine">The first line of the end that is shown.</param>
+/// <param name="FirstCutLine">The first line left out, wholly or in part.</param>
+/// <param name="LastCutLine">The last line left out, wholly or in part.</param>
+public readonly record struct CodeModeExcerptLines(int TotalLines, int HeadLastLine, int TailFirstLine, int FirstCutLine, int LastCutLine)
+{
+    /// <summary>Gets the number of lines left out.</summary>
+    public int CutLines => Math.Max(0, LastCutLine - FirstCutLine + 1);
+
+    /// <summary>Gives the lines of a cut: the text shown is <c>text[..headLength]</c> and <c>text[tailStart..]</c>.</summary>
+    /// <param name="text">The whole text.</param>
+    /// <param name="headLength">The length of the start that is shown.</param>
+    /// <param name="tailStart">Where the end that is shown starts.</param>
+    /// <returns>The lines.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/> is null.</exception>
+    public static CodeModeExcerptLines Of(string text, int headLength, int tailStart)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        // The line breaks at the edges of the cut belong to the lines around it, not to what is left out.
+        var first = headLength;
+        while (first < tailStart && text[first] is '\n' or '\r')
+        {
+            first++;
+        }
+
+        var last = tailStart - 1;
+        while (last >= first && text[last] is '\n' or '\r')
+        {
+            last--;
+        }
+
+        var total = text.Length == 0 ? 0 : LineOf(text, text[^1] == '\n' ? text.Length - 2 : text.Length - 1);
+        return new CodeModeExcerptLines(
+            total,
+            headLength == 0 ? 0 : LineOf(text, headLength - 1),
+            tailStart >= text.Length ? total + 1 : LineOf(text, tailStart),
+            LineOf(text, first),
+            LineOf(text, Math.Max(first, last)));
+    }
+
+    private static int LineOf(string text, int position)
+        => position < 0 ? 1 : 1 + text.AsSpan(0, Math.Min(position, text.Length)).Count('\n');
+}
+
 /// <summary>
 /// Cuts a Markdown text to its start and its end at whole lines, so that what is left still reads as Markdown: a block
 /// of code cut open is closed at the end of the start, and opened again at the start of the end.
@@ -15,9 +61,22 @@ public static class CodeModeMarkdownExcerpt
     /// <param name="where">What the line between says of what is left out, such as "they are in the full result", or null.</param>
     /// <returns>The text, or its start and its end when it is longer than the budget.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="text"/> is null.</exception>
-    public static string Cut(string text, int maxCharacters, string? where)
+    public static string Cut(string text, int maxCharacters, string? where) => Cut(text, maxCharacters, where, out _);
+
+    /// <summary>
+    /// Cuts a text longer than a budget, as <see cref="Cut(string, int, string?)"/> does, and gives the lines it kept: the
+    /// line between the start and the end names the lines left out, so that a reader of the whole text reads only those.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="maxCharacters">The budget.</param>
+    /// <param name="where">What the line between says of what is left out, such as "they are in the full result", or null.</param>
+    /// <param name="lines">The lines kept and left out, or the default when the text is not cut.</param>
+    /// <returns>The text, or its start and its end when it is longer than the budget.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/> is null.</exception>
+    public static string Cut(string text, int maxCharacters, string? where, out CodeModeExcerptLines lines)
     {
         ArgumentNullException.ThrowIfNull(text);
+        lines = default;
         if (text.Length <= maxCharacters)
         {
             return text;
@@ -41,7 +100,11 @@ public static class CodeModeMarkdownExcerpt
         }
 
         var leftOut = text.Length - head.Length - tail.Length;
-        builder.Append("\n\n… ").Append(leftOut.ToString("N0", CultureInfo.InvariantCulture)).Append(" characters left out");
+        lines = CodeModeExcerptLines.Of(text, head.Length, tailStart);
+        builder.Append("\n\n… lines ").Append(lines.FirstCutLine.ToString("N0", CultureInfo.InvariantCulture)).Append('–')
+            .Append(lines.LastCutLine.ToString("N0", CultureInfo.InvariantCulture)).Append(" left out (")
+            .Append(lines.CutLines.ToString("N0", CultureInfo.InvariantCulture)).Append(lines.CutLines == 1 ? " line, " : " lines, ")
+            .Append(leftOut.ToString("N0", CultureInfo.InvariantCulture)).Append(" characters)");
         if (where is not null)
         {
             builder.Append(": ").Append(where);

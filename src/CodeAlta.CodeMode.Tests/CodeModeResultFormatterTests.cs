@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace CodeAlta.CodeMode.Tests;
 
@@ -57,12 +59,65 @@ public sealed class CodeModeResultFormatterTests
         Assert.IsNotNull(kept);
         Assert.AreEqual(report, kept.Text);
         Assert.AreEqual(".md", kept.FileExtension);
-        StringAssert.Contains(text, $"Full result: C:\\session\\tool-output\\script-run-1-result.md ({report.Length:N0} characters; a preview of its start and its end is below, read the file for the rest)\nResult:\n- line 1 with `code`\n");
-        StringAssert.Contains(text, "characters left out: they are in the full result …");
+        StringAssert.Contains(text, $"Full result: C:\\session\\tool-output\\script-run-1-result.md (2,000 lines, {report.Length:N0} characters; shown below: lines 1–");
+        StringAssert.Contains(text, "\nResult:\n- line 1 with `code`\n");
+        StringAssert.Contains(text, " characters): they are in the full result …");
         StringAssert.EndsWith(text, "- line 2000 with `code`\n");
         Assert.IsLessThan(CodeModeResultFormatter.PreviewCharacters + 400, text.Length);
         Assert.IsFalse(text.Contains("\\u0060", StringComparison.Ordinal));
         Assert.IsNull(CodeModeResultFormatter.ResultToKeep(Completed("short"), 1_000));
+    }
+
+    [TestMethod]
+    public void ALongText_NamesTheLinesItShows_AndTheLinesLeftOut_AsTheFileNumbersThem()
+    {
+        // Line k of the file reads "- line k": what the text says of each line can be checked against the lines shown.
+        var report = string.Join('\n', Enumerable.Range(1, 2_000).Select(static i => $"- line {i}"));
+
+        var text = CodeModeResultFormatter.Format(Completed(report), 1_000, @"C:\s\script-run-1-result.md");
+
+        var header = Regex.Match(text, @"\(2,000 lines, [\d,]+ characters; shown below: lines 1–([\d,]+) and ([\d,]+)–2,000\)\n");
+        Assert.IsTrue(header.Success, text);
+        var headLast = int.Parse(header.Groups[1].Value, NumberStyles.AllowThousands, CultureInfo.InvariantCulture);
+        var tailFirst = int.Parse(header.Groups[2].Value, NumberStyles.AllowThousands, CultureInfo.InvariantCulture);
+        var shown = text.Split('\n').ToHashSet();
+        Assert.IsTrue(shown.Contains($"- line {headLast}") && !shown.Contains($"- line {headLast + 1}"), "the start ends at the line it names");
+        Assert.IsTrue(shown.Contains($"- line {tailFirst}") && !shown.Contains($"- line {tailFirst - 1}"), "the end starts at the line it names");
+        StringAssert.Contains(text, FormattableString.Invariant($"… lines {headLast + 1:N0}–{tailFirst - 1:N0} left out ({tailFirst - 1 - headLast:N0} lines, "));
+    }
+
+    [TestMethod]
+    public void ALongObject_IsKeptIndented_AndItsHeaderCountsTheLinesOfTheFile()
+    {
+        var value = Enumerable.Range(1, 600).Select(static i => new { id = i, path = $"src/file{i}.cs" }).ToArray();
+
+        var kept = CodeModeResultFormatter.ResultToKeep(Completed(value), 1_000)!;
+        var text = CodeModeResultFormatter.Format(Completed(value), 1_000, @"C:\s\script-run-2-result.json");
+
+        var lines = kept.Text.Split('\n').Length;
+        Assert.IsGreaterThan(600, lines, "an indented array of objects reads by line");
+        StringAssert.Contains(text, FormattableString.Invariant($"Full result: C:\\s\\script-run-2-result.json ({lines:N0} lines of indented JSON, {kept.Text.Length:N0} characters; "));
+    }
+
+    [TestMethod]
+    public void ALongTextOfLinesInAnObject_IsKeptInAFileOfItsOwn_AndTheHeaderSaysWhichOfItsLinesAreShown()
+    {
+        var stdout = string.Join("\r\n", Enumerable.Range(1, 2_000).Select(static i => $"row {i}"));
+        var value = new { exitCode = 0, stdout, stderr = "" };
+
+        var kept = CodeModeResultFormatter.ResultToKeep(Completed(value), 1_000)!;
+        var part = CodeModeResultFormatter.TextParts(kept).Single();
+        var text = CodeModeResultFormatter.Format(Completed(value), 1_000, @"C:\s\script-run-3-result.json");
+
+        Assert.AreEqual("stdout", part.DisplayName);
+        Assert.AreEqual(stdout, part.Text);
+        Assert.AreEqual(@"C:\s\script-run-3-result.stdout.txt", CodeModeResultFormatter.TextPartPath(@"C:\s\script-run-3-result.json", part));
+        var header = Regex.Match(text, @"; `stdout` \(2,000 lines; lines 1–([\d,]+) shown\) is in C:\\s\\script-run-3-result\.stdout\.txt\)\n");
+        Assert.IsTrue(header.Success, text);
+        var shown = int.Parse(header.Groups[1].Value, NumberStyles.AllowThousands, CultureInfo.InvariantCulture);
+        StringAssert.Contains(text, $"row {shown}\\r\\n", "the last line it names is whole in the preview");
+        Assert.IsFalse(text.Contains($"row {shown + 1}\\r\\n", StringComparison.Ordinal), "the line after it is not");
+        Assert.IsEmpty(CodeModeResultFormatter.TextParts(CodeModeResultFormatter.ResultToKeep(Completed(string.Join('\n', Enumerable.Range(1, 2_000))), 1_000)!), "a text result reads by line already");
     }
 
     [TestMethod]
@@ -90,7 +145,7 @@ public sealed class CodeModeResultFormatterTests
         var fences = excerpt.Split('\n').Count(static line => line.StartsWith("```", StringComparison.Ordinal));
         Assert.AreEqual(0, fences % 2, excerpt);
         StringAssert.Contains(excerpt, "\n```\n\n… ");
-        StringAssert.Contains(excerpt, "characters left out …\n\n```csharp\n");
+        StringAssert.Contains(excerpt, " characters) …\n\n```csharp\n");
         StringAssert.EndsWith(excerpt, "```\nend");
     }
 

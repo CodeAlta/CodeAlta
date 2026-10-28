@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -988,13 +989,24 @@ public sealed class AgentToolsTests
         StringAssert.Contains(output, "line-1" + Environment.NewLine);
         Assert.IsTrue(output.TrimEnd().Contains("line-5000", StringComparison.Ordinal));
         Assert.IsFalse(output.Contains("line-2500", StringComparison.Ordinal));
-        StringAssert.Contains(output, "lines) cut ...]");
         var saved = Directory.GetFiles(outputFolder).Single();
         StringAssert.Contains(output, "output_truncated: ");
         StringAssert.Contains(output, saved);
         StringAssert.Contains(Path.GetFileName(saved), "call_1");
         var whole = await File.ReadAllTextAsync(saved).ConfigureAwait(false);
         StringAssert.Contains(whole, "line-2500");
+        // The marker names the lines cut as read_file numbers them in the saved output: the line before and the line
+        // after are shown, the first and the last it names are not.
+        var marker = Regex.Match(output, @"\[\.\.\. lines ([\d,]+)–([\d,]+) of the saved output cut \(([\d,]+) lines, [\d,]+ characters\) \.\.\.\]");
+        Assert.IsTrue(marker.Success, output);
+        var first = int.Parse(marker.Groups[1].Value, NumberStyles.AllowThousands, CultureInfo.InvariantCulture);
+        var last = int.Parse(marker.Groups[2].Value, NumberStyles.AllowThousands, CultureInfo.InvariantCulture);
+        Assert.AreEqual(last - first + 1, int.Parse(marker.Groups[3].Value, NumberStyles.AllowThousands, CultureInfo.InvariantCulture));
+        var wholeLines = whole.Split('\n').Select(static line => line.TrimEnd('\r')).ToArray();
+        var shown = output.Split('\n').Select(static line => line.TrimEnd('\r')).ToHashSet();
+        Assert.IsTrue(shown.Contains(wholeLines[first - 2]) && !shown.Contains(wholeLines[first - 1]), $"line {first} is the first one cut");
+        Assert.IsTrue(!shown.Contains(wholeLines[last - 1]) && shown.Contains(wholeLines[last]), $"line {last} is the last one cut");
+        StringAssert.Contains(output, FormattableString.Invariant($"the output has {wholeLines.Length - (whole.EndsWith('\n') ? 1 : 0):#,0} lines ("));
         // The user is shown the whole output, and a script receives all of it.
         Assert.AreEqual(whole, result.Display);
         StringAssert.Contains(result.Structured!.Value.GetProperty("stdout").GetString(), "line-2500");

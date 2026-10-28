@@ -2,7 +2,7 @@
  * The text of the result of a script of Code Mode, as the host writes it for the model (CodeModeResultFormatter): a
  * header ("Script completed · 2.0 s · 3 calls"), then what the run wrote (an error, its output, its profile), then the
  * result last, as Markdown, after a line `Result:`. A result longer than its budget keeps its start and its end, and a
- * line `Full result: <path> (<n> characters; …)` before it names the file that keeps the whole of it.
+ * line `Full result: <path> (<lines> lines, <n> characters; …)` before it names the file that keeps the whole of it.
  */
 export type ScriptResult = Readonly<{
   /** The header of the text: "Script completed · 36m50s · 4 calls, 4 at once". */
@@ -20,7 +20,8 @@ export type ScriptResult = Readonly<{
 export type WorkflowResult = ScriptResult & Readonly<{ runId: string; title: string | null }>;
 
 const header = /^Script (completed|stopped|failed)\b/;
-const fullResultLine = /^Full result: (.+) \(([\d.,\s  ]+) characters[^)]*\)$/;
+// "(52,341 characters; …)" before, "(930 lines, 52,341 characters; …)" or "(1,204 lines of indented JSON, … characters; …)" now.
+const fullResultLine = /^Full result: (.+) \((?:[\d.,\s  ]+ lines?(?: of indented JSON)?, )?([\d.,\s  ]+) characters?[^)]*\)$/;
 const fence = /^ {0,3}(`{3,}|~{3,})/;
 
 /** Reads the text of the result of a script, or returns null for another text. */
