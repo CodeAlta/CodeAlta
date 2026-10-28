@@ -809,7 +809,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(GlobalConfigPluginProviderDetailsResponse))]
 [JsonSerializable(typeof(GlobalConfigPluginProviderRequest))]
 [JsonSerializable(typeof(GlobalConfigPluginSignInRequest))]
-[JsonSerializable(typeof(GlobalConfigPluginSignInResponse))]
+[JsonSerializable(typeof(GlobalConfigPluginSignInEvent))]
 [JsonSerializable(typeof(GlobalConfigSavePluginProviderRequest))]
 [JsonSerializable(typeof(ClaudeCliCheckRequest))]
 [JsonSerializable(typeof(ClaudeCliCheckResponse))]

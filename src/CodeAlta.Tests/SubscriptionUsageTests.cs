@@ -197,6 +197,9 @@ public sealed class SubscriptionUsageTests
             "Without a folder of its own, the CLI keeps the one it inherits.");
         var work = Path.Combine(folder.Path, "codex-work");
         Assert.AreEqual(work, CodexAccountUsage.CreateStartInfo(cli, work).Environment["CODEX_HOME"]);
+        // The standalone app-server of a Codex release, which the Codex CLI provider runs, is the server itself.
+        var standalone = Path.Combine(folder.Path, OperatingSystem.IsWindows() ? "codex-app-server.exe" : "codex-app-server");
+        Assert.IsEmpty(CodexAccountUsage.CreateStartInfo(standalone, work).ArgumentList);
         if (OperatingSystem.IsWindows())
         {
             // A script that a package manager installs runs through the command interpreter.

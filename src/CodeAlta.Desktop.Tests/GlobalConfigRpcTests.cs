@@ -47,6 +47,69 @@ type = "future-provider"
     }
 
     [TestMethod]
+    public async Task PluginProviderSignIn_StreamsThePromptOpensTheBrowserAndEnds()
+    {
+        const string content = """
+[providers.codex-work]
+type = "fake-agent"
+""";
+        await using var fixture = new Fixture(content);
+        await using var endpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints();
+        var types = new CodeAlta.Hosting.PluginModelProviderTypes(endpoints);
+        var account = new PromptingAccount();
+        types.Attach(() => [new CodeAlta.Plugins.Abstractions.PluginModelProviderContribution
+        {
+            ProviderType = "fake-agent", DisplayName = "Fake agent", CreateRuntime = static _ => throw new NotSupportedException("Not created in this test."), Account = account,
+        }]);
+        var opened = new List<Uri>();
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch)
+        {
+            PluginProviderTypes = types,
+            OpenSignInBrowser = uri => { opened.Add(uri); return true; },
+        };
+
+        var events = new List<GlobalConfigPluginSignInEvent>();
+        await foreach (var item in service.SignInAsync(new(Epoch, "codex-work", "device"), CancellationToken.None)) events.Add(item);
+
+        CollectionAssert.AreEqual(new[] { "prompt", "completed" }, events.Select(static item => item.Kind).ToArray());
+        Assert.AreEqual("https://auth.example.com/device", events[0].Url);
+        Assert.AreEqual("ABCD-1234", events[0].UserCode);
+        Assert.IsTrue(events[0].BrowserOpened);
+        Assert.AreEqual("ok", events[1].Status);
+        Assert.AreEqual(new Uri("https://auth.example.com/device"), opened.Single());
+
+        account.Failure = "The sign-in to ChatGPT did not complete: denied";
+        events.Clear();
+        await foreach (var item in service.SignInAsync(new(Epoch, "codex-work", "device"), CancellationToken.None)) events.Add(item);
+        Assert.AreEqual("failed", events[^1].Kind);
+        Assert.AreEqual("failed", events[^1].Status);
+        Assert.AreEqual(account.Failure, events[^1].Message);
+
+        events.Clear();
+        await foreach (var item in service.SignInAsync(new("another", "codex-work", "device"), CancellationToken.None)) events.Add(item);
+        Assert.AreEqual("stale_epoch", events.Single().Status);
+    }
+
+    // A sign-in that shows a device code, then ends, or fails.
+    private sealed class PromptingAccount : CodeAlta.Plugins.Abstractions.IPluginProviderAccount
+    {
+        public string? Failure { get; set; }
+
+        public Task<IReadOnlyList<CodeAlta.Plugins.Abstractions.PluginProviderSignInMethod>> GetSignInMethodsAsync(CodeAlta.Plugins.Abstractions.PluginProviderSettings settings, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<CodeAlta.Plugins.Abstractions.PluginProviderSignInMethod>>([new("device", "Sign in with a device code", null)]);
+
+        public Task SignInAsync(CodeAlta.Plugins.Abstractions.PluginProviderSettings settings, string methodId, CancellationToken cancellationToken)
+            => throw new NotSupportedException("The window calls the sign-in that shows a prompt.");
+
+        public async Task SignInAsync(CodeAlta.Plugins.Abstractions.PluginProviderSettings settings, string methodId,
+            Func<CodeAlta.Plugins.Abstractions.PluginProviderSignInPrompt, CancellationToken, ValueTask> onPrompt, CancellationToken cancellationToken)
+        {
+            await onPrompt(new(new Uri("https://auth.example.com/device"), "ABCD-1234", DateTimeOffset.UtcNow.AddMinutes(15)), cancellationToken);
+            if (Failure is { } failure) throw new InvalidOperationException(failure);
+        }
+    }
+
+    [TestMethod]
     public async Task Read_ReturnsTheTemplateForAMissingFileAndRefusesAnotherEpoch()
     {
         await using var fixture = new Fixture();

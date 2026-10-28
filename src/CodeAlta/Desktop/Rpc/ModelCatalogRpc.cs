@@ -197,6 +197,9 @@ internal sealed class ModelCatalogService(
                 "acp-signed-out" => "acp-signed-out",
                 "acp-not-installed" => "acp-not-installed",
                 "acp-unavailable" => "acp-unavailable",
+                "codex-cli-signed-out" => "codex-cli-signed-out",
+                "codex-cli-not-found" => "codex-cli-not-found",
+                "codex-cli-unavailable" => "codex-cli-unavailable",
                 _ => null,
             }
             : null;

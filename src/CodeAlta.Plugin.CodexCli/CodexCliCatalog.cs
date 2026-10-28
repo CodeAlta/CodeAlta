@@ -48,7 +48,7 @@ internal sealed class CodexCliCatalog(Func<CodexAppServerInstaller> installer) :
         }
 
         // No command: the provider runs the pinned app-server, the one just downloaded.
-        return new PluginProviderInstallResult(EntryId, "Codex CLI", new Dictionary<string, object?>(StringComparer.Ordinal)) { Icon = "openai" };
+        return new PluginProviderInstallResult(EntryId, "Codex CLI", new Dictionary<string, object?>(StringComparer.Ordinal));
     }
 
     public Task<string?> GetUpdateAsync(PluginProviderSettings settings, CancellationToken cancellationToken)

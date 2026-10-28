@@ -37,8 +37,11 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
   const [busy, setBusy] = useState<"update" | "signIn" | null>(null);
   const [progress, setProgress] = useState<Readonly<{ message: string | null; received: number | null; total: number | null }> | null>(null);
   const [notice, setNotice] = useState<Readonly<{ text: string; intent: "success" | "danger" | "none" }> | null>(null);
+  // What the sign-in the plugin runs shows the user: its address, and the code of a device flow.
+  const [prompt, setPrompt] = useState<Readonly<{ url: string | null; userCode: string | null; browserOpened: boolean }> | null>(null);
+  const signingIn = useRef<AbortController | null>(null);
   const alive = useRef(true);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; signingIn.current?.abort(); }; }, []);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -63,14 +66,30 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
 
   async function signIn(method: GlobalConfigPluginSignInMethod) {
     if (busy) return;
-    setBusy("signIn"); setNotice(null);
+    const abort = new AbortController();
+    signingIn.current = abort;
+    setBusy("signIn"); setNotice(null); setPrompt(null);
     try {
-      const reply = await api.pluginProviderSignIn({ expectedEpoch: epoch, key: providerKey, methodId: method.id }, { timeoutMilliseconds: 360000 });
-      if (!alive.current) return;
-      if (reply.status === "ok") { setNotice({ text: t("Signed in. Test the provider to see its models."), intent: "success" }); onSignedIn(); }
-      else setNotice({ text: t("The sign-in did not complete: {reason}", { reason: reply.message ?? reply.status }), intent: "danger" });
-    } catch { if (alive.current) setNotice({ text: t("The sign-in did not complete: {reason}", { reason: "timeout" }), intent: "danger" }); }
-    finally { if (alive.current) setBusy(null); }
+      // The stream gives the address to open once the plugin has it, then how the sign-in ended; closing it cancels it.
+      const events = await api.pluginProviderSignIn({ expectedEpoch: epoch, key: providerKey, methodId: method.id }, { signal: abort.signal });
+      for await (const event of events) {
+        if (abort.signal.aborted || !alive.current) return;
+        if (event.kind === "prompt") setPrompt({ url: event.url, userCode: event.userCode, browserOpened: event.browserOpened });
+        else if (event.kind === "completed") { setNotice({ text: t("Signed in. Test the provider to see its models."), intent: "success" }); onSignedIn(); }
+        else setNotice(event.status === "canceled" ? { text: t("Sign-in canceled."), intent: "none" }
+          : { text: t("The sign-in did not complete: {reason}", { reason: event.message ?? event.status ?? "failed" }), intent: "danger" });
+      }
+    } catch { if (alive.current && !abort.signal.aborted) setNotice({ text: t("The sign-in did not complete: {reason}", { reason: "failed" }), intent: "danger" }); }
+    finally {
+      if (signingIn.current === abort) signingIn.current = null;
+      if (alive.current && !abort.signal.aborted) { setBusy(null); setPrompt(null); }
+    }
+  }
+
+  function cancelSignIn() {
+    signingIn.current?.abort();
+    signingIn.current = null;
+    setBusy(null); setPrompt(null); setNotice({ text: t("Sign-in canceled."), intent: "none" });
   }
 
   async function update() {
@@ -124,6 +143,13 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
               icon={busy === "signIn" ? <ActivitySpinner size={12} /> : <AppIcon name="user" size={13} />} onClick={() => void signIn(method)}>
               {busy === "signIn" ? t("Signing in…") : method.label}</Button>)}
     </div>
+    {busy === "signIn" && <Callout compact intent="primary" className="provider-account-running" icon={<ActivitySpinner size={16} />}>
+      <p>{t(!prompt ? "Starting the sign-in…" : prompt.userCode ? "Enter this code on the sign-in page to finish:" : prompt.browserOpened
+        ? "Finish the sign-in in the browser window that opened." : "Open this address in a browser to finish the sign-in:")}</p>
+      {prompt?.userCode && <Copyable code value={prompt.userCode} label={t("Copy code")} />}
+      {prompt?.url && <Copyable value={prompt.url} label={t("Copy address")} />}
+      <Button size="small" onClick={cancelSignIn}>{t("Cancel")}</Button>
+    </Callout>}
     {notice && <Callout compact intent={notice.intent} role={notice.intent === "danger" ? "alert" : "status"}>{notice.text}</Callout>}
   </div>;
 }

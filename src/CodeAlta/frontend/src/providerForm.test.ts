@@ -151,6 +151,7 @@ test("the form of a provider that is not ready says why above its fields, and wh
   assert.deepEqual(providerStateProblem(state("Failed", "acp-signed-out"), true),
     { key: "{provider} is not signed in: sign in below, then test it again.", intent: "warning", signIn: true });
   assert.equal(providerStateProblem(state("Failed", "claude-code-signed-out"), true)?.intent, "warning");
+  assert.equal(providerStateProblem(state("Failed", "codex-cli-signed-out"), true)?.signIn, true, "Codex CLI signs in from its form, as an agent does");
   assert.deepEqual(providerStateProblem(state("Failed", "acp-not-installed"), true),
     { key: "The command of {provider} was not found. Install the agent, or the tool that runs it, then test again.", intent: "danger", signIn: false });
   // A failure the window has no words for points to the log, which keeps what the provider said.

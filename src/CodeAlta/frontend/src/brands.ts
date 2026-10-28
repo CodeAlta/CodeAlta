@@ -56,12 +56,12 @@ const words: readonly (readonly [RegExp, BrandIconName])[] = [
 
 // The adapter types that belong to one brand. `openai-chat` is the protocol of many: it names none.
 const types: Readonly<Record<string, BrandIconName>> = {
-  codex: "codex", copilot: "githubcopilot", "claude-code": "claudecode", xai: "xai", mistral: "mistral",
+  codex: "codex", "codex-cli": "codex", copilot: "githubcopilot", "claude-code": "claudecode", xai: "xai", mistral: "mistral",
   "google-genai": "gemini", "vertex-ai": "vertexai", "azure-openai": "azure", "openai-responses": "openai", anthropic: "anthropic",
 };
 
 // The adapter types that run one product, whose providers are accounts of it.
-const productTypes: ReadonlySet<string> = new Set(["claude-code", "codex", "copilot"]);
+const productTypes: ReadonlySet<string> = new Set(["claude-code", "codex", "codex-cli", "copilot"]);
 
 // The model families, by what their ids hold. A family comes before a provider: a model of Anthropic that is
 // reached through another provider is still shown as Claude.

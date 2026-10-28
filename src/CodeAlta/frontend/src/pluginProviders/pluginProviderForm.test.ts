@@ -65,6 +65,14 @@ test("an agent that is not signed in or not installed is said so", () => {
   assert.match(providerProblem("acp-unavailable")!, /did not start/);
 });
 
+test("a Codex CLI provider that is not signed in or has no Codex is said so", () => {
+  assert.equal(isSignedOut("codex-cli-signed-out"), true);
+  assert.match(providerProblem("codex-cli-signed-out")!, /not signed in/);
+  assert.match(providerProblem("codex-cli-not-found")!, /could not find or download Codex/);
+  assert.match(providerProblem("codex-cli-unavailable")!, /did not start/);
+  assert.deepEqual(providerBrand({ key: "codex-work", type: "codex-cli", name: "Codex CLI" }), { icon: "codex" });
+});
+
 test("an agent of no known brand is shown with the icon of its plugin, a known one with its logo", () => {
   assert.deepEqual(providerBrand({ key: "cursor", type: "acp", name: "Cursor", iconData: copilot.plugin!.iconData }), { icon: null, image: copilot.plugin!.iconData! });
   assert.deepEqual(providerBrand({ key: "github-copilot-cli", type: "acp", name: "Copilot", iconData: copilot.plugin!.iconData }), { icon: "githubcopilot" });

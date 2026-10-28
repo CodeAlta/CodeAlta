@@ -11,8 +11,36 @@ public sealed class ConfiguredProviderUsageTests
     [TestMethod]
     public void OnlyTheSubscriptionProviders_HaveAUsageToRead()
     {
-        foreach (var type in new[] { "codex", "copilot", "claude-code" }) Assert.IsTrue(ConfiguredProviderUsage.Supports(type), type);
+        foreach (var type in new[] { "codex", "codex-cli", "copilot", "claude-code" }) Assert.IsTrue(ConfiguredProviderUsage.Supports(type), type);
         foreach (var type in new[] { "xai", "openai-chat", "openai-responses", "anthropic", "", null }) Assert.IsFalse(ConfiguredProviderUsage.Supports(type), type);
+    }
+
+    [TestMethod]
+    public async Task ACodexCliProvider_IsDescribedFromItsSection_AndWithoutItsAppServerSaysWhatIsMissing()
+    {
+        var root = Directory.CreateTempSubdirectory("CodeAlta-provider-usage-").FullName;
+        try
+        {
+            var provider = new CodeAltaExternalProvider("codex-work", "codex-cli", new Dictionary<string, object?>
+            {
+                ["codex_home"] = "~/codex-work", ["enabled"] = false, ["command"] = "  ",
+            });
+            var definition = ConfiguredProviderUsage.DescribePluginProvider(provider)!;
+            Assert.AreEqual("codex-cli", definition.ProviderType);
+            Assert.AreEqual("~/codex-work", definition.CodexHome);
+            Assert.IsNull(definition.Command);
+            Assert.IsFalse(definition.Enabled);
+            Assert.IsNull(ConfiguredProviderUsage.DescribePluginProvider(new CodeAltaExternalProvider("cursor", "acp", new Dictionary<string, object?>())));
+
+            // The pinned app-server was never downloaded: nothing is started.
+            using var http = new HttpClient(new Refusing());
+            var reading = await ConfiguredProviderUsage.ReadAsync(definition, root, http, default);
+            Assert.AreEqual(AgentSubscriptionUsageReading.ToolMissing, reading.Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [TestMethod]

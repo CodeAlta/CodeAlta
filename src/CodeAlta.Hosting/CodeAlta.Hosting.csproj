@@ -23,6 +23,7 @@
     <ProjectReference Include="..\CodeAlta.Agent.GoogleGenAI\CodeAlta.Agent.GoogleGenAI.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Mistral\CodeAlta.Agent.Mistral.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.OpenAI\CodeAlta.Agent.OpenAI.csproj" />
+    <ProjectReference Include="..\CodeAlta.CodexAppServer\CodeAlta.CodexAppServer.csproj" />
     <ProjectReference Include="..\CodeAlta.Agent.Xai\CodeAlta.Agent.Xai.csproj" />
   </ItemGroup>
 
