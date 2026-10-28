@@ -97,6 +97,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     // What steers the run in progress, with the session of the agent that sent each (null for a person or the host) and
     // the provenance of a prompt of the host (null for one the user typed).
     private readonly Queue<(AgentInput Input, string? SourceSessionId, string? Provenance)> _pendingSteerInputs = new();
+
+    // Called when a run that answered is about to end, after its last look at what steers it: a test steers it there.
+    internal Func<AgentRunId, Task>? RunEnding { get; set; }
+
     private readonly AgentSessionToolImages _toolImages;
     // The reads of files the model has in its conversation, which answer a read of the same lines again.
     private readonly AgentReadFileGuard _readFileGuard;
@@ -807,7 +811,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     }
 
                     await AppendTurnDiffUpdatedAsync(fileChangeTracker, runId, linkedCts.Token).ConfigureAwait(false);
-                    await CompleteActiveTurnAsync(runId, CancellationToken.None).ConfigureAwait(false);
+                    if (RunEnding is { } ending) await ending(runId).ConfigureAwait(false);
+                    // What steered the run since its last look (the answer of a child) was told it was taken: the run goes on
+                    // with it rather than dropping it as it ends.
+                    if (!await CompleteActiveTurnAsync(runId, CancellationToken.None, whenNothingSteers: true).ConfigureAwait(false))
+                    {
+                        continue;
+                    }
+
                     await RefreshEstimatedUsageAsync(
                             runId,
                             instructionBundle.SystemMessage,
@@ -2469,14 +2480,21 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
     // Clear steering/replay/media bookkeeping before post-turn usage refresh and compaction, but
     // retain source lifetime authority until FinishRunAsync has joined and disposed the original work.
-    private async Task CompleteActiveTurnAsync(AgentRunId runId, CancellationToken cancellationToken)
+    // whenNothingSteers: a run that answered ends only when no steer waits, under the gate SteerAsync takes, so that a steer
+    // is either taken into the run or refused (no active run), never accepted and dropped. Returns false when one waits.
+    private async Task<bool> CompleteActiveTurnAsync(AgentRunId runId, CancellationToken cancellationToken, bool whenNothingSteers = false)
     {
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_activeRunId != runId)
             {
-                return;
+                return true;
+            }
+
+            if (whenNothingSteers && _pendingSteerInputs.Count > 0)
+            {
+                return false;
             }
 
             _activeRunId = null;
@@ -2484,6 +2502,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             _pendingSteerInputs.Clear();
             _toolImages.ReleaseRun();
             _pdfInputs.Clear();
+            return true;
         }
         finally
         {

@@ -102,6 +102,43 @@ public sealed class HeadlessSessionDriverTests
     }
 
     [TestMethod]
+    public async Task Run_WhoseFirstRunFailed_IsCompleted_WhenTheAnswerOfItsChildStartedARunThatAnswered()
+    {
+        var (root, provider, host) = await CreateAsync();
+        await using var scope = root;
+        string? rootId = null;
+        // The child answers once the first run of the root has failed.
+        var rootFailed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var driver = new HeadlessSessionDriver(host, new HeadlessSessionDriverOptions
+        {
+            Observer = (item, _) =>
+            {
+                if (item.Event is SessionAgentEvent { Event: AgentErrorEvent } failed && failed.SessionId == Volatile.Read(ref rootId)) rootFailed.TrySetResult();
+                return ValueTask.CompletedTask;
+            },
+        });
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        Volatile.Write(ref rootId, session.SessionId);
+        var childId = Guid.CreateVersion7().ToString();
+        var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
+        provider.Script(session.SessionId,
+            async (_, _) =>
+            {
+                var child = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Child", session.SessionId, null, null, null, childId);
+                _ = host.RuntimeService.SendAsync(child, options, new AgentSendOptions { Input = AgentInput.Text("child work") });
+                throw new CodeAlta.Agent.Runtime.AgentProviderFailureException("The stream completed without a terminal response.", new AgentFailureInfo(AgentFailureKind.Other));
+            },
+            ScriptedTurnProvider.Reply("Recovered."));
+        provider.Script(childId, ScriptedTurnProvider.WaitThenReply(rootFailed.Task, "Child result."));
+
+        var result = await driver.RunAsync(session, new HeadlessPrompt("delegate")).WaitAsync(Hang);
+
+        Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
+        Assert.AreEqual("Recovered.", result.FinalMessage);
+        Assert.AreEqual(2, provider.RequestsOf(session.SessionId).Length, "The answer of the child started a second run of the root.");
+    }
+
+    [TestMethod]
     public async Task ReadOutcome_OfARunWhoseIndexedTurnStartsWhereTheJournalEnds_ReadsTheRunFromTheWholeJournal()
     {
         var (root, provider, host) = await CreateAsync();

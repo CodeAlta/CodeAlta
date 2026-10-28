@@ -2168,6 +2168,56 @@ public sealed partial class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_ASteerThatComesAsTheRunEnds_IsTakenIntoTheRun_NotDropped()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-steer-ending");
+        var state = CreateState("session-steer-ending");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                (_, _, _) => Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("First answer.")]),
+                }),
+                (request, _, _) =>
+                {
+                    Assert.AreEqual("The child is done.", Assert.IsInstanceOfType<AgentMessagePart.Text>(request.Conversation[^1].Parts.Single()).Value);
+                    return Task.FromResult(new AgentTurnResponse
+                    {
+                        AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Second answer.")]),
+                    });
+                }),
+            CreateOptions(provider, temp.Path));
+        // The answer of a child steers the run after its last look at what steers it, before it ends.
+        AgentRunId? steeredInto = null;
+        session.RunEnding = async runId =>
+        {
+            if (steeredInto is not null) return;
+            steeredInto = await session.SteerAsync(new AgentSteerOptions { Input = AgentInput.Text("The child is done."), ExpectedRunId = runId }).ConfigureAwait(false);
+        };
+
+        var completedRunId = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") }).WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+
+        Assert.AreEqual(completedRunId, steeredInto, "The steer was taken by the run in progress.");
+        var history = await session.GetHistoryAsync().ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "Initial prompt", "The child is done." },
+            history.OfType<AgentContentCompletedEvent>().Where(static evt => evt.Kind == AgentContentKind.User).Select(static evt => evt.Content).ToArray(),
+            "A steer the run took is answered in it.");
+        Assert.AreEqual("Second answer.", history.OfType<AgentContentCompletedEvent>().Last(static evt => evt.Kind == AgentContentKind.Assistant).Content);
+    }
+
+    [TestMethod]
     public async Task AgentSession_RecordsTheProvenanceOfAPromptOfTheHost_AndReadsItBack()
     {
         using var temp = TestTempDirectory.Create();

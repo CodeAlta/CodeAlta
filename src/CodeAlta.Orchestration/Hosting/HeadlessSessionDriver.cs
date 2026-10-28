@@ -376,7 +376,10 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
 
         if (sent is { Outcome: not OwnedSessionCommandOutcome.Completed, Code: SessionRuntimeService.SessionInUseCode } && runId is null)
             return Result(HeadlessRunStatus.SessionInUse, null, outcome, usage, null, $"Session '{session.SessionId}' is in use by another process.");
-        if (sent is { Outcome: not OwnedSessionCommandOutcome.Completed } && runId is null && outcome.FinalError is null)
+        // A send whose run failed has no run id (an in-process provider fails the send with its run); a run that the answer
+        // of a child started after it may still have completed the work, and is how the run ended.
+        if (sent is { Outcome: not OwnedSessionCommandOutcome.Completed } && runId is null && outcome.FinalError is null
+            && outcome.Status != SessionOutcomeStatus.Completed)
             return Result(HeadlessRunStatus.Failed, null, outcome, usage, null, $"The prompt could not be sent ({sent.Code ?? sent.Outcome.ToString().ToLowerInvariant()}).");
 
         return outcome.Status switch
