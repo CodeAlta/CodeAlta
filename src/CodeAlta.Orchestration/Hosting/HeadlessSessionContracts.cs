@@ -222,4 +222,8 @@ public sealed record HeadlessSessionDriverOptions
     /// is reported anyway. The default is 30 seconds.
     /// </summary>
     public TimeSpan AbortGrace { get; init; } = TimeSpan.FromSeconds(30);
+
+    // Reads how a run ended from the journal of its session (its run, or the events since the prompt when the run is not
+    // known), in place of the runtime's read: a test gives one that finds nothing.
+    internal Func<SessionViewDescriptor, AgentRunId?, DateTimeOffset, Task<SessionOutcome>>? ReadOutcome { get; init; }
 }

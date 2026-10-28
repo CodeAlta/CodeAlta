@@ -73,6 +73,30 @@ public sealed partial class SessionRuntimeService
     }
 
     /// <summary>
+    /// Lists a session and every session below it: those this runtime holds (<see cref="GetSessionTree"/>), then those the
+    /// stored sessions name as its descendants (<see cref="SessionLineage.Descendants"/>), which the runtime no longer holds
+    /// once they ended and were detached.
+    /// </summary>
+    /// <param name="rootSessionId">The session at the root.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The root first, then its descendants, each once.</returns>
+    /// <exception cref="ArgumentException"><paramref name="rootSessionId"/> is blank.</exception>
+    /// <exception cref="OperationCanceledException">The listing was canceled.</exception>
+    public async Task<IReadOnlyList<string>> ListSessionTreeAsync(string rootSessionId, CancellationToken cancellationToken = default)
+    {
+        var tree = GetSessionTree(rootSessionId).ToList();
+        var stored = await AdmitAsync(() => ListSessionRowsAsync(_sessionViewCatalog.JournalStore.CreateSessionStore()), cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+        var known = new HashSet<string>(tree, StringComparer.OrdinalIgnoreCase);
+        foreach (var descendant in SessionLineage.Descendants(rootSessionId, stored))
+        {
+            if (known.Add(descendant.Session.SessionId)) tree.Add(descendant.Session.SessionId);
+        }
+
+        return tree;
+    }
+
+    /// <summary>
     /// Waits until a session and every session it started have settled: no run, no queue drain and no prompt waiting in
     /// their queues, no background task of their provider and no job that runs or whose end is still being told, no
     /// parent notification or host prompt being delivered, no fallback that continues a failed run, no command of the

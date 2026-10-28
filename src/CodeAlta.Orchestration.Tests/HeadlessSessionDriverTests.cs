@@ -102,6 +102,107 @@ public sealed class HeadlessSessionDriverTests
     }
 
     [TestMethod]
+    public async Task ReadOutcome_OfARunWhoseIndexedTurnStartsWhereTheJournalEnds_ReadsTheRunFromTheWholeJournal()
+    {
+        var (root, provider, host) = await CreateAsync();
+        await using var scope = root;
+        await using var driver = new HeadlessSessionDriver(host);
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("The answer."));
+        var run = await driver.RunAsync(session, new HeadlessPrompt("hello")).WaitAsync(Hang);
+        Assert.AreEqual(HeadlessRunStatus.Completed, run.Status, run.FailureMessage);
+
+        // The index of the journal names a turn of the run that starts where the journal ends, as an update of the index
+        // that raced the records a script writes late can leave it: a read from there finds nothing of the run.
+        await host.SessionViewCatalog.JournalStore.ApplicationDatabase.WriteAsync("test", async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE session_journal_index_turn SET start_offset = (SELECT length FROM session_journal_index WHERE session_id = $session)
+                WHERE session_id = $session AND run_id = $run;
+                """;
+            command.Parameters.AddWithValue("$session", session.SessionId);
+            command.Parameters.AddWithValue("$run", run.RunId!.Value.Value);
+            Assert.AreEqual(1, await command.ExecuteNonQueryAsync(token), "The index has the turn of the run.");
+        });
+
+        var outcome = await host.RuntimeService.ReadOutcomeAsync(session.Descriptor, run.RunId!.Value).WaitAsync(Hang);
+
+        Assert.AreEqual(SessionOutcomeStatus.Completed, outcome.Status);
+        Assert.AreEqual("The answer.", outcome.FinalMessage);
+        Assert.AreEqual(100, outcome.Usage.InputTokens, "The usage of the root is read with its answer.");
+    }
+
+    [TestMethod]
+    public async Task Run_WhoseJournalReadFindsNoAnswer_ReportsTheAnswerAndUsageTheDriverSaw()
+    {
+        var (root, provider, host) = await CreateAsync();
+        await using var scope = root;
+        var reads = 0;
+        await using var driver = new HeadlessSessionDriver(host, new HeadlessSessionDriverOptions
+        {
+            Observer = static (_, _) => ValueTask.CompletedTask,
+            // A read of the journal that finds nothing of the run, as one that raced the records of a script did.
+            ReadOutcome = (_, _, _) =>
+            {
+                Interlocked.Increment(ref reads);
+                return Task.FromResult(SessionOutcome.From([], isRunning: false));
+            },
+        });
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        provider.Turns.Enqueue(ScriptedTurnProvider.Reply("The answer."));
+
+        var result = await driver.RunAsync(session, new HeadlessPrompt("hello")).WaitAsync(Hang);
+
+        Assert.IsGreaterThan(1, reads, "The journal is read again before the driver falls back on what it saw.");
+        Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
+        Assert.AreEqual("The answer.", result.FinalMessage);
+        Assert.AreEqual(100, result.Usage.InputTokens);
+        Assert.AreEqual(0.25, result.Usage.Cost);
+    }
+
+    [TestMethod]
+    public async Task Run_CountsTheUsageOfAChildTheRuntimeDetachedOnceItEnded()
+    {
+        await using var root = new HeadlessTestRoot();
+        var provider = new ScriptedTurnProvider();
+        var host = await root.CreateHostAsync(provider, readOnlyGlobalState: true, fullTrust: true, headlessInstructions: true,
+            sessionLeaseOwner: SessionLeaseOwner.DesktopKind);
+        var runtime = host.RuntimeService;
+        // As in CodeAlta Desktop, a session nobody shows is detached once it has nothing left to do.
+        runtime.IdleReleaseDelay = TimeSpan.Zero;
+        runtime.IdleSweepInterval = TimeSpan.FromMilliseconds(20);
+        runtime.SetShownSessions([]);
+        var childId = Guid.CreateVersion7().ToString();
+        await using var driver = new HeadlessSessionDriver(host, new HeadlessSessionDriverOptions
+        {
+            // The outcome is read once the runtime detached the child that ended, before the usage of the tree is read.
+            ReadOutcome = async (descriptor, run, _) =>
+            {
+                using var deadline = new CancellationTokenSource(Hang);
+                while (runtime.GetSessionTree(descriptor.SessionId).Contains(childId, StringComparer.OrdinalIgnoreCase)) await Task.Delay(10, deadline.Token);
+                return await runtime.ReadOutcomeAsync(descriptor, run);
+            },
+        });
+        var session = (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = root.ProjectRoot, ModelRef = "scripted:scripted-model" })).Session!;
+        var options = HeadlessTestRoot.Options(provider, root.ProjectRoot);
+        provider.Script(session.SessionId,
+            ScriptedTurnProvider.DoThenReply(async () =>
+            {
+                var child = await runtime.CreateProjectSessionAsync(host.CurrentProject, options, "Child", session.SessionId, null, null, null, childId);
+                _ = runtime.SendAsync(child, options, new AgentSendOptions { Input = AgentInput.Text("child work") });
+            }, "Started."),
+            ScriptedTurnProvider.Reply("The child said it."));
+        provider.Script(childId, ScriptedTurnProvider.Reply("Child result."));
+
+        var result = await driver.RunAsync(session, new HeadlessPrompt("delegate")).WaitAsync(Hang);
+
+        Assert.AreEqual(HeadlessRunStatus.Completed, result.Status, result.FailureMessage);
+        Assert.AreEqual("The child said it.", result.FinalMessage);
+        Assert.AreEqual(300, result.Usage.InputTokens, "Two runs of the root and one of the child, which ended before them.");
+    }
+
+    [TestMethod]
     public async Task FlushEvents_WaitsUntilTheObserverWasGivenEveryEventPublishedBefore()
     {
         var (root, provider, host) = await CreateAsync();
