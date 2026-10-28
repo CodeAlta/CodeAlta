@@ -3,6 +3,7 @@ import { createOwnerChangeSignal } from "./ownerChangeSignal";
 import { createImageDrafts, freezeImages, isImageAttachment, validImages, withLinkAttachments } from "./promptImages";
 import { diagnosticRequestId, rpcFailureCode } from "./rpcDiagnostics";
 import { sendDiagnostics } from "./sendDiagnostics";
+import type { MessageKey } from "./localization";
 
 type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 /** `reason` says why an admission stayed unconfirmed: the host's status, or the transport failure code. */
@@ -79,6 +80,25 @@ function validSend(request: SessionSendRequest, checkAttachments = true): boolea
       && (request.selection.reasoningEffort === null || identity(request.selection.reasoningEffort, 32))
       && (request.selection.permissionMode == null || identity(request.selection.permissionMode, 256)));
 }
+/** What the composer says of a Send or a steering prompt a plugin answered itself, so that it never looks sent: a message and its parameters. */
+export type PluginPromptOutcome = Readonly<{ key: MessageKey; parameters?: Readonly<Record<string, string>>; cancelled: boolean }>;
+
+/**
+ * The outcome of a settled Send or Steer that a plugin handled (`plugin_handled`) or cancelled (`plugin_cancelled`) before
+ * anything was sent to the agent, with what the plugin said; null for any other row.
+ */
+export function pluginPromptOutcome(row: Pick<SessionReceiptView, "kind" | "state" | "code" | "message">): PluginPromptOutcome | null {
+  if (row.kind !== "Send" && row.kind !== "Steer" || row.state !== "terminal") return null;
+  const message = row.message ?? null;
+  if (row.code === "plugin_handled") return message
+    ? { key: "A plugin handled this prompt: {message}", parameters: { message }, cancelled: false }
+    : { key: "A plugin handled this prompt: nothing was sent to the agent.", cancelled: false };
+  if (row.code === "plugin_cancelled") return message
+    ? { key: "A plugin cancelled this prompt: {message}", parameters: { message }, cancelled: true }
+    : { key: "A plugin cancelled this prompt: nothing was sent to the agent.", cancelled: true };
+  return null;
+}
+
 /** The key of the timeline echo a Send shows while the host has not reported its message yet. */
 export function outgoingKey(request: Pick<SessionSendRequest, "expectedEpoch" | "sessionId" | "clientRequestId">): string {
   return JSON.stringify([request.expectedEpoch, request.sessionId, request.clientRequestId]);
@@ -113,27 +133,15 @@ function freezeSelection(value: SessionSelection | null): Readonly<SessionSelect
 }
 
 // Match the existing wire validation. Legacy outcome/code/run nullability is deliberately independent
-// of state; Queue phases apply only to Queue/CancelQueue rows in a legitimately mixed receipt page.
+// of state.
 function validRow(row: SessionReceiptView): boolean {
   if (!row || !identity(row.clientRequestId, 256, false) || !identity(row.sessionId, 256, false) || !guid(row.operationId)
     || (row.targetOperationId !== null && !guid(row.targetOperationId)) || !["pending", "terminal"].includes(row.state)
     || (row.outcome !== null && !["Completed", "Cancelled", "Failed"].includes(row.outcome))
-    || (row.code !== null && !identity(row.code, 64, false)) || (row.runId !== null && !identity(row.runId, 256, false))) return false;
-  if (row.kind !== "Queue" && row.kind !== "CancelQueue")
-    return ["Send", "Abort", "Steer", "Compact", "AbortRun"].includes(row.kind) && row.queueInsertion === null;
-  if (row.state === "pending" && (row.outcome !== null || row.code !== null || row.runId !== null)) return false;
-  if (row.state === "terminal" && (row.outcome === null || !identity(row.code, 64, false))) return false;
-  if (row.kind === "CancelQueue") return row.queueInsertion === null && row.runId === null && guid(row.targetOperationId)
-    && row.targetOperationId !== row.operationId && (row.state === "pending" || row.outcome === "Failed"
-      || row.outcome === "Completed" && ["queue_cancellation_signalled", "already_terminal"].includes(row.code!));
-  const insertion = row.queueInsertion;
-  if (row.targetOperationId !== null || !insertion) return false;
-  if (insertion.state === "pending") return row.state === "pending" && insertion.accepted === null && insertion.code === null;
-  if (insertion.state !== "terminal" || typeof insertion.accepted !== "boolean" || !identity(insertion.code, 64, false)
-    || (insertion.accepted ? insertion.code !== "queue_accepted" : insertion.code === "queue_accepted")) return false;
-  if (row.state === "pending") return true;
-  return row.outcome === "Completed" ? insertion.accepted && row.code === "queue_dispatched" && row.runId !== null
-    : row.runId === null && (row.outcome === "Failed" || row.outcome === "Cancelled" && row.code === "queue_cancelled");
+    || (row.code !== null && !identity(row.code, 64, false)) || (row.runId !== null && !identity(row.runId, 256, false))
+    // A message (what a plugin said of a Send it answered itself) takes the place of a run id.
+    || (row.message != null && (row.runId !== null || !identity(row.message, 256)))) return false;
+  return ["Send", "Abort", "Steer", "Compact", "AbortRun"].includes(row.kind);
 }
 function validEnvelope(value: { status: string; epoch: string | null }): boolean {
   return !!value && identity(value.status, 64) && (value.epoch === null || identity(value.epoch, 64));

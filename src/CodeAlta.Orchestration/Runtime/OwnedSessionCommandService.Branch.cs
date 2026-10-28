@@ -54,11 +54,10 @@ public sealed partial class OwnedSessionCommandService
         lock (_gate)
         {
             if (_closed || _retained) throw new ObjectDisposedException(nameof(OwnedSessionCommandService));
-            // A send, a queue or another command of this owner that is under way for the session would be cut with it.
+            // A send or another command of this owner that is under way for the session would be cut with it.
             if (_deleteWork is not null || _active.ContainsKey(sessionId) || _steering.Contains(sessionId) || _compacting.Contains(sessionId)
-                || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId) || _remoteControlling.ContainsKey(sessionId)
-                || _operations.Values.Any(operation => !operation.Released && string.Equals(operation.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
-                || _queues.Values.Any(operation => !operation.Released && string.Equals(operation.Request.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)))
+                || _abortingRuns.Contains(sessionId) || _remoteControlling.ContainsKey(sessionId)
+                || _operations.Values.Any(operation => !operation.Released && string.Equals(operation.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)))
                 return new("session_in_use");
         }
 

@@ -2218,6 +2218,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         var ownTitleMode = AgentSessionTitles.ParseMode(startNewSession ? session.TitleMode : savedLocalState?.TitleMode);
         var titleMode = ownTitleMode ?? _configStore.LoadGlobalSessionTitleMode();
+        var toolInterceptor = await CreateToolInterceptorAsync(session, project, options.WorkingDirectory, cancellationToken).ConfigureAwait(false);
         var sessionOptions = new AgentSessionResumeOptions
         {
             SessionId = requestedSessionId,
@@ -2259,6 +2260,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             DisabledToolPatterns = toolPatterns,
             WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree, options.ProjectRoots),
             CommandGuard = CreateCommandGuard(session.SessionId),
+            ToolInterceptor = toolInterceptor,
             // Where its built-in tools run: in the worker of its sandbox while it is sandboxed, read at each call.
             BuiltInToolRouter = CreateSandboxToolRouter(session.SessionId, options.ProviderKey ?? session.ResolvedProviderKey, options.ProjectRoots),
             OnPermissionRequest = options.OnPermissionRequest,
@@ -2303,7 +2305,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             () => _agentHub.AbortAsync(sessionHandleId, CancellationToken.None),
             () => _agentHub.StopSessionAsync(sessionHandleId, CancellationToken.None));
         // A retirement before this assignment cannot have a bound owned send: publication is later.
-        attachment.CloseOwnedPermissions = () => CloseOwnedQueueAttachmentAsync(attachment);
+        attachment.CloseOwnedPermissions = () => Permissions.InvalidateOwnedAttachmentAsync(attachment);
         try
         {
         session.ProviderId = options.ProviderId.Value;
@@ -3193,9 +3195,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // Recorded idleness only permits a provider attempt. The provider gate proves idle against
     // intervening sends; neither this route nor its mailbox query publishes a started event.
     internal Task<AgentCompactionOutcome?> CompactOwnedCommandAsync(OwnedCompactRequest request, CancellationToken executionCancellationToken)
-        => AdmitAsync(() => CompactOwnedCommandBodyAsync(request, executionCancellationToken), CancellationToken.None);
+        => CompactOwnedCommandAsync(request, AgentCompactionOptions.Default, executionCancellationToken);
 
-    private async Task<AgentCompactionOutcome?> CompactOwnedCommandBodyAsync(OwnedCompactRequest request, CancellationToken executionCancellationToken)
+    internal Task<AgentCompactionOutcome?> CompactOwnedCommandAsync(OwnedCompactRequest request, AgentCompactionOptions options, CancellationToken executionCancellationToken)
+        => AdmitAsync(() => CompactOwnedCommandBodyAsync(request, options, executionCancellationToken), CancellationToken.None);
+
+    private async Task<AgentCompactionOutcome?> CompactOwnedCommandBodyAsync(OwnedCompactRequest request, AgentCompactionOptions options, CancellationToken executionCancellationToken)
     {
         executionCancellationToken.ThrowIfCancellationRequested();
         if (request.ExpectedRuntimeInstanceId != _runtimeInstanceId || !_sessionActors.TryGet(request.SessionId, out var actor))
@@ -3216,7 +3221,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }, CancellationToken.None).ConfigureAwait(false);
             if (handle is null) return null;
             var lifetime = new RuntimeCommandLifetime(new { Runtime = this, Use = handleUse });
-            return await lifetime.RunAsync(token => _agentHub.TryCompactWhenIdleAsync(handle.Value, token),
+            return await lifetime.RunAsync(token => _agentHub.TryCompactWhenIdleAsync(handle.Value, options, token),
                 executionCancellationToken, handleUse!.Attachment.Cancellation.Token).ConfigureAwait(false);
         }
         catch (Exception failure) when (OwnedProviderEventForwarding.HasRetention(failure))
@@ -4247,15 +4252,35 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         SessionViewDescriptor session,
         SessionExecutionOptions options,
         CancellationToken cancellationToken = default)
-        => await AdmitAsync(() => CompactOwnedBodyAsync(session, options, cancellationToken), cancellationToken)
+        => await CompactAsync(session, options, AgentCompactionOptions.Default, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Triggers a manual compaction for a session coordinator session, with options, and returns its outcome.
+    /// </summary>
+    /// <param name="session">The session to compact.</param>
+    /// <param name="options">Execution options used to resume the coordinator session when it is not already active.</param>
+    /// <param name="compaction">What the compaction is given besides the conversation, such as instructions for its summary.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The outcome the session reported, with the summary of a compaction it made itself; <see langword="null"/> when it reports none.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/>, <paramref name="options"/> or <paramref name="compaction"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired or has been retired, or compaction admission failed.</exception>
+    /// <exception cref="NotSupportedException">The session cannot follow the instructions of <paramref name="compaction"/>.</exception>
+    public async Task<AgentCompactionOutcome?> CompactAsync(
+        SessionViewDescriptor session,
+        SessionExecutionOptions options,
+        AgentCompactionOptions compaction,
+        CancellationToken cancellationToken = default)
+        => await AdmitAsync(() => CompactOwnedBodyAsync(session, options, compaction, cancellationToken), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
 
-    private async Task CompactOwnedBodyAsync(SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken cancellationToken)
+    private async Task<AgentCompactionOutcome?> CompactOwnedBodyAsync(SessionViewDescriptor session, SessionExecutionOptions options,
+        AgentCompactionOptions compaction, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(compaction);
 
-        await WithRetentionWorkAsync(async () =>
+        return await WithRetentionWorkAsync(async () =>
         {
         ReserveSessionIdentity(session);
         GetActorForWork(session.SessionId);
@@ -4280,6 +4305,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         OwnedProviderEventForwarding.Use? handleUse = null;
+        AgentCompactionOutcome? outcome = null;
         try
         {
             while (handleUse is null)
@@ -4296,7 +4322,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 }, CancellationToken.None).ConfigureAwait(false);
                 if (handleUse is null) continue;
                 using var execution = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, entry.Attachment.Cancellation.Token);
-                var outcome = await AwaitRetentionAwareAsync(_agentHub.CompactAsync(entry.SessionHandleId, execution.Token)).ConfigureAwait(false);
+                outcome = await AwaitRetentionAwareAsync(_agentHub.CompactAsync(entry.SessionHandleId, compaction, execution.Token)).ConfigureAwait(false);
                 if (outcome is not null && ShouldPublishHostCompactionOutcome(outcome))
                 {
                     _events.TryPublish(new SessionHostEvent(
@@ -4313,7 +4339,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             throw;
         }
         finally { handleUse?.Dispose(); }
-        return true;
+        return outcome;
         }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);
     }
 
@@ -4633,7 +4659,6 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     published = sanitized;
                     if (sanitized is not null)
                         mark(CapturePluginEvent(sanitized, sessionId, projectId, workingDirectory));
-                    RefuseUnavailableOwnedQueue(sessionId);
                     notifications = projector.Entry!.TakeParentNotifications(sanitized);
                     // A failure the session goes on from with the next model of its tier is not told to the parent,
                     // and its queue waits for the run that continues: both are held until the fallback settles.
@@ -4745,25 +4770,16 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         => @event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle }
             or AgentErrorEvent;
 
-    private async Task TryDrainNextQueuedPromptAsync(string sessionId, SessionActor? existingActor = null, OwnedQueuedExecution? ownedTrigger = null)
+    private async Task TryDrainNextQueuedPromptAsync(string sessionId, SessionActor? existingActor = null)
     {
         if (_disposed || string.IsNullOrWhiteSpace(sessionId))
         {
             return;
         }
 
-        var work = await TryMarkNextQueuedPromptSubmittingAsync(sessionId, existingActor, ownedTrigger).ConfigureAwait(false);
+        var work = await TryMarkNextQueuedPromptSubmittingAsync(sessionId, existingActor).ConfigureAwait(false);
         if (work is null)
         {
-            return;
-        }
-
-        if (work.Owned is { } owned)
-        {
-            // The runtime-admitted queue body owns execution and cleanup, not this event tail.
-            // The claim was published atomically with the slot in the mailbox.
-            await owned.Drained.Task.ConfigureAwait(false);
-            await TryDrainNextQueuedPromptAsync(sessionId, existingActor).ConfigureAwait(false);
             return;
         }
 
@@ -4771,18 +4787,17 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var askExecution = CreateRunAskExecution(sessionId, work.Entry.Attachment.Cancellation.Token);
         try
         {
-            // The legacy arm always holds a cloned durable prompt; only the owned arm above has null.
             await RestoreArchivedForRunAsync(sessionId, work.Entry.CreatedAt).ConfigureAwait(false);
             var runStartedAt = DateTimeOffset.UtcNow;
             var sendOptions = new AgentSendOptions
             {
-                Input = QueuedInput(work.Prompt!), SourceSessionId = AgentSource(work.Prompt!.SubmittedBy),
+                Input = QueuedInput(work.Prompt), SourceSessionId = AgentSource(work.Prompt.SubmittedBy),
                 Provenance = SessionPromptProvenance.Of(work.Prompt.Kind, work.Prompt.SubmittedBy),
             };
             if (askExecution is not null) sendOptions = ComposeRunAsk(askExecution, work.Entry, sendOptions);
             var runId = await _agentHub.RunAsync(work.SessionHandleId, sendOptions, work.Entry.Attachment.Cancellation.Token)
                 .ConfigureAwait(false);
-            await MarkQueuedPromptSubmittedAsync(work.Entry, work.Prompt!.QueueItemId, runId, runStartedAt, DateTimeOffset.UtcNow).ConfigureAwait(false);
+            await MarkQueuedPromptSubmittedAsync(work.Entry, work.Prompt.QueueItemId, runId, runStartedAt, DateTimeOffset.UtcNow).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -4791,7 +4806,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 work.Use.Retain(ex);
                 _forwarding.RetainDependencies(ex, work);
             }
-            try { await MarkQueuedPromptFailedAsync(work.Entry, work.Prompt!.QueueItemId, ex.Message, DateTimeOffset.UtcNow).ConfigureAwait(false); }
+            try { await MarkQueuedPromptFailedAsync(work.Entry, work.Prompt.QueueItemId, ex.Message, DateTimeOffset.UtcNow).ConfigureAwait(false); }
             catch (Exception cleanupFailure) { throw new AggregateException(ex, cleanupFailure); }
             if (OwnedProviderEventForwarding.HasRetention(ex)) throw;
         }
@@ -4808,7 +4823,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     private async Task<QueuedPromptDrainWork?> TryMarkNextQueuedPromptSubmittingAsync(string sessionId,
-        SessionActor? existingActor = null, OwnedQueuedExecution? ownedTrigger = null)
+        SessionActor? existingActor = null)
     {
         var actor = existingActor ?? GetActorForWork(sessionId);
         while (!_disposed)
@@ -4817,11 +4832,6 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var work = await actor.QueryAsync(
                 async actorCancellationToken =>
                 {
-                    RefuseUnavailableOwnedQueue(sessionId);
-                    // A rejected/stale immediate owned trigger is not authority to begin legacy
-                    // replacement. Ordinary event/completion drain opportunities remain unchanged.
-                    if (ownedTrigger is not null && (!_entries.TryGetValue(sessionId, out var target)
-                        || !ReferenceEquals(target.OwnedQueue, ownedTrigger) || !CanUseOwnedQueue(target, ownedTrigger))) return null;
                     if (_transitions.TryGetValue(sessionId, out transition)) return null;
                     if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated || entry.HasActiveRun || entry.QueueDrainInProgress)
                     {
@@ -4846,9 +4856,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                             PublishQueueChanged(sessionId, localState, recovered[^1], DateTimeOffset.UtcNow, isEnqueued: false);
                         }
 
-                        // This successful read and the slot claim share the original arbitration.
-                        // Never start a second owned drainer after an ambiguous null/busy/fault result.
-                        return TryClaimOwnedQueue(entry);
+                        return null;
                     }
 
                     var sessionHandleId = entry.SessionHandleId;
@@ -6143,7 +6151,6 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         public DateTimeOffset LastTerminalEventAt { get; private set; } = DateTimeOffset.MinValue;
 
         public bool QueueDrainInProgress { get; private set; }
-        internal OwnedQueuedExecution? OwnedQueue { get; set; }
 
         private ParentFinalNotificationCandidate? _lastParentFinalCandidate;
 
@@ -6423,8 +6430,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     }
 
-    private sealed record QueuedPromptDrainWork(AgentSessionHandleId SessionHandleId, SessionViewQueuedPrompt? Prompt,
-        RuntimeSessionEntry Entry, OwnedProviderEventForwarding.Use Use, OwnedQueuedExecution? Owned = null);
+    private sealed record QueuedPromptDrainWork(AgentSessionHandleId SessionHandleId, SessionViewQueuedPrompt Prompt,
+        RuntimeSessionEntry Entry, OwnedProviderEventForwarding.Use Use);
 
     private sealed record ParentNotificationPayload(string Kind, string Body);
 

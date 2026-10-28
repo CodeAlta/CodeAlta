@@ -79,10 +79,9 @@ public sealed partial class OwnedSessionCommandService
             if (_closed || _retained) return "closed";
             if (Reserved(sessionId) || Asks.List(sessionId).Head is not null) return SessionRuntimeService.CatchUpBusy;
             if (_deleteWork is not null || _active.ContainsKey(sessionId) || _steering.Contains(sessionId)
-                || _compacting.Contains(sessionId) || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId)
+                || _compacting.Contains(sessionId) || _abortingRuns.Contains(sessionId)
                 || _remoteControlling.ContainsKey(sessionId)
-                || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId)
-                || _queues.Values.Any(operation => !operation.Released && operation.Request.SessionId == sessionId)) return SessionRuntimeService.CatchUpBusy;
+                || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId)) return SessionRuntimeService.CatchUpBusy;
         }
 
         try { return await _runtime.CatchUpExternalTurnsAsync(sessionId).ConfigureAwait(false); }
@@ -90,7 +89,7 @@ public sealed partial class OwnedSessionCommandService
     }
 
     /// <summary>Saves an idle provider selection. Caller disconnect does not cancel admitted host work.</summary>
-    /// <remarks>Uses the exclusive catalog-mutation reservation shared with deletion. Send/queue admission
+    /// <remarks>Uses the exclusive catalog-mutation reservation shared with deletion. Send admission
     /// and shutdown already honor and drain this reservation. No automatic retry is performed.</remarks>
     /// <exception cref="ArgumentNullException">The expected observation is null.</exception>
     public Task<string> SelectProviderAsync(OwnedProviderSelectionContext expected, string providerKey)
@@ -106,10 +105,9 @@ public sealed partial class OwnedSessionCommandService
             if (_closed || _retained) return Task.FromResult("closed");
             if (Asks.List(expected.SessionId).Head is not null) return Task.FromResult("interaction_pending");
             if (_deleteWork is not null || _active.ContainsKey(expected.SessionId) || _steering.Contains(expected.SessionId)
-                || _compacting.Contains(expected.SessionId) || _abortingRuns.Contains(expected.SessionId) || _queueing.Contains(expected.SessionId)
+                || _compacting.Contains(expected.SessionId) || _abortingRuns.Contains(expected.SessionId)
                 || _remoteControlling.ContainsKey(expected.SessionId)
-                || _operations.Values.Any(operation => !operation.Released && operation.SessionId == expected.SessionId)
-                || _queues.Values.Any(operation => !operation.Released && operation.Request.SessionId == expected.SessionId)) return Task.FromResult("busy");
+                || _operations.Values.Any(operation => !operation.Released && operation.SessionId == expected.SessionId)) return Task.FromResult("busy");
             completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _deleteWork = completion.Task;
             _ = SelectProviderOwnedAsync(expected, providerKey, carryOver, completion);
@@ -117,13 +115,12 @@ public sealed partial class OwnedSessionCommandService
         return completion.Task;
     }
 
-    // Under _gate: whether a send, a steer, a queue or another command of the session still holds it.
+    // Under _gate: whether a send, a steer or another command of the session still holds it.
     private bool IsSessionHeld(string sessionId)
         => _deleteWork is not null || _active.ContainsKey(sessionId) || _steering.Contains(sessionId)
-           || _compacting.Contains(sessionId) || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId)
+           || _compacting.Contains(sessionId) || _abortingRuns.Contains(sessionId)
            || _remoteControlling.ContainsKey(sessionId)
-           || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId)
-           || _queues.Values.Any(operation => !operation.Released && operation.Request.SessionId == sessionId);
+           || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId);
 
     private async Task SelectProviderOwnedAsync(OwnedProviderSelectionContext expected, string target,
         Catalog.SessionViewProviderCarryOver? carryOver, TaskCompletionSource<string> completion)

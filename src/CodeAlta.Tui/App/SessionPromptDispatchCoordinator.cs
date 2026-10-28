@@ -116,35 +116,6 @@ internal sealed class SessionPromptDispatchCoordinator
         return result;
     }
 
-    public SessionExecutionOptions AppendAdditionalDeveloperInstructions(
-        SessionExecutionOptions options,
-        string additionalDeveloperInstructions)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentException.ThrowIfNullOrWhiteSpace(additionalDeveloperInstructions);
-
-        var combinedInstructions = string.IsNullOrWhiteSpace(options.AdditionalDeveloperInstructions)
-            ? additionalDeveloperInstructions
-            : $"{options.AdditionalDeveloperInstructions}\n\n{additionalDeveloperInstructions}";
-        return new SessionExecutionOptions
-        {
-            ProviderId = options.ProviderId,
-            ProviderKey = options.ProviderKey,
-            WorkingDirectory = options.WorkingDirectory,
-            ProjectRoots = options.ProjectRoots,
-            Model = options.Model,
-            ReasoningEffort = options.ReasoningEffort,
-            AgentPromptId = options.AgentPromptId,
-            Tools = options.Tools,
-            AdditionalSystemMessage = options.AdditionalSystemMessage,
-            AdditionalDeveloperInstructions = combinedInstructions,
-            PreferredToolNames = options.PreferredToolNames,
-            InstructionProcessor = options.InstructionProcessor,
-            OnPermissionRequest = options.OnPermissionRequest,
-            OnUserInputRequest = options.OnUserInputRequest,
-        };
-    }
-
     public SessionExecutionOptions BuildPreferredExecutionOptions(
         ModelProviderId providerId,
         string workingDirectory,

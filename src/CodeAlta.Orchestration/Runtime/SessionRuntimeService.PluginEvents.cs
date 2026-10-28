@@ -112,53 +112,6 @@ public sealed partial class SessionRuntimeService
         return (sessionId, new ModelProviderId(providerKey.Trim()), projectId, normalizedCwd);
     }
 
-    // Permission invalidation and queue stop are independent controls. Query failure means queue
-    // drainage was not confirmed; a missing actor/queue is instead an explicit ineligible result.
-    internal sealed class AttachmentClosureJoin(object dependencies)
-    {
-        internal OwnedSessionCommandService.OriginalInvocation Permissions { get; } = new();
-        internal Task<Task?>? QueryOriginal { get; private set; }
-        internal Exception? QueryAwaitedFailure { get; private set; }
-        internal AggregateException? QueryOriginalFaults { get; private set; }
-        internal OwnedSessionCommandService.OriginalInvocation? QueueDrain { get; private set; }
-        private int _started;
-
-        internal async Task RunAsync(Func<Task> invalidatePermissions, Func<Task<Task?>?> queryDrain)
-        {
-            ArgumentNullException.ThrowIfNull(invalidatePermissions);
-            ArgumentNullException.ThrowIfNull(queryDrain);
-            if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("Attachment closure already launched.");
-            var failures = new List<Exception>();
-            var unconfirmed = false;
-            Permissions.Launch(invalidatePermissions);
-            try
-            {
-                QueryOriginal = queryDrain();
-                if (QueryOriginal is not null && await QueryOriginal.ConfigureAwait(false) is { } drainage)
-                {
-                    QueueDrain = new OwnedSessionCommandService.OriginalInvocation();
-                    QueueDrain.Launch(() => drainage);
-                }
-            }
-            catch (Exception failure)
-            {
-                QueryAwaitedFailure = failure;
-                QueryOriginalFaults = QueryOriginal?.Exception;
-                failures.Add(QueryOriginalFaults is { InnerExceptions.Count: > 1 } ? QueryOriginalFaults : failure);
-                unconfirmed = true;
-            }
-            // Explicit stage order: query/stop, permission invalidation, returned queue drainage.
-            if (await Permissions.Outcome.ConfigureAwait(false) is { } permissionFailure) failures.Add(permissionFailure);
-            unconfirmed |= Permissions.Original is null;
-            if (QueueDrain is not null && await QueueDrain.Outcome.ConfigureAwait(false) is { } queueFailure) failures.Add(queueFailure);
-            if (unconfirmed || failures.Any(OwnedProviderEventForwarding.HasRetention))
-                throw new AgentDependencyRetentionException("attachment closure", "required drainage", failures,
-                    new { Owner = dependencies, Closure = this });
-            if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
-            if (failures.Count > 1) throw new AggregateException(failures);
-        }
-    }
-
     // The broad abort route retains its original linked-token semantics. Its source is acquired
     // only after permission closure and is released only after confirmed ordinary abort completion.
     internal sealed class RuntimeAbortLifetime(object dependencies)

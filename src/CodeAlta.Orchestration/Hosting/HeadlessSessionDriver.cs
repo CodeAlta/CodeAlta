@@ -328,6 +328,13 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
             sent ??= receipt.Completion.IsCompleted ? await receipt.Completion.ConfigureAwait(false) : null;
         }
 
+        // A plugin answered the prompt itself (a prompt-submit hook): nothing ran, and what it said is the answer.
+        if (abortReason is null && sent is { RunId: null, Code: OwnedSessionCommandService.PluginHandledCode })
+            return new(HeadlessRunStatus.Completed, session.SessionId, null, sent.Message, null, null, null, SessionUsageTotals.None, stopwatch.Elapsed);
+        if (abortReason is null && sent is { RunId: null, Code: OwnedSessionCommandService.PluginCancelledCode })
+            return new(HeadlessRunStatus.Aborted, session.SessionId, null, null, "plugin", null, sent.Message ?? "A plugin cancelled the prompt.",
+                SessionUsageTotals.None, stopwatch.Elapsed);
+
         var runId = sent?.RunId;
         // A run aborted before its send returned has no known run: the events since the prompt are read instead.
         var outcome = await ReadOutcomeAsync().ConfigureAwait(false);

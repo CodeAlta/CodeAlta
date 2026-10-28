@@ -265,7 +265,8 @@ internal sealed class PluginHostBridge
         foreach (var contribution in _runtime.Adapter.GetAgentTools(options))
         {
             if (sandboxed && !contribution.ActivationPolicy.SafeInSandbox) continue;
-            tools.Add(WrapPluginTool(contribution.Definition, options));
+            // The tool hooks of the plugins run for every tool of the session, in the runtime of the session.
+            tools.Add(contribution.Definition);
         }
 
         return tools.Count == 0 ? null : tools;
@@ -304,7 +305,7 @@ internal sealed class PluginHostBridge
         {
             if (toolNames.Add(tool.Spec.Name))
             {
-                tools.Add(WrapPluginTool(tool, options));
+                tools.Add(tool);
             }
         }
 
@@ -457,7 +458,7 @@ internal sealed class PluginHostBridge
                 .Where(static item => !string.IsNullOrWhiteSpace(item))!);
         return new PluginCompactionAugmentation
         {
-            AdditionalDeveloperInstructions = string.IsNullOrWhiteSpace(instructionText) ? null : instructionText,
+            Instructions = string.IsNullOrWhiteSpace(instructionText) ? null : instructionText,
         };
     }
 
@@ -500,37 +501,6 @@ internal sealed class PluginHostBridge
             Summary = summary,
         };
         await _runtime.Adapter.RunCompactionAsync(after: after, options: options, cancellationToken: cancellationToken);
-    }
-
-    private AgentToolDefinition WrapPluginTool(AgentToolDefinition definition, PluginAdapterOperationOptions options)
-    {
-        return definition with
-        {
-            Handler = async (invocation, cancellationToken) =>
-            {
-                var activePlugins = _runtime.ActivePlugins;
-                if (activePlugins.Count == 0)
-                {
-                    return await definition.Handler(invocation, cancellationToken);
-                }
-
-                var seed = activePlugins[0];
-                var call = await _runtime.Adapter.OnToolCallAsync(activePlugins, new PluginToolCallContext { Plugin = seed.Descriptor, Services = seed.RuntimeContext.Services, Invocation = invocation }, options, cancellationToken);
-                if (call.Result?.Disposition == PluginToolCallDisposition.Block)
-                {
-                    return new AgentToolResult(false, [new AgentToolResultItem.Text(call.Result.BlockReason ?? "Plugin blocked tool call.")], call.Result.BlockReason ?? "Plugin blocked tool call.");
-                }
-
-                var effectiveInvocation = call.Result?.Disposition == PluginToolCallDisposition.ReplaceArguments && call.Result.ReplacementArguments is { } replacement
-                    ? invocation with { Arguments = replacement }
-                    : invocation;
-                var result = await definition.Handler(effectiveInvocation, cancellationToken);
-                var toolResult = await _runtime.Adapter.OnToolResultAsync(activePlugins, new PluginToolResultContext { Plugin = seed.Descriptor, Services = seed.RuntimeContext.Services, Invocation = effectiveInvocation, Result = result }, options, cancellationToken);
-                return toolResult.Result?.Disposition == PluginToolResultDisposition.Replace && toolResult.Result.ReplacementResult is not null
-                    ? toolResult.Result.ReplacementResult
-                    : result;
-            },
-        };
     }
 
     private PluginAdapterOperationOptions CreateOptions(SessionViewDescriptor? session, OpenSessionState? tab, bool isCodeAltaManagedProvider = false)
@@ -683,5 +653,6 @@ internal sealed record PluginCompactionAugmentation
 {
     public string? CancelReason { get; init; }
 
-    public string? AdditionalDeveloperInstructions { get; init; }
+    // Goes with the compaction (AgentCompactionOptions), never into the instructions of the session.
+    public string? Instructions { get; init; }
 }

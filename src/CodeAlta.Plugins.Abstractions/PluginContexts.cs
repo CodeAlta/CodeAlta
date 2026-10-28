@@ -341,21 +341,112 @@ public sealed class PluginBeforeAgentRunContext : PluginOperationContext
     public IReadOnlyList<string>? SandboxMcpServers { get; init; }
 }
 
-/// <summary>Context for plugin tool-call interception.</summary>
+/// <summary>Context of a tool-call hook (<see cref="PluginBase.OnToolCallAsync"/>): a call of any tool of a session.</summary>
 public sealed class PluginToolCallContext : PluginOperationContext
 {
-    /// <summary>Gets the tool invocation.</summary>
+    /// <summary>Gets the tool invocation, with the arguments the hooks before this one left.</summary>
     public required AgentToolInvocation Invocation { get; init; }
+
+    /// <summary>Gets the name of the tool, as the model calls it (<c>shell_command</c>, <c>Bash</c> for the shell of Claude Code).</summary>
+    public string ToolName => Invocation.ToolName;
+
+    /// <summary>Gets the JSON arguments of the call.</summary>
+    public System.Text.Json.JsonElement Arguments => Invocation.Arguments;
+
+    /// <summary>Gets who provides the tool: CodeAlta, a plugin, an MCP server, or the agent CLI itself.</summary>
+    public PluginToolKind ToolKind { get; init; }
+
+    /// <summary>Gets the id of the plugin that provides the tool (<c>mcp</c> for an MCP server), or <see langword="null"/>.</summary>
+    public string? ToolPluginId { get; init; }
+
+    /// <summary>Gets the folder the session works in, when known.</summary>
+    public string? WorkingDirectory { get; init; }
+
+    /// <summary>
+    /// Gets the shell command the call runs, read from its arguments, for the shell tools (<c>shell_command</c>, and the
+    /// <c>Bash</c> and <c>PowerShell</c> tools of an agent CLI); <see langword="null"/> for any other tool.
+    /// </summary>
+    public PluginShellCommand? ShellCommand { get; init; }
+
+    /// <summary>Gets the full paths of the files the call writes, deletes or moves, for the file tools that name them.</summary>
+    public IReadOnlyList<string> ModifiedFiles { get; init; } = [];
+
+    /// <summary>Gets the tool call whose Code Mode script makes this call, or <see langword="null"/> for a call of the model.</summary>
+    public string? ParentToolCallId { get; init; }
+
+    /// <summary>Gets what the hooks can do with this call, which depends on who runs the tool.</summary>
+    public PluginToolHookCapabilities Capabilities { get; init; } = PluginToolHookCapabilities.All;
+
+    /// <summary>Gets whether a hook can block the call.</summary>
+    public bool CanBlock => (Capabilities & PluginToolHookCapabilities.Block) != 0;
+
+    /// <summary>Gets whether a hook can replace the arguments of the call.</summary>
+    public bool CanModifyArguments => (Capabilities & PluginToolHookCapabilities.ModifyArguments) != 0;
+
+    /// <summary>Gets whether a hook can change the result of the call.</summary>
+    public bool CanChangeResult => (Capabilities & PluginToolHookCapabilities.ChangeResult) != 0;
 }
 
-/// <summary>Context for plugin tool-result interception.</summary>
+/// <summary>Context of a tool-result hook (<see cref="PluginBase.OnToolResultAsync"/>).</summary>
 public sealed class PluginToolResultContext : PluginOperationContext
 {
-    /// <summary>Gets the tool invocation.</summary>
+    /// <summary>Gets the tool invocation, with the arguments the call ran with.</summary>
     public required AgentToolInvocation Invocation { get; init; }
 
-    /// <summary>Gets the tool result.</summary>
+    /// <summary>Gets the tool result, as the hooks before this one left it.</summary>
     public required AgentToolResult Result { get; init; }
+
+    /// <summary>Gets the name of the tool, as the model calls it (<c>shell_command</c>, <c>Bash</c> for the shell of Claude Code).</summary>
+    public string ToolName => Invocation.ToolName;
+
+    /// <summary>Gets the JSON arguments of the call.</summary>
+    public System.Text.Json.JsonElement Arguments => Invocation.Arguments;
+
+    /// <summary>Gets who provides the tool: CodeAlta, a plugin, an MCP server, or the agent CLI itself.</summary>
+    public PluginToolKind ToolKind { get; init; }
+
+    /// <summary>Gets the id of the plugin that provides the tool (<c>mcp</c> for an MCP server), or <see langword="null"/>.</summary>
+    public string? ToolPluginId { get; init; }
+
+    /// <summary>Gets the folder the session works in, when known.</summary>
+    public string? WorkingDirectory { get; init; }
+
+    /// <summary>
+    /// Gets the shell command the call runs, read from its arguments, for the shell tools (<c>shell_command</c>, and the
+    /// <c>Bash</c> and <c>PowerShell</c> tools of an agent CLI); <see langword="null"/> for any other tool.
+    /// </summary>
+    public PluginShellCommand? ShellCommand { get; init; }
+
+    /// <summary>Gets the full paths of the files the call writes, deletes or moves, for the file tools that name them.</summary>
+    public IReadOnlyList<string> ModifiedFiles { get; init; } = [];
+
+    /// <summary>Gets the tool call whose Code Mode script makes this call, or <see langword="null"/> for a call of the model.</summary>
+    public string? ParentToolCallId { get; init; }
+
+    /// <summary>Gets what the hooks can do with this call, which depends on who runs the tool.</summary>
+    public PluginToolHookCapabilities Capabilities { get; init; } = PluginToolHookCapabilities.All;
+
+    /// <summary>Gets whether a hook can block the call.</summary>
+    public bool CanBlock => (Capabilities & PluginToolHookCapabilities.Block) != 0;
+
+    /// <summary>Gets whether a hook can replace the arguments of the call.</summary>
+    public bool CanModifyArguments => (Capabilities & PluginToolHookCapabilities.ModifyArguments) != 0;
+
+    /// <summary>Gets whether a hook can change the result of the call.</summary>
+    public bool CanChangeResult => (Capabilities & PluginToolHookCapabilities.ChangeResult) != 0;
+}
+
+/// <summary>Context of a run-end hook (<see cref="PluginBase.OnAgentRunEndedAsync"/>).</summary>
+public sealed class PluginAgentRunEndedContext : PluginOperationContext
+{
+    /// <summary>Gets the last answer of the agent in the run, when there is one.</summary>
+    public string? LastAssistantMessage { get; init; }
+
+    /// <summary>Gets how many runs in a row plugins already continued before this one ended.</summary>
+    public int Continuations { get; init; }
+
+    /// <summary>Gets how many runs in a row plugins may continue; a hook is not called once the session reached it.</summary>
+    public int MaxContinuations { get; init; }
 }
 
 /// <summary>Context for normalized agent event observation.</summary>

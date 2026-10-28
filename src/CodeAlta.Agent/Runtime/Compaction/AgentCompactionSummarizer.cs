@@ -107,6 +107,7 @@ internal sealed class AgentCompactionSummarizer(
         IReadOnlyList<AgentEvent> history,
         string? latestUserRequest,
         int maxOutputTokens,
+        string? instructions,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(provider);
@@ -157,6 +158,7 @@ internal sealed class AgentCompactionSummarizer(
                 oversizedAnchorSynopsis,
                 oversizedAnchorInvocationCount,
                 currentPass: 1,
+                instructions,
                 cancellationToken)
             .ConfigureAwait(false);
         return result with
@@ -182,6 +184,7 @@ internal sealed class AgentCompactionSummarizer(
         string? latestUserRequest,
         long checkpointTargetTokens,
         int maxOutputTokens,
+        string? instructions,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(provider);
@@ -200,7 +203,7 @@ internal sealed class AgentCompactionSummarizer(
                 modelInfo,
                 workingDirectory,
                 state,
-                CreateShrinkSystemPrompt(maxOutputTokens, checkpointTargetTokens),
+                CreateShrinkSystemPrompt(maxOutputTokens, checkpointTargetTokens, instructions),
                 userMessage,
                 maxOutputTokens,
                 cancellationToken)
@@ -243,6 +246,7 @@ internal sealed class AgentCompactionSummarizer(
         string? oversizedAnchorSynopsis,
         int additionalSummaryCallCount,
         int currentPass,
+        string? instructions,
         CancellationToken cancellationToken)
     {
         var serialization = AgentCompactionSerializer.BuildSummaryRequestBody(
@@ -287,6 +291,7 @@ internal sealed class AgentCompactionSummarizer(
                     oversizedAnchorSynopsis,
                     additionalSummaryCallCount,
                     currentPass,
+                    instructions,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -299,7 +304,7 @@ internal sealed class AgentCompactionSummarizer(
                 modelInfo,
                 workingDirectory,
                 state,
-                CreateSystemPrompt(maxOutputTokens),
+                CreateSystemPrompt(maxOutputTokens, instructions),
                 serialization.UserMessage,
                 maxOutputTokens,
                 cancellationToken)
@@ -352,6 +357,7 @@ internal sealed class AgentCompactionSummarizer(
         string? oversizedAnchorSynopsis,
         int additionalSummaryCallCount,
         int currentPass,
+        string? instructions,
         CancellationToken cancellationToken)
     {
         var chunks = GetChunksIfNeeded(preparation, latestUserRequest, modelVisibleFileActivity, settings, budget, oversizedAnchorSynopsis, maxOutputTokens);
@@ -404,6 +410,7 @@ internal sealed class AgentCompactionSummarizer(
                     oversizedAnchorSynopsis,
                     additionalSummaryCallCount: 0,
                     currentPass + 1,
+                    instructions,
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -444,6 +451,7 @@ internal sealed class AgentCompactionSummarizer(
                     oversizedAnchorSynopsis,
                     additionalSummaryCallCount: 0,
                     currentPass + 1,
+                    instructions,
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -966,19 +974,29 @@ internal sealed class AgentCompactionSummarizer(
         }
     }
 
-    private static string CreateSystemPrompt(int maxOutputTokens)
+    private static string CreateSystemPrompt(int maxOutputTokens, string? instructions)
         => $"""
-            {SummarySystemPromptTemplate}
-
+            {SummarySystemPromptTemplate}{AdditionalInstructions(instructions)}
             Keep the output under roughly {maxOutputTokens} tokens.
             """;
 
-    private static string CreateShrinkSystemPrompt(int maxOutputTokens, long checkpointTargetTokens)
+    private static string CreateShrinkSystemPrompt(int maxOutputTokens, long checkpointTargetTokens, string? instructions)
         => $"""
-            {ShrinkSystemPromptTemplate}
-
+            {ShrinkSystemPromptTemplate}{AdditionalInstructions(instructions)}
             Target roughly {checkpointTargetTokens} tokens when possible and never exceed roughly {maxOutputTokens} tokens.
             """;
+
+    // The instructions a manual compaction was given (by plugins): they shape the summary, never its required sections.
+    private static string AdditionalInstructions(string? instructions)
+        => string.IsNullOrWhiteSpace(instructions)
+            ? "\n"
+            : $"""
+
+
+              Also follow these instructions for this compaction, within the sections above:
+              {instructions.Trim()}
+
+              """;
 
     private static string CreateOversizedAnchorSystemPrompt(int maxOutputTokens)
         => $"""

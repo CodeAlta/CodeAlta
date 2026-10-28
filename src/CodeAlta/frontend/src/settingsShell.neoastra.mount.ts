@@ -2,8 +2,6 @@
 // No native bridge or user data is touched.
 import type { HistoryRequest, HistoryResponse, SessionDisplayItem, SessionDisplayRequest, ReminderListRequest, ReminderListResponse, WorkspaceArchiveProjectRequest, SessionRuntimeScopedRequest } from "#neoastra";
 import type { SessionPermissionsRequest, SessionPermissionResolveRequest } from "#neoastra";
-import type { SessionRuntimeStateRequest, SessionRuntimeStateResponse } from "#neoastra";
-import type { SessionReceiptRequest, SessionReceiptPage, SessionCancelQueueRequest, SessionAdmission } from "#neoastra";
 import type { createUserInputReviewer } from "./sessionUserInput";
 import type { TimelineHistoryResponse, HistorySourceResponse } from "#neoastra";
 const epoch = "12345678-1234-1234-1234-123456789abc";
@@ -46,19 +44,6 @@ const inputEntry = { handle: { ...permissionEntry.handle }, providerId: "literal
 const calls: string[] = [];
 const rpcCalls: string[] = [];
 const archives: Array<{ request: WorkspaceArchiveProjectRequest; resolve: (value: unknown) => void }> = [];
-const retainedQueueCalls: Array<{ request: unknown; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
-const queueReceiptReads: Array<{ request: SessionReceiptRequest; resolve: (value: SessionReceiptPage) => void }> = [];
-const retainedCancelCalls: Array<{ request: SessionCancelQueueRequest; resolve: (value: SessionAdmission) => void; reject: (error: Error) => void }> = [];
-const currentReads: Array<{ request: SessionRuntimeStateRequest; signal: AbortSignal; response?: SessionRuntimeStateResponse; resolve: (value: SessionRuntimeStateResponse) => void; reject: (error: Error) => void }> = [];
-let releaseReplacementCurrent = false;
-function releaseCurrentCall(call: typeof currentReads[number], attachmentGeneration = "7") {
-  call.response = { status: "ok", hostEpoch: call.request.expectedHostEpoch, sessionId: call.request.sessionId,
-    runtimeInstanceId: epoch, coordinatorTransitionInProgress: false,
-    entry: { attachmentGeneration, activeRunId: "literal-run", isTerminated: false, isRetiring: false,
-      backgroundTasks: [], queueDrainInProgress: false, providerId: "fixture", providerKey: "fixture", modelId: null,
-      reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null, activity: null } };
-  call.resolve(call.response);
-}
 const runtimeReads: Array<{ request: SessionRuntimeScopedRequest; signal: AbortSignal; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const sends: unknown[] = [];
 const sendFailures: Array<() => void> = [];
@@ -136,14 +121,7 @@ Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceRe
   displayCalls, displayCleanup, notesCalls, lateDisplayAttempts, reminderReads, reminderSaves, reminderDetails, reminderSaveLists, projectNameReads, referenceReads,
   reminderEvidence: () => reminderTrace.map(({ signal, ...entry }) => ({ ...entry, aborted: signal?.aborted ?? null })),
   displayEvidence: () => displayAttempts.map(({ signal, ...attempt }) => ({ ...attempt, aborted: signal.aborted })),
-  referenceObservations, archives, retainedQueueCalls, retainedCancelCalls, queueReceiptReads, currentReads, runtimeReads, permissionReads, permissionDecisions, permissionEntry,
-  releaseCurrent(index = currentReads.length - 1, attachmentGeneration = "7") {
-    const call = currentReads[index];
-    // StrictMode may have detached the original waiter before its queued replacement can start.
-    // Release exactly that successor too, not arbitrary future explicit refreshes.
-    releaseReplacementCurrent = call.signal.aborted;
-    releaseCurrentCall(call, attachmentGeneration);
-  },
+  referenceObservations, archives, runtimeReads, permissionReads, permissionDecisions, permissionEntry,
   inputReads, inputAnswers, inputCancels, inputEntry, fileDetails, longBodyText,
   releaseInputs() { const call = inputReads.at(-1)!; call.resolve({ status: "ok", hostEpoch: epoch,
     sessionId: call.request.sessionId, entries: [{ ...inputEntry, handle: { ...inputEntry.handle, sessionId: call.request.sessionId } }], hasMore: false }); },
@@ -329,13 +307,7 @@ export const sessionDisplay = { observe: async (request: SessionDisplayRequest, 
     } finally { attempt.settled = true; displayCleanup.push(request.sessionId); }
   })();
 } };
-export const sessionRuntimeState = { current: (request: SessionRuntimeStateRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) =>
-  localStorage.getItem("retainedQueueFixture") === "true"
-    ? new Promise<SessionRuntimeStateResponse>((resolve, reject) => {
-      const call = { request, signal: options.signal, resolve, reject };
-      currentReads.push(call);
-      if (releaseReplacementCurrent) { releaseReplacementCurrent = false; releaseCurrentCall(call); }
-    }) : unavailable(),
+export const sessionRuntimeState = { current: unavailable,
   observe: (request: SessionRuntimeScopedRequest, options: { signal: AbortSignal }) =>
   new Promise((resolve, reject) => runtimeReads.push({ request, signal: options.signal, resolve, reject })) };
 export const sessionUsage = { read: (request: unknown) => new Promise((resolve, reject) => usageReads.push({ request, resolve, reject })) };
@@ -351,20 +323,13 @@ export const conversationHeld = {
 };
 export const sessionOperations = { observeReferences: (request: { text: string }) => new Promise(resolve => referenceObservations.push({ request, resolve })),
   reviewBeforeCommit: unavailable, setReviewBeforeCommit: unavailable, options: unavailable, setOptions: unavailable,
-  ...(localStorage.getItem("retainedQueueFixture") === "true" ? {
-    receipts: (request: SessionReceiptRequest) => new Promise<SessionReceiptPage>(resolve => queueReceiptReads.push({ request, resolve })),
-  } : {}),
   searchReferences: (request: unknown) => new Promise(resolve => referenceReads.push({ request, resolve })),
   choices: (request: { expectedEpoch: string; sessionId: string }) =>
   localStorage.getItem("settingsFixtureHoldChoices") === "true" ? new Promise(resolve => choiceReads.push({ request, resolve })) : Promise.resolve(choices(request)),
   send: (request: unknown) => { sends.push(request); return new Promise((_resolve, reject) => {
     sendFailures.push(() => reject(new Error("fixture transport uncertainty")));
   }); }, abort: unavailable, steer: unavailable,
-  compact: unavailable, abortRun: unavailable,
-  queue: (request: unknown) => localStorage.getItem("retainedQueueFixture") === "true"
-    ? new Promise((resolve, reject) => retainedQueueCalls.push({ request, resolve, reject })) : unavailable(),
-  cancelQueue: (request: SessionCancelQueueRequest) => localStorage.getItem("retainedQueueFixture") === "true"
-    ? new Promise<SessionAdmission>((resolve, reject) => retainedCancelCalls.push({ request, resolve, reject })) : unavailable() };
+  compact: unavailable, abortRun: unavailable };
 export const sessionAsks = { answer: unavailable, cancel: unavailable };
 export const sessionNotes = { current: (request: unknown) => { notesCalls.push(request); return unavailable(); }, clear: unavailable };
 // Outside the observed set below: plugin cards are an optional decoration of a settled timeline.

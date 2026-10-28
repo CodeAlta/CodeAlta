@@ -287,7 +287,7 @@ public sealed partial class SessionRuntimeService
         // An attachment whose session shut down has nothing to carry.
         if (entry.IsTerminated) return true;
         if (entry.HasActiveRun || entry.QueueDrainInProgress
-            || entry.OwnedQueue is not null || entry.PendingAgentPromptId is not null || entry.BackgroundTasks.Any(static task => task.Outcome is null)
+            || entry.PendingAgentPromptId is not null || entry.BackgroundTasks.Any(static task => task.Outcome is null)
             || _remoteControlWanted.ContainsKey(entry.SessionId) || Jobs.HasUnsettled(entry.SessionId) || _forwarding.HasSessionWork(entry.SessionId)
             || OwnedWork?.Invoke(entry.SessionId) == true)
             return false;

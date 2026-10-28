@@ -199,6 +199,8 @@ Open the prompt manager with `Ctrl+G Ctrl+H` or `/prompt` (**Settings > Agent pr
 
 Open it with `Ctrl+G Ctrl+K` or `/skills`. CodeAlta finds Agent Skills `SKILL.md` packages in your folders and the project's. Inspect them, create one with **New skill**, and enable or disable each for every project (`~/.alta/config.toml`) or the selected one (`.alta/config.toml`). A disabled skill is not offered to models. To use a skill yourself, see [Use a skill](readme.md#use-a-skill).
 
+A folder of skills can hold symbolic links, for example to a library of skills shared with other tools: CodeAlta finds the skills where the links lead, offers them to agents and sees a change made there; a broken link is skipped. Skills management lists them, shows their details with a **Linked** tag and switches them on or off, but does not edit or remove a skill through a link: change it where the link leads.
+
 - **Edit**, or the `</>` button, opens the folder of a skill in the [code editor](code.md#code-editor); built-in and plugin skills have **View files** (read-only).
 - **Remove** moves one of your skills, or one of the project, to the trash after you confirm.
 - An **Invalid** skill (unreadable YAML, a duplicate name) shows its diagnostics and can be removed.

@@ -28,7 +28,7 @@ test("throwing subscriber cannot strand Send or Steer before transport starts", 
     expectedRuntimeInstanceId: "runtime", expectedAttachmentGeneration: "1", expectedRunId: "run", text: "exact" };
   const receipt = (kind: "Send" | "Steer", key: string): SessionReceiptPage => ({ status: "ok", epoch: "epoch", next: null,
     rows: [{ kind, clientRequestId: key, sessionId: "one", operationId: "33333333-3333-3333-3333-333333333333",
-      targetOperationId: null, state: "pending", outcome: null, code: null, runId: null, queueInsertion: null }] });
+      targetOperationId: null, state: "pending", outcome: null, code: null, runId: null }] });
   for (const owner of [
     { store: sendStore, invoke: () => sendStore.submit(send, signal, capability, () => {}), pending: () => sendStore.pending("one"), calls: () => sends,
       recover: () => sendStore.reconcile("one", receipt("Send", "send"), capability) },

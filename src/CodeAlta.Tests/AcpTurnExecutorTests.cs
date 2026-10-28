@@ -376,6 +376,48 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ToolHooksOfTheSession_RefuseACallTheAgentAsksFor_InEveryPermissionMode()
+    {
+        var outcomes = new List<string>();
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                outcomes.Add((await prompt.RequestPermissionAsync("run-1", "Run a script", "execute", new JsonObject { ["command"] = "Get-ChildItem 'x" }))!["outcome"]!["optionId"]!.GetValue<string>());
+                outcomes.Add((await prompt.RequestPermissionAsync("run-2", "List", "execute", new JsonObject { ["command"] = "Get-ChildItem" }))!["outcome"]!["optionId"]!.GetValue<string>());
+                return "end_turn";
+            },
+        };
+        var hooks = new QuoteCheckHooks();
+        await using var fixture = new Fixture(agent)
+        {
+            PermissionMode = "bypassPermissions",
+            ToolInterceptor = hooks,
+        };
+
+        await fixture.RunAsync([User("run")]);
+
+        // The protocol only tells the agent that the call is refused; a call the hooks let through follows the mode.
+        CollectionAssert.AreEqual(new[] { "no", "yes" }, outcomes);
+        var call = hooks.Calls.First();
+        Assert.AreEqual(("shell", "Get-ChildItem 'x", fixture.WorkingDirectory), (call.Invocation.ToolName, call.ShellCommand!.Command, call.ShellCommand.WorkingDirectory));
+        Assert.IsTrue(call is { RunByAgent: true, Capabilities: CodeAlta.Agent.Runtime.Tools.AgentToolHookCapabilities.Block });
+    }
+
+    private sealed class QuoteCheckHooks : CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<CodeAlta.Agent.Runtime.Tools.AgentToolHookCall> Calls { get; } = new();
+
+        public override ValueTask<CodeAlta.Agent.Runtime.Tools.AgentToolCallDecision> BeforeToolCallAsync(CodeAlta.Agent.Runtime.Tools.AgentToolHookCall call, CancellationToken cancellationToken)
+        {
+            Calls.Enqueue(call);
+            return ValueTask.FromResult(call.ShellCommand?.Command.Count(static c => c == '\'') % 2 == 1
+                ? CodeAlta.Agent.Runtime.Tools.AgentToolCallDecision.Block("Blocked by Shell check: missing closing quote.")
+                : CodeAlta.Agent.Runtime.Tools.AgentToolCallDecision.Allow);
+        }
+    }
+
+    [TestMethod]
     public async Task LaterTurn_KeepsTheProcess_AndSendsOnlyTheNewMessage()
     {
         var agent = new AcpFakeAgent();
@@ -1023,6 +1065,8 @@ public sealed class AcpTurnExecutorTests
 
         public string? PermissionMode { get; init; }
 
+        public CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? ToolInterceptor { get; init; }
+
         public AgentPermissionRequestHandler OnPermission { get; init; } = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
 
         public Action<List<AgentConversationMessage>>? BeforeNextTurn { get; init; }
@@ -1093,6 +1137,7 @@ public sealed class AcpTurnExecutorTests
                 Tools = Tools,
                 State = State,
                 ProcessHost = ProcessHost,
+                ToolInterceptor = ToolInterceptor,
             };
 
         public async ValueTask DisposeAsync()

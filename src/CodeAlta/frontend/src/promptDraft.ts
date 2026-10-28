@@ -72,9 +72,11 @@ export function createDraftIndicators() {
         && !/^[\s\u0085]*$/u.test(text) && isWellFormed(text);
       if (!valid) { if (edits.delete(id)) publish(); return null; }
       // Each edit gets an exact identity; an earlier persistence effect cannot certify this edit.
-      const current = ++generation;
-      edits.set(id, { generation: current, persisted: false });
-      publish();
+      const current = ++generation, previous = edits.get(id);
+      // A keystroke in a draft already edited keeps its mark, until its own write says otherwise: the listeners,
+      // the window among them, are told only when the mark changes, never at each key.
+      edits.set(id, { generation: current, persisted: previous?.persisted ?? false });
+      if (!previous) publish();
       return current;
     },
     persisted(id: string, editGeneration: number | null, success: boolean) {

@@ -60,7 +60,9 @@ export function settledCompactionFailure(row: Pick<SessionReceiptView, "state" |
   if (row.state !== "terminal" || row.outcome === "Completed") return null;
   if (row.outcome === "Cancelled") return { key: "The compaction was cancelled." };
   return { key: row.code === "compact_busy" ? "The session is busy: compact it once it is idle."
-    : row.code === "compact_unsupported" ? "This provider cannot compact the conversation." : "The compaction failed. The timeline says why." };
+    : row.code === "compact_unsupported" ? "This provider cannot compact the conversation."
+    : row.code === "compact_plugin_cancelled" ? "A plugin cancelled the compaction. The timeline says why."
+    : "The compaction failed. The timeline says why." };
 }
 
 /** What the composer says when the host did not take a compaction, or took it and has already ended it; null otherwise. */

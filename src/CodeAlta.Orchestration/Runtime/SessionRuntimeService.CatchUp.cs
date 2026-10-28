@@ -301,7 +301,7 @@ public sealed partial class SessionRuntimeService
     private async Task<string?> CatchUpRefusalAsync(string sessionId, CancellationToken token)
     {
         if (_transitions.ContainsKey(sessionId)) return CatchUpBusy;
-        if (_entries.TryGetValue(sessionId, out var entry) && (entry.HasActiveRun || entry.QueueDrainInProgress || entry.OwnedQueue is not null
+        if (_entries.TryGetValue(sessionId, out var entry) && (entry.HasActiveRun || entry.QueueDrainInProgress
             || entry.Attachment.IsRetiring || entry.Attachment.HasWorkInProgress
             || entry.RemoteControl.Status is AgentRemoteControlStatus.Connecting or AgentRemoteControlStatus.Connected
             || entry.BackgroundTasks.Any(static task => task.Outcome is null))) return CatchUpBusy;

@@ -305,12 +305,15 @@ internal sealed class DesktopSearchSources
                 var body = string.Empty;
                 try
                 {
-                    var info = new FileInfo(skill.SkillFilePath);
+                    var path = skill.SkillFilePath;
+                    var info = new FileInfo(path);
+                    // The length and the time of a linked SKILL.md are those of the link: those of the file it leads to tell an edit.
+                    if (info.LinkTarget is not null && info.ResolveLinkTarget(returnFinalTarget: true) is FileInfo target) info = target;
                     if (info.Exists && info.Length <= 64 * 1024)
                     {
-                        if (bodies.TryGetValue(info.FullName, out var kept) && kept.Length == info.Length && kept.Written == info.LastWriteTimeUtc) body = kept.Body;
-                        else body = SplitMarkdown(await File.ReadAllTextAsync(info.FullName, cancellationToken).ConfigureAwait(false)).Body;
-                        seen[info.FullName] = (info.Length, info.LastWriteTimeUtc, body);
+                        if (bodies.TryGetValue(path, out var kept) && kept.Length == info.Length && kept.Written == info.LastWriteTimeUtc) body = kept.Body;
+                        else body = SplitMarkdown(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false)).Body;
+                        seen[path] = (info.Length, info.LastWriteTimeUtc, body);
                     }
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }

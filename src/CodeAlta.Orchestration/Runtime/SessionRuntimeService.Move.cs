@@ -150,7 +150,7 @@ public sealed partial class SessionRuntimeService
     {
         // Remote Control does not keep a session where it is: its owner turns it on again in the new folder.
         if (_transitions.ContainsKey(sessionId)) return "session_in_use";
-        if (_entries.TryGetValue(sessionId, out var entry) && (entry.HasActiveRun || entry.QueueDrainInProgress || entry.OwnedQueue is not null
+        if (_entries.TryGetValue(sessionId, out var entry) && (entry.HasActiveRun || entry.QueueDrainInProgress
             || entry.Attachment.IsRetiring || !HasOwnedCommandDefaults(entry) || entry.PendingAgentPromptId is not null
             // The tasks of its provider end with its process, which a move stops.
             || entry.BackgroundTasks.Any(static task => task.Outcome is null))) return "session_in_use";

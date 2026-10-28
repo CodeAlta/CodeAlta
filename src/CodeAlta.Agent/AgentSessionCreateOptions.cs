@@ -214,6 +214,13 @@ public class AgentSessionCreateOptions
     public CodeAlta.Agent.Runtime.Tools.AgentCommandGuard? CommandGuard { get; init; }
 
     /// <summary>
+    /// Gets or initializes the hooks of the tool calls of the session (the tool hooks of plugins): they run before and
+    /// after every tool the session runs, before its guards, its permission prompt and its sandbox, and before the tools
+    /// of a provider that runs its own and asks CodeAlta first. <see langword="null"/> for none.
+    /// </summary>
+    public CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? ToolInterceptor { get; init; }
+
+    /// <summary>
     /// Gets or initializes where the built-in tools of the session run, and whether a run may start: set for a
     /// session whose tools may run in a sandbox. <see langword="null"/> where they run in this process.
     /// </summary>

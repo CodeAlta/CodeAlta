@@ -307,39 +307,62 @@ internal sealed class SessionCommandCoordinator
             tab.PendingManualCompaction = true;
             _commandContext.SetSessionStatus(tab, SR.T("Compacting '{0}'...", session.Title), true, StatusTone.Info);
             var options = BuildExecutionOptions(session, tab);
-            var augmentation = _pluginHostBridge is null
-                ? new PluginCompactionAugmentation()
-                : await _pluginHostBridge.BeforeCompactionAsync(session, tab, CancellationToken.None);
-            if (!string.IsNullOrWhiteSpace(augmentation.CancelReason))
+            if (await CompactWithPluginHooksAsync(_runtimeService, _pluginHostBridge, session, tab, options, CancellationToken.None) is { } cancelReason)
             {
                 tab.PendingManualCompaction = false;
-                _commandContext.SetSessionStatus(tab, SR.T("Compaction cancelled by plugin: {0}", augmentation.CancelReason), false, StatusTone.Warning);
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(augmentation.AdditionalDeveloperInstructions))
-            {
-                options = _promptDispatchCoordinator.AppendAdditionalDeveloperInstructions(options, augmentation.AdditionalDeveloperInstructions);
-            }
-
-            await _runtimeService.CompactAsync(session, options, CancellationToken.None);
-            if (_pluginHostBridge is not null)
-            {
-                await _pluginHostBridge.AfterCompactionAsync(session, tab, succeeded: true, summary: null, CancellationToken.None);
+                _commandContext.SetSessionStatus(tab, SR.T("Compaction cancelled by plugin: {0}", cancelReason), false, StatusTone.Warning);
             }
         }
         catch (Exception ex)
         {
             tab.PendingManualCompaction = false;
-            if (_pluginHostBridge is not null)
-            {
-                await _pluginHostBridge.AfterCompactionAsync(session, tab, succeeded: false, summary: ex.Message, CancellationToken.None);
-            }
-
             CodeAltaApp.UiLogger.Error(ex, $"Failed to compact session {session.SessionId}");
 
             _commandContext.SetSessionStatus(tab, SR.T("Failed to compact '{0}': {1}", session.Title, ex.Message), false, StatusTone.Error);
         }
+    }
+
+    // The compaction hooks of plugins around a manual compaction, as CodeAlta Desktop runs them: the instructions go with
+    // the compaction (to its summary request, or after the /compact of an agent that compacts its own context), and the
+    // after-hooks get the summary it wrote, or the failure. Returns the reason of a plugin that cancelled it, or null.
+    internal static async Task<string?> CompactWithPluginHooksAsync(
+        SessionRuntimeService runtimeService,
+        PluginHostBridge? pluginHostBridge,
+        SessionViewDescriptor session,
+        OpenSessionState tab,
+        SessionExecutionOptions options,
+        CancellationToken cancellationToken)
+    {
+        var augmentation = pluginHostBridge is null
+            ? new PluginCompactionAugmentation()
+            : await pluginHostBridge.BeforeCompactionAsync(session, tab, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(augmentation.CancelReason))
+        {
+            return augmentation.CancelReason;
+        }
+
+        var compaction = string.IsNullOrWhiteSpace(augmentation.Instructions)
+            ? AgentCompactionOptions.Default
+            : new AgentCompactionOptions { Instructions = augmentation.Instructions };
+        AgentCompactionOutcome? outcome;
+        try
+        {
+            outcome = await runtimeService.CompactAsync(session, options, compaction, cancellationToken);
+        }
+        catch (Exception ex) when (pluginHostBridge is not null)
+        {
+            await pluginHostBridge.AfterCompactionAsync(session, tab, succeeded: false, summary: ex.Message, CancellationToken.None);
+            throw;
+        }
+
+        if (pluginHostBridge is not null)
+        {
+            // A session that reports no outcome compacted without a summary of its own.
+            var (succeeded, summary) = outcome is null ? (true, null) : outcome.Success ? (true, outcome.Summary) : (false, outcome.Message);
+            await pluginHostBridge.AfterCompactionAsync(session, tab, succeeded, summary, CancellationToken.None);
+        }
+
+        return null;
     }
 
     public Task ClearSelectedSessionQueueAsync()
