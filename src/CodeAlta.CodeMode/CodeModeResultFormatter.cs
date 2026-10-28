@@ -36,7 +36,7 @@ public sealed record CodeModeResultText(string Text, CodeModeResultKind Kind)
 public static class CodeModeResultFormatter
 {
     /// <summary>The output budget of a result, in tokens, when the script sets none.</summary>
-    public const int DefaultMaxOutputTokens = 4_000;
+    public const int DefaultMaxOutputTokens = 10_000;
 
     /// <summary>The line that names the file that keeps the whole of a result, before the result: <c>Full result: &lt;path&gt; (…)</c>.</summary>
     public const string FullResultPrefix = "Full result: ";
@@ -425,7 +425,8 @@ public static class CodeModeJsonTruncation
         return last.Length <= maxCharacters ? last : CutText(last, maxCharacters);
     }
 
-    // Cuts the largest piece: a long string loses its tail, a long array its last items.
+    // Cuts the largest piece by what is over the budget, no more: a long string loses its tail, a long array its last
+    // items. A JSON just over the budget keeps about the budget, not half of it.
     private static bool CutLargest(JsonNode root, int excess)
     {
         JsonNode? largest = null;
@@ -439,7 +440,13 @@ public static class CodeModeJsonTruncation
         switch (largest)
         {
             case JsonValue value when value.TryGetValue<string>(out var text):
-                var keep = Math.Max(32, Math.Min(text.Length / 2, text.Length - excess - 40));
+                // A character is at least one character of the JSON: cutting the excess and the marker's room is enough.
+                var keep = Math.Max(32, text.Length - excess - 40);
+                if (keep < text.Length && char.IsHighSurrogate(text[keep - 1]))
+                {
+                    keep--;
+                }
+
                 if (keep >= text.Length)
                 {
                     return false;
@@ -448,22 +455,28 @@ public static class CodeModeJsonTruncation
                 Replace(value, JsonValue.Create(text[..keep] + $"…[{text.Length - keep:N0} characters cut]"));
                 return true;
             case JsonArray array:
-                var remove = Math.Max(1, array.Count / 2);
+                // The marker of an earlier round is replaced by one that counts every item cut.
                 var dropped = 0;
-                while (remove-- > 0 && array.Count > 1)
+                var removed = 0;
+                if (array[^1] is JsonValue marker && marker.TryGetValue<string>(out var markerText)
+                    && markerText.StartsWith("…[", StringComparison.Ordinal) && markerText.EndsWith(" more items cut]", StringComparison.Ordinal)
+                    && int.TryParse(markerText.AsSpan(2, markerText.Length - 2 - " more items cut]".Length), NumberStyles.None, CultureInfo.InvariantCulture, out var before))
                 {
+                    removed = markerText.Length + 3;
                     array.RemoveAt(array.Count - 1);
-                    dropped++;
+                    dropped = before;
                 }
 
-                if (array.Count > 0 && array[^1] is JsonValue marker && marker.TryGetValue<string>(out var markerText) && markerText.StartsWith("…[", StringComparison.Ordinal))
+                var cut = 0;
+                while (array.Count > 1 && (cut == 0 || removed < excess + 40))
                 {
+                    removed += (array[^1]?.ToJsonString(s_relaxed).Length ?? 4) + 1;
                     array.RemoveAt(array.Count - 1);
-                    dropped++;
+                    cut++;
                 }
 
-                array.Add((JsonNode?)JsonValue.Create($"…[{dropped} more items cut]"));
-                return dropped > 0;
+                array.Add((JsonNode?)JsonValue.Create($"…[{dropped + cut} more items cut]"));
+                return cut > 0;
             default:
                 return false;
         }

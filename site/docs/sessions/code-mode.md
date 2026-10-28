@@ -107,7 +107,7 @@ What a script returns is what the agent reads, and you read it too: in the **Wor
 - A text is shown as Markdown: headings, lists, tables, code. A link to a file opens it in CodeAlta, a picture too (`![chart](chart.png)`).
 - An object or an array is shown as JSON. A list of texts of several lines, such as the answers of sub-agents, is shown as sections.
 - `image(path, { title })` attaches a picture file to the result (PNG, JPEG, GIF or WebP, 8 at most): you see it as a thumbnail, and the agent sees the picture too. A file that is missing or not a picture is named in the result instead.
-- A result longer than the budget of the script (`max_output_tokens`, 4,000 tokens by default) is saved whole in a file of the session, with its attachments under `~/.alta/sessions`, and goes with it. The agent and the card get a preview of its start and its end with the path of that file: the agent reads the rest there when it needs it, and **Open the full result** opens it.
+- A result longer than the budget of the script (`max_output_tokens`, 10,000 tokens by default) is saved whole in a file of the session, with its attachments under `~/.alta/sessions`, and goes with it. The agent and the card get a preview of its start and its end with the path of that file: the agent reads the rest there when it needs it, and **Open the full result** opens it.
 - **Run details** shows what the run wrote besides its result: its output, where its time went, an error.
 
 ## Resume a run
