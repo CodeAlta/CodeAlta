@@ -69,13 +69,14 @@ export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled,
         {detail && !detail.modelVisible && skill.enabled && <Tag minimal round intent="warning">{t("Not offered to the model")}</Tag>}
         {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
         {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}
+        {detail?.linked && <Tag minimal round title={t("This skill is reached through a symbolic link: edit or remove it in the folder the link leads to.")}>{t("Linked")}</Tag>}
         {!projectSkillSource(skill.source) && skillToggleable(skill.name)
           && <ResourceSpaceChip scope={spaceScope} kind="skill" resourceKey={skill.name} name={skill.title || skill.name} disabled={disabled} />}
         {detail?.folder && detail.skillRootPath && onEdit && <Button size="small" icon={<AppIcon name="code" size={15} />}
           aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name: skill.title || skill.name })}
           title={t(readOnly ? "Open in the code editor" : "Edit in the code editor")}
           onClick={() => onEdit({ id: detail.folder!, path: detail.skillRootPath!, name: skill.name })}>{t(readOnly ? "View files" : "Edit")}</Button>}
-        {onDelete && skillRemovable(skill.source) && <RemoveButton text name={skill.title || skill.name} disabled={disabled} onRemove={() => onDelete(skill)} />}</span></header>
+        {onDelete && skillRemovable(skill.source) && !detail?.linked && <RemoveButton text name={skill.title || skill.name} disabled={disabled} onRemove={() => onDelete(skill)} />}</span></header>
     <p className="skill-detail-description">{skill.description}</p>
     {failed && <p role="alert" className="error-text">{t("The skill details could not be read.")}</p>}
     {detail && <>

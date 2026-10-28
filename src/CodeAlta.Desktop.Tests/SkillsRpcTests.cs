@@ -352,6 +352,7 @@ public sealed class SkillsRpcTests
 
         var detail = await fixture.Service.DetailAsync(new(Epoch, null, "alpha", "UserAlta"), default);
         Assert.AreEqual("ok", detail.Status);
+        Assert.IsFalse(detail.Linked);
         Assert.AreEqual("alpha", detail.Name);
         Assert.AreEqual(Path.Combine(root, "SKILL.md"), detail.SkillFilePath);
         Assert.AreEqual(root, detail.SkillRootPath);
@@ -736,14 +737,18 @@ public sealed class SkillsRpcTests
             Assert.Inconclusive($"Symbolic links are unavailable: {exception.Message}");
         }
         var request = new SkillsDetailRequest(Epoch, null, null, alpha.Source, alpha.Id);
-        Assert.AreNotEqual("ok", (await fixture.Service.DetailAsync(request, default)).Status);
+        // The skill is shown, read where the link leads, and is neither given to the editor nor removed through the link.
+        var detail = await fixture.Service.DetailAsync(request, default);
+        Assert.AreEqual("ok", detail.Status);
+        Assert.IsTrue(detail.Linked);
+        Assert.IsNull(detail.Folder);
         Assert.AreNotEqual("ok", (await fixture.Service.DeleteAsync(request, default)).Status);
         Assert.IsEmpty(fixture.Trash.Moved);
         Assert.IsTrue(File.Exists(target));
     }
 
     [TestMethod]
-    public async Task ALinkedSkillFolder_IsListed_ButNotRemovedThroughItsLink()
+    public async Task ALinkedSkillFolder_IsListedAndShown_ButNotRemovedThroughItsLink()
     {
         using var fixture = await Fixture.CreateAsync();
         var library = Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, "library", "shared")).FullName;
@@ -757,6 +762,11 @@ public sealed class SkillsRpcTests
         fixture.Trash.Available = true;
         var shared = (await fixture.Service.ListAsync(new(Epoch, null), default)).Skills.Single(skill => skill.Name == "shared");
         var request = new SkillsDetailRequest(Epoch, null, null, shared.Source, shared.Id);
+        var detail = await fixture.Service.DetailAsync(request, default);
+        Assert.AreEqual("ok", detail.Status);
+        Assert.IsTrue(detail.Linked, "A skill of a shared library is read through its link.");
+        StringAssert.Contains(detail.Content, "# Shared");
+        Assert.IsNull(detail.Folder, "Its files are edited in the folder the link leads to.");
         Assert.AreNotEqual("ok", (await fixture.Service.DeleteAsync(request, default)).Status);
         Assert.IsEmpty(fixture.Trash.Moved);
         Assert.IsTrue(File.Exists(Path.Combine(library, "SKILL.md")));

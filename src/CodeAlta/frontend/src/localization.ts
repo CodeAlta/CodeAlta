@@ -2133,6 +2133,8 @@ export const messages = dictionary({
   "Hide the changes of the file": ["Ocultar los cambios del archivo", "Masquer les modifications du fichier", "Änderungen der Datei ausblenden", "ファイルの変更を隠す", "隐藏文件的更改"],
   "Hide unchanged lines": ["Ocultar líneas sin cambios", "Masquer les lignes inchangées", "Unveränderte Zeilen ausblenden", "変更のない行を隠す", "隐藏未更改的行"],
   "Ignore whitespace changes": ["Ignorar cambios de espacios", "Ignorer les changements d’espaces", "Leerraumänderungen ignorieren", "空白の変更を無視", "忽略空白更改"],
+  "Linked": ["Enlazado", "Lié", "Verknüpft", "リンク", "已链接"],
+  "This skill is reached through a symbolic link: edit or remove it in the folder the link leads to.": ["Esta habilidad se alcanza a través de un enlace simbólico: edítala o elimínala en la carpeta a la que lleva el enlace.", "Cette compétence est atteinte par un lien symbolique : modifiez-la ou supprimez-la dans le dossier vers lequel mène le lien.", "Dieser Skill wird über einen symbolischen Link erreicht: Bearbeiten oder entfernen Sie ihn im Ordner, auf den der Link zeigt.", "このスキルはシンボリックリンク経由で参照されています。リンク先のフォルダーで編集または削除してください。", "此技能通过符号链接访问：请在链接指向的文件夹中编辑或删除它。"],
   "Not created yet": ["Aún no creado", "Pas encore créé", "Noch nicht erstellt", "未作成", "尚未创建"],
   "It does not exist yet: nothing in it applies.": ["Aún no existe: nada de su contenido se aplica.", "Il n’existe pas encore : rien de son contenu ne s’applique.", "Existiert noch nicht: Nichts davon gilt.", "まだ存在しないため、その内容は何も適用されません。", "尚不存在：其中的任何内容都不适用。"],
   "Copy path": ["Copiar ruta", "Copier le chemin", "Pfad kopieren", "パスをコピー", "复制路径"],
