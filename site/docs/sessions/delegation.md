@@ -12,8 +12,8 @@ You do not type `alta` commands yourself: **you ask for the outcome, and the age
 
 A sub-agent is a child session with a context of its own, which works in parallel with its parent. The agent decides by itself when sub-agents help:
 
-- When the work has independent parts (several modules to look into, research beside an implementation, a review of a diff), it gives each part to a sub-agent and keeps the decisions and the final answer.
-- It works directly when the task is small or does not split.
+- When the work has large independent parts (several topics to research or compare, several modules or pull requests to work on separately, how another area works when only its conclusion matters), it gives each part to a sub-agent and keeps the decisions and the final answer.
+- It works directly on what it needs in detail: the code it changes, its callers, its tests, the review of its own diff. A long task in one area stays with it.
 - It gives simple work a lower reasoning effort.
 - A sub-agent does its work itself: it does not pass it on to a single sub-agent of its own.
 - A sub-agent runs the Default agent prompt, or another one when asked. Under a session in Plan mode, sub-agents are told only to read.

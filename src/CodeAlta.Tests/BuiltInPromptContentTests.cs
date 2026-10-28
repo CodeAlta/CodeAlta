@@ -27,18 +27,22 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(plan.Body, "use the exact `description` field on questions and choices");
         StringAssert.Contains(plan.Body, "alta session current");
         StringAssert.Contains(plan.Body, "alta session send <current-session-id> --queue-if-busy --stdin");
-        StringAssert.Contains(plan.Body, "--same-model-as <session-id>");
         StringAssert.Contains(plan.Body, "--model-ref");
-        // Sub-agents are the planner's own call: one for each independent question of a broad plan, none for a small one, no chain.
+        // Sub-agents are the planner's own call, by purpose and size: large independent questions whose conclusion is
+        // enough go to children; what the plan will change is read by the planner itself.
         StringAssert.Contains(plan.Body, "explore them in parallel with sub-agents");
-        StringAssert.Contains(plan.Body, "a normal way to dig into a problem");
-        StringAssert.Contains(plan.Body, "as many sub-agents as there are independent questions");
-        StringAssert.Contains(plan.Body, "a small plan needs no child session");
-        StringAssert.Contains(plan.Body, "without being asked");
-        StringAssert.Contains(plan.Body, "never hand the exploration to a single child");
+        StringAssert.Contains(plan.Body, "read directly, in batches, what the plan will change");
+        StringAssert.Contains(plan.Body, "It serves two purposes");
+        StringAssert.Contains(plan.Body, "dozens, not a few");
+        StringAssert.Contains(plan.Body, "Explore yourself what the plan will change");
+        StringAssert.Contains(plan.Body, "Never delegate the question you need answered next");
+        StringAssert.Contains(plan.Body, "When unsure, explore yourself");
+        StringAssert.Contains(plan.Body, "delegate only a piece of your question that is itself large and independent");
         StringAssert.Contains(plan.Body, "--reasoning low");
+        Assert.IsFalse(plan.Body.Contains("without being asked", StringComparison.Ordinal));
+        Assert.IsFalse(plan.Body.Contains("two, five or more", StringComparison.Ordinal));
         Assert.IsFalse(plan.Body.Contains("only when the user explicitly asks", StringComparison.Ordinal));
-        StringAssert.Contains(plan.Body, "all relevant child and descendant work");
+        StringAssert.Contains(plan.Body, "what the children found, in your own words");
         StringAssert.Contains(plan.Body, "alta session set_agent --prompt-id default");
         // The plan is a document for a reader: its front matter lists it, and its approval is told to CodeAlta, which shows it.
         StringAssert.Contains(plan.Body, "Who reads the plan");
@@ -76,18 +80,22 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "GitHub-style blockquotes");
         StringAssert.Contains(defaultPrompt.Body, "commit the plan update with the implementation step it records");
         StringAssert.Contains(defaultPrompt.Body, "one writing child at a time");
-        // Sub-agents are the agent's own call: one for each independent part, direct work when the task is small, no chain of single children.
-        StringAssert.Contains(defaultPrompt.Body, "Delegating is a normal way to work");
-        StringAssert.Contains(defaultPrompt.Body, "without being asked");
-        StringAssert.Contains(defaultPrompt.Body, "as many sub-agents as there are independent parts");
-        StringAssert.Contains(defaultPrompt.Body, "Work directly when the task is small or does not split");
-        StringAssert.Contains(defaultPrompt.Body, "never your task or most of it to a single child");
+        // Sub-agents are the agent's own call, by purpose and size: large independent parts go to children; the details of
+        // its own change stay with the agent, and when unsure it does the work itself.
+        StringAssert.Contains(defaultPrompt.Body, "It serves two purposes");
+        StringAssert.Contains(defaultPrompt.Body, "dozens, not a few");
+        StringAssert.Contains(defaultPrompt.Body, "Do it yourself when you will need the details");
+        StringAssert.Contains(defaultPrompt.Body, "the review of your own diff");
+        StringAssert.Contains(defaultPrompt.Body, "Never delegate the step you need next");
+        StringAssert.Contains(defaultPrompt.Body, "Length alone is not a reason");
+        StringAssert.Contains(defaultPrompt.Body, "When unsure, do it yourself");
+        StringAssert.Contains(defaultPrompt.Body, "delegate only a piece of it that is itself large and independent");
         StringAssert.Contains(defaultPrompt.Body, "--reasoning low");
+        Assert.IsFalse(defaultPrompt.Body.Contains("decide it yourself, without being asked", StringComparison.Ordinal));
+        Assert.IsFalse(defaultPrompt.Body.Contains("two, five or more", StringComparison.Ordinal));
         Assert.IsFalse(defaultPrompt.Body.Contains("only when the user explicitly asks for delegation", StringComparison.Ordinal));
-        StringAssert.Contains(defaultPrompt.Body, "Implementation children that write files must run sequentially");
-        StringAssert.Contains(defaultPrompt.Body, "all relevant child and descendant work");
-        StringAssert.Contains(defaultPrompt.Body, "over-compression across nesting levels");
-        StringAssert.Contains(defaultPrompt.Body, "--same-model-as");
+        StringAssert.Contains(defaultPrompt.Body, "Children that write files run one at a time unless each has a worktree of its own");
+        StringAssert.Contains(defaultPrompt.Body, "what the children found or changed, in your own words");
         StringAssert.Contains(defaultPrompt.Body, "--model-ref");
         StringAssert.Contains(defaultPrompt.Body, "alta reminder create --duration 00:05:00");
         StringAssert.Contains(defaultPrompt.Body, "alta session set_agent --prompt-id plan");
@@ -145,7 +153,24 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(system.Body, "Use them wisely");
         StringAssert.Contains(system.Body, "not for a command that completes quickly");
         StringAssert.Contains(system.Body, "Give a job a timeout when its command could hang");
-        StringAssert.Contains(system.Body, "unless the host explicitly supports it (a background job, a reminder)");
+        StringAssert.Contains(PromptFeatureConditions.Apply(system.Body, null), "unless the host explicitly supports it (a background job, a reminder)");
+        StringAssert.Contains(PromptFeatureConditions.Apply(system.Body, new HashSet<string> { PromptFeatures.Reminders }), "unless the host explicitly supports it (a background job).");
+    }
+
+    [TestMethod]
+    public void BuiltInSystemPrompt_AsksForIndependentCallsTogether_AndSmallOutput()
+    {
+        using var root = TempDirectory.Create();
+        var system = new AgentPromptCatalog().ListSystemPrompts(new AgentPromptCatalogQuery { UserCodeAltaRoot = root.Path })
+            .Single(static prompt => prompt.IsBuiltIn && prompt.PromptName == "default");
+
+        // Independent reads and searches go in one response, decided edits in one step; output is filtered, not dumped.
+        StringAssert.Contains(system.Body, "Make independent tool calls together");
+        StringAssert.Contains(system.Body, "make all the calls in the same response");
+        StringAssert.Contains(system.Body, "When you have decided several edits, make them in one step too");
+        StringAssert.Contains(system.Body, "do not read again what is still in your context");
+        StringAssert.Contains(system.Body, "Keep command output small");
+        Assert.IsFalse(system.Body.Contains("Parallelize independent reads/searches when supported", StringComparison.Ordinal));
     }
 
     private static IReadOnlyList<AgentPromptDescriptor> ListBuiltInPrompts(string userCodeAltaRoot)

@@ -13,17 +13,17 @@ internal static class CliPromptFeatures
 
     /// <summary>
     /// What <c>altacli run</c> leaves out: a run is one request read by a program, so nobody reads its notes, its proposed
-    /// tasks or a review request (its commands are not offered), nor switches it to another mode, and the request stays
-    /// in the context when it is compacted, which the scratchpad was for.
+    /// tasks or a review request, answers a question or gets a reminder (their commands are not offered), nor switches it
+    /// to another mode, and the request stays in the context when it is compacted, which the scratchpad was for.
     /// </summary>
     public static IReadOnlyList<string> RunDefaults { get; } =
-        [PromptFeatures.Scratchpad, PromptFeatures.Notes, PromptFeatures.Tasks, PromptFeatures.Review, PromptFeatures.ModeHandoff];
+        [PromptFeatures.Scratchpad, PromptFeatures.Notes, PromptFeatures.Tasks, PromptFeatures.Review, PromptFeatures.Reminders, PromptFeatures.Ask, PromptFeatures.ModeHandoff];
 
     /// <summary>
     /// What <c>altacli acp</c> leaves out: a user works in the editor, over several prompts, as in CodeAlta Desktop, so only
-    /// the review by the user, whose commands altacli does not offer.
+    /// the review by the user, the reminders and the questions, whose commands altacli does not offer.
     /// </summary>
-    public static IReadOnlyList<string> AcpDefaults { get; } = [PromptFeatures.Review];
+    public static IReadOnlyList<string> AcpDefaults { get; } = [PromptFeatures.Review, PromptFeatures.Reminders, PromptFeatures.Ask];
 
     /// <summary>Works out the features the sessions leave out.</summary>
     /// <param name="defaults">The features the command leaves out by default.</param>

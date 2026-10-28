@@ -165,8 +165,9 @@ public sealed class SystemPromptInfrastructureTests
 
         var on = Instructions("on");
         StringAssert.Contains(on, "# Code Mode");
-        StringAssert.Contains(on, "Independent parts run together, in one `exec`");
-        StringAssert.Contains(on, "export const meta = { title:");
+        StringAssert.Contains(on, "Several independent reads or searches: one `exec`");
+        StringAssert.Contains(on, "await Promise.allSettled([");
+        Assert.DoesNotContain("your first call is one `exec`", on);
         Assert.DoesNotContain(SystemPromptBuilder.CodeModeOnlyGuidance, on);
         StringAssert.Contains(Instructions("only"), SystemPromptBuilder.CodeModeOnlyGuidance);
         // A sub-agent of a script does its part itself: each level of sub-agents is a whole session more.

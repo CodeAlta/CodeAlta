@@ -12,6 +12,9 @@ public static partial class PromptToolConditions
     /// <summary>The name of the built-in shell tool.</summary>
     public const string ShellCommand = "shell_command";
 
+    /// <summary>The name of the tool of Code Mode that runs a script, which a session has only in Code Mode.</summary>
+    public const string Exec = "exec";
+
     /// <summary>Keeps the text of the tools the session has and the other text of those it does without.</summary>
     /// <param name="text">The text of a prompt file.</param>
     /// <param name="disabledTools">The tools the session does without; <see langword="null"/> for none.</param>

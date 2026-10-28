@@ -117,7 +117,8 @@ public sealed class SystemPromptBuilder
 
         var parts = new List<SystemPromptManifestPart>();
         var disabledFeatures = request.DisabledFeatures;
-        var systemMessage = ApplyConditions(systemResolution.Body!, disabledTools, disabledFeatures).Trim();
+        var conditionTools = ConditionTools(request, disabledTools);
+        var systemMessage = ApplyConditions(systemResolution.Body!, conditionTools, disabledFeatures).Trim();
         foreach (var applied in systemResolution.Applied)
         {
             parts.Add(CreateResourcePart(applied.Resource, "system", selectedSystemName, "system", 100, applied.Status, applied.Replaces));
@@ -143,7 +144,7 @@ public sealed class SystemPromptBuilder
         }
 
         var agentPromptBody = JoinPromptBodies(inherited.Select(static prompt => prompt.Resolution.Body!).Append(promptResolution.Body!));
-        developerParts.Add(new RenderedPromptPart($"agents/{composition.AgentPromptName}", RenderSection("Agent Prompt", ApplyConditions(agentPromptBody, disabledTools, disabledFeatures))));
+        developerParts.Add(new RenderedPromptPart($"agents/{composition.AgentPromptName}", RenderSection("Agent Prompt", ApplyConditions(agentPromptBody, conditionTools, disabledFeatures))));
         foreach (var skipped in promptResolution.Skipped)
         {
             parts.Add(CreateResourcePart(skipped.Resource, "agent_prompt", composition.AgentPromptName, "developer", 300, skipped.Status, null));
@@ -250,6 +251,13 @@ public sealed class SystemPromptBuilder
     // otherwise be read as the one of a feature.
     private static string ApplyConditions(string text, IReadOnlySet<string> disabledTools, IReadOnlySet<string>? disabledFeatures)
         => PromptFeatureConditions.Apply(PromptToolConditions.Apply(text, disabledTools), disabledFeatures);
+
+    // The tools the text of the prompt files is read for: a session has exec only in Code Mode, so the text written for it
+    // is left out of the others, as for a tool turned off.
+    private static IReadOnlySet<string> ConditionTools(SystemPromptBuildRequest request, HashSet<string> disabledTools)
+        => request.CodeMode is "on" or "only" || disabledTools.Contains(PromptToolConditions.Exec)
+            ? disabledTools
+            : new HashSet<string>(disabledTools, StringComparer.Ordinal) { PromptToolConditions.Exec };
 
     private static bool IsOff(IReadOnlySet<string>? disabledFeatures, string feature)
         => disabledFeatures?.Contains(feature) == true;
@@ -845,42 +853,65 @@ public sealed class SystemPromptBuilder
 
     /// <summary>What a session that has <c>exec</c> is told about using it; the same text for every session of a mode, so that prompt caches hold.</summary>
     internal const string CodeModeGuidance = """
-        `exec` runs a JavaScript program that calls your tools, `alta` and sub-agents; the user watches each run live, as a graph of its steps and sessions. It is your way to run work that splits.
+        `exec` runs a JavaScript program that calls your tools and `alta`, and gives you back only what the program returns. Use it to do in one step what would otherwise take several turns.
 
-        - **Independent parts run together, in one `exec`.** When a request names several items to look into, change, check or compare (topics, projects, sources, modules, files, options, angles of a review), your first call is one `exec` that gives each item an `agent()` and runs them at once with `parallel()`; do not work through them yourself one after another. Items still to find (the files of a folder, the matches of a search) are found by that script (`tools.list_dir`, `tools.grep`), not by a call before it. A sub-agent has the tools you have (web search too, when you have it). Never start sub-agents one at a time with `alta session create`/`send`. A loop or batch of tool calls goes in a script too, not one call per turn.
-        - **Write the script for the task**, without a library script; `workflow("name")` reuses one that fits (`codemode.search({ query: "workflow:" })`).
-        - **Show the plan:** start with `export const meta = { title: "…", steps: [{ id: "…", title: "…" }] };`, declaring only the steps the script runs, and wrap each in `step("<id>", fn)` with those ids (`step`, `agent` and `parallel` are given: never define your own).
-        - **Brief each sub-agent fully** (it sees nothing else): what to find or do, when to stop, and a short answer, or a `schema` when code combines the answers. `tier: "quick"` for lookups; `worktree: true` for parts that edit files at the same time. Use their answers as they are: do not redo their work to check it.
-        - **Return a compact result**, it is all you read back: findings, decisions, branches, failures. Return text as Markdown, which the user sees rendered (files as `[name](path)`), and data as an object.
-        - Call the tools directly for one or two calls, for items that each take a single call (make those calls together), and for steps that each need the previous result.
+        - **Several independent reads or searches: one `exec`.** When you need two or more files, ranges, searches or listings whose results do not depend on each other, get them in one script with `await Promise.allSettled([...])` and look at every result: a wrong path must not lose the other reads.
+        - **Several edits you have decided: one `exec`.** When you know two or more changes, in one file or in several, make them in one script, one after the other, and return what each call answered.
+        - **Keep sequential what depends on a result:** an edit that depends on what you are reading, the test run after a change, the next step of a diagnosis. For a single call, call the tool directly.
+        - **Return only what you will use:** the lines or matches you need, the exit code and the failing part of a test run; not whole tool objects or long logs. A result past `max_output_tokens` is kept in a file and you see only its start and end.
+        - **A script still running:** do other work, or call `wait` with a `yield_ms` of 30000 or more; do not poll in short steps.
+        - **Sub-agents:** `agent()` starts a sub-agent and follows the rules of "Sub-agents". When they call for several, start them in one `exec` with `parallel()`, and give that script a `meta` with its steps, each wrapped in `step()`: the user follows its progress.
 
         ```js
-        export const meta = { title: "Compare caches", steps: [{ id: "research", title: "Research each option" }, { id: "compare", title: "Compare" }] };
-        const notes = await step("research", () => parallel(["Redis", "Memcached", "in-process LRU"].map((name) => () =>
-          agent(`Research ${name} as a cache for <context>. Answer in 10 lines: strengths, limits, sources.`, { title: name, tier: "quick" }))));
-        return step("compare", () => agent(`Recommend one, in 5 lines:\n${notes.join("\n---\n")}`, { title: "Compare" }));
+        // Read a module and its tests, and find the callers of a function, in one step.
+        const [module, tests, callers] = await Promise.allSettled([
+          tools.read_file({ path: "src/cache.ts" }),
+          tools.read_file({ path: "test/cache.test.ts", limit: 200 }),
+          tools.grep({ pattern: "evictExpired\\(", path: "src" }),
+        ]);
+        const show = (r) => (r.status === "fulfilled" ? r.value.content ?? r.value : `failed: ${r.reason}`);
+        return [module, tests, callers].map(show).join("\n\n---\n\n");
+        ```
+
+        ```js
+        // Two changes decided after reading, applied in order.
+        const answers = [];
+        answers.push(await tools.replace_in_file({ path: "src/cache.ts", old_string: "const ttl = 60;", new_string: "const ttl = options.ttl ?? 60;" }));
+        answers.push(await tools.replace_in_file({ path: "test/cache.test.ts", old_string: "it.skip(\"expires\"", new_string: "it(\"expires\"" }));
+        return answers;
         ```
         """;
 
     /// <summary>
-    /// What a session that has <c>exec</c> but cannot start sessions of its own is told: scripts batch its tool calls,
-    /// without sub-agents.
+    /// What a session that has <c>exec</c> but cannot start sessions of its own is told: <see cref="CodeModeGuidance"/>
+    /// without its line about sub-agents.
     /// </summary>
     internal const string CodeModeGuidanceWithoutSubAgents = """
-        `exec` runs a JavaScript program that calls your tools and `alta`; the user watches each run live. It is your way to batch tool calls.
+        `exec` runs a JavaScript program that calls your tools and `alta`, and gives you back only what the program returns. Use it to do in one step what would otherwise take several turns.
 
-        - **A loop or batch of tool calls goes in one `exec`**, not one call per turn. Items still to find (the files of a folder, the matches of a search) are found by that script (`tools.list_dir`, `tools.grep`), not by a call before it, and independent calls run together under `Promise.all`.
-        - **Show the plan:** start with `export const meta = { title: "…", steps: [{ id: "…", title: "…" }] };`, declaring only the steps the script runs, and wrap each in `step("<id>", fn)` with those ids (`step` is given: never define your own).
-        - **Return a compact result**, it is all you read back: findings, decisions, failures.
-        - Call the tools directly for one or two calls, and for steps that each need the previous result.
+        - **Several independent reads or searches: one `exec`.** When you need two or more files, ranges, searches or listings whose results do not depend on each other, get them in one script with `await Promise.allSettled([...])` and look at every result: a wrong path must not lose the other reads.
+        - **Several edits you have decided: one `exec`.** When you know two or more changes, in one file or in several, make them in one script, one after the other, and return what each call answered.
+        - **Keep sequential what depends on a result:** an edit that depends on what you are reading, the test run after a change, the next step of a diagnosis. For a single call, call the tool directly.
+        - **Return only what you will use:** the lines or matches you need, the exit code and the failing part of a test run; not whole tool objects or long logs. A result past `max_output_tokens` is kept in a file and you see only its start and end.
+        - **A script still running:** do other work, or call `wait` with a `yield_ms` of 30000 or more; do not poll in short steps.
 
         ```js
-        export const meta = { title: "Read the configs", steps: [{ id: "read", title: "Read each config" }] };
-        return step("read", async () => {
-          const files = ["package.json", "tsconfig.json"];
-          const read = await Promise.all(files.map((path) => tools.read_file({ path })));
-          return files.map((path, i) => `${path}: ${read[i].content.length} characters`);
-        });
+        // Read a module and its tests, and find the callers of a function, in one step.
+        const [module, tests, callers] = await Promise.allSettled([
+          tools.read_file({ path: "src/cache.ts" }),
+          tools.read_file({ path: "test/cache.test.ts", limit: 200 }),
+          tools.grep({ pattern: "evictExpired\\(", path: "src" }),
+        ]);
+        const show = (r) => (r.status === "fulfilled" ? r.value.content ?? r.value : `failed: ${r.reason}`);
+        return [module, tests, callers].map(show).join("\n\n---\n\n");
+        ```
+
+        ```js
+        // Two changes decided after reading, applied in order.
+        const answers = [];
+        answers.push(await tools.replace_in_file({ path: "src/cache.ts", old_string: "const ttl = 60;", new_string: "const ttl = options.ttl ?? 60;" }));
+        answers.push(await tools.replace_in_file({ path: "test/cache.test.ts", old_string: "it.skip(\"expires\"", new_string: "it(\"expires\"" }));
+        return answers;
         ```
         """;
 
@@ -893,7 +924,7 @@ public sealed class SystemPromptBuilder
     // The section of a session that has exec, or null for one that has not.
     private static string? BuildCodeModeGuidance(SystemPromptBuildRequest request, IReadOnlySet<string> disabledTools)
     {
-        if (request.CodeMode is not ("on" or "only") || disabledTools.Contains("exec"))
+        if (request.CodeMode is not ("on" or "only") || disabledTools.Contains(PromptToolConditions.Exec))
         {
             return null;
         }
