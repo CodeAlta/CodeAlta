@@ -5114,6 +5114,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                             {
                                 Input = AgentInput.Text(prompt), SourceSessionId = AgentSource(submittedBy),
                                 Provenance = SessionPromptProvenance.Of(SessionPromptProvenance.ParentNotifyKind, submittedBy),
+                                NotTaken = () => _ = QueueNotTakenSteerAsync(parent, prompt, SessionPromptProvenance.ParentNotifyKind,
+                                    submittedBy, images: null, notification.SourceSessionId),
                             },
                             CancellationToken.None)
                         .ConfigureAwait(false);
@@ -5133,6 +5135,26 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             && (ex is not OperationCanceledException || _disposed))
         {
             PublishParentNotificationWarning(notification.SourceSessionId, $"Automatic parent notification failed without affecting the child session: {ex.Message}");
+        }
+    }
+
+    // A prompt the host steered into a run that ended without taking it (the run failed or was aborted) is queued, as for
+    // a session without a run, rather than lost. Nobody waits for this work: a failure is told to warnSessionId.
+    private async Task QueueNotTakenSteerAsync(SessionViewDescriptor session, string prompt, string kind, AltaActorProvenance submittedBy,
+        IReadOnlyList<SessionViewQueuedPromptImage>? images, string warnSessionId)
+    {
+        try
+        {
+            await QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, images, CancellationToken.None).ConfigureAwait(false);
+            await TryDrainNextQueuedPromptAsync(session.SessionId).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (OwnedProviderEventForwarding.HasRetention(ex))
+        {
+            _forwarding.RetainDependencies(ex, new { Runtime = this, Session = session.SessionId });
+        }
+        catch (Exception ex)
+        {
+            PublishParentNotificationWarning(warnSessionId, $"The prompt the run of session '{session.SessionId}' did not take could not be queued: {ex.Message}");
         }
     }
 

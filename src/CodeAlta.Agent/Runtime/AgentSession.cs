@@ -94,9 +94,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly AgentEarlierConversation? _earlierConversation;
     // Whether the first prompt is in events not read yet: _firstPromptTitle is then not known.
     private volatile bool _firstPromptTitleUnread;
-    // What steers the run in progress, with the session of the agent that sent each (null for a person or the host) and
-    // the provenance of a prompt of the host (null for one the user typed).
-    private readonly Queue<(AgentInput Input, string? SourceSessionId, string? Provenance)> _pendingSteerInputs = new();
+    // What steers the run in progress, with the session of the agent that sent each (null for a person or the host), the
+    // provenance of a prompt of the host (null for one the user typed) and what hands it back when the run does not take it.
+    private readonly Queue<AgentSteerOptions> _pendingSteerInputs = new();
 
     // Called when a run that answered is about to end, after its last look at what steers it: a test steers it there.
     internal Func<AgentRunId, Task>? RunEnding { get; set; }
@@ -1560,7 +1560,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     $"Local raw-API steering expected run '{expectedRunId.Value}', but active run is '{activeRunId.Value}'.");
             }
 
-            _pendingSteerInputs.Enqueue((options.Input, options.SourceSessionId, options.Provenance));
+            _pendingSteerInputs.Enqueue(options);
             return activeRunId;
         }
         finally
@@ -1989,7 +1989,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             {
             if (admitted)
             {
-                await CompleteActiveTurnAsync(run.Id, CancellationToken.None).ConfigureAwait(false);
+                var notTaken = new List<Action>();
+                await CompleteActiveTurnAsync(run.Id, CancellationToken.None, notTaken: notTaken).ConfigureAwait(false);
                 await _stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
                 try
                 {
@@ -1998,6 +1999,16 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     if (ReferenceEquals(_activeRun, run)) _activeRun = null;
                 }
                 finally { _stateGate.Release(); }
+                // The run failed or was aborted with steers it had accepted (the answer of a child) and not taken: they
+                // go back to their senders, which send them again, once the session can start a run.
+                foreach (var handBack in notTaken)
+                {
+                    try { handBack(); }
+                    catch
+                    {
+                        // What a sender does with its input is its own: the run has ended either way.
+                    }
+                }
             }
             }, bodyFailure).ConfigureAwait(false);
     }
@@ -2482,7 +2493,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
     private async Task<bool> AppendPendingSteerInputsAsync(AgentRunId runId, CancellationToken cancellationToken)
     {
-        List<(AgentInput Input, string? SourceSessionId, string? Provenance)>? pendingInputs = null;
+        List<AgentSteerOptions>? pendingInputs = null;
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -2499,9 +2510,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             _stateGate.Release();
         }
 
-        foreach (var (input, sourceSessionId, provenance) in pendingInputs)
+        foreach (var steer in pendingInputs)
         {
-            await AppendUserMessageAsync(input, runId, askId: null, cancellationToken, sourceSessionId, provenance).ConfigureAwait(false);
+            await AppendUserMessageAsync(steer.Input, runId, askId: null, cancellationToken, steer.SourceSessionId, steer.Provenance).ConfigureAwait(false);
         }
 
         return true;
@@ -2511,7 +2522,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     // retain source lifetime authority until FinishRunAsync has joined and disposed the original work.
     // whenNothingSteers: a run that answered ends only when no steer waits, under the gate SteerAsync takes, so that a steer
     // is either taken into the run or refused (no active run), never accepted and dropped. Returns false when one waits.
-    private async Task<bool> CompleteActiveTurnAsync(AgentRunId runId, CancellationToken cancellationToken, bool whenNothingSteers = false)
+    // notTaken: a run that failed or was aborted ends with the steers it accepted and did not take, whose senders are
+    // given them back there.
+    private async Task<bool> CompleteActiveTurnAsync(AgentRunId runId, CancellationToken cancellationToken, bool whenNothingSteers = false,
+        List<Action>? notTaken = null)
     {
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -2528,6 +2542,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
             _activeRunId = null;
             _activeRunConversationStartIndex = null;
+            if (notTaken is not null)
+            {
+                foreach (var steer in _pendingSteerInputs)
+                {
+                    if (steer.NotTaken is { } handBack) notTaken.Add(handBack);
+                }
+            }
+
             _pendingSteerInputs.Clear();
             _toolImages.ReleaseRun();
             _pdfInputs.Clear();

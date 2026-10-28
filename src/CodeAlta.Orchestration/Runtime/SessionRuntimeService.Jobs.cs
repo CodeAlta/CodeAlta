@@ -126,12 +126,19 @@ public sealed partial class SessionRuntimeService
             SourceProjectId = session.ProjectRef,
             CreatedAt = DateTimeOffset.UtcNow,
         };
+        List<SessionViewQueuedPromptImage> QueuedImages()
+            => [.. saved.Select(static image => new SessionViewQueuedPromptImage { Path = image.Path, Title = image.Title, MediaType = image.MediaType })];
         if (running)
         {
             try
             {
                 var runId = await SteerOwnedBodyAsync(session, CreateParentDeliveryExecutionOptions(session),
-                    new AgentSteerOptions { Input = input, Provenance = SessionPromptProvenance.Of(kind, submittedBy) },
+                    new AgentSteerOptions
+                    {
+                        Input = input, Provenance = SessionPromptProvenance.Of(kind, submittedBy),
+                        // A run that fails or is aborted before it takes the prompt hands it back: it waits its turn.
+                        NotTaken = () => _ = QueueNotTakenSteerAsync(session, prompt, kind, submittedBy, QueuedImages(), session.SessionId),
+                    },
                     CancellationToken.None).ConfigureAwait(false);
                 await PersistPromptProvenanceAsync(session, runId.Value, queued: false, kind, prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);
                 return "steered";
@@ -142,9 +149,7 @@ public sealed partial class SessionRuntimeService
             }
         }
 
-        await QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy,
-            [.. saved.Select(static image => new SessionViewQueuedPromptImage { Path = image.Path, Title = image.Title, MediaType = image.MediaType })],
-            CancellationToken.None).ConfigureAwait(false);
+        await QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, QueuedImages(), CancellationToken.None).ConfigureAwait(false);
         await TryDrainNextQueuedPromptAsync(session.SessionId).ConfigureAwait(false);
         return "queued";
         }, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);

@@ -304,6 +304,39 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
+    public Task ParentDelivery_AnAnswerTheRunOfTheParentAcceptedButDidNotTake_IsQueued() => Fixture.Run(async f =>
+    {
+        var parent = f.NewSession();
+        await f.Persist(parent);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(parent, f.Options));
+        var parentProvider = f.Provider.Latest;
+        parentProvider.EmitState(AgentSessionUpdateKind.Warning, new AgentRunId("failing-parent"), "active");
+        Assert.AreEqual("failing-parent", (await f.Wait(f.Runtime.GetCurrentStateAsync(parent.SessionId))).Entry!.ActiveRunId);
+        f.Session.ParentSessionId = parent.SessionId;
+        await f.Persist(f.Session);
+        await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
+        f.Provider.ReleaseSteer.TrySetResult();
+        var post = ParentEventPoster(f, _ => { });
+        await f.Wait(post(new AgentContentCompletedEvent(f.Provider.Descriptor.ProviderId,
+            f.Session.SessionId, DateTimeOffset.UtcNow, null, AgentContentKind.Assistant, "steered", null,
+            "<notify-parent>inert child answer</notify-parent>")));
+        Assert.AreEqual(1, f.Provider.Steers, "The answer steers the run of the parent.");
+        Assert.AreEqual(0, (await f.Wait(f.Journal.ReadLatestStateAsync(parent.SessionId, parent.CreatedAt)))!.QueuedPrompts.Count);
+
+        // The run of the parent fails before it takes the answer and hands it back: it is queued and starts a run.
+        parentProvider.EmitIdle();
+        var notTaken = f.Provider.LastSteer?.NotTaken;
+        Assert.IsNotNull(notTaken, "The delivery asks for the answer back when the run does not take it.");
+        notTaken();
+        await f.Ready(f.Provider.SendStarted.Task);
+        var queued = (await f.Wait(f.Journal.ReadLatestStateAsync(parent.SessionId, parent.CreatedAt)))!.QueuedPrompts.Single();
+        Assert.AreEqual("parent-notify", queued.Kind);
+        Assert.AreEqual(f.Session.SessionId, queued.SubmittedBy?.SourceSessionId);
+        StringAssert.Contains(queued.Prompt, "inert child answer");
+        f.Provider.ReleaseSend.TrySetResult();
+    });
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public Task ParentAndHostRetention_QueuedWorkerOutlivesCanceledWaitAndRowRemoval(bool host) => Fixture.Run(async f =>
