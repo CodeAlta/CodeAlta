@@ -42,6 +42,8 @@ internal sealed class CliAcpCommand(CliStreams streams, CliOutput output, CliEnv
                 Offline = options.Offline,
                 ChecksRequired = true,
                 DisabledPromptFeatures = disabledFeatures,
+                // A user works in the editor: the sessions are not told that nobody is there.
+                Headless = false,
             }, environment, processToken).ConfigureAwait(false);
             environment.HostCreated?.Invoke(host.Host);
             CliAcpAgent? agent = null;

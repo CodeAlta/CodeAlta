@@ -557,6 +557,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 SessionPermissionModes = options.SessionPermissionModes || options.FullTrust,
                 FullTrust = options.FullTrust,
                 Headless = options.HeadlessInstructions,
+                WithoutReviews = options.WithoutReviews,
                 InheritPermissionMode = options.InheritPermissionModePolicy,
                 ShowsPromptSuggestions = options.ShowsPromptSuggestions,
                 Identities = options.AppliesSpaceIdentities

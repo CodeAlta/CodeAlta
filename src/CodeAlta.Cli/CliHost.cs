@@ -47,6 +47,12 @@ internal sealed record CliHostRequest
 
     /// <summary>Gets the parts of the agent prompt the sessions leave out (<see cref="CliPromptFeatures"/>); empty for none.</summary>
     public IReadOnlyList<string> DisabledPromptFeatures { get; init; } = [];
+
+    /// <summary>
+    /// Gets whether the sessions run without a user and are told so (<see cref="CodeAltaHostOptions.HeadlessInstructions"/>):
+    /// true, but for <c>acp</c>, whose user works in the editor.
+    /// </summary>
+    public bool Headless { get; init; } = true;
 }
 
 /// <summary>A host that cannot run as it was set up: a required plugin or MCP server did not start. Exit code 2.</summary>
@@ -55,8 +61,8 @@ internal sealed class CliStartupException(string message) : Exception(message);
 
 /// <summary>
 /// The host of a run of <c>altacli</c>, the composition every face shares (<c>run</c>, <c>alta</c>, <c>models</c>,
-/// <c>auth check</c>, and the coming <c>acp</c>): a headless <see cref="CodeAltaHost"/> with full trust and the headless
-/// instructions, on a private application database and private scratchpads, that leaves the shared state of the global
+/// <c>auth check</c>, and <c>acp</c>): a headless <see cref="CodeAltaHost"/> with full trust, without reviews, and the headless
+/// instructions but for <c>acp</c>, on a private application database and private scratchpads, that leaves the shared state of the global
 /// root as it is (no <c>alta.lock</c>, no <c>AGENTS.md</c>, no project registered); the configured providers; the built-in
 /// plugins that declare the command-line application; and the <c>alta</c> tool without the commands of a user or a window.
 /// </summary>
@@ -157,7 +163,9 @@ internal sealed class CliHost : IAsyncDisposable
                 // Desktop clears the scratchpad of ~/.alta when it starts: the run keeps its own, deleted with its database.
                 ScratchpadRoot = Path.Combine(database.Directory, "scratchpad"),
                 FullTrust = true,
-                HeadlessInstructions = true,
+                HeadlessInstructions = request.Headless,
+                // altacli offers no review (alta review), with a user or without.
+                WithoutReviews = true,
                 // A session another process runs (another altacli, CodeAlta Desktop or TUI) is refused as in use, exit code 5.
                 SessionLeaseOwner = SessionLeaseOwner.CliKind,
                 ListsSkills = request.ListsSkills,

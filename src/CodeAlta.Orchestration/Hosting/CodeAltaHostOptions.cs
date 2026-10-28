@@ -108,6 +108,13 @@ public sealed class CodeAltaHostOptions
     public bool HeadlessInstructions { get; init; }
 
     /// <summary>
+    /// Gets whether the host offers its sessions none of the commands of a user who reviews (<c>alta review</c>), while a
+    /// user may still work with them, as in an editor over ACP: none of them reviews its changes before commit, and their
+    /// prompt says nothing of a headless run. <see cref="HeadlessInstructions"/> implies it. Default false.
+    /// </summary>
+    public bool WithoutReviews { get; init; }
+
+    /// <summary>
     /// Gets the kind of holder this host names in the leases it takes on the sessions it runs or shows
     /// (<see cref="Catalog.SessionLeaseOwner.DesktopKind"/>, <see cref="Catalog.SessionLeaseOwner.TuiKind"/>,
     /// <see cref="Catalog.SessionLeaseOwner.CliKind"/>), so that two processes on one sessions folder never run one session;

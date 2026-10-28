@@ -56,7 +56,7 @@ public sealed partial class OwnedSessionCommandService
             if (session is null || !string.Equals(session.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)) return new("unavailable", null, setting, setting);
             cancellationToken.ThrowIfCancellationRequested();
             await _runtime.SetReviewBeforeCommitAsync(session, reviewBeforeCommit).ConfigureAwait(false);
-            return new("ok", reviewBeforeCommit, !_runtime.Headless && (reviewBeforeCommit ?? setting), setting);
+            return new("ok", reviewBeforeCommit, !_runtime.NeverReviews && (reviewBeforeCommit ?? setting), setting);
         }
         catch (ObjectDisposedException) { return new("closed", null, setting, setting); }
     }
