@@ -1,6 +1,6 @@
 ---
 name: codealta-plugin-runtime
-description: Use this skill to create, change, build, reload, test or troubleshoot a CodeAlta plugin - C# code that adds commands, dialogs, status items, agent tools, alta commands, prompt text or timeline cards to CodeAlta.
+description: Use this skill to create, change, build, reload, test or troubleshoot a CodeAlta plugin - C# code that adds commands, dialogs, status items, agent tools, alta commands, prompt text or timeline cards to CodeAlta, or hooks that check, block or change the tool calls of sessions (a check of each shell command before it runs) and continue a session when its run ends.
 ---
 
 # CodeAlta plugins
@@ -131,7 +131,8 @@ Override only what the plugin needs.
 | `GetResources()` | Skills shipped with the plugin: `Resources.SkillRoot("skills")` | yes | yes |
 | `OnBeforeAgentRunAsync` | Tools and messages for one run; can cancel the run | yes | yes |
 | `OnAgentEventAsync` | Sees the events of the sessions | yes | yes |
-| `OnToolCallAsync`, `OnToolResultAsync` | Sees and changes the calls of the tools that plugins add | yes | yes |
+| `OnToolCallAsync`, `OnToolResultAsync` | Hooks: see, block or change every tool call of a session (see "Tool hooks") | yes | yes |
+| `OnAgentRunEndedAsync` | Hook: continues a session whose run ended, with a prompt | yes | yes |
 | `GetPromptProcessors()`, `OnPromptSubmittingAsync` | Changes a prompt before it is sent | no | yes |
 | `GetCompactionContributions()` | Hooks of a manual compaction | no | yes |
 | `GetCommandLineContributions()` | Commands of the `altatui` command line | no | yes |
@@ -491,6 +492,33 @@ public override IEnumerable<PluginAgentToolContribution> GetAgentTools()
 - The project of the session that calls: `Services.Workspace.SelectedProjectPath ?? Environment.CurrentDirectory`.
 - A tool that starts a program with the arguments the model gives (a command line tool that takes any arguments) is one more shell: say so with `new PluginAgentToolContribution { Definition = …, ActivationPolicy = new PluginToolActivationPolicy { StartsPrograms = true } }`. A session whose `shell_command` the user turned off is then refused it.
 - To try the tool: `alta plugin reload <id>`, then call it in the same turn.
+
+## Tool hooks
+
+`OnToolCallAsync` runs before **every** tool call of a session: the built-in tools (`shell_command`, `write_file`, `apply_patch`, `alta`, `exec`…), plugin and MCP tools, the calls of Code Mode scripts, and the tools Claude Code or an ACP agent runs itself. `OnToolResultAsync` runs after the tools CodeAlta runs. Filter by `context.ToolName`; read a shell command from `context.ShellCommand` (`Command`, `WorkingDirectory`) and the files a call changes from `context.ModifiedFiles`, instead of parsing `context.Arguments`.
+
+```csharp
+public override bool ToolHooksFailClosed => true;              // block the call when this hook throws or times out
+public override TimeSpan HookTimeout => TimeSpan.FromSeconds(15); // 10 seconds by default
+
+public override async ValueTask<PluginToolCallResult?> OnToolCallAsync(PluginToolCallContext context, CancellationToken cancellationToken = default)
+{
+    if (context.ShellCommand is not { } shell) return null;    // null: let the call go on
+    var errors = await CheckAsync(shell.Command, cancellationToken);
+    return errors is null ? null : PluginToolCallResult.Block(errors); // the model reads "Blocked by <plugin>: <errors>"
+}
+
+public override ValueTask<PluginToolResult?> OnToolResultAsync(PluginToolResultContext context, CancellationToken cancellationToken = default)
+    => ValueTask.FromResult<PluginToolResult?>(context.ToolName == "shell_command" && !context.Result.Success
+        ? PluginToolResult.Append("Hint: run the tests with `dotnet test`.")  // or Replace(result), AttachDetails(json)
+        : null);
+```
+
+- The hooks of the plugins run in turn; the first `Block` ends the call; `ReplaceArguments(json)` gives the next hook the new arguments.
+- They run before the checks of CodeAlta, the permission prompt and the sandbox, which still apply to the new arguments: a hook cannot allow what CodeAlta refuses.
+- `context.CanBlock`, `CanModifyArguments`, `CanChangeResult` say what applies: the own tools of Claude Code and of ACP agents (`ToolKind` `Agent`) can only be blocked, and ACP agents only ask about some calls.
+- A hook that throws or does not answer in time is listed by `alta plugin status <id>`; the call goes on unless `ToolHooksFailClosed` is true.
+- `OnAgentRunEndedAsync` returns `PluginAgentRunEndedResult.Continue(prompt)` to give a session whose run ended normally a new prompt (at most 3 times in a row).
 
 ## Commands of the alta tool
 

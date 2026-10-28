@@ -6,6 +6,8 @@ title: Plugins
 
 Plugins extend CodeAlta with commands, dialogs, status items, timeline cards, agent tools, `alta` commands and prompt text. CodeAlta ships built-in plugins, and you can write your own source plugins in C#.
 
+A plugin can also hook the tool calls of sessions: check each shell command before it runs, block a call and tell the model why, or change a result. See [Tool hooks](developers.md#tool-hooks).
+
 > [!WARNING]
 > Enable only plugins you trust. A source plugin is built on your machine and loaded into CodeAlta: it has the same risk as running local code.
 
@@ -21,7 +23,7 @@ Plugins extend CodeAlta with commands, dialogs, status items, timeline cards, ag
 | Agents coordinating sessions, questions, notes and reminders | [Delegation](../sessions/delegation.md) |
 | External tools from a standard protocol | [MCP servers](mcp.md) |
 | Reusable context that runs no code | [Skills](../workspace/settings.md#skills-management) |
-| Host UI, runtime, prompt, timeline or `alta` command extensions | Source plugins |
+| Host UI, runtime, prompt, timeline or `alta` command extensions, hooks on tool calls | Source plugins |
 
 A prompt, an MCP server or a skill is easier to inspect and review. Use a plugin when you need .NET code inside CodeAlta.
 
