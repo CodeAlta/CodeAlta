@@ -12,7 +12,7 @@ internal sealed class CodexCliCatalog(Func<CodexAppServerInstaller> installer) :
     /// <summary>The identifier of the entry.</summary>
     public const string EntryId = "codex-cli";
 
-    public string Title => "Codex";
+    public string Title => "Codex CLI";
 
     public Task<PluginProviderCatalogSnapshot> ListAsync(bool refresh, CancellationToken cancellationToken)
     {

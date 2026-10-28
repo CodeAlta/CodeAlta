@@ -454,7 +454,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
                     onChange={event => edit({ clearApiKey: event.currentTarget.checked, apiKey: "" })} />}</FormGroup>
               </>}
             {original && original.type === form.type && hasSubscriptionUsage(form.type)
-              && <ProviderUsagePanel key={original.key} epoch={epoch} providerKey={original.key} api={usage} />}
+              && <ProviderUsagePanel key={`${original.key}:usage`} epoch={epoch} providerKey={original.key} api={usage} />}
             <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
               onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
           </SectionCard>

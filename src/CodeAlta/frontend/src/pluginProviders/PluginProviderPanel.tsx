@@ -40,6 +40,7 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
   // What the sign-in the plugin runs shows the user: its address, and the code of a device flow.
   const [prompt, setPrompt] = useState<Readonly<{ url: string | null; userCode: string | null; browserOpened: boolean }> | null>(null);
   const signingIn = useRef<AbortController | null>(null);
+  const [signingMethod, setSigningMethod] = useState<string | null>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; signingIn.current?.abort(); }; }, []);
 
@@ -68,7 +69,7 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
     if (busy) return;
     const abort = new AbortController();
     signingIn.current = abort;
-    setBusy("signIn"); setNotice(null); setPrompt(null);
+    setBusy("signIn"); setSigningMethod(method.id); setNotice(null); setPrompt(null);
     try {
       // The stream gives the address to open once the plugin has it, then how the sign-in ended; closing it cancels it.
       const events = await api.pluginProviderSignIn({ expectedEpoch: epoch, key: providerKey, methodId: method.id }, { signal: abort.signal });
@@ -82,14 +83,14 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
     } catch { if (alive.current && !abort.signal.aborted) setNotice({ text: t("The sign-in did not complete: {reason}", { reason: "failed" }), intent: "danger" }); }
     finally {
       if (signingIn.current === abort) signingIn.current = null;
-      if (alive.current && !abort.signal.aborted) { setBusy(null); setPrompt(null); }
+      if (alive.current && !abort.signal.aborted) { setBusy(null); setSigningMethod(null); setPrompt(null); }
     }
   }
 
   function cancelSignIn() {
     signingIn.current?.abort();
     signingIn.current = null;
-    setBusy(null); setPrompt(null); setNotice({ text: t("Sign-in canceled."), intent: "none" });
+    setBusy(null); setSigningMethod(null); setPrompt(null); setNotice({ text: t("Sign-in canceled."), intent: "none" });
   }
 
   async function update() {
@@ -140,8 +141,8 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
                 onClick={() => runInTerminal(terminalCommandLine(method.terminalCommand!, method.terminalEnvironment ?? [], windows))}>{t("Run in a terminal")}</Button>}
             </div>
           : <Button key={method.id} size="small" intent="primary" disabled={!!busy} title={method.description ?? undefined}
-              icon={busy === "signIn" ? <ActivitySpinner size={12} /> : <AppIcon name="user" size={13} />} onClick={() => void signIn(method)}>
-              {busy === "signIn" ? t("Signing in…") : method.label}</Button>)}
+              icon={signingMethod === method.id ? <ActivitySpinner size={12} /> : <AppIcon name="user" size={13} />} onClick={() => void signIn(method)}>
+              {signingMethod === method.id ? t("Signing in…") : method.label}</Button>)}
     </div>
     {busy === "signIn" && <Callout compact intent="primary" className="provider-account-running" icon={<ActivitySpinner size={16} />}>
       <p>{t(!prompt ? "Starting the sign-in…" : prompt.userCode ? "Enter this code on the sign-in page to finish:" : prompt.browserOpened

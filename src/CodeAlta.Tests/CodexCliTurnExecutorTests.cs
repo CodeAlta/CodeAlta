@@ -325,6 +325,21 @@ public sealed class CodexCliTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task AHomeWithoutASignIn_FailsTheTurnAsASignIn_BeforeAnyThread()
+    {
+        // Codex would call the OpenAI API without a key and fail with a 401 that says nothing of the sign-in.
+        var server = new CodexAppServerFake { SignedIn = false };
+        await using var fixture = new Fixture(server);
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentProviderFailureException>(() => fixture.RunAsync([User("hello")]));
+
+        Assert.AreEqual(AgentFailureKind.Auth, exception.Failure.Kind);
+        StringAssert.Contains(exception.Message, "is not signed in");
+        Assert.IsEmpty(server.RequestsOf("thread/start"));
+        Assert.IsEmpty(server.RequestsOf("turn/start"));
+    }
+
+    [TestMethod]
     public async Task Compaction_IsTheOneOfCodex()
     {
         var server = new CodexAppServerFake();
