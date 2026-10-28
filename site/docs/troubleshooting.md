@@ -11,6 +11,18 @@ Use `Ctrl+G Ctrl+L` or `/logs`. Logs are the first place to look for provider, c
 - CodeAlta Desktop: `CodeAlta/desktop/logs` in the local application data folder, such as `%LOCALAPPDATA%\CodeAlta\desktop\logs` on Windows;
 - CodeAlta TUI: `~/.alta/logs/`.
 
+In CodeAlta Desktop, filter the logs by feature, and set **Log levels** to **Debug** for the feature that fails to see more of it: see [Logs and recovery](workspace/settings.md#logs-and-recovery).
+
+## An issue tracker shows an error
+
+When the [Issues tab](issues.md) or the `#` picker shows an error, the log says what failed:
+
+1. Open the logs, choose **Issue trackers** in the feature list and **Warnings**.
+2. The message names the service, the request, the status it answered and what it said, such as `401 Unauthorized ... Bad credentials`, or a sign-in page for Azure DevOps. It also says when the requests carried no credentials, and the messages before it say why: `az` or `gh` not found, or the command that failed with its error.
+3. For every request, set **Log levels > Issue trackers** to **Debug** and open the tab again.
+
+The log never holds your tokens. Sign in as the [Issues](issues.md) page says for your service, for example `az login` or `AZURE_DEVOPS_EXT_PAT` for Azure DevOps.
+
 ## The desktop app does not start
 
 When the window of `alta` cannot open, CodeAlta says why and what to do: in the terminal you started it from, in a message box on Windows, or in a notification on Linux and macOS when you started it from the applications menu or the Dock. The log has the full report.
@@ -135,6 +147,7 @@ A busy session puts the prompt in its waiting list instead of sending it.
 - **An agent has no `shell_command`**: it is turned off in **Settings > Permissions > Tools**, in the **Tools** of the space, or in the agent prompt. See [Tools turned off](workspace/settings.md#tools-turned-off).
 - **Commits have the wrong author**: open the space in **Settings > Spaces**, then **Identity**, and **Check** on the Git card. A running session keeps the identity it started with, and a repository's own `.git/config` comes first. See [Identity](spaces.md#identity).
 - **A session did not fall back after a quota error**: the fallback is off until you turn it on, and uses only the models of the session's tier whose provider is in its space. See [Model tiers and fallback](model-tiers.md#fallback-when-a-provider-fails).
+- **A session did not resume after its limit reset**: **Resume when the limit resets** is off until you turn it on, it resumes a session at most 5 times in a row by default, and a prompt sent to the session while it waits cancels it. See [Resume when the limit resets](model-tiers.md#resume-when-the-limit-resets).
 
 ### History cannot be read
 

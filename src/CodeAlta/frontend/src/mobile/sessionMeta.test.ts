@@ -45,6 +45,8 @@ test("the facts of a session, in order, compact", () => {
   assert.equal(sessionMeta(busy, { space: true, live: false })[0].kind, "space", "the page of a session has no live word");
   assert.deepEqual(sessionMeta(busy, { space: true, live: false, selection: false }).map(item => item.kind), ["space", "project", "worktree", "child"],
     "the page of a session leaves the model and the agent to the chip of its composer");
+  assert.deepEqual(sessionMeta(busy, { space: false, live: false, project: false, child: false }).map(item => item.kind), ["worktree", "model", "agent"],
+    "a sub-agent under its parent repeats neither its project nor that it is a sub-agent");
 });
 
 test("only a hex color reaches a style", () => {

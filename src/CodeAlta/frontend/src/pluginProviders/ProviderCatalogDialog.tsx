@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Callout, Dialog, DialogBody, InputGroup, NonIdealState, Tag } from "@blueprintjs/core";
 import { globalConfig, type GlobalConfigPluginCatalogEntry, type GlobalConfigPluginCatalogResponse } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { PaintedProgressBar } from "../PaintedProgressBar";
+import { MarkdownLinksContext } from "../MarkdownContent";
 import { Logo } from "../ProviderIcon";
 import { providerBrand } from "../brands";
 import { useShellLanguage } from "../shellLanguage";
@@ -26,6 +27,7 @@ export function ProviderCatalogDialog({ epoch, type, title, api = globalConfig, 
   onClose: () => void;
 }) {
   const { t, locale } = useShellLanguage();
+  const openLink = useContext(MarkdownLinksContext);
   const [catalog, setCatalog] = useState<GlobalConfigPluginCatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
@@ -111,7 +113,10 @@ export function ProviderCatalogDialog({ epoch, type, title, api = globalConfig, 
                     </div>
                   : <div className="provider-catalog-actions">
                       {entry.unavailable && <Tag minimal intent="warning" className="provider-catalog-unavailable" title={entry.unavailable}>{entry.unavailable}</Tag>}
-                      {entry.website && <a className="provider-catalog-link" href={entry.website} target="_blank" rel="noreferrer" title={entry.website}><AppIcon name="openExternal" size={13} /></a>}
+                      {entry.website && <a className="provider-catalog-link" href={entry.website} target="_blank" rel="noreferrer" title={entry.website}
+                        aria-label={`${entry.name}: ${entry.website}`}
+                        // The window of the app opens no page itself: the host opens it in the browser of the system.
+                        onClick={event => { if (!openLink) return; event.preventDefault(); openLink(entry.website!, null); }}><AppIcon name="openExternal" size={13} /></a>}
                       <span className="provider-settings-spacer" />
                       {key
                         ? <><Tag minimal round intent="success" icon={<AppIcon name="check" size={12} />}>{t("Added")}</Tag>

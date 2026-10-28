@@ -65,7 +65,8 @@ internal sealed class ProviderFrontendCoordinator
         => _configStore.LoadGlobalConfigContent();
 
     public CodeAltaConfigValidationResult ValidateProviderConfigurationContent(string? content)
-        => CodeAltaConfigStore.ValidateGlobalConfigContent(content, _configStore.ConfigPath);
+        => CodeAltaConfigStore.ValidateGlobalConfigContent(content, _configStore.ConfigPath,
+            _ownedServices is { } owned ? type => owned.PluginProviderTypes.Find(type) is not null : null);
 
     public bool HasAnyEnabledProviders()
     {

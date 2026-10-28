@@ -70,7 +70,7 @@ function Marked({ text, words }: { text: string; words: readonly string[] }) {
  * use a skill. Tab changes the category; a text that starts with "/" looks for a command or a skill, and what follows
  * the name of a skill goes with it. It is a movable, resizable window like the others; its place and size are remembered.
  */
-export function GlobalSearch({ snapshot, favorites, start, files, note, available, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose,
+export function GlobalSearch({ snapshot, favorites, start, files, note, available, unavailableReason, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose,
   archived = noArchived, archivedProjects, onRestore, skills = noSkills, onSkill, content = null, onContent, onOfferMeaning, claudeCode = null, onClaudeCode }: {
   snapshot: WorkspaceSnapshot | null;
   /** The archived sessions of the shown space: a query finds them in a group of their own, and choosing one restores it. */
@@ -90,6 +90,8 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   /** The project whose files are searched, and the search itself; null where no file can be searched. */
   files: Readonly<{ project: FileProject; search: (query: string, signal: AbortSignal) => Promise<SessionReferenceSearchResponse> }> | null;
   available: (id: CommandId) => boolean;
+  /** Why a command that is not available cannot run now, when that is known: its entry says it in place of its description. */
+  unavailableReason?: (id: CommandId) => string | null;
   onCommand: (id: CommandId) => void;
   /** The commands of plugins, listed after the application's own. */
   pluginCommands?: readonly PluginCommandView[];
@@ -130,7 +132,8 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   // A text that starts with "/" shows the commands, or the commands and the skills, or one of the two.
   const shownCategory: SearchCategory = scoped ? "sessions" : !query.commands ? category : !offersSkills ? "commands"
     : slashCategories.includes(category) ? category : "all";
-  const latest = useRef({ files, content, available, onCommand, onPluginCommand, canvasAvailable, onCanvas }); latest.current = { files, content, available, onCommand, onPluginCommand, canvasAvailable, onCanvas };
+  const latest = useRef({ files, content, available, unavailableReason, onCommand, onPluginCommand, canvasAvailable, onCanvas });
+  latest.current = { files, content, available, unavailableReason, onCommand, onPluginCommand, canvasAvailable, onCanvas };
   const skillSearch = useMemo(() => offersSkills ? searchSkills(skills, text) : [], [skills, text, offersSkills]);
 
   // The files of the project in front are searched by the host, a moment after the last key.
@@ -225,6 +228,8 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   useLayoutEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [index, groups]);
 
   const enabled = (result: SearchResult) => result.kind !== "command" || result.enabled && (!result.key.startsWith("command:") || latest.current.available(result.key.slice("command:".length) as CommandId));
+  const reason = (result: SearchResult) => result.kind === "command" && result.key.startsWith("command:") && !enabled(result)
+    ? latest.current.unavailableReason?.(result.key.slice("command:".length) as CommandId) ?? null : null;
   function open(result: SearchResult | undefined) {
     if (!result || !enabled(result)) return;
     if (result.kind === "project") onProject(result.project);
@@ -301,7 +306,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
             {shownCategory === "all" && group.total > group.results.length && <button type="button" tabIndex={-1} onClick={() => choose(group.group)}>
               {t("Show all {count}", { count: group.total })}<AppIcon name="chevronRight" size={12} /></button>}</div>
           {group.results.map(result => { option++; const at = option;
-            return <SearchRow key={result.key} result={result} words={words} id={`search-option-${at}`} selected={at === index} enabled={enabled(result)} locale={locale} now={now}
+            return <SearchRow key={result.key} result={result} words={words} id={`search-option-${at}`} selected={at === index} enabled={enabled(result)} reason={reason(result)} locale={locale} now={now}
               onHover={() => { if (at !== index) setActive(at); }} onOpen={() => open(result)} />; })}
         </div>)}
         {!rows.length && <p className="global-search-empty" role="status">{t(empty)}</p>}
@@ -326,8 +331,10 @@ const contentKindLabels: Readonly<Record<string, MessageKey>> = { note: "Notes",
 const rank = (name: string) => { const at = suggestedCommands.indexOf(name); return at < 0 ? suggestedCommands.length : at; };
 
 /** One result: its icon, its name with what the query found marked, what tells it from the others, and what is known of it. */
-function SearchRow({ result, words, id, selected, enabled, locale, now, onHover, onOpen }: {
-  result: SearchResult; words: readonly string[]; id: string; selected: boolean; enabled: boolean; locale: Parameters<typeof sessionTime>[1]; now: number;
+function SearchRow({ result, words, id, selected, enabled, reason = null, locale, now, onHover, onOpen }: {
+  result: SearchResult; words: readonly string[]; id: string; selected: boolean; enabled: boolean;
+  /** Why a command that is not available cannot run now. */
+  reason?: string | null; locale: Parameters<typeof sessionTime>[1]; now: number;
   onHover: () => void; onOpen: () => void;
 }) {
   const { t } = useShellLanguage();
@@ -390,9 +397,9 @@ function SearchRow({ result, words, id, selected, enabled, locale, now, onHover,
     detail = skill.description;
     meta = <span className="global-search-tag">{t(skillSourceLabels[skill.source] ?? "Plugin")}</span>;
   } else {
-    icon = "chevronRight"; tone = "azure"; hint = `/${result.name}\n${result.description}`;
+    icon = "chevronRight"; tone = "azure"; hint = `/${result.name}\n${reason ?? result.description}`;
     title = <>{result.label}<code className="global-search-slash">/{result.name}</code></>;
-    detail = result.description;
+    detail = reason ? <span className="global-search-unavailable">{reason}</span> : result.description;
     meta = <span className="global-search-keys">{result.keys.slice(0, 2).map(gesture => <KeyGesture key={gesture} gesture={gesture} />)}</span>;
   }
   return <div role="option" id={id} aria-selected={selected} aria-disabled={!enabled} className="global-search-row" data-kind={result.kind} title={hint}

@@ -743,7 +743,8 @@ public sealed class SystemPromptBuilder
         if (!string.IsNullOrWhiteSpace(request.ModelTiers) && !IsOff(request.DisabledFeatures, PromptFeatures.SubAgents))
         {
             lines.Add($"- Model tiers: {request.ModelTiers}. Give a session one with `alta session create --tier <name>` instead of naming a model."
-                + (request.ModelFallback ? " When its provider fails (quota, outage), a session goes on with the next model of its tier." : string.Empty));
+                + (request.ModelFallback ? " When its provider fails (quota, outage), a session goes on with the next model of its tier." : string.Empty)
+                + (request.ModelFallback && request.ModelResume ? " When every model of its tier reached its limit, it resumes by itself once a limit resets: a session that waits for it has not failed." : string.Empty));
         }
 
         // Where an agent writes down long instructions of the user, so that they outlive a compaction of the context.
@@ -1512,6 +1513,12 @@ public sealed class SystemPromptBuildRequest
 
     /// <summary>Gets whether, in the space of the session, a session goes on with the next model of its tier when its provider fails.</summary>
     public bool ModelFallback { get; init; }
+
+    /// <summary>
+    /// Gets whether, in the space of the session, a session that stopped on a limit with no model of its tier to take over
+    /// resumes by itself once a limit resets.
+    /// </summary>
+    public bool ModelResume { get; init; }
 
     /// <summary>
     /// Gets the mode of Code Mode the session has: <c>off</c> when the host gives none; <c>on</c> when it has <c>exec</c>; <c>only</c> when

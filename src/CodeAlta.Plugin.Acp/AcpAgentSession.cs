@@ -681,6 +681,9 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
                     ? $"{_options.AgentName} is not signed in, in the sandbox of this session, where it has a home folder of its own. Give its provider a token or an API key in its Environment (Settings > Providers), then send the message again. ({auth.Message})"
                     : $"{_options.AgentName} is not signed in. Sign in from Settings > Providers, then send the message again. ({auth.Message})",
                 new AgentFailureInfo(AgentFailureKind.Auth), auth),
+            AcpJsonRpcException rpc when AcpAgentInspector.AsksForSignIn(rpc.Message) => new AgentProviderFailureException(
+                $"{_options.AgentName} is not signed in. Sign in from Settings > Providers, then send the message again. ({rpc.Message})",
+                new AgentFailureInfo(AgentFailureKind.Auth), rpc),
             AcpJsonRpcException rpc => new AgentProviderFailureException($"{_options.AgentName}: {rpc.Message}", AgentFailureClassifier.Classify(rpc) ?? new AgentFailureInfo(AgentFailureKind.Other), rpc),
             AcpConnectionClosedException closed => Closed(connection, closed),
             OperationCanceledException canceled => canceled,

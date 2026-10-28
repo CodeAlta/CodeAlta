@@ -11,7 +11,8 @@ import { createQueueSubmissions } from "./sessionQueue";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
 import { createNextSendSelectionStore } from "./nextSendSelection";
-import type { SessionAbortRunRequest, SessionAdmission, SessionRuntimeBackgroundTaskResponse, SessionRuntimeStateResponse, SessionSendRequest, SessionSteerRequest } from "#neoastra";
+import type { SessionAbortRunRequest, SessionAdmission, SessionCompactRequest, SessionReceiptView, SessionRuntimeBackgroundTaskResponse, SessionRuntimeStateResponse,
+  SessionSendRequest, SessionSteerRequest } from "#neoastra";
 
 const unavailable = async (): Promise<never> => { throw new Error("The composer fixture does not offer this operation"); };
 const epoch = "fixture-epoch";
@@ -19,6 +20,8 @@ const sessionId = "fixture-session";
 const runtime = "11111111-1111-4111-8111-111111111111";
 let run: string | null = null;
 let draining = false;
+// A saved session that has not attached to the runtime yet: the host observes no attachment for it.
+let attached = true;
 let background: SessionRuntimeBackgroundTaskResponse[] = [];
 let runs = 0;
 let operations = 0;
@@ -50,8 +53,24 @@ const abortRuns = createAbortRunSubmissions(async (request): Promise<SessionAdmi
     code: "cancellation_signalled", runId: null, queueInsertion: null } };
 });
 
+// The host takes a compaction and lists its receipt, pending until the test settles it.
+const compaction = createCompactionSubmissions(async (request): Promise<SessionAdmission> => {
+  fixture.compactCalls.push(request);
+  const receipt: SessionReceiptView = { kind: "Compact", clientRequestId: request.clientRequestId, sessionId: request.sessionId, operationId: operationId(),
+    targetOperationId: null, state: "pending", outcome: null, code: null, runId: null, queueInsertion: null };
+  (window as Window & { fixtureReceiptRows?: unknown[] }).fixtureReceiptRows = [receipt];
+  return { status: "accepted", epoch: request.expectedEpoch, receipt };
+});
+
 const fixture = {
   sendCalls: [] as SessionSendRequest[],
+  compactCalls: [] as SessionCompactRequest[],
+  attach(value: boolean) { attached = value; },
+  /** The host ends the compaction it listed. */
+  settleCompaction(outcome: string, code: string | null) {
+    const page = window as Window & { fixtureReceiptRows?: SessionReceiptView[] };
+    page.fixtureReceiptRows = (page.fixtureReceiptRows ?? []).map(row => row.kind === "Compact" ? { ...row, state: "terminal", outcome, code } : row);
+  },
   steerCalls: [] as SessionSteerRequest[],
   abortRunCalls: [] as SessionAbortRunRequest[],
   sendMode(value: typeof sendMode) { sendMode = value; },
@@ -78,10 +97,12 @@ Object.assign(window, { fixture });
 
 const props = {
   epoch, sessionId, submissions, steering, queue,
-  compaction: createCompactionSubmissions(unavailable), abortRuns,
+  compaction, abortRuns,
   capability: createMutationCapability(epoch), draftIndicators: createDraftIndicators(), permissionReviewer: null,
   selections: createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)),
-  runtimeReader: createRuntimeStateReader(async request => ({ status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
+  runtimeReader: createRuntimeStateReader(async request => !attached
+    ? { status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId, entry: null, runtimeInstanceId: runtime, coordinatorTransitionInProgress: false }
+    : ({ status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
     entry: { attachmentGeneration: "12", activeRunId: run, isRetiring: false, isTerminated: false, backgroundTasks: background, queueDrainInProgress: draining,
       providerId: "fixture-provider", providerKey: "fixture-provider", modelId: null, reasoningEffort: null, agentPromptId: null,
       // An idle attachment can have a next-turn prompt selection: normal Send consumes it.

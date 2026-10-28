@@ -178,6 +178,8 @@
 .changes-review-toggle.bp6-button[aria-pressed="true"] { color: var(--review-accent); }
 .changes-panel > .review-bar { border-bottom: 1px solid var(--line); }
 .review-bar-request { color: var(--review-accent); }
+.review-bar-approved { display: inline-flex; align-items: center; gap: 3px; color: var(--green); }
+.review-bar-approved > svg { margin-left: 2px; }
 .changes-side-views { flex: none; display: flex; align-items: stretch; height: 32px; border-bottom: 1px solid var(--line); }
 .changes-side-view { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; padding: 0 8px; border: 0; background: transparent;
   color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }

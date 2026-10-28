@@ -24,18 +24,26 @@ internal static class MobileAlta
         var result = await alta.InvokeAsync(args, stdin, cancellationToken: cancellationToken).ConfigureAwait(false);
         var records = new List<JsonObject>();
         string? error = null;
-        foreach (var line in result.TranscriptJsonl.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var record in Parse(result.TranscriptJsonl))
         {
-            JsonNode? node;
-            try { node = JsonNode.Parse(line); }
-            catch (JsonException) { continue; }
-            if (node is not JsonObject record) continue;
             var type = (string?)record["type"];
             if (type == "alta.error") error ??= Text(record, "message") ?? Text(record, "code");
             else if (type != "alta.result") records.Add(record);
         }
 
         return new(result.ExitCode, result.ExitCode == 0 ? null : error ?? result.Error ?? "The command failed.", records, result.Truncated);
+    }
+
+    /// <summary>The records of a transcript, one JSON object a line; a line that is none is skipped.</summary>
+    internal static IEnumerable<JsonObject> Parse(string transcript)
+    {
+        foreach (var line in transcript.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            JsonNode? node;
+            try { node = JsonNode.Parse(line); }
+            catch (JsonException) { continue; }
+            if (node is JsonObject record) yield return record;
+        }
     }
 
     /// <summary>A string member of a record, null when it has none or an empty one.</summary>

@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using CodeAlta.Plugins.Abstractions;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.Git;
 
@@ -56,11 +57,14 @@ internal sealed class GitHostTracker : IIssueTracker
             {
                 Filters = request.Selections, Fields = request.Fields, Cache = Cache,
             };
-            return await Api.FiltersAsync(asked, cancellationToken).ConfigureAwait(false);
+            var filters = await Api.FiltersAsync(asked, cancellationToken).ConfigureAwait(false);
+            if (asked.FailureStatusCode is { } refused) LogRefusal("reading the filters of the issues", refused, asked);
+            return filters;
         }
         catch (Exception exception) when (exception is HttpRequestException or JsonException or InvalidOperationException
             || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
+            LogFailure("reading the filters of the issues", exception);
             return [];
         }
     }
@@ -71,11 +75,14 @@ internal sealed class GitHostTracker : IIssueTracker
         try
         {
             var asked = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false)) { Cache = Cache };
-            return await Api.FieldsAsync(asked, cancellationToken).ConfigureAwait(false);
+            var fields = await Api.FieldsAsync(asked, cancellationToken).ConfigureAwait(false);
+            if (asked.FailureStatusCode is { } refused) LogRefusal("reading the fields of the issues", refused, asked);
+            return fields;
         }
         catch (Exception exception) when (exception is HttpRequestException or JsonException or InvalidOperationException
             || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
+            LogFailure("reading the fields of the issues", exception);
             return [];
         }
     }
@@ -104,12 +111,17 @@ internal sealed class GitHostTracker : IIssueTracker
             request = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false)) { Filters = query.Filters, Cache = Cache };
             var items = await Api.ListAsync(request, query.Kind, query.Filter, text, limit + 1, cancellationToken).ConfigureAwait(false);
             var page = new TrackedItemPage(items.Count > limit ? [.. items.Take(limit)] : items) { More = items.Count > limit };
-            return request.FailureStatusCode is { } refused ? Refused(page, refused, request.Anonymous) : page;
+            if (request.FailureStatusCode is not { } refused) return page;
+            page = Refused(page, refused, request.Anonymous);
+            LogRefusal($"listing the {Kind(query.Kind)}", refused, request, page.Problem);
+            return page;
         }
         catch (Exception exception) when (exception is HttpRequestException or JsonException or InvalidOperationException
             || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            return new([]) { Problem = exception is OperationCanceledException ? $"{DisplayName} did not answer in time." : $"{DisplayName} could not be reached." };
+            var problem = exception is OperationCanceledException ? $"{DisplayName} did not answer in time." : $"{DisplayName} could not be reached.";
+            LogFailure($"listing the {Kind(query.Kind)}", exception, problem);
+            return new([]) { Problem = problem };
         }
     }
 
@@ -120,14 +132,31 @@ internal sealed class GitHostTracker : IIssueTracker
         try
         {
             var request = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false));
-            return await Api.ReadAsync(request, kind, number, cancellationToken).ConfigureAwait(false);
+            var detail = await Api.ReadAsync(request, kind, number, cancellationToken).ConfigureAwait(false);
+            if (detail is null && request.FailureStatusCode is { } refused) LogRefusal($"reading {Kind(kind, one: true)} {id}", refused, request);
+            return detail;
         }
         catch (Exception exception) when (exception is HttpRequestException or JsonException or InvalidOperationException
             || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
+            LogFailure($"reading {Kind(kind, one: true)} {id}", exception);
             return null;
         }
     }
+
+    private static string Kind(TrackedItemKind kind, bool one = false)
+        => kind == TrackedItemKind.PullRequest ? one ? "the pull request" : "pull requests" : one ? "the issue" : "issues";
+
+    // The failure the Issues tab shows, with the request that failed and what the service said of it.
+    private void LogRefusal(string what, HttpStatusCode status, GitIssueQuery query, string? problem = null)
+    {
+        var request = query.Failure?.ToString() ?? string.Create(CultureInfo.InvariantCulture, $"The service answered {(int)status} {status}.");
+        var credentials = query.Anonymous ? " The requests carried no credentials: see the messages before for why." : string.Empty;
+        GitIssueLog.Log?.Warn($"{DisplayName} {Location}: {what} failed{(problem is null ? "" : $" ({problem})")}. {request}{credentials}");
+    }
+
+    private void LogFailure(string what, Exception exception, string? problem = null)
+        => GitIssueLog.Log?.Warn(exception, $"{DisplayName} {Location}: {what} failed{(problem is null ? "." : $" ({problem})")}");
 
     private TrackedItemPage Refused(TrackedItemPage page, HttpStatusCode status, bool anonymous)
     {

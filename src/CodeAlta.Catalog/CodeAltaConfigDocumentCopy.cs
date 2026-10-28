@@ -79,7 +79,7 @@ internal static class CodeAltaConfigDocumentCopy
                         ? new CodeAltaModelTiersDocument { Complex = Copy(tiers.Complex), Standard = Copy(tiers.Standard), Quick = Copy(tiers.Quick) }
                         : null,
                     Fallback = models.Fallback is { } fallback
-                        ? new CodeAltaModelFallbackDocument { Enabled = fallback.Enabled, On = Copy(fallback.On) }
+                        ? new CodeAltaModelFallbackDocument { Enabled = fallback.Enabled, On = Copy(fallback.On), Resume = fallback.Resume, MaxResumes = fallback.MaxResumes }
                         : null,
                 }
                 : null,
@@ -103,6 +103,9 @@ internal static class CodeAltaConfigDocumentCopy
                         Outside = profile.Outside,
                     }),
                 }
+                : null,
+            Logging = document.Logging is { } logging
+                ? new CodeAltaLoggingSettingsDocument { Level = logging.Level, Features = Copy(logging.Features, static level => level) }
                 : null,
             Identity = Copy(document.Identity),
         };

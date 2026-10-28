@@ -591,6 +591,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             operation.Work = RunSendAsync(operation);
         }
         operation.Launch.TrySetResult();
+        // A session given a prompt no longer waits for a resume after a limit.
+        Fallback.NoteSend(request.SessionId, request.Provenance);
         return new(OwnedSessionCommandAdmissionKind.Accepted, operation.Receipt);
     }
 
@@ -1131,24 +1133,10 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Whether an attached file is converted to Markdown when it is sent: an office document for every model, a PDF for a
-    /// model that does not declare PDF input. Converted once, then: a request only reads the Markdown.
+    /// Whether an attached file is converted to Markdown when it is sent. The rule lives in <see cref="PromptAttachmentInput"/>.
     /// </summary>
     internal static bool NeedsConversion(string mediaType, AgentModelInfo? model)
-        => AgentAttachedFiles.IsDocument(mediaType) || mediaType == AgentPdfInputs.MediaType && !AgentPdfInputs.AcceptsPdf(model);
-
-    // The copy of an attachment the store saves: an image as its PNG, a file with the type its content shows and its own extension.
-    private static PromptImageAttachment CreateAttachment(string id, OwnedPromptImage attachment)
-    {
-        if (OwnedPromptImages.IsImage(attachment))
-            return new PromptImageAttachment(id, attachment.Title, OwnedPromptImages.Decode(attachment), attachment.MediaType, ".png");
-        var bytes = OwnedPromptImages.DecodeFile(attachment);
-        var mediaType = AgentAttachedFiles.FindMediaType(bytes, attachment.Title);
-        // A PDF or a document keeps the extension of its type, which the converter reads it by; any other file its own.
-        var extension = (AgentAttachedFiles.Extension(mediaType) ?? Path.GetExtension(attachment.Title)).TrimStart('.');
-        if (extension.Length is 0 or > 16 || extension.Any(static c => !char.IsAsciiLetterOrDigit(c))) extension = "bin";
-        return new PromptImageAttachment(id, attachment.Title, bytes, mediaType, "." + extension);
-    }
+        => PromptAttachmentInput.NeedsConversion(mediaType, model);
 
     private async Task<Prepared?> PrepareAsync(SendOperation operation)
     {
@@ -1190,25 +1178,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 if (project is { Archived: true } || (!string.IsNullOrWhiteSpace(session.ProjectRef)
                     && (project is null || operation.Request.References is null)))
                     throw new ArgumentException("Image Send requires the exact current project scope.");
-                operation.Execution.Token.ThrowIfCancellationRequested();
-                var attachments = images.Select((image, index) => CreateAttachment(operation.Receipt.OperationId.ToString("N") + index, image)).ToArray();
-                var saved = await new PromptImageAttachmentStore(_catalog).SaveAsync(session, attachments, operation.Execution.Token).ConfigureAwait(false);
                 var items = new List<AgentInputItem>(input.Items);
-                // The store keeps the order of the batch.
-                for (var index = 0; index < saved.Count; index++)
-                {
-                    var attachment = saved[index];
-                    if (OwnedPromptImages.IsImage(images[index]))
-                    {
-                        items.Add(new AgentInputItem.LocalImage(attachment.Path, attachment.Title, attachment.MediaType));
-                        continue;
-                    }
-
-                    if (NeedsConversion(attachment.MediaType, model))
-                        await Documents.ConvertAsync(attachment.Path, operation.Execution.Token).ConfigureAwait(false);
-                    items.Add(new AgentInputItem.LocalFile(attachment.Path, attachment.Title, attachment.MediaType));
-                }
-
+                items.AddRange(await PromptAttachmentInput.SaveAsync(session, _catalog, images, operation.Receipt.OperationId.ToString("N"),
+                    model, Documents, operation.Execution.Token).ConfigureAwait(false));
                 input = new AgentInput(items);
             }
             // A selection without a model keeps the model the session already runs with. A send never leaves

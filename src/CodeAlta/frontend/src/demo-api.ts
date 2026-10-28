@@ -285,6 +285,8 @@ export const colorSchemes = Object.freeze({
 export const applicationLogs = Object.freeze({
   read: async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }),
   clear: async () => ({ status: "unavailable", captureId: null, clearedRows: 0, coveredOmitted: "0", boundary: "0" }),
+  levels: async () => ({ status: "unavailable", level: "info", features: [], levels: [], editable: false }),
+  saveLevels: async () => ({ status: "unavailable", level: "info", features: [], levels: [], editable: false }),
 });
 export const composerStatus = Object.freeze({ read: unavailable });
 export const pluginUi = Object.freeze({ contributions: unavailable, buttons: async () => ({ status: "unavailable", place: null, buttons: [] }), regions: unavailable, invokeCommand: unavailable, searchPicker: unavailable, watch: unavailable, respond: unavailable, dialogAction: unavailable });

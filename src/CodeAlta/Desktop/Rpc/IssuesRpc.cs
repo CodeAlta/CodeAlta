@@ -5,6 +5,7 @@ using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Desktop.WorkItems;
 using CodeAlta.Plugins.Abstractions;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Rpc;
 
@@ -28,6 +29,9 @@ internal sealed partial class IssuesService
 
     /// <summary>The most text of a description or of all the comments of an item, in UTF-16 units.</summary>
     internal const int MaximumBody = 200 * 1024;
+
+    /// <summary>The name of the logger of the Issues tab, of the Issue trackers feature of the log.</summary>
+    internal const string LoggerName = "CodeAlta.Issues";
 
     private const int MaximumQuery = 256;
     private const int MaximumTitle = 512;
@@ -96,16 +100,23 @@ internal sealed partial class IssuesService
             var filters = kind == TrackedItemKind.Issue ? await CheckedFiltersAsync(tracker, request.Filters, request.Service, project, timeout.Token).ConfigureAwait(false) : TrackedFilters.None;
             if (filters is null) return new("invalid_request", [], false, null, false);
             var page = await tracker.ListAsync(new(kind, filter, string.IsNullOrWhiteSpace(request.Query) ? null : request.Query.Trim(), limit) { Part = request.Part, Filters = filters }, timeout.Token).ConfigureAwait(false);
-            return new("ok", [.. page.Items.Take(limit).Select(Row).OfType<IssueRow>()], page.More, page.Problem is null ? null : GitIssuesService.Clean(page.Problem, MaximumTitle), page.NeedsSignIn);
+            var problem = page.Problem is null ? null : GitIssuesService.Clean(page.Problem, MaximumTitle);
+            // What the tab shows in its place is in the log too, with what the tracker wrote of it before.
+            if (problem is not null) LogFailure(tracker, $"listing the {KindName(kind)} shows: {problem}{(page.NeedsSignIn ? " (sign-in asked)" : "")}", null);
+            return new("ok", [.. page.Items.Take(limit).Select(Row).OfType<IssueRow>()], page.More, problem, page.NeedsSignIn);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
-            return new("ok", [], false, $"{GitIssuesService.Clean(tracker.DisplayName, MaximumName)} did not answer in time.", false);
+            var problem = $"{GitIssuesService.Clean(tracker.DisplayName, MaximumName)} did not answer in time.";
+            LogFailure(tracker, $"listing the {KindName(kind)} shows: {problem} ({ListTimeout.TotalSeconds:0} s)", exception);
+            return new("ok", [], false, problem, false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // Never the text of an exception: it can name local paths, hosts or request headers.
-            return new("ok", [], false, $"{GitIssuesService.Clean(tracker.DisplayName, MaximumName)} could not be read.", false);
+            // Never the text of an exception to the page: it can name local paths, hosts or request headers. The log has it.
+            var problem = $"{GitIssuesService.Clean(tracker.DisplayName, MaximumName)} could not be read.";
+            LogFailure(tracker, $"listing the {KindName(kind)} shows: {problem}", exception);
+            return new("ok", [], false, problem, false);
         }
     }
 
@@ -138,12 +149,14 @@ internal sealed partial class IssuesService
 
             return new("ok", row, body.Text, body.Cut, comments, detail.MoreComments || comments.Count < detail.Comments.Count);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
+            LogFailure(tracker, $"reading {request.Id} did not end in time.", exception);
             return new("failed");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            LogFailure(tracker, $"reading {request.Id} failed.", exception);
             return new("failed");
         }
     }
@@ -166,7 +179,11 @@ internal sealed partial class IssuesService
             return new("no_tracker");
         TrackedItemDetail? detail;
         try { detail = await tracker.ReadAsync(kind, request.Id, cancellationToken).ConfigureAwait(false); }
-        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { detail = null; }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            LogFailure(tracker, $"reading {request.Id} to start a session failed.", exception);
+            detail = null;
+        }
         if (detail is null || Row(detail.Item) is not { } row) return new("not_found");
 
         // What the user chose in the form of the Agent chip, else what the session that shows the item runs with, else the defaults.
@@ -212,11 +229,25 @@ internal sealed partial class IssuesService
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
+                Log?.Warn(exception, $"{source.GetType().Name} could not give the trackers of {project.ProjectPath}.");
             }
         }
 
         return trackers;
     }
+
+    private static string KindName(TrackedItemKind kind) => kind == TrackedItemKind.PullRequest ? "pull requests" : "issues";
+
+    // A failure the tab shows is in the log, with the exception the page is not given.
+    private static void LogFailure(IIssueTracker tracker, string what, Exception? exception)
+    {
+        var message = $"{GitIssuesService.Clean(tracker.DisplayName, MaximumName)} {GitIssuesService.Clean(tracker.Location, MaximumTitle)}: {what}";
+        if (exception is null) Log?.Warn(message);
+        else Log?.Warn(exception, message);
+    }
+
+    // XenoAtom.Logging throws for a message with values before the log starts, as in a test: nothing is logged then.
+    private static Logger? Log => LogManager.IsInitialized ? LogManager.GetLogger(LoggerName) : null;
 
     private static IssueSource? Source(IIssueTracker tracker)
     {

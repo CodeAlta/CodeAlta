@@ -39,9 +39,18 @@ export function runningSessionKeys(state: RuntimeObservationState): ReadonlySet<
 
 /** Whether any known session of a project (or global session, for null) is working. */
 export function projectRunning(state: RuntimeObservationState, projectId: string | null): boolean {
-  for (const run of state.live.values()) if (run.running && run.projectId === projectId) return true;
-  for (const [key, row] of state.rows) if (row.projectId === projectId && row.running && !row.stale && !state.live.has(key)) return true;
-  return false;
+  return runningCount(state, id => id === projectId) > 0;
+}
+
+/**
+ * How many known sessions are working in the projects a scope holds: one project (or the global sessions, for null),
+ * or the projects of a label and of the labels under it.
+ */
+export function runningCount(state: RuntimeObservationState, inScope: (projectId: string | null) => boolean): number {
+  let count = 0;
+  for (const run of state.live.values()) if (run.running && inScope(run.projectId)) count++;
+  for (const [key, row] of state.rows) if (!state.live.has(key) && row.running && !row.stale && inScope(row.projectId ?? null)) count++;
+  return count;
 }
 
 export function runtimeTarget(snapshot: WorkspaceSnapshot | undefined, tab: SessionTab, epoch: string | undefined): RuntimeTarget | null {

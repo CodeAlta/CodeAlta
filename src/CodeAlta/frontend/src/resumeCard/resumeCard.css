@@ -1,0 +1,4 @@
+/* The line of the warning card of a resume after a limit: when, and its two actions. */
+.timeline-resume { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.timeline-resume-when { color: var(--text); }
+.timeline-resume-refused { color: var(--danger, #c23030); }

@@ -18,6 +18,12 @@ test("Review changes brings the Changes tab in front of the session of its pane"
       await until(`!document.querySelector('.session-tab-popup')`, `the menu closed after ${text}`);
     };
     const reviewChanges = async () => { await press(session("two"), 1, "right"); await choose("Review changes"); };
+    // The notices of the fixture (cleanup status) can lie over the tabs of a narrow pane, whose tabs are below the title row.
+    const tab = async (name: string) => {
+      await evaluate("document.querySelectorAll('.bp6-toast button').forEach(button => button.click())");
+      await until("!document.querySelector('.bp6-toast')", "the notices closed");
+      await press(title(name));
+    };
 
     await until(`!!${session("two")} && ${session("one")}.getAttribute('aria-pressed')==='true'`, "the selected project with session one open");
     // Two panes: session one, then session two beside it.
@@ -36,9 +42,9 @@ test("Review changes brings the Changes tab in front of the session of its pane"
     // Asked again, the changes come in front of that session: from the session itself, and from another pane.
     await reviewChanges();
     await showing(["one - Project*", "two - Project*", "Changes Project* | chat-1 - Chat"], "the Changes tab in front again");
-    await press(title("chat-1 - Chat"));
+    await tab("chat-1 - Chat");
     await showing(["one - Project*", "two - Project*", "Changes Project | chat-1 - Chat*"], "the session in front again");
-    await press(title("one - Project"));
+    await tab("one - Project");
     await until(`${session("one")}.getAttribute('aria-pressed')==='true'`, "session one selected in the other pane");
     await showing(["one - Project*", "two - Project*", "Changes Project | chat-1 - Chat*"], "the session still in front of the Changes tab");
     await reviewChanges();

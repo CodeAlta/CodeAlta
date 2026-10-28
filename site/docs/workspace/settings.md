@@ -33,7 +33,7 @@ Most settings are files. Each page shows its paths, with **Edit in the code edit
 | **Plugins** | `~/.alta/plugins`, `.alta/plugins` of the project, and each source plugin |
 | **Appearance** | The folder of your color schemes |
 
-Opening `~/.alta/skills` or `~/.alta/plugins` lets you work on all of them at once. A file that does not exist yet has no button to open it. `config.toml` and `mcp.json` of `~/.alta` open alone in their tab.
+Opening `~/.alta/skills` or `~/.alta/plugins` lets you work on all of them at once. A file that does not exist yet says **Not created yet** beside its path, and has no button to open it: nothing of it applies until you create it. `config.toml` and `mcp.json` of `~/.alta` open alone in their tab.
 
 ## Appearance
 
@@ -182,6 +182,8 @@ Cleanup runs at the **next startup**, never at once. Session cleanup runs on loc
 
 The model browser (**Settings > Models**, `Ctrl+G Ctrl+O` or `/models`) lists the models of every provider with their context size, their capabilities (reasoning, tool calls, images) and their model refs, such as `codex:gpt-5.5@high`.
 
+Above it, **Model tiers** sets the models of the Complex, Standard and Quick tiers, the fallback to the next model of a tier when a provider fails, and the resume of a session when the limit resets. See [Model Tiers and Fallback](../model-tiers.md).
+
 ## Agent prompts
 
 Open the prompt manager with `Ctrl+G Ctrl+H` or `/prompt` (**Settings > Agent prompts**). It lists the built-in prompts, such as Default and Plan, and your global and project prompts, shows which are overridden, and edits the selected one: `name`, `description`, `system` and the Markdown body. Built-in prompts are read-only: **Customize a copy**, or a prompt with the same id, overrides one. System prompt files follow the same rules. The `</>` button opens the file of a prompt in the [code editor](code.md#code-editor). See [Agent Prompts](../prompts.md).
@@ -225,6 +227,18 @@ Open **MCP Servers** with `/mcp`, or `Ctrl+G Ctrl+Y` in CodeAlta Desktop. See [M
 {{ alta_shot "alta-desktop-logs.webp" "alta-logs.png" "Logs viewer with diagnostic output and search controls" "The logs viewer keeps startup, provider, credential, and plugin diagnostics available inside CodeAlta." }}
 
 Open the logs with `Ctrl+G Ctrl+L` or `/logs` (**Settings > Application Logs**): startup, provider, credential and plugin messages, with search and level filters.
+
+In CodeAlta Desktop, each message belongs to a feature: **System**, **Providers**, **Sessions**, **Tools**, **Issue trackers**, **Git**, **MCP**, **Plugins**, **Search**, **Speech** or **Mobile**. The feature list beside the level filter shows the messages of one feature, with the number of messages of each.
+
+**Log levels** sets what is written to the log: a default level, and a level for any feature that needs another one. Choose **Debug** for the feature you investigate, such as **Issue trackers**, and its details are written while the others stay quiet. The change applies at once and is saved in `config.toml`:
+
+```toml
+[logging]
+level = "info"        # trace, debug, info, warn or error
+
+[logging.features]
+issues = "debug"      # system, providers, sessions, tools, issues, git, mcp, plugins, search, speech, mobile
+```
 
 If `~/.alta/config.toml` cannot be loaded at startup, CodeAlta opens a recovery editor with TOML highlighting and live errors: fix the file and save to continue. **Settings > Configuration file** edits it at any time.
 

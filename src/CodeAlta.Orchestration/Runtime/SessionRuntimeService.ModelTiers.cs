@@ -102,6 +102,51 @@ public sealed partial class SessionRuntimeService
     }
 
     /// <summary>
+    /// Reads what a session that stopped on a limit resumes with, as the fallback reads a failed run: the provider,
+    /// model, tier and permission mode it has now, its queue, its space and its sandbox. A session attached to its
+    /// provider gives what it runs; one that is not gives what it saved.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="error">The error that stopped the run the resume continues.</param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The notice, or <see langword="null"/> for a session that is not known or is archived.</returns>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    internal async Task<RunFailureNotice?> ReadResumeNoticeAsync(string sessionId, CodeAlta.Agent.AgentErrorEvent error, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(error);
+        return await AdmitAsync(
+                () => GetActorForWork(sessionId).QueryAsync(async token =>
+                {
+                    var session = await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false);
+                    if (session is null) return null;
+                    var local = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false);
+                    if (local?.Archived == true) return null;
+                    _entries.TryGetValue(sessionId, out var entry);
+                    if (entry is { IsTerminated: true }) entry = null;
+                    var spaceId = entry is null ? session.SpaceId : entry.SpaceId;
+                    var projectId = entry is null ? session.ProjectRef : entry.ProjectId;
+                    var scope = await LoadModelTierScopeAsync(spaceId, projectId, token).ConfigureAwait(false);
+                    var sandboxed = (await GetSessionSandboxAsync(sessionId, token).ConfigureAwait(false)).IsSandboxed;
+                    return new RunFailureNotice(
+                        sessionId,
+                        entry?.ParentSessionId ?? session.ParentSessionId,
+                        entry?.ProviderKey ?? local?.ProviderKey ?? session.ProviderKey ?? session.ProviderId,
+                        entry?.Model ?? local?.ModelId ?? session.ModelId,
+                        entry?.ReasoningEffort ?? local?.ReasoningEffort ?? session.ReasoningEffort,
+                        entry is null ? local?.PermissionMode ?? session.PermissionMode : entry.PermissionMode,
+                        entry?.PendingAgentPromptId ?? entry?.AgentPromptId ?? local?.AgentPromptId ?? session.AgentPromptId,
+                        ModelTiers.Parse(local?.Tier),
+                        error,
+                        local?.HasPendingQueuedPrompts() ?? false,
+                        scope,
+                        sandboxed);
+                }, CancellationToken.None).AsTask(),
+                cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// What a fallback held back of a failed run: the notification of its parent and the drain of its queue. Either
     /// the session went on with another model (<see cref="Replace"/>), or they go out as they would have
     /// (<see cref="ReleaseAsync"/>).

@@ -261,6 +261,256 @@ public sealed class SessionFallbackTests
         var told = await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
         Assert.AreEqual(1, told.Count(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)),
             "Only the last failure is told: the first one was replaced.");
+        Assert.IsFalse((card.Message ?? string.Empty).Contains("Resumes", StringComparison.Ordinal), "The resume is off unless the settings turn it on.");
+        Assert.AreEqual(0, f.Host.Commands.PendingResumes.Count);
+    }
+
+    private const string ResumingTiers = """
+        [models.tiers]
+        standard = ["prov-a:model-a@high", "prov-b:model-b@high"]
+
+        [models.fallback]
+        enabled = true
+        resume = true
+        """;
+
+    [TestMethod]
+    public async Task ExhaustedTier_ResumesAtTheEarliestReset_AndTheParentHearsTheAnswer()
+    {
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        await using var f = await Fixture.CreateAsync(ResumingTiers, clock: clock);
+        var start = clock.GetUtcNow();
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted, start.AddHours(2))));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted, start.AddHours(1))));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        await f.NextSendAsync(f.B);
+
+        // The earliest reset of the tier is B's: the card says when, and with which provider.
+        var resume = await f.WaitForResumeAsync();
+        Assert.AreEqual("prov-b", resume.ProviderKey);
+        Assert.AreEqual(start.AddHours(1) + SessionFallbackCoordinator.ResumeMargin, resume.ResumeAt);
+        Assert.AreEqual(1, resume.Attempt);
+        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Warning && (card.Message ?? string.Empty).Contains("Resumes", StringComparison.Ordinal), "resume");
+        StringAssert.Contains(card.Message, "no other model of the standard tier can take over. Resumes ");
+        StringAssert.Contains(card.Message, " with PROV-B.");
+        Assert.AreEqual(resume.ResumeId, card.Details!.Value.GetProperty("resumeId").GetString());
+        Assert.AreEqual("scheduled", card.Details!.Value.GetProperty("resume").GetString());
+        await clock.WaitForTimersAsync(1);
+
+        // Before its time, nothing runs.
+        clock.Advance(TimeSpan.FromMinutes(30));
+        Assert.AreEqual(1, f.B.SendCount);
+
+        clock.Advance(TimeSpan.FromMinutes(31));
+        var continuation = await f.NextSendAsync(f.B);
+        StringAssert.Contains(continuation.Text, "[CodeAlta resume]");
+        StringAssert.Contains(continuation.Text, "The limit has reset");
+        StringAssert.Contains(continuation.Text, "check its result");
+        Assert.AreEqual(AgentPromptProvenance.ModelFallback, continuation.Provenance);
+        var resumed = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.ProviderFallback && (card.Message ?? string.Empty).Contains("has reset", StringComparison.Ordinal), "resumed");
+        StringAssert.Contains(resumed.Message, "The limit of PROV-B has reset: resuming on PROV-B model-b high.");
+        Assert.AreEqual("automatic", resumed.Details!.Value.GetProperty("resume").GetString());
+        Assert.IsNull(f.Host.Commands.GetPendingResume(f.Child.SessionId));
+
+        // The parent waited as for a fallback: it hears the answer of the resumed run, never the failure.
+        var told = await f.WaitForParentAsync(static prompts => prompts.Count > 0);
+        Assert.IsFalse(told.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)), string.Join("\n", told.Select(static p => p.Prompt)));
+    }
+
+    [TestMethod]
+    public async Task LimitReachedAgain_SchedulesTheNextResume_ThenTheTierIsTakenInOrder()
+    {
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        await using var f = await Fixture.CreateAsync(ResumingTiers, clock: clock);
+        var start = clock.GetUtcNow();
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted, start.AddHours(2))));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted, start.AddHours(1))));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted, start.AddHours(5))));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        await f.NextSendAsync(f.B);
+        var first = await f.WaitForResumeAsync();
+        await clock.WaitForTimersAsync(1);
+        clock.Advance(TimeSpan.FromHours(1) + TimeSpan.FromMinutes(1));
+        await f.NextSendAsync(f.B);
+
+        // B reached its limit again: the next reset of the tier is A's, the second resume in a row.
+        var second = await f.WaitForResumeAsync(pending => pending.ResumeId != first.ResumeId);
+        Assert.AreEqual(("prov-a", 2), (second.ProviderKey, second.Attempt));
+        await clock.WaitForTimersAsync(1);
+        clock.Advance(TimeSpan.FromHours(1));
+
+        // A comes first in the tier: the session goes back to it.
+        var continuation = await f.NextSendAsync(f.A);
+        StringAssert.Contains(continuation.Text, "[CodeAlta resume]");
+        Assert.AreEqual("model-a", continuation.Options.Model);
+        Assert.AreEqual("prov-a", (await f.ChildStateAsync()).ProviderKey);
+        var told = await f.WaitForParentAsync(static prompts => prompts.Count > 0);
+        Assert.IsFalse(told.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task CancelledResume_TellsTheParentOfTheFailure_AndNothingRunsLater()
+    {
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        await using var f = await Fixture.CreateAsync(ResumingTiers, clock: clock);
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        await f.NextSendAsync(f.B);
+        var resume = await f.WaitForResumeAsync();
+        // Without a reset time, a provider is held 15 minutes.
+        Assert.AreEqual(clock.GetUtcNow() + TimeSpan.FromMinutes(15) + SessionFallbackCoordinator.ResumeMargin, resume.ResumeAt);
+        await clock.WaitForTimersAsync(1);
+
+        Assert.AreEqual("unknown", await f.Host.Commands.CancelResumeAsync(f.Child.SessionId, "another-resume"));
+        Assert.AreEqual("ok", await f.Host.Commands.CancelResumeAsync(f.Child.SessionId, resume.ResumeId));
+        Assert.IsNull(f.Host.Commands.GetPendingResume(f.Child.SessionId));
+        Assert.AreEqual("unknown", f.Host.Commands.ResumeNow(f.Child.SessionId, resume.ResumeId));
+        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Info, "cancelled");
+        Assert.AreEqual("Automatic resume cancelled.", card.Message);
+        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+
+        clock.Advance(TimeSpan.FromHours(1));
+        Assert.AreEqual(0, clock.PendingTimerCount);
+        Assert.AreEqual((1, 1), (f.A.SendCount, f.B.SendCount));
+    }
+
+    [TestMethod]
+    public async Task ResumeNow_RunsTheTierInOrderAtOnce_WhateverTheKnownLimits()
+    {
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        await using var f = await Fixture.CreateAsync(ResumingTiers, clock: clock);
+        var start = clock.GetUtcNow();
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted, start.AddHours(3))));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted, start.AddHours(3))));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        await f.NextSendAsync(f.B);
+        var resume = await f.WaitForResumeAsync();
+
+        Assert.AreEqual("ok", f.Host.Commands.ResumeNow(f.Child.SessionId, resume.ResumeId));
+        var continuation = await f.NextSendAsync(f.A);
+        StringAssert.Contains(continuation.Text, "The user asked CodeAlta to resume it");
+        Assert.AreEqual("prov-a", (await f.ChildStateAsync()).ProviderKey);
+        var resumed = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.ProviderFallback && (card.Message ?? string.Empty).Contains("as asked", StringComparison.Ordinal), "resumed");
+        Assert.AreEqual("manual", resumed.Details!.Value.GetProperty("resume").GetString());
+        Assert.IsNull(f.Host.Commands.GetPendingResume(f.Child.SessionId));
+    }
+
+    [TestMethod]
+    public async Task ResumesInARow_StopAtTheMaximum_AndThenTheParentIsTold()
+    {
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        await using var f = await Fixture.CreateAsync(ResumingTiers + "\nmax_resumes = 1\n", clock: clock);
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        await f.NextSendAsync(f.B);
+        await f.WaitForResumeAsync();
+        await clock.WaitForTimersAsync(1);
+        clock.Advance(TimeSpan.FromMinutes(16));
+        // Both holds ended: the resume takes A, which falls back to B, which stops on its limit again.
+        await f.NextSendAsync(f.A);
+        await f.NextSendAsync(f.B);
+
+        var card = await f.WaitForCardAsync(static card => (card.Message ?? string.Empty).Contains("in a row", StringComparison.Ordinal), "maximum");
+        StringAssert.Contains(card.Message, "It resumed by itself once in a row: choose another model, or send again after the reset.");
+        Assert.IsNull(f.Host.Commands.GetPendingResume(f.Child.SessionId));
+        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task PromptSentWhileAResumeWaits_CancelsTheResume()
+    {
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        await using var f = await Fixture.CreateAsync(ResumingTiers, clock: clock);
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        await f.NextSendAsync(f.B);
+        await f.WaitForResumeAsync();
+        await clock.WaitForTimersAsync(1);
+
+        f.Send("something else", "second");
+        var sent = await f.NextSendAsync(f.B);
+        Assert.AreEqual("something else", sent.Text);
+        Assert.IsNull(f.Host.Commands.GetPendingResume(f.Child.SessionId));
+        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Info, "cancelled");
+        StringAssert.Contains(card.Message, "the session was given a prompt");
+        clock.Advance(TimeSpan.FromHours(1));
+        Assert.AreEqual(0, clock.PendingTimerCount);
+    }
+
+    [TestMethod]
+    public async Task HostPromptThatRunsWhileAResumeWaits_CancelsTheResume()
+    {
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        await using var f = await Fixture.CreateAsync(ResumingTiers, clock: clock);
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        await f.NextSendAsync(f.B);
+        await f.WaitForResumeAsync();
+        await clock.WaitForTimersAsync(1);
+
+        // The end of a background job is no send of the user, but it runs the session: the resume is no longer wanted.
+        await f.Host.RuntimeService.DeliverHostPromptAsync(f.Child.SessionId, "[CodeAlta background job]\nJob: job-1\nResult: succeeded", "background-job");
+        var sent = await f.NextSendAsync(f.B);
+        StringAssert.Contains(sent.Text, "[CodeAlta background job]");
+        // The events of that run arrive on their own: the resume goes once the session is seen running again.
+        for (var attempt = 0; f.Host.Commands.GetPendingResume(f.Child.SessionId) is not null; attempt++)
+        {
+            if (attempt > 500) Assert.Fail("The resume still waits after the session ran again.");
+            await Task.Delay(10);
+        }
+
+        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Info, "cancelled");
+        StringAssert.Contains(card.Message, "the session ran again since it stopped");
+        clock.Advance(TimeSpan.FromHours(1));
+        Assert.AreEqual(2, f.B.SendCount, "Nothing more is sent once the limit resets.");
+    }
+
+    [TestMethod]
+    public async Task ResumeThatWaits_OutlivesARestartOfTheHost()
+    {
+        var clock = new ManualClock(DateTimeOffset.UtcNow);
+        await using var f = await Fixture.CreateAsync(ResumingTiers, clock: clock);
+        var start = clock.GetUtcNow();
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted, start.AddHours(2))));
+        f.B.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted, start.AddHours(1))));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        await f.NextSendAsync(f.B);
+        var resume = await f.WaitForResumeAsync();
+        await clock.WaitForTimersAsync(1);
+
+        await f.RestartAsync();
+        var restored = await f.WaitForResumeAsync();
+        Assert.AreEqual((resume.ResumeId, resume.ResumeAt, resume.ProviderKey, resume.Attempt), (restored.ResumeId, restored.ResumeAt, restored.ProviderKey, restored.Attempt));
+        await clock.WaitForTimersAsync(1);
+
+        // The new host knows no limit of the old one: the tier is taken in order once the time comes.
+        clock.Advance(TimeSpan.FromHours(1) + TimeSpan.FromMinutes(1));
+        var continuation = await f.NextSendAsync(f.A);
+        StringAssert.Contains(continuation.Text, "[CodeAlta resume]");
+        Assert.IsNull(f.Host.Commands.GetPendingResume(f.Child.SessionId));
+        Assert.AreEqual(0, (await new SessionResumeStore(f.Host.ApplicationDatabase).ReadAllAsync()).Count, "A resume that ran leaves the store.");
     }
 
     [TestMethod]
@@ -416,8 +666,9 @@ public sealed class SessionFallbackTests
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "CodeAlta-fallback-" + Guid.NewGuid().ToString("N"));
         private readonly ConcurrentQueue<AgentSessionUpdateEvent> _cards = new();
-        private readonly CancellationTokenSource _closing = new();
+        private CancellationTokenSource _closing = new();
         private Task _collector = Task.CompletedTask;
+        private Func<Task<CodeAltaHost>> _createHost = null!;
         private readonly List<OwnedSessionCommandReceipt> _receipts = [];
 
         internal ScriptedProvider A { get; } = new("prov-a", "model-a", [SessionPermissionModes.Ask, SessionPermissionModes.AcceptEdits, SessionPermissionModes.Bypass]);
@@ -427,13 +678,30 @@ public sealed class SessionFallbackTests
         internal SessionViewDescriptor Parent { get; private set; } = null!;
         internal SessionViewDescriptor Child { get; private set; } = null!;
 
+        /// <summary>The clock of the host, when the test moves the time itself.</summary>
+        internal ManualClock? Clock { get; private set; }
+
         internal static async Task<Fixture> CreateAsync(string config, string? childPermissionMode = null, IReadOnlyList<string>? bModes = null,
-            Func<SpaceCatalog, Task<string>>? childSpace = null, string? providerSpaces = null, IReadOnlyList<SessionViewQueuedPrompt>? childQueue = null, string? bType = null)
+            Func<SpaceCatalog, Task<string>>? childSpace = null, string? providerSpaces = null, IReadOnlyList<SessionViewQueuedPrompt>? childQueue = null, string? bType = null,
+            ManualClock? clock = null)
         {
-            var f = new Fixture();
+            var f = new Fixture { Clock = clock };
             f.B = new ScriptedProvider("prov-b", "model-b", bModes ?? [SessionPermissionModes.Ask, SessionPermissionModes.AcceptEdits, SessionPermissionModes.Bypass], bType);
             await f.SetupAsync(providerSpaces is null ? config : config + "\n" + providerSpaces, childPermissionMode, childSpace, childQueue);
             return f;
+        }
+
+        /// <summary>Closes the host and starts another one on the same profile, as CodeAlta does when it starts again.</summary>
+        internal async Task RestartAsync()
+        {
+            await Task.WhenAll(_receipts.Select(static receipt => receipt.Completion)).WaitAsync(Timeout);
+            _receipts.Clear();
+            await _closing.CancelAsync();
+            await Host.DisposeAsync();
+            await _collector;
+            _closing = new CancellationTokenSource();
+            Host = await _createHost();
+            _collector = CollectAsync();
         }
 
         private async Task SetupAsync(string config, string? childPermissionMode, Func<SpaceCatalog, Task<string>>? childSpace,
@@ -456,8 +724,9 @@ public sealed class SessionFallbackTests
             // The space of the child, set up before the host reads it.
             var spaceId = childSpace is null ? null : await childSpace(new SpaceCatalog(new ProjectCatalog(catalog)));
             Child = await PersistAsync(projectId, project, "Child", Parent.SessionId, childPermissionMode, spaceId, childQueue);
-            Host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            _createHost = () => CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
+                TimeProvider = Clock,
                 GlobalRoot = global,
                 CurrentProjectPath = project,
                 DiscoveryScope = new SessionDiscoveryScope(home, _root),
@@ -472,6 +741,7 @@ public sealed class SessionFallbackTests
                     registry.RegisterOrReplace(B.Descriptor, B.CreateRuntime);
                 },
             }, CancellationToken.None);
+            Host = await _createHost();
             _collector = CollectAsync();
         }
 
@@ -534,7 +804,7 @@ public sealed class SessionFallbackTests
             {
                 await foreach (var value in Host.RuntimeService.StreamEventsAsync(_closing.Token))
                 {
-                    if (value is SessionAgentEvent { Event: AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.ProviderFallback or AgentSessionUpdateKind.Warning } update }
+                    if (value is SessionAgentEvent { Event: AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.ProviderFallback or AgentSessionUpdateKind.Warning or AgentSessionUpdateKind.Info } update }
                         && update.SessionId == Child.SessionId)
                         _cards.Enqueue(update);
                 }
@@ -542,25 +812,44 @@ public sealed class SessionFallbackTests
             catch (OperationCanceledException) { }
         }
 
-        internal void Send(string text)
+        internal void Send(string text, string requestId = "first")
         {
-            var admission = Host.Commands.AdmitSend(new OwnedTextSendRequest("first", Child.SessionId, text));
+            var admission = Host.Commands.AdmitSend(new OwnedTextSendRequest(requestId, Child.SessionId, text));
             Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, admission.Kind);
             _receipts.Add(admission.Receipt!);
         }
 
         internal async Task<AgentSessionUpdateEvent> WaitForCardAsync(AgentSessionUpdateKind kind)
+            => await WaitForCardAsync(card => card.Kind == kind, kind.ToString());
+
+        internal async Task<AgentSessionUpdateEvent> WaitForCardAsync(Func<AgentSessionUpdateEvent, bool> match, string what)
         {
             var deadline = DateTimeOffset.UtcNow + Timeout;
             while (DateTimeOffset.UtcNow < deadline)
             {
-                if (_cards.FirstOrDefault(card => card.Kind == kind) is { } card) return card;
+                if (_cards.FirstOrDefault(match) is { } card) return card;
                 await Task.Delay(20);
             }
 
-            Assert.Fail($"No {kind} card.");
+            Assert.Fail($"No {what} card. Cards: " + string.Join(" | ", _cards.Select(static card => $"{card.Kind}: {card.Message}")));
             return null!;
         }
+
+        /// <summary>Waits for the resume a session waits for, as the coordinator lists it once its card is written.</summary>
+        internal async Task<SessionResumeSnapshot> WaitForResumeAsync(Func<SessionResumeSnapshot, bool>? match = null)
+        {
+            var deadline = DateTimeOffset.UtcNow + Timeout;
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                if (Host.Commands.GetPendingResume(Child.SessionId) is { } pending && (match?.Invoke(pending) ?? true)) return pending;
+                await Task.Delay(20);
+            }
+
+            Assert.Fail("No resume waits. Cards: " + string.Join(" | ", _cards.Select(static card => $"{card.Kind}: {card.Message}")));
+            return null!;
+        }
+
+        internal IReadOnlyList<AgentSessionUpdateEvent> Cards => [.. _cards];
 
         internal async Task<SendRecord> NextSendAsync(ScriptedProvider provider)
         {
@@ -596,6 +885,84 @@ public sealed class SessionFallbackTests
             await _collector;
             try { Directory.Delete(_root, recursive: true); }
             catch (IOException) { }
+        }
+    }
+
+    // One-shot timers on a time the test moves; the callbacks run on the thread that moves it, outside the clock's gate.
+    internal sealed class ManualClock(DateTimeOffset start) : TimeProvider
+    {
+        private readonly object _gate = new();
+        private readonly List<Timer> _timers = [];
+        private DateTimeOffset _now = start;
+
+        public int PendingTimerCount
+        {
+            get { lock (_gate) return _timers.Count; }
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            lock (_gate) return _now;
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            Assert.AreEqual(global::System.Threading.Timeout.InfiniteTimeSpan, period);
+            lock (_gate)
+            {
+                var timer = new Timer(this, callback, state, _now + dueTime);
+                _timers.Add(timer);
+                return timer;
+            }
+        }
+
+        // The timers are armed once the cards of a resume are written: the test waits for them before it moves the time.
+        public async Task WaitForTimersAsync(int count)
+        {
+            var deadline = DateTimeOffset.UtcNow + Timeout;
+            while (PendingTimerCount < count)
+            {
+                if (DateTimeOffset.UtcNow >= deadline) Assert.Fail($"{count} timer(s) expected, {PendingTimerCount} armed.");
+                await Task.Delay(10);
+            }
+        }
+
+        public void Advance(TimeSpan duration)
+        {
+            Timer[] due;
+            lock (_gate)
+            {
+                _now += duration;
+                due = [.. _timers.Where(timer => timer.DueAt <= _now)];
+                foreach (var timer in due) _timers.Remove(timer);
+            }
+
+            foreach (var timer in due) timer.Fire();
+        }
+
+        private sealed class Timer(ManualClock owner, TimerCallback callback, object? state, DateTimeOffset dueAt) : ITimer
+        {
+            private int _disposed;
+            public DateTimeOffset DueAt { get; } = dueAt;
+
+            public void Fire()
+            {
+                if (Volatile.Read(ref _disposed) == 0) callback(state);
+            }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => throw new NotSupportedException("Only one-shot timers are expected.");
+
+            public void Dispose()
+            {
+                Interlocked.Exchange(ref _disposed, 1);
+                lock (owner._gate) owner._timers.Remove(this);
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
         }
     }
 

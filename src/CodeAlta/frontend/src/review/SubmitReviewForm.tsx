@@ -3,7 +3,7 @@ import { Button, HTMLSelect, PopoverNext, TextArea } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
-import { canSubmitReview, type ReviewVerdict } from "./reviewThreads";
+import { canSubmitReview, defaultVerdict, type ReviewVerdict } from "./reviewThreads";
 import type { ReviewDestination, ReviewScope, ReviewsHub, ReviewTarget } from "./reviewsHub";
 import { showToast } from "../appToaster";
 import type { ReviewSessionChoice } from "./reviewSessions";
@@ -14,9 +14,6 @@ const verdicts: readonly Readonly<{ value: ReviewVerdict; label: MessageKey; det
   { value: "changes_requested", label: "Request changes", detail: "the agent revises" },
   { value: "commented", label: "Comment", detail: "the agent answers, no verdict" },
 ];
-
-/** The verdict a new round starts with: changes asked when there are comments to send, approval otherwise. */
-export const defaultVerdict = (comments: number): ReviewVerdict => comments > 0 ? "changes_requested" : "approved";
 
 /** The three verdicts of a review, as radio buttons; `1` to `3` choose one while the group has the keyboard. */
 export function ReviewVerdictPicker({ value, onChange, disabled = false, name }: { value: ReviewVerdict; onChange: (verdict: ReviewVerdict) => void; disabled?: boolean; name?: string }) {

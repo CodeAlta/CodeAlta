@@ -16,7 +16,7 @@ const model = (id: string, name: string, efforts: string[]): ModelCatalogModel =
 test("the tiers show their models in order with their efforts, the model each gives, and the fallback", () => {
   const store = createTierStore(() => Promise.reject(new Error("not read")));
   store.set("epoch", readTierState({
-    fallback: { enabled: true, onQuota: true, onUnavailable: false },
+    fallback: { enabled: true, onQuota: true, onUnavailable: false, resume: false, maxResumes: 5 },
     tiers: [
       { tier: "complex", targets: [{ providerKey: "claude-code", modelId: "opus", reasoning: ["High", "XHigh"] }, { providerKey: "gone", modelId: "m", reasoning: [] }],
         choice: { providerKey: "claude-code", modelId: "opus", reasoning: "High", providerName: "Claude Code", modelName: "Opus" } },
@@ -51,10 +51,29 @@ test("the tiers show their models in order with their efforts, the model each gi
   assert.match(html, /Quota reached/);
 });
 
+test("the resume after a limit is offered with the fallback on quota, and its number of resumes once it is on", () => {
+  const render = (fallback: { enabled: boolean; onQuota: boolean; resume: boolean; maxResumes: number }) => {
+    const store = createTierStore(() => Promise.reject(new Error("not read")));
+    store.set("epoch", readTierState({ fallback: { onUnavailable: true, ...fallback },
+      tiers: [{ tier: "complex", targets: [], choice: null }, { tier: "standard", targets: [], choice: null }, { tier: "quick", targets: [], choice: null }] })!);
+    return renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+      createElement(ModelTierSettings, { epoch: "epoch", store, api: { saveModelTiers: never }, providers: [], models: new Map() })));
+  };
+
+  assert.doesNotMatch(render({ enabled: false, onQuota: true, resume: true, maxResumes: 5 }), /Resume when the limit resets/);
+  assert.doesNotMatch(render({ enabled: true, onQuota: false, resume: true, maxResumes: 5 }), /Resume when the limit resets/, "Only a limit resets.");
+  const off = render({ enabled: true, onQuota: true, resume: false, maxResumes: 5 });
+  assert.match(off, /Resume when the limit resets/);
+  assert.doesNotMatch(off, /times in a row/);
+  const on = render({ enabled: true, onQuota: true, resume: true, maxResumes: 3 });
+  assert.match(on, /<input[^>]*aria-label="Automatic resumes in a row"[^>]*value="3"/);
+  assert.match(on, /At most.*times in a row/);
+});
+
 test("the global tiers name the spaces of a provider that is not in all of them, and those of a space say a provider it has not got", () => {
   const store = createTierStore(() => Promise.reject(new Error("not read")));
   const reply = {
-    fallback: { enabled: false, onQuota: true, onUnavailable: true },
+    fallback: { enabled: false, onQuota: true, onUnavailable: true, resume: false, maxResumes: 5 },
     tiers: [
       { tier: "complex", targets: [{ providerKey: "work-claude", modelId: "opus", reasoning: [] }, { providerKey: "claude-code", modelId: "opus", reasoning: [] }], choice: null },
       { tier: "standard", targets: [], choice: null },

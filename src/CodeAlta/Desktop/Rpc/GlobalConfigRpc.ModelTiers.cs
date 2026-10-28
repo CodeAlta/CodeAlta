@@ -112,6 +112,8 @@ internal sealed partial class GlobalConfigService
                 {
                     Enabled = request.Fallback.Enabled,
                     On = [.. Triggers(request.Fallback)],
+                    Resume = request.Fallback.Resume,
+                    MaxResumes = request.Fallback.MaxResumes,
                 },
             });
         }
@@ -215,7 +217,7 @@ internal sealed partial class GlobalConfigService
     }
 
     private static ModelFallbackSetting ToItem(ModelFallbackSettings fallback)
-        => new(fallback.Enabled, fallback.OnQuota, fallback.OnUnavailable);
+        => new(fallback.Enabled, fallback.OnQuota, fallback.OnUnavailable, fallback.Resume, fallback.MaxResumes);
 }
 
 /// <summary>Asks for the tiers of models.</summary>
@@ -286,4 +288,6 @@ internal sealed record ModelTierChoiceItem(string ProviderKey, string ModelId, s
 /// <param name="Enabled">Whether the fallback is on.</param>
 /// <param name="OnQuota">On an exhausted quota or a long rate limit.</param>
 /// <param name="OnUnavailable">On a provider that stays unavailable.</param>
-internal sealed record ModelFallbackSetting(bool Enabled, bool OnQuota, bool OnUnavailable);
+/// <param name="Resume">Whether a session that stopped on a limit, with no other model to take over, resumes when the limit resets.</param>
+/// <param name="MaxResumes">How many times in a row a session resumes by itself, from 1 to 50.</param>
+internal sealed record ModelFallbackSetting(bool Enabled, bool OnQuota, bool OnUnavailable, bool Resume, int MaxResumes);

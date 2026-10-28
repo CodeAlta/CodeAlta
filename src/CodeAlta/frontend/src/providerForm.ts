@@ -113,6 +113,22 @@ export function providerProblem(reason: string | null | undefined): MessageKey |
     : null;
 }
 
+/**
+ * What the form of a provider says of its state, above its fields, while it is not ready: a provider that waits for a
+ * sign-in (a warning), one whose test named a cause, or one that failed for a cause the window has no words for (the log
+ * keeps what it said). Null for a provider that works, is disabled, or was not tried yet.
+ */
+export function providerStateProblem(state: Readonly<{ availability: string; reason: string | null }> | undefined, enabled: boolean)
+  : Readonly<{ key: MessageKey; intent: "warning" | "danger"; signIn: boolean }> | null {
+  if (!enabled || !state) return null;
+  if (state.reason === "acp-signed-out") return { key: "{provider} is not signed in: sign in below, then test it again.", intent: "warning", signIn: true };
+  const known = providerProblem(state.reason);
+  if (known) return { key: known, intent: isSignedOut(state.reason) ? "warning" : "danger", signIn: isSignedOut(state.reason) };
+  return state.availability === "Failed" || state.availability === "Unsupported"
+    ? { key: "{provider} did not start. Test it again; Settings > Application Logs says why.", intent: "danger", signIn: false }
+    : null;
+}
+
 /** Whether a provider that is not ready only waits for its account to be signed in. */
 export function isSignedOut(reason: string | null | undefined): boolean {
   return reason === "claude-code-signed-out" || reason === "acp-signed-out";

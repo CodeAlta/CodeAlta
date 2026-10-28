@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactElement } from "react";
-import { Button, Checkbox, InputGroup, Menu, MenuDivider, MenuItem, PopoverNext, Switch, Tag } from "@blueprintjs/core";
+import { Button, Checkbox, InputGroup, Menu, MenuDivider, MenuItem, NumericInput, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import { globalConfig, type ModelCatalogModel, type ModelCatalogProvider } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { matchingModels } from "./modelPicker";
-import { addTierTarget, emptyTiers, moveEffort, moveTierTarget, readTierState, removeTierTarget, replaceTierTarget, setTierReasoning, startingEfforts, tierLabels,
+import { addTierTarget, emptyTiers, maximumMaxResumes, moveEffort, moveTierTarget, readTierState, removeTierTarget, replaceTierTarget, setTierReasoning, startingEfforts, tierLabels,
   tierLists, tierNames, tierStore, useTiers, type TierName, type TierState, type TierStore, type TierTarget } from "./modelTiers";
 import { ProviderIcon } from "./ProviderIcon";
 import { useShellLanguage } from "./shellLanguage";
@@ -134,6 +134,13 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, sp
             onChange={event => void save({ ...state, fallback: { ...state.fallback, onQuota: event.currentTarget.checked } })} />
           <Checkbox inline checked={state.fallback.onUnavailable} label={t("Provider unavailable")}
             onChange={event => void save({ ...state, fallback: { ...state.fallback, onUnavailable: event.currentTarget.checked } })} />
+        </span>}
+        {/* A session that stopped on a limit, with no model of its tier to take over, can wait for the reset. */}
+        {state.fallback.enabled && state.fallback.onQuota && <span className="model-tier-resume">
+          <Switch className="settings-checkbox" checked={state.fallback.resume} label={t("Resume when the limit resets")}
+            onChange={event => void save({ ...state, fallback: { ...state.fallback, resume: event.currentTarget.checked } })} />
+          {state.fallback.resume && <MaxResumes value={state.fallback.maxResumes}
+            onChange={maxResumes => void save({ ...state, fallback: { ...state.fallback, maxResumes } })} />}
         </span>}
       </div>
     </header>
@@ -283,4 +290,24 @@ function TierModelPicker({ providers, models, offered, note, taken, current, cla
     </div>}>
     {children}
   </PopoverNext></span>;
+}
+
+// How many times in a row a session resumes by itself: saved once the number is a whole number from 1 to 50.
+function MaxResumes({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  const { t } = useShellLanguage();
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => { setDraft(String(value)); }, [value]);
+  const commit = (text: string) => {
+    const count = Number(text.trim());
+    if (Number.isInteger(count) && count >= 1 && count <= maximumMaxResumes) { if (count !== value) onChange(count); }
+    else setDraft(String(value));
+  };
+  return <label className="model-tier-max-resumes">
+    <span>{t("At most")}</span>
+    <NumericInput aria-label={t("Automatic resumes in a row")} value={draft} min={1} max={maximumMaxResumes} stepSize={1} minorStepSize={null}
+      majorStepSize={5} clampValueOnBlur={false} buttonPosition="right" size="small"
+      onValueChange={(_value, text) => setDraft(text)} onButtonClick={(_value, text) => commit(text)} onBlur={event => commit(event.currentTarget.value)}
+      onKeyUp={event => { if (event.key === "Enter") commit(event.currentTarget.value); }} />
+    <span>{t("times in a row")}</span>
+  </label>;
 }

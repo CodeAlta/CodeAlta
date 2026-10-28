@@ -111,6 +111,8 @@ Focus on the parser only. Do not refactor unrelated files.
 Compaction replaces the conversation of a long session with a summary, so that it can go on without reaching the context limit. To compact an idle session, press `Ctrl+F11`, run `/compact`, or choose **Compact the conversation** in the **⋯** menu of the prompt.
 
 - It uses the provider, model and reasoning of the session, and the timeline shows when it starts and ends.
+- It needs a session that has started and is idle. Otherwise **Compact the conversation** is disabled and its tooltip says why, `/compact` is shown dimmed with the reason, and `Ctrl+F11` shows the reason in a notice.
+- A compaction that fails says so in the status line under the prompt, and the timeline shows the error of the provider.
 - The summary is a request like any other, billed by the provider. The details of the completion notice show what it used (input, cached input, output, and AI credits for Copilot), and the [context usage](../workspace/prompt.md#context-usage) shows it until the next request.
 - It aims at a context much smaller than the limit, so the session does not reach it again soon.
 

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigModelTiersResponse } from "#neoastra";
-import { addTierTarget, composerTierEntries, createTierStore, emptyTiers, moveEffort, moveTierTarget, noTiers, readTierState, removeTierTarget, replaceTierTarget,
+import { addTierTarget, composerTierEntries, createTierStore, emptyTiers, moveEffort, moveTierTarget, noTiers, readMaxResumes, readTierState, removeTierTarget, replaceTierTarget,
   setTierReasoning, startingEfforts, tierLists, type TierState } from "./modelTiers";
 
 const reply = (changes: Partial<GlobalConfigModelTiersResponse> = {}): GlobalConfigModelTiersResponse => ({
   status: "ok", message: null, source: "global", spaceId: null,
-  fallback: { enabled: true, onQuota: true, onUnavailable: false },
+  fallback: { enabled: true, onQuota: true, onUnavailable: false, resume: false, maxResumes: 5 },
   tiers: [
     { tier: "complex", targets: [{ providerKey: "claude-code", modelId: "opus", reasoning: ["High", "XHigh"] }, { providerKey: "codex", modelId: "gpt-6.1", reasoning: ["XHigh"] }],
       choice: { providerKey: "codex", modelId: "gpt-6.1", reasoning: "XHigh", providerName: "Codex", modelName: "GPT-6.1" } },
@@ -24,7 +24,7 @@ test("the tiers of the host are read with what each gives, and a reply that is n
   assert.deepEqual(read.tiers.complex[0].reasoning, ["High", "XHigh"]);
   assert.equal(read.choices.complex?.modelName, "GPT-6.1");
   assert.equal(read.choices.quick, null);
-  assert.deepEqual(read.fallback, { enabled: true, onQuota: true, onUnavailable: false });
+  assert.deepEqual(read.fallback, { enabled: true, onQuota: true, onUnavailable: false, resume: false, maxResumes: 5 });
   assert.equal(noTiers(read), false);
   assert.equal(noTiers(emptyTiers), true);
   assert.equal(noTiers(null), true);
@@ -33,6 +33,15 @@ test("the tiers of the host are read with what each gives, and a reply that is n
   assert.equal(readTierState({ tiers: [], fallback: null }), null);
   // What is saved is the tiers in order, without what they give.
   assert.deepEqual(tierLists(read).map(list => [list.tier, list.targets.length, list.choice]), [["complex", 2, null], ["standard", 0, null], ["quick", 1, null]]);
+});
+
+test("the resume after a limit is read with its number of resumes in a row, the default for one the host would refuse", () => {
+  const read = readTierState(reply({ fallback: { enabled: true, onQuota: true, onUnavailable: true, resume: true, maxResumes: 12 } }))!;
+  assert.deepEqual(read.fallback, { enabled: true, onQuota: true, onUnavailable: true, resume: true, maxResumes: 12 });
+  assert.equal(emptyTiers.fallback.resume, false);
+  assert.equal(emptyTiers.fallback.maxResumes, 5);
+  assert.deepEqual([readMaxResumes(1), readMaxResumes(50), readMaxResumes(0), readMaxResumes(51), readMaxResumes(2.5), readMaxResumes("3"), readMaxResumes(undefined)],
+    [1, 50, 5, 5, 5, 5, 5]);
 });
 
 test("a model is added once to a tier, removed, and given its efforts in order", () => {

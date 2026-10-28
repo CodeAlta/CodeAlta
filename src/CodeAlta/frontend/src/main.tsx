@@ -163,7 +163,7 @@ import { ConversationElsewhereBanner, ConversationElsewhereLine, promptFocusTarg
 import { openElsewhereEntries } from "./claudeCodeOpen/openElsewhereEntries";
 import { projectRailGroups, projectRailProjection } from "./explorer/projectRail";
 import { createLabelsHub } from "./labels/labelsHub";
-import { canMoveLabel, labelsOfSpace, projectLabels } from "./labels/labels";
+import { canMoveLabel, labelsOfSpace, labelSubtreeProjects, projectLabels } from "./labels/labels";
 import { LabelRailRow, type LabelRowEditing } from "./labels/LabelRailRow";
 import { LabelDragGhost, LabelFormPopover } from "./labels/LabelViews";
 import { LabelSettings } from "./labels/LabelSettings";
@@ -182,6 +182,8 @@ import { OpenRunContext } from "./workflows/openRun";
 import { createMessageReader, MessageReaderContext } from "./wholeMessage";
 import { createWorkflowsHub } from "./workflows/workflowsHub";
 import { ScriptRunActionsContext } from "./scriptCard/SaveAsScript";
+import { SessionResumeContext } from "./resumeCard/TimelineResumeCard";
+import { createResumeHub } from "./resumeCard/resumeHub";
 import { IssuesPanel } from "./issues/IssuesPanel";
 import { PullRequestButton } from "./pullRequests/PullRequestButton";
 import { PullRequestSettings } from "./pullRequests/PullRequestSettings";
@@ -304,6 +306,7 @@ import { askPluginComposer, noPluginContributions, pluginCommandAvailable, plugi
   findPluginCommand, type PluginComposerRequest, type PluginContributionsView, type PluginPane, type PluginUiValue, pluginsChangedEvent } from "./pluginUi";
 import { CommandHelp } from "./CommandHelp";
 import { commandDefinitions, commandKeys, resolveCommandKey, type CommandId } from "./commandRegistry";
+import { composerCommandBlock, composerControlState, isComposerControlCommand, type ComposerControlCommand } from "./composerCommands";
 import { landingCanvasId, landingPluginKey, LandingShellContext } from "./landing/landingShell";
 import { useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
 import { createPaletteFocusRestoration } from "./paletteActions";
@@ -316,6 +319,7 @@ import "./style.css";
 import "./timelineEmphasis/timelineEmphasis.css";
 import "./timelineActivity/timelineActivity.css";
 import "./scriptCard/scriptCard.css";
+import "./resumeCard/resumeCard.css";
 import "./editor/editor.css";
 import "./pluginProviders/pluginProviders.css";
 import "./review/review.css";
@@ -3217,7 +3221,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     switch (command) {
       case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": return session;
       case "bookmarkPrevious": case "bookmarkNext": case "bookmarkSession": return ownedSession && bookmarkHost.hub.getSnapshot().available;
-      case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
+      case "usage": case "reminders": case "nextPrompt": case "modelSelector": case "steer": return ownedSession;
+      // The control of the composer in front decides: the command runs exactly when pressing it would.
+      case "send": case "abort": case "clearQueue": case "compact":
+        return ownedSession && composerCommandBlock(command, composerControlState(composerControl(command)), t) === null;
       case "fork": case "rewind": return ownedSession && currentProjectWritable();
       case "reviewChanges": return ownedSession && !!selectedSession?.projectId;
       case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
@@ -3258,15 +3265,42 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
   }
 
+  // Why a command that is not offered now cannot run, when the composer in front knows it: the picker shows it on the
+  // entry, a shortcut in a notice.
+  function commandUnavailableReason(command: CommandId): string | null {
+    if (!isComposerControlCommand(command) || view !== "workspace" || !selectedSession || fileTabs.active || !owned) return null;
+    return composerCommandBlock(command, composerControlState(composerControl(command)), t);
+  }
+  function notifyCommandUnavailable(command: CommandId) {
+    const reason = commandUnavailableReason(command);
+    const definition = commandDefinitions.find(item => item.id === command);
+    if (reason && definition) showToast({ message: t("{command}: {reason}", { command: t(definition.label), reason }), intent: "warning",
+      icon: "warning-sign", timeout: 6000 }, `command-unavailable:${command}`);
+  }
+  // The Compact control of the session in front, under the identity it was rendered for.
+  function compactControl() {
+    const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId, selectedSessionId.current, selectedScope.current);
+    const trigger = compactTrigger.current;
+    return view === "workspace" && owned && currentProjectWritable() && status?.hostEpoch && mutation?.capability.canMutate()
+      && selection && trigger?.isConnected && trigger.dataset.epoch === status.hostEpoch && trigger.dataset.sessionId === selection.sessionId
+      && trigger.dataset.projectId === (selection.projectId ?? "") ? trigger : null;
+  }
+  // The control of the composer in front that carries out a command; only the active composer marks its controls.
+  function composerControl(command: ComposerControlCommand) {
+    return command === "compact" ? compactControl()
+      : workspaceShell.current?.querySelector<HTMLButtonElement>(`[data-composer-command="${command}"]`) ?? null;
+  }
+
   // Commands the active session's composer carries out itself.
-  function composerCommand(command: "send" | "abort" | "clearQueue" | "nextPrompt") {
+  function composerCommand(command: "nextPrompt") {
     window.dispatchEvent(new CustomEvent("codealta:composer", { detail: command }));
   }
   const activeComposerControl = (selector: string) => Array.from(workspaceShell.current?.querySelectorAll<HTMLButtonElement>(selector) ?? [])
     .find(button => button.offsetParent !== null);
 
   function runCommand(command: CommandId) {
-    if (!commandAvailable(command)) return;
+    // Only a shortcut gets here with a command that is not offered: it is told why, as the picker shows it.
+    if (!commandAvailable(command)) { notifyCommandUnavailable(command); return; }
     if (command === "exit") { exitApplication(); return; }
     // The host zooms the window's view and keeps the zoom for the next starts; an open window does not stop it.
     if (command === "zoomIn" || command === "zoomOut" || command === "resetZoom") {
@@ -3346,7 +3380,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "dictate": invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#dictate-prompt")); break;
       case "searchSessions": openSearch({ category: "sessions" }); break;
       case "refreshStatuses": runtimeObservationControls().refresh(tabs.open); break;
-      case "send": case "abort": case "clearQueue": case "nextPrompt": composerCommand(command); break;
+      case "send": case "abort": case "clearQueue": case "compact": invokeComposerControl(composerControl(command)); break;
+      case "nextPrompt": composerCommand(command); break;
       case "steer": break;
       case "fork": case "rewind": openSessionBranch(command); break;
       case "reviewChanges": if (selectedSession) reviewSessionChanges(selectedSession); break;
@@ -3480,15 +3515,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     }
     else if (action === "sessionInfo") invokeComposerControl(sessionInfoTrigger.current);
     else if (action === "reminders") invokeComposerControl(remindersTrigger.current);
-    else if (action === "compact") {
-      const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId,
-        selectedSessionId.current, selectedScope.current);
-      const trigger = compactTrigger.current;
-      if (view === "workspace" && owned && currentProjectWritable() && status?.hostEpoch && mutation?.capability.canMutate()
-        && selection && trigger?.isConnected && !trigger.disabled
-        && trigger.dataset.epoch === status.hostEpoch && trigger.dataset.sessionId === selection.sessionId
-        && trigger.dataset.projectId === (selection.projectId ?? "")) invokeComposerControl(trigger);
-    }
+    else if (action === "compact") invokeComposerControl(compactControl());
     else if (action === "expandPrompt") {
       if (!dialog) invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#expand-session-prompt"));
     }
@@ -3659,6 +3686,18 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       {session.forkedFromSessionId && <SessionLineageMark lineage={sessionLineage(session)!} />}
       <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
     </>;
+  }
+  // A closed project shows its chevron only when opening it shows something: its sessions, its terminals, or the
+  // Claude Code sessions of its folder. A truncated snapshot does not tell, so every project keeps it then.
+  const projectsWithSessions = new Set(snapshot?.sessions.flatMap(session => session.projectId ? [session.projectId] : []) ?? []);
+  const projectUnfoldable = (id: string) => !snapshot || snapshot.sessionsTruncated || claudeCodeConfigured || projectsWithSessions.has(id)
+    || terminalsOf(terminalList, id).length > 0;
+  // What a label row tells of the projects it holds, with those of the labels under it: the sessions that wait for
+  // the user, and how many run, so that a folded label says it without being unfolded.
+  function labelActivity(projects: ReadonlySet<string>) {
+    if (!projects.size) return null;
+    return <><WaitingBadge count={spacesState.sessions.reduce((count, session) => count + (session.waiting && session.projectId && projects.has(session.projectId) ? 1 : 0), 0)} />
+      <RunningSessionBadge controls={runtimeObservationControls()} projectIds={projects} /></>;
   }
   function scopeSessions(scope: string | null) {
     const shown = openScopes.get(scopeKey(scope));
@@ -5166,7 +5205,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               row: group => <LabelRailRow group={group} labels={spaceLabels} folded={!filterView && isLabelFolded(projectTree, group.label.id)}
                 onFold={value => setProjectTree(current => setLabelFolded(current, group.label.id, value))} editing={owned ? labelEditing : undefined}
                 drop={railDrag.view?.over?.labelId === group.label.id ? railDrag.view.over.place : undefined}
-                drag={owned ? railDrag.source({ kind: "label", labelId: group.label.id }, group.label.name) : undefined} />,
+                drag={owned ? railDrag.source({ kind: "label", labelId: group.label.id }, group.label.name) : undefined}
+                activity={labelActivity(labelSubtreeProjects(group.label.id, spaceLabels))} />,
               badges: project => <ProjectLabelBadges labels={projectLabels(project.id, spaceLabels)} all={spaceLabels} />,
               drag: owned && spaceLabels.length ? (project, from) => railDrag.source({ kind: "project", projectId: project.id, from }, project.name) : undefined,
               otherDrop: railDrag.view?.over?.labelId === "" ? "into" : undefined,
@@ -5183,6 +5223,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 onOpen={showTerminal} onClose={terminal => terminalWorkspace.hub.close(terminal.id)} /> }}
             terminals={owned ? { count: id => terminalsOf(terminalList, id).length, create: project => void createTerminal(project.id) } : undefined}
             changes={owned ? { open: id => fileTabs.open.some(tab => isChangesTab(tab) && tab.projectId === id), show: project => showChanges(project) } : undefined}
+            unfoldable={projectUnfoldable}
             activity={id => <><WaitingBadge count={spacesState.sessions.reduce((count, session) => count + (session.waiting && session.projectId === id ? 1 : 0), 0)} />
               <RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />
               <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} />
@@ -5629,7 +5670,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "logs" ? <>
         <ApplicationLogsPanel clearActions={logClearActions} read={demoMode
-          ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} /></>
+          ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read}
+          levelsApi={demoMode ? undefined : applicationLogs} epoch={owned ? status!.hostEpoch : null} /></>
       : settingsSection === "providers" ? owned && status?.hostEpoch
         ? <ProviderSettings key={providerFocus ?? ""} epoch={status.hostEpoch} readRuntime={modelCatalog.providers} probe={modelCatalog.probe} initialProvider={providerFocus}
           onOpenModels={() => navigate("models")} onOpenConfiguration={() => navigate("config")}
@@ -5755,7 +5797,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     {archivedInfo && catalog.current && (row => row && <SessionInfoDialog info={sessionInfoView(catalog.current!, row, row.projectId)}
       demo={demoMode} onClose={() => setArchivedInfo(null)} />)(catalog.current.sessions.find(session => session.id === archivedInfo))}
     {searchStart && <GlobalSearch snapshot={snapshot ?? null} favorites={projectTree.favorites} start={searchStart} files={searchedFiles()} note={notice}
-      available={commandAvailable} onCommand={id => chooseSearch({ kind: "command", id })}
+      available={commandAvailable} unavailableReason={commandUnavailableReason} onCommand={id => chooseSearch({ kind: "command", id })}
       pluginCommands={pluginContributed.commands} onPluginCommand={id => chooseSearch({ kind: "plugin", id })}
       canvases={owned ? canvasCatalog : []} canvasAvailable={item => !!defaultCanvasTarget(item, canvasSelection)}
       onCanvas={item => chooseSearch({ kind: "canvas", pluginKey: item.pluginKey, id: item.id })}
@@ -6252,7 +6294,11 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
       return outcome.ok ? null : outcome.message ?? "";
     },
   } : null, [cliEpoch, session.id]);
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><MessageReaderContext.Provider value={readMessage}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  // The resume after a limit the session waits for: its warning card offers Resume now and Cancel, in an owned host only.
+  // It is read when a card shows it, and again when the run of the session starts or ends.
+  const resumeHub = useMemo(() => cliEpoch ? createResumeHub(sessionOperations, cliEpoch, session.id) : null, [cliEpoch, session.id]);
+  useEffect(() => { resumeHub?.noteRunning(running === true); }, [resumeHub, running]);
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><SessionResumeContext.Provider value={resumeHub}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><MessageReaderContext.Provider value={readMessage}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       // The conversation of the Claude Code CLI the session continues: read when the window opens; another provider has none.
       conversation={ownedSession && !demoMode && session.providerConversation === true
@@ -6341,7 +6387,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div></MessageReaderContext.Provider></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></ScriptRunActionsContext.Provider></MarkdownLinkScopeContext.Provider>;
+  </div></MessageReaderContext.Provider></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></ScriptRunActionsContext.Provider></SessionResumeContext.Provider></MarkdownLinkScopeContext.Provider>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

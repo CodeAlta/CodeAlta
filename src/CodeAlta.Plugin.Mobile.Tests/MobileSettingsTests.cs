@@ -72,7 +72,8 @@ public sealed class MobileSettingsTests
         await using var fixture = new Fixture(cli);
         await fixture.StartAsync(oldPort, 4443);
         Assert.AreEqual("https://desk.tail1234.ts.net:4443", fixture.Plugin.Settings().Address);
-        var token = fixture.State.Read().Token;
+        var access = await fixture.AccessAsync();
+        var phone = (await access.SignInAsync(await access.PairAsync(CancellationToken.None), CancellationToken.None))!;
         var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
 
         // Tailscale now serves the old ports: they are what is taken off.
@@ -96,7 +97,8 @@ public sealed class MobileSettingsTests
         Assert.IsTrue(await ListensAsync(newPort), "the server listens on the new port");
         Assert.IsFalse(await ListensAsync(oldPort), "and no longer on the old one");
         var saved = fixture.State.Read();
-        Assert.AreEqual((newPort, 5443, token), (saved.Port, saved.HttpsPort, saved.Token), "the ports are saved, the token stays");
+        Assert.AreEqual((newPort, 5443), (saved.Port, saved.HttpsPort), "the ports are saved");
+        Assert.IsTrue((await fixture.AccessAsync()).IsPhone(phone), "the phones stay signed in");
         Assert.IsTrue(page.Events.Any(static change => change.Name == "mobile.settings.changed"), "the page hears the change");
     }
 
@@ -140,21 +142,114 @@ public sealed class MobileSettingsTests
     }
 
     [TestMethod]
-    public async Task TheReset_GivesANewToken_AndKeepsThePorts()
+    public async Task TheReset_GivesANewPairingToken_SignsEveryPhoneOut_AndKeepsThePorts()
     {
         var port = FreePort.Next();
         await using var fixture = new Fixture(new FakeTailscaleCli(installed: false));
         await fixture.StartAsync(port, 4443);
-        var before = fixture.State.Read();
+        var (tab, _) = await fixture.OpenAsync(MobilePlugin.CanvasId);
+        await tab.InvokeAsync<MobileEmpty, MobileStatus>("mobile.status", new MobileEmpty());
+        var access = await fixture.AccessAsync();
+        var before = access.PairingToken!;
+        var phone = (await access.SignInAsync(before, CancellationToken.None))!;
         var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
 
         var answer = await page.InvokeAsync<MobileEmpty, MobileSettingsView>("mobile.reset", new MobileEmpty());
 
-        var after = fixture.State.Read();
-        Assert.AreNotEqual(before.Token, after.Token);
-        Assert.IsTrue(MobileToken.IsValid(after.Token));
+        access = await fixture.AccessAsync();
+        Assert.AreNotEqual(before, fixture.Plugin.PairingToken);
+        Assert.IsTrue(MobileToken.IsValid(fixture.Plugin.PairingToken));
+        Assert.IsNull(await access.SignInAsync(before, CancellationToken.None), "the code of before no longer signs in");
+        Assert.IsFalse(access.IsPhone(phone), "the phones of before are signed out");
         Assert.AreEqual((port, 4443), (answer.Port, answer.HttpsPort));
-        Assert.IsFalse(JsonSerializer.Serialize(answer, page.JsonOptions).Contains(after.Token!, StringComparison.Ordinal), "the page never gets the token");
+        Assert.IsFalse(JsonSerializer.Serialize(answer, page.JsonOptions).Contains(fixture.Plugin.PairingToken!, StringComparison.Ordinal), "the page never gets the token");
+    }
+
+    [TestMethod]
+    public async Task TheFiles_KeepNoSecret_TheTabMakesThePairingToken_AndARestartMakesANewOneForTheSamePhones()
+    {
+        var port = FreePort.Next();
+        var state = new MemoryState();
+        string token, phone;
+        await using (var fixture = new Fixture(new FakeTailscaleCli(installed: false), state))
+        {
+            await fixture.StartAsync(port, 4443);
+            Assert.IsNull(fixture.Plugin.PairingToken, "no pairing token until the tab shows the code");
+            var (tab, _) = await fixture.OpenAsync(MobilePlugin.CanvasId);
+            await tab.InvokeAsync<MobileEmpty, MobileStatus>("mobile.status", new MobileEmpty());
+            token = fixture.Plugin.PairingToken!;
+            Assert.IsTrue(MobileToken.IsValid(token));
+            phone = (await (await fixture.AccessAsync()).SignInAsync(token, CancellationToken.None))!;
+            Assert.AreNotEqual(token, phone, "a phone gets a key of its own");
+        }
+
+        Assert.IsFalse(state.AllText.Contains(token, StringComparison.Ordinal), "the pairing token is not on disk");
+        Assert.IsFalse(state.AllText.Contains(phone, StringComparison.Ordinal), "the key of the phone is not on disk");
+        StringAssert.Contains(state.AllText, MobileAccess.Hash(phone));
+
+        await using var restarted = new Fixture(new FakeTailscaleCli(installed: false), state);
+        await restarted.StartAsync(port, 4443, write: false);
+        var access = await restarted.AccessAsync();
+        Assert.IsTrue(access.IsPhone(phone), "a phone signed in stays signed in after a restart");
+        Assert.IsNull(restarted.Plugin.PairingToken);
+        var (again, _) = await restarted.OpenAsync(MobilePlugin.CanvasId);
+        await again.InvokeAsync<MobileEmpty, MobileStatus>("mobile.status", new MobileEmpty());
+        Assert.AreNotEqual(token, restarted.Plugin.PairingToken, "the tab makes a new pairing token");
+        Assert.IsNull(await access.SignInAsync(token, CancellationToken.None), "the pairing token of before no longer signs in");
+        Assert.IsNull(await access.SignInAsync("0123456789abcdefghijklmnopqrstuvwxyzABCDEFG", CancellationToken.None), "a wrong token is refused");
+        Assert.IsNull(await access.SignInAsync(MobileAccess.Hash(phone), CancellationToken.None), "the hash on disk signs nothing in");
+    }
+
+    [TestMethod]
+    public async Task AFileOfBefore_WithTheTokenItself_IsMigrated_AndItsPhonesStaySignedIn()
+    {
+        var port = FreePort.Next();
+        const string Legacy = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFG";
+        var state = new MemoryState();
+        await state.WriteJsonAsync(PluginStateScope.User, "mobile.json", new MobileSettings { Token = Legacy, Port = port, HttpsPort = 4443 });
+        await using var fixture = new Fixture(new FakeTailscaleCli(installed: false), state);
+
+        await fixture.StartAsync(port, 4443, write: false);
+
+        Assert.IsFalse(state.AllText.Contains(Legacy, StringComparison.Ordinal), "the token leaves the files");
+        Assert.IsNull(state.Read().Token);
+        Assert.AreEqual((port, 4443), (state.Read().Port, state.Read().HttpsPort), "the ports stay");
+        var access = await fixture.AccessAsync();
+        Assert.IsTrue(access.IsPhone(Legacy), "the cookie of a phone of before still signs it in");
+        Assert.AreEqual(Legacy, await access.SignInAsync(Legacy, CancellationToken.None), "and so does the token it kept");
+        Assert.IsFalse(access.IsPhone("ZYXWVUTSRQPONMLKJIHGFEDCBAzyxwvutsrqponmlkji"), "a wrong key is refused");
+    }
+
+    [TestMethod]
+    public async Task AHostThatCannotSayTheAsks_StopsNothing_AndTheAsksOfBeforeAreKept()
+    {
+        var asks = new FailingAsks();
+        await using var fixture = new Fixture(new FakeTailscaleCli(installed: false), asks: asks);
+        await fixture.StartAsync(FreePort.Next(), 4443);
+
+        Assert.AreEqual("s1", (await fixture.Plugin.ReadAskingAsync(CancellationToken.None))!.Single().SessionId);
+        asks.Fail = true;
+        Assert.IsNull(await fixture.Plugin.ReadAskingAsync(CancellationToken.None), "a failure keeps the asks of the last flush");
+        Assert.IsNull(await fixture.Plugin.ReadAskingAsync(CancellationToken.None), "and does not stop the next reading");
+        asks.Fail = false;
+        Assert.IsNotNull(await fixture.Plugin.ReadAskingAsync(CancellationToken.None));
+    }
+
+    private sealed class FailingAsks : IPluginAskService
+    {
+        internal bool Fail { get; set; }
+
+        public bool HasAsks => true;
+
+        public ValueTask<IReadOnlyList<PluginAskSummary>> ListAskingAsync(CancellationToken cancellationToken = default)
+            => Fail ? throw new InvalidOperationException("The host closes.") : ValueTask.FromResult<IReadOnlyList<PluginAskSummary>>([new("s1", "ask-1", "0", "pending", false)]);
+
+        public ValueTask<PluginAsk?> GetPendingAsync(string sessionId, CancellationToken cancellationToken = default) => ValueTask.FromResult<PluginAsk?>(null);
+
+        public ValueTask<PluginAskOutcome> AnswerAsync(PluginAskReference ask, IReadOnlyList<PluginAskAnswer> answers, PluginAskReviewAnswer? review, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new PluginAskOutcome("unavailable"));
+
+        public ValueTask<PluginAskOutcome> CancelAsync(PluginAskReference ask, CancellationToken cancellationToken = default) => ValueTask.FromResult(new PluginAskOutcome("unavailable"));
     }
 
     // What `tailscale serve status --json` says when the HTTPS port serves the server of the plugin on its local port.
@@ -188,16 +283,19 @@ public sealed class MobileSettingsTests
     }
 
     /// <summary>The plugin of a window, attached to services of the tests and started on the ports a test gives.</summary>
-    private sealed class Fixture(FakeTailscaleCli cli) : IAsyncDisposable
+    private sealed class Fixture(FakeTailscaleCli cli, MemoryState? state = null, IPluginAskService? asks = null) : IAsyncDisposable
     {
         internal MobilePlugin Plugin { get; } = new(cli);
 
-        internal MemoryState State { get; } = new();
+        internal MemoryState State { get; } = state ?? new();
 
-        internal async Task StartAsync(int port, int httpsPort)
+        // The access of the plugin, read from its files when it started.
+        internal Task<MobileAccess> AccessAsync() => Task.FromResult(Plugin.Access!);
+
+        internal async Task StartAsync(int port, int httpsPort, bool write = true)
         {
-            await State.WriteJsonAsync(PluginStateScope.User, "mobile.json", new MobileSettings { Port = port, HttpsPort = httpsPort });
-            var services = new Services(State);
+            if (write) await State.WriteJsonAsync(PluginStateScope.User, "mobile.json", new MobileSettings { Port = port, HttpsPort = httpsPort });
+            var services = new Services(State) { Asks = asks ?? NoopPluginAskService.Instance };
             Plugin.AttachRuntimeContext(new PluginRuntimeContext
             {
                 Plugin = PluginDescriptorFactory.FromType(typeof(MobilePlugin)),
@@ -245,6 +343,8 @@ public sealed class MobileSettingsTests
         public IPluginSpaceService Spaces { get; } = new FakeSpaces("default");
 
         public IPluginAppFileService AppFiles { get; } = new FakeFiles().Add("mobile.html", "<!doctype html><p>Phone</p>", "text/html");
+
+        public IPluginAskService Asks { get; init; } = NoopPluginAskService.Instance;
     }
 
     /// <summary>The state of the plugin, kept as JSON in memory.</summary>
@@ -256,6 +356,9 @@ public sealed class MobileSettingsTests
         internal int Writes => Volatile.Read(ref _writes);
 
         internal string? Text => _files.GetValueOrDefault("mobile.json");
+
+        /// <summary>Every file of the plugin, as JSON.</summary>
+        internal string AllText => string.Join("\n", _files.Values);
 
         internal MobileSettings Read() => JsonSerializer.Deserialize<MobileSettings>(Text!)!;
 

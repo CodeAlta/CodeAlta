@@ -320,6 +320,15 @@ public sealed class SpaceCatalogTests
         Assert.AreEqual(quotaOnly, read.Fallback);
         Assert.AreEqual("work-claude:opus@high", read.Tiers!.Standard.Single().ToString());
 
+        // The resume after a limit is the space's own too.
+        var resuming = quotaOnly with { Resume = true, MaxResumes = 2 };
+        Assert.IsTrue((await fixture.Spaces.UpdateSettingsAsync("business",
+            current => current with { NewSessions = current.NewSessions! with { Fallback = resuming } })).Succeeded);
+        text = await File.ReadAllTextAsync(path);
+        StringAssert.Contains(text, "resume: true");
+        StringAssert.Contains(text, "max_resumes: 2");
+        Assert.AreEqual(resuming, (await fixture.Spaces.GetAsync("business"))!.Settings.NewSessions!.Fallback);
+
         // Without a fallback, the file has none: the space takes the global one.
         Assert.IsTrue((await fixture.Spaces.UpdateSettingsAsync("business",
             current => current with { NewSessions = current.NewSessions! with { Fallback = null } })).Succeeded);

@@ -11,6 +11,7 @@ export type SessionView = Readonly<{
   agent: Readonly<{ id: string; name: string | null }> | null;
   worktree: string | null;
   parentId: string | null;
+  parentTitle?: string | null;
   summary: string | null;
   lastActivity: string | null;
   live: Live | null;
@@ -54,6 +55,7 @@ export function createSessionStore() {
     return {
       id, title: session?.title ?? null, projectId: session?.projectId ?? state?.projectId ?? null, project: session?.project ?? null,
       space: session?.space ?? null, model: session?.model ?? null, agent: session?.agent ?? null, worktree: session?.worktree ?? null, parentId: session?.parentId ?? null,
+      parentTitle: session?.parentTitle ?? (session?.parentId ? known.get(session.parentId)?.title : null) ?? null,
       summary: session?.summary ?? null, lastActivity: session?.lastActivity ?? null, live: state,
     };
   };
@@ -81,11 +83,12 @@ export function createSessionStore() {
     /** Takes a page of the list read from `startedAt`: the first page replaces the list, a later one adds to it. */
     applyPage(page: SessionPage, startedAt: number, append: boolean) {
       const ids: string[] = [];
-      for (const session of page.sessions ?? []) {
+      // The parents of its sub-agents come with a page, out of its order: the list shows them once.
+      for (const session of [...page.sessions ?? [], ...page.parents ?? []]) {
         known.set(session.id, session);
         const current = live.get(session.id);
         if (session.live && (!current || current.stamp <= startedAt)) live.set(session.id, { live: session.live, stamp: startedAt });
-        ids.push(session.id);
+        if (!ids.includes(session.id)) ids.push(session.id);
       }
       listed = append ? [...listed, ...ids.filter(id => !listed.includes(id))] : ids;
       next = page.next ?? listed.length;

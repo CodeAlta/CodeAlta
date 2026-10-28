@@ -85,9 +85,11 @@ public sealed class ReviewBeforeCommitRuntimeTests
         reviews.CommitRound(scope, await reviews.PrepareRoundAsync(scope, new(ReviewTargets.Changes, null, ReviewVerdicts.Approved, null, sessionId), default));
         Assert.IsNull(await guard("git commit -am approved", temp.ProjectRoot, default));
 
-        // An edit after the approval needs a new review.
+        // An edit after the approval needs a new review: the refusal names what changed since (#238).
         File.WriteAllText(Path.Combine(temp.ProjectRoot, "a.txt"), "one\ntwo\nthree\n");
-        Assert.IsNotNull(await guard("git commit -am more", temp.ProjectRoot, default));
+        var refused = await guard("git commit -am more", temp.ProjectRoot, default);
+        StringAssert.Contains(refused, "changed since: `a.txt`");
+        StringAssert.Contains(refused, "alta review request changes");
     }
 
     private static bool Git(string folder, params string[] arguments)

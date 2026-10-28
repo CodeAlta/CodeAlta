@@ -6,7 +6,7 @@ title: Model Tiers and Fallback
 
 Instead of a model, a session can run on a tier: **Complex** for hard work, **Standard** for everyday work, and **Quick** for searches and simple tasks. Each tier is a list of models you choose, the preferred first. A session on a tier takes the first of them whose provider is ready.
 
-When a provider runs out of quota or stays unavailable, the fallback can move a session to the next model of its tier, so the work goes on with another model or another account.
+When a provider runs out of quota or stays unavailable, the fallback can move a session to the next model of its tier, so the work goes on with another model or another account. When every model of the tier has reached its limit, the session can resume by itself once a limit resets.
 
 ## Set the tiers
 
@@ -42,7 +42,7 @@ A [space](spaces.md) can have tiers and a fallback of its own: in **Settings > S
 
 - The tiers start as a copy of the global tiers and replace them for the sessions of that space, also for a tier they leave empty.
 - **Add a model** offers the providers of the space, so a provider you keep for that space alone, such as a work account, goes in its tiers. A row whose provider is not in the space says **Not in this space**.
-- The fallback switch and its two boxes are the space's own. Until you change them there, the space follows the fallback of Settings > Models.
+- The fallback switch, its two boxes and the resume when the limit resets are the space's own. Until you change them there, the space follows the fallback of Settings > Models.
 
 With **Use global**, the space has the usual settings again, and the section says what each global tier gives.
 
@@ -69,7 +69,20 @@ When a session falls back:
 - the session receives a message from CodeAlta that asks the agent to continue the task, and to check what an interrupted command or edit already did before it runs it again;
 - a session that delegated the work gets the answer of the run that continues, not the failure.
 
-When no other model of the tier can take over, a warning card says so: choose another model, or send again once the limit resets.
+When no other model of the tier can take over, a warning card says so: choose another model, or send again once the limit resets. With **Resume when the limit resets** on, the session waits for the reset instead (below).
+
+## Resume when the limit resets
+
+Turn on **Resume when the limit resets**, under the fallback switch, and a session that stopped on a limit, with no other model of its tier to take over, goes on by itself when the earliest limit of its tier resets. It acts on quota and usage limits only, so it is offered while the fallback acts on **Quota reached**.
+
+- The warning card says when and with which provider: **Resumes at 14:05 with Claude Code**. It offers **Resume now**, which tries the tier at once (useful once you bought credits or the limit reset early), and **Cancel**.
+- The resume time is the reset time the provider gives, or 15 minutes later when it gives none.
+- At that time, the session takes its tier again in order: the first model whose provider is available, the preferred one first. It receives the same message as after a fallback, which asks the agent to continue the task and to check what an interrupted command or edit already did. A **Session resumed** card says which model it took.
+- If the limits are reached again, the next reset is waited for, at most the number of times in a row you set in **At most … times in a row** (5 by default). A prompt you send yourself starts the count again.
+- A prompt sent to the session while it waits, by you or by an agent, cancels the resume: the session works on that prompt instead. So does any other run of the session meanwhile, such as the result of a background job or the message of a sub-agent. **Automatic resume cancelled** says so in the timeline.
+- Only a run that stopped on a limit is resumed: a session that ended its task never is.
+- A session that delegated the work waits as for a fallback: it gets the answer of the run that resumes, and hears of the failure only when the resume is cancelled or the resumes in a row are used up.
+- A resume that waits is kept when CodeAlta closes: it starts at its time after CodeAlta starts again, or at once when that time has passed.
 
 ## In the file
 
@@ -84,6 +97,8 @@ quick    = ["claude-code:haiku", "codex:gpt-6.1-mini@low"]
 [models.fallback]
 enabled = true
 on = ["quota", "unavailable"]   # the failures to fall back on; both by default
+resume = true                   # resume by itself when the limit resets; off by default
+max_resumes = 5                 # automatic resumes in a row, from 1 to 50; 5 by default
 ```
 
 The tiers of a space are in the file of the space, under `new_sessions.tiers`, written the same way, and its fallback under `new_sessions.fallback` (see [Files](spaces.md#files)):
@@ -92,7 +107,7 @@ The tiers of a space are in the file of the space, under `new_sessions.tiers`, w
 new_sessions:
   tiers:
     standard: ["work-claude:opus@medium", "codex:gpt-6.1@medium"]
-  fallback: { enabled: true, on: [quota] }
+  fallback: { enabled: true, on: [quota], resume: true, max_resumes: 3 }
 ```
 
 A space without `tiers` takes the tiers and the fallback of `config.toml`; one with `tiers` and no `fallback` takes the fallback of `config.toml`.

@@ -18,8 +18,8 @@ internal sealed record MobileServerOptions
     /// <summary>Gets the port on the loopback address.</summary>
     public required int Port { get; init; }
 
-    /// <summary>Gets the access token of now: resetting it disconnects every phone.</summary>
-    public required Func<string> Token { get; init; }
+    /// <summary>Gets who may use the view: the pairing token of the QR code, and the key of each phone.</summary>
+    public required MobileAccess Access { get; init; }
 
     /// <summary>Gets the host names the requests may name, beside the loopback ones: the name of this computer on the tailnet, with its port.</summary>
     public required Func<IReadOnlyCollection<string>> Hosts { get; init; }
@@ -33,6 +33,9 @@ internal sealed record MobileServerOptions
     /// <summary>Gets what the phone does through alta.</summary>
     public required MobileApi Api { get; init; }
 
+    /// <summary>Gets the questions and the review requests of the sessions, which the phone answers.</summary>
+    public required MobileAsks Asks { get; init; }
+
     /// <summary>Gets the live state of the sessions.</summary>
     public required MobileLive Live { get; init; }
 
@@ -43,7 +46,7 @@ internal sealed record MobileServerOptions
 /// <summary>
 /// The in-process HTTP server of the mobile view. It listens on the loopback address only: other devices reach it through
 /// Tailscale Serve, which terminates TLS and forwards to it. It serves the page of the phones from the files of the
-/// application's page, and its API to the phone that signed in with the access token.
+/// application's page, and its API to the phones that signed in with the pairing token of the QR code, each with a key of its own.
 /// </summary>
 internal sealed partial class MobileServer : IAsyncDisposable
 {
@@ -57,10 +60,14 @@ internal sealed partial class MobileServer : IAsyncDisposable
     // A diagram is Mermaid's SVG, never trusted: no script, no request, nothing but its own inline styles and images.
     private const string DiagramPolicy = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox";
     private const long MaximumBody = 1024 * 1024;
+
+    // A prompt and its files: 64 MB of files, as base64, with the text around them.
+    private const long MaximumPromptBody = 90L * 1024 * 1024;
     private const long MaximumDiagram = 4 * 1024 * 1024;
 
     private readonly MobileServerOptions _options;
     private readonly MobileDiagrams _diagrams = new();
+    private readonly SemaphoreSlim _uploads = new(1, 1);
     private WebApplication? _app;
 
     internal MobileServer(MobileServerOptions options)
@@ -87,12 +94,13 @@ internal sealed partial class MobileServer : IAsyncDisposable
         builder.Services.AddSingleton<IHostLifetime, QuietLifetime>();
         var app = builder.Build();
         app.Use(GuardAsync);
+        app.Use(AllowPromptBodyAsync);
         Map(app);
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
         _app = app;
     }
 
-    /// <summary>Closes the live streams: a phone that connects again signs in again, with the token of now.</summary>
+    /// <summary>Closes the live streams: a phone that connects again signs in again, with a key of now.</summary>
     internal void Disconnect() => _options.Live.CloseListeners();
 
     private void Map(WebApplication app)
@@ -103,17 +111,18 @@ internal sealed partial class MobileServer : IAsyncDisposable
         app.MapGet("/assets/{**file}", (HttpContext context, string file, CancellationToken ct) => FileAsync(context, "assets/" + file, null, ct));
         app.MapGet("/mobile/{**file}", (HttpContext context, string file, CancellationToken ct) => FileAsync(context, "mobile/" + file, null, ct));
 
-        // The phone signs in with the token of the QR code, which it read from the fragment of the address: never a query, which
-        // proxies and histories keep.
+        // The phone signs in with the pairing token of the QR code, which it read from the fragment of the address (never a query,
+        // which proxies and histories keep), and gets a key of its own: its cookie, and what it keeps to sign in again (an
+        // installed app does not share the browser's cookies). It signs in again with that key.
         app.MapPost("/api/login", async (HttpContext context, CancellationToken ct) =>
         {
             var body = await BodyAsync(context.Request, ct).ConfigureAwait(false);
-            if (body is null || !MobileToken.Matches(MobileAlta.Text(body, "token"), _options.Token())) return Results.Unauthorized();
-            context.Response.Cookies.Append(CookieName, _options.Token(), new CookieOptions
+            if (body is null || await _options.Access.SignInAsync(MobileAlta.Text(body, "token"), ct).ConfigureAwait(false) is not { } key) return Results.Unauthorized();
+            context.Response.Cookies.Append(CookieName, key, new CookieOptions
             {
                 HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = !IsLoopback(context.Request.Host.Host), Path = "/", MaxAge = TimeSpan.FromDays(30),
             });
-            return Results.NoContent();
+            return Json(new JsonObject { ["key"] = key });
         });
 
         var api = app.MapGroup("/api").AddEndpointFilter(async (invocation, next) =>
@@ -124,16 +133,27 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapGet("/sessions/{id}", async (string id, CancellationToken ct) => Json(await _options.Sessions.GetAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/events", async (string id, long? since, CancellationToken ct) =>
             Json(await _options.Sessions.EventsAsync(id, Math.Max(0, since ?? 0), ct).ConfigureAwait(false)));
+        // The images of a timeline, by an id the server finds in the records of the session, never by a path: a saved copy of
+        // the session, or a picture of the disk that an answer shows. They never change: the phone keeps them.
+        api.MapGet("/sessions/{id}/images/{imageId}", async (string id, string imageId, HttpContext context, CancellationToken ct) =>
+            Image(context, await _options.Sessions.Images.SavedAsync(id, imageId, ct).ConfigureAwait(false)));
+        api.MapGet("/sessions/{id}/linked-images/{seq:long}/{index:int}", async (string id, long seq, int index, HttpContext context, CancellationToken ct) =>
+            Image(context, await _options.Sessions.Images.LinkedAsync(id, seq, index, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/choices", async (string id, CancellationToken ct) => Json(await _options.Api.ChoicesAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/projects", async (CancellationToken ct) => Json(await _options.Api.ProjectsAsync(ct).ConfigureAwait(false)));
         api.MapGet("/options", async (CancellationToken ct) => Json(await _options.Api.OptionsAsync(ct).ConfigureAwait(false)));
-        api.MapPost("/sessions", async (HttpRequest request, CancellationToken ct) =>
-            await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Api.CreateAsync(body, ct).ConfigureAwait(false)) : Invalid());
-        api.MapPost("/sessions/{id}/prompt", async (string id, HttpRequest request, CancellationToken ct) =>
-            await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Api.PromptAsync(id, body, ct).ConfigureAwait(false)) : Invalid());
+        api.MapPost("/sessions", (HttpRequest request, CancellationToken ct) =>
+            PromptBodyAsync(request, async body => await _options.Api.CreateAsync(body, ct).ConfigureAwait(false), ct));
+        api.MapPost("/sessions/{id}/prompt", (string id, HttpRequest request, CancellationToken ct) =>
+            PromptBodyAsync(request, body => _options.Api.PromptAsync(id, body, ct), ct));
         api.MapPost("/sessions/{id}/abort", async (string id, CancellationToken ct) => Json(await _options.Api.AbortAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/archive", async (string id, CancellationToken ct) => Json(await _options.Api.ArchiveAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/restore", async (string id, CancellationToken ct) => Json(await _options.Api.RestoreAsync(id, ct).ConfigureAwait(false)));
+        api.MapGet("/sessions/{id}/ask", async (string id, CancellationToken ct) => Json(await _options.Asks.GetAsync(id, ct).ConfigureAwait(false)));
+        api.MapPost("/sessions/{id}/ask/answer", async (string id, HttpRequest request, CancellationToken ct) =>
+            await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Asks.AnswerAsync(id, body, ct).ConfigureAwait(false)) : Invalid());
+        api.MapPost("/sessions/{id}/ask/cancel", async (string id, HttpRequest request, CancellationToken ct) =>
+            await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Asks.CancelAsync(id, body, ct).ConfigureAwait(false)) : Invalid());
 
         // A diagram to open in a tab of its own, at a link that needs no sign-in: a new tab of an app installed on iOS opens in
         // Safari, which has neither the app's cookie nor its storage. The link is a random id, kept two hours.
@@ -178,6 +198,42 @@ internal sealed partial class MobileServer : IAsyncDisposable
         });
     }
 
+    // A body larger than the small limit carries files: one such prompt at a time is read, written for alta and handed over,
+    // which bounds what the uploads hold in memory. A prompt of text never waits for one.
+    private async Task<IResult> PromptBodyAsync(HttpRequest request, Func<MobilePromptBody, Task<JsonObject?>> handle, CancellationToken cancellationToken)
+    {
+        var large = request.ContentLength is not { } length || length > MaximumBody;
+        if (large) await _uploads.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var body = await MobilePromptBody.ReadAsync(request, MaximumPromptBody, cancellationToken).ConfigureAwait(false);
+            return body is null ? Invalid() : Json(await handle(body).ConfigureAwait(false));
+        }
+        finally
+        {
+            if (large) _uploads.Release();
+        }
+    }
+
+    // The two routes that carry a prompt's files. Every other route keeps the server's small limit.
+    private static bool IsPromptBody(PathString path)
+    {
+        var text = path.Value ?? "";
+        return text.Equals("/api/sessions", StringComparison.OrdinalIgnoreCase)
+            || text.StartsWith("/api/sessions/", StringComparison.OrdinalIgnoreCase) && text.EndsWith("/prompt", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Task AllowPromptBodyAsync(HttpContext context, RequestDelegate next)
+    {
+        if (HttpMethods.IsPost(context.Request.Method) && IsPromptBody(context.Request.Path))
+        {
+            var feature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+            if (feature is { IsReadOnly: false }) feature.MaxRequestBodySize = MaximumPromptBody;
+        }
+
+        return next(context);
+    }
+
     // Every answer: no cache unless a file says otherwise, no sniffing, no referrer, no frame. A request that names another
     // host than this computer is refused: a page of another site that resolves its name to the loopback address gets nothing.
     private async Task GuardAsync(HttpContext context, RequestDelegate next)
@@ -205,12 +261,20 @@ internal sealed partial class MobileServer : IAsyncDisposable
 
     private static bool IsLoopback(string host) => host is "127.0.0.1" or "localhost" or "[::1]";
 
+    // The key of a phone, in its cookie or as a bearer token; the pairing token only signs in.
+    private static IResult Image(HttpContext context, MobileImage? image)
+    {
+        if (image is null) return Results.NotFound();
+        context.Response.Headers.CacheControl = "private, max-age=86400, immutable";
+        context.Response.Headers.ContentSecurityPolicy = "default-src 'none'; sandbox";
+        return Results.Bytes(image.Bytes, image.MediaType);
+    }
+
     private bool Authorized(HttpContext context)
     {
-        var token = _options.Token();
         var header = context.Request.Headers.Authorization.ToString();
-        if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && MobileToken.Matches(header[7..].Trim(), token)) return true;
-        return MobileToken.Matches(context.Request.Cookies[CookieName], token);
+        if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && _options.Access.IsPhone(header[7..].Trim())) return true;
+        return _options.Access.IsPhone(context.Request.Cookies[CookieName]);
     }
 
     private async Task<IResult> FileAsync(HttpContext context, string path, string? policy, CancellationToken cancellationToken)

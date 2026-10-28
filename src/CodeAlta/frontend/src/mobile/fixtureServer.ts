@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
+import type { Ask, AskResult, Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
 
 /** The policy the plugin's server sets on the page (the contract of the phone page). */
 export const mobilePolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -15,7 +15,10 @@ export type FixtureRequest = Readonly<{ method: string; path: string; query: str
  */
 export async function startFixtureServer(files: Readonly<Record<string, Readonly<{ type: string; body: string | Buffer }>>>) {
   const state = {
+    /** The pairing token of the QR code. */
     token: "secret",
+    /** The keys of the phones signed in, which sign them in again; the pairing token gives a new one. */
+    keys: new Set<string>(),
     cookies: new Set<string>(),
     sessions: [] as Session[],
     events: new Map<string, TimelineEvent[]>(),
@@ -28,10 +31,23 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     created: 0,
     /** What the next `POST /api/sessions` answers besides its id. */
     createAnswer: {} as Record<string, unknown>,
+    /** The next prompt fails with this text, once. */
+    promptError: null as string | null,
+    /** The asks the sessions wait on: an answer or a cancel that goes ends it. */
+    asks: new Map<string, Ask>(),
+    /** What the next answer or cancel of an ask becomes; null: it goes. */
+    askResult: null as AskResult | null,
+    /** What becomes of the ask when the next answer or cancel is refused or still goes; null leaves it as it is. */
+    askAfter: null as Ask | null,
+    /**
+     * The images of the sessions, by `<session>/<image id>` for a saved copy and `<session>/linked/<seq>/<position>` for a
+     * picture of the disk an answer shows; any other image is not found.
+     */
+    images: new Map<string, Readonly<{ type: string; body: Buffer }>>(),
   };
   const requests: FixtureRequest[] = [];
   const streams = new Set<ServerResponse>();
-  let cookieSeq = 0;
+  let cookieSeq = 0, keySeq = 0;
 
   const send = (response: ServerResponse, status: number, body?: unknown, headers: Record<string, string> = {}) => {
     response.writeHead(status, { "Content-Security-Policy": mobilePolicy, "Cache-Control": "no-store", ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...headers });
@@ -69,10 +85,13 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       return response.end(file.body);
     }
     if (path === "/api/login" && request.method === "POST") {
-      if ((body as { token?: string } | undefined)?.token !== state.token) return send(response, 401);
+      const given = (body as { token?: string } | undefined)?.token ?? "";
+      const key = state.keys.has(given) ? given : given === state.token ? `key${++keySeq}` : null;
+      if (!key) return send(response, 401);
+      state.keys.add(key);
       const cookie = `c${++cookieSeq}`;
       state.cookies.add(cookie);
-      return send(response, 204, undefined, { "Set-Cookie": `alta_mobile=${cookie}; Path=/; HttpOnly; SameSite=Strict` });
+      return send(response, 200, { key }, { "Set-Cookie": `alta_mobile=${cookie}; Path=/; HttpOnly; SameSite=Strict` });
     }
     if (!signedIn(request)) return send(response, 401);
     if (path === "/api/events") {
@@ -87,8 +106,21 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       const offset = Number(url.searchParams.get("offset") ?? 0), limit = Math.min(50, Number(url.searchParams.get("limit") ?? 6));
       const projects = url.searchParams.getAll("project");
       const all = state.sessions.filter(s => projects.length === 0 || projects.includes(s.projectId ?? "")).sort((a, b) => Date.parse(b.lastActivity!) - Date.parse(a.lastActivity!));
-      const page = all.slice(offset, offset + limit);
-      return send(response, 200, { sessions: page, next: offset + page.length, hasMore: offset + page.length < all.length, projects, machine: "FIXTURE-PC", spaces: state.spaces, error: null });
+      // As the plugin: the parents of the sub-agents of the page that no page gave yet come with it, and a sub-agent names its parent.
+      const named = (s: Session): Session => s.parentId ? { ...s, parentTitle: sessionOf(s.parentId)?.title ?? s.parentTitle ?? null } : s;
+      const page = all.slice(offset, offset + limit).map(named);
+      const held = new Set(all.slice(0, offset + limit).map(s => s.id)), parents: Session[] = [];
+      for (let children = page; children.length;) {
+        const next: Session[] = [];
+        for (const parent of children.map(s => all.find(p => p.id === s.parentId))) {
+          if (!parent || held.has(parent.id)) continue;
+          held.add(parent.id);
+          next.push(parent);
+          parents.push(named(parent));
+        }
+        children = next;
+      }
+      return send(response, 200, { sessions: page, parents, next: offset + page.length, hasMore: offset + page.length < all.length, projects, machine: "FIXTURE-PC", spaces: state.spaces, error: null });
     }
     if (path === "/api/sessions" && request.method === "POST") {
       const id = `new${++state.created}`;
@@ -96,9 +128,17 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       state.sessions.push(session(id, `New: ${text}`, project, 0));
       return send(response, 200, { id, ...state.createAnswer });
     }
+    const image = /^\/api\/sessions\/([^/]+)\/(images\/[^/]+|linked-images\/\d+\/[^/]+)$/.exec(path);
+    if (image) {
+      const key = `${decodeURIComponent(image[1])}/${image[2].startsWith("images/") ? decodeURIComponent(image[2].slice("images/".length)) : `linked/${image[2].slice("linked-images/".length)}`}`;
+      const found = state.images.get(key);
+      if (!found) return send(response, 404);
+      response.writeHead(200, { "Content-Type": found.type, "Cache-Control": "private, max-age=86400, immutable", "Content-Security-Policy": "default-src 'none'; sandbox" });
+      return response.end(found.body);
+    }
     if (path === "/api/projects") return send(response, 200, { projects: state.projects, default: "p1", error: null });
     if (path === "/api/options") return send(response, 200, state.options);
-    const found = /^\/api\/sessions\/([^/]+)(?:\/(events|prompt|abort|archive|restore|choices))?$/.exec(path);
+    const found = /^\/api\/sessions\/([^/]+)(?:\/(events|prompt|abort|archive|restore|choices|ask|ask\/answer|ask\/cancel))?$/.exec(path);
     if (found) {
       const id = decodeURIComponent(found[1]), action = found[2];
       // An archived session is out of the list, and can still be restored.
@@ -118,7 +158,22 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         return send(response, 200, { since: Math.max(since, ...events.map(e => e.seq)), events, error: null });
       }
       if (action === "choices") return send(response, 200, choicesOf(target));
+      if (action === "ask") return send(response, 200, { ask: state.asks.get(id) ?? null, error: null });
+      if (action === "ask/answer" || action === "ask/cancel") {
+        const result = state.askResult ?? { ok: true, status: action === "ask/answer" ? "admitted" : "cancelled", error: null };
+        state.askResult = null;
+        const { askId } = body as { askId: string };
+        if (state.askAfter) state.asks.set(id, state.askAfter);
+        else if (result.ok && !result.pending && state.asks.get(id)?.id === askId) state.asks.delete(id);
+        state.askAfter = null;
+        return send(response, 200, result);
+      }
       if (action === "prompt") {
+        if (state.promptError) {
+          const error = state.promptError;
+          state.promptError = null;
+          return send(response, 200, { ok: false, error });
+        }
         // A send or a queue that carries a selection: the session runs on it now, as alta would say.
         const { mode, model, reasoning, agent, permissionMode } = body as { mode: string } & PromptSelection;
         if (mode !== "steer" && (model || reasoning || agent || permissionMode)) {
@@ -178,7 +233,7 @@ export function session(id: string, title: string, projectId: string, minutesAgo
 export const fixtureChoices: Omit<SessionChoices, "current"> = {
   models: [
     { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", efforts: ["low", "medium", "high"], startEffort: "medium" },
-    { id: "gpt-6.1-argon", name: "GPT-6.1 Argon", efforts: ["medium", "high", "xhigh"], startEffort: "high" },
+    { id: "gpt-6.1-argon", name: "GPT-6.1 Argon", efforts: ["medium", "high", "xhigh"], startEffort: "high", imageInput: true },
     { id: "gpt-5.5", name: "GPT-5.5", efforts: ["low", "medium", "high"], startEffort: "medium" },
   ],
   prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }, { id: "review", name: "Review" }],

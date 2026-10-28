@@ -12,11 +12,13 @@ type Owner = ReturnType<typeof createComposerQueue>;
  * The prompts waiting above the composer, one compact row each: steering for the running turn first, then
  * the queue in the order it will be sent.
  */
-export function ComposerQueueStrip({ owner, epoch, sessionId, disabled, running, retry }: {
+export function ComposerQueueStrip({ owner, epoch, sessionId, disabled, running, retry, commandTarget = false }: {
   owner: Owner; epoch: string; sessionId: string; disabled: boolean;
   /** A turn is running: a queued prompt can be sent to it as steering. */
   running: boolean;
   retry: (item: ComposerQueueItem) => void;
+  /** The composer is the one in front: its Clear queue button is what the Clear Queue command presses. */
+  commandTarget?: boolean;
 }) {
   useSyncExternalStore(owner.subscribe, owner.getSnapshot);
   const { t } = useShellLanguage();
@@ -42,6 +44,7 @@ export function ComposerQueueStrip({ owner, epoch, sessionId, disabled, running,
           {sends > queued.length && <> · {t("{count} sends", { count: sends })}</>}</span>}
       </span>
       {queued.some(item => item.state === "waiting" || item.state === "failed") && <Button size="small" variant="minimal" className="composer-queue-clear" disabled={disabled}
+        data-composer-command={commandTarget ? "clearQueue" : undefined} data-unavailable={disabled ? t("Reload required.") : undefined}
         title={`${t("Remove every queued prompt")} (F10)`} onClick={() => owner.clear(epoch, sessionId)}>{t("Clear queue")}</Button>}
     </header>
     <ol className="composer-queue-list">

@@ -278,8 +278,26 @@ public sealed record ModelFallbackSettings(bool Enabled, bool OnQuota, bool OnUn
     /// <summary>The name of the unavailable trigger.</summary>
     public const string UnavailableTrigger = "unavailable";
 
+    /// <summary>How many times in a row a session resumes by itself when nothing else is configured.</summary>
+    public const int DefaultMaxResumes = 5;
+
+    /// <summary>The most automatic resumes in a row the settings accept.</summary>
+    public const int MaximumMaxResumes = 50;
+
     /// <summary>Gets the choices when nothing is configured: off, on both failures once turned on.</summary>
     public static ModelFallbackSettings Default { get; } = new(false, true, true);
+
+    /// <summary>
+    /// Gets whether a session that stopped on a limit, with no other model of its tier to take over, resumes by itself
+    /// when the earliest limit of its tier resets. Off unless the user turns it on; it acts only with the fallback on.
+    /// </summary>
+    public bool Resume { get; init; }
+
+    /// <summary>
+    /// Gets how many times in a row a session resumes by itself; a prompt sent to the session starts the count again.
+    /// Between 1 and <see cref="MaximumMaxResumes"/>.
+    /// </summary>
+    public int MaxResumes { get; init; } = DefaultMaxResumes;
 
     /// <summary>Gets the table as the configuration writes it, or null for the defaults.</summary>
     /// <returns>The table, or <see langword="null"/> when every choice is the default.</returns>
@@ -290,7 +308,15 @@ public sealed record ModelFallbackSettings(bool Enabled, bool OnQuota, bool OnUn
             {
                 Enabled = Enabled ? true : null,
                 On = OnQuota && OnUnavailable ? null : [.. Triggers()],
+                Resume = Resume ? true : null,
+                MaxResumes = MaxResumes == DefaultMaxResumes ? null : MaxResumes,
             };
+
+    /// <summary>Gets the number of automatic resumes a setting asks for, brought within the accepted bounds.</summary>
+    /// <param name="value">The written value, or <see langword="null"/> for the default.</param>
+    /// <returns>A number between 1 and <see cref="MaximumMaxResumes"/>.</returns>
+    public static int ClampMaxResumes(int? value)
+        => value is { } count ? Math.Clamp(count, 1, MaximumMaxResumes) : DefaultMaxResumes;
 
     // The failures it falls back on, as the configuration names them.
     internal IEnumerable<string> Triggers()
@@ -343,6 +369,11 @@ public sealed record ModelSettings(ModelTierSettings Tiers, ModelFallbackSetting
             }
         }
 
+        if (document.Fallback?.MaxResumes is { } resumes and (< 1 or > ModelFallbackSettings.MaximumMaxResumes))
+        {
+            errors.Add($"models.fallback.max_resumes: {resumes} is not a number of resumes. Use a number from 1 to {ModelFallbackSettings.MaximumMaxResumes}.");
+        }
+
         return errors;
     }
 
@@ -389,6 +420,10 @@ public sealed record ModelSettings(ModelTierSettings Tiers, ModelFallbackSetting
         return new ModelFallbackSettings(
             document.Enabled ?? false,
             on is null || on.Contains(ModelFallbackSettings.QuotaTrigger),
-            on is null || on.Contains(ModelFallbackSettings.UnavailableTrigger));
+            on is null || on.Contains(ModelFallbackSettings.UnavailableTrigger))
+        {
+            Resume = document.Resume ?? false,
+            MaxResumes = ModelFallbackSettings.ClampMaxResumes(document.MaxResumes),
+        };
     }
 }

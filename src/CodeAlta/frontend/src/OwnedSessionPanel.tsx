@@ -22,8 +22,9 @@ import { changedSessionOptions, sessionOptionsOf } from "./sessionSettings/sessi
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, sendAvailable, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
-import { captureCompaction, hasPendingCompaction, watchCompaction, type CompactionWatch, type createCompactionSubmissions } from "./sessionCompaction";
-import { captureAbortRun, type createAbortRunSubmissions } from "./sessionAbortRun";
+import { captureCompaction, compactControlBlock, compactControlBlockMessages, compactionAdmissionFailure, hasPendingCompaction, watchCompaction, watchedCompactionFailure,
+  type CompactionFailure, type CompactionWatch, type createCompactionSubmissions } from "./sessionCompaction";
+import { abortRunAdmissionFailure, captureAbortRun, watchedStopFailure, type createAbortRunSubmissions, type StopFailure } from "./sessionAbortRun";
 import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancellationStatus, type createQueueSubmissions } from "./sessionQueue";
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
@@ -302,8 +303,12 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   }, [epoch, sessionId, observing, capability]);
   const [steerText, setSteerText] = useState("");
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
-  const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");
+  // A compaction asked here that did not complete: the status line says so until the next prompt or compaction.
+  const [compactFailure, setCompactFailure] = useState<CompactionFailure | null>(null);
   const [abortRunMessage, setAbortRunMessage] = useState("Refresh runtime state explicitly before targeting cancellation.");
+  // A Stop that did not stop the run says so in the status line, while the run goes on; its key, while its receipt waits.
+  const [stopFailure, setStopFailure] = useState<StopFailure | null>(null);
+  const [submittedStop, setSubmittedStop] = useState<string | null>(null);
   const [queueText, setQueueText] = useState(() => queue.draft(epoch, sessionId));
   function editQueueText(value: string) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted) return;
@@ -389,9 +394,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       ? "A retained steering request exists. Refresh submissions to reconcile it, or explicitly retry its exact key and target once the previous wait settles."
       : "Refresh runtime state explicitly before targeting a run.");
     setPage(undefined);
-    setCompactMessage(compaction.pending(sessionId)
-      ? "A retained compaction request exists. Refresh submissions to reconcile it, or explicitly retry its exact key and attachment once the previous wait settles."
-      : "Refresh runtime state explicitly before attempting idle compaction.");
+    setCompactFailure(null);
+    setStopFailure(null);
+    setSubmittedStop(null);
     setAbortRunMessage(abortRuns.pending(sessionId)
       ? "A retained exact cancellation request exists. Refresh submissions or explicitly retry its original key and run after the previous wait settles."
       : "Refresh runtime state explicitly before targeting cancellation.");
@@ -479,8 +484,22 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   useEffect(() => {
     if (!submittedCompact) return;
     const next = invalidEpoch ? null : watchCompaction(submittedCompact, sessionId, page);
-    if (next !== submittedCompact) setSubmittedCompact(next);
+    if (next === submittedCompact) return;
+    // The receipt settled: a compaction that did not complete says so, whatever else waits for recovery.
+    if (!invalidEpoch) setCompactFailure(watchedCompactionFailure(submittedCompact, sessionId, page));
+    setSubmittedCompact(next);
   }, [page, invalidEpoch, sessionId, submittedCompact]);
+  useEffect(() => {
+    if (!submittedStop) return;
+    if (invalidEpoch) { setSubmittedStop(null); return; }
+    const row = page?.status === "ok" ? page.rows.find(item => item.kind === "AbortRun" && item.sessionId === sessionId && item.clientRequestId === submittedStop) : undefined;
+    if (row?.state !== "terminal") return;
+    setStopFailure(watchedStopFailure(submittedStop, sessionId, page));
+    setSubmittedStop(null);
+  }, [page, invalidEpoch, sessionId, submittedStop]);
+  // A Stop that failed matters while the run goes on: once it ended, there is nothing left to stop.
+  useEffect(() => { if (!runActive) setStopFailure(null); }, [runActive]);
+  const stopShown = invalidEpoch ? null : stopFailure;
   // Presentation only, like the run above: the host decides what a compaction refuses.
   const compacting = !invalidEpoch && (!!pendingCompact?.inFlight || !!submittedCompact || hasPendingCompaction(sessionId, page));
   const thinkingSeconds = useThinkingElapsed(composerBusy);
@@ -545,7 +564,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     return () => runActivity.current?.(null);
   }, [composerBusy, background, watching, sessionId]);
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
-  const availableCompact = captureCompaction(epoch, sessionId, observedTarget, "availability");
+  // The Compact control, the command picker and Ctrl+F11 all follow this: it is enabled exactly when compact() submits.
+  const compactBlock = compactControlBlock({ invalidEpoch, compacting, retained: pendingCompact?.request ?? null, canSubmit: capability.canSubmit },
+    epoch, sessionId, observedTarget);
+  const compactUnavailable = compactBlock && t(compactControlBlockMessages[compactBlock]);
   const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
   // The latest stagePrompt, for what an answer outside this render sends: the text of a denied permission.
   const stageLatest = useRef(stagePrompt);
@@ -717,6 +739,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
     setMessage("Ready to send to this owned session.");
     setSendFailure("");
+    setCompactFailure(null);
     void submissions.submit(request, signal, capability, result => {
       observeEpoch(result);
       if (!["accepted", "replay"].includes(result.status) || result.receipt?.state === "terminal") setSubmittedThinking(null);
@@ -740,16 +763,14 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         && imageOwner.get(imageKey) === capturedImages) { clearText(); imageOwner.replace(imageKey, capturedImages, []); }
     });
   }
-  // Commands addressed to the active session's composer (keyboard shortcuts and the command palette).
+  // Commands addressed to the active session's composer that no control carries out (keyboard shortcuts and the
+  // command picker). Send, Abort, Clear Queue and Compact press their control, marked with data-composer-command.
   useEffect(() => {
     if (!active) return;
     const run = (event: Event) => {
       const command = (event as CustomEvent<string>).detail;
       if (invalidEpoch || !canAdmit()) return;
-      if (command === "send") submit();
-      else if (command === "abort") { if (composerBusy || availableAbortRun || pendingAbortRun) abortRun(); }
-      else if (command === "clearQueue") queue.composer.clear(epoch, sessionId);
-      else if (command === "nextPrompt") {
+      if (command === "nextPrompt") {
         const prompts = activeChoices?.prompts ?? [];
         if (prompts.length > 1 && selected && !selectionDisabled)
           select("agentPromptId", prompts[(prompts.findIndex(prompt => prompt.id === selected.agentPromptId) + 1) % prompts.length].id);
@@ -864,8 +885,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         setSteerText("");
         setSteerMessage("Steering receipt recovered. Input submission is not run completion.");
       }
-      if (compaction.reconcile(sessionId, result, capability))
-        setCompactMessage("Compaction receipt recovered. Review its settled outcome; a busy outcome requires a new explicit action.");
+      compaction.reconcile(sessionId, result, capability);
       if (abortRuns.reconcile(sessionId, result, capability))
         setAbortRunMessage("Exact cancellation receipt recovered. Review its outcome; cancellation signalling is not run completion.");
       const retainedQueue = queue.pending(sessionId);
@@ -930,7 +950,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (retained?.inFlight) return;
     const request = retained?.request ?? captureCompaction(epoch, sessionId, observedTarget, crypto.randomUUID());
     if (!request || !capability.canSubmit(request)) return;
-    setCompactMessage("Idle compaction admission pending…");
+    setCompactFailure(null);
     const key = request.clientRequestId;
     setSubmittedCompact({ key, listed: false });
     void compaction.submit(request, signal, capability, result => {
@@ -938,10 +958,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       // An admission that is not known leaves the receipts to say whether a compaction is going on.
       if (result.status !== "accepted" && result.status !== "replay" || result.receipt?.state === "terminal")
         setSubmittedCompact(current => current?.key === key ? null : current);
-      setCompactMessage(result.status === "accepted" || result.status === "replay"
-        ? "Compaction attempt accepted. Refresh submissions for its settled outcome; busy requires a new explicit action, not replay."
-        : result.status === "busy" ? "Compaction: busy. This attempt cannot be retried; refresh runtime state for a new explicit attempt."
-          : `Compaction: ${result.status}. Refresh submissions; uncertain requests retain their exact attachment and key. No automatic retry.`);
+      setCompactFailure(compactionAdmissionFailure(result));
     });
   }
   function abortRun() {
@@ -953,8 +970,13 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const request = retained?.request ?? captureAbortRun(epoch, sessionId, observedTarget, crypto.randomUUID());
     if (!request || !capability.canSubmit(request)) return;
     setAbortRunMessage("Exact cancellation admission pending…");
+    setStopFailure(null);
+    setSubmittedStop(request.clientRequestId);
     void abortRuns.submit(request, signal, capability, result => {
       observeEpoch(result);
+      setStopFailure(abortRunAdmissionFailure(result));
+      if (result.status !== "accepted" && result.status !== "replay" || result.receipt?.state === "terminal")
+        setSubmittedStop(current => current === request.clientRequestId ? null : current);
       setAbortRunMessage(result.status === "accepted" || result.status === "replay"
         ? "Cancellation request accepted. Refresh submissions for signalling outcome; run completion is not confirmed."
         : `Exact cancellation: ${result.status}. Uncertain requests retain their original run and key. No automatic retry.`);
@@ -1387,7 +1409,7 @@ ${value}` : value);
       showSkill={showPermissionSkill} />}
     <WaitingSubSessionsPanel sessions={waitingSubSessions} epoch={epoch} createReviewer={createSubSessionReviewer}
       canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} onAnswered={() => promptInput.current?.focus()} showSkill={showPermissionSkill} />
-    <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} />
+    <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} commandTarget={active} />
     {pendingSteer && !staged.some(item => item.request?.clientRequestId === pendingSteer.request.clientRequestId) &&
       <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>
         <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingSteer.inFlight} onClick={() => steer()} /></div>}
@@ -1398,11 +1420,12 @@ ${value}` : value);
     <ClaudeCliFirstUse epoch={epoch} providerKey={selected?.providerKey ?? observedProvider} />
     {!expanded && attachmentStrip}
     <ComposerSurface busy={composerBusy || compacting} status={<>
-      <span className="composer-foreground-status" data-tone={!composerBusy && !compacting && (invalidEpoch || sendFailure || spaceProblem) ? "danger" : undefined}>
-        {composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || spaceProblem ? "error" : "prompt"} size={14} />}
-        <span className="composer-foreground-text">{composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
+      <span className="composer-foreground-status" data-tone={stopShown || !composerBusy && !compacting && (invalidEpoch || sendFailure || compactFailure || spaceProblem) ? "danger" : undefined}>
+        {stopShown ? <AppIcon name="error" size={14} /> : composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || compactFailure || spaceProblem ? "error" : "prompt"} size={14} />}
+        <span className="composer-foreground-text">{stopShown ? t(stopShown.key, stopShown.parameters) : composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
           : compacting ? t("Compacting…")
-          : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span></span>
+          : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem
+          : !invalidEpoch && compactFailure ? t(compactFailure.key, compactFailure.parameters) : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span></span>
       {/* A prompt that waits for a reload offers it: the window would otherwise have no way out. */}
       {invalidEpoch && !composerBusy && !compacting && <Button variant="minimal" size="small" intent="danger" className="composer-reload"
         icon={<AppIcon name="refresh" size={13} />} onClick={() => window.location.reload()}>{t("Reload")}</Button>}
@@ -1509,10 +1532,9 @@ ${value}` : value);
       {/* The fold, since the box of "compact" is also the one of Archive below it. */}
       <Button ref={compactTrigger} variant="minimal" icon={<AppIcon name="fold" size={16} />} onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
-        disabled={invalidEpoch || compacting || (pendingCompact
-          ? !capability.canSubmit(pendingCompact.request) : !availableCompact || !capability.canSubmit(availableCompact))}
+        data-composer-command={active ? "compact" : undefined} data-unavailable={compactUnavailable || undefined} disabled={!!compactBlock}
         aria-label={pendingCompact ? t("Retry exact compaction request for attachment {attachment}", { attachment: pendingCompact.request.expectedAttachmentGeneration }) : t("Compact observed idle attachment")}
-        title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
+        title={compactUnavailable ? `${t("Compact the conversation")}: ${compactUnavailable}` : pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
           : t("Compact the conversation (Ctrl+F11)")} endIcon={<kbd>Ctrl+F11</kbd>}>{t("Compact the conversation")}</Button>
       {/* Archive, as in the menu of the session in the Explorer: one with child sessions asks there whether they go with it. */}
       {archive && <Button variant="minimal" icon={<AppIcon name="archive" size={16} />} disabled={invalidEpoch || composerBusy}
@@ -1528,6 +1550,8 @@ ${value}` : value);
       {!pending && !expanded && !invalidEpoch && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}
       <span className="sr-only">{t("Enter to send or enqueue while busy · Shift+Enter for a new line · {shortcut} to send now (steer)", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}</span>
       {(composerBusy || availableAbortRun || pendingAbortRun) && <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
+        data-composer-command={active ? "abort" : undefined}
+        data-unavailable={invalidEpoch ? t("Reload required.") : !pendingAbortRun && !availableAbortRun ? t("The state of the session is not known yet. Try again in a moment.") : undefined}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
         aria-label={pendingAbortRun ? t("Retry exact cancellation request for observed run {run}", { run: pendingAbortRun.request.expectedRunId }) : t("Cancel observed run")}
@@ -1536,7 +1560,9 @@ ${value}` : value);
       <MicButton owner={speechOwner} input={promptInput} disabled={!!pending || invalidEpoch || expanded} visible={observing}
         id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => submit(composerBusy)} />
       <SendSplitButton enqueue={enqueue} busy={composerBusy} onEnqueueChange={setEnqueue} optionsDisabled={invalidEpoch || !!pending}>
-      <Button aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : composerBusy ? "Send now (steer)" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : composerBusy ? "Send now (steer)" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : composerBusy ? "steer" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (hasImages && imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || !sendAvailable(epoch, sessionId, text, images.length ? selected : null, images))} onClick={() => submit()} />
+      <Button data-composer-command={active ? "send" : undefined}
+        data-unavailable={invalidEpoch ? t("Reload required.") : !pending && !text.trim() && !images.length ? t("Type a prompt first.") : undefined}
+        aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : composerBusy ? "Send now (steer)" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : composerBusy ? "Send now (steer)" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : composerBusy ? "steer" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (hasImages && imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || !sendAvailable(epoch, sessionId, text, images.length ? selected : null, images))} onClick={() => submit()} />
       </SendSplitButton>
     </ComposerSurface>
     {timelineNotices && createPortal(<>

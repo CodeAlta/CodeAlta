@@ -90,6 +90,9 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
 
     internal ModelsDevCatalogService ModelsDevCatalogService => _modelsDevCatalogService;
 
+    /// <summary>Gets the provider types the running plugins add, such as <c>acp</c>.</summary>
+    internal PluginModelProviderTypes PluginProviderTypes => _pluginProviderTypes;
+
     public ProjectCatalog ProjectCatalog { get; }
 
     public SessionViewCatalog SessionViewCatalog { get; }

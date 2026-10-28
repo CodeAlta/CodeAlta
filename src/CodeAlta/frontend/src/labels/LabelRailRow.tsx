@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent } from "react";
+import { useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
 import { ConfirmPopover } from "../ConfirmPopover";
 import type { RailLabelGroup } from "../explorer/projectRail";
@@ -22,11 +22,11 @@ type Form = "edit" | "child" | "delete" | null;
 
 /**
  * The title of a label in the Explorer, the head of its branch: its icon in its color, its name, how many projects it
- * lists, and a chevron that folds them, with the labels under it. On hover, a star keeps it on top and `⋯` opens what
+ * lists, what runs or waits in them, and a chevron that folds them, with the labels under it. On hover, a star keeps it on top and `⋯` opens what
  * changes it: its look, a label under it, its place, its deletion. Its row is dragged to put it before, after or under
  * another label, and a project dropped on it gets it.
  */
-export function LabelRailRow({ group, labels, folded, onFold, editing, drop, drag }: {
+export function LabelRailRow({ group, labels, folded, onFold, editing, drop, drag, activity }: {
   group: RailLabelGroup;
   /** The labels of the space. */
   labels: readonly Label[];
@@ -37,6 +37,8 @@ export function LabelRailRow({ group, labels, folded, onFold, editing, drop, dra
   drop?: "before" | "after" | "into";
   /** What starts a drag of this row. */
   drag?: Readonly<{ onPointerDown?: (event: PointerEvent<HTMLElement>) => void }>;
+  /** What goes on in its projects and in those of the labels under it: the sessions that run or wait. */
+  activity?: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const { label } = group;
@@ -88,6 +90,7 @@ export function LabelRailRow({ group, labels, folded, onFold, editing, drop, dra
       <LabelIcon label={label} size={15} />
       <strong className="project-label-name">{label.name}</strong>
       {count > 0 && <span className="project-label-count" aria-label={t(count === 1 ? "{count} project" : "{count} projects", { count })}>{count}</span>}
+      {activity}
       {group.path.length > 0 && <span className="project-label-path">{group.path.map(above => above.name).join(" › ")}</span>}
     </button>
     {editing && <button type="button" className="icon-button label-row-action label-favorite-trigger" data-on={label.favorite}

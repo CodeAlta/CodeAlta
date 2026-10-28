@@ -20,6 +20,15 @@ public interface IReviewTextSource
     /// <param name="cancellationToken">Stops the work.</param>
     /// <returns>The id of the tree, or null when git could not write it.</returns>
     Task<string?> SnapshotAsync(ReviewScope scope, CancellationToken cancellationToken);
+
+    /// <summary>Lists the files that differ between two snapshots of a checkout.</summary>
+    /// <param name="scope">The checkout.</param>
+    /// <param name="from">The first tree.</param>
+    /// <param name="to">The second tree.</param>
+    /// <param name="cancellationToken">Stops the work.</param>
+    /// <returns>The paths, relative to the root of the checkout with <c>/</c>; empty when they cannot be listed.</returns>
+    Task<IReadOnlyList<string>> ChangedPathsAsync(ReviewScope scope, string from, string to, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<string>>([]);
 }
 
 /// <summary>
@@ -84,6 +93,21 @@ public sealed class GitReviewTextSource : IReviewTextSource
         var root = GitWorktreeService.FindCheckoutRoot(scope.Folder);
         return root is null ? Task.FromResult<string?>(null) : GitSnapshot.WriteTreeAsync(root, cancellationToken);
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ChangedPathsAsync(ReviewScope scope, string from, string to, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        if (!IsTree(from) || !IsTree(to) || GitWorktreeService.FindCheckoutRoot(scope.Folder) is not { } root)
+        {
+            return [];
+        }
+
+        var run = await _run(root, ["diff-tree", "-r", "--name-only", "--no-renames", "-z", from, to], Timeout, cancellationToken).ConfigureAwait(false);
+        return run.Succeeded ? run.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries) : [];
+    }
+
+    private static bool IsTree(string? id) => id is { Length: >= 40 and <= 64 } && id.All(Uri.IsHexDigit);
 
     // Where the branch left its base, as the changes view of the desktop finds it: the upstream branch, else the main
     // branch of `origin` or of the repository that is not the branch itself; then their merge base with HEAD.

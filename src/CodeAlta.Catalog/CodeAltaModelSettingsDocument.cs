@@ -46,4 +46,18 @@ public sealed class CodeAltaModelFallbackDocument
     /// </summary>
     [JsonPropertyName("on")]
     public List<string>? On { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether a session that stopped on a limit, with no other model of its tier to take over, resumes by
+    /// itself when the earliest limit of its tier resets; false when absent.
+    /// </summary>
+    [JsonPropertyName("resume")]
+    public bool? Resume { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many times in a row a session resumes by itself before it waits for the user;
+    /// <see cref="ModelTiers.ModelFallbackSettings.DefaultMaxResumes"/> when absent.
+    /// </summary>
+    [JsonPropertyName("max_resumes")]
+    public int? MaxResumes { get; set; }
 }

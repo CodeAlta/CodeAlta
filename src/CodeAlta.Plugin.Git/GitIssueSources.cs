@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.Git;
 
@@ -31,6 +33,15 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
 
     public HttpStatusCode? FailureStatusCode { get; private set; }
 
+    /// <summary>
+    /// Gets the request of the first refusal reported (<see cref="ReportFailure"/>): what was asked and what the
+    /// provider answered, for the log; null when none was reported.
+    /// </summary>
+    public GitRequestFailure? Failure { get; private set; }
+
+    // The last request the provider did not answer as asked: the refusal reported next is the one of that request.
+    private GitRequestFailure? _lastFailure;
+
     /// <summary>Gets the values chosen for the filters of the tracker, by filter id; the provider applies those it knows.</summary>
     public IReadOnlyDictionary<string, string> Filters { get; init; } = CodeAlta.Plugins.Abstractions.TrackedFilters.None;
 
@@ -41,7 +52,11 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
     public GitHostValueCache? Cache { get; init; }
 
     public void ReportFailure(HttpStatusCode statusCode)
-        => FailureStatusCode ??= statusCode;
+    {
+        if (FailureStatusCode is not null) return;
+        FailureStatusCode = statusCode;
+        Failure = _lastFailure;
+    }
 
     private static string Digest(AuthenticationHeaderValue? authorization)
         => authorization is null ? "anonymous"
@@ -66,9 +81,44 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
                 message.Headers.Authorization = authorization;
             }
 
-            return await client.SendAsync(message, cancellationToken).ConfigureAwait(false);
+            var started = Stopwatch.GetTimestamp();
+            var response = await client.SendAsync(message, cancellationToken).ConfigureAwait(false);
+            var elapsed = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            var log = GitIssueLog.Log;
+            var address = GitIssueLog.Address(message.RequestUri);
+            var media = response.Content.Headers.ContentType?.MediaType;
+            // Azure DevOps answers a request it wants signed in with its sign-in page, 203 or after a redirection.
+            if (response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NonAuthoritativeInformation
+                && !string.Equals(media, "text/html", StringComparison.OrdinalIgnoreCase))
+            {
+                if (log?.IsEnabled(LogLevel.Debug) == true) log.Debug($"{message.Method.Method} {address} answered {(int)response.StatusCode} in {elapsed} ms.");
+                return response;
+            }
+
+            var failure = new GitRequestFailure(message.Method.Method, address, response.StatusCode, media,
+                await GitIssueLog.ProviderMessageAsync(response, cancellationToken).ConfigureAwait(false), Anonymous);
+            _lastFailure = failure;
+            log?.Debug($"{failure.ToString()} ({elapsed} ms)");
+            return response;
         }
     }
+}
+
+/// <summary>A request a hosting service did not answer as asked, as the log tells it: never the credentials.</summary>
+/// <param name="Method">The method of the request.</param>
+/// <param name="Address">The address of the request, bounded.</param>
+/// <param name="Status">The status the service answered.</param>
+/// <param name="MediaType">The type of the body it answered; null for none.</param>
+/// <param name="Message">What the service said of the failure, bounded; null when it said nothing that can be read.</param>
+/// <param name="Anonymous">Whether the request carried no credentials.</param>
+internal sealed record GitRequestFailure(string Method, string Address, HttpStatusCode Status, string? MediaType, string? Message, bool Anonymous)
+{
+    /// <inheritdoc />
+    public override string ToString()
+        => string.Create(CultureInfo.InvariantCulture, $"{Method} {Address} answered {(int)Status} {Status}")
+           + (MediaType is null ? string.Empty : $" ({MediaType})")
+           + (Anonymous ? " without credentials" : " with credentials")
+           + (Message is null ? "." : $": {Message}");
 }
 
 /// <summary>The issue tracker of one provider, reached through its REST API.</summary>

@@ -76,7 +76,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     private static int RunWithCapture(DesktopLaunchOptions options, Func<DesktopLaunchOptions, DesktopLogCapture?, int> run)
     {
-        var capture = DesktopLogging.Initialize(options.DataRoot, out var flushPending);
+        var capture = DesktopLogging.Initialize(options.DataRoot, LoggingSettingsOf(options), out var flushPending);
         var result = 1;
         try
         {
@@ -96,6 +96,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             else flushPending?.Invoke(); // Persist failures without invalidating retained callbacks' loggers.
         }
     }
+
+    // The levels of the features of the log, from the configuration of the user, before the host reads it.
+    private static Func<CodeAlta.Catalog.Logging.LoggingSettings>? LoggingSettingsOf(DesktopLaunchOptions options)
+        => options.CatalogRoot is { } root
+            ? () => new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root, StateRoot = options.StateRoot ?? root }).LoadGlobalLoggingSettings()
+            : null;
 
     private static int RunCore(DesktopLaunchOptions options, DesktopLogCapture? capture)
     {
@@ -460,6 +466,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var retentionProtection = DesktopSessionRetention.CreateProtection();
             var pluginUi = new DesktopPluginUi(retentionProtection);
             var pluginIdentities = new DesktopPluginIdentities();
+            var pluginAsks = new DesktopPluginAsks();
             // The tabs that plugins provide: created with the plugins, which start before the window has a page, and attached to their runtime once it exists.
             canvases = pluginAlta is null ? null : new DesktopCanvases(pluginUi);
             pluginUi.Modules = canvases?.Modules;
@@ -527,7 +534,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
                     DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay), PluginSafeMode = DesktopPlugins.SafeMode,
-                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest)),
+                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, modelsDev, pluginProviderTypes),
@@ -766,6 +773,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // A session that reviews before commit may commit the work tree its last review approved.
                 host.RuntimeService.Reviews = reviewService;
                 asks = new SessionAsksService(host.Commands.Asks, epoch, reviewService, host.ProjectCatalog);
+                pluginAsks.Attach(host.Commands.Asks, asks, epoch);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch, host.RetentionProtection);
                 changesView = new DesktopChangesView();
                 // The space the window shows, and what a command asks of it. A catalog that never had spaces
@@ -939,8 +947,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         PluginProviderTypes = pluginProviderTypes,
                     });
+                    var applicationLogs = new ApplicationLogsService(logCapture, configStore, epoch);
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch)
                     {
+                        // The file may change the levels of the log: they are taken at once.
+                        Saved = applicationLogs.Reload,
                         ProviderStates = () => host.ModelProviderInitializationService.CurrentStates,
                         Spaces = host.SpaceCatalog,
                         SessionSpace = (sessionId, token) => host.RuntimeService.GetSessionSpaceAsync(sessionId, token),
@@ -989,7 +1000,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         ProviderTypes = pluginProviderTypes,
                         Sessions = host.RuntimeService.ListOverview,
                     });
-                    builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
+                    builder.AddApplicationLogsService(applicationLogs);
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch, new DesktopDefaultProvider(host.CatalogOptions), modelsDev);
                     _ = providers.StartInitialization(shown.Shown); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);

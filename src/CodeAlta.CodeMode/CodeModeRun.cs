@@ -69,6 +69,10 @@ internal sealed partial class CodeModeRun
     private long _lastCheck;
     private long _sliceStart;
     private long _scriptTicks;
+    // How many calls have settled: the script only resumes from an await once one did, which tells an await from the
+    // thread of a busy loop being preempted by a loaded machine (both leave a gap between two checks).
+    private long _settledCalls;
+    private long _settledAtCheck;
     private volatile bool _ended;
     private Engine? _engine;
 
@@ -338,6 +342,7 @@ internal sealed partial class CodeModeRun
         finally
         {
             _pending.TryRemove(call.Index, out _);
+            Interlocked.Increment(ref _settledCalls);
         }
     }
 
@@ -997,12 +1002,17 @@ internal sealed partial class CodeModeRun
         var now = Stopwatch.GetTimestamp();
         var previous = _lastCheck;
         _lastCheck = now;
+        var settled = Interlocked.Read(ref _settledCalls);
+        var resumed = settled != _settledAtCheck;
+        _settledAtCheck = settled;
         if (previous != 0 && now - previous < Stopwatch.Frequency / 200)
         {
             Interlocked.Add(ref _scriptTicks, now - previous);
         }
-        else
+        else if (previous == 0 || resumed)
         {
+            // A new slice after an await; a gap without a call that settled is the thread being preempted, which
+            // the elapsed time of the slice keeps counting.
             _sliceStart = now;
         }
 

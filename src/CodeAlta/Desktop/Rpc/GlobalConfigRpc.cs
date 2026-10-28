@@ -59,6 +59,9 @@ internal sealed partial class GlobalConfigService
     /// </summary>
     internal ModelsDevCatalogService? ModelCatalog { get; init; }
 
+    /// <summary>Gets what is done once the text of the file was saved, such as giving the log its new levels; null for nothing.</summary>
+    internal Action? Saved { get; init; }
+
     /// <summary>Reads the current configuration text and its revision.</summary>
     [NeoRpcMethod("read")]
     public GlobalConfigReadResponse Read(GlobalConfigReadRequest request)
@@ -85,7 +88,8 @@ internal sealed partial class GlobalConfigService
         ArgumentNullException.ThrowIfNull(request);
         if (request.Content is null || request.Content.Length > MaximumContentLength)
             return new(false, "The configuration exceeds the editor limit.", null, null);
-        var result = CodeAltaConfigStore.ValidateGlobalConfigContent(request.Content);
+        // The types of the running plugins (acp...) are known: only the providers of a type nothing knows are warned about.
+        var result = CodeAltaConfigStore.ValidateGlobalConfigContent(request.Content, sourcePath: null, type => PluginProviderTypes?.Find(type) is not null);
         return new(result.IsValid, Bound(result.Message), result.Line, result.Column) { Warning = Bound(result.Warning) };
     }
 
@@ -117,6 +121,8 @@ internal sealed partial class GlobalConfigService
             {
                 return Failure("write_failed");
             }
+
+            Saved?.Invoke();
 
             var revision = Revision(request.Content);
             if (!request.ApplyProviders) return new("ok", revision, null, null, null, 0);

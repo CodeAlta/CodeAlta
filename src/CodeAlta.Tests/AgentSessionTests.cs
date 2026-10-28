@@ -5058,6 +5058,12 @@ public sealed partial class AgentSessionTests
         Assert.IsFalse(persistedHistory.OfType<AgentRawEvent>().Any(static evt => evt.BackendEventType == "local.compactionCheckpoint"));
         Assert.IsTrue(persistedHistory.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.CompactionStarted));
         Assert.IsFalse(persistedHistory.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.CompactionCompleted));
+        // The timeline says why the compaction that started did not complete, with the message of the provider.
+        var updates = persistedHistory.OfType<AgentSessionUpdateEvent>().ToList();
+        var failure = updates.Last();
+        Assert.AreEqual(AgentSessionUpdateKind.Warning, failure.Kind);
+        StringAssert.Contains(failure.Message ?? "", "summary failed");
+        Assert.IsTrue(updates.FindIndex(static evt => evt.Kind == AgentSessionUpdateKind.CompactionStarted) < updates.IndexOf(failure));
     }
 
     [TestMethod]

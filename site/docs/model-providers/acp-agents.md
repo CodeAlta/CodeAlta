@@ -34,7 +34,9 @@ An agent named like a provider you already have is added with **(ACP)** after it
 
 ## Sign in
 
-When the agent is not signed in, its form says so and shows how to sign in. A command to run in a terminal comes with **Run in a terminal**, which opens a terminal in CodeAlta with it. Test the provider again once you are signed in.
+When the agent is not signed in, its card in the list says **Signed out**, and its form says so above its fields and shows how to sign in, also when the agent says it in its own words rather than with the code of the protocol. A command to run in a terminal comes with **Run in a terminal**, which opens a terminal in CodeAlta with it. Test the provider again once you are signed in.
+
+An agent that does not start for another reason says **Failed**: its form says so, and **Settings > Application Logs** keeps what the agent answered.
 
 ## In a session
 

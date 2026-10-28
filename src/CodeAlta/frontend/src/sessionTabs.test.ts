@@ -4,7 +4,7 @@ import type { WorkspaceSnapshot } from "#neoastra";
 import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftTabLimit, draftTabOf, emptySessionTabs, hasDraftTab, isPreviewTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabLimit, singleSessionTab } from "./sessionTabs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SessionTabLabel } from "./SessionTabStrip";
+import { SessionTabLabel, titleBarPlace } from "./SessionTabStrip";
 import { ShellLanguageContext } from "./shellLanguage";
 import { locales, translate } from "./localization";
 
@@ -273,4 +273,19 @@ test("the sessions that keep a pane without a tab are the named ones the catalog
   // A session listed twice, or under a project the catalog does not have, is not one the window can show.
   assert.deepEqual(backgroundSessionTabs({ ...catalog, sessions: [...catalog.sessions, catalog.sessions[0]] }, ["one", "two"], []), [tab("two")]);
   assert.deepEqual(backgroundSessionTabs({ ...catalog, projects: [] }, ["one", "global"], []), [tab("global", null)]);
+});
+
+test("a pane at the top keeps its tabs in the title row while they have room beside the title bar, and goes below it when crowded", () => {
+  const window = { left: 0, right: 1600, top: 0, width: 1600 };
+  const pane = (left: number, right: number) => ({ left, right, top: 0, width: right - left });
+  // The whole window, with the brand at the start and the actions at the end.
+  assert.deepEqual(titleBarPlace(pane(0, 1600), window, 300, 1200), { top: true, start: true, end: true, crowded: false });
+  // A pane docked on the right, wide enough for its tabs beside the actions.
+  assert.deepEqual(titleBarPlace(pane(900, 1600), window, 300, 1200), { top: true, start: false, end: true, crowded: false });
+  // A narrow pane docked on the right: its tabs would be hidden under the actions, so they go below the title row.
+  assert.deepEqual(titleBarPlace(pane(1250, 1600), window, 300, 1200), { top: true, start: false, end: false, crowded: true });
+  // A pane below the top, or one that the brand and the actions leave room for, is not crowded.
+  assert.deepEqual(titleBarPlace({ left: 1250, right: 1600, top: 400, width: 350 }, window, 300, 1200), { top: false, start: false, end: false, crowded: false });
+  assert.deepEqual(titleBarPlace(pane(0, 600), window, 300, null), { top: true, start: true, end: false, crowded: false });
+  assert.deepEqual(titleBarPlace(pane(0, 450), window, 300, null).crowded, true, "the brand leaves less than the room of the tabs");
 });

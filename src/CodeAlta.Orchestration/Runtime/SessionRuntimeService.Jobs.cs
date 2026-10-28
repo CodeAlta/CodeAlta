@@ -142,7 +142,9 @@ public sealed partial class SessionRuntimeService
             }
         }
 
-        await QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, saved, CancellationToken.None).ConfigureAwait(false);
+        await QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy,
+            [.. saved.Select(static image => new SessionViewQueuedPromptImage { Path = image.Path, Title = image.Title, MediaType = image.MediaType })],
+            CancellationToken.None).ConfigureAwait(false);
         await TryDrainNextQueuedPromptAsync(session.SessionId).ConfigureAwait(false);
         return "queued";
         }, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);

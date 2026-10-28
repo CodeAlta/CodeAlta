@@ -13,7 +13,7 @@ import { providerBrand } from "./brands";
 import { Logo, ProviderIcon } from "./ProviderIcon";
 import { ProviderColorInput, ProviderIconPicker } from "./ProviderIconFields";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
-import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { SettingsFileLocations } from "./SettingsFileLocation";
@@ -181,6 +181,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
     return { label: value ?? t("Not loaded"), intent: value === "Ready" ? "success" : value === "Failed" || value === "Unsupported" ? "danger" : value ? "warning" : "none" };
   };
   const signedOut = original && original.type === form?.type && isSignedOut(availability.get(original.key.toLowerCase())?.reason);
+  // What the form says of the state of the saved provider, above its fields: why it is not ready, and what to do.
+  const stateProblem = original && original.type === form?.type ? providerStateProblem(availability.get(original.key.toLowerCase()), original.enabled) : null;
   function choose(key: string) {
     if (busy || key === selected || !listing) return;
     setSelected(key); setNotice(null); setDiagnostic(null);
@@ -356,6 +358,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
           rightElement={<Switch checked={form.enabled} disabled={busy} label={t("Enabled")} alignIndicator="end"
             onChange={event => edit({ enabled: event.currentTarget.checked, makeDefault: event.currentTarget.checked && form.makeDefault })} />}>
           <SectionCard className="provider-settings-fields">
+            {stateProblem && !notice && <Callout intent={stateProblem.intent} compact className="provider-settings-wide provider-state-problem" role="status"
+              icon={<AppIcon name={stateProblem.signIn ? "user" : "error"} size={16} />}>{t(stateProblem.key, { provider: original!.effectiveName })}</Callout>}
             <FormGroup label={t("Provider key")} labelFor="provider-key" helperText={original ? t("Sessions refer to a provider by its key; renaming it does not update them.") : undefined}>
               <InputGroup id="provider-key" value={form.key} disabled={busy} maxLength={64} spellCheck={false} onChange={event => edit({ key: event.target.value })} placeholder="my-provider" /></FormGroup>
             <FormGroup label={t("Adapter type")} labelFor="provider-type">
@@ -424,9 +428,6 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
               </HTMLSelect></FormGroup>}
             {!runsOwnCli(form.type) && !formPlugin && <FormGroup label={t("API URL")} labelFor="provider-url">
               <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
-            {/* A signed-out account says how to sign in, beside the box whose command does it. */}
-            {signedOut && !notice && runsOwnCli(form.type) && <Callout intent="warning" compact className="provider-settings-wide provider-signed-out" icon={<AppIcon name="user" size={16} />}>
-              {t("{provider} is not signed in. Run the command of the Claude Code CLI box in a terminal and type /login, then test again.", { provider: original!.effectiveName })}</Callout>}
             {formPlugin
               ? original && original.type === form.type
                 ? <PluginProviderPanel key={original.key} epoch={epoch} providerKey={original.key} api={plugins}

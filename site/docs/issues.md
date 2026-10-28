@@ -33,6 +33,8 @@ Open it with **Issues** in the title bar (in its **…** menu when the window is
 - Type words or a number to filter.
 - Select an item to read its description and comments. Double-click it, or use the expand button, for a larger window.
 
+When a service cannot be read, the tab says so in place of the list, and the log says why: see [An issue tracker shows an error](troubleshooting.md#an-issue-tracker-shows-an-error).
+
 A project with its code on one service and its issues in Jira shows both: choose the tracker beside the project. With [several Jira projects](plugins/jira.md#several-jira-projects), a list beside the tracker shows one alone.
 
 ## Filters

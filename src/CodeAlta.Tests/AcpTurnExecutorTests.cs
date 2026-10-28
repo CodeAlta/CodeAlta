@@ -608,6 +608,34 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task AgentThatSaysItIsNotLoggedIn_WithAnotherCode_FailsTheTurnAsAuth()
+    {
+        // Some agents do not answer auth_required: they say it in the text of another error.
+        var agent = new AcpFakeAgent { NewSessionError = -32603, NewSessionErrorMessage = "Not logged in. Run `cursor-agent login` first." };
+        await using var fixture = new Fixture(agent);
+
+        var error = await Assert.ThrowsExactlyAsync<AgentProviderFailureException>(() => fixture.RunAsync([User("hello")]));
+        Assert.AreEqual(AgentFailureKind.Auth, error.Failure.Kind);
+        StringAssert.Contains(error.Message, "is not signed in");
+    }
+
+    [TestMethod]
+    public void TheTextOfAFailure_SaysWhenAnAgentWaitsForASignIn()
+    {
+        foreach (var asking in new[] { "Authentication required", "Not logged in. Run `cursor-agent login` first.", "error: unauthorized (401)",
+            "You are not signed in.", "Please log in to continue", "Login required", "No API key was found", "AUTH_REQUIRED" })
+        {
+            Assert.IsTrue(CodeAlta.Plugin.Acp.AcpAgentInspector.AsksForSignIn(asking), asking);
+        }
+
+        foreach (var other in new[] { null, "", "Failed", "The session store is broken.", "Model gpt-9 not found", "The ACP agent closed its output.",
+            "Sign in from the form of the provider" })
+        {
+            Assert.IsFalse(CodeAlta.Plugin.Acp.AcpAgentInspector.AsksForSignIn(other), other);
+        }
+    }
+
+    [TestMethod]
     public async Task AgentThatIsNotSignedInInTheSandbox_SaysHowToSignItInThere()
     {
         var agent = new AcpFakeAgent { NewSessionError = -32000 };

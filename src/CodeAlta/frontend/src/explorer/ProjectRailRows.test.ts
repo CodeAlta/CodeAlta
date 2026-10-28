@@ -248,3 +248,16 @@ test("grouped under labels, a label is a branch with its projects and its sub-la
   assert.doesNotMatch(folded, /Alpha|Beta|title Helm/);
   assert.match(folded, /<li class="project-session-branch" hidden="">.*kept/);
 });
+
+test("a closed project shows its chevron only when it has something to show once opened", () => {
+  const render = (expanded: readonly (string | null)[]) => rows(renderToStaticMarkup(createElement(ProjectRailRows, {
+    projects: [project("a", "Alpha"), project("b", "Beta")], selectedId: null, onSelect: never, canRename: false, renameBusy: false, onRename: never,
+    tree: tree(expanded), unfoldable: id => id === "a" })));
+  const [chats, alpha, beta] = render([]);
+  assert.doesNotMatch(chats, /data-empty/, "the chats always open");
+  assert.doesNotMatch(alpha, /data-empty/);
+  assert.match(beta, /class="tree-twist" data-empty="true"/);
+  // An open project keeps its chevron, which closes it.
+  const [, , opened] = render(["b"]);
+  assert.doesNotMatch(opened, /data-empty/);
+});

@@ -161,6 +161,63 @@ public sealed class ReviewHostTests
         }
     }
 
+    [TestMethod]
+    public async Task TheApproval_OfTheChanges_HoldsUntilAFileChanges_AndAFolderBelowTheCheckoutIsThatCheckout()
+    {
+        // #238: the composer and the Changes tab no longer say that approved changes wait for a review.
+        await using var fixture = await Fixture.CreateAsync();
+        var root = fixture.Project.ProjectPath;
+        if (!Git(root, "init", "-q", "-b", "main"))
+        {
+            Assert.Inconclusive("git is not installed.");
+        }
+
+        foreach (var (name, value) in new[] { ("user.name", "Test"), ("user.email", "test@example.invalid"), ("commit.gpgsign", "false"), ("core.autocrlf", "false") }) Git(root, "config", name, value);
+        Assert.IsTrue(Git(root, "add", "-A") && Git(root, "commit", "-q", "-m", "one"));
+        File.WriteAllText(Path.Combine(root, "a.txt"), "one\n");
+        File.WriteAllText(Path.Combine(root, "b.txt"), "two\n");
+        var below = Directory.CreateDirectory(Path.Combine(root, "src")).FullName;
+
+        var none = await fixture.Rpc.ApprovalAsync(new(Epoch, fixture.Project.Id, null), default);
+        Assert.AreEqual(("ok", null, false), (none.Status, none.Round, none.Current));
+        var submitted = await fixture.Rpc.SubmitAsync(new(Epoch, fixture.Project.Id, null, "changes", null, "approved", null, "session-1", false), default);
+        Assert.AreEqual("ok", submitted.Status, submitted.Message);
+
+        var approval = await fixture.Rpc.ApprovalAsync(new(Epoch, fixture.Project.Id, null), default);
+        Assert.AreEqual(("ok", submitted.RoundId, "approved", true), (approval.Status, approval.Round?.Id, approval.Round?.Verdict, approval.Current));
+        Assert.IsTrue((await fixture.Rpc.ApprovalAsync(new(Epoch, fixture.Project.Id, below), default)).Current, "A folder of the project's checkout is the project folder.");
+
+        // The agent commits a part: the rest is still what the user approved.
+        Assert.IsTrue(Git(root, "add", "a.txt") && Git(root, "commit", "-q", "-m", "a"));
+        Assert.IsTrue((await fixture.Rpc.ApprovalAsync(new(Epoch, fixture.Project.Id, null), default)).Current);
+
+        File.WriteAllText(Path.Combine(root, "b.txt"), "two, edited\n");
+        var changed = await fixture.Rpc.ApprovalAsync(new(Epoch, fixture.Project.Id, null), default);
+        Assert.AreEqual(("ok", submitted.RoundId, false), (changed.Status, changed.Round?.Id, changed.Current));
+        Assert.AreEqual("stale_epoch", (await fixture.Rpc.ApprovalAsync(new("6f1c8f0e-2a4b-4c55-9d1e-000000000000", fixture.Project.Id, null), default)).Status);
+    }
+
+    private static bool Git(string folder, params string[] arguments)
+    {
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo("git") { WorkingDirectory = folder, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
+            foreach (var argument in arguments) start.ArgumentList.Add(argument);
+            start.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+            start.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(folder, "..", "no-global-config");
+            using var process = System.Diagnostics.Process.Start(start)!;
+            var error = process.StandardError.ReadToEndAsync();
+            process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            _ = error.Result;
+            return process.ExitCode == 0;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public const string Plan = ".alta/plans/plan.md";

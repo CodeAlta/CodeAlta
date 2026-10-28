@@ -325,6 +325,55 @@ internal sealed class SessionOperationsService
         return new(await _commands.StopBackgroundTaskAsync(request.SessionId, request.TaskId, cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
     }
 
+    // The resume after a limit a session waits for, as its card shows it. It leaves no receipt: the cards of the session
+    // and its run say how it goes.
+    [NeoRpcMethod("pendingResume")]
+    public SessionResumeState PendingResume(SessionResumeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null);
+            if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId, null);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId, null);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var pending = _commands.GetPendingResume(request.SessionId);
+        return new("ok", _epoch, request.SessionId, pending is null ? null
+            : new(pending.ResumeId, pending.ResumeAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), pending.ProviderKey, pending.ProviderName, pending.Attempt));
+    }
+
+    [NeoRpcMethod("cancelResume")]
+    public async Task<SessionResumeResult> CancelResumeAsync(SessionResumeActionRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (CheckResumeAction(request) is { } refused) return refused;
+        // Admitted work is not cancelled by the page that asked: the cancellation is written whole.
+        return new(await _commands!.CancelResumeAsync(request.SessionId, request.ResumeId).WaitAsync(cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
+    }
+
+    [NeoRpcMethod("resumeNow")]
+    public SessionResumeResult ResumeNow(SessionResumeActionRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (CheckResumeAction(request) is { } refused) return refused;
+        cancellationToken.ThrowIfCancellationRequested();
+        return new(_commands!.ResumeNow(request.SessionId, request.ResumeId), _epoch, request.SessionId);
+    }
+
+    private SessionResumeResult? CheckResumeAction(SessionResumeActionRequest request)
+    {
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId);
+            if (!Identity(request.SessionId, 256) || !Identity(request.ResumeId, 64)) return new("invalid_request", _epoch, request.SessionId);
+            return _commands is null ? new("unavailable", _epoch, request.SessionId) : null;
+        }
+    }
+
     // A session opened in the window shows the turns made outside CodeAlta (in VS Code, in a terminal) on the conversation
     // of its provider: they are added to its journal, which the timeline reads. It leaves no receipt.
     [NeoRpcMethod("catchUp")]

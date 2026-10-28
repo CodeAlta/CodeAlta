@@ -55,6 +55,31 @@ turns = 12
     }
 
     [TestMethod]
+    public void Validation_WarnsOnlyOfTheTypesNothingKnows_NotThoseOfARunningPlugin()
+    {
+        const string content = NewerVersionConfig + """
+
+[providers.cursor]
+type = "acp"
+command = "cursor-agent"
+""";
+
+        // Without the plugins, both types are unknown to this version.
+        var bare = CodeAltaConfigStore.ValidateGlobalConfigContent(content);
+        Assert.IsTrue(bare.IsValid);
+        StringAssert.Contains(bare.Warning, "providers.cursor (type \"acp\")");
+
+        // A plugin adds "acp": only the type of a newer version is still warned about.
+        var known = CodeAltaConfigStore.ValidateGlobalConfigContent(content, null, static type => type == "acp");
+        Assert.IsTrue(known.IsValid);
+        StringAssert.Contains(known.Warning, "providers.future (type \"future-provider\")");
+        Assert.IsFalse(known.Warning!.Contains("cursor", StringComparison.Ordinal), known.Warning);
+
+        // Every type known: no warning at all.
+        Assert.IsNull(CodeAltaConfigStore.ValidateGlobalConfigContent(content, null, static _ => true).Warning);
+    }
+
+    [TestMethod]
     public void ExternalProviders_GiveTheValuesOfTheirSections()
         => WithGlobalConfig(NewerVersionConfig, static (store, _) =>
         {

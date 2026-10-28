@@ -117,12 +117,29 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
         catch (Exception) { return new("uncertain", _epoch, null); }
     }
 
+    /// <summary>The comments the answer of a review request sends now: the drafts and the open comments of its target.</summary>
+    /// <returns>Their number; null when the host keeps no reviews, the project is gone or the store cannot be read.</returns>
+    internal async Task<int?> CommentsAsync(AltaReviewTarget target, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (await ScopeAsync(target, cancellationToken).ConfigureAwait(false) is not { } scope) return null;
+        try
+        {
+            var state = await reviews!.ListAsync(scope, target.Kind, target.Kind == ReviewTargets.File ? target.Path : null, false, cancellationToken).ConfigureAwait(false);
+            return state.Threads.Count(static thread => thread.State is ReviewThreadStates.Draft or ReviewThreadStates.Open);
+        }
+        catch (ReviewException)
+        {
+            return null;
+        }
+    }
+
     // The checkout of the review a request asks for; null when the host keeps no reviews or the project is gone.
     private async Task<ReviewScope?> ScopeAsync(AltaReviewTarget target, CancellationToken token)
     {
         if (reviews is null || projects is null || target.ProjectId is not { } projectId) return null;
         var project = await projects.GetByIdAsync(projectId, token).ConfigureAwait(false);
-        return project is null ? null : new ReviewScope(project, target.Checkout);
+        return project is null ? null : ReviewService.ScopeOf(project, target.Checkout);
     }
 
     // A round the session did not get is undone; a cancelled request is forgotten. A dispatch whose outcome is not

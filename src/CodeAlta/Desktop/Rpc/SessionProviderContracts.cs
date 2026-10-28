@@ -13,6 +13,26 @@ internal sealed record SessionStopBackgroundTaskRequest(string ExpectedEpoch, st
 /// <summary>Whether the provider took the request: <c>ok</c>, <c>unavailable</c> (no such task runs), or why it was refused.</summary>
 internal sealed record SessionStopBackgroundTaskResult(string Status, string? Epoch, string SessionId);
 
+/// <summary>Asks for the resume after a limit a session waits for.</summary>
+internal sealed record SessionResumeRequest(string ExpectedEpoch, string SessionId);
+
+/// <summary>Cancels, or starts at once, the resume after a limit a session waits for, by the identity its card names.</summary>
+internal sealed record SessionResumeActionRequest(string ExpectedEpoch, string SessionId, string ResumeId);
+
+/// <summary>A resume after a limit, as its card offers Cancel and Resume now.</summary>
+/// <param name="ResumeId">The identity of the resume.</param>
+/// <param name="ResumeAt">When it starts, ISO 8601 in UTC.</param>
+/// <param name="ProviderKey">The provider whose limit resets first.</param>
+/// <param name="ProviderName">The name of that provider.</param>
+/// <param name="Attempt">How many times in a row the session resumes by itself, this one included.</param>
+internal sealed record SessionResumeItem(string ResumeId, string ResumeAt, string ProviderKey, string ProviderName, int Attempt);
+
+/// <summary><c>ok</c> with the resume the session waits for, or none; or why it was not read.</summary>
+internal sealed record SessionResumeState(string Status, string? Epoch, string SessionId, SessionResumeItem? Resume);
+
+/// <summary><c>ok</c> when the resume was cancelled or started; <c>unknown</c> when it no longer waits; or why it was refused.</summary>
+internal sealed record SessionResumeResult(string Status, string? Epoch, string SessionId);
+
 /// <summary>Asks to give a session a permission mode at once.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
 /// <param name="SessionId">The session.</param>

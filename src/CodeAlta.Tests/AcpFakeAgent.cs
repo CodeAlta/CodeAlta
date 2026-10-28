@@ -32,6 +32,9 @@ internal sealed class AcpFakeAgent
     /// <summary>Gets or sets the error code <c>session/new</c> answers with, or null to start sessions.</summary>
     public int? NewSessionError { get; set; }
 
+    /// <summary>The text of the error of <see cref="NewSessionError"/>; the usual one of its code when null.</summary>
+    public string? NewSessionErrorMessage { get; set; }
+
     public JsonArray AuthMethods { get; set; } = [];
 
     public List<string> Models { get; set; } = ["fast", "smart"];
@@ -250,7 +253,7 @@ internal sealed class AcpFakeConnection
     {
         if (_agent.NewSessionError is { } code)
         {
-            throw new FakeRpcException(code, code == -32000 ? "Authentication required" : "Failed");
+            throw new FakeRpcException(code, _agent.NewSessionErrorMessage ?? (code == -32000 ? "Authentication required" : "Failed"));
         }
 
         var sessionId = _agent.NextSessionId();

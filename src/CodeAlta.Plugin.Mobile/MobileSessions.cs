@@ -19,11 +19,15 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
 
     private const int EventsPerRead = 400;
     private const int MaximumReads = 40;
-    private const int MaximumText = 20_000;
     private const int MaximumSummary = 300;
+    private const int MaximumAncestors = 8;
     private static readonly TimeSpan NamesLife = TimeSpan.FromSeconds(30);
 
     private volatile MobileNames? _names;
+    private MobileImages? _images;
+
+    /// <summary>The images of the timelines the phone sees.</summary>
+    internal MobileImages Images => _images ??= new MobileImages(alta, this);
 
     /// <summary>The ids of the spaces of the plugin; empty when it is in every space.</summary>
     internal IReadOnlyList<string> Spaces => spaces.GetAssignedSpaces();
@@ -62,14 +66,59 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
 
         var ordered = sessions.OrderByDescending(LastActivity).ThenBy(static item => MobileAlta.Text(item, "title"), StringComparer.OrdinalIgnoreCase).ToList();
         var names = await NamesAsync(cancellationToken).ConfigureAwait(false);
-        var page = ordered.Skip(offset).Take(limit).Select(item => (JsonNode)Describe(item, names)).ToArray();
+        var items = ordered.Skip(offset).Take(limit).ToArray();
+        var (parents, titles) = await ParentsAsync(ordered, offset + items.Length, items, projects, cancellationToken).ConfigureAwait(false);
+        var page = items.Select(item => (JsonNode)Describe(item, names, titles)).ToArray();
         return new JsonObject
         {
             ["sessions"] = new JsonArray(page), ["next"] = offset + page.Length, ["hasMore"] = ordered.Count > offset + page.Length,
+            // The parents of its sub-agents that no page gave yet: the phone shows a sub-agent under its parent.
+            ["parents"] = new JsonArray([.. parents.Select(item => (JsonNode)Describe(item, names, titles))]),
             ["projects"] = new JsonArray([.. projects.Select(static project => (JsonNode)project)]), ["machine"] = Environment.MachineName, ["error"] = error,
             // The spaces the phone sees; empty when it sees every space.
             ["spaces"] = new JsonArray([.. assigned.Select(space => (JsonNode)names.Space(space))]),
         };
+    }
+
+    /// <summary>
+    /// The parents, grandparents and further ancestors of the sessions of a page that the pages up to this one do not hold: a
+    /// parent is often less recently active than the sub-agents it started, so the phone would have it only pages later. Only
+    /// those the phone sees (its spaces, not archived) and of the projects it keeps to are given; the title of every parent
+    /// found is kept for the line of a sub-agent shown without it.
+    /// </summary>
+    private async Task<(List<JsonObject> Parents, Dictionary<string, string?> Titles)> ParentsAsync(List<JsonObject> ordered, int paged,
+        IReadOnlyList<JsonObject> items, IReadOnlyList<string> projects, CancellationToken cancellationToken)
+    {
+        var read = new Dictionary<string, JsonObject?>(StringComparer.Ordinal);
+        foreach (var item in ordered)
+            if (MobileAlta.Text(item, "sessionId") is { } id) read.TryAdd(id, item);
+        var held = new HashSet<string>(ordered.Take(paged).Select(static item => MobileAlta.Text(item, "sessionId")!), StringComparer.Ordinal);
+        var parents = new List<JsonObject>();
+        var titles = new Dictionary<string, string?>(StringComparer.Ordinal);
+        IReadOnlyList<JsonObject> children = items;
+        for (var depth = 0; depth < MaximumAncestors && children.Count > 0; depth++)
+        {
+            var wanted = children.Select(static child => MobileAlta.Text(child, "parentSessionId")).OfType<string>().Where(MobileApi.IsId)
+                .Where(id => !titles.ContainsKey(id)).Distinct(StringComparer.Ordinal).ToArray();
+            var missing = wanted.Where(id => !read.ContainsKey(id)).ToArray();
+            var found = await Task.WhenAll(missing.Select(id => FindAsync(id, cancellationToken))).ConfigureAwait(false);
+            for (var index = 0; index < missing.Length; index++) read[missing[index]] = found[index];
+            var next = new List<JsonObject>();
+            foreach (var id in wanted)
+            {
+                if (read[id] is not { } parent) continue;
+                titles[id] = MobileAlta.Text(parent, "title");
+                if (IsArchived(parent) || held.Contains(id)) continue;
+                if (projects.Count > 0 && !projects.Contains(MobileAlta.Text(parent, "projectId") ?? "", StringComparer.Ordinal)) continue;
+                held.Add(id);
+                parents.Add(parent);
+                next.Add(parent);
+            }
+
+            children = next;
+        }
+
+        return (parents, titles);
     }
 
     /// <summary>A space as the phone shows it: its id, its name, its color and its icon.</summary>
@@ -103,7 +152,8 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
 
     /// <summary>
     /// The timeline of a session after a sequence number, read with <c>alta session events</c> a page at a time, from the
-    /// journal the desktop timeline is built from. Tool output is left out: the phone shows the calls.
+    /// journal the desktop timeline is built from. The text of tool output is left out: the phone shows the calls, and the
+    /// images an output gave the model; each event is projected by <see cref="MobileTimeline.Entry"/>.
     /// </summary>
     /// <returns>The events, or null when the phone does not see the session.</returns>
     internal async Task<JsonObject?> EventsAsync(string sessionId, long since, CancellationToken cancellationToken)
@@ -114,7 +164,7 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         for (var read = 0; read < MaximumReads; read++)
         {
             var result = await MobileAlta.RunAsync(alta, ["session", "events", sessionId, "--since", since.ToString(CultureInfo.InvariantCulture),
-                "--limit", EventsPerRead.ToString(CultureInfo.InvariantCulture), "--no-tool-output", "--include", "user,assistant,reasoning,tool,host",
+                "--limit", EventsPerRead.ToString(CultureInfo.InvariantCulture), "--no-tool-output", "--tool-images", "--include", "user,assistant,reasoning,tool,host,workflow",
                 "--fields", "sequenceNumber,timestamp,kind,content,metadata"], null, cancellationToken).ConfigureAwait(false);
             if (result.Error is not null)
             {
@@ -130,13 +180,7 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
                 if (sequence > since) since = sequence;
                 var kind = MobileAlta.Text(record, "kind") ?? "";
                 if (kind is "host.usageupdated" or "host.modelchanged") continue;
-                var text = string.Concat((record["content"] as JsonArray ?? []).Select(static part => (string?)part?["text"] ?? ""));
-                if (text.Length > MaximumText) text = text[..MaximumText] + "…";
-                events.Add(new JsonObject
-                {
-                    ["seq"] = sequence, ["at"] = MobileAlta.Text(record, "timestamp"), ["kind"] = kind, ["text"] = text,
-                    ["activityId"] = MobileAlta.Text(record["metadata"] as JsonObject, "activityId"),
-                });
+                events.Add(MobileTimeline.Entry(record, sequence, kind));
             }
 
             // A read that filled its page, or whose output the host cut, says there may be more after the last one read.
@@ -145,6 +189,36 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         }
 
         return new JsonObject { ["since"] = since, ["events"] = events, ["error"] = error };
+    }
+
+    /// <summary>
+    /// The text of a user message without the lines that name its files with their paths on this computer
+    /// (<c>Local image (title): path</c>, <c>Attached file (title): path</c>), and its files as the phone sees them: a title, a
+    /// type and the id of the saved copy (its name, without a folder), which alta lists in the metadata of the message.
+    /// </summary>
+    internal static (string Text, JsonArray Attachments) WithoutPaths(string text, JsonArray listed)
+    {
+        var attachments = new JsonArray();
+        var lines = new List<string>(text.Split('\n'));
+        var removed = false;
+        foreach (var item in listed.OfType<JsonObject>())
+        {
+            if (MobileAlta.Text(item, "title") is not { } title || MobileAlta.Text(item, "id") is not { } id || id.Contains('/') || id.Contains('\\')) continue;
+            attachments.Add(new JsonObject { ["title"] = title, ["mediaType"] = MobileAlta.Text(item, "mediaType") ?? "application/octet-stream", ["id"] = id });
+            // The last line that names it, as the host writes them.
+            for (var index = lines.Count - 1; index >= 0; index--)
+            {
+                var line = lines[index].AsSpan().TrimEnd('\r');
+                var named = line.StartsWith($"Local image ({title}): ", StringComparison.Ordinal) || line.StartsWith("Local image: ", StringComparison.Ordinal)
+                    || line.StartsWith($"Attached file ({title}): ", StringComparison.Ordinal) || line.StartsWith($"Attached file ({id}): ", StringComparison.Ordinal);
+                if (!named || !(line.EndsWith("/" + id, StringComparison.Ordinal) || line.EndsWith("\\" + id, StringComparison.Ordinal))) continue;
+                lines.RemoveAt(index);
+                removed = true;
+                break;
+            }
+        }
+
+        return (removed ? string.Join('\n', lines).TrimEnd('\r', '\n') : text, attachments);
     }
 
     // The names of the projects, the spaces, the models and the agent prompts, read at most every half minute: a page of the
@@ -179,8 +253,9 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         return _names = names;
     }
 
-    private JsonObject Describe(JsonObject item, MobileNames names)
+    private JsonObject Describe(JsonObject item, MobileNames names, IReadOnlyDictionary<string, string?>? parentTitles = null)
     {
+        var parentId = MobileAlta.Text(item, "parentSessionId");
         var id = MobileAlta.Text(item, "sessionId")!;
         var projectId = MobileAlta.Text(item, "projectId");
         var at = LastActivity(item);
@@ -205,11 +280,13 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
             ["agent"] = agent is null ? null : new JsonObject { ["id"] = agent, ["name"] = names.Prompts.GetValueOrDefault(agent) ?? agent },
             // The last folder of the path, whatever the system that wrote it.
             ["worktree"] = MobileAlta.Text(item, "worktreeDirectory") is { } worktree ? worktree.TrimEnd('\\', '/').Split('\\', '/')[^1] : null,
-            ["parentId"] = MobileAlta.Text(item, "parentSessionId"),
+            ["parentId"] = parentId,
+            // The title of the parent, which a sub-agent shown without it names.
+            ["parentTitle"] = parentId is not null && parentTitles?.GetValueOrDefault(parentId) is { } parentTitle ? parentTitle : null,
             ["summary"] = PlainSummary(MobileAlta.Text(item, "latestSummary")),
             ["lastActivity"] = at == DateTimeOffset.MinValue ? null : at.ToString("O", CultureInfo.InvariantCulture),
             // What the plugin saw of the session since it started; else what alta says of it now.
-            ["live"] = live.Describe(id) ?? MobileLive.Quiet(id, projectId, MobileAlta.Flag(item, "isRunning")),
+            ["live"] = live.Describe(id) ?? live.Quiet(id, projectId, MobileAlta.Flag(item, "isRunning")),
         };
     }
 

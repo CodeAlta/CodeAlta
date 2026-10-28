@@ -2819,12 +2819,54 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         => await AdmitAsync(() => QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, images: null, CancellationToken.None), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
 
-    // The images of a queued prompt are files saved with the attachments of the session: the drain sends them with its text.
+    /// <summary>
+    /// Persists a prompt queue item with the images and the files of the prompt, as <see cref="QueuePromptAsync(SessionViewDescriptor, string, string, AltaActorProvenance?, CancellationToken)"/>
+    /// does: the drain sends them after its text, as a send of the window would.
+    /// </summary>
+    /// <param name="session">Target session.</param>
+    /// <param name="prompt">Prompt text to submit later; it may be empty when the prompt has attachments.</param>
+    /// <param name="kind">Prompt dispatch kind, such as <c>send</c> or <c>queue</c>.</param>
+    /// <param name="submittedBy">Durable caller attribution for the queueing actor.</param>
+    /// <param name="attachments">
+    /// The <see cref="AgentInputItem.LocalImage"/> and <see cref="AgentInputItem.LocalFile"/> items of the prompt, files the session
+    /// already owns (saved with its attachments); empty for none.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The persisted queue item.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/>, <paramref name="prompt"/> or <paramref name="attachments"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="kind"/> is empty, <paramref name="prompt"/> is empty without attachments, or an attachment is not a local image or file.</exception>
+    public async Task<SessionViewQueuedPrompt> QueuePromptAsync(
+        SessionViewDescriptor session,
+        string prompt,
+        string kind,
+        AltaActorProvenance? submittedBy,
+        IReadOnlyList<AgentInputItem> attachments,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(attachments);
+        var queued = new List<SessionViewQueuedPromptImage>(attachments.Count);
+        foreach (var attachment in attachments)
+        {
+            queued.Add(attachment switch
+            {
+                AgentInputItem.LocalImage image => new SessionViewQueuedPromptImage { Path = image.Path, Title = image.DisplayName, MediaType = image.MediaType },
+                AgentInputItem.LocalFile file => new SessionViewQueuedPromptImage { Path = file.Path, Title = file.DisplayName, MediaType = file.MediaType, IsFile = true },
+                _ => throw new ArgumentException("A queued prompt takes local images and files only.", nameof(attachments)),
+            });
+        }
+
+        return await AdmitAsync(() => QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, queued, CancellationToken.None), cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // The images and files of a queued prompt are saved with the attachments of the session: the drain sends them with its text.
     private async Task<SessionViewQueuedPrompt> QueuePromptOwnedBodyAsync(SessionViewDescriptor session, string prompt, string kind,
-        AltaActorProvenance? submittedBy, IReadOnlyList<PromptImageAttachmentReference>? images, CancellationToken cancellationToken)
+        AltaActorProvenance? submittedBy, IReadOnlyList<SessionViewQueuedPromptImage>? images, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
-        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        // Files alone are a prompt; text alone needs words.
+        if (images is { Count: > 0 }) ArgumentNullException.ThrowIfNull(prompt);
+        else ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
 
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
@@ -2842,10 +2884,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         QueueItemId = "queue-" + Guid.NewGuid().ToString("N"),
                         Kind = kind,
                         Prompt = prompt,
-                        PromptPreview = CreatePromptPreview(prompt),
-                        Images = images is { Count: > 0 }
-                            ? [.. images.Select(static image => new SessionViewQueuedPromptImage { Path = image.Path, Title = image.Title, MediaType = image.MediaType })]
-                            : null,
+                        PromptPreview = CreatePromptPreview(string.IsNullOrWhiteSpace(prompt) && images is { Count: > 0 }
+                            ? string.Join(", ", images.Select(static image => image.Title ?? Path.GetFileName(image.Path)))
+                            : prompt),
+                        Images = images is { Count: > 0 } ? [.. images] : null,
                         State = "queued",
                         SubmittedBy = submittedBy,
                         CreatedAt = timestamp,
@@ -3746,6 +3788,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// </summary>
     public CodeAlta.Catalog.Reviews.ReviewService? Reviews { get; set; }
 
+    /// <summary>
+    /// Gets the last run a session was seen to start, whatever started it (a send, a queued prompt, a fallback); null
+    /// for a session without one since its entry was made.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    internal AgentRunId? LastRunIdOf(string sessionId) => _entries.TryGetValue(sessionId, out var entry) ? entry.LastRunId : null;
+
     internal const string CommitRefusal = "The user reviews the changes of this session before they are committed, and no review approved the work tree as it is now. "
         + "Do not commit: when the work is done and verified, run `alta review request changes` and end your turn; commit after the review approves the changes, and only them.";
 
@@ -3763,9 +3812,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             {
                 try
                 {
-                    if (await reviews.IsApprovedAsync(new CodeAlta.Catalog.Reviews.ReviewScope(project, entry.WorktreeDirectory), cancellationToken).ConfigureAwait(false))
+                    // The reviews of the checkout the session works in, as the agent's `alta review` and the window name it.
+                    var scope = CodeAlta.Catalog.Reviews.ReviewService.ScopeOf(project, entry.WorktreeDirectory);
+                    if (await reviews.GetApprovalAsync(scope, cancellationToken).ConfigureAwait(false) is { } approval)
                     {
-                        return null;
+                        if (approval.Current) return null;
+                        return CommitRefusalSinceApproval(await reviews.ChangedSinceApprovalAsync(scope, approval, cancellationToken).ConfigureAwait(false));
                     }
                 }
                 catch (CodeAlta.Catalog.Reviews.ReviewException)
@@ -3776,6 +3828,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
             return CommitRefusal;
         };
+
+    // The refusal of a commit after an approval that no longer holds: the files that changed since say why, so that the
+    // agent tells the user, or undoes a change it made by mistake, instead of asking again for a review of the same work.
+    internal static string CommitRefusalSinceApproval(IReadOnlyList<string> changed)
+    {
+        const int Shown = 20;
+        var files = changed.Count == 0 ? "" : ": " + string.Join(", ", changed.Take(Shown).Select(static path => "`" + path + "`"))
+            + (changed.Count > Shown ? $" and {changed.Count - Shown} more" : "");
+        return "The user reviews the changes of this session before they are committed. They approved the work tree, but it changed since" + files + ". "
+            + "Commit only the work tree the user approved: undo a change since the approval that you made and that is not meant to be committed, and never undo a change of the user; "
+            + "otherwise, run `alta review request changes` and end your turn.";
+    }
 
     // The note a run carries about the review before commit: what applies, when the agent was told something else,
     // or nothing yet while the review applies. Null when there is nothing to tell.
@@ -3866,12 +3930,22 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private static string CreatePromptPreview(string prompt)
         => prompt.Length <= 160 ? prompt : prompt[..160];
 
-    // The input of a queued prompt: its text, then its images.
+    // The input of a queued prompt: its text, then its images and its files.
     private static AgentInput QueuedInput(SessionViewQueuedPrompt prompt)
-        => prompt.Images is not { Count: > 0 } images
-            ? AgentInput.Text(prompt.Prompt)
-            : new AgentInput([new AgentInputItem.Text(prompt.Prompt),
-                .. images.Where(static image => !string.IsNullOrWhiteSpace(image.Path)).Select(static image => new AgentInputItem.LocalImage(image.Path, image.Title, image.MediaType))]);
+    {
+        if (prompt.Images is not { Count: > 0 } images) return AgentInput.Text(prompt.Prompt);
+        var items = new List<AgentInputItem>(images.Count + 1);
+        if (!string.IsNullOrWhiteSpace(prompt.Prompt)) items.Add(new AgentInputItem.Text(prompt.Prompt));
+        foreach (var image in images)
+        {
+            if (string.IsNullOrWhiteSpace(image.Path)) continue;
+            items.Add(image.IsFile
+                ? new AgentInputItem.LocalFile(image.Path, image.Title ?? Path.GetFileName(image.Path), image.MediaType ?? "application/octet-stream")
+                : new AgentInputItem.LocalImage(image.Path, image.Title, image.MediaType));
+        }
+
+        return new AgentInput(items);
+    }
 
     private static void TrimLocalStateHistory(SessionViewLocalState localState)
     {

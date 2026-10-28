@@ -599,6 +599,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 options.FollowExternalSessions);
             // The markers written while no instance ran are read at once, beside the start of the frontend.
             host.ExternalSessions?.Start();
+            // The resumes after a limit that sessions waited for when the host last closed are armed again.
+            host.Commands.Fallback.Time = options.TimeProvider ?? TimeProvider.System;
+            host.Commands.Fallback.ResumeStore = new SessionResumeStore(applicationDatabase);
+            _ = host.Commands.Fallback.RestoreResumesAsync();
             return host;
         }
         catch (Exception creationFailure)

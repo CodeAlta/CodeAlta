@@ -46,6 +46,7 @@ The Explorer lists the projects of the space the window shows. **Chats**, at the
 
 - **Filter sessions**, at the top, keeps the sessions, chats, projects and Claude Code conversations whose title has every word you type. `Esc` or **×** clears it.
 - Click the arrow of a project to show or hide its sessions; **Collapse all** closes them all. Open projects stay open at the next start.
+- A project or a [label](../labels.md) shows a spinner while sessions run in it, with their number when there are several, and a yellow mark with the number of sessions that wait for you: a folded one tells it without being opened. A project with no session or terminal has no arrow.
 - Click a project to write the prompt of a new session in it. Click a session to look at it; double-click it to keep its tab (see [Tabs](#tabs)).
 - Point at a project for its buttons: the star (adds it to **Favorites**), its [changes](code.md#changes), its [code editor](code.md#code-editor) and a [terminal](code.md#terminals).
 - The `…` button or a right-click (`Ctrl`+click on macOS) opens the menu of a project or a session.
@@ -71,7 +72,7 @@ Press `Ctrl+P` to search and run any command. In CodeAlta Desktop, `Ctrl+P` or t
 
 - the **sessions** of every project and your chats, then the Claude Code conversations not in CodeAlta yet;
 - the **projects**, and the **files** of the current project;
-- the **commands**, each with its slash command and its shortcut;
+- the **commands**, each with its slash command and its shortcut. A command that cannot run now is dimmed, and when the session in front knows why, the reason replaces its description;
 - the **skills** of the current project.
 
 `Tab` switches between **All**, **Sessions**, **Conversations**, **Projects**, **Files**, **Commands**, **Skills**, **Docs**, **Tools** and **Archived** (`Enter` restores an archived session). **Conversations**, **Docs** and **Tools** come from the [search index](../search.md). Start with `/` for a command or a skill.
@@ -113,7 +114,7 @@ In CodeAlta Desktop, a session you click opens in one tab whose title is in *ita
   <figcaption class="small text-secondary mt-2">Kept tabs, and the tab with the italic title that the next session or project you click takes over.</figcaption>
 </figure>
 
-A session you create is kept from the start. Closing a tab never deletes a session. `Ctrl+W` (`Cmd+W` on macOS) or a middle click closes a tab, and `Ctrl+Shift+T` reopens the last closed one.
+A session you create is kept from the start. Closing a tab never deletes a session. `Ctrl+W` (`Cmd+W` on macOS) or a middle click closes a tab: `Ctrl+W` closes the tab of the pane you last clicked in, such as a pane docked on the right. `Ctrl+Shift+T` reopens the last closed one. A pane at the top too narrow for its tabs beside the buttons of the title bar shows them below it.
 
 Right-click a tab, or press `Shift+F10` on it, for **Close**, **Close others**, **Close to the right** and **Close all** (in the same pane), **Keep open** on an italic tab, and **Move to window** (see [Windows](#windows)). The `…` menu of a pane has **Close others**, **Close all** and **Reopen closed tab**. A code editor with unsaved changes asks before it closes.
 

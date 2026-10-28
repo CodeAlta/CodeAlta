@@ -13,6 +13,7 @@ import { sandboxMessages } from "./sandbox/messages";
 import { promptProvenanceMessages } from "./promptProvenance";
 import { codeModeSettingsMessages } from "./codeModeSettingsMessages";
 import { scriptCardMessages } from "./scriptCard/messages";
+import { resumeCardMessages } from "./resumeCard/messages";
 import { scriptAutomationMessages } from "./automations/scriptAutomationMessages";
 import { workflowMessages } from "./workflows/messages";
 import { claudeCliMessages } from "./claudeCli/messages";
@@ -41,6 +42,8 @@ import { mcpAppMessages } from "./mcpApps/messages";
 import { mobileCanvasMessages } from "./mobile/canvas/messages";
 import { labelMessages } from "./labels/messages";
 import { sessionSettingsMessages } from "./sessionSettings/messages";
+import { composerCommandMessages } from "./composerCommandMessages";
+import { applicationLogMessages } from "./applicationLogMessages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2130,6 +2133,8 @@ export const messages = dictionary({
   "Hide the changes of the file": ["Ocultar los cambios del archivo", "Masquer les modifications du fichier", "Änderungen der Datei ausblenden", "ファイルの変更を隠す", "隐藏文件的更改"],
   "Hide unchanged lines": ["Ocultar líneas sin cambios", "Masquer les lignes inchangées", "Unveränderte Zeilen ausblenden", "変更のない行を隠す", "隐藏未更改的行"],
   "Ignore whitespace changes": ["Ignorar cambios de espacios", "Ignorer les changements d’espaces", "Leerraumänderungen ignorieren", "空白の変更を無視", "忽略空白更改"],
+  "Not created yet": ["Aún no creado", "Pas encore créé", "Noch nicht erstellt", "未作成", "尚未创建"],
+  "It does not exist yet: nothing in it applies.": ["Aún no existe: nada de su contenido se aplica.", "Il n’existe pas encore : rien de son contenu ne s’applique.", "Existiert noch nicht: Nichts davon gilt.", "まだ存在しないため、その内容は何も適用されません。", "尚不存在：其中的任何内容都不适用。"],
   "Copy path": ["Copiar ruta", "Copier le chemin", "Pfad kopieren", "パスをコピー", "复制路径"],
   "Select a file to see its changes": ["Selecciona un archivo para ver sus cambios", "Sélectionnez un fichier pour voir ses modifications", "Datei auswählen, um ihre Änderungen zu sehen", "ファイルを選択すると変更が表示されます", "选择文件以查看其更改"],
   "The file has no changes any more.": ["El archivo ya no tiene cambios.", "Le fichier n’a plus de modification.", "Die Datei hat keine Änderungen mehr.", "このファイルにはもう変更がありません。", "该文件已没有更改。"],
@@ -2788,6 +2793,7 @@ export const messages = dictionary({
   ...promptProvenanceMessages,
   ...codeModeSettingsMessages,
   ...scriptCardMessages,
+  ...resumeCardMessages,
   ...scriptAutomationMessages,
   ...workflowMessages,
   ...claudeCliMessages,
@@ -2816,6 +2822,8 @@ export const messages = dictionary({
   ...mobileCanvasMessages,
   ...labelMessages,
   ...sessionSettingsMessages,
+  ...composerCommandMessages,
+  ...applicationLogMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

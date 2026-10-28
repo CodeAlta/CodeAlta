@@ -1,4 +1,5 @@
 import type { HistoryResponse } from "#neoastra";
+import { readResumeOffer, type ResumeOffer } from "./resumeCard/resumeHub";
 import { parseDelegatedMessage } from "./delegatedMessage";
 import { parseJobResult, type JobResult } from "./jobResult";
 import { promptProvenance, promptProvenanceIcon, promptProvenanceIds, promptProvenanceTitle } from "./promptProvenance";
@@ -81,6 +82,8 @@ export type TimelineItem = Readonly<{
   provenance?: string;
   /** The provider of an error that says it has no Claude Code CLI to run: the card proposes its download. */
   missingCliProvider?: string;
+  /** The resume after a limit a warning card scheduled: the card offers Cancel and Resume now while it waits. */
+  resumeOffer?: ResumeOffer;
   /** Where a prompt made outside CodeAlta was made (in VS Code, in a terminal), on the conversation its provider keeps. */
   madeElsewhere?: ExternalOrigin;
   /** True for a prompt its run never gave the provider: the conversation changed while the run waited for it. */
@@ -246,7 +249,9 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     // The records of a run of a script describe the card of its exec call, not rows of their own.
     if (entry.eventType === "raw" || entry.eventType === "notes" || entry.eventType === "workflow") continue;
     // These update the TUI's status/usage surfaces, not its conversation timeline.
-    if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "providerfallback", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")) continue;
+    // The cancellation of a resume after a limit is said where its card said when the session would resume.
+    if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "providerfallback", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")
+      && !cancelledResume(entry)) continue;
     if ((entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") &&
         isToolOutput(entry.kind) && entry.parentActivityId && calls.has(parentActivityKey(entry))) {
       // The text of an output is shown on the tile of its call; the images the model was given get a card.
@@ -608,9 +613,10 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       markdown = null;
       detailsLabel = "Usage details";
     } else if (normalizedKind === "providerfallback") {
-      // The session went on with the next model of its tier after a failure of its provider.
+      // The session went on with the next model of its tier after a failure of its provider, or resumed after a limit.
       icon = "model";
-      title = "Model changed after a failure";
+      const resumed = stringAt(parsedDetails, "resume");
+      title = resumed === "automatic" || resumed === "manual" ? "Session resumed" : "Model changed after a failure";
       const from = stringAt(parsedDetails, "from");
       const to = stringAt(parsedDetails, "to");
       subtitle = from && to ? `${from} → ${to}` : null;
@@ -623,6 +629,10 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       detailMarkdown = model.keepMessage ? entry.text : null;
       markdown = null;
       detailsLabel = "Model details";
+    } else if (normalizedKind === "info" && stringAt(parsedDetails, "resume") === "cancelled") {
+      // The resume a session waited for after a limit was cancelled.
+      icon = "reminder";
+      title = "Automatic resume cancelled";
     } else {
       title = sessionUpdateTitle(kind);
       // A local compaction is detailed like in the terminal, in place of its raw record.
@@ -689,6 +699,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     providerPrompt: category === "user" && (entry.contentId?.startsWith("provider:") || provenance === promptProvenanceIds.provider) ? true : undefined,
     provenance: category === "user" ? provenance ?? undefined : undefined,
     missingCliProvider: entry.eventType === "error" && entry.kind === "claude-code-not-found" && entry.providerId ? entry.providerId : undefined,
+    resumeOffer: entry.eventType === "sessionUpdate" ? readResumeOffer(parsedDetails) ?? undefined : undefined,
     madeElsewhere: elsewhere ?? undefined,
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
     prompt,
@@ -766,6 +777,11 @@ function modelPresentation(text: string | null, details: JsonObject | null) {
     summary: reasoning ? `Reasoning: ${friendly(reasoning)}` : null,
     keepMessage: !provider && !model && !reasoning,
   };
+}
+
+// An informational update that says a resume after a limit was cancelled.
+function cancelledResume(entry: HistoryEntry): boolean {
+  return entry.kind?.toLowerCase() === "info" && !!entry.details?.includes("cancelled") && stringAt(parseDetails(entry.details), "resume") === "cancelled";
 }
 
 function sessionUpdateTitle(kind: string): string {

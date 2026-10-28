@@ -46,8 +46,16 @@ public sealed class HelloPlugin : PluginBase
   breaks a rule (a duplicate id, too many buttons) is left out with a diagnostic, not thrown.
 - **Plugins see services, not frontends.** A command receives `PluginCommandContext` (`Ui`, `Sessions`, `Prompts`,
   `Workspace`), never raw command text, frontend view models or controls. `IPluginServices` gives the `alta` bridge,
-  state, database, tasks, canvases, spaces and identity. A host without a window gives no-op services
+  state, database, tasks, canvases, spaces, identity and asks. A host without a window gives no-op services
   (`HasInteractiveUi` is false).
+- **Asks are answered for the user, never by an agent.** `Services.Asks` (`IPluginAskService`) reads the question or
+  review request a session waits on and answers or cancels it as the window does, naming the revision it read, so an
+  answer to an ask that changed meanwhile is refused. An agent must not answer what it asks (an approved review lets it
+  commit), and an agent can write a plugin of a folder, so only the built-in Mobile plugin gets a working service: the
+  runtime asks the host for the service of each plugin (`IPluginAskRuntimeService.ForPlugin`, with whether the plugin
+  is built in), and the desktop gives it to `builtin:mobile` without a package folder, the no-op service to every other
+  plugin; a host without that interface gives none. The services of a plugin's `alta` command, which an agent runs,
+  are always wrapped and have the no-op service.
 - **One contract, two applications.** Both hosts run the same runtime. `PluginAttribute.Frontends` says which
   applications a plugin supports; a host does not activate one made for the other. The default, `All`, is the desktop
   and the terminal: the command-line application (`altacli`, no window and no user) is a third value, `Cli`, that a
@@ -252,7 +260,7 @@ be delayed by static references, native resources or untracked work: collectible
 | `acp` | `CodeAlta.Plugin.Acp` | all three | The provider type `acp`, see [providers](providers.md) |
 | `landing` | desktop project | desktop | The canvas of the landing page; the cards on it are other plugins' |
 | `search` | desktop project | desktop | The canvas and landing card of the search index |
-| `mobile` | `CodeAlta.Plugin.Mobile` | desktop, off by default | A local server published on the tailnet by Tailscale Serve that serves the sessions of its spaces to a phone, acting through `alta` |
+| `mobile` | `CodeAlta.Plugin.Mobile` | desktop, off by default | A local server published on the tailnet by Tailscale Serve that serves the sessions of its spaces to a phone, acting through `alta` (images by an id resolved from the records of their session, never a path from the phone), and answers their asks through `Services.Asks`. It keeps no usable secret on disk, only the SHA-256 of the pairing token and of each phone's key, so a program that reads its files cannot answer as the user |
 | `ui` | desktop project | desktop | On request, the tools that see and drive the window; not offered when the user reviews commands, since a session could then answer its own review |
 
 "All three" is the desktop, the terminal and the command-line application (`Cli`): what these plugins give agents

@@ -1,6 +1,8 @@
+import { hasImages, newSessionReadsImages } from "./attachments";
 import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
 import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
 import { coalesce, composerView } from "./composer";
+import { createAskPanel } from "./askPanel";
 import { isBusy, type Live, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
 import { activityLine, el, icon, iconSvg, type IconName } from "./dom";
 import { createDrafts, newSessionDraft } from "./drafts";
@@ -11,15 +13,20 @@ import {
   choiceLabel, choiceRequest, entryName, findModel, forgetMode, groupVariants, initialChoice, modelsOf, orderModels, pickEffort, pickModel, preferencesKey,
   providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
 } from "./models";
+import { createPhoneFiles, newSessionFiles } from "./phoneFiles";
 import {
   appliedSelection, chipText, modeDescription, modeName, pickedChanges, pickSessionModel, providerPermissionMode, queueFirstKey, shownSelection, type Picked,
 } from "./selection";
 import { safeColor, sessionMeta, showSpaces } from "./sessionMeta";
+import { createSessionList } from "./sessionList";
+import { topLevelCount } from "./sessionTree";
 import { createSheet } from "./sheet";
-import { ago, dotLabels, dotOf, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
+import { ago, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
 import {
-  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, stillPending, type ActivityBlock, type PendingPrompt, type TimelineBlock, type ToolRow,
+  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, stillPending, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
+import { createImageViewer } from "./imageViewer";
+import { createTimelineView } from "./timelineView";
 
 /** Starts the phone page in a window whose document is `mobile.html`. */
 export function startMobile(window: Window & typeof globalThis) {
@@ -133,72 +140,12 @@ export function startMobile(window: Window & typeof globalThis) {
     return line;
   }
 
-  function card(view: SessionView, now: number): { element: HTMLDivElement; version: string } {
-    const state = dotOf(view, now);
-    const live = view.live;
-    const when = live?.at ?? view.lastActivity;
-    const lineText = live?.line ?? view.summary;
-    const space = showSpaces(sessions.spaces);
-    const version = JSON.stringify([state, view.title, ago(when, now), live?.kind, lineText, live?.activity, sessionMeta(view, { space, live: true }), space]);
-    const element = make("div", `card ${state}`);
-    const anchor = make("a", "card-link");
-    anchor.href = `#/session/${encodeURIComponent(view.id)}`;
-    anchor.append(make("div", "title", view.title || "(untitled session)"));
-    const meta = metaLine(view, { space, live: true, dot: true, when, now });
-    meta.title = dotLabels[state];
-    anchor.append(meta);
-    if (live?.kind === "activity" && live.activity) anchor.append(activityLine(document, live.activity, live.activity.state === "running", now));
-    else if (lineText) {
-      const line = make("div", "line", lineText);
-      line.dataset.kind = live?.line ? (live.kind ?? "assistant") : "summary";
-      anchor.append(line);
-    }
-    // The archive of a swipe, for a keyboard and a screen reader: shown when it has the focus.
-    const archive = make("button", "card-archive");
-    archive.type = "button";
-    archive.setAttribute("aria-label", `Archive “${view.title || "untitled session"}”`);
-    archive.append(icon(document, "archive"));
-    element.append(anchor, archive);
-    return { element, version };
-  }
-
-  function row(view: SessionView, now: number): HTMLLIElement {
-    const item = make("li", "row");
-    item.dataset.id = view.id;
-    const under = make("div", "swipe-under");
-    under.setAttribute("aria-hidden", "true");
-    const action = make("span", "swipe-act archive");
-    action.append(icon(document, "archive"), make("span", null, "Archive"));
-    under.append(action);
-    const { element, version } = card(view, now);
-    item.dataset.version = version;
-    item.append(under, element);
-    return item;
-  }
-
-  // Rows are kept by id, and a card is drawn again only when what it shows changed: a state change transitions the
-  // outline color instead of redrawing it, and the focus stays where it is.
+  const sessionList = createSessionList({ window, list, sessions, store, visible: () => !$("home").hidden });
   function renderList() {
     if (signedOut) return;
-    const now = Date.now();
-    const views = sessions.list();
-    const old = new Map(Array.from(list.children as HTMLCollectionOf<HTMLLIElement>).map(item => [item.dataset.id!, item]));
-    const rows = views.map(view => {
-      const item = old.get(view.id);
-      if (!item) return row(view, now);
-      const fresh = card(view, now);
-      if (item.dataset.version !== fresh.version) {
-        const current = item.querySelector<HTMLElement>(".card")!;
-        current.className = fresh.element.className + (current.classList.contains("springing") ? " springing" : "");
-        current.replaceChildren(...Array.from(fresh.element.childNodes));
-        item.dataset.version = fresh.version;
-      }
-      return item;
-    });
-    rows.forEach((item, index) => { if (list.children[index] !== item) list.insertBefore(item, list.children[index] ?? null); });
-    Array.from(list.children).slice(rows.length).forEach(item => item.remove());
+    sessionList.render();
     moreButton.hidden = !sessions.hasMore;
-    if (views.length) note.textContent = "";
+    if (sessions.list().length) note.textContent = "";
   }
 
   let listError: string | null = null;
@@ -218,6 +165,7 @@ export function startMobile(window: Window & typeof globalThis) {
         offset = page.next;
         if (!page.hasMore) break;
       }
+      if (!await readOn(filter, startedAt, pageSize)) return;
       renderList();
       showScope();
       if (!sessions.list().length) note.textContent = listError
@@ -227,6 +175,16 @@ export function startMobile(window: Window & typeof globalThis) {
       note.textContent = `CodeAlta is not reachable: ${failureText(error, host)}`;
     }
   });
+  // Sub-agents folded under their parents take no card of their own: the list reads on, a page at a time and four at most,
+  // until it shows `cards` cards. False when the filter changed meanwhile.
+  async function readOn(filter: readonly string[], startedAt: number, cards: number): Promise<boolean> {
+    for (let read = 0; read < 4 && sessions.hasMore && topLevelCount(sessions.list()) < cards; read++) {
+      const page = await api.sessions(sessions.next, pageSize, filter);
+      if (filter !== sessions.filter) return false;
+      sessions.applyPage(page, startedAt, true);
+    }
+    return true;
+  }
   let reloadTimer = 0;
   function scheduleListRead(ms: number) { window.clearTimeout(reloadTimer); reloadTimer = window.setTimeout(() => void readList(), ms); }
 
@@ -235,8 +193,9 @@ export function startMobile(window: Window & typeof globalThis) {
     moreButton.textContent = "Loading…";
     const filter = sessions.filter, startedAt = sessions.beginRead();
     try {
+      const cards = topLevelCount(sessions.list()) + pageSize;
       const page = await api.sessions(sessions.next, pageSize, filter);
-      if (filter === sessions.filter) { sessions.applyPage(page, startedAt, true); renderList(); }
+      if (filter === sessions.filter) { sessions.applyPage(page, startedAt, true); if (await readOn(filter, startedAt, cards)) renderList(); }
     } catch (error) {
       if (!(error instanceof SignedOutError)) showToast(`Not loaded: ${failureText(error, host)}`);
     } finally {
@@ -304,6 +263,7 @@ export function startMobile(window: Window & typeof globalThis) {
     store.set(projectKey, JSON.stringify(chosen));
     sessions.setFilter(chosen);
     list.replaceChildren();
+    sessionList.settle();
     showFilter();
     void readList();
   }
@@ -350,7 +310,7 @@ export function startMobile(window: Window & typeof globalThis) {
     filterSheet.open();
   });
 
-  // ---- The page of a session: its timeline, folded as the desktop folds it, drawn block by block ----
+  // ---- The page of a session: its timeline, folded as the desktop folds it, drawn block by block (timelineView.ts) ----
   type Drawn = { element: HTMLLIElement; version: string; diagram: boolean };
   const timeline = $<HTMLOListElement>("timeline");
   const detail = {
@@ -361,84 +321,25 @@ export function startMobile(window: Window & typeof globalThis) {
   // The prompts each session accepted that its timeline does not hold yet (a steered one reaches the journal later): shown at once.
   const pendingPrompts = new Map<string, PendingPrompt[]>();
   let pendingSeq = 0;
-  const pendingLabels: Readonly<Record<PendingPrompt["mode"], string>> = { send: "You", steer: "You · steering", queue: "You · queued" };
   let working: HTMLLIElement | null = null;
   markdown.handle(timeline);
+  const blocksView = createTimelineView({
+    document, fill: (element, text, redraw) => markdown.fill(element, text, redraw), session: () => detail.id,
+    sessionTitle: id => sessions.view(id)?.title ?? null,
+    openSession: id => { window.location.hash = `#/session/${encodeURIComponent(id)}`; },
+    viewer: createImageViewer({ window }),
+  });
 
   const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 40;
   const toBottom = () => window.scrollTo(0, document.documentElement.scrollHeight);
   function noteHere(text: string) { if (detail.id) detailNote.textContent = text; else showToast(text); }
-
-  function messageBlock(block: Extract<TimelineBlock, { kind: "message" }>, pending?: PendingPrompt): Drawn {
-    const item = make("li", `msg msg-${block.role}${pending ? " pending" : ""}`);
-    item.dataset.key = block.key;
-    item.append(make("div", "msg-label", pending ? pendingLabels[pending.mode] : block.role === "user" ? "You" : block.role === "assistant" ? "Agent" : "Error"));
-    const content = make("div", "markdown-content");
-    const fill = () => markdown.fill(content, block.text, fill);
-    const diagram = fill();
-    item.append(content);
-    return { element: item, version: block.key, diagram };
-  }
-
-  function toolRow(tool: ToolRow): HTMLDivElement {
-    const element = make("div", "tool-row");
-    element.dataset.key = tool.key;
-    element.dataset.phase = tool.phase;
-    element.append(make("span", "tool-dot"), make("strong", null, tool.title), make("span", "tool-phase", tool.phase));
-    return element;
-  }
-
-  function activityBody(block: ActivityBlock, body: HTMLElement) {
-    // Rows are kept by key: a thought never changes, a tool changes its phase; new rows are added after.
-    const existing = new Map(Array.from(body.children as HTMLCollectionOf<HTMLElement>).map(child => [child.dataset.key!, child]));
-    let previous: Element | null = null;
-    for (const entry of block.rows) {
-      let element = existing.get(entry.key);
-      if (!element) {
-        if (entry.type === "thought") {
-          element = make("div", "msg msg-reasoning");
-          element.dataset.key = entry.key;
-          const content = make("div", "markdown-content");
-          const fill = () => markdown.fill(content, entry.text, fill);
-          fill();
-          element.append(make("div", "msg-label", "Thinking"), content);
-        } else element = toolRow(entry);
-      } else if (entry.type === "tool" && element.dataset.phase !== entry.phase) {
-        element.dataset.phase = entry.phase;
-        element.querySelector(".tool-phase")!.textContent = entry.phase;
-      }
-      const expected: ChildNode | null = previous ? previous.nextSibling : body.firstChild;
-      if (expected !== element) body.insertBefore(element, expected);
-      previous = element;
-    }
-  }
-
-  function drawActivity(item: HTMLLIElement, block: ActivityBlock, live: boolean, open: boolean) {
-    const facts = activityFacts(block, live);
-    item.dataset.state = facts.state;
-    item.dataset.expanded = String(open);
-    let toggle = item.querySelector<HTMLButtonElement>(":scope > .act-toggle");
-    if (!toggle) {
-      toggle = make("button", "act-toggle");
-      toggle.type = "button";
-      toggle.append(icon(document, "chevron", "act-chevron"));
-      item.append(toggle);
-    }
-    toggle.setAttribute("aria-expanded", String(open));
-    toggle.querySelector(".act-line")?.remove();
-    toggle.append(activityLine(document, facts, live, Date.now()));
-    let body = item.querySelector<HTMLElement>(":scope > .act-body");
-    if (open) {
-      if (!body) { body = make("div", "act-body"); item.append(body); }
-      activityBody(block, body);
-    } else body?.remove();
-  }
 
   function drawTimeline() {
     if (!detail.id) return;
     const view = sessions.view(detail.id);
     const busy = isBusy(view?.live?.live);
     const blocks = detail.blocks = foldEvents(detail.events);
+    blocksView.know(blocks);
     type Entry = { block: TimelineBlock; live: boolean; open: boolean; key: string; version: string; prompt?: PendingPrompt };
     const entries: Entry[] = blocks.map((block, index) => {
       const live = liveBlock(blocks, index, busy), open = detail.expanded.has(block.key);
@@ -455,16 +356,20 @@ export function startMobile(window: Window & typeof globalThis) {
       const entry = all[index];
       let drawn = detail.drawn.get(step.key);
       if (step.action === "create" || !drawn) {
-        if (entry.block.kind === "message") drawn = messageBlock(entry.block, entry.prompt);
+        if (entry.block.kind === "message") drawn = blocksView.messageBlock(entry.block, entry.prompt);
+        else if (entry.block.kind === "workflow") drawn = { ...blocksView.workflowBlock(entry.block), version: entry.version };
         else {
           const item = make("li", "activity");
           item.dataset.key = entry.key;
-          drawActivity(item, entry.block, entry.live, entry.open);
+          blocksView.drawActivity(item, entry.block, entry.live, entry.open);
           drawn = { element: item, version: entry.version, diagram: false };
         }
         detail.drawn.set(step.key, drawn);
       } else if (step.action === "update" && entry.block.kind === "activity") {
-        drawActivity(drawn.element, entry.block, entry.live, entry.open);
+        blocksView.drawActivity(drawn.element, entry.block, entry.live, entry.open);
+        drawn.version = entry.version;
+      } else if (step.action === "update" && entry.block.kind === "workflow") {
+        blocksView.drawWorkflow(drawn.element, entry.block);
         drawn.version = entry.version;
       }
       const expected: ChildNode | null = previous ? previous.nextSibling : timeline.firstChild;
@@ -503,6 +408,7 @@ export function startMobile(window: Window & typeof globalThis) {
   }
 
   timeline.addEventListener("click", event => {
+    if (blocksView.click(event)) return;
     const toggle = (event.target as Element | null)?.closest<HTMLButtonElement>("button.act-toggle");
     const key = toggle?.closest<HTMLElement>("li.activity")?.dataset.key;
     if (!key) return;
@@ -569,6 +475,7 @@ export function startMobile(window: Window & typeof globalThis) {
     detail.expanded = new Set();
     detail.drawn = new Map();
     detail.loaded = false;
+    blocksView.reset();
     timeline.replaceChildren();
     working = null;
     detailNote.textContent = pendingNotes.get(id) ?? "";
@@ -576,6 +483,7 @@ export function startMobile(window: Window & typeof globalThis) {
     bindComposer(id);
     showDetailHead();
     void readChoices(id);
+    void askPanel.read(id);
     if (!sessions.listed(id) || !sessions.view(id)?.title) void readSessionAlone(id);
     void readDetail().then(() => { if (detail.id === id) toBottom(); });
   }
@@ -595,7 +503,7 @@ export function startMobile(window: Window & typeof globalThis) {
       const content = drawn.element.querySelector<HTMLElement>(":scope > .markdown-content");
       const key = drawn.element.dataset.key!;
       const block = detail.blocks.find(b => b.key === key);
-      if (content && block?.kind === "message") { const fill = () => markdown.fill(content, block.text, fill); fill(); }
+      if (content && block?.kind === "message") blocksView.fillMessage(content, block, block.text);
     }
   }
 
@@ -604,13 +512,37 @@ export function startMobile(window: Window & typeof globalThis) {
   const sendButton = $<HTMLButtonElement>("send"), queueButton = $<HTMLButtonElement>("queue"), abortButton = $<HTMLButtonElement>("abort");
   const hint = $("composer-hint");
   let composerFor: string | null = null;
+  // Files and photos held with a prompt, for each session and the new one (phoneFiles.ts).
+  const files = createPhoneFiles({
+    document, input: $<HTMLInputElement>("attach-input"),
+    session: { strip: $("attach-strip"), note: $("attach-note") }, newSession: { strip: $("new-attach-strip"), note: $("new-attach-note") },
+    current: () => composerFor,
+    readsImages: key => key === newSessionFiles ? newSessionReadsImages(options, choice) : sessionReadsImages(key),
+    changed: key => { if (key === composerFor && detail.id === key) showComposer(); },
+  });
+  $<HTMLButtonElement>("attach").addEventListener("click", () => { if (composerFor) files.choose(composerFor); });
+  $<HTMLButtonElement>("new-attach").addEventListener("click", () => files.choose(newSessionFiles));
   const stopping = new Map<string, number>(), stoppedAt = new Map<string, number>();
+
+  // ---- The ask a session waits on: in place of the composer once the run that asked ended, as on the desktop ----
+  const askBar = $("ask");
+  const askPanel = createAskPanel({
+    document, window, root: askBar, cancelSheet: $("ask-cancel-sheet"), api, host,
+    current: () => detail.id,
+    live: id => sessions.view(id)?.live,
+    markdown: (element, text) => { const fill = () => markdown.fill(element, text, fill); fill(); },
+    onChange: () => showComposer(),
+    onSent: () => scheduleDetailRead(0),
+    onResize: () => padComposer(),
+  });
+  const bottomBar = () => askBar.hidden ? composer : askBar;
 
   function bindComposer(id: string | null) {
     if (composerFor) drafts.set(composerFor, promptBox.value);
     composerFor = id;
     promptBox.value = id ? drafts.get(id) : "";
     grow();
+    files.show(id);
   }
   const buttonFaces: Readonly<Record<PromptMode, Readonly<{ icon: "send" | "steer" | "queue"; label: string; title: string }>>> = {
     send: { icon: "send", label: "Send", title: "Send the prompt" },
@@ -629,7 +561,7 @@ export function startMobile(window: Window & typeof globalThis) {
     const busy = isBusy(view?.live?.live);
     if (id && !busy && stopping.has(id)) endStopping(id);
     const typed = promptBox.value.trim().length > 0;
-    const state = composerView(busy, typed, !!view?.live?.canSteer, queueFirst);
+    const state = composerView(busy, typed, !!view?.live?.canSteer, queueFirst, !!id && files.get(id).length > 0);
     sendButton.hidden = state.primary === null;
     if (state.primary) face(sendButton, state.primary);
     queueButton.hidden = state.secondary === null;
@@ -643,6 +575,15 @@ export function startMobile(window: Window & typeof globalThis) {
     promptBox.placeholder = busy && !typed ? state.hint : "Ask for more…";
     composer.dataset.submit = state.submit;
     showSelection();
+    showAsk();
+  }
+
+  function showAsk() {
+    const was = !askBar.hidden;
+    const shown = askPanel.show();
+    composer.hidden = shown;
+    if (detail.id && foot.parentElement !== bottomBar()) bottomBar().append(foot);
+    if (shown !== was) padComposer();
   }
 
   // ---- The selection of the composer: the chip (model and effort) and "⋯" (agent prompt, permissions, queue first) ----
@@ -658,6 +599,7 @@ export function startMobile(window: Window & typeof globalThis) {
     try {
       const read = await api.choices(id);
       choicesOf.set(id, { current: read.current, models: read.models ?? [], prompts: read.prompts ?? [], permissionModes: read.permissionModes ?? [], error: read.error ?? null });
+      files.reconcile(id);
     } catch (error) {
       if (error instanceof SignedOutError) return;
       // An older CodeAlta has no choices: the chip keeps what the list says, and its sheet says why.
@@ -768,7 +710,11 @@ export function startMobile(window: Window & typeof globalThis) {
 
   async function submitPrompt(mode: "send" | "steer" | "queue") {
     const id = composerFor, text = promptBox.value.trim();
-    if (!id || !text) return;
+    // Files go with a Send or a Queue; a steer sends the text into the turn, and the files stay for the next one.
+    const held = id && mode !== "steer" ? files.get(id) : [];
+    if (!id || (!text && !held.length)) return;
+    if (hasImages(held) && sessionReadsImages(id) === false) { files.note(id, "This model does not read images."); return; }
+    const sent = held.length ? files.take(id) : held;
     composer.classList.add("sending");
     // The prompt leaves the input (and its draft) as it is sent: the request can take a while to return while the
     // turn already runs. If it fails, the text goes back to the session it was written for.
@@ -778,14 +724,15 @@ export function startMobile(window: Window & typeof globalThis) {
     showComposer();
     const sentAt = Date.now();
     // The prompt shows in the timeline at once, as the user's message: it goes when the journal holds it, or when the send fails.
-    const prompt: PendingPrompt = { key: `p${++pendingSeq}`, text, mode, sentAt, after: detail.id === id ? detail.events.at(-1)?.seq ?? 0 : 0 };
+    const prompt: PendingPrompt = { key: `p${++pendingSeq}`, text, mode, sentAt, after: detail.id === id ? detail.events.at(-1)?.seq ?? 0 : 0,
+      ...(sent.length ? { attachments: sent.map(({ title, mediaType }) => ({ title, mediaType })) } : {}) };
     const forget = () => { pendingPrompts.set(id, (pendingPrompts.get(id) ?? []).filter(p => p !== prompt)); if (detail.id === id) drawTimeline(); };
     pendingPrompts.set(id, [...pendingPrompts.get(id) ?? [], prompt]);
     if (detail.id === id) { drawTimeline(); toBottom(); }
     // What was picked goes with a send or a queue; a steer leaves it for the next one.
     const picked = picks.get(id) ?? {}, selection = mode === "steer" ? {} : pickedChanges(choicesOf.get(id), picked);
     try {
-      await api.prompt(id, text, mode, selection);
+      await api.prompt(id, text, mode, selection, sent);
       if (mode !== "steer" && picks.get(id) === picked) picks.delete(id);
       if (Object.keys(selection).length) {
         // The session runs on it now: its choices say so.
@@ -805,6 +752,7 @@ export function startMobile(window: Window & typeof globalThis) {
       forget();
       if (composerFor === id && !promptBox.value.trim()) { promptBox.value = text; drafts.set(id, text); grow(); }
       else drafts.giveBack(id, text);
+      files.giveBack(id, sent);
       if (error instanceof SignedOutError) return;
       if (detail.id === id) detailNote.textContent = `Not sent: ${failureText(error, host)}`;
       else showToast(`Not sent to “${sessions.view(id)?.title || "the session"}”: ${failureText(error, host)} The text is kept as its draft.`, undefined, 8000);
@@ -853,10 +801,12 @@ export function startMobile(window: Window & typeof globalThis) {
     const page = !$("detail").hidden ? $("detail") : creating ? document.body : null;
     if (!creating) document.body.style.paddingBottom = "";
     if (!page) return;
-    const bar = creating ? $("create-bar") : composer;
+    const bar = creating ? $("create-bar") : bottomBar();
     const viewport = window.visualViewport;
     const covered = viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0;
     bar.style.bottom = `${covered}px`;
+    // The ask scrolls in the bar, which leaves the top of the screen to the timeline.
+    if (bar === askBar) askBar.style.maxHeight = `${Math.round((viewport?.height ?? window.innerHeight) * 0.72)}px`;
     page.style.paddingBottom = `${bar.offsetHeight + covered + (creating ? 0 : 16)}px`;
   }
   window.visualViewport?.addEventListener("resize", padComposer);
@@ -882,6 +832,13 @@ export function startMobile(window: Window & typeof globalThis) {
   const newMoreSheet = createSheet(document, $("new-more-sheet"));
   let options: Options | null = null;
   let choice: Choice = { tier: null, provider: "", model: "", effort: "" };
+  // Images go only to a model that says it reads them. A model that does not say is treated as one that does not.
+  // Null until the choices are known: a photo picked then is kept and checked when they arrive.
+  function sessionReadsImages(id: string): boolean | null {
+    const choices = choicesOf.get(id);
+    if (!choices || choices.error || choices.models.length === 0) return null;
+    return choices.models.find(model => model.id === sessionShown(id).model)?.imageInput === true;
+  }
   // The permission mode of the new session; "" is the provider's.
   let newPermission = "";
   const allPreferences = (): Record<string, ProjectPreferences> => { try { return JSON.parse(store.get(preferencesKey) ?? "{}") ?? {}; } catch { return {}; } };
@@ -1073,6 +1030,7 @@ export function startMobile(window: Window & typeof globalThis) {
       newAgent.replaceChildren(...options.prompts.map(p => option(p.id, p.name, p.id === options!.defaults?.prompt)));
       if (!newText.value) newText.value = drafts.get(newSessionDraft);
       initForm();
+      files.reconcile(newSessionFiles);
       padComposer();
     } catch (error) {
       if (!(error instanceof SignedOutError)) newNote.textContent = `Could not read the choices: ${failureText(error, host)}`;
@@ -1083,7 +1041,9 @@ export function startMobile(window: Window & typeof globalThis) {
   $("new-form").addEventListener("submit", async event => {
     event.preventDefault();
     const text = newText.value.trim();
-    if (!text || !newProject.value) return;
+    const held = files.get(newSessionFiles);
+    if ((!text && !held.length) || !newProject.value) return;
+    if (hasImages(held) && newSessionReadsImages(options, choice) === false) { files.note(newSessionFiles, "This model does not read images."); return; }
     const start = $<HTMLButtonElement>("new-start");
     start.disabled = true;
     newNote.textContent = "Starting…";
@@ -1091,12 +1051,18 @@ export function startMobile(window: Window & typeof globalThis) {
       const created = await api.create({
         project: newProject.value, text, prompt: newAgent.value || undefined, ...choiceRequest(choice),
         ...(newPermission ? { permissionMode: newPermission } : {}), worktree: newWorktree.checked,
+        ...(held.length ? { attachments: held } : {}),
       });
       newText.value = "";
+      files.take(newSessionFiles);
       drafts.clear(newSessionDraft);
       newNote.textContent = "";
       // A prompt that did not go is shown on the page of its session, back in its composer.
-      if (created.sendError) { drafts.set(created.id, text); pendingNotes.set(created.id, `Created, but the prompt was not sent: ${created.sendError}`); }
+      if (created.sendError) {
+        drafts.set(created.id, text);
+        files.giveBack(created.id, held);
+        pendingNotes.set(created.id, `Created, but the prompt was not sent: ${created.sendError}`);
+      }
       scheduleListRead(0);
       window.location.hash = `#/session/${encodeURIComponent(created.id)}`;
     } catch (error) {
@@ -1213,6 +1179,7 @@ export function startMobile(window: Window & typeof globalThis) {
     if (found) { try { id = decodeURIComponent(found[1]); } catch { id = null; } }
     const creating = hash === "#/new" && !signedOut;
     if (signedOut) id = null;
+    const returning = !id && !creating && $("home").hidden;
     $("home").hidden = !!id || creating;
     $("detail").hidden = !id;
     $("create").hidden = !creating;
@@ -1223,12 +1190,14 @@ export function startMobile(window: Window & typeof globalThis) {
     if (creating) plus.setAttribute("aria-current", "page"); else plus.removeAttribute("aria-current");
     document.body.classList.toggle("with-composer", !!id);
     // One footer: under the composer on the page of a session, under Start on the new-session screen, at the bottom of the list.
-    if (id) composer.append(foot);
+    if (id) bottomBar().append(foot);
     else if (creating) $("create-bar").append(foot);
     else if (foot.parentElement !== document.body) document.body.insertBefore(foot, toastElement);
     if (creating) void openCreate(false);
     if (id && id !== detail.id) openDetail(id);
     if (!id && detail.id) closeDetail();
+    // Back on the list, the cards are in their latest order at once.
+    if (returning) sessionList.settle();
     if (!id) renderList();
     padComposer();
   }
@@ -1242,9 +1211,10 @@ export function startMobile(window: Window & typeof globalThis) {
     const decision = sessions.applyLive(update);
     if (decision === "reload") scheduleListRead(500);
     else if (decision === "listed" && !$("home").hidden) renderList();
+    askPanel.onLive(update);
     if (detail.id === update.id) { showDetailHead(); drawTimeline(); scheduleDetailRead(400); }
   }
-  function readAgain() { void readList(); if (detail.id) void readDetail(); }
+  function readAgain() { void readList(); if (detail.id) { void readDetail(); void askPanel.read(detail.id); } }
   const stream = createLiveStream({
     create: () => new window.EventSource("/api/events"),
     onSession,
@@ -1259,6 +1229,7 @@ export function startMobile(window: Window & typeof globalThis) {
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden || signedOut) return;
+    if (!$("home").hidden) sessionList.settle();
     if (stream.open) readAgain(); else stream.wake();
   });
   window.addEventListener("online", () => stream.wake());
@@ -1271,7 +1242,8 @@ export function startMobile(window: Window & typeof globalThis) {
     const button = event.currentTarget as HTMLButtonElement;
     button.classList.add("spin");
     if (signedOut) { button.classList.remove("spin"); return; }
-    try { await Promise.all([readList(), refreshDetail()]); } finally { button.classList.remove("spin"); }
+    if (!$("home").hidden) sessionList.settle();
+    try { await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null]); } finally { button.classList.remove("spin"); }
   });
 
   // ---- Sign-in: the token of the QR link (#k=) gets the cookie; without it, the cookie or the kept token is used ----

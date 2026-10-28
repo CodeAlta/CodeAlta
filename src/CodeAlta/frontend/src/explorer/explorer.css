@@ -4,6 +4,8 @@
 .ide-shell .tree-twist { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; height: 22px; margin: -3px -3px -3px -4px; border-radius: 4px; }
 .ide-shell .tree-twist:hover { background: color-mix(in srgb, var(--text) 13%, transparent); }
 .ide-shell .tree-twist:hover .tree-chevron { color: var(--text); }
+/* A closed project with nothing to show keeps the room of its chevron, so that the rows stay aligned. */
+.ide-shell .tree-twist[data-empty] { visibility: hidden; }
 .ide-shell .tree-chevron { transition: transform .12s ease; }
 
 /* Icons have the color of what they stand for; the name follows the selection. */

@@ -22,13 +22,21 @@ export type TierState = Readonly<{
 }>;
 
 export const maximumTierTargets = 16;
+/** How many times in a row a session resumes by itself after a limit, unless the settings say otherwise; and the most they accept. */
+export const defaultMaxResumes = 5;
+export const maximumMaxResumes = 50;
+
+/** A number of resumes in a row the host accepts: a whole number from 1 to 50, the default for anything else. */
+export function readMaxResumes(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= maximumMaxResumes ? value : defaultMaxResumes;
+}
 const maximumEfforts = 8;
 const text = (value: unknown, limit = 256): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= limit;
 
 export const emptyTiers: TierState = Object.freeze({
   tiers: Object.freeze({ complex: [], standard: [], quick: [] }),
   choices: Object.freeze({ complex: null, standard: null, quick: null }),
-  fallback: Object.freeze({ enabled: false, onQuota: true, onUnavailable: true }),
+  fallback: Object.freeze({ enabled: false, onQuota: true, onUnavailable: true, resume: false, maxResumes: defaultMaxResumes }),
   source: "global",
 });
 
@@ -50,7 +58,8 @@ export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers
     const choice = list.choice;
     choices[tier] = choice && text(choice.providerKey) && text(choice.modelId) ? choice : null;
   }
-  return { tiers, choices, fallback: { enabled: reply.fallback.enabled === true, onQuota: reply.fallback.onQuota !== false, onUnavailable: reply.fallback.onUnavailable !== false },
+  return { tiers, choices, fallback: { enabled: reply.fallback.enabled === true, onQuota: reply.fallback.onQuota !== false, onUnavailable: reply.fallback.onUnavailable !== false,
+    resume: reply.fallback.resume === true, maxResumes: readMaxResumes(reply.fallback.maxResumes) },
     source: reply.source === "space" ? "space" : "global" };
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changesWaitForReview, nextReviewThread, reviewHeightEstimate, reviewKeyAction, reviewOrder, reviewTargetOfScope, threadCountsByFile, typingTarget,
-  viewedFiles } from "./changesReview";
+import { changesWaitForReview, nextReviewThread, reviewChoiceAfterRequest, reviewHeightEstimate, reviewKeyAction, reviewOrder, reviewTargetOfScope, threadCountsByFile,
+  typingTarget, viewedFiles } from "./changesReview";
 import type { ReviewThread } from "./reviewThreads";
 
 const thread = (id: string, path: string, startLine: number, more: Partial<ReviewThread> = {}): ReviewThread => ({ id, target: "changes", path, side: "new", startLine,
@@ -64,8 +64,8 @@ test("a field takes the keys, the read-only text of a diff does not, a comment's
   assert.equal(typingTarget(null), false);
 });
 
-test("the changes wait for a review when the session reviews before commit, has changes, no request and no run", () => {
-  const base = { reviewBeforeCommit: true, changedFiles: 3, requested: false, running: false };
+test("the changes wait for a review when the session reviews before commit, has changes, no request, no run and no approval of them", () => {
+  const base = { reviewBeforeCommit: true, changedFiles: 3, requested: false, running: false, approved: false };
   assert.equal(changesWaitForReview(base), true);
   assert.equal(changesWaitForReview({ ...base, reviewBeforeCommit: false }), false);
   assert.equal(changesWaitForReview({ ...base, reviewBeforeCommit: null }), false);
@@ -73,6 +73,20 @@ test("the changes wait for a review when the session reviews before commit, has 
   assert.equal(changesWaitForReview({ ...base, changedFiles: null }), false);
   assert.equal(changesWaitForReview({ ...base, requested: true }), false);
   assert.equal(changesWaitForReview({ ...base, running: true }), false);
+  // Approved, then committed in part or left as it is: what remains is the work tree the user approved (#238).
+  assert.equal(changesWaitForReview({ ...base, approved: true }), false);
   assert.equal(reviewHeightEstimate(2), 192);
   assert.equal(reviewHeightEstimate(-1), 0);
+});
+
+test("an answered request gives the review mode of the Changes tab back to what waits (#238)", () => {
+  // Opened for a request, then approved in the session or here: the choice it forced is let go.
+  assert.equal(reviewChoiceAfterRequest(true, "ask-1", null), null);
+  assert.equal(reviewChoiceAfterRequest(false, "ask-1", null), null);
+  // Another request replaced it: what waits says again.
+  assert.equal(reviewChoiceAfterRequest(true, "ask-1", "ask-2"), null);
+  // Nothing was answered: the user's choice stays.
+  assert.equal(reviewChoiceAfterRequest(true, null, null), true);
+  assert.equal(reviewChoiceAfterRequest(false, null, "ask-1"), false);
+  assert.equal(reviewChoiceAfterRequest(true, "ask-1", "ask-1"), true);
 });

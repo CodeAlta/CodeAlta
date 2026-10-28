@@ -188,3 +188,23 @@ test("a review is deleted whole, the review shown is read again, and a review al
   assert.equal((await hub.deleteReview(scope, plan)).ok, true, "nothing left to delete is not a failure");
   disconnect();
 });
+
+test("the approval of the changes of a checkout is read at once, and a host without it approves nothing (#238)", async () => {
+  const server = host();
+  const round = { id: "r2", target: "changes", path: null, verdict: "approved", overall: null, sessionId: "s", snapshot: "t", threads: [], requestId: "ask", at: "" };
+  const asked: (string | null)[] = [];
+  let current = true;
+  const hub = createReviewsHub({ ...server.api, async approval(request) { asked.push(request.checkout); return { status: "ok", round, current }; } }, noTimers);
+  assert.equal(await hub.approval(scope), null, "no host yet");
+  const disconnect = hub.connect("epoch");
+  assert.deepEqual(await hub.approval({ projectId: "p", checkout: "/w" }), { round, current: true });
+  current = false;
+  assert.deepEqual(await hub.approval(scope), { round, current: false }, "the work tree changed since");
+  assert.deepEqual(asked, ["/w", null]);
+  disconnect();
+
+  const older = createReviewsHub(server.api, noTimers);
+  const stop = older.connect("epoch");
+  assert.equal(await older.approval(scope), null);
+  stop();
+});
