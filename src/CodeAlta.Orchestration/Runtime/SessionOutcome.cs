@@ -210,14 +210,19 @@ public sealed record SessionOutcome(
             : null;
     }
 
-    /// <summary>Adds the usage of the operations of the runs: each operation once, however many events repeat it.</summary>
+    /// <summary>
+    /// Adds the usage of the operations of the runs: each request to a model once, as the record that reported it (a
+    /// <see cref="AgentSessionUpdateKind.UsageUpdated"/> event) tells it, also when two requests report the same numbers.
+    /// The other events that carry the usage of the session (the end of a run, a compaction) repeat the last operation and
+    /// are not counted, nor is a record given twice.
+    /// </summary>
     /// <param name="usageUpdates">The usage events of the runs, in order.</param>
     /// <returns>The totals.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="usageUpdates"/> is null.</exception>
     public static SessionUsageTotals TotalUsage(IEnumerable<AgentSessionUpdateEvent> usageUpdates)
     {
         ArgumentNullException.ThrowIfNull(usageUpdates);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seen = new HashSet<AgentSessionUpdateEvent>(ReferenceEqualityComparer.Instance);
         long inputTokens = 0, outputTokens = 0, cachedInputTokens = 0, reasoningTokens = 0, cacheWriteTokens = 0;
         double? cost = null;
         string? costUnit = null;
@@ -225,10 +230,7 @@ public sealed record SessionOutcome(
         bool cacheReadReported = false, cacheWriteReported = false, reasoningReported = false;
         foreach (var usage in usageUpdates)
         {
-            if (usage.Usage?.LastOperation is not { } operation) continue;
-            var signature = string.Join('\u001f', usage.RunId?.Value, operation.Model, operation.InputTokens, operation.OutputTokens, operation.CachedInputTokens,
-                operation.CacheReadTokens, operation.CacheWriteTokens, operation.ReasoningTokens, operation.ParentToolCallId, operation.Initiator);
-            if (!seen.Add(signature)) continue;
+            if (usage is not { Kind: AgentSessionUpdateKind.UsageUpdated, Usage.LastOperation: { } operation } || !seen.Add(usage)) continue;
             operationCount++;
             // The input of an operation holds what the cache read and wrote: the cached and written counts are parts of the
             // input, not counts to add to it.

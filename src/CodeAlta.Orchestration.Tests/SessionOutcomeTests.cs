@@ -24,12 +24,19 @@ public sealed class SessionOutcomeTests
     [TestMethod]
     public void Completed_RunsAddTheirOperationsOnce_AndTheirCostInOneUnit()
     {
+        var first = Usage(1, Run1, 100, 10, 0.5);
+        // The end of a run and a compaction repeat the usage of the last operation, which they did not make.
+        var idle = new AgentSessionUpdateEvent(Provider, "s", Start.AddSeconds(3), Run1, AgentSessionUpdateKind.Idle, null, Usage: first.Usage);
+        var compacted = new AgentSessionUpdateEvent(Provider, "s", Start.AddSeconds(4), Run1, AgentSessionUpdateKind.CompactionCompleted, null, Usage: first.Usage);
         IReadOnlyList<AgentEvent> events =
         [
             Content(AgentContentKind.User, "do it", 0, Run1),
-            Usage(1, Run1, 100, 10, 0.5),
+            first,
+            // Another request of the run that reported the same numbers.
             Usage(1, Run1, 100, 10, 0.5),
             Content(AgentContentKind.Assistant, "first answer", 2, Run1),
+            idle,
+            compacted,
             Usage(5, Run2, 200, 20, 0.25),
             Usage(6, Run2, 50, 5, 9, "AI credits"),
             Content(AgentContentKind.Assistant, "final answer", 8, Run2),
@@ -40,16 +47,17 @@ public sealed class SessionOutcomeTests
         Assert.AreEqual(SessionOutcomeStatus.Completed, outcome.Status);
         Assert.AreEqual("final answer", outcome.FinalMessage);
         Assert.AreEqual(TimeSpan.FromSeconds(8), outcome.Duration);
-        Assert.AreEqual(3, outcome.Usage.OperationCount, "An operation repeated by its events counts once.");
-        Assert.AreEqual(350, outcome.Usage.InputTokens);
-        Assert.AreEqual(35, outcome.Usage.OutputTokens);
-        Assert.AreEqual(385, outcome.Usage.TotalTokens);
-        Assert.AreEqual(9, outcome.Usage.ReasoningTokens);
-        Assert.AreEqual(0.75, outcome.Usage.Cost!.Value, 1e-9, "Costs add up in the unit of the first: the credits are left out.");
+        Assert.AreEqual(4, outcome.Usage.OperationCount, "Each request counts once, also two that report the same numbers.");
+        Assert.AreEqual(450, outcome.Usage.InputTokens);
+        Assert.AreEqual(45, outcome.Usage.OutputTokens);
+        Assert.AreEqual(495, outcome.Usage.TotalTokens);
+        Assert.AreEqual(12, outcome.Usage.ReasoningTokens);
+        Assert.AreEqual(1.25, outcome.Usage.Cost!.Value, 1e-9, "Costs add up in the unit of the first: the credits are left out.");
         Assert.AreEqual("USD", outcome.Usage.CostUnit);
         Assert.AreEqual(2, outcome.RunCount);
         Assert.IsNull(outcome.FinalError);
         Assert.AreEqual(3, SessionOutcome.SelectFromRun(events, Run2).Count);
+        Assert.AreEqual(1, SessionOutcome.TotalUsage([first, first]).OperationCount, "A record given twice is one request.");
     }
 
     [TestMethod]
