@@ -434,7 +434,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
                     capabilities={availability.get(original.key.toLowerCase())?.capabilities ?? null} signedOut={!!signedOut}
                     blocked={dirty ? t("Save before signing in.") : null} runInTerminal={runInTerminal}
                     onChanged={() => { selectAfterLoad.current = original.key; setGeneration(value => value + 1); onApplied?.(); }}
-                    onSignedIn={() => void test()} />
+                    // Signed in: the test shows its state, and the rest of the window (new sessions, the tiers) reads the providers again.
+                    onSignedIn={() => void test().finally(() => onApplied?.())} />
                 : <Callout compact className="provider-settings-wide" icon={<AppIcon name="plugin" size={16} />}>{t("Save the provider, then sign in and test it here.")}</Callout>
               : runsOwnCli(form.type)
               ? <ClaudeCodeCli epoch={epoch} api={cli} providerKey={original?.type === form.type ? original.key : null} configDir={form.configDir}

@@ -396,6 +396,83 @@ public sealed class ModelProviderInitializationServiceTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
+    [TestMethod]
+    public async Task RefreshAfterChange_DoesNotTakeTheResultOfAProbeThatStartedBefore()
+    {
+        // A probe reads the account when it starts: one that started before a sign-in reports it signed out, even when
+        // it ends after. What asks for the provider after the sign-in must get a probe that started after it.
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("account"), "Account", "test");
+        var runtime = new AccountProbeRuntime(descriptor);
+        registry.RegisterOrReplace(descriptor, () => runtime);
+        var service = new ModelProviderInitializationService(registry);
+
+        var before = service.RefreshProviderAsync(descriptor.ProviderId);
+        await runtime.FirstProbeStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        runtime.SignedIn = true;
+        var after = service.RefreshProviderAfterChangeAsync(descriptor.ProviderId);
+        runtime.ReleaseFirstProbe.TrySetResult();
+        await Task.WhenAll(before, after).WaitAsync(TimeSpan.FromSeconds(5));
+
+        var state = service.CurrentStates.Single(value => value.ProviderId == descriptor.ProviderId);
+        Assert.AreEqual(ModelProviderAvailability.Ready, state.Availability, state.StatusMessage);
+        CollectionAssert.AreEqual(new[] { "model" }, state.Models.Select(static model => model.Id).ToArray());
+        Assert.AreEqual(2, runtime.ProbeCount, "the probe that started before is not taken for the one after");
+    }
+
+    [TestMethod]
+    public async Task RefreshAfterChange_StartsOneProbe_WhenNoneRuns()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("idle"), "Idle", "test");
+        var runtime = new TestRuntime(descriptor, [new AgentModelInfo("idle-model")]);
+        registry.RegisterOrReplace(descriptor, () => runtime);
+        var service = new ModelProviderInitializationService(registry);
+
+        await service.RefreshProviderAfterChangeAsync(descriptor.ProviderId).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual(1, runtime.ProbeCount);
+        Assert.AreEqual(ModelProviderAvailability.Ready, service.CurrentStates.Single(value => value.ProviderId == descriptor.ProviderId).Availability);
+    }
+
+    // Reads its "account" when a probe starts; the first probe waits until it is released.
+    private sealed class AccountProbeRuntime(ModelProviderDescriptor descriptor) : IModelProviderRuntime
+    {
+        private int _probes;
+
+        public volatile bool SignedIn;
+
+        public TaskCompletionSource FirstProbeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ReleaseFirstProbe { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int ProbeCount => Volatile.Read(ref _probes);
+
+        public ModelProviderDescriptor Descriptor => descriptor;
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public async Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+        {
+            var signedIn = SignedIn;
+            if (Interlocked.Increment(ref _probes) == 1)
+            {
+                FirstProbeStarted.TrySetResult();
+                await ReleaseFirstProbe.Task.WaitAsync(cancellationToken);
+            }
+
+            return signedIn
+                ? new() { ProviderId = descriptor.ProviderId, Availability = ModelProviderAvailability.Ready, Models = [new AgentModelInfo("model")] }
+                : new() { ProviderId = descriptor.ProviderId, Availability = ModelProviderAvailability.Failed, StatusMessage = "Not signed in.", ErrorCategory = "signed-out" };
+        }
+
+        public IModelProviderTurnExecutor CreateTurnExecutor() => throw new NotSupportedException();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class HeldProbeRuntime(ModelProviderDescriptor descriptor, TaskCompletionSource entered,
         TaskCompletionSource release, TaskCompletionSource? disposed = null) : IModelProviderRuntime
     {

@@ -157,6 +157,43 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         return StartRefreshAsync(descriptor, cancellationToken);
     }
 
+    /// <summary>
+    /// Prepares a provider again after something it depends on changed, such as the sign-in of its account: the state
+    /// comes from a probe that started after the change. A preparation already running is not joined, since it may have
+    /// read the account before the change; it ends, then a new one starts.
+    /// </summary>
+    /// <param name="providerId">The provider.</param>
+    /// <param name="cancellationToken">Stops waiting; a preparation that started goes on.</param>
+    /// <returns>A task that completes when the provider was prepared again.</returns>
+    /// <exception cref="KeyNotFoundException">The provider is not registered.</exception>
+    /// <exception cref="ObjectDisposedException">Original preparation admission has closed for shutdown.</exception>
+    /// <exception cref="InvalidOperationException">Retention currently owns a session and refuses new preparation.</exception>
+    /// <exception cref="AgentDependencyRetentionException">A provider preparation retains unconfirmed dependencies.</exception>
+    public async Task RefreshProviderAfterChangeAsync(ModelProviderId providerId, CancellationToken cancellationToken = default)
+    {
+        var key = ModelProviderId.NormalizeValue(GetProviderDescriptor(providerId).ProviderId.Value);
+        Task? running;
+        lock (_gate)
+        {
+            running = _refreshTasks.TryGetValue(key, out var task) && !task.IsCompleted ? task : null;
+        }
+
+        if (running is not null)
+        {
+            try
+            {
+                await running.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                // Its outcome is replaced by the preparation below; a retained one is reported by it.
+            }
+        }
+
+        // Read again: the change may have replaced the provider (a provider enabled, settings applied).
+        await StartRefreshAsync(GetProviderDescriptor(providerId), cancellationToken).ConfigureAwait(false);
+    }
+
     /// <inheritdoc />
     /// <exception cref="ObjectDisposedException">A required preparation cannot start after admission closes.</exception>
     /// <exception cref="InvalidOperationException">Retention currently owns a session and refuses required preparation.</exception>

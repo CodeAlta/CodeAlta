@@ -62,6 +62,12 @@ internal sealed partial class GlobalConfigService
     /// <summary>Gets what is done once the text of the file was saved, such as giving the log its new levels; null for nothing.</summary>
     internal Action? Saved { get; init; }
 
+    /// <summary>
+    /// Gets what prepares a provider again once its account was signed in, by its key: a probe that starts after the
+    /// sign-in; null for nothing.
+    /// </summary>
+    internal Func<string, CancellationToken, Task>? RefreshProviderAfterSignIn { get; init; }
+
     /// <summary>Reads the current configuration text and its revision.</summary>
     [NeoRpcMethod("read")]
     public GlobalConfigReadResponse Read(GlobalConfigReadRequest request)

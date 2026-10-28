@@ -958,6 +958,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         PluginProviderTypes = pluginProviderTypes,
                         AbortProviderRuns = host.RuntimeService.AbortRunsOfProvidersAsync,
                         ModelCatalog = modelsDev,
+                        RefreshProviderAfterSignIn = (key, token) =>
+                            host.ModelProviderInitializationService.RefreshProviderAfterChangeAsync(new CodeAlta.Agent.ModelProviderId(key), token),
                     };
                     // A plugin that starts, stops or is built again brings or takes its provider types: the running turns
                     // of the providers that stop are stopped, then the providers are registered again.

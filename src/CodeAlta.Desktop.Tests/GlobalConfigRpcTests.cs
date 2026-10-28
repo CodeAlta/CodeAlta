@@ -90,6 +90,65 @@ type = "fake-agent"
         Assert.AreEqual("stale_epoch", events.Single().Status);
     }
 
+    [TestMethod]
+    public async Task PluginProviderSignIn_PreparesTheProviderAgain_BeforeItSaysCompleted()
+    {
+        // The state of the provider (its account, its models) is read again once signed in: sessions and the list of
+        // models see it at once, without a restart. A failed sign-in changes nothing.
+        const string content = """
+[providers.codex-work]
+type = "fake-agent"
+""";
+        await using var fixture = new Fixture(content);
+        await using var endpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints();
+        var types = new CodeAlta.Hosting.PluginModelProviderTypes(endpoints);
+        var account = new PromptingAccount();
+        types.Attach(() => [new CodeAlta.Plugins.Abstractions.PluginModelProviderContribution
+        {
+            ProviderType = "fake-agent", DisplayName = "Fake agent", CreateRuntime = static _ => throw new NotSupportedException("Not created in this test."), Account = account,
+        }]);
+        var refreshed = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var events = new List<GlobalConfigPluginSignInEvent>();
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch)
+        {
+            PluginProviderTypes = types,
+            OpenSignInBrowser = static _ => true,
+            RefreshProviderAfterSignIn = async (key, _) =>
+            {
+                // Slower than the page: "completed" must still wait for it.
+                await Task.Delay(50);
+                refreshed.Enqueue(key);
+            },
+        };
+
+        await foreach (var item in service.SignInAsync(new(Epoch, "codex-work", "device"), CancellationToken.None))
+        {
+            if (item.Kind == "completed") Assert.HasCount(1, refreshed, "the provider is prepared before the sign-in says it completed");
+            events.Add(item);
+        }
+
+        Assert.AreEqual("completed", events[^1].Kind);
+        CollectionAssert.AreEqual(new[] { "codex-work" }, refreshed.ToArray());
+
+        account.Failure = "denied";
+        events.Clear();
+        await foreach (var item in service.SignInAsync(new(Epoch, "codex-work", "device"), CancellationToken.None)) events.Add(item);
+        Assert.AreEqual("failed", events[^1].Kind);
+        Assert.HasCount(1, refreshed, "a failed sign-in does not prepare the provider again");
+
+        // A preparation that fails does not turn a sign-in that completed into a failure.
+        account.Failure = null;
+        events.Clear();
+        var failing = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch)
+        {
+            PluginProviderTypes = types,
+            OpenSignInBrowser = static _ => true,
+            RefreshProviderAfterSignIn = static (_, _) => Task.FromException(new InvalidOperationException("probe failed")),
+        };
+        await foreach (var item in failing.SignInAsync(new(Epoch, "codex-work", "device"), CancellationToken.None)) events.Add(item);
+        Assert.AreEqual("completed", events[^1].Kind);
+    }
+
     // A sign-in that shows a device code, then ends, or fails.
     private sealed class PromptingAccount : CodeAlta.Plugins.Abstractions.IPluginProviderAccount
     {

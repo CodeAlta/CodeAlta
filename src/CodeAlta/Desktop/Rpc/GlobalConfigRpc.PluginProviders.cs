@@ -484,6 +484,7 @@ internal sealed partial class GlobalConfigService
                     events.Writer.TryWrite(new GlobalConfigPluginSignInEvent("prompt", address?.Length <= 4096 ? address : null, Bound(prompt.UserCode), prompt.ExpiresAt, opened, null, null));
                     return ValueTask.CompletedTask;
                 }, cancellation.Token).ConfigureAwait(false);
+                await RefreshAfterSignInAsync(found.Settings.ProviderKey, cancellation.Token).ConfigureAwait(false);
                 events.Writer.TryWrite(new GlobalConfigPluginSignInEvent("completed", null, null, null, false, null, "ok"));
             }
             catch (OperationCanceledException)
@@ -512,6 +513,25 @@ internal sealed partial class GlobalConfigService
             // Closing the stream cancels the sign-in: the plugin frees what it waited with (a port of the browser flow).
             cancellation.Cancel();
             await work.ConfigureAwait(false);
+        }
+    }
+
+    // A provider signed in is prepared again before the page is told: its state (its account, its models) was read when
+    // it was not signed in, and sessions and the list of models take it from that state. The sign-in stands even when
+    // the preparation fails: the test of the page shows why.
+    private async Task RefreshAfterSignInAsync(string providerKey, CancellationToken cancellationToken)
+    {
+        if (RefreshProviderAfterSignIn is not { } refresh) return;
+        try
+        {
+            await refresh(providerKey, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+        {
+            if (LogManager.IsInitialized)
+            {
+                LogManager.GetLogger("CodeAlta.Desktop").Warn($"The provider {providerKey} could not be prepared again after its sign-in: {exception.Message}");
+            }
         }
     }
 

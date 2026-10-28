@@ -76,7 +76,8 @@ export function PluginProviderPanel({ epoch, providerKey, api = globalConfig, ca
       for await (const event of events) {
         if (abort.signal.aborted || !alive.current) return;
         if (event.kind === "prompt") setPrompt({ url: event.url, userCode: event.userCode, browserOpened: event.browserOpened });
-        else if (event.kind === "completed") { setNotice({ text: t("Signed in. Test the provider to see its models."), intent: "success" }); onSignedIn(); }
+        // The host prepared the provider again before it said so: the test that follows shows its models.
+        else if (event.kind === "completed") { setNotice({ text: t("Signed in."), intent: "success" }); onSignedIn(); }
         else setNotice(event.status === "canceled" ? { text: t("Sign-in canceled."), intent: "none" }
           : { text: t("The sign-in did not complete: {reason}", { reason: event.message ?? event.status ?? "failed" }), intent: "danger" });
       }
