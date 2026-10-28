@@ -41,7 +41,7 @@
     <PackageVersion Include="Tomlyn" Version="2.10.1" />
     <PackageVersion Include="XenoAtom.CommandLine.Terminal" Version="2.0.3" />
     <PackageVersion Include="XenoAtom.Logging.Terminal" Version="1.2.0" />
-    <PackageVersion Include="XenoAtom.Glob" Version="1.0.0" />
+    <PackageVersion Include="XenoAtom.Glob" Version="1.0.1" />
     <!-- CodeAltaPluginPackageVersions:Start -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.11.0" />
