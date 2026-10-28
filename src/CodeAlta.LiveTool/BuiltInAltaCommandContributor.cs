@@ -6502,9 +6502,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         => string.Equals(context.Caller.Kind, "agent", StringComparison.OrdinalIgnoreCase);
 
     // The provenance a prompt this caller sends is recorded with: the one the host names for it, else the one of its kind
-    // (an agent, a reminder, a plugin). Null for a person, the command line or a client of the MCP server.
+    // (an agent, a reminder, a plugin). Null for a person, the command line, a client of the MCP server, and a plugin that
+    // sends what the user asked for on its page (the phone).
     private static string? PromptProvenanceOf(AltaCommandContext context)
-        => SessionPromptProvenance.Of(context.Caller.PromptProvenance, dispatchKind: null, context.Caller.Kind);
+        => SessionPromptProvenance.Of(context.Caller.PromptProvenance, dispatchKind: null, context.Caller.OnBehalfOfUser ? null : context.Caller.Kind);
 
     private static bool IsTargetingCallingAgentSession(AltaCommandContext context, string sessionId)
         => IsAgentCaller(context) &&
@@ -7633,6 +7634,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             SourceAgentId = context.Caller.SourceAgentId,
             PluginRuntimeKey = context.Caller.PluginRuntimeKey,
             PromptProvenance = AgentPromptProvenance.Normalize(context.Caller.PromptProvenance),
+            OnBehalfOfUser = context.Caller.OnBehalfOfUser,
             CorrelationId = context.CorrelationId,
             CreatedAt = DateTimeOffset.UtcNow,
         };

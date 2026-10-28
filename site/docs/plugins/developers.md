@@ -224,6 +224,8 @@ A session has the tools of a plugin from its next prompt. The session that creat
 var result = await Services.Alta.InvokeAsync(["session", "create", "--project", projectId], cancellationToken: cancellationToken);
 ```
 
+A prompt a plugin sends this way is titled **Plugin** in the timeline. When the user typed it in a page the plugin serves, pass `new PluginAltaInvocationOptions { OnBehalfOfUser = true }`: the timeline shows it as the user's.
+
 ## Tool hooks
 
 `OnToolCallAsync` is called before every tool call of a session, and `OnToolResultAsync` after it, with its result: the tools of CodeAlta (`shell_command`, `write_file`, `apply_patch`, `alta`, `exec`…), the tools of plugins and MCP servers, the calls a Code Mode script makes, and the tools an agent CLI runs itself. A hook that cares about some tools only checks `context.ToolName`.

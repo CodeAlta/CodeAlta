@@ -27,6 +27,13 @@ public sealed record AltaCallerIdentity
     /// </summary>
     public string? PromptProvenance { get; init; }
 
+    /// <summary>
+    /// Gets a value indicating whether the caller acts for the user, who asked for the command in a client of a plugin (the
+    /// phone of the Mobile plugin): the prompts it sends are the user's, with no provenance of its <see cref="Kind"/>. Set
+    /// by the host only, never by CLI arguments.
+    /// </summary>
+    public bool OnBehalfOfUser { get; init; }
+
     /// <summary>Gets the tools of the calling run, where a command can register tools for the rest of that run; never supplied by CLI arguments.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public CodeAlta.Agent.AgentRunTools? RunTools { get; init; }

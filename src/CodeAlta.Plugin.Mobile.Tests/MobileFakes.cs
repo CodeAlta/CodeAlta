@@ -14,6 +14,9 @@ internal sealed class FakeAlta : IPluginAltaService
 
     internal ConcurrentQueue<(string[] Args, string? Stdin)> Calls { get; } = new();
 
+    /// <summary>The options of each call, in the order of <see cref="Calls"/>.</summary>
+    internal ConcurrentQueue<PluginAltaInvocationOptions?> Options { get; } = new();
+
     /// <summary>Answers the commands that start with a prefix (such as <c>session list</c>) with records, one JSON object each.</summary>
     internal FakeAlta Answer(string prefix, params JsonObject[] records) => Answer(prefix, (_, _) => Transcript(0, records));
 
@@ -42,6 +45,7 @@ internal sealed class FakeAlta : IPluginAltaService
     public async ValueTask<PluginAltaCommandResult> InvokeAsync(IReadOnlyList<string> args, string? stdin = null, PluginAltaInvocationOptions? options = null, CancellationToken cancellationToken = default)
     {
         Calls.Enqueue(([.. args], stdin));
+        Options.Enqueue(options);
         var line = string.Join(' ', args);
         (string Prefix, Func<IReadOnlyList<string>, string?, Task<string>> Answer)[] answers;
         lock (_answers) answers = [.. _answers];

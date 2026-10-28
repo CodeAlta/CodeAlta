@@ -39,6 +39,13 @@ public sealed record AltaActorProvenance
     /// </summary>
     public string? PromptProvenance { get; init; }
 
+    /// <summary>
+    /// Gets a value indicating whether the actor acted for the user, who asked for it in a client of a plugin (the phone of
+    /// the Mobile plugin): the prompts it submits are the user's, with no provenance of its <see cref="Kind"/>.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool OnBehalfOfUser { get; init; }
+
     /// <summary>Gets the alta command correlation identifier associated with the action.</summary>
     public string? CorrelationId { get; init; }
 
