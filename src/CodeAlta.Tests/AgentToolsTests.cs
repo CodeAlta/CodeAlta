@@ -1823,6 +1823,51 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public async Task ReplaceInFileTool_AppliesAListOfEditsInOrder_AllOrNone()
+    {
+        using var temp = TestTempDirectory.Create();
+        var filePath = Path.Combine(temp.Path, "sample.cs");
+        await File.WriteAllTextAsync(filePath, "int a = 1;\r\nint b = 2;\r\nlog(a);\r\nlog(a);\r\n").ConfigureAwait(false);
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path)).Single(static tool => tool.Spec.Name == "replace_in_file");
+
+        async Task<AgentToolResult> ReplaceAsync(string arguments)
+        {
+            using var args = JsonDocument.Parse(arguments);
+            return await tool.Handler(new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+
+        // The second edit fails: no edit is made.
+        var failed = await ReplaceAsync("""{"path":"sample.cs","edits":[{"old_string":"int a = 1;","new_string":"int a = 10;"},{"old_string":"int c","new_string":"int d"}]}""");
+        Assert.IsFalse(failed.Success);
+        StringAssert.Contains(failed.Error, "(edit 2 of 2, after the edits before it; no edit was made)");
+        Assert.AreEqual("int a = 1;\r\nint b = 2;\r\nlog(a);\r\nlog(a);\r\n", await File.ReadAllTextAsync(filePath).ConfigureAwait(false));
+        var ambiguous = await ReplaceAsync("""{"path":"sample.cs","edits":[{"old_string":"log(a);","new_string":"log(b);"}]}""");
+        StringAssert.Contains(ambiguous.Error, "found 2 matches");
+
+        // Each edit applies to what the edits before it left, with the newline rules of a single edit and replace_all.
+        var result = await ReplaceAsync("""{"path":"sample.cs","edits":[{"old_string":"int a = 1;\nint b = 2;","new_string":"int a = 10;\nint b = 20;"},{"old_string":"a = 10","new_string":"x = 10"},{"old_string":"log(a);","new_string":"log(x);","replace_all":true}]}""");
+        Assert.IsTrue(result.Success, result.Error);
+        StringAssert.Contains(Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value, "Made 3 edits, 4 occurrence(s)");
+        Assert.AreEqual("int x = 10;\r\nint b = 20;\r\nlog(x);\r\nlog(x);\r\n", await File.ReadAllTextAsync(filePath).ConfigureAwait(false));
+
+        // A list and a single edit at once, an empty list, or an edit without its texts: nothing is changed.
+        foreach (var invalid in new[]
+        {
+            """{"path":"sample.cs","old_string":"b","new_string":"c","edits":[{"old_string":"x","new_string":"y"}]}""",
+            """{"path":"sample.cs","edits":[]}""",
+            """{"path":"sample.cs","edits":[{"old_string":"x"}]}""",
+        })
+        {
+            Assert.IsFalse((await ReplaceAsync(invalid)).Success, invalid);
+        }
+
+        var empty = await ReplaceAsync("""{"path":"sample.cs","edits":[{"old_string":"","new_string":"y"}]}""");
+        StringAssert.Contains(empty.Error, "every edit must not be empty");
+        Assert.AreEqual("int x = 10;\r\nint b = 20;\r\nlog(x);\r\nlog(x);\r\n", await File.ReadAllTextAsync(filePath).ConfigureAwait(false));
+    }
+
+    [TestMethod]
     public async Task ReplaceInFileTool_RejectsBinaryFiles()
     {
         using var temp = TestTempDirectory.Create();

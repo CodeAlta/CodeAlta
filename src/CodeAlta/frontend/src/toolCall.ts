@@ -261,6 +261,13 @@ export function changedFiles(call: ToolCall, given: ToolArguments | null): Chang
   const input = text(given?.input) ?? text(given?.patch);
   if (input) return patchFiles(input) ?? [];
   if (typeof given?.old_string === "string" && typeof given.new_string === "string") return [replacementFile(path, given.old_string, given.new_string)];
+  // Several replacements in one file: each is a hunk of its own.
+  const edits = Array.isArray(given?.edits) ? (given.edits as unknown[]).filter((edit): edit is { old_string: string; new_string: string } =>
+    typeof edit === "object" && edit !== null && typeof (edit as ToolArguments).old_string === "string" && typeof (edit as ToolArguments).new_string === "string") : [];
+  if (edits.length) {
+    return [changedFile(path, "update", null, edits.flatMap((edit, index) => [
+      ...(index ? [{ kind: "hunk" as const, text: "", oldLine: null, newLine: null }] : []), ...replacementFile(path, edit.old_string, edit.new_string).rows]))];
+  }
   if (typeof given?.content === "string") {
     return [changedFile(path, "add", null, given.content.replaceAll("\r\n", "\n").replace(/\n$/, "").split("\n")
       .map((line, index) => ({ kind: "added" as const, text: line, oldLine: null, newLine: index + 1 })))];

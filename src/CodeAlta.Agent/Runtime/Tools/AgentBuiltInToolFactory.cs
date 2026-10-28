@@ -28,7 +28,7 @@ public static partial class AgentBuiltInToolFactory
     private const string WriteFileToolDescription =
         "Write an entire text file in one deterministic operation. Creates parent directories as needed and replaces any existing file.";
     private const string ReplaceInFileToolDescription =
-        "Replace exact text in a file. Deterministic only: no regex, no fuzzy matching. When replace_all is false, the tool errors unless exactly one match exists and leaves the file unchanged. Use replace_all=true to replace every match.";
+        "Replace exact text in a file. Deterministic only: no regex, no fuzzy matching. When replace_all is false, the tool errors unless exactly one match exists and leaves the file unchanged. Use replace_all=true to replace every match. For several changes in one file, give an edits list instead of old_string and new_string: the edits apply in their order, each to the text the edits before it left, and if one fails the file is left unchanged.";
     private const string DeleteFileOrDirToolDescription =
         "Delete a file or a directory. Directory deletes are recursive.";
     private const string RenameFileOrDirToolDescription =
@@ -75,9 +75,24 @@ public static partial class AgentBuiltInToolFactory
             "path": { "type": "string", "description": "File path. Relative paths resolve from the session working directory; absolute paths are accepted." },
             "old_string": { "type": "string", "description": "Exact text to replace. Newlines are matched exactly, with deterministic normalization to the file's newline style when needed." },
             "new_string": { "type": "string", "description": "Replacement text." },
-            "replace_all": { "type": "boolean", "description": "Replace every exact match. When false, the tool errors unless exactly one match exists and leaves the file unchanged." }
+            "replace_all": { "type": "boolean", "description": "Replace every exact match. When false, the tool errors unless exactly one match exists and leaves the file unchanged." },
+            "edits": {
+              "type": "array",
+              "description": "Several replacements in this file, instead of old_string, new_string and replace_all: applied in order, all or none.",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "old_string": { "type": "string", "description": "Exact text to replace, in the text the edits before it left." },
+                  "new_string": { "type": "string", "description": "Replacement text." },
+                  "replace_all": { "type": "boolean", "description": "Replace every exact match. When false, exactly one match must exist." }
+                },
+                "required": ["old_string", "new_string"],
+                "additionalProperties": false
+              }
+            }
           },
-          "required": ["path", "old_string", "new_string"],
+          "required": ["path"],
           "additionalProperties": false
         }
         """);
@@ -1120,41 +1135,56 @@ public static partial class AgentBuiltInToolFactory
             return Failure($"replace_in_file does not support binary files: '{resolution.DisplayPath}'.");
         }
 
-        var oldString = GetRequiredStringValue(invocation.Arguments, "old_string");
-        if (oldString.Length == 0)
+        if (ReadReplacements(invocation.Arguments) is not { } edits)
         {
-            return Failure("The 'old_string' value must not be empty.");
+            return Failure("replace_in_file takes either old_string and new_string, or an edits list of objects with a non-empty old_string and a new_string, not both.");
         }
 
-        var newString = GetRequiredStringValue(invocation.Arguments, "new_string");
-        var replaceAll = GetOptionalBool(invocation.Arguments, "replace_all") ?? false;
+        if (edits.Exists(static edit => edit.OldString.Length == 0))
+        {
+            return Failure(edits.Count == 1 && !invocation.Arguments.TryGetProperty("edits", out _)
+                ? "The 'old_string' value must not be empty."
+                : "The 'old_string' value of every edit must not be empty.");
+        }
 
         var original = await File.ReadAllTextAsync(resolution.FullPath, cancellationToken).ConfigureAwait(false);
         var newline = DetectExistingNewline(original);
-        var replacementTarget = oldString;
-        var replacementValue = newString;
-
-        if (!original.Contains(replacementTarget, StringComparison.Ordinal))
+        // The edits apply in their order, each to the text the edits before it left; one that fails changes nothing.
+        var updated = original;
+        var replacedCount = 0;
+        for (var index = 0; index < edits.Count; index++)
         {
-            var normalizedOldString = NormalizeNewlines(oldString, newline);
-            if (!string.Equals(normalizedOldString, oldString, StringComparison.Ordinal) &&
-                original.Contains(normalizedOldString, StringComparison.Ordinal))
+            var edit = edits[index];
+            var replacementTarget = edit.OldString;
+            var replacementValue = edit.NewString;
+            if (!updated.Contains(replacementTarget, StringComparison.Ordinal))
             {
-                replacementTarget = normalizedOldString;
-                replacementValue = NormalizeNewlines(newString, newline);
+                var normalizedOldString = NormalizeNewlines(edit.OldString, newline);
+                if (!string.Equals(normalizedOldString, edit.OldString, StringComparison.Ordinal) &&
+                    updated.Contains(normalizedOldString, StringComparison.Ordinal))
+                {
+                    replacementTarget = normalizedOldString;
+                    replacementValue = NormalizeNewlines(edit.NewString, newline);
+                }
             }
-        }
 
-        var matchCount = CountOccurrences(original, replacementTarget);
-        if (matchCount == 0)
-        {
-            return Failure($"replace_in_file could not find the requested text in '{resolution.DisplayPath}'.");
-        }
+            var matchCount = CountOccurrences(updated, replacementTarget);
+            var which = edits.Count == 1 ? string.Empty : FormattableString.Invariant($" (edit {index + 1} of {edits.Count}, after the edits before it; no edit was made)");
+            if (matchCount == 0)
+            {
+                return Failure($"replace_in_file could not find the requested text in '{resolution.DisplayPath}'{which}.");
+            }
 
-        if (!replaceAll && matchCount != 1)
-        {
-            return Failure(
-                $"replace_in_file found {matchCount} matches in '{resolution.DisplayPath}'. Set replace_all=true to replace every match.");
+            if (!edit.ReplaceAll && matchCount != 1)
+            {
+                return Failure(
+                    $"replace_in_file found {matchCount} matches in '{resolution.DisplayPath}'{which}. Set replace_all=true to replace every match.");
+            }
+
+            updated = edit.ReplaceAll
+                ? updated.Replace(replacementTarget, replacementValue, StringComparison.Ordinal)
+                : ReplaceFirstOccurrence(updated, replacementTarget, replacementValue);
+            replacedCount += edit.ReplaceAll ? matchCount : 1;
         }
 
         var permission = await RequestFileChangePermissionAsync(
@@ -1169,12 +1199,44 @@ public static partial class AgentBuiltInToolFactory
             return permission;
         }
 
-        var updated = replaceAll
-            ? original.Replace(replacementTarget, replacementValue, StringComparison.Ordinal)
-            : ReplaceFirstOccurrence(original, replacementTarget, replacementValue);
         await File.WriteAllTextAsync(resolution.FullPath, updated, cancellationToken).ConfigureAwait(false);
-        var replacedCount = replaceAll ? matchCount : 1;
-        return SuccessResult($"Replaced {replacedCount} occurrence(s) in {resolution.DisplayPath}");
+        return SuccessResult(edits.Count == 1
+            ? $"Replaced {replacedCount} occurrence(s) in {resolution.DisplayPath}"
+            : $"Made {edits.Count} edits, {replacedCount} occurrence(s), in {resolution.DisplayPath}");
+    }
+
+    // One replacement of replace_in_file.
+    private sealed record Replacement(string OldString, string NewString, bool ReplaceAll);
+
+    // The replacements a call asks for: its old_string and new_string, or its edits list; null when it gives both, or a
+    // list that is empty or has an item that is not a replacement. A missing old_string or new_string throws, as it did.
+    private static List<Replacement>? ReadReplacements(JsonElement arguments)
+    {
+        if (!arguments.TryGetProperty("edits", out var list) || list.ValueKind == JsonValueKind.Null)
+        {
+            return [new Replacement(GetRequiredStringValue(arguments, "old_string"), GetRequiredStringValue(arguments, "new_string"),
+                GetOptionalBool(arguments, "replace_all") ?? false)];
+        }
+
+        if (list.ValueKind != JsonValueKind.Array || list.GetArrayLength() == 0
+            || arguments.TryGetProperty("old_string", out _) || arguments.TryGetProperty("new_string", out _))
+        {
+            return null;
+        }
+
+        var edits = new List<Replacement>(list.GetArrayLength());
+        foreach (var item in list.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || GetOptionalString(item, "old_string") is not { } oldString
+                || GetOptionalString(item, "new_string") is not { } newString)
+            {
+                return null;
+            }
+
+            edits.Add(new Replacement(oldString, newString, GetOptionalBool(item, "replace_all") ?? false));
+        }
+
+        return edits;
     }
 
     private static async Task<AgentToolResult> DeleteFileOrDirAsync(

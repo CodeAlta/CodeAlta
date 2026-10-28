@@ -126,6 +126,9 @@ test("the files a call changes come from its diff, else from what its arguments 
   assert.deepEqual(changedFiles(call(), { input: "*** Begin Patch\n*** Add File: other\n+x\n*** End Patch" }).map(file => [file.path, file.operation]), [["other", "add"]]);
   const replaced = changedFiles(call(), { path: "a.cs", old_string: "one\ntwo", new_string: "three" })[0];
   assert.deepEqual([replaced.path, replaced.removed, replaced.added, replaced.rows.map(row => row.kind)], ["a.cs", 2, 1, ["removed", "removed", "added"]]);
+  const edited = changedFiles(call(), { path: "a.cs", edits: [{ old_string: "one", new_string: "1" }, { old_string: "two\nthree", new_string: "2" }, { old_string: 3 }] });
+  assert.deepEqual(edited.map(file => [file.path, file.removed, file.added, file.rows.map(row => row.kind)]),
+    [["a.cs", 3, 2, ["removed", "added", "hunk", "removed", "removed", "added"]]], "Each replacement of a list is a hunk, and one that is not a replacement is left out.");
   const written = changedFiles(call(), { path: "new.txt", content: "a\nb\n" })[0];
   assert.deepEqual([written.operation, written.added, written.rows.map(row => row.newLine)], ["add", 2, [1, 2]]);
   assert.deepEqual(changedFiles(call(), { path: "a.cs" }), []);
