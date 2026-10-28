@@ -106,7 +106,8 @@ pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-cc-opus      
 pwsh -File .\scripts\run-hard51.ps1 -ConfirmPaidRun -Runs codealta-opus,codealta-astra -CodeAltaArgs "--code-mode=off"
 ```
 
-- **CodeAlta arguments:** `-CodeAltaArgs` passes more `altacli run` arguments to every CodeAlta job (the adapter's `extra_args`), such as `--code-mode=off` to compare with a run made before Code Mode, or `--no-sub-sessions` for an agent that does all the work itself, without sub-agents, their tools and their instructions. The run manifest records them.
+- **One model, one session:** every CodeAlta job runs with `--no-sub-sessions`. The agent does all the work itself, without sub-agents, their tools or their instructions, because a sub-agent can run on another model: the one of the tier it asks for. `-AllowSubSessions` lets the jobs start sub-agents again. The run manifest records which way it ran (`codealta_sub_sessions`).
+- **CodeAlta arguments:** `-CodeAltaArgs` passes more `altacli run` arguments to every CodeAlta job (the adapter's `extra_args`), such as `--code-mode=off` to compare with a run made before Code Mode. The run manifest records them, `--no-sub-sessions` included.
 
 - **Order:** the jobs run one after the other, in the order of the table above, each followed by its replay. `codealta-cc-opus` needs `ANTHROPIC_API_KEY`.
 - **Concurrency:** 8 task sandboxes at a time (`-Concurrency`).

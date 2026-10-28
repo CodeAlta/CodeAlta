@@ -19,6 +19,10 @@ param(
     # "--code-mode=off"; recorded in the run manifest.
     [string]$CodeAltaArgs,
 
+    # Lets the CodeAlta jobs start sub-agents. Off by default: a sub-agent may run on another model (its tier), and the
+    # benchmark measures one model in one session, so the jobs get --no-sub-sessions.
+    [switch]$AllowSubSessions,
+
     [ValidateRange(0, 3)]
     [int]$InfrastructureRetries = 1,
 
@@ -321,6 +325,12 @@ if (-not $DryRun) {
     }
 }
 
+# One model in one session unless -AllowSubSessions: a sub-agent may run on another model.
+$codeAltaExtraArgs = if ([string]::IsNullOrWhiteSpace($CodeAltaArgs)) { "" } else { $CodeAltaArgs.Trim() }
+if (-not $AllowSubSessions -and $codeAltaExtraArgs -notmatch '(^|\s)--no-sub-sessions(\s|$)') {
+    $codeAltaExtraArgs = ("$codeAltaExtraArgs --no-sub-sessions").Trim()
+}
+
 $manifest = [ordered]@{
     schema = 1
     run_id = $RunId
@@ -331,7 +341,8 @@ $manifest = [ordered]@{
     codealta_commit = $config.codealta_commit
     codealta_dirty = $config.codealta_dirty
     codealta_requested_revision = $config.codealta_requested_revision
-    codealta_args = if ([string]::IsNullOrWhiteSpace($CodeAltaArgs)) { $null } else { $CodeAltaArgs }
+    codealta_args = if ([string]::IsNullOrWhiteSpace($codeAltaExtraArgs)) { $null } else { $codeAltaExtraArgs }
+    codealta_sub_sessions = $codeAltaExtraArgs -notmatch '(^|\s)--no-sub-sessions(\s|$)'
     allow_errored_trials = [bool]$AllowErroredTrials
     altacli_sha256 = if ($config.PSObject.Properties["altacli_sha256"]) { $config.altacli_sha256 } else { $null }
     harbor_version = $config.harbor_version
@@ -353,8 +364,8 @@ foreach ($key in $selectedRuns) {
     $run = $runDefinitions[$key]
     $jobName = "$RunId-$($run.Name)"
     $kwargs = @($run.Kwargs)
-    if ($run.Agent -eq "locked_codealta:LockedCodeAlta" -and -not [string]::IsNullOrWhiteSpace($CodeAltaArgs)) {
-        $kwargs += "extra_args=$CodeAltaArgs"
+    if ($run.Agent -eq "locked_codealta:LockedCodeAlta" -and -not [string]::IsNullOrWhiteSpace($codeAltaExtraArgs)) {
+        $kwargs += "extra_args=$codeAltaExtraArgs"
     }
     Invoke-HarborJob -JobName $jobName -Agent $run.Agent -Model $run.Model -AllowedHost $run.Host -AgentKwargs $kwargs -AllowErrored:$AllowErroredTrials
     Invoke-HarborJob -JobName "$jobName-regrade" -Agent "patch_replay:PatchReplayAgent" -Model "replay" -SourceJob (Join-Path $jobsRoot $jobName)
