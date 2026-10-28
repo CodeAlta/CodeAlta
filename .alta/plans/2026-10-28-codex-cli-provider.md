@@ -264,7 +264,8 @@ Codex's commands and patches are children of that process, so they stay in the c
   - Done: `CodexAppServerFake` scripts turns (text, reasoning, commands, file changes, approvals, MCP calls over HTTP, plans, steers, failures) and keeps its threads for resume and fork.
 - [x] 3. **Plugin skeleton.** Contribution, settings and validation, registration in the three hosts, the `CODEX_HOME` helper, and the `config.toml` writer. Tests: registration, validation, and the exact `config.toml` written.
   - Done: the `codex-cli` plugin, its settings (`command`, `codex_home`, `env`; `~/.codex` and `CODEX_HOME` refused), the three hosts, and the `config.toml` writer. A live check found `features.plugin_discovery_prefetch` unknown to 0.165.0: it is left out.
-- [ ] 4. **Probe, models, sign-in and download.**
+- [x] 4. **Probe, models, sign-in and download.**
+  - Done: the probe, `model/list`, the pinned package and its download (checked for real: `altacli` downloaded 0.165.0 into `~/.alta/cache/codex-cli`), the sign-in contract and both sign-ins. `--session-source codealta` changes neither the models nor the turns.
   - Probe categories and `model/list`.
   - The pinned package with its hashes, and its automatic download from the catalog entry and at first use, with the `codex-path` folder put on `PATH`.
   - The sign-in prompt contract and the browser and device-code sign-ins over `account/login/*`.
@@ -281,13 +282,16 @@ Codex's commands and patches are children of that process, so they stay in the c
   - Done: `untrusted` for `default` and `acceptEdits`, `never` for `bypassPermissions`. The live test confirms that Codex asks before a command that writes a file under `untrusted` with its sandbox off.
 - [x] 7. **Fork, rewind, compaction and failures.** `thread/fork`, `thread/compact/start`, and failure classification. Tests with the fake for each.
   - Done: a rewind or a fork forks the thread at the turn the point ends (`lastTurnId`), from the last 100 turns kept in the provider state. The live test confirms that the developer instructions survive the compaction of Codex: they are part of its turn context, rebuilt at each turn.
-- [ ] 8. **Sandbox.** `StartsInSandbox`, plus the launch with its folders, protected paths, hosts and port. Tests: a sibling of `SessionSandboxTests` for `codex-cli`. A manual run of a sandboxed session on macOS.
-- [ ] 9. **Desktop.** Problem codes, the signed-out banner, the plugin sign-in prompt in the provider form, plan usage with the standalone executable, and the icon. Tests: siblings in `ProviderUsageRpcTests`, `ConfiguredProviderUsageTests`, `PluginsRpcTests` (the sign-in channel) and `providerForm.test.ts`.
-- [ ] 10. **Live tests.** `CodexCliLiveTests`, gated by:
+- [x] 8. **Sandbox.** `StartsInSandbox`, plus the launch with its folders, protected paths, hosts and port. Tests: a sibling of `SessionSandboxTests` for `codex-cli`. A manual run of a sandboxed session on macOS.
+  - Done: a sandboxed `altacli` session on macOS: Codex ran in the container with its own sandbox off, a write to the real home was refused, `$HOME` was the sandbox home, and the `alta` call reached CodeAlta.
+- [x] 9. **Desktop.** Problem codes, the signed-out banner, the plugin sign-in prompt in the provider form, plan usage with the standalone executable, and the icon. Tests: siblings in `ProviderUsageRpcTests`, `ConfiguredProviderUsageTests`, `PluginsRpcTests` (the sign-in channel) and `providerForm.test.ts`.
+  - Done: the sign-in prompt of plugins is a stream of events; the window opens the browser or shows the code, with Cancel. The end-to-end check found two problems, fixed in `443080d8`: duplicate React keys piled up the plugin panel, and a home without a sign-in failed with a raw 401 (the session now checks `account/read` first).
+- [x] 10. **Live tests.** `CodexCliLiveTests`, gated by:
+  - Done: the four live tests pass on this Mac with the pinned 0.165.0.
   - `CODEALTA_TEST_CODEX_CLI`: the path of the pinned `codex-app-server`;
   - `CODEALTA_TEST_CODEX_HOME`: a home for the tests, signed in once through the app-server's sign-in. On this Mac that is `~/.alta/plugin-data/codex-cli/_live-tests`, signed in on 2026-10-28. The pinned 0.165.0 is unpacked, with its hash checked, in the ignored `tmp/codex-cli/0.165.0/`. That home is never `~/.codex`: the provider writes its `config.toml` there, and a copied `auth.json` would sign the user's own Codex out when its single-use refresh token rotates;
   - `CODEALTA_TEST_CODEX_TURN=1` for turns, which cost a little. They cover: probe and models; a turn that calls `alta`; steer, stop and compaction; and whether the instructions survive Codex's compaction.
-- [ ] 11. **Docs.**
+- [x] 11. **Docs.**
   - User guide:
     - a "Codex CLI" section in `site/docs/model-providers/setup.md`, next to "Codex (ChatGPT)", that says when to choose which;
     - a fields row in `configuration.md` and a row in the providers table of `readme.md`;
@@ -300,14 +304,14 @@ Codex's commands and patches are children of that process, so they stay in the c
 ## How it is verified
 
 - [ ] `dotnet test -c <Configuration>` and `npm test` pass, and `lunet build` succeeds.
-- [ ] The live tests pass on this Mac with the pinned `codex-app-server` and a signed-in test home.
-- [ ] In the developer instance:
+- [x] The live tests pass on this Mac with the pinned `codex-app-server` and a signed-in test home.
+- [x] In the developer instance:
   - add **Codex CLI** and see the pinned package download;
   - sign in with the browser, then with a device code on a second provider, and see the models;
   - run a turn that edits a file and calls `alta session list`;
   - steer, stop, compact, fork and switch to Claude Code and back;
   - see the plan usage.
-- [ ] A sandboxed session on Codex CLI: commands run in the container, a write outside the project fails, and `alta` works.
+- [x] A sandboxed session on Codex CLI: commands run in the container, a write outside the project fails, and `alta` works.
 - [ ] The TUI runs a `codex-cli` session, and its Providers dialog leaves the provider's table unchanged.
 - [ ] After a release: the reporter of #250 signs in with a Business workspace and runs a turn.
 

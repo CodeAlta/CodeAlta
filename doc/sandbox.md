@@ -81,6 +81,10 @@ permission, the command guard, its progress) comes back to CodeAlta, which answe
   sandbox starts another process, which resumes the conversation. On Windows the shells of the CLI do not run in a
   container (msys2 needs a named object it refuses), so they are turned off and the CLI is offered `shell_command`,
   which runs in the worker of the session.
+- **The process of Codex CLI** starts the same way, with Codex's own sandbox off: the CODEX_HOME of its provider
+  read-write except the files that configure it (`config.toml`, hooks, rules, skills, plugins), the package of its
+  executable read-only, the hosts of OpenAI, and the port of the harness MCP endpoint among the local ports of its
+  proxy. Its commands and edits are children of its app-server, so they stay in the container.
 - **The process of an ACP agent** starts the same way, for every agent alike: a home folder of its own per provider
   (`OwnHome`, under `agents/` of the sandbox data folder), kept between sessions and reached by no other process of a
   sandbox, since the user's sign-in stays out of reach; the variables of its provider with their values, where a token

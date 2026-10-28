@@ -10,7 +10,7 @@ Providers are tables of `~/.alta/config.toml`. The provider editor writes the sa
 
 Each provider is a `[providers.<key>]` table. Keys are lower case. `codex` and `copilot` get their type when `type` is left out.
 
-The types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, `vertex-ai`, `mistral` and `claude-code`. Plugins add others, such as `acp` for the [agents of the ACP registry](acp-agents.md). Aliases such as `openai`, `responses`, `aoai`, `gemini`, `vertex` and `github-copilot` are read as these types.
+The types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, `vertex-ai`, `mistral` and `claude-code`. Plugins add others, such as `acp` for the [agents of the ACP registry](acp-agents.md) and `codex-cli` for [Codex CLI](setup.md#codex-cli). Aliases such as `openai`, `responses`, `aoai`, `gemini`, `vertex` and `github-copilot` are read as these types.
 
 A type your version of CodeAlta does not know, one a newer version added, leaves that provider out; its table stays in the file as written.
 
@@ -54,6 +54,7 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 | `copilot` | GitHub sign-in; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI sign-in; optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `claude-code` | none: `api_key`, `api_key_env` and `api_url` are refused | `config_dir`, `command`, `args`, `permission_mode`, `anthropic_api_key`, `single_model_id`, `models_include_regex` (see [Claude Code settings](setup.md#claude-code-settings)) |
+| `codex-cli` | none: Codex signs in by itself, from the form of the provider | `codex_home`, `command`, `env`, `permission_mode` (see [Codex CLI](setup.md#codex-cli)) |
 | `acp` | none: the agent signs in by itself | `command`, `arguments`, `env`, `permission_mode`, and `agent` and `agent_version` for an agent of the registry (see [Write one by hand](acp-agents.md#write-one-by-hand)) |
 
 `text_verbosity` (`low`, `medium` or `high`) sets how long the answers of the models of an `openai-responses` or `codex` provider are:
