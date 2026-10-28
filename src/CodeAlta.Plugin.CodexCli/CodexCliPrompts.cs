@@ -61,7 +61,8 @@ internal static class CodexCliPrompts
             builder.AppendLine(instructions);
         }
 
-        return builder.ToString().TrimEnd();
+        // One kind of line ending on every system, as the input of the turns has (AppendLine writes \r\n on Windows).
+        return builder.ToString().ReplaceLineEndings("\n").TrimEnd();
     }
 
     /// <summary>Where Codex was given the instructions, as the note of a change names it.</summary>
