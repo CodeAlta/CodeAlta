@@ -71,33 +71,37 @@ public static class CodeModeToolFactory
 
     private const int MaxWaitMilliseconds = 600_000;
 
+    // A wait shorter than this is a poll that costs a whole request of the model: wait lasts at least this long, unless it
+    // stops the script.
+    private const int MinWaitMilliseconds = 10_000;
+
     // How often exec looks again at a run whose yield has not passed: its clock stops while the run waits for the user.
     private static readonly TimeSpan YieldCheck = TimeSpan.FromMilliseconds(200);
 
     // The description of exec: the same text for every session that can start sessions of its own, so that prompt caches hold.
-    private const string ExecDescription = ExecDescriptionStart + """
+    private static readonly string ExecDescription = ExecDescriptionStart + """
 
         - `agent(prompt, { tier, model, title, schema })` starts a sub-agent, a child session of its own for a part of the work, and resolves with its final answer once it ended (`alta.session.send` does not wait for one), or with the JSON value it answered when `schema` (a JSON Schema) is given; `worktree: true` has it work in a new git worktree of the project, on a branch of its own, so that sessions that change files in parallel do not collide; `subSessions: false` creates it without sessions of its own, for a part it must do itself. `parallel(thunks, { limit })` runs functions at once and turns a failure into `null`; `pipeline(items, ...stages)` takes each item through the stages on its own; `phase(title)` marks a part of the work. `session({ tier, title, worktree })` keeps a session for several prompts: `const s = await session(); await s.run("..."); await s.close();`, and `s.worktree` gives `{ folder, branch }` of its worktree.
 
-        """ + ExecDescriptionLibrary + """
+        """ + ExecDescriptionLibrary + $$"""
 
 
-        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "max_output_tokens": 4000, "timeout_ms": 600000, "budget_tokens": 500000}` (`budget_tokens` caps the tokens of the sessions the script starts). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
+        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "timeout_ms": 600000, "budget_tokens": 500000}` (`budget_tokens` caps the tokens of the sessions the script starts; `max_output_tokens` is {{CodeModeResultFormatter.DefaultMaxOutputTokens}} by default). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
         """ + ExecDescriptionEnd;
 
     // The description of exec for a session without sub-sessions: no agent() nor session(), which it does not have.
-    private const string ExecDescriptionWithoutSubSessions = ExecDescriptionStart + """
+    private static readonly string ExecDescriptionWithoutSubSessions = ExecDescriptionStart + """
 
         - `parallel(thunks, { limit })` runs functions at once and turns a failure into `null`; `pipeline(items, ...stages)` takes each item through the stages on its own; `phase(title)` marks a part of the work.
 
-        """ + ExecDescriptionLibrary + """
+        """ + ExecDescriptionLibrary + $$"""
 
 
-        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "max_output_tokens": 4000, "timeout_ms": 600000}`. `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
+        Options go on an optional first line: `// @exec: {"title": "…", "yield_ms": 30000, "timeout_ms": 600000}` (`max_output_tokens` is {{CodeModeResultFormatter.DefaultMaxOutputTokens}} by default). `exec` waits `yield_ms` (30 s by default) for the script. A script still running then goes on in the background: call `wait` with its run id, or end your turn, and its result comes back to this session as a prompt.
         """ + ExecDescriptionEnd;
 
     private const string ExecDescriptionStart = """
-        Run JavaScript in CodeAlta to compose tool calls: loops, filters and parallel calls run without model turns, and only what the script returns comes back to you. Use it when a task needs several calls whose results you would otherwise read one by one; for a single call, call the tool directly.
+        Run JavaScript in CodeAlta to compose tool calls: independent calls run together, and only what the script returns comes back to you. Use it to batch independent reads and searches, or edits you have decided, into one step; for a single call, call the tool directly.
 
         The script is the body of an async function: use `await` and `return`. It is plain JavaScript in strict mode, not Node.js: no TypeScript syntax, no `import` or `require`. It has no file, network or timer access of its own: every effect is a call of a function below, with this session's permissions.
 
@@ -115,7 +119,7 @@ public static class CodeModeToolFactory
         - `step(id, fn)` groups the calls of one part of the work; `log(...)`, `console.log(...)` and `text(...)` write output; `args` holds the arguments of the run. `image(path, { title })` attaches a picture to the result: the user sees it, and you too.
         - `store(key, value)` keeps a JSON value for the later scripts of this session, and `load(key)` reads it back (undefined when there is none).
 
-        Calls run at the same time under `Promise.all`; tools that change files run one at a time. Await every call whose result matters: calls still pending when the script returns are cancelled. A failed call throws an error you can catch, and the calls made before a failure are not undone.
+        Calls run at the same time under `Promise.all`; tools that change files run one at a time. Await every call whose result matters: calls still pending when the script returns are cancelled. A failed call throws an error you can catch (a `ToolError` for a tool), and the calls made before a failure are not undone. In a batch, use `Promise.allSettled`, or `parallel()`, which turns a failure into `null`, so that one failure does not lose the other results.
         """;
 
     private const string ExecDescriptionEnd = """
@@ -139,14 +143,14 @@ public static class CodeModeToolFactory
         }
         """;
 
-    private const string WaitDescription = "Wait for a script that `exec` left running in the background: returns its result, or what it wrote so far when `yield_ms` passes (at most 600000). `terminate: true` stops the script.";
+    private const string WaitDescription = "Wait for a script that `exec` left running in the background: returns its result, or what it wrote so far when `yield_ms` passes (30000 by default, at most 600000). Prefer one long wait, or other work, to repeated short ones. `terminate: true` stops the script.";
 
     private const string WaitSchema = """
         {
           "type": "object",
           "properties": {
             "run": { "type": "string", "description": "The id of the run, such as run-7f3c2a." },
-            "yield_ms": { "type": "integer", "minimum": 1, "description": "How long to wait, in milliseconds; 30000 by default, at most 600000." },
+            "yield_ms": { "type": "integer", "minimum": 1, "description": "How long to wait, in milliseconds; 30000 by default, at least 10000 unless it terminates, at most 600000." },
             "terminate": { "type": "boolean", "description": "Stop the script instead of waiting for it." }
           },
           "required": ["run"],
@@ -420,13 +424,14 @@ public static class CodeModeToolFactory
             return Failure($"No run `{runElement.GetString()}` of this session.{(known.Length == 0 ? string.Empty : " Its runs: " + string.Join(", ", known) + ".")}");
         }
 
-        if (arguments.TryGetProperty("terminate", out var terminate) && terminate.ValueKind == JsonValueKind.True)
+        var terminates = arguments.TryGetProperty("terminate", out var terminate) && terminate.ValueKind == JsonValueKind.True;
+        if (terminates)
         {
             run.Stop();
         }
 
         var yieldTime = arguments.TryGetProperty("yield_ms", out var yieldElement) && yieldElement.TryGetInt32(out var yieldMs) && yieldMs > 0
-            ? TimeSpan.FromMilliseconds(Math.Min(yieldMs, MaxWaitMilliseconds))
+            ? TimeSpan.FromMilliseconds(Math.Clamp(yieldMs, terminates ? 1 : MinWaitMilliseconds, MaxWaitMilliseconds))
             : options.DefaultYield;
         var (ended, result) = await options.Runs.WaitAsync(run, yieldTime, cancellationToken).ConfigureAwait(false);
         if (ended)

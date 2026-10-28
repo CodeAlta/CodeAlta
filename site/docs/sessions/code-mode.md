@@ -92,7 +92,7 @@ Click the card of a script without steps or sessions, or **Show the call** on a 
 
 ## Long scripts
 
-`exec` waits 30 seconds for a script, or what its first line says (`yield_ms`). A script still running then goes on in the background: the agent can call `wait` for it, or end its turn. When it ends, its result comes back to the session as a **Workflow** message.
+`exec` waits 30 seconds for a script, or what its first line says (`yield_ms`). A script still running then goes on in the background: the agent can call `wait` for it, which waits 30 seconds by default and at least 10 seconds unless it stops the script, or end its turn. When it ends, its result comes back to the session as a **Workflow** message.
 
 While it runs, it is listed above the prompt with what the session runs in the background: click it there to go to its card in the timeline.
 
