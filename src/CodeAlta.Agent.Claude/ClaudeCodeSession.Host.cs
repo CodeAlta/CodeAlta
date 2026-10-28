@@ -777,6 +777,56 @@ internal sealed partial class ClaudeCodeSession
         })).ConfigureAwait(false);
     }
 
+    // A tool the CLI runs itself, asked of the tool hooks of the session: a block denies the call with the reason the
+    // model reads. The hooks cannot change its input here (an input changed through a hook also skips the permissions
+    // of the CLI), and they do not see its result. A tool of CodeAlta runs its hooks when the session runs it.
+    private async Task AnswerToolHookAsync(string requestId, JsonElement request)
+    {
+        string? refusal = null;
+        try
+        {
+            CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? interceptor;
+            ModelProviderId providerId;
+            lock (_gate)
+            {
+                interceptor = _toolInterceptor;
+                providerId = _providerId;
+            }
+
+            ClaudeCodeJson.TryGetObject(request, "input", out var input);
+            if (interceptor is not null && ClaudeCodeJson.GetString(input, "tool_name") is { Length: > 0 } toolName
+                && !toolName.StartsWith(ClaudeCodeLauncher.McpToolPrefix, StringComparison.Ordinal))
+            {
+                var arguments = ClaudeCodeJson.TryGetObject(input, "tool_input", out var toolInput) ? toolInput.Clone() : ClaudeCodeJson.EmptyObject;
+                var callId = ClaudeCodeJson.GetString(request, "tool_use_id") ?? ClaudeCodeJson.GetString(input, "tool_use_id") ?? Guid.NewGuid().ToString("N");
+                var cwd = ClaudeCodeJson.GetString(input, "cwd");
+                var folder = cwd is { Length: > 0 } ? cwd : _launchKey?.WorkingDirectory ?? Environment.CurrentDirectory;
+                var call = CodeAlta.Agent.Runtime.Tools.AgentToolHookCall.Create(
+                    new AgentToolInvocation(providerId, _sessionId, callId, toolName, arguments),
+                    spec: null,
+                    folder,
+                    CodeAlta.Agent.Runtime.Tools.AgentToolHookCapabilities.Block,
+                    runByAgent: true,
+                    commandDirectory: cwd);
+                refusal = (await interceptor.BeforeToolCallAsync(call, _lifetime.Token).ConfigureAwait(false)).BlockMessage;
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // Hooks that fail let the permissions of the CLI decide, as without hooks; a hook that must not be skipped
+            // blocks by itself (it fails closed).
+        }
+
+        await SendSafelyAsync(connection => connection.RespondAsync(requestId, refusal is null ? null : writer =>
+        {
+            writer.WriteStartObject("hookSpecificOutput");
+            writer.WriteString("hookEventName", "PreToolUse");
+            writer.WriteString("permissionDecision", "deny");
+            writer.WriteString("permissionDecisionReason", refusal);
+            writer.WriteEndObject();
+        })).ConfigureAwait(false);
+    }
+
     private ToolCallState? GetToolCall(string toolUseId)
     {
         lock (_gate)
@@ -793,6 +843,12 @@ internal sealed partial class ClaudeCodeSession
         if (string.Equals(ClaudeCodeJson.GetString(request, "callback_id"), CommandHookId, StringComparison.Ordinal))
         {
             _ = AnswerCommandHookAsync(requestId, request);
+            return false;
+        }
+
+        if (string.Equals(ClaudeCodeJson.GetString(request, "callback_id"), ToolHookId, StringComparison.Ordinal))
+        {
+            _ = AnswerToolHookAsync(requestId, request);
             return false;
         }
 

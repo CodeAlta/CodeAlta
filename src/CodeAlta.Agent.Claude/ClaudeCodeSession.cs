@@ -29,6 +29,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private const string PlanModeHookMatcher = "EnterPlanMode";
     private const string CommandHookId = "codealta_command";
     private const string CommandHookMatcher = "Bash|PowerShell";
+    private const string ToolHookId = "codealta_tool_hooks";
     private const string ReasoningDisplayOption = "--thinking-display";
     private const string NothingLeftOfOwnTurn = "Claude Code had nothing more to show for this turn.";
     // The startup_failure_reason of a resume refused because a background session of Claude Code runs the conversation.
@@ -74,6 +75,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? _writeGuard;
     // Checks each shell command before it runs, in every permission mode (a hook runs before the permissions of the CLI).
     private CodeAlta.Agent.Runtime.Tools.AgentCommandGuard? _commandGuard;
+    // The tool hooks of the session (those of plugins), asked before each tool the CLI runs itself.
+    private CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? _toolInterceptor;
     // Where the next process of the session starts: the sandbox of the session, or null for a child of this process.
     private IAgentProcessHost? _processHost;
     private string? _cliPermissionMode;
@@ -512,6 +515,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _permissionMode = permissionMode;
             _writeGuard = key.WithoutShell ? request.WriteGuard : null;
             _commandGuard = request.CommandGuard;
+            _toolInterceptor = request.ToolInterceptor;
             _processHost = request.ProcessHost;
         }
 
@@ -896,6 +900,13 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                     writer.WriteString("matcher", CommandHookMatcher);
                     writer.WriteStartArray("hookCallbackIds");
                     writer.WriteStringValue(CommandHookId);
+                    writer.WriteEndArray();
+                    writer.WriteNumber("timeout", PreToolHookTimeoutSeconds);
+                    writer.WriteEndObject();
+                    // The tool hooks of CodeAlta (those of plugins) see each tool the CLI runs itself, and can block it.
+                    writer.WriteStartObject();
+                    writer.WriteStartArray("hookCallbackIds");
+                    writer.WriteStringValue(ToolHookId);
                     writer.WriteEndArray();
                     writer.WriteNumber("timeout", PreToolHookTimeoutSeconds);
                     writer.WriteEndObject();

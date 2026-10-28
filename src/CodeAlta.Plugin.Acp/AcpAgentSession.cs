@@ -44,6 +44,8 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
     private ModelProviderId _providerId;
     private AgentProviderRunContext? _run;
     private string? _permissionMode;
+    // The tool hooks of the session (those of plugins), asked before a tool the agent asks permission for.
+    private CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? _toolInterceptor;
     private IReadOnlyDictionary<string, AgentToolDefinition> _exposedTools = new Dictionary<string, AgentToolDefinition>(StringComparer.Ordinal);
     private static readonly TimeSpan ToolsSyncTimeout = TimeSpan.FromSeconds(2);
     // Completed when the session gives the next segment, with its tools.
@@ -135,6 +137,7 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
             lock (_gate)
             {
                 _permissionMode = NormalizePermissionMode(request.PermissionMode);
+                _toolInterceptor = request.ToolInterceptor;
             }
 
             var newMessages = BindConversation(request);
