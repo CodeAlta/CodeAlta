@@ -288,6 +288,8 @@ public sealed class MobileSessionsTests
         CollectionAssert.AreEqual(new[] { "session", "steer", "a", "--stdin" }, alta.CallsOf("session steer").Single(), "A steer joins the running turn: it takes no selection.");
         CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin", "--permission-mode", "provider", "--queue-if-busy", "--no-wait" }, alta.CallsOf("session send")[1], "A value that looks like an option is not passed.");
         Assert.AreEqual("Go on", alta.Calls.First(static call => call.Args[1] == "queue").Stdin);
+        // The user typed every prompt on the phone: the timelines show it as theirs, not as the plugin's.
+        Assert.IsTrue(alta.Options.All(static options => options is { OnBehalfOfUser: true }), "Each command runs for the user.");
     }
 
     [TestMethod]

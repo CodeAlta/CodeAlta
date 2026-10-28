@@ -228,4 +228,10 @@ public sealed record PluginAltaInvocationOptions
 
     /// <summary>Gets the command timeout.</summary>
     public TimeSpan? Timeout { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the user asked for the command in a client the plugin serves, such as the page of the
+    /// Mobile plugin: the prompts it sends are recorded as the user's, not as prompts of the plugin. False by default.
+    /// </summary>
+    public bool OnBehalfOfUser { get; init; }
 }

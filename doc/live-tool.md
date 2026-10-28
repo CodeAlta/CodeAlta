@@ -119,7 +119,9 @@ services the host registered. Nothing is shared between invocations.
 - `project current` is the project of the calling session (also from a worktree), else the catalog project of `cwd`.
 - A prompt sent by a caller other than a person is recorded with its source session and provenance
   (`AgentPromptProvenance`: `agent-session`, `reminder`, `plugin`, `background-job`, or what the host names through
-  `AltaCallerIdentity.PromptProvenance`, never an argument), so timelines never show it as the user's words.
+  `AltaCallerIdentity.PromptProvenance`, never an argument), so timelines never show it as the user's words. A plugin
+  that relays what the user typed in a client of its own (the phone of the Mobile plugin) says so with
+  `PluginAltaInvocationOptions.OnBehalfOfUser`: its prompts are the user's.
 
 ## Safety rules
 

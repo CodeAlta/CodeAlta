@@ -56,4 +56,15 @@ public sealed class AgentPromptProvenanceTests
         Assert.AreEqual(AgentPromptProvenance.UserReview,
             SessionPromptProvenance.Of("send", new AltaActorProvenance { Kind = "host", PromptProvenance = AgentPromptProvenance.UserReview }));
     }
+
+    [TestMethod]
+    public void QueuedPromptOfAPluginActingForTheUser_IsTheUsers()
+    {
+        // The phone queues a prompt while a turn runs: it leaves the queue as the user's, not as the plugin's.
+        Assert.IsNull(SessionPromptProvenance.Of("send", new AltaActorProvenance { Kind = "plugin", OnBehalfOfUser = true }));
+        Assert.AreEqual(AgentPromptProvenance.Plugin, SessionPromptProvenance.Of("send", new AltaActorProvenance { Kind = "plugin" }));
+        // What the dispatch kind says still wins.
+        Assert.AreEqual(AgentPromptProvenance.BackgroundJob,
+            SessionPromptProvenance.Of(SessionRuntimeService.JobPromptKind, new AltaActorProvenance { Kind = "plugin", OnBehalfOfUser = true }));
+    }
 }

@@ -18,10 +18,13 @@ internal sealed record MobileAltaResult(int ExitCode, string? Error, IReadOnlyLi
 /// <summary>Runs the <c>alta</c> commands of the mobile view and reads their records.</summary>
 internal static class MobileAlta
 {
-    /// <summary>Runs one command.</summary>
+    // The user asked for every command of the phone: a prompt it sends is theirs, which the timelines show as "You".
+    private static readonly PluginAltaInvocationOptions ForTheUser = new() { OnBehalfOfUser = true };
+
+    /// <summary>Runs one command, for the user.</summary>
     internal static async Task<MobileAltaResult> RunAsync(IPluginAltaService alta, IReadOnlyList<string> args, string? stdin, CancellationToken cancellationToken)
     {
-        var result = await alta.InvokeAsync(args, stdin, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var result = await alta.InvokeAsync(args, stdin, ForTheUser, cancellationToken).ConfigureAwait(false);
         var records = new List<JsonObject>();
         string? error = null;
         foreach (var record in Parse(result.TranscriptJsonl))

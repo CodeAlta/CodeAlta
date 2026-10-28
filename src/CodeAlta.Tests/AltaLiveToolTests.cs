@@ -1401,7 +1401,7 @@ public sealed partial class AltaLiveToolTests
     public async Task PluginAltaCommandContribution_GetsNoAsks_WhateverItsAltaService(bool runtimeAlta)
     {
         // An agent runs the commands of alta: through the asks it would answer what it asked the user.
-        IPluginAltaService alta = runtimeAlta ? new LoopbackPluginAltaRuntimeService() : NoopPluginServices.Create().Alta;
+        IPluginAltaService alta = runtimeAlta ? new PluginAltaServiceBridge() : NoopPluginServices.Create().Alta;
         Assert.AreEqual(runtimeAlta, alta is IPluginAltaRuntimeService);
         IPluginAskService? seen = null;
         var catalog = new FakeAltaPluginCatalog(new AltaPluginCommandContribution
@@ -1426,7 +1426,7 @@ public sealed partial class AltaLiveToolTests
             },
         });
         var dispatcher = CreateDispatcher(catalog);
-        if (alta is LoopbackPluginAltaRuntimeService loopback) loopback.SetDispatcher(dispatcher);
+        if (alta is PluginAltaServiceBridge loopback) loopback.SetDispatcher(dispatcher);
 
         var result = await dispatcher.InvokeAsync(["peek-asks"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
 
@@ -1447,7 +1447,7 @@ public sealed partial class AltaLiveToolTests
         var providerRuntime = new StatefulProviderRuntime(ProviderId);
         var runtime = CreateRuntime(options, providerRuntime);
         await using var _ = runtime.ConfigureAwait(false);
-        var loopback = new LoopbackPluginAltaRuntimeService();
+        var loopback = new PluginAltaServiceBridge();
         var plugin = CreatePluginDescriptor("creator-plugin");
         var catalog = new FakeAltaPluginCatalog(
             new AltaPluginCommandContribution
@@ -1528,7 +1528,7 @@ public sealed partial class AltaLiveToolTests
         var projectCatalog = new ProjectCatalog(options);
         var projectA = await projectCatalog.UpsertFromPathAsync(projectAPath).ConfigureAwait(false);
         var projectB = await projectCatalog.UpsertFromPathAsync(projectBPath).ConfigureAwait(false);
-        var loopback = new LoopbackPluginAltaRuntimeService();
+        var loopback = new PluginAltaServiceBridge();
         var catalog = new FakeAltaPluginCatalog(
             new AltaPluginCommandContribution
             {
@@ -1577,8 +1577,12 @@ public sealed partial class AltaLiveToolTests
         Assert.AreEqual(AltaExitCodes.Success, peek.GetProperty("nestedExitCode").GetInt32());
     }
 
+    // A plugin that sends what the user asked for in a client of its own (the phone of the Mobile plugin) sends a prompt of
+    // the user, which the timelines show as theirs; any other prompt of a plugin is recorded as the plugin's.
     [TestMethod]
-    public async Task PluginAltaCommandContribution_SessionSendThroughPluginServicePersistsPromptProvenance()
+    [DataRow(false, AgentPromptProvenance.Plugin)]
+    [DataRow(true, null)]
+    public async Task PluginAltaCommandContribution_SessionSendThroughPluginServicePersistsPromptProvenance(bool onBehalfOfUser, string? expectedProvenance)
     {
         using var root = TempDirectory.Create();
         var options = new CatalogOptions { GlobalRoot = root.Path };
@@ -1591,7 +1595,7 @@ public sealed partial class AltaLiveToolTests
         var runtime = CreateRuntime(options, providerRuntime);
         await using var _ = runtime.ConfigureAwait(false);
         string? targetSessionId = null;
-        var loopback = new LoopbackPluginAltaRuntimeService();
+        var loopback = new PluginAltaServiceBridge();
         var catalog = new FakeAltaPluginCatalog(
             new AltaPluginCommandContribution
             {
@@ -1621,6 +1625,7 @@ public sealed partial class AltaLiveToolTests
                                         SourceProjectId = project.Id,
                                         SourceSessionId = "plugin-source-session",
                                         WorkingDirectory = project.ProjectPath,
+                                        OnBehalfOfUser = onBehalfOfUser,
                                     },
                                     cancellationToken: pluginContext.CancellationToken)
                                 .ConfigureAwait(false);
@@ -1645,6 +1650,7 @@ public sealed partial class AltaLiveToolTests
 
         Assert.AreEqual(AltaExitCodes.Success, result.ExitCode);
         Assert.AreEqual("plugin prompt", ExtractText(providerRuntime.SentOptions.Single().Input));
+        Assert.AreEqual(expectedProvenance, providerRuntime.SentOptions.Single().Provenance);
         var state = await ReadJournalStateAsync(new SessionViewCatalog(options), targetSessionId!).ConfigureAwait(false);
         var provenance = state.PromptProvenance.Single();
         Assert.IsFalse(provenance.Queued);
@@ -1652,6 +1658,7 @@ public sealed partial class AltaLiveToolTests
         Assert.AreEqual("plugin", provenance.SubmittedBy?.Kind);
         Assert.AreEqual("prompt-plugin", provenance.SubmittedBy?.PluginRuntimeKey);
         Assert.AreEqual("plugin-source-session", provenance.SubmittedBy?.SourceSessionId);
+        Assert.AreEqual(onBehalfOfUser, provenance.SubmittedBy?.OnBehalfOfUser);
     }
 
     [TestMethod]
@@ -6886,62 +6893,6 @@ public sealed partial class AltaLiveToolTests
 
         public IReadOnlyList<AltaPluginCommandContribution> ListCommandContributions()
             => contributions;
-    }
-
-    private sealed class LoopbackPluginAltaRuntimeService : IPluginAltaRuntimeService
-    {
-        private AltaCommandDispatcher? _dispatcher;
-
-        public void SetDispatcher(AltaCommandDispatcher dispatcher)
-        {
-            ArgumentNullException.ThrowIfNull(dispatcher);
-            _dispatcher = dispatcher;
-        }
-
-        public ValueTask<PluginAltaCommandResult> InvokeAsync(
-            IReadOnlyList<string> args,
-            string? stdin = null,
-            PluginAltaInvocationOptions? options = null,
-            CancellationToken cancellationToken = default)
-            => InvokeAsync(string.Empty, args, stdin, options, cancellationToken);
-
-        public async ValueTask<PluginAltaCommandResult> InvokeAsync(
-            string pluginRuntimeKey,
-            IReadOnlyList<string> args,
-            string? stdin = null,
-            PluginAltaInvocationOptions? options = null,
-            CancellationToken cancellationToken = default)
-        {
-            if (_dispatcher is null)
-            {
-                throw new InvalidOperationException("The dispatcher must be assigned before invoking alta from a plugin test.");
-            }
-
-            options ??= new PluginAltaInvocationOptions();
-            var result = await _dispatcher.InvokeAsync(
-                    args,
-                    stdin,
-                    new AltaCallerIdentity
-                    {
-                        Kind = "plugin",
-                        SourceSessionId = options.SourceSessionId,
-                        SourceProjectId = options.SourceProjectId,
-                        SourceAgentId = options.SourceAgentId,
-                        PluginRuntimeKey = pluginRuntimeKey,
-                    },
-                    options.WorkingDirectory,
-                    options.MaxOutputRecords,
-                    options.MaxOutputBytes,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            return new PluginAltaCommandResult
-            {
-                ExitCode = result.ExitCode,
-                TranscriptJsonl = result.Stdout,
-                Truncated = result.Truncated,
-                Error = result.Error,
-            };
-        }
     }
 
     private sealed class PluginServicesWithAlta(IPluginAltaService alta) : IPluginServices

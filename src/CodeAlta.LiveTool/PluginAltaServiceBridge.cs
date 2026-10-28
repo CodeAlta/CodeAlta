@@ -84,6 +84,7 @@ public sealed class PluginAltaServiceBridge : IPluginAltaRuntimeService
                     SourceProjectId = options.SourceProjectId,
                     SourceAgentId = options.SourceAgentId,
                     PluginRuntimeKey = pluginRuntimeKey,
+                    OnBehalfOfUser = options.OnBehalfOfUser,
                 },
                 options.WorkingDirectory,
                 maxOutputRecords: options.MaxOutputRecords,
