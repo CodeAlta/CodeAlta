@@ -9,7 +9,7 @@ using XenoAtom.Logging;
 namespace CodeAlta.Plugin.Acp;
 
 /// <summary>A model provider that runs CodeAlta sessions through an ACP agent.</summary>
-internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IModelProviderModelCatalog, IModelProviderModelOptions
+internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IModelProviderModelCatalog, IModelProviderModelOptions, IModelProviderProbeTimeout
 {
     /// <summary>The protocol family recorded in the journals of the sessions of this provider.</summary>
     public const string ProtocolFamily = "acp";
@@ -48,6 +48,13 @@ internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IMod
     public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; }
 
     public IModelProviderModelCatalog? ModelCatalog => this;
+
+    /// <summary>
+    /// Gets how long a probe may take: as long as its steps may (the start of the agent, which npx may download first, its
+    /// session, the efforts of its models, then the closing of the session), so that a slow agent is waited for and one
+    /// that fails says why, instead of being cut at the default time of a probe.
+    /// </summary>
+    public TimeSpan ProbeTimeout => _options.InitializeTimeout + _options.RequestTimeout + _options.EffortsBudget + TimeSpan.FromSeconds(30);
 
     public Task StartAsync(CancellationToken cancellationToken = default)
     {

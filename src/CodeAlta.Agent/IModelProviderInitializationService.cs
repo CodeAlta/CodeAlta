@@ -54,10 +54,20 @@ public sealed record ModelProviderInitializationOptions
     /// Gets the default timeout applied to provider startup and probing.
     /// </summary>
     /// <remarks>
-    /// Provider configuration does not yet carry a persisted per-provider probe timeout, so Phase 2 applies this
-    /// service-level default consistently until provider configuration grows a targeted timeout setting.
+    /// A runtime that asks for more time (<see cref="IModelProviderProbeTimeout"/>) has it once it is created.
     /// </remarks>
     public TimeSpan DefaultProbeTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets how long the preparation of a provider keeps its place when the providers are prepared a few at a time: a
+    /// slower one goes on, and the next provider starts.
+    /// </summary>
+    /// <remarks>
+    /// Starting a provider loads the computer at first (a process, an agent); a probe that takes longer mostly waits for
+    /// an answer, and must not keep the providers after it waiting. Nothing fails at this time: it is long enough that a
+    /// computer under load does not start every provider at once.
+    /// </remarks>
+    public TimeSpan PreparationPlaceTime { get; init; } = TimeSpan.FromSeconds(10);
 }
 
 /// <summary>

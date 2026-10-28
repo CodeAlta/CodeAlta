@@ -17,6 +17,9 @@ internal sealed class AcpFakeAgent
 {
     private int _sessions;
 
+    /// <summary>Gets or sets how long the agent takes to start, as one that is slow on a computer, or downloaded first.</summary>
+    public TimeSpan StartDelay { get; set; }
+
     public bool LoadSession { get; set; } = true;
 
     public bool ResumeSession { get; set; }
@@ -91,6 +94,7 @@ internal sealed class AcpFakeAgent
     {
         public async Task<AcpClient> StartAsync(AcpConnectionRequest request, Action<AcpServerMessage> messageHandler, CancellationToken cancellationToken)
         {
+            await Task.Delay(agent.StartDelay, cancellationToken);
             var toAgent = new Pipe();
             var fromAgent = new Pipe();
             var connection = new AcpFakeConnection(agent, toAgent.Reader.AsStream(), fromAgent.Writer.AsStream(), request);

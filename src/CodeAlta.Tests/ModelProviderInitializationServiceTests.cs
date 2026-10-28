@@ -517,6 +517,72 @@ public sealed class ModelProviderInitializationServiceTests
     }
 
     [TestMethod]
+    public async Task InitializeAllAsync_AProviderThatAsksForMoreTime_IsProbedThatLong()
+    {
+        // An ACP provider starts an agent, which may be slow to answer, or downloaded first by npx: cut at the default
+        // time, its probe never ends, and the provider fails with no word of the agent (#252).
+        await using var registry = new ModelProviderRegistry();
+        var slowDescriptor = new ModelProviderDescriptor(new ModelProviderId("slow"), "Slow", "test");
+        var hangingDescriptor = new ModelProviderDescriptor(new ModelProviderId("hanging"), "Hanging", "test");
+        registry.RegisterOrReplace(slowDescriptor, () => new SlowProbeRuntime(slowDescriptor, TimeSpan.FromMilliseconds(300), TimeSpan.FromSeconds(10)));
+        registry.RegisterOrReplace(hangingDescriptor, () => new SlowProbeRuntime(hangingDescriptor, Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(200)));
+        var service = new ModelProviderInitializationService(
+            registry,
+            new ModelProviderInitializationOptions { DefaultProbeTimeout = TimeSpan.FromMilliseconds(50) });
+
+        await service.InitializeAllAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+        var slow = service.CurrentStates.Single(state => state.ProviderId == slowDescriptor.ProviderId);
+        Assert.AreEqual(ModelProviderAvailability.Ready, slow.Availability, slow.StatusMessage);
+        var hanging = service.CurrentStates.Single(state => state.ProviderId == hangingDescriptor.ProviderId);
+        Assert.AreEqual((ModelProviderAvailability.Failed, "Timeout"), (hanging.Availability, hanging.ErrorCategory));
+        StringAssert.Contains(hanging.StatusMessage, TimeSpan.FromMilliseconds(200).ToString());
+    }
+
+    [TestMethod]
+    public async Task InitializeAllAsync_AProbeLongerThanTheDefaultTime_LetsTheNextProvidersStart()
+    {
+        // The probes of agents that take their time do not keep the providers after them waiting.
+        await using var registry = new ModelProviderRegistry();
+        // Named so that the slow one is prepared first: the providers are prepared in the order of their names.
+        var slowDescriptor = new ModelProviderDescriptor(new ModelProviderId("slow"), "A slow agent", "test");
+        var readyDescriptor = new ModelProviderDescriptor(new ModelProviderId("ready"), "B ready", "test");
+        var slow = new SlowProbeRuntime(slowDescriptor, Timeout.InfiniteTimeSpan, TimeSpan.FromSeconds(30));
+        var ready = new TestRuntime(readyDescriptor, [new AgentModelInfo("ready-model")]);
+        registry.RegisterOrReplace(slowDescriptor, () => slow);
+        registry.RegisterOrReplace(readyDescriptor, () => ready);
+        var service = new ModelProviderInitializationService(
+            registry,
+            new ModelProviderInitializationOptions { PreparationPlaceTime = TimeSpan.FromMilliseconds(50) });
+
+        var initialization = service.InitializeAllAsync(maxConcurrency: 1, CancellationToken.None);
+        await ready.ProbeCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.IsFalse(initialization.IsCompleted);
+        Assert.AreEqual(ModelProviderAvailability.Probing, service.CurrentStates.Single(state => state.ProviderId == slowDescriptor.ProviderId).Availability);
+        slow.Release.TrySetResult();
+        await initialization.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.AreEqual(ModelProviderAvailability.Ready, service.CurrentStates.Single(state => state.ProviderId == slowDescriptor.ProviderId).Availability);
+    }
+
+    private sealed class SlowProbeRuntime(ModelProviderDescriptor descriptor, TimeSpan probeDuration, TimeSpan probeTimeout)
+        : IModelProviderRuntime, IModelProviderProbeTimeout
+    {
+        public ModelProviderDescriptor Descriptor => descriptor;
+        public TimeSpan ProbeTimeout => probeTimeout;
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public async Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+        {
+            await Task.WhenAny(Task.Delay(probeDuration, cancellationToken), Release.Task).Unwrap();
+            return new() { ProviderId = descriptor.ProviderId, Availability = ModelProviderAvailability.Ready, Models = [new AgentModelInfo("model")] };
+        }
+        public IModelProviderTurnExecutor CreateTurnExecutor() => throw new NotSupportedException();
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [TestMethod]
     public async Task InitializeAllAsync_WithAConcurrency_PreparesThatManyProvidersAtATime()
     {
         await using var registry = new ModelProviderRegistry();

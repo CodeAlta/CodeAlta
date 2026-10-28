@@ -67,6 +67,19 @@ public interface IModelProviderRuntime : IAsyncDisposable
 }
 
 /// <summary>
+/// A provider runtime whose probe may take longer than the default time of a probe, such as one that starts an agent,
+/// which may be slow to answer or be downloaded first.
+/// </summary>
+public interface IModelProviderProbeTimeout
+{
+    /// <summary>
+    /// Gets how long a probe of the runtime may take once the runtime is created: its start and its probe. A time
+    /// shorter than the default time of a probe is not taken.
+    /// </summary>
+    TimeSpan ProbeTimeout { get; }
+}
+
+/// <summary>
 /// Represents a provider runtime that can be attached to the agent session runtime.
 /// </summary>
 public interface IAgentModelProviderRuntime : IModelProviderRuntime

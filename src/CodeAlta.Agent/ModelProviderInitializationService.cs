@@ -35,7 +35,7 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
     /// <param name="registry">The model provider registry.</param>
     /// <param name="options">Optional initialization options.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="registry" /> is <see langword="null" />.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">Thrown when the configured probe timeout is not positive.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the configured probe timeout or place time is not positive.</exception>
     public ModelProviderInitializationService(
         IModelProviderRegistry registry,
         ModelProviderInitializationOptions? options = null)
@@ -48,7 +48,7 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
     /// <param name="options">Optional initialization settings.</param>
     /// <param name="retentionAdmission">The host registry, installed before any provider preparation begins.</param>
     /// <exception cref="ArgumentNullException">The registry is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">The configured probe timeout is not positive.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The configured probe timeout or place time is not positive.</exception>
     public ModelProviderInitializationService(IModelProviderRegistry registry, ModelProviderInitializationOptions? options,
         ISessionRetentionAdmission? retentionAdmission)
     {
@@ -60,6 +60,11 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         if (_options.DefaultProbeTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(options), _options.DefaultProbeTimeout, "The default provider probe timeout must be positive.");
+        }
+
+        if (_options.PreparationPlaceTime <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), _options.PreparationPlaceTime, "The time a preparation keeps its place must be positive.");
         }
     }
 
@@ -133,14 +138,21 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
             .Select(async descriptor =>
             {
                 await slots.WaitAsync(cancellationToken).ConfigureAwait(false);
+                Task refresh;
                 try
                 {
-                    await StartRefreshAsync(descriptor, cancellationToken).ConfigureAwait(false);
+                    refresh = StartRefreshAsync(descriptor, cancellationToken);
+                    // A slow provider (an agent that takes its time to answer) gives its place to the next ones: it waits
+                    // more than it loads the computer.
+                    try { await refresh.WaitAsync(_options.PreparationPlaceTime, CancellationToken.None).ConfigureAwait(false); }
+                    catch (TimeoutException) { }
                 }
                 finally
                 {
                     slots.Release();
                 }
+
+                await refresh.ConfigureAwait(false);
             })
             .ToArray();
 
@@ -337,6 +349,7 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         IDisposable? preparation = null;
         IModelProviderRuntime? runtime = null;
         CancellationTokenSource? timeout = null;
+        var probeTimeout = _options.DefaultProbeTimeout;
         try
         {
             if (!descriptor.IsEnabled)
@@ -371,6 +384,11 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
             var acquisition = _registry.GetOrCreateRuntimeAsync(descriptor.ProviderId, timeout.Token).AsTask();
             original = acquisition;
             runtime = await acquisition.ConfigureAwait(false);
+            if (runtime is IModelProviderProbeTimeout { ProbeTimeout: var longer } && longer > probeTimeout)
+            {
+                probeTimeout = longer;
+                timeout.CancelAfter(longer);
+            }
             original = runtime.StartAsync(timeout.Token);
             await original.ConfigureAwait(false);
             var probing = runtime.ProbeAsync(timeout.Token);
@@ -404,7 +422,7 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         }
         catch (OperationCanceledException)
         {
-            PublishFailureState(descriptor, ModelProviderAvailability.Failed, $"Provider probe timed out after {_options.DefaultProbeTimeout}.", "Timeout");
+            PublishFailureState(descriptor, ModelProviderAvailability.Failed, $"Provider probe timed out after {probeTimeout}.", "Timeout");
         }
         catch (Exception ex)
         {

@@ -712,6 +712,24 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task Probe_OfAnAgentSlowerThanTheDefaultTimeOfAProbe_WaitsForIt()
+    {
+        // An agent slow to start on a computer, or downloaded first by npx, was cut at the default time of a probe: the
+        // provider failed with no word of the agent, and a download began again at each start (#252).
+        var agent = new AcpFakeAgent { StartDelay = TimeSpan.FromMilliseconds(500) };
+        await using var fixture = new Fixture(agent);
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(fixture.Runtime.Descriptor, () => fixture.Runtime);
+        var service = new ModelProviderInitializationService(registry, new ModelProviderInitializationOptions { DefaultProbeTimeout = TimeSpan.FromMilliseconds(100) });
+
+        await service.RefreshProviderAsync(fixture.Runtime.Descriptor.ProviderId);
+
+        var state = service.CurrentStates.Single();
+        Assert.AreEqual(ModelProviderAvailability.Ready, state.Availability, state.StatusMessage);
+        CollectionAssert.AreEqual(new[] { "fast", "smart" }, state.Models.Select(static model => model.Id).ToArray());
+    }
+
+    [TestMethod]
     public async Task Probe_ReadsTheEffortsOfEachModel_AndGivesTheAgentBackItsModel()
     {
         // The efforts of a model are known only once it is chosen: Copilot gives other ones to each model.
