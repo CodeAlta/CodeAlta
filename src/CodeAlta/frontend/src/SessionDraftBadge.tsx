@@ -5,7 +5,7 @@ import type { createDraftIndicators } from "./promptDraft";
 export type DraftIndicators = ReturnType<typeof createDraftIndicators>;
 
 /**
- * Whether a session shows the mark of an edited prompt. Each keystroke changes the indicators: the component
+ * Whether a session shows the mark of an edited prompt. The indicators change when a mark does: the component
  * that asks is rendered again only when its own answer changes, and nothing above it is.
  */
 export function useDraftIndicator(indicators: DraftIndicators | undefined, sessionId: string | null, selectedId: string | null): boolean {
