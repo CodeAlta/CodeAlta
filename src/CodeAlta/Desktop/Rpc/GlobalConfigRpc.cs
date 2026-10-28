@@ -88,7 +88,8 @@ internal sealed partial class GlobalConfigService
         ArgumentNullException.ThrowIfNull(request);
         if (request.Content is null || request.Content.Length > MaximumContentLength)
             return new(false, "The configuration exceeds the editor limit.", null, null);
-        var result = CodeAltaConfigStore.ValidateGlobalConfigContent(request.Content);
+        // The types of the running plugins (acp...) are known: only the providers of a type nothing knows are warned about.
+        var result = CodeAltaConfigStore.ValidateGlobalConfigContent(request.Content, sourcePath: null, type => PluginProviderTypes?.Find(type) is not null);
         return new(result.IsValid, Bound(result.Message), result.Line, result.Column) { Warning = Bound(result.Warning) };
     }
 

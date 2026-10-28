@@ -33,7 +33,7 @@ Most settings are files. Each page shows its paths, with **Edit in the code edit
 | **Plugins** | `~/.alta/plugins`, `.alta/plugins` of the project, and each source plugin |
 | **Appearance** | The folder of your color schemes |
 
-Opening `~/.alta/skills` or `~/.alta/plugins` lets you work on all of them at once. A file that does not exist yet has no button to open it. `config.toml` and `mcp.json` of `~/.alta` open alone in their tab.
+Opening `~/.alta/skills` or `~/.alta/plugins` lets you work on all of them at once. A file that does not exist yet says **Not created yet** beside its path, and has no button to open it: nothing of it applies until you create it. `config.toml` and `mcp.json` of `~/.alta` open alone in their tab.
 
 ## Appearance
 

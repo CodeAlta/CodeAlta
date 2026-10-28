@@ -56,6 +56,10 @@ test("the files of a page are listed with the scope they belong to, and one that
     assert.deepEqual(buttons(rows[1]), [translate(locale, "Edit in the code editor"), translate(locale, "Copy path")], rows[1]);
     assert.deepEqual(buttons(rows[2]), [translate(locale, "Copy path")], rows[2]);
     assert.deepEqual(buttons(rows[3]), [translate(locale, "Open in the code editor"), translate(locale, "Copy path"), translate(locale, "Reveal in File Explorer")], rows[3]);
+    // A file or a folder that is not there says so, beside its path.
+    const missing = `>${translate(locale, "Not created yet")}<`;
+    assert.ok(rows[1].includes(missing) && rows[2].includes(missing), html);
+    assert.ok(!rows[0].includes(missing) && !rows[3].includes(missing), html);
   }
   // A window that opens no editor still says where the files are.
   assert.deepEqual(buttons(render(createElement(SettingsFileLocations, { files: { ...files, open: undefined, locations: [location()] } }))), ["Copy path", "Reveal in File Explorer"]);

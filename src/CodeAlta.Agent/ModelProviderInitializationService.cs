@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Agent;
 
@@ -9,6 +10,9 @@ namespace CodeAlta.Agent;
 /// </summary>
 public sealed class ModelProviderInitializationService : IModelProviderInitializationService
 {
+    // A provider that fails says why in the log: the window names the reason, the log keeps what the provider said.
+    private const string LoggerName = "CodeAlta.App.ModelProviderInitialization";
+
     private readonly IModelProviderRegistry _registry;
     private readonly ModelProviderInitializationOptions _options;
     private readonly ISessionRetentionAdmission? _retentionAdmission;
@@ -452,9 +456,18 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
     private void PublishState(ModelProviderStateSnapshot state)
     {
         var key = ModelProviderId.NormalizeValue(state.ProviderId.Value);
+        ModelProviderStateSnapshot? previous;
         lock (_gate)
         {
+            _states.TryGetValue(key, out previous);
             _states[key] = state;
+        }
+
+        if (LogManager.IsInitialized && state.Availability is ModelProviderAvailability.Failed or ModelProviderAvailability.Unsupported
+            && (previous is null || previous.Availability != state.Availability || !string.Equals(previous.StatusMessage, state.StatusMessage, StringComparison.Ordinal)))
+        {
+            var category = state.ErrorCategory is { Length: > 0 } value ? $" ({value})" : string.Empty;
+            LogManager.GetLogger(LoggerName).Warn($"The provider {state.ProviderId.Value} is {state.Availability}{category}: {state.StatusMessage ?? "no message"}");
         }
 
         _changes.Writer.TryWrite(new ModelProviderStateChanged(state));

@@ -436,14 +436,29 @@ public sealed partial class CodeAltaConfigStore
     /// <param name="sourcePath">Optional source path used in diagnostics.</param>
     /// <returns>The validation result, including the first diagnostic location when available.</returns>
     public static CodeAltaConfigValidationResult ValidateGlobalConfigContent(string? content, string? sourcePath = null)
+        => ValidateGlobalConfigContent(content, sourcePath, isKnownProviderType: null);
+
+    /// <summary>
+    /// Validates global CodeAlta TOML configuration content without starting providers or sessions, knowing the provider
+    /// types the running plugins add (such as <c>acp</c>): only a provider of a type that neither this version nor a
+    /// plugin knows is warned about.
+    /// </summary>
+    /// <param name="content">The TOML content to validate.</param>
+    /// <param name="sourcePath">Optional source path used in diagnostics.</param>
+    /// <param name="isKnownProviderType">Says whether a type this version does not know is one a running plugin adds; null for none.</param>
+    /// <returns>The validation result, including the first diagnostic location when available.</returns>
+    public static CodeAltaConfigValidationResult ValidateGlobalConfigContent(string? content, string? sourcePath, Func<string, bool>? isKnownProviderType)
     {
         try
         {
             var document = ParseDocument(content ?? string.Empty, sourcePath);
             ValidateGlobalDocument(document);
-            return document.UnsupportedProviders.Count == 0
+            var unknown = isKnownProviderType is null
+                ? document.UnsupportedProviders
+                : [.. document.UnsupportedProviders.Where(provider => !isKnownProviderType(provider.ProviderType))];
+            return unknown.Count == 0
                 ? CodeAltaConfigValidationResult.Valid
-                : CodeAltaConfigValidationResult.Valid with { Warning = DescribeUnsupportedProviders(document.UnsupportedProviders) };
+                : CodeAltaConfigValidationResult.Valid with { Warning = DescribeUnsupportedProviders(unknown) };
         }
         catch (Exception ex) when (IsConfigLoadException(ex))
         {

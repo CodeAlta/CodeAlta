@@ -20,6 +20,33 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task Validate_KnowsTheProviderTypesOfTheRunningPlugins()
+    {
+        const string content = """
+[providers.cursor]
+type = "fake-agent"
+command = "cursor-agent"
+
+[providers.future]
+type = "future-provider"
+""";
+        await using var endpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints();
+        var types = new CodeAlta.Hosting.PluginModelProviderTypes(endpoints);
+        types.Attach(static () => [new CodeAlta.Plugins.Abstractions.PluginModelProviderContribution
+        {
+            ProviderType = "fake-agent", DisplayName = "Fake agent", CreateRuntime = static _ => throw new NotSupportedException("Not created in this test."),
+        }]);
+
+        // The type a plugin adds is not one of a newer version: only the type nothing knows is warned about.
+        var result = new GlobalConfigService { PluginProviderTypes = types }.Validate(new(content));
+        Assert.IsTrue(result.Valid);
+        StringAssert.Contains(result.Warning, "providers.future");
+        Assert.IsFalse(result.Warning!.Contains("cursor", StringComparison.Ordinal), result.Warning);
+        // Without the plugins, the type is unknown too.
+        StringAssert.Contains(new GlobalConfigService().Validate(new(content)).Warning, "providers.cursor");
+    }
+
+    [TestMethod]
     public async Task Read_ReturnsTheTemplateForAMissingFileAndRefusesAnotherEpoch()
     {
         await using var fixture = new Fixture();

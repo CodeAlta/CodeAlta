@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigProvider } from "#neoastra";
-import { modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
+import { modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
 
 const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
@@ -143,4 +143,22 @@ test("the folder of the account is read, checked and sent for a provider that ru
   for (const folder of ["~", "~/x", "~\\x", "/home/me/.claude", "C:\\Users\\me\\.claude", "D:/claude"]) assert.equal(validateProviderForm({ ...form, configDir: folder }, [], "local"), null, folder);
   assert.equal(validateProviderForm({ ...form, configDir: ".claude-work" }, [], "local"), "A folder is a full path or starts with ~.");
   assert.equal(validateProviderForm({ ...form, type: "anthropic", configDir: ".claude-work" }, [], "local"), null, "another type ignores it");
+});
+
+test("the form of a provider that is not ready says why above its fields, and what to do", () => {
+  const state = (availability: string, reason: string | null = null) => ({ availability, reason });
+  // An agent that waits for a sign-in is not broken: the form asks for the sign-in below it.
+  assert.deepEqual(providerStateProblem(state("Failed", "acp-signed-out"), true),
+    { key: "{provider} is not signed in: sign in below, then test it again.", intent: "warning", signIn: true });
+  assert.equal(providerStateProblem(state("Failed", "claude-code-signed-out"), true)?.intent, "warning");
+  assert.deepEqual(providerStateProblem(state("Failed", "acp-not-installed"), true),
+    { key: "The command of {provider} was not found. Install the agent, or the tool that runs it, then test again.", intent: "danger", signIn: false });
+  // A failure the window has no words for points to the log, which keeps what the provider said.
+  assert.equal(providerStateProblem(state("Failed"), true)?.key, "{provider} did not start. Test it again; Settings > Application Logs says why.");
+  assert.equal(providerStateProblem(state("Unsupported"), true)?.intent, "danger");
+  // A provider that works, is disabled, or was not tried says nothing.
+  assert.equal(providerStateProblem(state("Ready"), true), null);
+  assert.equal(providerStateProblem(state("Failed"), false), null);
+  assert.equal(providerStateProblem(state("Probing"), true), null);
+  assert.equal(providerStateProblem(undefined, true), null);
 });

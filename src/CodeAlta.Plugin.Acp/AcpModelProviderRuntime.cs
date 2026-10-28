@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using CodeAlta.Acp;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
@@ -201,7 +202,7 @@ internal sealed record AcpInspection(
     string? ErrorCategory);
 
 /// <summary>Starts an agent to read its capabilities and its models, in a session it closes.</summary>
-internal static class AcpAgentInspector
+internal static partial class AcpAgentInspector
 {
     public const string NotInstalledCategory = "acp-not-installed";
     public const string SignedOutCategory = "acp-signed-out";
@@ -209,6 +210,14 @@ internal static class AcpAgentInspector
 
     public static Task<AcpInspection> InspectAsync(AcpRuntimeOptions options, CancellationToken cancellationToken)
         => InspectAsync(options, known: null, cancellationToken);
+
+    /// <summary>Whether the text of a failure of an agent says that it waits for a sign-in.</summary>
+    /// <param name="message">The text of the failure.</param>
+    internal static bool AsksForSignIn(string? message) => !string.IsNullOrWhiteSpace(message) && SignInWords().IsMatch(message);
+
+    [GeneratedRegex(@"\b(auth(entication|orization)?[\s_-]+required|not[\s_-]+(logged|signed)[\s_-]+in|unauthenticated|unauthori[sz]ed|(please|must|need(s)?[\s_-]+to)[\s_-]+(log|sign)[\s_-]*in|login[\s_-]+required|no[\s_-]+(api[\s_-]+key|credentials))\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SignInWords();
 
     /// <summary>Inspects the agent; <paramref name="known"/> are the models learned before, whose efforts are learned last.</summary>
     public static async Task<AcpInspection> InspectAsync(AcpRuntimeOptions options, IReadOnlyList<AcpListedModel>? known, CancellationToken cancellationToken)
@@ -283,7 +292,12 @@ internal static class AcpAgentInspector
         }
         catch (Exception ex) when (ex is AcpConnectionClosedException or TimeoutException or IOException or AcpJsonRpcException or System.ComponentModel.Win32Exception or InvalidOperationException && !cancellationToken.IsCancellationRequested)
         {
-            return new AcpInspection(options.Profile.Capabilities, [], null, null, $"{options.AgentName} could not be started. {ex.Message}", UnavailableCategory);
+            // An agent that wants a sign-in does not always answer auth_required: some say it in the text of another
+            // error, or write it as they exit. Such an agent is not broken, it waits for a sign-in.
+            return AsksForSignIn(ex.Message)
+                ? new AcpInspection(options.Profile.Capabilities, [], null, null,
+                    $"{options.AgentName} is not signed in. Sign in from the form of the provider, then test it again. ({ex.Message})", SignedOutCategory)
+                : new AcpInspection(options.Profile.Capabilities, [], null, null, $"{options.AgentName} could not be started. {ex.Message}", UnavailableCategory);
         }
         finally
         {

@@ -40,6 +40,8 @@ export function SettingsFileLocation({ path, label, missing = false, readOnly = 
   return <span className="settings-file-location" data-missing={missing ? "true" : undefined}>
     {label !== undefined && <span className="settings-file-label">{label}</span>}
     <code title={path}><bdi>{path}</bdi></code>
+    {/* A file a page would read when it is there: it is not yet, and nothing of it applies. */}
+    {missing && <Tag minimal round className="settings-file-missing" title={t("It does not exist yet: nothing in it applies.")}>{t("Not created yet")}</Tag>}
     <span className="settings-file-actions">
       {onOpen && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />} disabled={disabled}
         aria-label={openLabel ?? `${open}: ${path}`} title={open} onClick={onOpen} />}
