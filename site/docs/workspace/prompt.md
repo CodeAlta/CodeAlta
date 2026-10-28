@@ -191,7 +191,7 @@ The line under the title gives the duration, the exit code and the lines changed
 The agent gets a bounded part of a long result, which stays in every later request:
 
 - **a command** that prints more than 30,000 characters: the start and the end of its output, and the path of a file of the session that holds all of it, for the agent to read;
-- **a file read**: lines cut at 2,000 characters, and at most 100,000 characters, with the line to read on from;
+- **a file read**: lines cut at 2,000 characters, and at most 40,000 characters, with the line to read on from; a read of lines the agent already has, of a file unchanged since, gets a short note that points to that earlier read, until the conversation is compacted;
 - **a search**: matching lines cut at 500 characters around the match, and at most 30,000 characters.
 
 The window of a command still shows you its whole output.

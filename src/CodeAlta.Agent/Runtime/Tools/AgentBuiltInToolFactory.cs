@@ -17,7 +17,7 @@ namespace CodeAlta.Agent.Runtime.Tools;
 /// <summary>
 /// Creates the default non-provider built-in tools used by local raw-API sessions.
 /// </summary>
-public static class AgentBuiltInToolFactory
+public static partial class AgentBuiltInToolFactory
 {
     private static readonly FileTreeWalker FileTreeWalker = new();
     private static readonly Lazy<string> WindowsShellFileName = new(
@@ -355,6 +355,16 @@ public static class AgentBuiltInToolFactory
             Structured = CreateReadFileValue(resolvedPath, startLine, startLine + lineCount - 1, raw.ToString(), more),
         });
     }
+
+    // The line to read on from that the note of a read stopped at its limit of characters names, or null without the note.
+    internal static int? ReadFileStoppedAt(string text)
+        => ReadFileStopRegex().Match(text) is { Success: true } match
+           && int.TryParse(match.Groups[1].ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out var next)
+            ? next
+            : null;
+
+    [GeneratedRegex(@"\[read_file stopped at [\d,]+ characters: read on with offset=(\d+)\.\]\z")]
+    private static partial Regex ReadFileStopRegex();
 
     private static string DescribeReadFileCharacterLimits(AgentBuiltInToolOptions options)
         => (options.MaxReadFileLineCharacters > 0 ? FormattableString.Invariant($" Lines longer than {options.MaxReadFileLineCharacters} characters are cut.") : string.Empty)
