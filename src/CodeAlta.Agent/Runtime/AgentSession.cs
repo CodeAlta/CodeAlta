@@ -1572,15 +1572,20 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         => CompactWithOutcomeAsync(cancellationToken);
 
     /// <inheritdoc />
-    public async Task<AgentCompactionOutcome?> CompactWithOutcomeAsync(CancellationToken cancellationToken = default)
+    public Task<AgentCompactionOutcome?> CompactWithOutcomeAsync(CancellationToken cancellationToken = default)
+        => CompactWithOutcomeAsync(AgentCompactionOptions.Default, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<AgentCompactionOutcome?> CompactWithOutcomeAsync(AgentCompactionOptions options, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(options);
         using var operation = EnterOperation();
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await CompactGateHeldAsync(instructions: null, cancellationToken).ConfigureAwait(false);
+            return await CompactGateHeldAsync(options.Instructions, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

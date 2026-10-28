@@ -458,7 +458,7 @@ internal sealed class PluginHostBridge
                 .Where(static item => !string.IsNullOrWhiteSpace(item))!);
         return new PluginCompactionAugmentation
         {
-            AdditionalDeveloperInstructions = string.IsNullOrWhiteSpace(instructionText) ? null : instructionText,
+            Instructions = string.IsNullOrWhiteSpace(instructionText) ? null : instructionText,
         };
     }
 
@@ -653,5 +653,6 @@ internal sealed record PluginCompactionAugmentation
 {
     public string? CancelReason { get; init; }
 
-    public string? AdditionalDeveloperInstructions { get; init; }
+    // Goes with the compaction (AgentCompactionOptions), never into the instructions of the session.
+    public string? Instructions { get; init; }
 }

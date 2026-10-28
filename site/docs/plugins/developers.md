@@ -309,7 +309,7 @@ public sealed class PwshCheckPlugin : PluginBase
 `GetCompactionContributions()` returns a `PluginCompactionContribution` whose hooks run when the user compacts a session (the **Compact** button or command):
 
 - `BeforeCompaction` runs first. `PluginBeforeCompactionResult.CancelWithReason("…")` stops the compaction. In CodeAlta Desktop the reason is in the timeline of the session and the prompt bar says that a plugin cancelled it; CodeAlta TUI shows it in its status line.
-- `Instructions` returns text for the summary of the compaction, such as "Keep the list of open tasks". In CodeAlta Desktop the summary request follows it; with Claude Code or an ACP agent, the text goes after its `/compact` command.
+- `Instructions` returns text for the summary of the compaction, such as "Keep the list of open tasks". The summary request follows it, in CodeAlta Desktop and CodeAlta TUI; with Claude Code or an ACP agent, the text goes after its `/compact` command. It does not change the instructions of the session.
 - `AfterCompaction` runs once the compaction ended: `context.Succeeded`, and `context.Summary`, the summary CodeAlta wrote (null when the agent compacted its own context) or the message of a failure.
 
 The compactions a session makes by itself when its context is full, during a run, do not call these hooks.

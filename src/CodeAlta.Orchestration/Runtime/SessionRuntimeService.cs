@@ -4228,15 +4228,35 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         SessionViewDescriptor session,
         SessionExecutionOptions options,
         CancellationToken cancellationToken = default)
-        => await AdmitAsync(() => CompactOwnedBodyAsync(session, options, cancellationToken), cancellationToken)
+        => await CompactAsync(session, options, AgentCompactionOptions.Default, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Triggers a manual compaction for a session coordinator session, with options, and returns its outcome.
+    /// </summary>
+    /// <param name="session">The session to compact.</param>
+    /// <param name="options">Execution options used to resume the coordinator session when it is not already active.</param>
+    /// <param name="compaction">What the compaction is given besides the conversation, such as instructions for its summary.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The outcome the session reported, with the summary of a compaction it made itself; <see langword="null"/> when it reports none.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/>, <paramref name="options"/> or <paramref name="compaction"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired or has been retired, or compaction admission failed.</exception>
+    /// <exception cref="NotSupportedException">The session cannot follow the instructions of <paramref name="compaction"/>.</exception>
+    public async Task<AgentCompactionOutcome?> CompactAsync(
+        SessionViewDescriptor session,
+        SessionExecutionOptions options,
+        AgentCompactionOptions compaction,
+        CancellationToken cancellationToken = default)
+        => await AdmitAsync(() => CompactOwnedBodyAsync(session, options, compaction, cancellationToken), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
 
-    private async Task CompactOwnedBodyAsync(SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken cancellationToken)
+    private async Task<AgentCompactionOutcome?> CompactOwnedBodyAsync(SessionViewDescriptor session, SessionExecutionOptions options,
+        AgentCompactionOptions compaction, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(compaction);
 
-        await WithRetentionWorkAsync(async () =>
+        return await WithRetentionWorkAsync(async () =>
         {
         ReserveSessionIdentity(session);
         GetActorForWork(session.SessionId);
@@ -4261,6 +4281,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         OwnedProviderEventForwarding.Use? handleUse = null;
+        AgentCompactionOutcome? outcome = null;
         try
         {
             while (handleUse is null)
@@ -4277,7 +4298,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 }, CancellationToken.None).ConfigureAwait(false);
                 if (handleUse is null) continue;
                 using var execution = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, entry.Attachment.Cancellation.Token);
-                var outcome = await AwaitRetentionAwareAsync(_agentHub.CompactAsync(entry.SessionHandleId, execution.Token)).ConfigureAwait(false);
+                outcome = await AwaitRetentionAwareAsync(_agentHub.CompactAsync(entry.SessionHandleId, compaction, execution.Token)).ConfigureAwait(false);
                 if (outcome is not null && ShouldPublishHostCompactionOutcome(outcome))
                 {
                     _events.TryPublish(new SessionHostEvent(
@@ -4294,7 +4315,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             throw;
         }
         finally { handleUse?.Dispose(); }
-        return true;
+        return outcome;
         }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);
     }
 
