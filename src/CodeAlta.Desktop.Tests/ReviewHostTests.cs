@@ -280,10 +280,13 @@ public sealed class ReviewHostTests
         {
             try
             {
+                // Git marks its objects read-only.
+                foreach (var file in Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
                 Directory.Delete(_root, recursive: true);
             }
-            catch (IOException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
+                // Best-effort cleanup of a temporary directory.
             }
 
             return ValueTask.CompletedTask;
