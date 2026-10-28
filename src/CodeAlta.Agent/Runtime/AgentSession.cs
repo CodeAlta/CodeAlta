@@ -721,15 +721,15 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             if (_options.BuiltInToolRouter is { } router
                 && await router.RefuseRunAsync(providerToolHost is not null, linkedCts.Token).ConfigureAwait(false) is { } refusal)
                 throw new InvalidOperationException(refusal);
-            var allTools = WithoutDisabledTools(AppendSendTools(BuildAvailableTools(permissionRequestHandler,
-                userInputRequestHandler, options.EnableUserInputTool), options.AdditionalTools));
+            var allTools = Intercepted(WithoutDisabledTools(AppendSendTools(BuildAvailableTools(permissionRequestHandler,
+                userInputRequestHandler, options.EnableUserInputTool), options.AdditionalTools)));
             providerToolHost?.AttachRun(new AgentProviderRunContext(SessionId, runId, permissionRequestHandler,
                 options.EnableUserInputTool ? userInputRequestHandler : null, options.IsProviderInitiated,
                 options.OnConversationHeld ?? _options.OnConversationHeld));
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
             var runTools = new AgentRunTools(toolMap.Keys, allTools.Where(static tool => tool.Spec.Deferred).Select(static tool => tool.Spec));
-            var toolRun = new ToolCallRun(runId, fileChangeTracker, instructionBundle, modelInfo, runTools) { Tools = toolMap };
+            var toolRun = new ToolCallRun(runId, fileChangeTracker, instructionBundle, modelInfo, runTools) { Tools = toolMap, Intercept = InterceptedTool };
             using var endToolRun = new ToolRunEnd(toolRun);
 
             while (true)
@@ -740,7 +740,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 {
                     // A tool registered again under a name of the run (a plugin that was built again) takes its place.
                     var names = addedTools.Select(static tool => AgentToolBridge.GetRegisteredToolName(tool.Spec.Name)).ToHashSet(StringComparer.Ordinal);
-                    allTools = [.. allTools.Where(tool => !names.Contains(AgentToolBridge.GetRegisteredToolName(tool.Spec.Name))), .. WithoutDisabledTools(addedTools)];
+                    allTools = [.. allTools.Where(tool => !names.Contains(AgentToolBridge.GetRegisteredToolName(tool.Spec.Name))), .. Intercepted(WithoutDisabledTools(addedTools))];
                     toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
                     toolRun.Tools = toolMap;
                 }
@@ -868,9 +868,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         /// <summary>Gets the gate of <see cref="FileChanges"/>, which the calls of the run and the calls of their scripts share.</summary>
         public SemaphoreSlim FileChangesGate { get; } = new(1, 1);
 
+        /// <summary>Gets what gives a tool registered during the run the tool hooks of the session.</summary>
+        public Func<AgentToolDefinition, AgentToolDefinition> Intercept { get; init; } = static tool => tool;
+
         /// <summary>Finds a tool of the run by its name, also one a call registered since the last model request.</summary>
         public AgentToolDefinition? Resolve(string toolName)
-            => Tools.TryGetValue(AgentToolBridge.GetRegisteredToolName(toolName), out var tool) ? tool : RunTools.FindPending(toolName);
+            => Tools.TryGetValue(AgentToolBridge.GetRegisteredToolName(toolName), out var tool) ? tool
+                : RunTools.FindPending(toolName) is { } pending ? Intercept(pending) : null;
     }
 
     // Runs the tool calls of an assistant message. The session runs its tools one after the other, in their order.
@@ -1116,10 +1120,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 run.Instructions.DeveloperInstructions,
                 run.ModelInfo);
             // The view of an MCP App is recorded once, with the end of the call: the conversation and the output do not carry it.
+            // Nor do the details of the tool hooks, which are for the host.
             var withoutApp = result.App is null ? result : result with { App = null };
             var toolMessage = new AgentConversationMessage(
                 AgentConversationRole.Tool,
-                [new AgentMessagePart.ToolResult(toolCall.CallId, modelVisibleResult.App is null ? modelVisibleResult : modelVisibleResult with { App = null })]);
+                [new AgentMessagePart.ToolResult(toolCall.CallId, modelVisibleResult.App is null && modelVisibleResult.Details is null ? modelVisibleResult : modelVisibleResult with { App = null, Details = null })]);
             _conversation.Add(toolMessage);
 
             var completed = new AgentActivityEvent(
@@ -1273,7 +1278,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                             var delta = new AgentContentDeltaEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentContentKind.ToolOutput,
                                 outputContentId, callId, update.Delta, update.Details);
                             await AppendEventsAsync([delta], AgentEventPersistenceMode.TransientOnly, progressToken).ConfigureAwait(false);
-                        }) { RunTools = run.RunTools },
+                        }) { RunTools = run.RunTools, ParentToolCallId = parent.CallId },
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -2122,6 +2127,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             : builtIns;
     }
 
+    // Every tool the session runs goes through the tool hooks of the session, before its handler: the guards, the permission
+    // prompt and the sandbox of a tool are in its handler, so they apply to the arguments the hooks leave.
+    private IReadOnlyList<AgentToolDefinition> Intercepted(IReadOnlyList<AgentToolDefinition> tools)
+        => _options.ToolInterceptor is null ? tools : [.. tools.Select(InterceptedTool)];
+
+    private AgentToolDefinition InterceptedTool(AgentToolDefinition tool)
+        => _options.ToolInterceptor is { } interceptor ? interceptor.Intercept(tool, _summary.ExecutionDirectory) : tool;
+
     // The tools the patterns of the session turn off are never offered, nor run when a model names them anyway.
     private IReadOnlyList<AgentToolDefinition> WithoutDisabledTools(IReadOnlyList<AgentToolDefinition> tools)
         => _options.DisabledToolPatterns is { Count: > 0 } patterns && tools.Any(tool => AgentToolPatterns.IsDisabled(tool.Spec.Name, patterns))
@@ -2210,6 +2223,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DisabledTools = _options.DisabledBuiltInTools,
             WriteGuard = _options.WriteGuard,
             CommandGuard = _options.CommandGuard,
+            ToolInterceptor = _options.ToolInterceptor,
             // A provider that runs its own tools starts its process where the router of the session says: its sandbox.
             ProcessHost = _options.BuiltInToolRouter?.ProcessHost,
             Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo, _pdfInputs).ToArray(),
@@ -4705,6 +4719,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
         writer.WriteEndArray();
     }
+
+    internal static IReadOnlyList<string> GetModifiedFiles(AgentMessagePart.ToolCall toolCall, string? workingDirectory)
+        => GetToolFileActivity(toolCall, workingDirectory).ModifiedFiles;
 
     private static ToolFileActivity GetToolFileActivity(AgentMessagePart.ToolCall toolCall, string? workingDirectory)
     {

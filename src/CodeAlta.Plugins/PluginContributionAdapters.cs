@@ -200,7 +200,7 @@ public sealed record PluginStartupAdapterResult
 /// <summary>
 /// Adapts registered plugin contributions and active-plugin callbacks into host-callable runtime operations.
 /// </summary>
-public sealed class PluginContributionAdapterService
+public sealed partial class PluginContributionAdapterService
 {
     private readonly PluginContributionRegistry _registry;
     private readonly PluginRuntimeDiagnosticStore? _diagnostics;
@@ -456,7 +456,11 @@ public sealed class PluginContributionAdapterService
                 prompts.AddRange(result.TemporaryPromptContributions);
                 preferredTools.AddRange(result.PreferredToolNames);
                 // A plugin tool runs here, outside the sandbox of a sandboxed session: it gets those of a plugin that chose them for it.
-                if (template.SandboxMcpServers is null || result.AdditionalToolsFollowSandbox) additionalTools.AddRange(result.AdditionalTools);
+                if (template.SandboxMcpServers is null || result.AdditionalToolsFollowSandbox)
+                {
+                    additionalTools.AddRange(result.AdditionalTools);
+                    RecordToolPlugin(active, result.AdditionalTools);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -618,71 +622,6 @@ public sealed class PluginContributionAdapterService
         }
 
         return new PluginStartupAdapterResult { Resources = resources, Diagnostics = diagnostics };
-    }
-
-    /// <summary>Runs tool-call interception callbacks until one blocks or replaces arguments.</summary>
-    public async ValueTask<(PluginToolCallResult? Result, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> OnToolCallAsync(
-        IReadOnlyList<ActivePluginInstance> activePlugins,
-        PluginToolCallContext template,
-        PluginAdapterOperationOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(activePlugins);
-        ArgumentNullException.ThrowIfNull(template);
-        var diagnostics = new List<PluginRuntimeDiagnostic>();
-        foreach (var active in GetApplicableActivePlugins(activePlugins, options))
-        {
-            var context = CreateToolCallContext(active, template, options, cancellationToken);
-            try
-            {
-                var result = active.Instance is null ? null : await active.Instance.OnToolCallAsync(context, cancellationToken).ConfigureAwait(false);
-                context.Invalidate();
-                if (result is not null && result.Disposition != PluginToolCallDisposition.Allow)
-                {
-                    return (result, diagnostics);
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                LogCallbackFailure(active, "Tool-call callback failed.", ex);
-                diagnostics.Add(AddDiagnostic(CreateCallbackDiagnostic(active, PluginRuntimeDiagnosticSource.Callback, "Tool-call callback failed.", ex)));
-            }
-        }
-
-        return (null, diagnostics);
-    }
-
-    /// <summary>Runs tool-result interception callbacks and returns the last transformation.</summary>
-    public async ValueTask<(PluginToolResult? Result, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> OnToolResultAsync(
-        IReadOnlyList<ActivePluginInstance> activePlugins,
-        PluginToolResultContext template,
-        PluginAdapterOperationOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(activePlugins);
-        ArgumentNullException.ThrowIfNull(template);
-        var diagnostics = new List<PluginRuntimeDiagnostic>();
-        PluginToolResult? current = null;
-        foreach (var active in GetApplicableActivePlugins(activePlugins, options))
-        {
-            var context = CreateToolResultContext(active, template, options, cancellationToken);
-            try
-            {
-                var result = active.Instance is null ? null : await active.Instance.OnToolResultAsync(context, cancellationToken).ConfigureAwait(false);
-                context.Invalidate();
-                if (result is not null && result.Disposition != PluginToolResultDisposition.Unchanged)
-                {
-                    current = result;
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                LogCallbackFailure(active, "Tool-result callback failed.", ex);
-                diagnostics.Add(AddDiagnostic(CreateCallbackDiagnostic(active, PluginRuntimeDiagnosticSource.Callback, "Tool-result callback failed.", ex)));
-            }
-        }
-
-        return (current, diagnostics);
     }
 
     /// <summary>Broadcasts a normalized agent event to applicable active plugins.</summary>
@@ -1502,45 +1441,6 @@ public sealed class PluginContributionAdapterService
             LoadedTools = template.LoadedTools,
             ProviderDefersTools = template.ProviderDefersTools,
             SandboxMcpServers = template.SandboxMcpServers,
-            CancellationToken = cancellationToken,
-        };
-
-    private static PluginToolCallContext CreateToolCallContext(ActivePluginInstance active, PluginToolCallContext template, PluginAdapterOperationOptions? options, CancellationToken cancellationToken)
-        => new()
-        {
-            Plugin = active.Descriptor,
-            Services = active.RuntimeContext.Services,
-            Scope = active.RuntimeContext.Scope,
-            ScopeProjectId = active.RuntimeContext.ScopeProjectId,
-            ScopeProjectPath = active.RuntimeContext.ScopeProjectPath,
-            ProjectId = options?.ProjectId ?? template.ProjectId,
-            ProjectPath = options?.ProjectPath ?? template.ProjectPath,
-            SessionId = options?.SessionId ?? template.SessionId,
-            SpaceId = options?.SpaceId ?? template.SpaceId,
-            RunId = options?.RunId ?? template.RunId,
-            ProviderId = options?.ProviderId ?? template.ProviderId,
-            Model = options?.Model ?? template.Model,
-            Invocation = template.Invocation,
-            CancellationToken = cancellationToken,
-        };
-
-    private static PluginToolResultContext CreateToolResultContext(ActivePluginInstance active, PluginToolResultContext template, PluginAdapterOperationOptions? options, CancellationToken cancellationToken)
-        => new()
-        {
-            Plugin = active.Descriptor,
-            Services = active.RuntimeContext.Services,
-            Scope = active.RuntimeContext.Scope,
-            ScopeProjectId = active.RuntimeContext.ScopeProjectId,
-            ScopeProjectPath = active.RuntimeContext.ScopeProjectPath,
-            ProjectId = options?.ProjectId ?? template.ProjectId,
-            ProjectPath = options?.ProjectPath ?? template.ProjectPath,
-            SessionId = options?.SessionId ?? template.SessionId,
-            SpaceId = options?.SpaceId ?? template.SpaceId,
-            RunId = options?.RunId ?? template.RunId,
-            ProviderId = options?.ProviderId ?? template.ProviderId,
-            Model = options?.Model ?? template.Model,
-            Invocation = template.Invocation,
-            Result = template.Result,
             CancellationToken = cancellationToken,
         };
 

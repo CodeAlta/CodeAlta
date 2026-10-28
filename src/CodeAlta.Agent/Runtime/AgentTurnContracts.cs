@@ -438,6 +438,14 @@ public sealed record AgentTurnRequest
     public CodeAlta.Agent.Runtime.Tools.AgentCommandGuard? CommandGuard { get; init; }
 
     /// <summary>
+    /// Gets or initializes the hooks of the tool calls of the session, for a provider that runs its own tools and asks
+    /// CodeAlta before them: it calls <see cref="CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor.BeforeToolCallAsync"/>
+    /// with what it can do there. The tools of the session in <see cref="Tools"/> already run their hooks.
+    /// <see langword="null"/> for none.
+    /// </summary>
+    public CodeAlta.Agent.Runtime.Tools.AgentToolInterceptor? ToolInterceptor { get; init; }
+
+    /// <summary>
     /// Gets or initializes the maximum number of output tokens the provider should generate when supported.
     /// </summary>
     public int? MaxOutputTokens { get; init; }

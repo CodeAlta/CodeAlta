@@ -188,6 +188,12 @@ public sealed record AgentToolInvocation(
     /// </summary>
     [JsonIgnore]
     public IAgentRunToolInvoker? Tools { get; init; }
+
+    /// <summary>
+    /// Gets the tool call whose script of Code Mode makes this call, or <see langword="null"/> for a call of the model.
+    /// </summary>
+    [JsonIgnore]
+    public string? ParentToolCallId { get; init; }
 }
 
 /// <summary>
@@ -249,6 +255,14 @@ public sealed record AgentToolResult(
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Display { get; init; }
+
+    /// <summary>
+    /// Gets structured details the tool hooks attached to the result for the host (a JSON object with one property per
+    /// plugin that attached some), or null. They are recorded with the call, where timeline cards and event observers read
+    /// them; the model is never sent them.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Details { get; init; }
 }
 
 /// <summary>

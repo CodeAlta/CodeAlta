@@ -8,7 +8,7 @@ namespace CodeAlta.Orchestration.Runtime.Plugins;
 /// <summary>
 /// Headless bridge that exposes plugin runtime contributions to orchestration pipelines.
 /// </summary>
-public sealed class PluginOrchestrationBridge
+public sealed partial class PluginOrchestrationBridge
 {
     private static readonly AsyncLocal<PluginAdapterOperationOptions?> ToolOperation = new();
     private readonly PluginContributionAdapterService _adapter;
@@ -124,9 +124,9 @@ public sealed class PluginOrchestrationBridge
         => _adapter.GetAgentTools(MarkHeadless(options));
 
     /// <summary>
-    /// Returns the agent tools that plugins contribute to a scope, as a run gets them: each one runs the tool call
-    /// hooks of the plugins. A turn that is running registers them to use, at once, the tools of a plugin that
-    /// was just started or built again.
+    /// Returns the agent tools that plugins contribute to a scope, as a run gets them: each one runs the code of the
+    /// plugin as it is when it is called. A turn that is running registers them to use, at once, the tools of a plugin
+    /// that was just started or built again.
     /// </summary>
     /// <param name="options">Operation scope options.</param>
     /// <param name="pluginRuntimeKeys">The plugins whose tools are returned; null for those of every plugin.</param>
@@ -507,27 +507,8 @@ public sealed class PluginOrchestrationBridge
                     return new AgentToolResult(false, [new AgentToolResultItem.Text(refused)], refused);
                 }
 
-                var activePlugins = _getActivePlugins();
-                if (activePlugins.Count == 0)
-                {
-                    return await definition.Handler(invocation, cancellationToken).ConfigureAwait(false);
-                }
-
-                var seed = activePlugins[0];
-                var call = await _adapter.OnToolCallAsync(activePlugins, new PluginToolCallContext { Plugin = seed.Descriptor, Services = seed.RuntimeContext.Services, Invocation = invocation }, options, cancellationToken).ConfigureAwait(false);
-                if (call.Result?.Disposition == PluginToolCallDisposition.Block)
-                {
-                    return new AgentToolResult(false, [new AgentToolResultItem.Text(call.Result.BlockReason ?? "Plugin blocked tool call.")], call.Result.BlockReason ?? "Plugin blocked tool call.");
-                }
-
-                var effectiveInvocation = call.Result?.Disposition == PluginToolCallDisposition.ReplaceArguments && call.Result.ReplacementArguments is { } replacement
-                    ? invocation with { Arguments = replacement }
-                    : invocation;
-                var result = await definition.Handler(effectiveInvocation, cancellationToken).ConfigureAwait(false);
-                var toolResult = await _adapter.OnToolResultAsync(activePlugins, new PluginToolResultContext { Plugin = seed.Descriptor, Services = seed.RuntimeContext.Services, Invocation = effectiveInvocation, Result = result }, options, cancellationToken).ConfigureAwait(false);
-                return toolResult.Result?.Disposition == PluginToolResultDisposition.Replace && toolResult.Result.ReplacementResult is not null
-                    ? toolResult.Result.ReplacementResult
-                    : result;
+                // The tool hooks of the plugins ran before, as for every tool of the session (see CreateToolInterceptor).
+                return await definition.Handler(invocation, cancellationToken).ConfigureAwait(false);
             },
         };
     }

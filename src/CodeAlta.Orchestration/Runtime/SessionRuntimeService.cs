@@ -2196,6 +2196,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         var ownTitleMode = AgentSessionTitles.ParseMode(startNewSession ? session.TitleMode : savedLocalState?.TitleMode);
         var titleMode = ownTitleMode ?? _configStore.LoadGlobalSessionTitleMode();
+        var toolInterceptor = await CreateToolInterceptorAsync(session, project, options.WorkingDirectory, cancellationToken).ConfigureAwait(false);
         var sessionOptions = new AgentSessionResumeOptions
         {
             SessionId = requestedSessionId,
@@ -2235,6 +2236,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             DisabledToolPatterns = toolPatterns,
             WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree, options.ProjectRoots),
             CommandGuard = CreateCommandGuard(session.SessionId),
+            ToolInterceptor = toolInterceptor,
             // Where its built-in tools run: in the worker of its sandbox while it is sandboxed, read at each call.
             BuiltInToolRouter = CreateSandboxToolRouter(session.SessionId, options.ProviderKey ?? session.ResolvedProviderKey, options.ProjectRoots),
             OnPermissionRequest = options.OnPermissionRequest,
