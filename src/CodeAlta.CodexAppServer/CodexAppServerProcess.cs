@@ -227,10 +227,10 @@ public sealed class CodexAppServerProcess : IAsyncDisposable
 
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+            // The task of the exit reads its code from the process: it ends before the process is disposed.
+            await Exited.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException)
+        catch (TimeoutException)
         {
             _logger?.Warn("The Codex app-server did not exit in time after it was killed.");
         }
@@ -238,10 +238,19 @@ public sealed class CodexAppServerProcess : IAsyncDisposable
         process.Dispose();
     }
 
+    // The exit code of the process; -1 when it was disposed before its code could be read (it did not exit in time
+    // after it was killed): nothing waits on this task to see it fail.
     private static async Task<int> WaitForExitAsync(Process process)
     {
-        await process.WaitForExitAsync().ConfigureAwait(false);
-        return process.ExitCode;
+        try
+        {
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            return process.ExitCode;
+        }
+        catch (InvalidOperationException)
+        {
+            return -1;
+        }
     }
 
     private static void StartThread(string name, Action body)
