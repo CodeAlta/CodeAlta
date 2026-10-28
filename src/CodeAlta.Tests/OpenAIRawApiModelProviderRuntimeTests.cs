@@ -2949,6 +2949,78 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsTrue(responsesClient.Requests.Single().Options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent));
     }
 
+    // Nobody reads the reasoning of a headless run: no summary is asked for, and the reasoning and its replay stay.
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_AHeadlessTurnOfTheOpenAIApi_AsksForNoReasoningSummary()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-headless", "gpt-reasoning", "Answer.")],
+            [CreateTextOnlyAssistantResponseUpdate("response-desktop", "gpt-reasoning", "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var request = CreateTurnRequest() with
+        {
+            ModelId = "gpt-reasoning",
+            ReasoningEffort = AgentReasoningEffort.XHigh,
+            ModelInfo = new AgentModelInfo(
+                "gpt-reasoning",
+                SupportedReasoningEfforts: [AgentReasoningEffort.Medium, AgentReasoningEffort.XHigh]),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request with { OmitReasoningSummaries = true }, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var headless = JsonDocument.Parse(responsesClient.Requests[0].SerializedOptions);
+        var reasoning = headless.RootElement.GetProperty("reasoning");
+        Assert.IsFalse(reasoning.TryGetProperty("summary", out _), reasoning.GetRawText());
+        Assert.AreEqual("xhigh", reasoning.GetProperty("effort").GetString());
+        Assert.IsTrue(responsesClient.Requests[0].Options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent));
+
+        // CodeAlta Desktop keeps them.
+        using var desktop = JsonDocument.Parse(responsesClient.Requests[1].SerializedOptions);
+        Assert.AreEqual("auto", desktop.RootElement.GetProperty("reasoning").GetProperty("summary").GetString());
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_AHeadlessTurnOfTheCodexSubscription_AsksForNoReasoningSummary()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-headless", "gpt-6-astra", "Answer.")],
+        ]);
+        var executor = CreateCodexExecutor(responsesClient);
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-6-astra",
+            ReasoningEffort = AgentReasoningEffort.XHigh,
+            OmitReasoningSummaries = true,
+            ModelInfo = new AgentModelInfo(
+                "gpt-6-astra",
+                SupportedReasoningEfforts: [AgentReasoningEffort.Medium, AgentReasoningEffort.XHigh],
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["source"] = "codex-endpoint",
+                    ["supportsReasoningSummaries"] = true,
+                    ["useResponsesLite"] = true,
+                }),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        var reasoning = document.RootElement.GetProperty("reasoning");
+        Assert.IsFalse(reasoning.TryGetProperty("summary", out _), reasoning.GetRawText());
+        Assert.AreEqual("xhigh", reasoning.GetProperty("effort").GetString());
+        // Responses Lite keeps the reasoning of every turn, and its tool calls one at a time, as Codex sends them.
+        Assert.AreEqual("all_turns", reasoning.GetProperty("context").GetString());
+        Assert.IsFalse(document.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
+    }
+
     [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_OfficialResponsesExplicitNoneDisablesReasoningSummary()
     {
@@ -5128,6 +5200,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 Experimental = true,
                 ResponseTransport = "http",
             },
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
         });
 
         var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
@@ -5205,7 +5278,6 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 Experimental = true,
                 ResponseTransport = "http",
             },
-            RetryDelayAsync = static (_, _) => Task.CompletedTask,
         });
 
         var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(

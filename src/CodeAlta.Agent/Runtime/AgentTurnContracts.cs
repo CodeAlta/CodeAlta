@@ -414,6 +414,12 @@ public sealed record AgentTurnRequest
     public AgentReasoningEffort? ReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether nobody reads the summaries of the reasoning (a headless run): a provider that asks
+    /// the model for them asks for none. The reasoning itself is unchanged.
+    /// </summary>
+    public bool OmitReasoningSummaries { get; init; }
+
+    /// <summary>
     /// Gets or initializes the requested permission mode, one of the <see cref="AgentProviderProfile.PermissionModes"/>
     /// of the provider. Null leaves the mode the provider is configured with.
     /// </summary>

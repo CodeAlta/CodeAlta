@@ -28,6 +28,8 @@ public sealed class HeadlessTrustTests
         foreach (var request in requests)
         {
             StringAssert.EndsWith(request.SystemMessage, SessionRuntimeService.HeadlessGuidance);
+            // Nobody reads the summaries of its reasoning.
+            Assert.IsTrue(request.OmitReasoningSummaries);
             // No note tells the agent to wait for a review that nobody makes.
             Assert.IsFalse(request.Conversation.SelectMany(static message => message.Parts).OfType<AgentMessagePart.Text>()
                 .Any(static part => part.Value.Contains("Review before commit: on", StringComparison.Ordinal)));
@@ -52,6 +54,7 @@ public sealed class HeadlessTrustTests
 
         Assert.IsTrue(provider.Requests.TryPeek(out var request));
         Assert.IsFalse(request.SystemMessage!.Contains(SessionRuntimeService.HeadlessGuidance, StringComparison.Ordinal));
+        Assert.IsFalse(request.OmitReasoningSummaries, "CodeAlta Desktop shows the summaries of the reasoning.");
         Assert.IsTrue(host.RuntimeService.GetEffectiveReviewBeforeCommit(session.SessionId));
         Assert.IsTrue(request.Conversation.SelectMany(static message => message.Parts).OfType<AgentMessagePart.Text>()
             .Any(static part => part.Value.Contains("Review before commit: on", StringComparison.Ordinal)), "The agent is told of the review it waits for.");

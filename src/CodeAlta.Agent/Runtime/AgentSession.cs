@@ -2204,6 +2204,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DeveloperInstructions = developerInstructions,
             SessionInstructions = sessionInstructions,
             ReasoningEffort = _options.ReasoningEffort,
+            OmitReasoningSummaries = _options.OmitReasoningSummaries,
             // A run has the mode it started with, or the one it was given since (ApplyPermissionModeNowAsync); what
             // runs outside one takes the current mode.
             PermissionMode = _activeRun is { } active && active.Id == runId ? active.PermissionMode : PermissionMode,

@@ -1481,7 +1481,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         ? MapReasoningEffortLevel(effectiveReasoningEffort!.Value, request.ModelInfo)
                         : null,
                 };
-                if (provider.CodexSubscription is null || modelCapabilities.SupportsReasoningSummaries)
+                // A headless run asks for no summary: the reasoning, and its replay, stay as they are.
+                if (!request.OmitReasoningSummaries &&
+                    (provider.CodexSubscription is null || modelCapabilities.SupportsReasoningSummaries))
                 {
                     options.ReasoningOptions.ReasoningSummaryVerbosity =
                         provider.CodexSubscription is not null || IsOfficialOpenAIResponsesEndpoint(provider)

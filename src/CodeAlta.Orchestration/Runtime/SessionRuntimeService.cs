@@ -2216,6 +2216,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderKey = options.ProviderKey ?? session.ResolvedProviderKey,
             Model = options.Model,
             ReasoningEffort = options.ReasoningEffort,
+            // Nobody reads the reasoning of a headless run: its summaries are not asked for.
+            OmitReasoningSummaries = Headless,
             PermissionMode = permissionMode,
             Streaming = true,
             WorkingDirectory = options.WorkingDirectory,
