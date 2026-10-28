@@ -80,7 +80,7 @@ text(banner, (x + 104 * S + code_width, 52 * S), "Alta", name, [(122, 232, 255),
 title = font("segoeuib.ttf", 50)
 text(banner, (x, 176 * S), "Your agents.", title, (255, 255, 255))
 text(banner, (x, 236 * S), "One workspace.", title, [CYAN, (99, 102, 241), PURPLE])
-text(banner, (x, 320 * S), "Sessions  ·  Worktrees  ·  Sandbox  ·  On your phone", font("segoeui.ttf", 20), (176, 198, 222))
+text(banner, (x, 320 * S), "Sessions  ·  Workflows  ·  Sandbox  ·  On your phone", font("segoeui.ttf", 20), (176, 198, 222))
 
 # The command that installs CodeAlta Desktop, in a box of its own.
 draw = ImageDraw.Draw(banner)
