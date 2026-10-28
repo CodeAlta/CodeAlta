@@ -8,7 +8,7 @@ const send = (key: string, text = "queued text"): SessionSendRequest => ({ expec
 const steer = (key: string, text = "steer text"): SessionSteerRequest => ({ expectedEpoch: "epoch", sessionId: "session", clientRequestId: key,
   expectedRuntimeInstanceId: "runtime", expectedAttachmentGeneration: "1", expectedRunId: "run", text });
 const receipt = (key: string, kind: string, outcome: string | null = "Completed"): SessionReceiptView => ({ clientRequestId: key, sessionId: "session",
-  operationId: "operation", targetOperationId: null, kind, state: outcome ? "terminal" : "pending", outcome, code: null, runId: "run", queueInsertion: null });
+  operationId: "operation", targetOperationId: null, kind, state: outcome ? "terminal" : "pending", outcome, code: null, runId: "run" });
 
 test("programmatic enqueue preserves its selection and awaits downstream ownership, not local insertion", async () => {
   const owner = createComposerQueue();

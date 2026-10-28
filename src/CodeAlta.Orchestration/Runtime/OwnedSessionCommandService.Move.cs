@@ -6,8 +6,8 @@ public sealed partial class OwnedSessionCommandService
     /// Moves an idle project session, with the sessions it started in the same project, to another project.
     /// Caller cancellation is owned by the waiting bridge only.
     /// </summary>
-    /// <remarks>Uses the exclusive catalog-mutation reservation shared with deletion and provider selection: send and
-    /// queue admission and shutdown honor and drain it. Refuses a session that runs, waits for an answer, or runs
+    /// <remarks>Uses the exclusive catalog-mutation reservation shared with deletion and provider selection: send
+    /// admission and shutdown honor and drain it. Refuses a session that runs, waits for an answer, or runs
     /// remotely, rather than stopping it. No automatic retry is performed.</remarks>
     /// <param name="sessionId">Exact catalog session identity.</param>
     /// <param name="projectId">Exact identity of the project the session belongs to.</param>
@@ -78,7 +78,6 @@ public sealed partial class OwnedSessionCommandService
     // Whether this owner has work of the session going on. The caller holds the gate.
     private bool IsOwnerBusy(string sessionId)
         => _active.ContainsKey(sessionId) || _steering.Contains(sessionId) || _compacting.Contains(sessionId)
-            || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId) || _remoteControlling.ContainsKey(sessionId)
-            || _operations.Values.Any(operation => !operation.Released && string.Equals(operation.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
-            || _queues.Values.Any(operation => !operation.Released && string.Equals(operation.Request.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+            || _abortingRuns.Contains(sessionId) || _remoteControlling.ContainsKey(sessionId)
+            || _operations.Values.Any(operation => !operation.Released && string.Equals(operation.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
 }

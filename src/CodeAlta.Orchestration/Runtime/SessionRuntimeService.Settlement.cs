@@ -318,7 +318,7 @@ public sealed partial class SessionRuntimeService
         {
             if (_transitions.ContainsKey(sessionId)) return true;
             if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated) return false;
-            if (entry.HasActiveRun || entry.QueueDrainInProgress || entry.OwnedQueue is not null
+            if (entry.HasActiveRun || entry.QueueDrainInProgress
                 || entry.BackgroundTasks.Any(static task => task.Outcome is null)) return true;
             // What waits in the queue runs next, unless an abort holds it.
             return !held && (await ReadLatestLocalStateAsync(sessionId, entry.CreatedAt, token).ConfigureAwait(false))?.HasPendingQueuedPrompts() == true;

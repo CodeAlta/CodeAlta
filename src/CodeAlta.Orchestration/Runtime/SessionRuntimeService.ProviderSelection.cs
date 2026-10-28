@@ -42,7 +42,7 @@ public sealed partial class SessionRuntimeService
                 if (_runtimeInstanceId != expected.RuntimeInstanceId || _transitions.ContainsKey(expected.SessionId)) return "stale_runtime";
                 _entries.TryGetValue(expected.SessionId, out var entry);
                 if (entry?.Attachment.Ordinal != expected.AttachmentGeneration) return "stale_attachment";
-                if (entry is not null && (entry.HasActiveRun || entry.QueueDrainInProgress || entry.OwnedQueue is not null
+                if (entry is not null && (entry.HasActiveRun || entry.QueueDrainInProgress
                     || entry.Attachment.IsRetiring || !HasOwnedCommandDefaults(entry))) return "session_in_use";
                 if ((await Permissions.ListAsync().ConfigureAwait(false)).Any(permission => permission.Handle.SessionId == expected.SessionId)
                     || (await Permissions.ListOwnedUserInputsAsync(expected.SessionId, token).ConfigureAwait(false)).Entries.Count != 0) return "interaction_pending";

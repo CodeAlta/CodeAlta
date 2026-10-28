@@ -9,7 +9,7 @@ public sealed partial class OwnedSessionCommandService
     /// providers, tools, identity) are the ones of its next turn. Caller cancellation is owned by the waiting bridge only.
     /// </summary>
     /// <remarks>Uses the exclusive catalog-mutation reservation shared with deletion, moves and provider selection: send
-    /// and queue admission and shutdown honor and drain it. Refuses a session that runs or waits for an answer rather
+    /// admission and shutdown honor and drain it. Refuses a session that runs or waits for an answer rather
     /// than stopping it. The caller validates that the space exists. No automatic retry is performed.</remarks>
     /// <param name="sessionId">Exact catalog session identity.</param>
     /// <param name="spaceId">The identifier of the space.</param>

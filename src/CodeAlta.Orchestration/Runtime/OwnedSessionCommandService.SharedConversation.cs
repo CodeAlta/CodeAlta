@@ -78,9 +78,8 @@ public sealed partial class OwnedSessionCommandService
             if (Reserved(sessionId) || _deleteWork is not null || _remoteControlling.ContainsKey(sessionId)) return new("busy", null);
             if (Asks.List(sessionId).Head is not null) return new(SessionRuntimeService.ReleaseInteractionPending, null);
             if (_active.ContainsKey(sessionId) || _steering.Contains(sessionId) || _compacting.Contains(sessionId)
-                || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId)
-                || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId)
-                || _queues.Values.Any(operation => !operation.Released && operation.Request.SessionId == sessionId))
+                || _abortingRuns.Contains(sessionId)
+                || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId))
                 return new(SessionRuntimeService.ReleaseRunning, null);
         }
 

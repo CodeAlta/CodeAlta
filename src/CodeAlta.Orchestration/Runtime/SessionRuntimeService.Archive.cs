@@ -118,7 +118,7 @@ public sealed partial class SessionRuntimeService
     private async Task<string?> ArchiveRefusalAsync(string sessionId, CancellationToken token)
     {
         if (_transitions.ContainsKey(sessionId)) return "session_in_use";
-        if (_entries.TryGetValue(sessionId, out var entry) && (entry.HasActiveRun || entry.QueueDrainInProgress || entry.OwnedQueue is not null
+        if (_entries.TryGetValue(sessionId, out var entry) && (entry.HasActiveRun || entry.QueueDrainInProgress
             || entry.Attachment.IsRetiring || entry.PendingAgentPromptId is not null
             // The tasks of its provider report to it.
             || entry.BackgroundTasks.Any(static task => task.Outcome is null))) return "session_in_use";

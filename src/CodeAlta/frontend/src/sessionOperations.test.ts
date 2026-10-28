@@ -74,7 +74,7 @@ test("a prompt leaving the queue shows its echo only once the host took it", asy
   await store.submit(send("first"), new AbortController().signal, capability, result => results.push(result.status), "whenAccepted");
   assert.deepEqual([results, store.outgoing("epoch", "session").length, store.pending("session")], [["busy"], 0, undefined]);
   answer = { status: "accepted", epoch: "epoch", receipt: { clientRequestId: "second", sessionId: "session", operationId: operation,
-    targetOperationId: null, kind: "Send", state: "pending", outcome: null, code: null, runId: null, queueInsertion: null } };
+    targetOperationId: null, kind: "Send", state: "pending", outcome: null, code: null, runId: null } };
   await store.submit(send("second"), new AbortController().signal, capability, result => results.push(result.status), "whenAccepted");
   assert.deepEqual(store.outgoing("epoch", "session").map(echo => [echo.text, echo.state]), [["queued", "accepted"]]);
   assert.equal(store.outgoing("epoch", "session")[0].key, outgoingKey(send("second")));
@@ -119,7 +119,7 @@ test("a Send or a steering prompt a plugin answered itself says so in the compos
 const control = "abcdefab-1234-5678-9abc-abcdefabcdee";
 function row(): SessionReceiptView {
   return { clientRequestId: "key", sessionId: "session", operationId: operation, targetOperationId: null, kind: "Send",
-    state: "pending", outcome: null, code: null, runId: null, queueInsertion: null };
+    state: "pending", outcome: null, code: null, runId: null };
 }
 function page(...rows: SessionReceiptView[]): SessionReceiptPage { return { status: "ok", epoch: "epoch", rows, next: null }; }
 function request() { return captureSubmission("epoch", "session", "  exact\ntext  ", "key")!; }
@@ -376,7 +376,7 @@ test("malformed admissions and mixed receipt pages fail closed while legacy null
     { ...row(), operationId: operation.toUpperCase() }, { ...row(), operationId: "00000000-0000-0000-0000-000000000000" },
     { ...row(), clientRequestId: "\ud800" }, { ...row(), state: "unknown" }, { ...row(), outcome: "unknown" },
     { ...row(), code: "x".repeat(65) }, { ...row(), runId: "\udc00" },
-    { ...row(), queueInsertion: { state: "pending", accepted: null, code: null } },
+    { ...row(), kind: "Queue" },
   ];
   const invalidPages: SessionReceiptPage[] = [
     { ...page(row()), rows: null as unknown as SessionReceiptView[] }, page(...Array.from({ length: 65 }, row)), page(row(), row()),
@@ -401,7 +401,7 @@ test("malformed admissions and mixed receipt pages fail closed while legacy null
   await f.wait(refreshSubmissions(() => f.keep(Promise.resolve(invalidPages[0])), "epoch", 0, signal, value => readResults.push(value), capability));
   assert.deepEqual(readResults, [{ status: "invalid_response", epoch: "epoch", rows: [], next: null }]);
   for (const wrong of [{ ...row(), sessionId: "SESSION" }, { ...row(), state: "terminal" }, { ...row(), targetOperationId: control },
-    { ...row(), kind: "AbortRun" }, { ...row(), kind: "Queue", queueInsertion: { state: "pending", accepted: null, code: null } }]) {
+    { ...row(), kind: "AbortRun" }]) {
     const value = page(wrong); assert.equal(captureSubmissionAbort("epoch", "session", value, wrong, "abort"), null);
   }
   const valid = page(row()); assert.equal(captureSubmissionAbort("epoch", "session", valid, { ...valid.rows[0] }, "abort"), null);
@@ -411,11 +411,10 @@ test("malformed admissions and mixed receipt pages fail closed while legacy null
   assert.ok(captureSubmissionAbort("epoch", "session", full, full.rows[0], "abort"));
   assert.equal(captureSubmissionAbort("epoch", "session", { ...full, next: 320 }, full.rows[0], "abort"), null);
   const mixed = page(row(), { ...abortRow(), kind: "AbortRun" },
-    { ...row(), kind: "Queue", operationId: "abcdefab-1234-5678-9abc-abcdefabcded", clientRequestId: "queue",
-      queueInsertion: { state: "terminal", accepted: false, code: "queue_target_unavailable" } });
+    { ...row(), kind: "Compact", operationId: "abcdefab-1234-5678-9abc-abcdefabcded", clientRequestId: "compact" });
   assert.ok(captureSubmissionAbort("epoch", "session", mixed, mixed.rows[0], "abort"));
   assert.deepEqual(store.reconcile("session", mixed, capability), { sendRecovered: true, abortsRecovered: 0 });
-  // Legacy wire validation permits nullable outcome/code/run even in terminal rows. Do not apply Queue phases.
+  // Legacy wire validation permits nullable outcome/code/run even in terminal rows.
   response = accepted({ ...row(), state: "terminal" });
   await f.wait(store.submit(request(), signal, capability, value => published.push(value)));
   assert.equal(store.pending("session"), undefined); assert.equal(published.at(-1)?.status, "accepted");

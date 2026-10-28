@@ -7,7 +7,7 @@ import { createMutationCapability, createOwnedSubmissions } from "./sessionOpera
 import { createSteeringSubmissions } from "./sessionSteering";
 import { createCompactionSubmissions } from "./sessionCompaction";
 import { createAbortRunSubmissions } from "./sessionAbortRun";
-import { createQueueSubmissions } from "./sessionQueue";
+import { createComposerQueue } from "./composerQueue";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
 import { createNextSendSelectionStore } from "./nextSendSelection";
@@ -29,7 +29,7 @@ let sendMode: "accept" | "busy" | "refuse" = "accept";
 let steerMode: "accept" | "refuse" | "expired" = "accept";
 const operationId = () => `22222222-2222-4222-8222-${String(++operations).padStart(12, "0")}`;
 
-const queue = createQueueSubmissions(unavailable, unavailable);
+const queue = createComposerQueue();
 const submissions = createOwnedSubmissions(async (request): Promise<SessionAdmission> => {
   fixture.sendCalls.push(request);
   if (sendMode !== "accept") return { status: sendMode === "busy" ? "busy" : "invalid_request", epoch: request.expectedEpoch, receipt: null };
@@ -37,27 +37,27 @@ const submissions = createOwnedSubmissions(async (request): Promise<SessionAdmis
   run = `run-${++runs}`;
   return { status: "accepted", epoch: request.expectedEpoch, receipt: { kind: "Send", clientRequestId: request.clientRequestId,
     sessionId: request.sessionId, operationId: operationId(), targetOperationId: null, state: "pending", outcome: null, code: null,
-    runId: null, queueInsertion: null } };
+    runId: null } };
 }, unavailable);
 const steering = createSteeringSubmissions(async (request): Promise<SessionAdmission> => {
   fixture.steerCalls.push(request);
   if (steerMode !== "accept") return { status: steerMode === "refuse" ? "conflict" : "expired", epoch: request.expectedEpoch, receipt: null };
   return { status: "accepted", epoch: request.expectedEpoch, receipt: { kind: "Steer", clientRequestId: request.clientRequestId,
     sessionId: request.sessionId, operationId: operationId(), targetOperationId: null, state: "terminal", outcome: "Completed", code: null,
-    runId: request.expectedRunId, queueInsertion: null } };
+    runId: request.expectedRunId } };
 });
 const abortRuns = createAbortRunSubmissions(async (request): Promise<SessionAdmission> => {
   fixture.abortRunCalls.push(request);
   return { status: "accepted", epoch: request.expectedEpoch, receipt: { kind: "AbortRun", clientRequestId: request.clientRequestId,
     sessionId: request.sessionId, operationId: operationId(), targetOperationId: null, state: "terminal", outcome: "Completed",
-    code: "cancellation_signalled", runId: null, queueInsertion: null } };
+    code: "cancellation_signalled", runId: null } };
 });
 
 // The host takes a compaction and lists its receipt, pending until the test settles it.
 const compaction = createCompactionSubmissions(async (request): Promise<SessionAdmission> => {
   fixture.compactCalls.push(request);
   const receipt: SessionReceiptView = { kind: "Compact", clientRequestId: request.clientRequestId, sessionId: request.sessionId, operationId: operationId(),
-    targetOperationId: null, state: "pending", outcome: null, code: null, runId: null, queueInsertion: null };
+    targetOperationId: null, state: "pending", outcome: null, code: null, runId: null };
   (window as Window & { fixtureReceiptRows?: unknown[] }).fixtureReceiptRows = [receipt];
   return { status: "accepted", epoch: request.expectedEpoch, receipt };
 });
@@ -88,9 +88,9 @@ const fixture = {
   },
   /** What the timeline would echo for the prompts sent from this window. */
   echoes: () => submissions.outgoing(epoch, sessionId).map(echo => `${echo.state}:${echo.text}`),
-  rows: () => queue.composer.list(epoch, sessionId).map(item => `${item.kind}:${item.state}:${item.count}:${item.text}`),
+  rows: () => queue.list(epoch, sessionId).map(item => `${item.kind}:${item.state}:${item.count}:${item.text}`),
   enqueueWithImage(text: string) {
-    queue.composer.add("Queue", epoch, sessionId, text, [{ title: "Image 1", mediaType: "image/png", base64: "AAAA" }]);
+    queue.add("Queue", epoch, sessionId, text, [{ title: "Image 1", mediaType: "image/png", base64: "AAAA" }]);
   },
 };
 Object.assign(window, { fixture });

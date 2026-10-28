@@ -124,7 +124,7 @@ public sealed partial class SessionRuntimeService
         if (_transitions.ContainsKey(sessionId)) return ReleaseRunning;
         if (_entries.TryGetValue(sessionId, out var entry))
         {
-            if (entry.HasActiveRun || entry.QueueDrainInProgress || entry.OwnedQueue is not null
+            if (entry.HasActiveRun || entry.QueueDrainInProgress
                 || entry.Attachment.IsRetiring || entry.Attachment.HasWorkInProgress) return ReleaseRunning;
             if (entry.RemoteControl.Status is AgentRemoteControlStatus.Connecting or AgentRemoteControlStatus.Connected) return ReleaseRemoteControl;
             if (entry.BackgroundTasks.Any(static task => task.Outcome is null)) return ReleaseBackgroundTasks;

@@ -133,7 +133,7 @@ function freezeSelection(value: SessionSelection | null): Readonly<SessionSelect
 }
 
 // Match the existing wire validation. Legacy outcome/code/run nullability is deliberately independent
-// of state; Queue phases apply only to Queue/CancelQueue rows in a legitimately mixed receipt page.
+// of state.
 function validRow(row: SessionReceiptView): boolean {
   if (!row || !identity(row.clientRequestId, 256, false) || !identity(row.sessionId, 256, false) || !guid(row.operationId)
     || (row.targetOperationId !== null && !guid(row.targetOperationId)) || !["pending", "terminal"].includes(row.state)
@@ -141,21 +141,7 @@ function validRow(row: SessionReceiptView): boolean {
     || (row.code !== null && !identity(row.code, 64, false)) || (row.runId !== null && !identity(row.runId, 256, false))
     // A message (what a plugin said of a Send it answered itself) takes the place of a run id.
     || (row.message != null && (row.runId !== null || !identity(row.message, 256)))) return false;
-  if (row.kind !== "Queue" && row.kind !== "CancelQueue")
-    return ["Send", "Abort", "Steer", "Compact", "AbortRun"].includes(row.kind) && row.queueInsertion === null;
-  if (row.state === "pending" && (row.outcome !== null || row.code !== null || row.runId !== null)) return false;
-  if (row.state === "terminal" && (row.outcome === null || !identity(row.code, 64, false))) return false;
-  if (row.kind === "CancelQueue") return row.queueInsertion === null && row.runId === null && guid(row.targetOperationId)
-    && row.targetOperationId !== row.operationId && (row.state === "pending" || row.outcome === "Failed"
-      || row.outcome === "Completed" && ["queue_cancellation_signalled", "already_terminal"].includes(row.code!));
-  const insertion = row.queueInsertion;
-  if (row.targetOperationId !== null || !insertion) return false;
-  if (insertion.state === "pending") return row.state === "pending" && insertion.accepted === null && insertion.code === null;
-  if (insertion.state !== "terminal" || typeof insertion.accepted !== "boolean" || !identity(insertion.code, 64, false)
-    || (insertion.accepted ? insertion.code !== "queue_accepted" : insertion.code === "queue_accepted")) return false;
-  if (row.state === "pending") return true;
-  return row.outcome === "Completed" ? insertion.accepted && row.code === "queue_dispatched" && row.runId !== null
-    : row.runId === null && (row.outcome === "Failed" || row.outcome === "Cancelled" && row.code === "queue_cancelled");
+  return ["Send", "Abort", "Steer", "Compact", "AbortRun"].includes(row.kind);
 }
 function validEnvelope(value: { status: string; epoch: string | null }): boolean {
   return !!value && identity(value.status, 64) && (value.epoch === null || identity(value.epoch, 64));

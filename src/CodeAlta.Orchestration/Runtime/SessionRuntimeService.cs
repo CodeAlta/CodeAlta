@@ -2281,7 +2281,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             () => _agentHub.AbortAsync(sessionHandleId, CancellationToken.None),
             () => _agentHub.StopSessionAsync(sessionHandleId, CancellationToken.None));
         // A retirement before this assignment cannot have a bound owned send: publication is later.
-        attachment.CloseOwnedPermissions = () => CloseOwnedQueueAttachmentAsync(attachment);
+        attachment.CloseOwnedPermissions = () => Permissions.InvalidateOwnedAttachmentAsync(attachment);
         try
         {
         session.ProviderId = options.ProviderId.Value;
@@ -4635,7 +4635,6 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     published = sanitized;
                     if (sanitized is not null)
                         mark(CapturePluginEvent(sanitized, sessionId, projectId, workingDirectory));
-                    RefuseUnavailableOwnedQueue(sessionId);
                     notifications = projector.Entry!.TakeParentNotifications(sanitized);
                     // A failure the session goes on from with the next model of its tier is not told to the parent,
                     // and its queue waits for the run that continues: both are held until the fallback settles.
@@ -4747,25 +4746,16 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         => @event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle }
             or AgentErrorEvent;
 
-    private async Task TryDrainNextQueuedPromptAsync(string sessionId, SessionActor? existingActor = null, OwnedQueuedExecution? ownedTrigger = null)
+    private async Task TryDrainNextQueuedPromptAsync(string sessionId, SessionActor? existingActor = null)
     {
         if (_disposed || string.IsNullOrWhiteSpace(sessionId))
         {
             return;
         }
 
-        var work = await TryMarkNextQueuedPromptSubmittingAsync(sessionId, existingActor, ownedTrigger).ConfigureAwait(false);
+        var work = await TryMarkNextQueuedPromptSubmittingAsync(sessionId, existingActor).ConfigureAwait(false);
         if (work is null)
         {
-            return;
-        }
-
-        if (work.Owned is { } owned)
-        {
-            // The runtime-admitted queue body owns execution and cleanup, not this event tail.
-            // The claim was published atomically with the slot in the mailbox.
-            await owned.Drained.Task.ConfigureAwait(false);
-            await TryDrainNextQueuedPromptAsync(sessionId, existingActor).ConfigureAwait(false);
             return;
         }
 
@@ -4773,18 +4763,17 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var askExecution = CreateRunAskExecution(sessionId, work.Entry.Attachment.Cancellation.Token);
         try
         {
-            // The legacy arm always holds a cloned durable prompt; only the owned arm above has null.
             await RestoreArchivedForRunAsync(sessionId, work.Entry.CreatedAt).ConfigureAwait(false);
             var runStartedAt = DateTimeOffset.UtcNow;
             var sendOptions = new AgentSendOptions
             {
-                Input = QueuedInput(work.Prompt!), SourceSessionId = AgentSource(work.Prompt!.SubmittedBy),
+                Input = QueuedInput(work.Prompt), SourceSessionId = AgentSource(work.Prompt.SubmittedBy),
                 Provenance = SessionPromptProvenance.Of(work.Prompt.Kind, work.Prompt.SubmittedBy),
             };
             if (askExecution is not null) sendOptions = ComposeRunAsk(askExecution, work.Entry, sendOptions);
             var runId = await _agentHub.RunAsync(work.SessionHandleId, sendOptions, work.Entry.Attachment.Cancellation.Token)
                 .ConfigureAwait(false);
-            await MarkQueuedPromptSubmittedAsync(work.Entry, work.Prompt!.QueueItemId, runId, runStartedAt, DateTimeOffset.UtcNow).ConfigureAwait(false);
+            await MarkQueuedPromptSubmittedAsync(work.Entry, work.Prompt.QueueItemId, runId, runStartedAt, DateTimeOffset.UtcNow).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -4793,7 +4782,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 work.Use.Retain(ex);
                 _forwarding.RetainDependencies(ex, work);
             }
-            try { await MarkQueuedPromptFailedAsync(work.Entry, work.Prompt!.QueueItemId, ex.Message, DateTimeOffset.UtcNow).ConfigureAwait(false); }
+            try { await MarkQueuedPromptFailedAsync(work.Entry, work.Prompt.QueueItemId, ex.Message, DateTimeOffset.UtcNow).ConfigureAwait(false); }
             catch (Exception cleanupFailure) { throw new AggregateException(ex, cleanupFailure); }
             if (OwnedProviderEventForwarding.HasRetention(ex)) throw;
         }
@@ -4810,7 +4799,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     private async Task<QueuedPromptDrainWork?> TryMarkNextQueuedPromptSubmittingAsync(string sessionId,
-        SessionActor? existingActor = null, OwnedQueuedExecution? ownedTrigger = null)
+        SessionActor? existingActor = null)
     {
         var actor = existingActor ?? GetActorForWork(sessionId);
         while (!_disposed)
@@ -4819,11 +4808,6 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var work = await actor.QueryAsync(
                 async actorCancellationToken =>
                 {
-                    RefuseUnavailableOwnedQueue(sessionId);
-                    // A rejected/stale immediate owned trigger is not authority to begin legacy
-                    // replacement. Ordinary event/completion drain opportunities remain unchanged.
-                    if (ownedTrigger is not null && (!_entries.TryGetValue(sessionId, out var target)
-                        || !ReferenceEquals(target.OwnedQueue, ownedTrigger) || !CanUseOwnedQueue(target, ownedTrigger))) return null;
                     if (_transitions.TryGetValue(sessionId, out transition)) return null;
                     if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated || entry.HasActiveRun || entry.QueueDrainInProgress)
                     {
@@ -4848,9 +4832,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                             PublishQueueChanged(sessionId, localState, recovered[^1], DateTimeOffset.UtcNow, isEnqueued: false);
                         }
 
-                        // This successful read and the slot claim share the original arbitration.
-                        // Never start a second owned drainer after an ambiguous null/busy/fault result.
-                        return TryClaimOwnedQueue(entry);
+                        return null;
                     }
 
                     var sessionHandleId = entry.SessionHandleId;
@@ -6145,7 +6127,6 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         public DateTimeOffset LastTerminalEventAt { get; private set; } = DateTimeOffset.MinValue;
 
         public bool QueueDrainInProgress { get; private set; }
-        internal OwnedQueuedExecution? OwnedQueue { get; set; }
 
         private ParentFinalNotificationCandidate? _lastParentFinalCandidate;
 
@@ -6425,8 +6406,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     }
 
-    private sealed record QueuedPromptDrainWork(AgentSessionHandleId SessionHandleId, SessionViewQueuedPrompt? Prompt,
-        RuntimeSessionEntry Entry, OwnedProviderEventForwarding.Use Use, OwnedQueuedExecution? Owned = null);
+    private sealed record QueuedPromptDrainWork(AgentSessionHandleId SessionHandleId, SessionViewQueuedPrompt Prompt,
+        RuntimeSessionEntry Entry, OwnedProviderEventForwarding.Use Use);
 
     private sealed record ParentNotificationPayload(string Kind, string Body);
 
