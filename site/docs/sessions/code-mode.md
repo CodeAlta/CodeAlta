@@ -78,11 +78,21 @@ A script shows as one card: `exec`, its title (the `title` of its first line), i
 
 A script that runs steps or starts sessions is a workflow: it gets a block of its own in the timeline, the width of the conversation, under the tool calls of the turn and shown even when they are folded. Its `exec` card stays one line, and a click on it goes to the block.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-workflow-run.webp" alt="A session of CodeAlta asked for a visual tour of its user guide: the workflow block of its script with three steps left to right, plan, explore with three sessions, and write, each session with its model, duration and tokens, then the Workflow message with the tour" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A workflow in the timeline: one quick session plans, three explore in parallel, one writes, and the tour comes back as a <strong>Workflow</strong> message.</figcaption>
+</figure>
+
 - **The head**: the title and the run id, the state (running with its time, waiting for you, sleeping, completed, failed, interrupted), the sessions it started, their tokens and its duration, and the actions as icons (in its **…** menu when the conversation is narrow): **Resume**, **Rerun with recorded results**, **Save as script…**, **Copy as Mermaid**, **Show the call** (the window of the `exec` call) and **Open run**.
 - **The graph**, left to right: a box per step, from the steps the script declares (`meta.steps`, laid out by `after`) or else from the steps it ran, the steps that run together one above the other. In a conversation too narrow for it, the graph runs top to bottom. A step is dim until it runs; while it runs, its ring fills as its sessions end, and the arrow that leads to it flows. Each step lists the sessions it started: the logo of their provider, their title, model, duration and tokens. A click opens a session. Above six sessions, they fold into one bar of how many are done, running and failed; a click lists them, the running and failed ones first.
 - What the run waits for, or until when it sleeps, shows on a line under the head.
 
 **Open run** opens the tab of the run: its graph large, which you pan and zoom (a minimap shows once it is larger than the view); the sessions it started (title, step, state, duration, tokens; each opens its session); a timeline of its steps, each with its sessions under it, in the colors of their states; its result and its script. **Copy as Mermaid** copies the graph as a Mermaid `flowchart`, as `alta workflow show <run-id> --format mermaid` gives it. The tab is restored when CodeAlta starts again, while the run is still kept.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-workflow-tab.webp" alt="The tab of a run: its graph of three steps, the five sessions it started with their step, state, duration and tokens, and a timeline of its steps and sessions" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The tab of a run: its graph, its sessions, and the timeline of its steps.</figcaption>
+</figure>
 
 Click the card of a script without steps or sessions, or **Show the call** on a workflow, for the window of the call:
 
@@ -193,6 +203,11 @@ In CodeAlta Desktop, the **Workflows** button of the title bar (or **Workflows**
   - **Edit** opens a script of the project or of yours in the code editor; **Delete** deletes its file, after a question. A sample is neither edited nor deleted.
   - Agents write the scripts: ask for one in a session, or click **Save as script…** on the card of a run that went well.
 - **Runs**: the scripts running in CodeAlta and those it keeps that ended, the running ones first. Click a run to open its tab.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-workflows.webp" alt="The Workflows tab of the CodeAlta project: the library with This project, My scripts and five samples with their steps and parameters, and the runs on the right, one of them running" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Workflows tab: the library of scripts, with the samples, and the runs.</figcaption>
+</figure>
 
 To run a script, click **Run…** on it, fill in its parameters, choose the project it runs in, then click **Run**. A list or an object is written as JSON. The script runs in a new session of that project, which opens. That session has `exec` even when Code Mode is off.
 

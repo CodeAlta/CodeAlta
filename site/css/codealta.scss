@@ -904,7 +904,7 @@ a.alta-card,
   > a { font-size: .9rem; font-weight: 600; text-decoration: none; }
   > a:hover { text-decoration: underline; }
 }
-.alta-story-shot img, .alta-story-frame img { aspect-ratio: 8 / 5; object-fit: contain; background: #1d2228; }
+.alta-story-shot img, .alta-story-frame img, .alta-story-shot video, .alta-story-frame video { aspect-ratio: 8 / 5; object-fit: contain; background: #1d2228; }
 .alta-story-stage[hidden] { display: none; }
 .alta-scroll-story {
   // Below the brand banner and the chapter index, whose height the site script measures.

@@ -42,7 +42,16 @@
     var frames = shots.map(function (shot) {
       var frame = shot.cloneNode(true);
       frame.className = "alta-window alta-story-frame";
-      frame.querySelector("img").alt = "";
+      var picture = frame.querySelector("img");
+      if (picture) picture.alt = "";
+      // A video of the stage is a moving picture: no controls, and it plays only while its chapter is the current one.
+      var video = frame.querySelector("video");
+      if (video) {
+        video.removeAttribute("controls");
+        video.removeAttribute("aria-label");
+        video.preload = "none";
+        video.tabIndex = -1;
+      }
       stage.appendChild(frame);
       return frame;
     });
@@ -60,6 +69,20 @@
         frames[i].classList.toggle("is-current", active);
         if (active) links[i].setAttribute("aria-current", "step");
         else links[i].removeAttribute("aria-current");
+      });
+      playFrames();
+    }
+    function playFrames() {
+      frames.forEach(function (frame, i) {
+        var video = frame.querySelector("video");
+        if (!video) return;
+        if (i === selected && roomy.matches) {
+          video.preload = "auto";
+          var playing = video.play();
+          if (playing && playing.catch) playing.catch(function () { });
+        } else if (!video.paused) {
+          video.pause();
+        }
       });
     }
     function update() {
@@ -86,6 +109,9 @@
     function layout() {
       story.classList.toggle("is-enhanced", roomy.matches);
       stage.hidden = !roomy.matches;
+      // The chapter's own video is hidden while the stage shows its copy.
+      if (roomy.matches) shots.forEach(function (shot) { var video = shot.querySelector("video"); if (video && !video.paused) video.pause(); });
+      playFrames();
       schedule();
     }
     window.addEventListener("scroll", schedule, { passive: true });
