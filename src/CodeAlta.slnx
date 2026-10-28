@@ -44,6 +44,7 @@
     <Project Path="CodeAlta.Agent/CodeAlta.Agent.csproj" />
     <Project Path="CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
     <Project Path="CodeAlta.CodeMode/CodeAlta.CodeMode.csproj" />
+    <Project Path="CodeAlta.CodexAppServer/CodeAlta.CodexAppServer.csproj" />
     <Project Path="CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
     <Project Path="CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />
     <Project Path="CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
@@ -80,6 +81,7 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="CodeAlta.Acp.Generator/CodeAlta.Acp.Generator.csproj" />
+    <Project Path="CodeAlta.CodexAppServer.Generator/CodeAlta.CodexAppServer.Generator.csproj" />
     <Project Path="CodeAlta.Agent.ModelsDev.Updater/CodeAlta.Agent.ModelsDev.Updater.csproj" />
     <Project Path="CodeAlta.Benchmarks/CodeAlta.Benchmarks.csproj" />
     <Project Path="CodeAlta.Evals/CodeAlta.Evals.csproj" />
