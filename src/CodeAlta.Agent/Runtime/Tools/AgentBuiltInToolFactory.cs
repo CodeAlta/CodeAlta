@@ -182,7 +182,7 @@ public static class AgentBuiltInToolFactory
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "read_file",
-                    $"Read a local text file by line number. Offsets are 1-based; use a negative offset to count from the end (-1 is the last line). Offsets past EOF return an empty text result, and oversized negative offsets clamp to line 1. Omitting limit returns up to {options.DefaultReadFileLineLimit} lines by default.{DescribeReadFileCharacterLimits(options)}",
+                    $"Read a local text file by line number. Offsets are 1-based; use a negative offset to count from the end (-1 is the last line). Offsets past EOF return an empty text result, and oversized negative offsets clamp to line 1. Omitting limit returns up to {options.DefaultReadFileLineLimit} lines by default. Each line is returned as its number, a colon, then the line as it is (`12:    return x;`).{DescribeReadFileCharacterLimits(options)}",
                     CreateReadFileSchema(options)) { RunsInParallel = true, Idempotent = true, OutputSchema = ReadFileOutputSchema },
                 (invocation, cancellationToken) => ReadFileAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
@@ -315,7 +315,8 @@ public static class AgentBuiltInToolFactory
 
             if (stoppedAtLine is null)
             {
-                var numbered = $"{lineNumber,5}: {CapLine(line, options.MaxReadFileLineCharacters)}";
+                // The number, a colon, then the line as it is: no padding nor space, which every line would pay for.
+                var numbered = string.Concat(lineNumber.ToString(CultureInfo.InvariantCulture), ":", CapLine(line, options.MaxReadFileLineCharacters));
                 if (lineCount > 0 && options.MaxReadFileCharacters > 0
                     && text.Length + Environment.NewLine.Length + numbered.Length > options.MaxReadFileCharacters)
                 {

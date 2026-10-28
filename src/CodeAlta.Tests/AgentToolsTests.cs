@@ -37,8 +37,7 @@ public sealed class AgentToolsTests
 
         Assert.IsTrue(result.Success);
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
-        StringAssert.Contains(output, "    2: beta");
-        StringAssert.Contains(output, "    3: gamma");
+        Assert.AreEqual("2:beta" + Environment.NewLine + "3:gamma", output, "the number, a colon, then the line as it is");
     }
 
     [TestMethod]
@@ -64,7 +63,7 @@ public sealed class AgentToolsTests
 
         Assert.IsTrue(result.Success);
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
-        Assert.AreEqual("    3: gamma" + Environment.NewLine + "    4: delta", output);
+        Assert.AreEqual("3:gamma" + Environment.NewLine + "4:delta", output);
     }
 
     [TestMethod]
@@ -115,8 +114,8 @@ public sealed class AgentToolsTests
 
         Assert.IsTrue(result.Success);
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
-        StringAssert.Contains(output, "    1: alpha");
-        StringAssert.Contains(output, "    2: beta");
+        StringAssert.Contains(output, "1:alpha");
+        StringAssert.Contains(output, "2:beta");
     }
 
     [TestMethod]
@@ -1036,8 +1035,8 @@ public sealed class AgentToolsTests
             CancellationToken.None).ConfigureAwait(false);
 
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
-        StringAssert.Contains(output, "    2: " + new string('x', 2_000) + "… [line cut: 5,000 characters]");
-        StringAssert.Contains(output, "    3: last");
+        StringAssert.Contains(output, "2:" + new string('x', 2_000) + "… [line cut: 5,000 characters]");
+        StringAssert.Contains(output, "3:last");
         Assert.IsTrue(output.Length < 2_200, $"Expected the long line to be cut, got {output.Length} characters.");
         StringAssert.Contains(result.Structured!.Value.GetProperty("content").GetString(), longLine);
     }
@@ -1065,7 +1064,7 @@ public sealed class AgentToolsTests
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
         var next = int.Parse(Regex.Match(output, @"read on with offset=(\d+)\.").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
         Assert.IsTrue(next > 3 && next < 20, $"Expected the read to stop within the file, got offset={next}.");
-        StringAssert.Contains(output, $"{next - 1,5}: line-{next - 1:00}");
+        StringAssert.Contains(output, $"{next - 1}:line-{next - 1:00}");
         Assert.IsFalse(output.Contains($"line-{next:00}", StringComparison.Ordinal));
         var lines = output[..output.LastIndexOf("[read_file stopped", StringComparison.Ordinal)];
         Assert.IsTrue(lines.Length <= 100 + Environment.NewLine.Length, $"Expected at most 100 characters of lines, got {lines.Length}.");
@@ -1120,6 +1119,29 @@ public sealed class AgentToolsTests
         var shown = output[..note.Index];
         Assert.IsTrue(shown.Length <= 200 + Environment.NewLine.Length, $"Expected at most 200 characters of matches, got {shown.Length}.");
         Assert.AreEqual(50, Regex.Matches(shown, "match-").Count + int.Parse(note.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [TestMethod]
+    public async Task ReadFileTool_StopsBefore40000CharactersByDefault_AndKeepsTheIndentationOfEachLine()
+    {
+        using var temp = TestTempDirectory.Create();
+        // 2,000 lines of 40 characters: 80,000 characters, read in two parts.
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "data.txt"), Enumerable.Range(1, 2_000).Select(static index => "    " + $"line {index:0000}".PadRight(36, '.'))).ConfigureAwait(false);
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path)).Single(static tool => tool.Spec.Name == "read_file");
+        using var args = JsonDocument.Parse("""{"path":"data.txt"}""");
+
+        var result = await tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+            CancellationToken.None).ConfigureAwait(false);
+
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.StartsWith(output, "1:    line 0001...");
+        var next = int.Parse(Regex.Match(output, @"\[read_file stopped at 40,000 characters: read on with offset=(\d+)\.\]$").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var lines = output[..output.LastIndexOf("[read_file stopped", StringComparison.Ordinal)];
+        Assert.IsLessThanOrEqualTo(40_000 + Environment.NewLine.Length, lines.Length);
+        Assert.IsGreaterThan(39_900, lines.Length, "the read stops before the line that would pass the limit");
+        StringAssert.Contains(output, $"{next - 1}:    line {next - 1:0000}");
+        Assert.IsFalse(output.Contains($"{next}:    line", StringComparison.Ordinal));
     }
 
     [TestMethod]

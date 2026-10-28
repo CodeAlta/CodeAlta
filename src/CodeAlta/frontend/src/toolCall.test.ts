@@ -52,6 +52,7 @@ test("a call is shown by what it does: changes, a terminal, a file, or its argum
   assert.equal(toolFamily(call({ name: "x", kind: "CommandExecution" })), "shell");
   assert.equal(toolFamily(call({ name: "alta", command: "alta plugin list" })), "generic", "An alta command writes records, not a terminal output.");
   assert.equal(toolFamily(call({ name: "read_file", output: whole("    1: a\n    2: b") })), "read");
+  assert.equal(toolFamily(call({ name: "read_file", output: whole("1:a\n2:b") })), "read");
   assert.equal(toolFamily(call({ name: "read_file", output: whole("File 'x' was not found.") })), "generic");
   assert.equal(toolFamily(call({ name: "grep", output: whole("a.cs:1: x") })), "generic");
 });
@@ -85,6 +86,11 @@ test("the note of a sandbox after the output of a command is read apart, and the
 });
 
 test("numbered lines are read only when every line has the next number", () => {
+  assert.deepEqual(parseNumberedLines("12:using System;\r\n13:\r\n14:    class A\r\n15: x"), { start: 12, lines: ["using System;", "", "    class A", " x"] },
+    "The line follows the colon as it is.");
+  assert.deepEqual(parseNumberedLines("1:a\n2:b\n[read_file stopped at 40,000 characters: read on with offset=3.]"), { start: 1, lines: ["a", "b"] },
+    "The note of a read that stopped is not a line.");
+  // The form of older sessions: numbers padded to five characters, a space after the colon.
   assert.deepEqual(parseNumberedLines("   12: using System;\r\n   13: \r\n   14:     class A"), { start: 12, lines: ["using System;", "", "    class A"] });
   assert.deepEqual(parseNumberedLines("    1: a\n    2: cut in the mi", true), { start: 1, lines: ["a"] }, "A last line the page cut is dropped.");
   for (const other of ["", "File 'x' was not found.", "    1: a\n    3: c", "    1: a\nnot numbered", "    1: only", ""]) {

@@ -156,18 +156,23 @@ export function parseShellResult(value: string): ShellResult | null {
 export type NumberedLines = Readonly<{ start: number; lines: readonly string[] }>;
 
 /**
- * Reads lines written as `   12: text` with consecutive numbers (the result of `read_file`), or returns null
- * when a line has another form. A last line cut by the page's limit is dropped.
+ * Reads lines written as `12:text` with consecutive numbers (the result of `read_file`), or returns null
+ * when a line has another form. A last line cut by the page's limit is dropped, and so is the note of a read
+ * that stopped at its limit of characters.
  */
 export function parseNumberedLines(value: string, partial = false): NumberedLines | null {
   const rows = value.replaceAll("\r\n", "\n").split("\n");
   if (rows.at(-1) === "") rows.pop();
   if (partial) rows.pop();
+  if (rows.length > 1 && /^\[read_file stopped at .*\]$/.test(rows.at(-1)!)) rows.pop();
   if (!rows.length) return null;
+  // The reads of older sessions pad their numbers to five characters and put a space after the colon: a first line
+  // that starts with a space is of that form, and the space after the colon is not part of the line.
+  const padded = rows[0].startsWith(" ");
   const lines: string[] = [];
   let start = 0;
   for (const row of rows) {
-    const match = /^ *(\d{1,9}): ?(.*)$/.exec(row);
+    const match = (padded ? /^ *(\d{1,9}): ?(.*)$/ : /^(\d{1,9}):(.*)$/).exec(row);
     if (!match) return null;
     const number = Number(match[1]);
     if (!lines.length) start = number;

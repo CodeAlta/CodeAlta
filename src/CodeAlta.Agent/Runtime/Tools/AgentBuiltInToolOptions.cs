@@ -89,7 +89,7 @@ public sealed class AgentBuiltInToolOptions
     /// the line that would pass it and names the offset to read on from. Zero or less for no limit. A script of Code
     /// Mode receives the lines read whole.
     /// </summary>
-    public int MaxReadFileCharacters { get; init; } = 100_000;
+    public int MaxReadFileCharacters { get; init; } = 40_000;
 
     /// <summary>
     /// Gets or initializes the maximum number of grep matches returned.
