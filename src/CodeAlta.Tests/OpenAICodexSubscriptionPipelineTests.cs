@@ -1110,6 +1110,67 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             sessionUpdates.Where(static update => update.Kind == AgentSessionUpdateKind.Reconnecting).Select(static update => update.Message).ToArray());
     }
 
+    // Cloudflare, in front of the endpoint, answers 520-524 when it cannot reach OpenAI: asked again after its Retry-After.
+    [TestMethod]
+    public async Task HttpTurn_AsksAgainAfterACloudflareStatus()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        const string message = """{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Answered.","annotations":[]}]}""";
+        var handler = new ScriptedHttpMessageHandler(
+            static () =>
+            {
+                var response = new HttpResponseMessage((HttpStatusCode)520) { Content = new StringContent("error code: 520") };
+                response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(3));
+                return response;
+            },
+            static () => CreateSseResponse(
+                $"data: {{\"type\":\"response.output_item.done\",\"sequence_number\":0,\"output_index\":0,\"item\":{message}}}\n\n" +
+                $"data: {{\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{{\"id\":\"resp_http\",\"object\":\"response\",\"created_at\":1,\"model\":\"gpt-5.3-codex\",\"status\":\"completed\",\"output\":[{message}]}}}}\n\n"));
+        using var httpClient = new HttpClient(handler);
+        var delays = new List<TimeSpan>();
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            BaseUri = new Uri("https://api.openai.com/v1"),
+            StateRootPath = temp.Path,
+            HttpClient = httpClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "http" },
+            RetryDelayAsync = (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            },
+        });
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+            new AgentTurnRequest
+            {
+                Provider = CreateProviderDescriptor(),
+                ProviderId = new ModelProviderId("openai-responses"),
+                SessionId = "session-http",
+                RunId = new AgentRunId("run-http"),
+                ModelId = "gpt-5.3-codex",
+                Conversation = [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Hello")])],
+                Tools = [],
+                State = new AgentSessionState { SessionId = "session-http", ProtocolFamily = "codex", ProviderKey = "codex", UpdatedAt = DateTimeOffset.UtcNow },
+            },
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) =>
+            {
+                sessionUpdates.Add(update);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+
+        Assert.AreEqual(2, handler.Requests);
+        Assert.AreEqual("Answered.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        CollectionAssert.AreEqual(new[] { TimeSpan.FromSeconds(3) }, delays);
+        CollectionAssert.AreEqual(
+            new[] { "The gateway of the provider failed (HTTP 520): reconnecting to ChatGPT/Codex in 3 s... 1/6" },
+            sessionUpdates.Where(static update => update.Kind == AgentSessionUpdateKind.Reconnecting).Select(static update => update.Message).ToArray());
+    }
+
     private static HttpResponseMessage CreateSseResponse(string events)
     {
         var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(events) };
@@ -1579,6 +1640,46 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual(272_000L, budget.InputContextLimit);
         Assert.AreEqual(272_000L, budget.TotalContextEnvelope);
         Assert.AreEqual(244_800L, AgentTokenBudgetResolver.ResolveCompactionThreshold(272_000, astra, AgentCompactionSettings.Default));
+    }
+
+    // The context_window of Codex's catalog is the input Codex sends at most (it compacts at 90% of it), for every model
+    // of the endpoint: it wins over the 922,000 input tokens models.dev gives GPT-5.6 and GPT-5.5.
+    [TestMethod]
+    public async Task ModelDiscovery_TheContextWindowOfTheEndpointIsTheInputLimit_AndCompactsAt90Percent()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {"models":[
+                {"slug":"gpt-5.6-sol","display_name":"GPT-5.6 Sol","supported_in_api":true,"visibility":"list","use_responses_lite":true,"context_window":272000},
+                {"slug":"gpt-5.5","display_name":"GPT-5.5","supported_in_api":true,"visibility":"list","context_window":272000}]}
+                """),
+        };
+        await using var catalog = new ModelsDevCatalogService(OpenAIKnownModelLimitsTests.CreateDatabase(), new ModelsDevCatalogServiceOptions());
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            StateRootPath = temp.Path,
+            ModelCatalog = catalog,
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(response)),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { ModelDiscovery = "codex_endpoint" },
+        };
+
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(provider, CreateProviderDescriptor(), CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(2, models.Count);
+        foreach (var model in models)
+        {
+            Assert.AreEqual("openai", model.Capabilities?["modelsDevProviderId"], model.Id);
+            var budget = AgentTokenBudgetResolver.Resolve(model, AgentCompactionSettings.Default);
+            Assert.AreEqual(272_000L, budget.InputContextLimit, model.Id);
+            Assert.AreEqual(128_000L, budget.MaxOutputTokens, model.Id);
+            Assert.AreEqual(244_800L, AgentTokenBudgetResolver.ResolveCompactionThreshold(budget.InputContextLimit!.Value, model, AgentCompactionSettings.Default), model.Id);
+        }
     }
 
     [TestMethod]

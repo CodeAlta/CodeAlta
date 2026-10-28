@@ -10,13 +10,18 @@ namespace CodeAlta.Agent.OpenAI;
 internal static class OpenAIKnownModelLimits
 {
     /// <summary>
+    /// The share of the <c>context_window</c> of Codex's catalog at which Codex compacts, and a session of these models.
+    /// </summary>
+    public const double CodexCompactionRatio = 0.90;
+
+    /// <summary>
     /// The table, first match wins. GPT-6: models.dev gives 922,000 input tokens, but past 272,000 the input costs
     /// twice as much and the output 1.5 times; Codex's catalog gives these models a <c>context_window</c> of 272,000
     /// (its <c>max_context_window</c> is 872,000) and Codex compacts at 90% of it.
     /// </summary>
     public static IReadOnlyList<AgentModelKnownLimit> Table { get; } =
     [
-        new("gpt-6", InputTokenLimit: 272_000, ContextWindowTokens: 400_000, CompactionRatio: 0.90),
+        new("gpt-6", InputTokenLimit: 272_000, ContextWindowTokens: 400_000, CompactionRatio: CodexCompactionRatio),
     ];
 
     /// <summary>The table for the provider: OpenAI's own endpoints only, null for another one.</summary>

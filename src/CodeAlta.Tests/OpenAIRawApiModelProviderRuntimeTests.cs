@@ -6007,6 +6007,60 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
     }
 
+    // Cloudflare, in front of api.openai.com, answers 520-524 when it cannot reach OpenAI: the SDK does not retry them.
+    [TestMethod]
+    [DataRow(520)]
+    [DataRow(522)]
+    [DataRow(524)]
+    public async Task OpenAIResponsesTurnExecutor_AnApiKeyTurnAsksAgainAfterACloudflareStatus(int status)
+    {
+        const string message = """{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Answered.","annotations":[]}]}""";
+        var handler = new SequenceHttpMessageHandler(
+            () => new HttpResponseMessage((HttpStatusCode)status) { Content = new StringContent($"error code: {status}") },
+            () =>
+            {
+                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        $"data: {{\"type\":\"response.output_item.done\",\"sequence_number\":0,\"output_index\":0,\"item\":{message}}}\n\n" +
+                        $"data: {{\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{{\"id\":\"resp_1\",\"object\":\"response\",\"created_at\":1,\"model\":\"gpt-test\",\"status\":\"completed\",\"output\":[{message}]}}}}\n\n"),
+                };
+                response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
+                return response;
+            });
+        using var httpClient = new HttpClient(handler);
+        var delays = new List<TimeSpan>();
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ApiKey = "test-key",
+            BaseUri = new Uri("https://api.openai.com/v1"),
+            HttpClient = httpClient,
+            RetryDelayAsync = (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            },
+        });
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(),
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) =>
+            {
+                sessionUpdates.Add(update);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+
+        Assert.AreEqual(2, handler.Requests);
+        Assert.AreEqual("Answered.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        CollectionAssert.AreEqual(new[] { TimeSpan.FromSeconds(2) }, delays);
+        var reconnect = sessionUpdates.Single(static update => update.Kind == AgentSessionUpdateKind.Reconnecting);
+        Assert.AreEqual($"The gateway of the provider failed (HTTP {status}): reconnecting to the provider in 2 s... 1/6", reconnect.Message);
+        Assert.AreEqual("gateway_error", reconnect.Details!.Value.GetProperty("reason").GetString());
+    }
+
     [TestMethod]
     [DataRow(HttpStatusCode.Unauthorized, "Incorrect API key provided.")]
     [DataRow(HttpStatusCode.BadRequest, "Invalid value for 'input'.")]
@@ -7696,6 +7750,22 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         {
             values = Values.TryGetValue(name, out var value) ? [value] : null;
             return values is not null;
+        }
+    }
+
+    // Answers each request with the next response of its sequence.
+    private sealed class SequenceHttpMessageHandler(params Func<HttpResponseMessage>[] responses) : HttpMessageHandler
+    {
+        private int _requests;
+
+        public int Requests => _requests;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var index = Interlocked.Increment(ref _requests) - 1;
+            return index < responses.Length
+                ? Task.FromResult(responses[index]())
+                : throw new InvalidOperationException($"No answer is scripted for request {index + 1}.");
         }
     }
 

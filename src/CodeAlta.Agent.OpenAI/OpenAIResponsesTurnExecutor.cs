@@ -3206,9 +3206,10 @@ internal sealed class OpenAIResponsesTurnExecutor(
     private static ReadOnlySpan<int> TransportRetryDelaySeconds => [2, 4, 8, 16, 30, 30];
 
     // A connection to the endpoint that could not be made (a name that does not resolve, a connection refused or reset,
-    // a TLS failure) or a stream that ended before its terminal response, over HTTP, on either provider: asked again
-    // while nothing of the attempt was committed, after the waits of TransportRetryDelaySeconds. An answer of the
-    // endpoint (an HTTP status, an error event: authentication, an invalid request, a quota) is not a connection failure.
+    // a TLS failure), a gateway in front of it that could not reach it (IsGatewayFailure) or a stream that ended before
+    // its terminal response, over HTTP, on either provider: asked again while nothing of the attempt was committed,
+    // after the waits of TransportRetryDelaySeconds or the Retry-After of the answer. Any other answer of the endpoint
+    // (an HTTP status, an error event: authentication, an invalid request, a quota) is not a connection failure.
     // A WebSocket keeps its own retries and its fallback to HTTP.
     private static bool ShouldRetryTransportFailure(
         Exception exception,
@@ -3225,7 +3226,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             cancellationToken.IsCancellationRequested ||
             exception is AgentTurnExecutionException ||
             exception is OperationCanceledException && !IsTransportAbortedOperationCanceled(exception) ||
-            GetHttpStatusCode(exception) is not null ||
+            GetHttpStatusCode(exception) is not null && !IsGatewayFailure(exception) ||
             !IsTransportFailure(exception))
         {
             return false;
@@ -3236,7 +3237,13 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private static bool IsTransportFailure(Exception exception)
-        => TryGetConnectionFailureReason(exception, out _) || IsPrematureResponseEnded(exception);
+        => TryGetConnectionFailureReason(exception, out _) || IsPrematureResponseEnded(exception) || IsGatewayFailure(exception);
+
+    // The statuses Cloudflare, in front of api.openai.com, answers when it cannot reach OpenAI: 520 (unknown error),
+    // 521 (down), 522 (connection timed out), 523 (unreachable), 524 (timeout). Transient, like a 502 or a 503, but
+    // the SDK's retry policy does not ask them again.
+    private static bool IsGatewayFailure(Exception exception)
+        => GetHttpStatusCode(exception) is { } status && (int)status is >= 520 and <= 524;
 
     // Why a connection could not be made, from the errors .NET gives for it.
     private static bool TryGetConnectionFailureReason(Exception exception, [NotNullWhen(true)] out string? reason)
@@ -3285,7 +3292,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
         var seconds = Math.Max(1, (int)Math.Ceiling(delay.TotalSeconds));
         var reason = TryGetConnectionFailureReason(exception, out _)
             ? "The connection to the provider failed"
-            : "The response of the provider was cut off";
+            : IsGatewayFailure(exception)
+                ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"The gateway of the provider failed (HTTP {(int)GetHttpStatusCode(exception)!.Value})")
+                : "The response of the provider was cut off";
         var target = provider.CodexSubscription is not null ? "ChatGPT/Codex" : "the provider";
         return new AgentTurnSessionUpdate
         {
@@ -3575,6 +3584,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
         if (TryGetConnectionFailureReason(exception, out var connectionFailure))
         {
             return connectionFailure;
+        }
+
+        if (IsGatewayFailure(exception))
+        {
+            return "gateway_error";
         }
 
         return "retryable_stream_error";
