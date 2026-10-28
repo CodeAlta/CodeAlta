@@ -116,7 +116,8 @@ internal static class OpenAIProviderSdkFactory
             provider.ModelCatalog,
             provider.ModelsDevProviderId,
             provider.ModelOverrides,
-            provider.ModelsIncludeRegex);
+            provider.ModelsIncludeRegex,
+            OpenAIKnownModelLimits.For(provider));
     }
 
     private static async Task<IReadOnlyList<AgentModelInfo>> ListModelsCoreAsync(

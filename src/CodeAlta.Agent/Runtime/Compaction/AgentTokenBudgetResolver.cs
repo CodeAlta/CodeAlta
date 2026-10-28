@@ -2,6 +2,12 @@ namespace CodeAlta.Agent.Runtime.Compaction;
 
 internal static class AgentTokenBudgetResolver
 {
+    /// <summary>
+    /// The capability that gives the share of the input-context limit at which a session of the model compacts, at
+    /// most: a model whose price rises past a size compacts before it (<see cref="ModelCatalog.AgentModelKnownLimit"/>).
+    /// </summary>
+    public const string CompactionRatioCapabilityKey = "compactionRatio";
+
     private static readonly string[] ContextWindowCapabilityKeys =
     [
         "contextWindow",
@@ -65,6 +71,54 @@ internal static class AgentTokenBudgetResolver
         return budget with { InputContextLimit = assumedInputContextLimit, IsInputContextLimitAssumed = true };
     }
 
+    /// <summary>
+    /// The size of the active context at which a session compacts automatically: the ratio of the settings, or the
+    /// smaller one of the model (<see cref="CompactionRatioCapabilityKey"/>), of the input-context limit.
+    /// </summary>
+    public static long ResolveCompactionThreshold(
+        long inputContextLimit,
+        AgentModelInfo? modelInfo,
+        AgentCompactionSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var ratio = settings.Ratio;
+        if (modelInfo?.Capabilities is { } capabilities &&
+            capabilities.TryGetValue(CompactionRatioCapabilityKey, out var rawRatio) &&
+            TryConvertToDouble(rawRatio, out var modelRatio) &&
+            modelRatio is > 0 and <= 1 &&
+            modelRatio < ratio)
+        {
+            ratio = modelRatio;
+        }
+
+        return Math.Max((long)Math.Floor(inputContextLimit * ratio), 1L);
+    }
+
+    // A capability read back from a cache can be another number type, or JSON.
+    private static bool TryConvertToDouble(object? value, out double converted)
+    {
+        switch (value)
+        {
+            case double doubleValue:
+                converted = doubleValue;
+                return true;
+            case float floatValue:
+                converted = floatValue;
+                return true;
+            case decimal decimalValue:
+                converted = (double)decimalValue;
+                return true;
+            case System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Number } element:
+                return element.TryGetDouble(out converted);
+            case string stringValue:
+                return double.TryParse(stringValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out converted);
+            default:
+                converted = default;
+                return false;
+        }
+    }
+
     internal static long? ResolveInputContextLimit(long? contextWindow, long? inputTokenLimit, long? outputTokenLimit)
     {
         if (inputTokenLimit is > 0)
@@ -108,7 +162,7 @@ internal static class AgentTokenBudgetResolver
         return null;
     }
 
-    private static bool TryConvertToInt64(object? value, out long converted)
+    internal static bool TryConvertToInt64(object? value, out long converted)
     {
         switch (value)
         {

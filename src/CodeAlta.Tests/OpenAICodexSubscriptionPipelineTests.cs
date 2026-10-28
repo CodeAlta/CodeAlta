@@ -9,7 +9,9 @@ using System.Text;
 using System.Text.Json;
 using Azure.AI.OpenAI;
 using CodeAlta.Agent;
+using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Agent.OpenAI.Codex;
 using OpenAI;
@@ -1444,6 +1446,37 @@ public sealed class OpenAICodexSubscriptionPipelineTests
             JsonSerializer.Serialize(model, AgentJsonSerializerContext.Default.AgentModelInfo),
             AgentJsonSerializerContext.Default.AgentModelInfo);
         Assert.AreEqual(supportsPriority, CodexSubscriptionModelCapabilities.FromModel(roundTripped).SupportsPriorityServiceTier);
+    }
+
+    // The endpoint gives the window of Codex's catalog; models.dev, the 922,000 input tokens a GPT-6 model accepts.
+    [TestMethod]
+    public async Task ModelDiscovery_AGpt6ModelKeepsTo272000InputTokens_AndCompactsAt90Percent()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"models":[{"slug":"gpt-6-astra","display_name":"GPT-6 Astra","supported_in_api":true,"visibility":"list","use_responses_lite":true,"context_window":272000}]}"""),
+        };
+        await using var catalog = new ModelsDevCatalogService(OpenAIKnownModelLimitsTests.CreateDatabase(), new ModelsDevCatalogServiceOptions());
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            StateRootPath = temp.Path,
+            ModelCatalog = catalog,
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(response)),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { ModelDiscovery = "codex_endpoint" },
+        };
+
+        var astra = (await OpenAIProviderSdkFactory.ListModelsAsync(provider, CreateProviderDescriptor(), CancellationToken.None)
+            .ConfigureAwait(false)).Single();
+
+        Assert.AreEqual("openai", astra.Capabilities?["modelsDevProviderId"]);
+        var budget = AgentTokenBudgetResolver.Resolve(astra, AgentCompactionSettings.Default);
+        Assert.AreEqual(272_000L, budget.InputContextLimit);
+        Assert.AreEqual(272_000L, budget.TotalContextEnvelope);
+        Assert.AreEqual(244_800L, AgentTokenBudgetResolver.ResolveCompactionThreshold(272_000, astra, AgentCompactionSettings.Default));
     }
 
     [TestMethod]
