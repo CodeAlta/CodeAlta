@@ -523,7 +523,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
             options.ConfigurePluginModelProviders?.Invoke(modelProviderRegistry, pluginRuntime);
             var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry, null, retentionProtection);
-            agentHub = new AgentHub(modelProviderRegistry, catalogOptions.StateRoot, sessionViewCatalog.JournalStore.ProjectionCache, retentionProtection);
+            agentHub = new AgentHub(modelProviderRegistry, catalogOptions.StateRoot, sessionViewCatalog.JournalStore.ProjectionCache, retentionProtection)
+            {
+                JournalFile = sessionJournalFile,
+            };
             var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
             var projectFileSnapshotCache = new ProjectFileSnapshotCache();
             var eventFailurePolicy = options.PluginAgentEventFailurePolicy ??

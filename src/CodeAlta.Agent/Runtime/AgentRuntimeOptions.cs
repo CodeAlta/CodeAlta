@@ -22,6 +22,9 @@ public sealed class AgentRuntimeOptions
     /// </summary>
     public IAgentSessionProjectionCache? SessionProjectionCache { get; init; }
 
+    // The locks of the journals, shared with the other writers of the process; null for locks of the runtime alone.
+    internal AgentSessionJournalFile? JournalFile { get; init; }
+
     /// <summary>
     /// Gets or initializes the provider registrations available through this runtime.
     /// </summary>

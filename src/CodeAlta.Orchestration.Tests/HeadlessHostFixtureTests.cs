@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
@@ -173,6 +174,49 @@ public sealed class HeadlessHostFixtureTests
 
         Assert.IsFalse(string.IsNullOrWhiteSpace(runId.Value));
         Assert.IsFalse(hasActiveRun);
+    }
+
+    [TestMethod]
+    public async Task HeadlessHost_TheListOfSessionsWaitsForTheJournalLockOfTheSessions()
+    {
+        // The list of sessions and the sessions append to the same journal: with locks of their own, they append at the
+        // same offset on Linux and macOS and break a record in the middle of the journal (#253).
+        using var temp = TempDirectory.Create();
+        var ProviderId = new ModelProviderId("fake-journal");
+        await using var host = await CodeAltaHost.CreateAsync(
+            new CodeAltaHostOptions
+            {
+                GlobalRoot = temp.GlobalRoot,
+                CurrentProjectPath = temp.ProjectRoot,
+                IsHeadless = true,
+                HasInteractiveUi = false,
+                StartPlugins = false,
+                ConfigureModelProviders = registry => RegisterFakeProvider(registry, ProviderId),
+            },
+            CancellationToken.None);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(
+            host.CurrentProject,
+            new SessionExecutionOptions
+            {
+                ProviderId = ProviderId,
+                ProviderKey = ProviderId.Value,
+                WorkingDirectory = temp.ProjectRoot,
+                ProjectRoots = [temp.ProjectRoot],
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
+            },
+            title: "Shared journal",
+            CancellationToken.None);
+        var journal = Directory.EnumerateFiles(temp.Root, $"*{session.SessionId}*.jsonl", SearchOption.AllDirectories).Single();
+
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holding = host.AgentHub.JournalFile.WithPathLockAsync(journal, () => release.Task, CancellationToken.None);
+        var append = host.SessionViewCatalog.JournalStore.AppendStateAsync(session, new SessionViewLocalState { ModelId = "fake-model" });
+        await Task.WhenAny(append, Task.Delay(TimeSpan.FromMilliseconds(300)));
+        Assert.IsFalse(append.IsCompleted, "The list of sessions wrote the journal while the sessions held it.");
+
+        release.SetResult();
+        await holding;
+        await append;
     }
 
     private static void RegisterFakeProvider(ModelProviderRegistry registry, ModelProviderId ProviderId)

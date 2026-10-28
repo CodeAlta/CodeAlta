@@ -30,6 +30,44 @@ public sealed class AgentHubTests
     }
 
     [TestMethod]
+    public async Task SessionJournalWrites_WaitForTheJournalLockOfTheHost()
+    {
+        // The list of sessions appends state records to the journal a session writes its events to. With locks of their own,
+        // two writers append at the same offset on Linux and macOS, and the second record overwrites the first, leaving a
+        // broken line in the middle of the journal (#253).
+        var root = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        try
+        {
+            var runtime = new CountingProviderRuntime("provider");
+            var registry = new ModelProviderRegistry();
+            registry.RegisterOrReplace(runtime.Descriptor, () => runtime);
+            var journals = new AgentSessionJournalFile();
+            await using var hub = new AgentHub(registry, root) { JournalFile = journals };
+            var handle = await hub.StartSessionAsync(new AgentSessionCreateOptions
+            {
+                ProviderKey = "provider",
+                WorkingDirectory = Environment.CurrentDirectory,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            }).ConfigureAwait(false);
+            var journal = Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories).Single();
+
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var holding = journals.WithPathLockAsync(journal, () => release.Task, CancellationToken.None);
+            var rename = hub.RenameSessionAsync(handle.HandleId, "Renamed");
+            await Task.WhenAny(rename, Task.Delay(TimeSpan.FromMilliseconds(300))).ConfigureAwait(false);
+            Assert.IsFalse(rename.IsCompleted, "The session wrote its journal while another writer of the process held it.");
+
+            release.SetResult();
+            await holding.ConfigureAwait(false);
+            Assert.IsTrue(await rename.ConfigureAwait(false));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task StartSessionAsync_RejectsRuntimeSessionIdMismatch()
     {
         var runtime = new RewritingSessionRuntime("provider");

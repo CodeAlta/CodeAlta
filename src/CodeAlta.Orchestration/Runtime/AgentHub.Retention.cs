@@ -16,7 +16,7 @@ public sealed partial class AgentHub
     private FileSystemAgentSessionStore GetExistenceStore()
     {
         if (Volatile.Read(ref _existenceStore) is { } store) return store;
-        var created = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(_stateRootPath!), new AgentSessionJournalFile(), _sessionProjectionCache);
+        var created = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(_stateRootPath!), JournalFile, _sessionProjectionCache);
         return Interlocked.CompareExchange(ref _existenceStore, created, null) ?? created;
     }
 

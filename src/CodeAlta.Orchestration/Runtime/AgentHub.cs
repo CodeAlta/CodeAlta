@@ -33,6 +33,11 @@ public sealed partial class AgentHub : IAsyncDisposable
 
     internal IReadOnlyList<ModelProviderDescriptor> SelectionProviders => _modelProviderRegistry.ListProviders();
 
+    // The locks of the journals, shared with the other writers of the process (the list of sessions appends state records
+    // to the same journals). FileShare keeps two writers apart on Windows only: on Linux and macOS, two writers with
+    // locks of their own append at the same offset, and the second record overwrites the first.
+    internal AgentSessionJournalFile JournalFile { get; init; } = new();
+
     /// <summary>The version of the registration of a provider (<see cref="ModelProviderRegistry.GetRegistrationVersion"/>); 0 when it is not registered.</summary>
     internal long GetProviderRegistrationVersion(string? providerKey)
         => string.IsNullOrWhiteSpace(providerKey) ? 0 : _modelProviderRegistry.GetRegistrationVersion(new ModelProviderId(providerKey.Trim()));
@@ -761,6 +766,7 @@ public sealed partial class AgentHub : IAsyncDisposable
                 {
                     StateRootPath = _stateRootPath,
                     SessionProjectionCache = _sessionProjectionCache,
+                    JournalFile = JournalFile,
                     Providers = [agentProviderRuntime.CreateProviderRegistration()],
                 });
             await InvokeOriginalAsync(() => providerRuntime.StartAsync(cancellationToken)).ConfigureAwait(false);

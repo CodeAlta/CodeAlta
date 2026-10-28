@@ -15,7 +15,7 @@ public sealed class AgentRuntime : IAsyncDisposable
     private readonly AgentRuntimePathLayout _layout;
     private readonly IReadOnlyDictionary<string, AgentRuntimeProviderRegistration> _providersByKey;
     private readonly Dictionary<string, IReadOnlyList<AgentModelInfo>> _modelCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly AgentSessionJournalFile _journalFile = new();
+    private readonly AgentSessionJournalFile _journalFile;
     private FileSystemAgentSessionStore? _store;
     private bool _started;
 
@@ -48,6 +48,7 @@ public sealed class AgentRuntime : IAsyncDisposable
         }
 
         _layout = new AgentRuntimePathLayout(options.StateRootPath);
+        _journalFile = options.JournalFile ?? new AgentSessionJournalFile();
         _providersByKey = options.Providers.ToDictionary(
             static provider => provider.Provider.ProviderKey,
             StringComparer.OrdinalIgnoreCase);
