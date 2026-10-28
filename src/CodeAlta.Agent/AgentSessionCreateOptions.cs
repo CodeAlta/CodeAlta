@@ -129,6 +129,12 @@ public class AgentSessionCreateOptions
     public AgentReasoningEffort? ReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether nobody reads the summaries of the reasoning of the session (a headless run): its
+    /// requests ask for none (<see cref="Runtime.AgentTurnRequest.OmitReasoningSummaries"/>). Default false.
+    /// </summary>
+    public bool OmitReasoningSummaries { get; init; }
+
+    /// <summary>
     /// Gets or initializes the permission mode of the session, one of the
     /// <see cref="Runtime.AgentProviderProfile.PermissionModes"/> of its provider. Null leaves the mode the provider
     /// is configured with.

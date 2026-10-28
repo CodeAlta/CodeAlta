@@ -2237,6 +2237,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DeveloperInstructions = developerInstructions,
             SessionInstructions = sessionInstructions,
             ReasoningEffort = _options.ReasoningEffort,
+            OmitReasoningSummaries = _options.OmitReasoningSummaries,
             // A run has the mode it started with, or the one it was given since (ApplyPermissionModeNowAsync); what
             // runs outside one takes the current mode.
             PermissionMode = _activeRun is { } active && active.Id == runId ? active.PermissionMode : PermissionMode,
@@ -3411,7 +3412,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             developerInstructions,
             _conversation,
             _state.Usage);
-        var thresholdTokens = Math.Max((long)Math.Floor(budget.InputContextLimit.Value * settings.Ratio), 1);
+        var thresholdTokens = AgentTokenBudgetResolver.ResolveCompactionThreshold(budget.InputContextLimit.Value, modelInfo, settings);
         if (estimate.Tokens < thresholdTokens)
         {
             return;
@@ -4553,7 +4554,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return FallbackModelVisibleToolResultCharacterLimit;
         }
 
-        var thresholdTokens = Math.Max((long)Math.Floor(inputLimit.Value * settings.Ratio), 1L);
+        var thresholdTokens = AgentTokenBudgetResolver.ResolveCompactionThreshold(inputLimit.Value, modelInfo, settings);
         var perToolTokenLimit = Math.Max((long)Math.Floor(inputLimit.Value * AgentCompactionSettings.DefaultPostCompactionTargetRatio), 1L);
         var providerConversation = CreateProviderConversation();
         var currentEstimate = AgentTokenEstimator.EstimatePromptTokens(

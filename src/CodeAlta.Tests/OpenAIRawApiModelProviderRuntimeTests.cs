@@ -1466,6 +1466,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             partialUpdates,
             partialUpdates,
             partialUpdates,
+            partialUpdates,
         ]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
@@ -1476,6 +1477,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 Experimental = true,
                 ResponseTransport = "http",
             },
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
         });
 
         var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
@@ -1484,7 +1486,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     static (_, _) => ValueTask.CompletedTask))
             .ConfigureAwait(false);
 
-        Assert.AreEqual(6, responsesClient.Requests.Count);
+        // The first request and the six retries of a stream cut before its response.
+        Assert.AreEqual(7, responsesClient.Requests.Count);
         var translatedException = Assert.IsInstanceOfType<InvalidOperationException>(exception.InnerException);
         var protocolException = Assert.IsInstanceOfType<OpenAIResponsesProtocolException>(translatedException.InnerException);
         Assert.AreEqual(OpenAIResponsesProtocolErrorCode.StreamClosedBeforeTerminalResponse, protocolException.ErrorCode);
@@ -2944,6 +2947,78 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual("auto", reasoning.GetProperty("summary").GetString());
         Assert.IsFalse(reasoning.TryGetProperty("effort", out _));
         Assert.IsTrue(responsesClient.Requests.Single().Options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent));
+    }
+
+    // Nobody reads the reasoning of a headless run: no summary is asked for, and the reasoning and its replay stay.
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_AHeadlessTurnOfTheOpenAIApi_AsksForNoReasoningSummary()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-headless", "gpt-reasoning", "Answer.")],
+            [CreateTextOnlyAssistantResponseUpdate("response-desktop", "gpt-reasoning", "Answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var request = CreateTurnRequest() with
+        {
+            ModelId = "gpt-reasoning",
+            ReasoningEffort = AgentReasoningEffort.XHigh,
+            ModelInfo = new AgentModelInfo(
+                "gpt-reasoning",
+                SupportedReasoningEfforts: [AgentReasoningEffort.Medium, AgentReasoningEffort.XHigh]),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request with { OmitReasoningSummaries = true }, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var headless = JsonDocument.Parse(responsesClient.Requests[0].SerializedOptions);
+        var reasoning = headless.RootElement.GetProperty("reasoning");
+        Assert.IsFalse(reasoning.TryGetProperty("summary", out _), reasoning.GetRawText());
+        Assert.AreEqual("xhigh", reasoning.GetProperty("effort").GetString());
+        Assert.IsTrue(responsesClient.Requests[0].Options.IncludedProperties.Contains(IncludedResponseProperty.ReasoningEncryptedContent));
+
+        // CodeAlta Desktop keeps them.
+        using var desktop = JsonDocument.Parse(responsesClient.Requests[1].SerializedOptions);
+        Assert.AreEqual("auto", desktop.RootElement.GetProperty("reasoning").GetProperty("summary").GetString());
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_AHeadlessTurnOfTheCodexSubscription_AsksForNoReasoningSummary()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-headless", "gpt-6-astra", "Answer.")],
+        ]);
+        var executor = CreateCodexExecutor(responsesClient);
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-6-astra",
+            ReasoningEffort = AgentReasoningEffort.XHigh,
+            OmitReasoningSummaries = true,
+            ModelInfo = new AgentModelInfo(
+                "gpt-6-astra",
+                SupportedReasoningEfforts: [AgentReasoningEffort.Medium, AgentReasoningEffort.XHigh],
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["source"] = "codex-endpoint",
+                    ["supportsReasoningSummaries"] = true,
+                    ["useResponsesLite"] = true,
+                }),
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        var reasoning = document.RootElement.GetProperty("reasoning");
+        Assert.IsFalse(reasoning.TryGetProperty("summary", out _), reasoning.GetRawText());
+        Assert.AreEqual("xhigh", reasoning.GetProperty("effort").GetString());
+        // Responses Lite keeps the reasoning of every turn, and its tool calls one at a time, as Codex sends them.
+        Assert.AreEqual("all_turns", reasoning.GetProperty("context").GetString());
+        Assert.IsFalse(document.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
     }
 
     [TestMethod]
@@ -5125,6 +5200,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 Experimental = true,
                 ResponseTransport = "http",
             },
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
         });
 
         var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
@@ -5501,6 +5577,204 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ProviderKey = "azure",
             ResponsesClientFactory = _ => responsesClient,
         });
+
+    // What the SDK throws when the name of the endpoint does not resolve, or nothing listens: no HTTP status.
+    private static ClientResultException CreateConnectionFailure(HttpRequestError error, SocketError socketError)
+        => new(
+            "No such host is known. (api.openai.com:443)",
+            response: null,
+            new HttpRequestException(error, "No such host is known. (api.openai.com:443)", new SocketException((int)socketError)));
+
+    [TestMethod]
+    [DataRow(HttpRequestError.NameResolutionError, SocketError.HostNotFound)]
+    [DataRow(HttpRequestError.ConnectionError, SocketError.ConnectionRefused)]
+    [DataRow(HttpRequestError.ConnectionError, SocketError.ConnectionReset)]
+    [DataRow(HttpRequestError.SecureConnectionError, SocketError.Success)]
+    public async Task OpenAIResponsesTurnExecutor_AnApiKeyTurnAsksAgainUntilTheConnectionComesBack(HttpRequestError error, SocketError socketError)
+    {
+        var responsesClient = new FlakyOpenAIResponseClient(
+            [CreateConnectionFailure(error, socketError), CreateConnectionFailure(error, socketError), CreateConnectionFailure(error, socketError)],
+            [CreateTextOnlyAssistantResponseUpdate("response-retried", "gpt-test", "Retried answer.")]);
+        var delays = new List<TimeSpan>();
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            RetryDelayAsync = (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            },
+        });
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(),
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) =>
+            {
+                sessionUpdates.Add(update);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+
+        Assert.AreEqual(4, responsesClient.RequestCount);
+        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        CollectionAssert.AreEqual(new[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8) }, delays);
+        Assert.AreEqual(3, sessionUpdates.Count);
+        Assert.IsTrue(sessionUpdates.All(static update => update.Kind == AgentSessionUpdateKind.Reconnecting));
+        Assert.AreEqual("The connection to the provider failed: reconnecting to the provider in 2 s... 1/6", sessionUpdates[0].Message);
+        Assert.AreEqual("openai", sessionUpdates[0].Details!.Value.GetProperty("provider").GetString());
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_AnApiKeyTurnWaitsOverAMinute_ThenFailsWithTheConnectionError()
+    {
+        var responsesClient = new FlakyOpenAIResponseClient(
+            Enumerable.Range(0, 10).Select(static _ => (Exception)CreateConnectionFailure(HttpRequestError.NameResolutionError, SocketError.HostNotFound)).ToArray(),
+            [CreateTextOnlyAssistantResponseUpdate("response-should-not-run", "gpt-test", "Unexpected.")]);
+        var delays = new List<TimeSpan>();
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            RetryDelayAsync = (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            },
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(7, responsesClient.RequestCount);
+        CollectionAssert.AreEqual(new[] { 2, 4, 8, 16, 30, 30 }, delays.Select(static delay => (int)delay.TotalSeconds).ToArray());
+        Assert.IsTrue(delays.Sum(static delay => delay.TotalSeconds) > 60);
+        StringAssert.Contains(exception.Failure.Message, "No such host is known");
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_AnApiKeyStreamThatEndsBeforeItsResponse_IsAskedAgain()
+    {
+        var responsesClient = new PartiallyFailingThenSuccessOpenAIResponseClient(
+            CreateCreatedResponseUpdate("response-started", "gpt-test"),
+            CreatePrematureResponseEndException(),
+            [CreateTextOnlyAssistantResponseUpdate("response-retried", "gpt-test", "Retried answer.")]);
+        var delays = new List<TimeSpan>();
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            RetryDelayAsync = (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            },
+        });
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(),
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) =>
+            {
+                sessionUpdates.Add(update);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+
+        Assert.AreEqual(2, responsesClient.RequestCount);
+        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        CollectionAssert.AreEqual(new[] { TimeSpan.FromSeconds(2) }, delays);
+        var reconnect = sessionUpdates.Single();
+        Assert.AreEqual("The response of the provider was cut off: reconnecting to the provider in 2 s... 1/6", reconnect.Message);
+        Assert.AreEqual("stream_closed_before_terminal", reconnect.Details!.Value.GetProperty("reason").GetString());
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_AnApiKeyStreamThatEndsWithNothing_IsAskedAgain()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [],
+            [CreateTextOnlyAssistantResponseUpdate("response-retried", "gpt-test", "Retried answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(),
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.AreEqual(2, responsesClient.Requests.Count);
+        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+    }
+
+    [TestMethod]
+    [DataRow(HttpStatusCode.Unauthorized, "Incorrect API key provided.")]
+    [DataRow(HttpStatusCode.BadRequest, "Invalid value for 'input'.")]
+    [DataRow(HttpStatusCode.TooManyRequests, "You exceeded your current quota (insufficient_quota).")]
+    public async Task OpenAIResponsesTurnExecutor_AnAnswerOfTheEndpointIsNotAConnectionFailure(HttpStatusCode status, string message)
+    {
+        var responsesClient = new FlakyOpenAIResponseClient(
+            [new HttpRequestException(HttpRequestError.Unknown, message, inner: null, status)],
+            [CreateTextOnlyAssistantResponseUpdate("response-should-not-run", "gpt-test", "Unexpected.")]);
+        var delays = new List<TimeSpan>();
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            RetryDelayAsync = (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            },
+        });
+
+        _ = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, responsesClient.RequestCount);
+        Assert.AreEqual(0, delays.Count);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_TheWaitForTheConnectionEndsWithTheTurn()
+    {
+        var responsesClient = new FlakyOpenAIResponseClient(
+            [CreateConnectionFailure(HttpRequestError.NameResolutionError, SocketError.HostNotFound)],
+            [CreateTextOnlyAssistantResponseUpdate("response-should-not-run", "gpt-test", "Unexpected.")]);
+        using var turn = new CancellationTokenSource();
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            RetryDelayAsync = async (delay, cancellationToken) =>
+            {
+                // The user stops the turn during the wait.
+                await turn.CancelAsync().ConfigureAwait(false);
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            },
+        });
+
+        _ = await Assert.ThrowsAsync<OperationCanceledException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask,
+                    turn.Token))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, responsesClient.RequestCount);
+    }
 
     [TestMethod]
     public void OpenAIResponsesTurnExecutor_SaysAnErrorEventCarriedNothing()
@@ -5915,7 +6189,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(0, deltas.Count);
         Assert.AreEqual(1, sessionUpdates.Count);
         Assert.AreEqual(AgentSessionUpdateKind.Reconnecting, sessionUpdates[0].Kind);
-        Assert.AreEqual("Reconnecting to ChatGPT/Codex... 1/5", sessionUpdates[0].Message);
+        Assert.AreEqual("The response of the provider was cut off: reconnecting to ChatGPT/Codex in 1 s... 1/6", sessionUpdates[0].Message);
         var text = response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value;
         Assert.AreEqual("Retried answer.", text);
     }

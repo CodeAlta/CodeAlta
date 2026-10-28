@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Agent.ModelCatalog;
 
@@ -24,7 +25,8 @@ internal static class AgentModelMetadataEnricher
         ModelsDevCatalogService? catalog,
         string? modelsDevProviderId,
         IReadOnlyDictionary<string, AgentModelOverride>? overrides,
-        string? modelsIncludeRegex = null)
+        string? modelsIncludeRegex = null,
+        IReadOnlyList<AgentModelKnownLimit>? knownLimits = null)
     {
         var filteredModels = AgentModelCatalogFilter.ApplyIncludeRegex(models, modelsIncludeRegex);
         if (filteredModels.Count == 0)
@@ -33,7 +35,7 @@ internal static class AgentModelMetadataEnricher
         }
 
         return filteredModels
-            .Select(model => EnrichModel(model, catalog, modelsDevProviderId, overrides))
+            .Select(model => EnrichModel(model, catalog, modelsDevProviderId, overrides, knownLimits))
             .ToArray();
     }
 
@@ -41,7 +43,8 @@ internal static class AgentModelMetadataEnricher
         AgentModelInfo model,
         ModelsDevCatalogService? catalog,
         string? modelsDevProviderId,
-        IReadOnlyDictionary<string, AgentModelOverride>? overrides)
+        IReadOnlyDictionary<string, AgentModelOverride>? overrides,
+        IReadOnlyList<AgentModelKnownLimit>? knownLimits = null)
     {
         ArgumentNullException.ThrowIfNull(model);
 
@@ -72,6 +75,13 @@ internal static class AgentModelMetadataEnricher
             {
                 displayName = modelsDevModel.Name ?? displayName;
             }
+        }
+
+        // What the provider knows better than models.dev, under what the user set.
+        if (AgentModelKnownLimit.Find(knownLimits, model.Id) is { } knownLimit)
+        {
+            capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
+            ApplyKnownLimit(capabilities, knownLimit);
         }
 
         if (TryGetOverride(overrides, model, out var modelOverride) && modelOverride is not null)
@@ -296,6 +306,31 @@ internal static class AgentModelMetadataEnricher
         SetWhenValue(capabilities, "supportsToolCall", modelOverride.SupportsToolCall);
         SetWhenValue(capabilities, "supportsAttachments", modelOverride.SupportsAttachments);
         SetWhenValue(capabilities, "supportsStructuredOutput", modelOverride.SupportsStructuredOutput);
+    }
+
+    private static void ApplyKnownLimit(
+        IDictionary<string, object?> capabilities,
+        AgentModelKnownLimit knownLimit)
+    {
+        SetAtMost(capabilities, "contextWindow", knownLimit.ContextWindowTokens);
+        SetAtMost(capabilities, "contextWindowTokens", knownLimit.ContextWindowTokens);
+        SetAtMost(capabilities, "inputTokenLimit", knownLimit.InputTokenLimit);
+        SetAtMost(capabilities, "maxInputTokens", knownLimit.InputTokenLimit);
+        capabilities[AgentTokenBudgetResolver.CompactionRatioCapabilityKey] = knownLimit.CompactionRatio;
+    }
+
+    // A limit the model has, lowered to the known one; the known one where it has none.
+    private static void SetAtMost(IDictionary<string, object?> capabilities, string key, long limit)
+    {
+        if (capabilities.TryGetValue(key, out var value) &&
+            AgentTokenBudgetResolver.TryConvertToInt64(value, out var current) &&
+            current > 0 &&
+            current <= limit)
+        {
+            return;
+        }
+
+        capabilities[key] = limit;
     }
 
     private static void SetIfMissing(IDictionary<string, object?> capabilities, string key, object? value)
