@@ -109,6 +109,35 @@ public sealed class CodeModeResultFormatterTests
     }
 
     [TestMethod]
+    public void AJsonJustOverItsBudget_KeepsAboutTheBudget_NotHalfOfIt()
+    {
+        // The raw objects of a batch of reads: one long content, a little over the budget.
+        var reads = JsonSerializer.Serialize(new[] { new { path = "a.cs", content = new string('a', 10_500) }, new { path = "b.cs", content = "short" } });
+        var items = JsonSerializer.Serialize(Enumerable.Range(1, 400).Select(static i => $"src/file-{i:000}.cs").ToArray());
+
+        var cutReads = CodeModeJsonTruncation.Truncate(reads, 10_000);
+        var cutItems = CodeModeJsonTruncation.Truncate(items, 6_000);
+
+        Assert.IsLessThanOrEqualTo(10_000, cutReads.Length);
+        Assert.IsGreaterThan(9_800, cutReads.Length, "only what is over the budget is cut");
+        StringAssert.Contains(cutReads, "characters cut]");
+        StringAssert.Contains(cutReads, "\"b.cs\"");
+        Assert.IsLessThanOrEqualTo(6_000, cutItems.Length);
+        Assert.IsGreaterThan(5_800, cutItems.Length, "an array loses the items over the budget, not half of them");
+        var kept = JsonSerializer.Deserialize<string[]>(cutItems)!;
+        Assert.AreEqual($"…[{400 - (kept.Length - 1)} more items cut]", kept[^1], "every item cut is counted");
+    }
+
+    [TestMethod]
+    public void TheDefaultBudget_GivesABatchOfReadsWhole()
+    {
+        var reads = Completed(new[] { new { content = new string('a', 15_000) }, new { content = new string('b', 15_000) } });
+
+        Assert.IsNull(CodeModeResultFormatter.ResultToKeep(reads, CodeModeResultFormatter.DefaultMaxOutputTokens), "30,000 characters are within 10,000 tokens");
+        Assert.IsNotNull(CodeModeResultFormatter.ResultToKeep(Completed(new string('a', 40_100)), CodeModeResultFormatter.DefaultMaxOutputTokens));
+    }
+
+    [TestMethod]
     public void OutputWithBackticks_HasALongerFence()
     {
         var text = CodeModeResultFormatter.Format(Completed("done", "```js", "x", "```"));

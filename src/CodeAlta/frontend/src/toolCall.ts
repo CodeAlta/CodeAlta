@@ -156,18 +156,23 @@ export function parseShellResult(value: string): ShellResult | null {
 export type NumberedLines = Readonly<{ start: number; lines: readonly string[] }>;
 
 /**
- * Reads lines written as `   12: text` with consecutive numbers (the result of `read_file`), or returns null
- * when a line has another form. A last line cut by the page's limit is dropped.
+ * Reads lines written as `12:text` with consecutive numbers (the result of `read_file`), or returns null
+ * when a line has another form. A last line cut by the page's limit is dropped, and so is the note of a read
+ * that stopped at its limit of characters.
  */
 export function parseNumberedLines(value: string, partial = false): NumberedLines | null {
   const rows = value.replaceAll("\r\n", "\n").split("\n");
   if (rows.at(-1) === "") rows.pop();
   if (partial) rows.pop();
+  if (rows.length > 1 && /^\[read_file stopped at .*\]$/.test(rows.at(-1)!)) rows.pop();
   if (!rows.length) return null;
+  // The reads of older sessions pad their numbers to five characters and put a space after the colon: a first line
+  // that starts with a space is of that form, and the space after the colon is not part of the line.
+  const padded = rows[0].startsWith(" ");
   const lines: string[] = [];
   let start = 0;
   for (const row of rows) {
-    const match = /^ *(\d{1,9}): ?(.*)$/.exec(row);
+    const match = (padded ? /^ *(\d{1,9}): ?(.*)$/ : /^(\d{1,9}):(.*)$/).exec(row);
     if (!match) return null;
     const number = Number(match[1]);
     if (!lines.length) start = number;
@@ -256,6 +261,13 @@ export function changedFiles(call: ToolCall, given: ToolArguments | null): Chang
   const input = text(given?.input) ?? text(given?.patch);
   if (input) return patchFiles(input) ?? [];
   if (typeof given?.old_string === "string" && typeof given.new_string === "string") return [replacementFile(path, given.old_string, given.new_string)];
+  // Several replacements in one file: each is a hunk of its own.
+  const edits = Array.isArray(given?.edits) ? (given.edits as unknown[]).filter((edit): edit is { old_string: string; new_string: string } =>
+    typeof edit === "object" && edit !== null && typeof (edit as ToolArguments).old_string === "string" && typeof (edit as ToolArguments).new_string === "string") : [];
+  if (edits.length) {
+    return [changedFile(path, "update", null, edits.flatMap((edit, index) => [
+      ...(index ? [{ kind: "hunk" as const, text: "", oldLine: null, newLine: null }] : []), ...replacementFile(path, edit.old_string, edit.new_string).rows]))];
+  }
   if (typeof given?.content === "string") {
     return [changedFile(path, "add", null, given.content.replaceAll("\r\n", "\n").replace(/\n$/, "").split("\n")
       .map((line, index) => ({ kind: "added" as const, text: line, oldLine: null, newLine: index + 1 })))];

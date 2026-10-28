@@ -481,8 +481,12 @@ internal sealed class AcpEventProjector
             _ => "other",
         };
 
+    // The cut of an update bounds what the client gets, not what the model read: the marker says so, and how long the
+    // whole output is, so that a reader of the updates does not take their length for that of the tool's result.
     private static string Bound(string text)
-        => text.Length <= MaximumToolOutput ? text : string.Concat(text.AsSpan(0, MaximumToolOutput), "\n[truncated]");
+        => text.Length <= MaximumToolOutput
+            ? text
+            : string.Concat(text.AsSpan(0, MaximumToolOutput), FormattableString.Invariant($"\n[truncated in this update: {MaximumToolOutput:N0} of {text.Length:N0} characters]"));
 
     private static string Shorten(string value)
     {

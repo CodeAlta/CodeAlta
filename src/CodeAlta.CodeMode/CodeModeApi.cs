@@ -227,7 +227,9 @@ public sealed class CodeModeApi
               }));
             });
             // parallel(thunks, { limit }): a barrier over functions that each return a promise. A failure is null in the
-            // array, and a warning in the output; at most `limit` (8 by default) run at once.
+            // array, and a warning in the output; at most `limit` (8 by default) run at once. Null, not the text of the
+            // error: the answer of a sub-agent is a text too, and an error must not read as one. The model reads the
+            // error in the output; a script that needs it uses Promise.allSettled.
             global("parallel", async function (thunks, options) {
               if (!Array.isArray(thunks) || thunks.some((t) => typeof t !== "function")) {
                 throw new TypeError("parallel(thunks, { limit }): thunks is an array of functions, such as [() => agent(\"a\"), () => agent(\"b\")].");

@@ -71,12 +71,16 @@ public sealed class AgentBuiltInToolOptions
     /// <summary>
     /// Gets or initializes the default maximum number of lines returned by <c>read_file</c>.
     /// </summary>
-    public int DefaultReadFileLineLimit { get; init; } = 2000;
+    public int DefaultReadFileLineLimit { get; init; } = DefaultReadFileLines;
 
     /// <summary>
     /// Gets or initializes the maximum number of lines returned by <c>read_file</c>.
     /// </summary>
-    public int MaxReadFileLineLimit { get; init; } = 5000;
+    public int MaxReadFileLineLimit { get; init; } = MaxReadFileLines;
+
+    // The limits of lines of a session's read_file, which its guard against reads again knows too.
+    internal const int DefaultReadFileLines = 2000;
+    internal const int MaxReadFileLines = 5000;
 
     /// <summary>
     /// Gets or initializes the maximum number of characters of one line <c>read_file</c> gives the model: a longer line
@@ -89,7 +93,7 @@ public sealed class AgentBuiltInToolOptions
     /// the line that would pass it and names the offset to read on from. Zero or less for no limit. A script of Code
     /// Mode receives the lines read whole.
     /// </summary>
-    public int MaxReadFileCharacters { get; init; } = 100_000;
+    public int MaxReadFileCharacters { get; init; } = 40_000;
 
     /// <summary>
     /// Gets or initializes the maximum number of grep matches returned.

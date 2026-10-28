@@ -37,8 +37,7 @@ public sealed class AgentToolsTests
 
         Assert.IsTrue(result.Success);
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
-        StringAssert.Contains(output, "    2: beta");
-        StringAssert.Contains(output, "    3: gamma");
+        Assert.AreEqual("2:beta" + Environment.NewLine + "3:gamma", output, "the number, a colon, then the line as it is");
     }
 
     [TestMethod]
@@ -64,7 +63,7 @@ public sealed class AgentToolsTests
 
         Assert.IsTrue(result.Success);
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
-        Assert.AreEqual("    3: gamma" + Environment.NewLine + "    4: delta", output);
+        Assert.AreEqual("3:gamma" + Environment.NewLine + "4:delta", output);
     }
 
     [TestMethod]
@@ -115,8 +114,8 @@ public sealed class AgentToolsTests
 
         Assert.IsTrue(result.Success);
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
-        StringAssert.Contains(output, "    1: alpha");
-        StringAssert.Contains(output, "    2: beta");
+        StringAssert.Contains(output, "1:alpha");
+        StringAssert.Contains(output, "2:beta");
     }
 
     [TestMethod]
@@ -1002,6 +1001,49 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public async Task ShellCommandTool_MaxOutputTokens_LowersTheBudgetOfTheOutput_AndNeverRaisesIt()
+    {
+        using var temp = TestTempDirectory.Create();
+        var outputFolder = Path.Combine(temp.Path, "tool-output");
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(new AgentBuiltInToolOptions
+            {
+                ProviderId = ModelProviderIds.OpenAIResponses,
+                SessionId = "session-1",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                MaxShellCommandOutputCharacters = 8_000,
+                ResolveToolOutputDirectoryAsync = _ => ValueTask.FromResult<string?>(outputFolder),
+            })
+            .Single(static tool => tool.Spec.Name == "shell_command");
+        StringAssert.Contains(tool.Spec.InputSchema.GetProperty("properties").GetProperty("max_output_tokens").GetProperty("description").GetString(), "8000 characters");
+        var command = OperatingSystem.IsWindows()
+            ? "1..2000 | ForEach-Object { \"line-$_\" }"
+            : "seq -f 'line-%g' 1 2000";
+
+        async Task<AgentToolResult> RunAsync(int? maxOutputTokens)
+        {
+            using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":60000{{(maxOutputTokens is { } tokens ? $",\"max_output_tokens\":{tokens}" : "")}}}""");
+            return await tool.Handler(
+                new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", $"call-{maxOutputTokens}", tool.Spec.Name, args.RootElement.Clone()),
+                CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(90)).ConfigureAwait(false);
+        }
+
+        var lowered = Assert.IsInstanceOfType<AgentToolResultItem.Text>((await RunAsync(500)).Items.Single()).Value;
+        var raised = await RunAsync(100_000);
+        var floor = Assert.IsInstanceOfType<AgentToolResultItem.Text>((await RunAsync(1)).Items.Single()).Value;
+
+        Assert.IsLessThanOrEqualTo(2_000, lowered.Length, "500 tokens are about 2,000 characters");
+        StringAssert.Contains(lowered, "line-1" + Environment.NewLine);
+        Assert.IsTrue(lowered.TrimEnd().Contains("line-2000", StringComparison.Ordinal));
+        StringAssert.Contains(lowered, "output_truncated: ");
+        var whole = Assert.IsInstanceOfType<AgentToolResultItem.Text>(raised.Items.Single()).Value;
+        Assert.IsLessThanOrEqualTo(8_000, whole.Length, "a budget above the default does not raise it");
+        StringAssert.Contains(raised.Display, "line-1000", "the user still sees the whole output");
+        Assert.IsLessThanOrEqualTo(1_000, floor.Length);
+        StringAssert.Contains(floor, "output_truncated: ", "the least budget still names the file of the whole output");
+    }
+
+    [TestMethod]
     public async Task ShellCommandTool_LeavesAShortOutputWhole()
     {
         using var temp = TestTempDirectory.Create();
@@ -1036,8 +1078,8 @@ public sealed class AgentToolsTests
             CancellationToken.None).ConfigureAwait(false);
 
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
-        StringAssert.Contains(output, "    2: " + new string('x', 2_000) + "… [line cut: 5,000 characters]");
-        StringAssert.Contains(output, "    3: last");
+        StringAssert.Contains(output, "2:" + new string('x', 2_000) + "… [line cut: 5,000 characters]");
+        StringAssert.Contains(output, "3:last");
         Assert.IsTrue(output.Length < 2_200, $"Expected the long line to be cut, got {output.Length} characters.");
         StringAssert.Contains(result.Structured!.Value.GetProperty("content").GetString(), longLine);
     }
@@ -1065,7 +1107,7 @@ public sealed class AgentToolsTests
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
         var next = int.Parse(Regex.Match(output, @"read on with offset=(\d+)\.").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
         Assert.IsTrue(next > 3 && next < 20, $"Expected the read to stop within the file, got offset={next}.");
-        StringAssert.Contains(output, $"{next - 1,5}: line-{next - 1:00}");
+        StringAssert.Contains(output, $"{next - 1}:line-{next - 1:00}");
         Assert.IsFalse(output.Contains($"line-{next:00}", StringComparison.Ordinal));
         var lines = output[..output.LastIndexOf("[read_file stopped", StringComparison.Ordinal)];
         Assert.IsTrue(lines.Length <= 100 + Environment.NewLine.Length, $"Expected at most 100 characters of lines, got {lines.Length}.");
@@ -1120,6 +1162,29 @@ public sealed class AgentToolsTests
         var shown = output[..note.Index];
         Assert.IsTrue(shown.Length <= 200 + Environment.NewLine.Length, $"Expected at most 200 characters of matches, got {shown.Length}.");
         Assert.AreEqual(50, Regex.Matches(shown, "match-").Count + int.Parse(note.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [TestMethod]
+    public async Task ReadFileTool_StopsBefore40000CharactersByDefault_AndKeepsTheIndentationOfEachLine()
+    {
+        using var temp = TestTempDirectory.Create();
+        // 2,000 lines of 40 characters: 80,000 characters, read in two parts.
+        await File.WriteAllLinesAsync(Path.Combine(temp.Path, "data.txt"), Enumerable.Range(1, 2_000).Select(static index => "    " + $"line {index:0000}".PadRight(36, '.'))).ConfigureAwait(false);
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path)).Single(static tool => tool.Spec.Name == "read_file");
+        using var args = JsonDocument.Parse("""{"path":"data.txt"}""");
+
+        var result = await tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+            CancellationToken.None).ConfigureAwait(false);
+
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.StartsWith(output, "1:    line 0001...");
+        var next = int.Parse(Regex.Match(output, @"\[read_file stopped at 40,000 characters: read on with offset=(\d+)\.\]$").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var lines = output[..output.LastIndexOf("[read_file stopped", StringComparison.Ordinal)];
+        Assert.IsLessThanOrEqualTo(40_000 + Environment.NewLine.Length, lines.Length);
+        Assert.IsGreaterThan(39_900, lines.Length, "the read stops before the line that would pass the limit");
+        StringAssert.Contains(output, $"{next - 1}:    line {next - 1:0000}");
+        Assert.IsFalse(output.Contains($"{next}:    line", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -1755,6 +1820,51 @@ public sealed class AgentToolsTests
 
         Assert.IsFalse(result.Success);
         StringAssert.Contains(result.Error, "replace_all=true");
+    }
+
+    [TestMethod]
+    public async Task ReplaceInFileTool_AppliesAListOfEditsInOrder_AllOrNone()
+    {
+        using var temp = TestTempDirectory.Create();
+        var filePath = Path.Combine(temp.Path, "sample.cs");
+        await File.WriteAllTextAsync(filePath, "int a = 1;\r\nint b = 2;\r\nlog(a);\r\nlog(a);\r\n").ConfigureAwait(false);
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path)).Single(static tool => tool.Spec.Name == "replace_in_file");
+
+        async Task<AgentToolResult> ReplaceAsync(string arguments)
+        {
+            using var args = JsonDocument.Parse(arguments);
+            return await tool.Handler(new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+
+        // The second edit fails: no edit is made.
+        var failed = await ReplaceAsync("""{"path":"sample.cs","edits":[{"old_string":"int a = 1;","new_string":"int a = 10;"},{"old_string":"int c","new_string":"int d"}]}""");
+        Assert.IsFalse(failed.Success);
+        StringAssert.Contains(failed.Error, "(edit 2 of 2, after the edits before it; no edit was made)");
+        Assert.AreEqual("int a = 1;\r\nint b = 2;\r\nlog(a);\r\nlog(a);\r\n", await File.ReadAllTextAsync(filePath).ConfigureAwait(false));
+        var ambiguous = await ReplaceAsync("""{"path":"sample.cs","edits":[{"old_string":"log(a);","new_string":"log(b);"}]}""");
+        StringAssert.Contains(ambiguous.Error, "found 2 matches");
+
+        // Each edit applies to what the edits before it left, with the newline rules of a single edit and replace_all.
+        var result = await ReplaceAsync("""{"path":"sample.cs","edits":[{"old_string":"int a = 1;\nint b = 2;","new_string":"int a = 10;\nint b = 20;"},{"old_string":"a = 10","new_string":"x = 10"},{"old_string":"log(a);","new_string":"log(x);","replace_all":true}]}""");
+        Assert.IsTrue(result.Success, result.Error);
+        StringAssert.Contains(Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value, "Made 3 edits, 4 occurrence(s)");
+        Assert.AreEqual("int x = 10;\r\nint b = 20;\r\nlog(x);\r\nlog(x);\r\n", await File.ReadAllTextAsync(filePath).ConfigureAwait(false));
+
+        // A list and a single edit at once, an empty list, or an edit without its texts: nothing is changed.
+        foreach (var invalid in new[]
+        {
+            """{"path":"sample.cs","old_string":"b","new_string":"c","edits":[{"old_string":"x","new_string":"y"}]}""",
+            """{"path":"sample.cs","edits":[]}""",
+            """{"path":"sample.cs","edits":[{"old_string":"x"}]}""",
+        })
+        {
+            Assert.IsFalse((await ReplaceAsync(invalid)).Success, invalid);
+        }
+
+        var empty = await ReplaceAsync("""{"path":"sample.cs","edits":[{"old_string":"","new_string":"y"}]}""");
+        StringAssert.Contains(empty.Error, "every edit must not be empty");
+        Assert.AreEqual("int x = 10;\r\nint b = 20;\r\nlog(x);\r\nlog(x);\r\n", await File.ReadAllTextAsync(filePath).ConfigureAwait(false));
     }
 
     [TestMethod]

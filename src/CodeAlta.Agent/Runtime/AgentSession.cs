@@ -26,6 +26,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private const string ToolMessageEventType = "local.toolMessage";
     private const string SkillActivationEventType = "local.skillActivation";
     private const string ToolLoadEventType = "local.toolLoad";
+    private const string ReadFileToolName = "read_file";
     private const string CompactionSnapshotEventType = "local.compactionSnapshot";
     private const string CompactionCheckpointEventType = "local.compactionCheckpoint";
     private const int FallbackModelVisibleToolResultCharacterLimit = 120_000;
@@ -97,6 +98,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     // the provenance of a prompt of the host (null for one the user typed).
     private readonly Queue<(AgentInput Input, string? SourceSessionId, string? Provenance)> _pendingSteerInputs = new();
     private readonly AgentSessionToolImages _toolImages;
+    // The reads of files the model has in its conversation, which answer a read of the same lines again.
+    private readonly AgentReadFileGuard _readFileGuard;
     // The PDF documents read for the requests of the run in progress.
     private readonly AgentPdfInputCache _pdfInputs = new();
     private AgentModelInfo? _resolvedModelInfo;
@@ -180,6 +183,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _providerKey = provider.ProviderKey;
         _store = store;
         _toolImages = new AgentSessionToolImages(store as IAgentSessionAttachmentStore, summary.SessionId);
+        _readFileGuard = new AgentReadFileGuard(AgentBuiltInToolOptions.DefaultReadFileLines, AgentBuiltInToolOptions.MaxReadFileLines);
         _turnExecutor = turnExecutor;
         _cachedModels = cachedModels ?? LoadConstructorModelCache(provider, turnExecutor);
         _compactionSummarizer = new AgentCompactionSummarizer(
@@ -980,6 +984,20 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
     }
 
+    // Whether a tool result is still, as it was recorded, in the conversation the model is sent.
+    private bool IsInConversation(AgentMessagePart.ToolResult result)
+    {
+        for (var index = _conversation.Count - 1; index >= 0; index--)
+        {
+            if (_conversation[index].Role == AgentConversationRole.Tool && _conversation[index].Parts.Any(part => ReferenceEquals(part, result)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private async Task RunToolCallAsync(
         ToolCallRun run,
         AgentMessagePart.ToolCall toolCall,
@@ -1006,9 +1024,18 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         var toolOutputContentId = $"{toolCall.CallId}:output";
         var trackedModifiedFiles = GetTrackedFileMutationPaths(toolCall, _summary.ExecutionDirectory);
         AgentTurnFileChangeTracker? toolFileChangeTracker = null;
+        // A read of lines the model has in its conversation, of a file unchanged since, is answered with a note.
+        var isRead = string.Equals(toolDefinition.Spec.Name, ReadFileToolName, StringComparison.Ordinal);
+        string? knownRead = null;
+        AgentReadFileGuard.FileStamp? readStamp = null;
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (isRead)
+            {
+                knownRead = _readFileGuard.TryAnswer(toolCall.Arguments, _summary.ExecutionDirectory, IsInConversation, out readStamp);
+            }
+
             await AppendEventsAsync([started], cancellationToken).ConfigureAwait(false);
             if (trackedModifiedFiles.Count > 0)
             {
@@ -1033,7 +1060,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentToolResult result;
         try
         {
-            result = await toolDefinition.Handler(
+            result = knownRead is not null ? new AgentToolResult(true, [new AgentToolResultItem.Text(knownRead)]) : await toolDefinition.Handler(
                     new AgentToolInvocation(
                         ProviderId,
                         SessionId,
@@ -1108,6 +1135,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // scripts is neither sent to the model nor journaled: a direct call of the model has no use for it. The text
             // meant for the user (the whole output of a command the model has the head and tail of) is its output alone.
             var display = result.Display;
+            var readValue = result.Structured;
             result = await _toolImages.PrepareAsync(result with { Structured = null, Display = null }, run.ModelInfo, cancellationToken).ConfigureAwait(false);
             var modelVisibleResult = CreateModelVisibleToolResult(
                 toolCall,
@@ -1117,10 +1145,15 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 run.ModelInfo);
             // The view of an MCP App is recorded once, with the end of the call: the conversation and the output do not carry it.
             var withoutApp = result.App is null ? result : result with { App = null };
-            var toolMessage = new AgentConversationMessage(
-                AgentConversationRole.Tool,
-                [new AgentMessagePart.ToolResult(toolCall.CallId, modelVisibleResult.App is null ? modelVisibleResult : modelVisibleResult with { App = null })]);
+            var toolResultPart = new AgentMessagePart.ToolResult(toolCall.CallId, modelVisibleResult.App is null ? modelVisibleResult : modelVisibleResult with { App = null });
+            var toolMessage = new AgentConversationMessage(AgentConversationRole.Tool, [toolResultPart]);
             _conversation.Add(toolMessage);
+            // A read is known once the model has all of it: not a read the session cut to fit the context.
+            if (readStamp is { } stamp && result.Success && readValue is { } value && ReferenceEquals(modelVisibleResult, result)
+                && result.Items is [AgentToolResultItem.Text readText])
+            {
+                _readFileGuard.Record(stamp, toolCall.CallId, value, readText.Value, toolResultPart);
+            }
 
             var completed = new AgentActivityEvent(
                 ProviderId,
@@ -3198,6 +3231,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         if (events.Count == 0)
         {
             return;
+        }
+
+        // Whatever compacts the conversation (the session or its provider), the model no longer has the files it read.
+        if (events.Any(static @event => @event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.CompactionStarted or AgentSessionUpdateKind.CompactionCompleted }))
+        {
+            _readFileGuard.Clear();
         }
 
         AddToHistory(events);

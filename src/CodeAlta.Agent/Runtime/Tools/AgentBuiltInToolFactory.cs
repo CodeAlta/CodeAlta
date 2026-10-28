@@ -17,7 +17,7 @@ namespace CodeAlta.Agent.Runtime.Tools;
 /// <summary>
 /// Creates the default non-provider built-in tools used by local raw-API sessions.
 /// </summary>
-public static class AgentBuiltInToolFactory
+public static partial class AgentBuiltInToolFactory
 {
     private static readonly FileTreeWalker FileTreeWalker = new();
     private static readonly Lazy<string> WindowsShellFileName = new(
@@ -28,13 +28,16 @@ public static class AgentBuiltInToolFactory
     private const string WriteFileToolDescription =
         "Write an entire text file in one deterministic operation. Creates parent directories as needed and replaces any existing file.";
     private const string ReplaceInFileToolDescription =
-        "Replace exact text in a file. Deterministic only: no regex, no fuzzy matching. When replace_all is false, the tool errors unless exactly one match exists and leaves the file unchanged. Use replace_all=true to replace every match.";
+        "Replace exact text in a file. Deterministic only: no regex, no fuzzy matching. When replace_all is false, the tool errors unless exactly one match exists and leaves the file unchanged. Use replace_all=true to replace every match. For several changes in one file, give an edits list instead of old_string and new_string: the edits apply in their order, each to the text the edits before it left, and if one fails the file is left unchanged.";
     private const string DeleteFileOrDirToolDescription =
         "Delete a file or a directory. Directory deletes are recursive.";
     private const string RenameFileOrDirToolDescription =
         "Rename or move a file or directory. Will not overwrite an existing destination.";
     private const string ApplyPatchToolDescription =
         "Use the `apply_patch` tool to edit files.";
+    private const string ShellMaxOutputTokensArgument = "max_output_tokens";
+    // The least output a call of shell_command can ask for: the head and the tail of each stream, and the note.
+    private const int MinimumShellCommandOutputCharacters = 1_000;
     private const string ViewImageToolName = "view_image";
     private const string ViewImageToolDescription =
         "Look at a local image file, such as a screenshot, a diagram, a mockup or a photo. The image is attached to the result so that you see it. PNG, JPEG, GIF, WebP and BMP files are supported; a large image is scaled down. Use this tool instead of read_file for image files.";
@@ -72,9 +75,24 @@ public static class AgentBuiltInToolFactory
             "path": { "type": "string", "description": "File path. Relative paths resolve from the session working directory; absolute paths are accepted." },
             "old_string": { "type": "string", "description": "Exact text to replace. Newlines are matched exactly, with deterministic normalization to the file's newline style when needed." },
             "new_string": { "type": "string", "description": "Replacement text." },
-            "replace_all": { "type": "boolean", "description": "Replace every exact match. When false, the tool errors unless exactly one match exists and leaves the file unchanged." }
+            "replace_all": { "type": "boolean", "description": "Replace every exact match. When false, the tool errors unless exactly one match exists and leaves the file unchanged." },
+            "edits": {
+              "type": "array",
+              "description": "Several replacements in this file, instead of old_string, new_string and replace_all: applied in order, all or none.",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "old_string": { "type": "string", "description": "Exact text to replace, in the text the edits before it left." },
+                  "new_string": { "type": "string", "description": "Replacement text." },
+                  "replace_all": { "type": "boolean", "description": "Replace every exact match. When false, exactly one match must exist." }
+                },
+                "required": ["old_string", "new_string"],
+                "additionalProperties": false
+              }
+            }
           },
-          "required": ["path", "old_string", "new_string"],
+          "required": ["path"],
           "additionalProperties": false
         }
         """);
@@ -182,7 +200,7 @@ public static class AgentBuiltInToolFactory
             new AgentToolDefinition(
                 new AgentToolSpec(
                     "read_file",
-                    $"Read a local text file by line number. Offsets are 1-based; use a negative offset to count from the end (-1 is the last line). Offsets past EOF return an empty text result, and oversized negative offsets clamp to line 1. Omitting limit returns up to {options.DefaultReadFileLineLimit} lines by default.{DescribeReadFileCharacterLimits(options)}",
+                    $"Read a local text file by line number. Offsets are 1-based; use a negative offset to count from the end (-1 is the last line). Offsets past EOF return an empty text result, and oversized negative offsets clamp to line 1. Omitting limit returns up to {options.DefaultReadFileLineLimit} lines by default. Each line is returned as its number, a colon, then the line as it is (`12:    return x;`).{DescribeReadFileCharacterLimits(options)}",
                     CreateReadFileSchema(options)) { RunsInParallel = true, Idempotent = true, OutputSchema = ReadFileOutputSchema },
                 (invocation, cancellationToken) => ReadFileAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
@@ -214,7 +232,7 @@ public static class AgentBuiltInToolFactory
                 new AgentToolSpec(
                     "shell_command",
                     $"Execute a local shell command or short shell script using the platform shell, subject to host approval. Some hosts may auto-approve. Returns exit_code, working_directory, stdout, and stderr as emitted by the shell and child processes; child commands may still include ANSI/control sequences. On Windows, pwsh runs with -NoProfile and preserves the final external command exit code when that command fails.{DescribeShellCommandOutputLimit(options)}",
-                    CreateShellCommandSchema()) { OutputSchema = ShellCommandOutputSchema },
+                    CreateShellCommandSchema(options)) { OutputSchema = ShellCommandOutputSchema },
                 (invocation, cancellationToken) => ShellCommandAsync(options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(
@@ -315,7 +333,8 @@ public static class AgentBuiltInToolFactory
 
             if (stoppedAtLine is null)
             {
-                var numbered = $"{lineNumber,5}: {CapLine(line, options.MaxReadFileLineCharacters)}";
+                // The number, a colon, then the line as it is: no padding nor space, which every line would pay for.
+                var numbered = string.Concat(lineNumber.ToString(CultureInfo.InvariantCulture), ":", CapLine(line, options.MaxReadFileLineCharacters));
                 if (lineCount > 0 && options.MaxReadFileCharacters > 0
                     && text.Length + Environment.NewLine.Length + numbered.Length > options.MaxReadFileCharacters)
                 {
@@ -354,6 +373,16 @@ public static class AgentBuiltInToolFactory
             Structured = CreateReadFileValue(resolvedPath, startLine, startLine + lineCount - 1, raw.ToString(), more),
         });
     }
+
+    // The line to read on from that the note of a read stopped at its limit of characters names, or null without the note.
+    internal static int? ReadFileStoppedAt(string text)
+        => ReadFileStopRegex().Match(text) is { Success: true } match
+           && int.TryParse(match.Groups[1].ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out var next)
+            ? next
+            : null;
+
+    [GeneratedRegex(@"\[read_file stopped at [\d,]+ characters: read on with offset=(\d+)\.\]\z")]
+    private static partial Regex ReadFileStopRegex();
 
     private static string DescribeReadFileCharacterLimits(AgentBuiltInToolOptions options)
         => (options.MaxReadFileLineCharacters > 0 ? FormattableString.Invariant($" Lines longer than {options.MaxReadFileLineCharacters} characters are cut.") : string.Empty)
@@ -888,10 +917,11 @@ public static class AgentBuiltInToolFactory
         var structured = CreateShellCommandValue(process.ExitCode, stdout, stderr, workdir);
         // A long output keeps its head and tail for the model; the user and a script have the whole of it.
         string? display = null;
-        if (options.MaxShellCommandOutputCharacters > 0 && output.Length > options.MaxShellCommandOutputCharacters)
+        var limit = ShellCommandOutputLimit(options, GetOptionalInt(invocation.Arguments, ShellMaxOutputTokensArgument));
+        if (limit > 0 && output.Length > limit)
         {
             display = output;
-            output = await CutShellCommandOutputAsync(options, invocation.ToolCallId, process.ExitCode, stdout, stderr, workdir, output, cancellationToken)
+            output = await CutShellCommandOutputAsync(options, limit, invocation.ToolCallId, process.ExitCode, stdout, stderr, workdir, output, cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -907,8 +937,22 @@ public static class AgentBuiltInToolFactory
         return new AgentToolResult(true, [new AgentToolResultItem.Text(output)]) { Structured = structured, Display = display };
     }
 
+    // The characters of the output the model is given: the limit of the options, which the call can lower (never raise)
+    // with a budget in tokens of about four characters, down to a floor that still shows the head, the tail and the note.
+    private static int ShellCommandOutputLimit(AgentBuiltInToolOptions options, int? maxOutputTokens)
+    {
+        if (maxOutputTokens is not > 0)
+        {
+            return options.MaxShellCommandOutputCharacters;
+        }
+
+        var asked = (int)Math.Clamp(maxOutputTokens.Value * 4L, MinimumShellCommandOutputCharacters, int.MaxValue);
+        return options.MaxShellCommandOutputCharacters > 0 ? Math.Min(asked, options.MaxShellCommandOutputCharacters) : asked;
+    }
+
     private static async Task<string> CutShellCommandOutputAsync(
         AgentBuiltInToolOptions options,
+        int limit,
         string toolCallId,
         int exitCode,
         string stdout,
@@ -932,7 +976,7 @@ public static class AgentBuiltInToolFactory
 
         var overhead = FormatShellCommandOutput(exitCode, string.Empty, string.Empty, workdir, note).Length;
         // Each marker of a cut takes about 80 characters of the budget.
-        var budget = Math.Max(options.MaxShellCommandOutputCharacters - overhead - 200, 0);
+        var budget = Math.Max(limit - overhead - 200, 0);
         var stdoutBudget = budget;
         var stderrBudget = budget;
         if (stdout.Length + stderr.Length > budget)
@@ -1091,41 +1135,56 @@ public static class AgentBuiltInToolFactory
             return Failure($"replace_in_file does not support binary files: '{resolution.DisplayPath}'.");
         }
 
-        var oldString = GetRequiredStringValue(invocation.Arguments, "old_string");
-        if (oldString.Length == 0)
+        if (ReadReplacements(invocation.Arguments) is not { } edits)
         {
-            return Failure("The 'old_string' value must not be empty.");
+            return Failure("replace_in_file takes either old_string and new_string, or an edits list of objects with a non-empty old_string and a new_string, not both.");
         }
 
-        var newString = GetRequiredStringValue(invocation.Arguments, "new_string");
-        var replaceAll = GetOptionalBool(invocation.Arguments, "replace_all") ?? false;
+        if (edits.Exists(static edit => edit.OldString.Length == 0))
+        {
+            return Failure(edits.Count == 1 && !invocation.Arguments.TryGetProperty("edits", out _)
+                ? "The 'old_string' value must not be empty."
+                : "The 'old_string' value of every edit must not be empty.");
+        }
 
         var original = await File.ReadAllTextAsync(resolution.FullPath, cancellationToken).ConfigureAwait(false);
         var newline = DetectExistingNewline(original);
-        var replacementTarget = oldString;
-        var replacementValue = newString;
-
-        if (!original.Contains(replacementTarget, StringComparison.Ordinal))
+        // The edits apply in their order, each to the text the edits before it left; one that fails changes nothing.
+        var updated = original;
+        var replacedCount = 0;
+        for (var index = 0; index < edits.Count; index++)
         {
-            var normalizedOldString = NormalizeNewlines(oldString, newline);
-            if (!string.Equals(normalizedOldString, oldString, StringComparison.Ordinal) &&
-                original.Contains(normalizedOldString, StringComparison.Ordinal))
+            var edit = edits[index];
+            var replacementTarget = edit.OldString;
+            var replacementValue = edit.NewString;
+            if (!updated.Contains(replacementTarget, StringComparison.Ordinal))
             {
-                replacementTarget = normalizedOldString;
-                replacementValue = NormalizeNewlines(newString, newline);
+                var normalizedOldString = NormalizeNewlines(edit.OldString, newline);
+                if (!string.Equals(normalizedOldString, edit.OldString, StringComparison.Ordinal) &&
+                    updated.Contains(normalizedOldString, StringComparison.Ordinal))
+                {
+                    replacementTarget = normalizedOldString;
+                    replacementValue = NormalizeNewlines(edit.NewString, newline);
+                }
             }
-        }
 
-        var matchCount = CountOccurrences(original, replacementTarget);
-        if (matchCount == 0)
-        {
-            return Failure($"replace_in_file could not find the requested text in '{resolution.DisplayPath}'.");
-        }
+            var matchCount = CountOccurrences(updated, replacementTarget);
+            var which = edits.Count == 1 ? string.Empty : FormattableString.Invariant($" (edit {index + 1} of {edits.Count}, after the edits before it; no edit was made)");
+            if (matchCount == 0)
+            {
+                return Failure($"replace_in_file could not find the requested text in '{resolution.DisplayPath}'{which}.");
+            }
 
-        if (!replaceAll && matchCount != 1)
-        {
-            return Failure(
-                $"replace_in_file found {matchCount} matches in '{resolution.DisplayPath}'. Set replace_all=true to replace every match.");
+            if (!edit.ReplaceAll && matchCount != 1)
+            {
+                return Failure(
+                    $"replace_in_file found {matchCount} matches in '{resolution.DisplayPath}'{which}. Set replace_all=true to replace every match.");
+            }
+
+            updated = edit.ReplaceAll
+                ? updated.Replace(replacementTarget, replacementValue, StringComparison.Ordinal)
+                : ReplaceFirstOccurrence(updated, replacementTarget, replacementValue);
+            replacedCount += edit.ReplaceAll ? matchCount : 1;
         }
 
         var permission = await RequestFileChangePermissionAsync(
@@ -1140,12 +1199,44 @@ public static class AgentBuiltInToolFactory
             return permission;
         }
 
-        var updated = replaceAll
-            ? original.Replace(replacementTarget, replacementValue, StringComparison.Ordinal)
-            : ReplaceFirstOccurrence(original, replacementTarget, replacementValue);
         await File.WriteAllTextAsync(resolution.FullPath, updated, cancellationToken).ConfigureAwait(false);
-        var replacedCount = replaceAll ? matchCount : 1;
-        return SuccessResult($"Replaced {replacedCount} occurrence(s) in {resolution.DisplayPath}");
+        return SuccessResult(edits.Count == 1
+            ? $"Replaced {replacedCount} occurrence(s) in {resolution.DisplayPath}"
+            : $"Made {edits.Count} edits, {replacedCount} occurrence(s), in {resolution.DisplayPath}");
+    }
+
+    // One replacement of replace_in_file.
+    private sealed record Replacement(string OldString, string NewString, bool ReplaceAll);
+
+    // The replacements a call asks for: its old_string and new_string, or its edits list; null when it gives both, or a
+    // list that is empty or has an item that is not a replacement. A missing old_string or new_string throws, as it did.
+    private static List<Replacement>? ReadReplacements(JsonElement arguments)
+    {
+        if (!arguments.TryGetProperty("edits", out var list) || list.ValueKind == JsonValueKind.Null)
+        {
+            return [new Replacement(GetRequiredStringValue(arguments, "old_string"), GetRequiredStringValue(arguments, "new_string"),
+                GetOptionalBool(arguments, "replace_all") ?? false)];
+        }
+
+        if (list.ValueKind != JsonValueKind.Array || list.GetArrayLength() == 0
+            || arguments.TryGetProperty("old_string", out _) || arguments.TryGetProperty("new_string", out _))
+        {
+            return null;
+        }
+
+        var edits = new List<Replacement>(list.GetArrayLength());
+        foreach (var item in list.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || GetOptionalString(item, "old_string") is not { } oldString
+                || GetOptionalString(item, "new_string") is not { } newString)
+            {
+                return null;
+            }
+
+            edits.Add(new Replacement(oldString, newString, GetOptionalBool(item, "replace_all") ?? false));
+        }
+
+        return edits;
     }
 
     private static async Task<AgentToolResult> DeleteFileOrDirAsync(
@@ -1951,21 +2042,27 @@ public static class AgentBuiltInToolFactory
             }
             """);
 
-    private static JsonElement CreateShellCommandSchema()
+    private static JsonElement CreateShellCommandSchema(AgentBuiltInToolOptions options)
         => ParseSchema(
-            """
+            $$"""
             {
               "type": "object",
               "properties": {
                 "command": { "type": "string", "description": "Shell command or short shell script to execute." },
                 "workdir": { "type": "string", "description": "Optional working directory override. Defaults to the session working directory." },
                 "timeoutMs": { "type": "integer", "description": "Optional timeout in milliseconds, covering shell execution and output collection. Omit for no deadline.", "minimum": 1 },
-                "login": { "type": "boolean", "description": "Whether to use login-shell semantics on Unix shells that support it. Ignored on Windows, where pwsh always runs with -NoProfile for predictable output." }
+                "login": { "type": "boolean", "description": "Whether to use login-shell semantics on Unix shells that support it. Ignored on Windows, where pwsh always runs with -NoProfile for predictable output." },
+                "{{ShellMaxOutputTokensArgument}}": { "type": "integer", "description": "{{DescribeShellMaxOutputTokens(options)}}", "minimum": 1 }
               },
               "required": ["command"],
               "additionalProperties": false
             }
             """);
+
+    private static string DescribeShellMaxOutputTokens(AgentBuiltInToolOptions options)
+        => options.MaxShellCommandOutputCharacters > 0
+            ? FormattableString.Invariant($"Optional budget of the output you are given, in tokens of about 4 characters, to get less than the default of {options.MaxShellCommandOutputCharacters} characters; it cannot raise it. A longer output keeps the head and the tail of each stream, and the whole output is saved to a file the result names.")
+            : "Optional budget of the output you are given, in tokens of about 4 characters. A longer output keeps the head and the tail of each stream, and the whole output is saved to a file the result names.";
 
     private static bool IsSupportedWebContentType(string mediaType)
         => mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ||
