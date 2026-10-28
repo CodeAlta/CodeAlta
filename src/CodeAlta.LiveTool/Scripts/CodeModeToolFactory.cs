@@ -132,6 +132,24 @@ public static class CodeModeToolFactory
         A run is kept with the results of its steps: `// @exec: {"resume": "<run-id>"}` alone resumes one that stopped, its completed steps giving their recorded results; `"replay": "all"` runs changed code over those results, and `"from": "<step>"` runs again from a step.
         """;
 
+    // The raw-text form of exec, as Codex declares it to the GPT-5 models and later: the model sends the source itself. Its
+    // description says so where the JSON form's talks of the script, and is otherwise the same.
+    private const string ExecScriptSentence = "The script is the body of an async function: use `await` and `return`.";
+    private const string ExecFreeformSentence = " This is a FREEFORM tool: send the raw JavaScript source itself as the input, not JSON, a quoted string or a Markdown code fence.";
+    private static readonly string FreeformExecDescription = ExecDescription.Replace(ExecScriptSentence, ExecScriptSentence + ExecFreeformSentence, StringComparison.Ordinal);
+    private static readonly string FreeformExecDescriptionWithoutSubSessions = ExecDescriptionWithoutSubSessions.Replace(ExecScriptSentence, ExecScriptSentence + ExecFreeformSentence, StringComparison.Ordinal);
+
+    // The grammar of Codex (codex-rs/core/src/tools/code_mode/execute_spec.rs): an optional `// @exec:` line, then the source.
+    private static readonly string ExecGrammar = """
+        start: pragma_source | plain_source
+        pragma_source: PRAGMA_LINE NEWLINE SOURCE
+        plain_source: SOURCE
+
+        PRAGMA_LINE: /[ \t]*\/\/ @exec:[^\r\n]*/
+        NEWLINE: /\r?\n/
+        SOURCE: /[\s\S]+/
+        """.ReplaceLineEndings("\n");
+
     private const string ExecSchema = """
         {
           "type": "object",
@@ -172,7 +190,15 @@ public static class CodeModeToolFactory
         return
         [
             new AgentToolDefinition(
-                new AgentToolSpec(ExecToolName, caller.SessionOptions.SubSessions ? ExecDescription : ExecDescriptionWithoutSubSessions, Parse(ExecSchema)) { Exposure = AgentToolExposure.Model, ScriptsTakeOver = options.TakesOver },
+                new AgentToolSpec(ExecToolName, caller.SessionOptions.SubSessions ? ExecDescription : ExecDescriptionWithoutSubSessions, Parse(ExecSchema))
+                {
+                    Exposure = AgentToolExposure.Model,
+                    ScriptsTakeOver = options.TakesOver,
+                    FreeformInput = new AgentToolFreeformInput("code", AgentToolFreeformSyntax.Lark, ExecGrammar)
+                    {
+                        Description = caller.SessionOptions.SubSessions ? FreeformExecDescription : FreeformExecDescriptionWithoutSubSessions,
+                    },
+                },
                 (invocation, cancellationToken) => ExecAsync(dispatcher, caller, options, invocation, cancellationToken)),
             new AgentToolDefinition(
                 new AgentToolSpec(WaitToolName, WaitDescription, Parse(WaitSchema)) { Exposure = AgentToolExposure.Model },

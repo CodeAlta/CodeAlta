@@ -35,6 +35,12 @@ public sealed record CodeModeFunction(string Path)
     /// </summary>
     public bool WaitsForUser { get; init; }
 
+    /// <summary>
+    /// Gets the property of the argument object a call with a string in its place puts that string in, such as <c>input</c>
+    /// for <c>tools.apply_patch(patch)</c>; null when the function takes an object only.
+    /// </summary>
+    public string? TextArgument { get; init; }
+
     /// <summary>Gets annotations shown in the declaration, such as <c>mutating</c>.</summary>
     public IReadOnlyList<string> Annotations { get; init; } = [];
 }

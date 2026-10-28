@@ -1354,6 +1354,24 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public void ApplyPatchTool_HasARawTextForm_WithTheGrammarOfCodex_AndKeepsItsJsonForm()
+    {
+        using var temp = TestTempDirectory.Create();
+        var applyPatch = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path)).Single(static tool => tool.Spec.Name == "apply_patch");
+
+        Assert.AreEqual("Use the `apply_patch` tool to edit files.", applyPatch.Spec.Description);
+        Assert.IsTrue(applyPatch.Spec.InputSchema.GetProperty("properties").TryGetProperty("input", out _));
+        var freeform = applyPatch.Spec.FreeformInput;
+        Assert.IsNotNull(freeform);
+        Assert.AreEqual("input", freeform.ArgumentName);
+        Assert.AreEqual(AgentToolFreeformSyntax.Lark, freeform.Syntax);
+        StringAssert.StartsWith(freeform.Definition, "start: begin_patch hunk+ end_patch\n");
+        Assert.IsFalse(freeform.Definition!.Contains('\r', StringComparison.Ordinal));
+        StringAssert.Contains(freeform.Description, "FREEFORM tool, so do not wrap the patch in JSON");
+        StringAssert.Contains(freeform.Description, "*** Begin Patch");
+    }
+
+    [TestMethod]
     public void AgentToolBridge_CreateOpenAIStrictInputSchema_MakesOptionalFieldsNullableAndRequired()
     {
         using var temp = TestTempDirectory.Create();

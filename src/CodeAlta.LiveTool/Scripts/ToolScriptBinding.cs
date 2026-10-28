@@ -63,6 +63,7 @@ public sealed class ToolScriptBinding : ICodeModeCallHandler
                 // A tool of an MCP server without a schema gives its structured content when it has one, else its text.
                 ResultType = spec.OutputSchema is not null ? null : spec.Group is { Length: > 0 } ? "unknown" : "string",
                 Parallel = spec.RunsInParallel,
+                TextArgument = spec.FreeformInput?.ArgumentName,
             });
         }
 
