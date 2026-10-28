@@ -2725,6 +2725,297 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    [DataRow("openai", "gpt-5.4", true)]
+    [DataRow("openai", "gpt-6-astra", true)]
+    [DataRow("openai", "openai/gpt-5.4", true)]
+    [DataRow("openai", "gpt-4.1", false)]
+    [DataRow("openai", "o3", false)]
+    [DataRow("codex", "gpt-5.3-codex", true)]
+    [DataRow("codex", "codex-auto-review", true)]
+    [DataRow("codex", "gpt-4.1", false)]
+    [DataRow("compatible", "gpt-5.4", false)]
+    public async Task OpenAIResponsesTurnExecutor_DeclaresAFreeformTool_AsACustomTool_ForTheModelsTrainedOnIt(string providerKind, string modelId, bool custom)
+    {
+        var client = new RecordingOpenAIResponseClient([[CreateTextOnlyAssistantResponseUpdate("response-freeform", modelId, "Answer.")]]);
+        var executor = new OpenAIResponsesTurnExecutor(CreateFreeformTestProvider(providerKind, client));
+        var request = (providerKind == "codex" ? CreateCodexTurnRequest() : CreateTurnRequest()) with
+        {
+            ModelId = modelId,
+            ModelInfo = new AgentModelInfo(modelId),
+            Tools = [CreateFreeformTestTool(), CreateInspectTestTool()],
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(client.Requests.Single().SerializedOptions);
+        var tools = document.RootElement.GetProperty("tools").EnumerateArray().ToArray();
+        var freeform = tools.Single(static tool => tool.TryGetProperty("name", out var name) && name.GetString() == "apply_text");
+        if (custom)
+        {
+            Assert.AreEqual("custom", freeform.GetProperty("type").GetString());
+            Assert.AreEqual("Send the text itself, not JSON.", freeform.GetProperty("description").GetString());
+            var format = freeform.GetProperty("format");
+            Assert.AreEqual("grammar", format.GetProperty("type").GetString());
+            Assert.AreEqual("lark", format.GetProperty("syntax").GetString());
+            Assert.AreEqual(FreeformTestGrammar, format.GetProperty("definition").GetString());
+            Assert.IsFalse(freeform.TryGetProperty("parameters", out _));
+        }
+        else
+        {
+            Assert.AreEqual("function", freeform.GetProperty("type").GetString());
+            Assert.AreEqual("Apply a text.", freeform.GetProperty("description").GetString());
+            Assert.IsTrue(freeform.GetProperty("parameters").GetProperty("properties").TryGetProperty("input", out _));
+        }
+
+        // A tool without a raw-text form stays a function.
+        var inspect = tools.Single(static tool => tool.TryGetProperty("name", out var name) && name.GetString() == "inspect_file");
+        Assert.AreEqual("function", inspect.GetProperty("type").GetString());
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_ResponsesLite_DeclaresAFreeformTool_AsACustomTool_InTheInput()
+    {
+        var client = new RecordingOpenAIResponseClient([[CreateTextOnlyAssistantResponseUpdate("response-lite-freeform", "gpt-5.6-sol", "Answer.")]]);
+        var executor = new OpenAIResponsesTurnExecutor(CreateFreeformTestProvider("codex", client));
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-5.6-sol",
+            ModelInfo = new AgentModelInfo(
+                "gpt-5.6-sol",
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal) { ["useResponsesLite"] = true }),
+            Tools = [CreateFreeformTestTool(), CreateInspectTestTool()],
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(client.Requests.Single().SerializedOptions);
+        var tools = document.RootElement.GetProperty("input")[0].GetProperty("tools").EnumerateArray().ToArray();
+        CollectionAssert.AreEqual(new[] { "custom", "function" }, tools.Select(static tool => tool.GetProperty("type").GetString()).ToArray());
+        Assert.AreEqual("lark", tools[0].GetProperty("format").GetProperty("syntax").GetString());
+    }
+
+    [TestMethod]
+    [DataRow("openai", "gpt-5.4", true)]
+    [DataRow("openai", "gpt-4.1", false)]
+    [DataRow("compatible", "gpt-5.4", false)]
+    public async Task OpenAIResponsesTurnExecutor_ReplaysARawTextCall_AsACustomToolCall_OnlyWhereCustomToolsAreDeclared(string providerKind, string modelId, bool custom)
+    {
+        const string patch = "*** Begin Patch\n*** Add File: a.txt\n+say \"hi\"\n*** End Patch\n";
+        var client = new RecordingOpenAIResponseClient([[CreateTextOnlyAssistantResponseUpdate("response-replay", modelId, "Answer.")]]);
+        var executor = new OpenAIResponsesTurnExecutor(CreateFreeformTestProvider(providerKind, client));
+        var request = CreateTurnRequest() with
+        {
+            ModelId = modelId,
+            ModelInfo = new AgentModelInfo(modelId),
+            Tools = [CreateFreeformTestTool(), CreateInspectTestTool()],
+            Conversation =
+            [
+                new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Edit.")]),
+                new AgentConversationMessage(
+                    AgentConversationRole.Assistant,
+                    [
+                        new AgentMessagePart.ToolCall("call-1", "apply_text", AgentToolFreeformInput.CreateArguments("input", patch)) { Freeform = true },
+                        new AgentMessagePart.ToolCall("call-2", "inspect_file", JsonDocument.Parse("""{"path":"a.txt"}""").RootElement.Clone()),
+                    ]),
+                new AgentConversationMessage(
+                    AgentConversationRole.Tool,
+                    [
+                        new AgentMessagePart.ToolResult("call-1", new AgentToolResult(true, [new AgentToolResultItem.Text("applied")])),
+                        new AgentMessagePart.ToolResult("call-2", new AgentToolResult(true, [new AgentToolResultItem.Text("say \"hi\"")])),
+                    ]),
+            ],
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(client.Requests.Single().SerializedOptions);
+        var input = document.RootElement.GetProperty("input").EnumerateArray().Skip(1).ToArray();
+        if (custom)
+        {
+            CollectionAssert.AreEqual(
+                new[] { "custom_tool_call", "function_call", "custom_tool_call_output", "function_call_output" },
+                input.Select(static item => item.GetProperty("type").GetString()).ToArray());
+            Assert.AreEqual("call-1", input[0].GetProperty("call_id").GetString());
+            Assert.AreEqual("apply_text", input[0].GetProperty("name").GetString());
+            Assert.AreEqual(patch, input[0].GetProperty("input").GetString());
+            Assert.AreEqual("call-1", input[2].GetProperty("call_id").GetString());
+            Assert.AreEqual("applied", input[2].GetProperty("output").GetString());
+        }
+        else
+        {
+            CollectionAssert.AreEqual(
+                new[] { "function_call", "function_call", "function_call_output", "function_call_output" },
+                input.Select(static item => item.GetProperty("type").GetString()).ToArray());
+            using var arguments = JsonDocument.Parse(input[0].GetProperty("arguments").GetString()!);
+            Assert.AreEqual(patch, arguments.RootElement.GetProperty("input").GetString());
+        }
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesModelProviderRuntime_AStreamedCustomToolCall_ReachesTheHandlerAsJson_AndIsReplayedAsCustom_AfterAResume()
+    {
+        const string patch = "*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new \"quoted\"\n*** End Patch\n";
+        using var temp = TestTempDirectory.Create();
+        var item = new CustomToolCallItem("call-1", patch, "apply_text");
+        var response = new ResponseResult { Id = "response-1", CreatedAt = DateTimeOffset.UtcNow, Model = "gpt-5.4" };
+        response.OutputItems.Add(item);
+        var client = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateOutputItemAddedUpdate(0, new CustomToolCallItem("call-1", string.Empty, "apply_text")),
+                DeserializeStreamingResponseUpdate(
+                    """{"type":"response.custom_tool_call_input.delta","sequence_number":0,"item_id":"ctc_1","output_index":0,"delta":"*** Begin Patch\n"}"""),
+                CreateOutputItemDoneUpdate(0, item),
+                CreateCompletedUpdate(response),
+            ],
+            [CreateTextOnlyAssistantResponseUpdate("response-2", "gpt-5.4", "Edited.")],
+            [CreateTextOnlyAssistantResponseUpdate("response-3", "gpt-5.4", "Still edited.")],
+        ]);
+        var received = new List<JsonElement>();
+        var tool = CreateFreeformTestTool(invocation =>
+        {
+            received.Add(invocation.Arguments.Clone());
+            return new AgentToolResult(true, [new AgentToolResultItem.Text("applied")]);
+        });
+        await using var providerRuntime = new OpenAIResponsesModelProviderRuntime(new OpenAIResponsesModelProviderRuntimeOptions
+        {
+            StateRootPath = temp.Path,
+            Providers =
+            {
+                new OpenAIProviderOptions
+                {
+                    ProviderKey = "openai",
+                    IsDefault = true,
+                    ResponsesClientFactory = _ => client,
+                    ModelListAsync = static _ => Task.FromResult<IReadOnlyList<AgentModelInfo>>([new AgentModelInfo("gpt-5.4")]),
+                },
+            },
+        });
+
+        string sessionId;
+        await using (var session = await providerRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            Model = "gpt-5.4",
+            WorkingDirectory = temp.Path,
+            Tools = [tool],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }).ConfigureAwait(false))
+        {
+            sessionId = session.SessionId;
+            _ = await session.SendAsync(new AgentSendOptions { Input = new AgentInput([new AgentInputItem.Text("Edit a.txt")]) }).ConfigureAwait(false);
+        }
+
+        await using (var resumed = await providerRuntime.ResumeSessionAsync(
+            sessionId,
+            new AgentSessionResumeOptions
+            {
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                Tools = [tool],
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            }).ConfigureAwait(false))
+        {
+            _ = await resumed.SendAsync(new AgentSendOptions { Input = new AgentInput([new AgentInputItem.Text("Again")]) }).ConfigureAwait(false);
+        }
+
+        // The handler gets the text in its JSON form.
+        Assert.AreEqual(1, received.Count);
+        Assert.AreEqual(patch, received[0].GetProperty("input").GetString());
+        Assert.AreEqual(3, client.Requests.Count);
+        // The next request of the run, and the first after the session was read back from its journal, send the call
+        // back the way it came, with its output.
+        foreach (var request in client.Requests.Skip(1))
+        {
+            using var document = JsonDocument.Parse(request.SerializedOptions);
+            var input = document.RootElement.GetProperty("input").EnumerateArray().ToArray();
+            var call = input.Single(static entry => entry.GetProperty("type").GetString() == "custom_tool_call");
+            Assert.AreEqual("call-1", call.GetProperty("call_id").GetString());
+            Assert.AreEqual(patch, call.GetProperty("input").GetString());
+            var output = input.Single(static entry => entry.GetProperty("type").GetString() == "custom_tool_call_output");
+            Assert.AreEqual("call-1", output.GetProperty("call_id").GetString());
+            Assert.AreEqual("applied", output.GetProperty("output").GetString());
+            Assert.IsFalse(input.Any(static entry => entry.GetProperty("type").GetString() is "function_call" or "function_call_output"));
+        }
+    }
+
+    [TestMethod]
+    public async Task OpenAIChatTurnExecutor_DeclaresAFreeformTool_AndReplaysARawTextCall_AsAFunction()
+    {
+        const string patch = "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch\n";
+        var chatClient = new RecordingOpenAIChatClient(
+        [
+            OpenAIChatModelFactory.StreamingChatCompletionUpdate(
+                completionId: "chatcmpl-freeform",
+                contentUpdate: [ChatMessageContentPart.CreateTextPart("OK")],
+                model: "gpt-5.4"),
+        ]);
+        var executor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions { ProviderKey = "openai", ChatClientFactory = _ => chatClient });
+        var request = CreateChatTurnRequest() with
+        {
+            ModelId = "gpt-5.4",
+            ModelInfo = new AgentModelInfo("gpt-5.4"),
+            Tools = [CreateFreeformTestTool()],
+            Conversation =
+            [
+                new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Edit.")]),
+                new AgentConversationMessage(
+                    AgentConversationRole.Assistant,
+                    [new AgentMessagePart.ToolCall("call-1", "apply_text", AgentToolFreeformInput.CreateArguments("input", patch)) { Freeform = true }]),
+                new AgentConversationMessage(
+                    AgentConversationRole.Tool,
+                    [new AgentMessagePart.ToolResult("call-1", new AgentToolResult(true, [new AgentToolResultItem.Text("applied")]))]),
+            ],
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var options = chatClient.Requests.Single().Options!;
+        var declared = options.Tools.Single();
+        Assert.AreEqual(ChatToolKind.Function, declared.Kind);
+        Assert.AreEqual("Apply a text.", declared.FunctionDescription);
+        StringAssert.Contains(declared.FunctionParameters.ToString(), "\"input\"");
+        var call = chatClient.Requests.Single().Messages.OfType<AssistantChatMessage>().Single().ToolCalls.Single();
+        Assert.AreEqual(ChatToolCallKind.Function, call.Kind);
+        using var arguments = JsonDocument.Parse(call.FunctionArguments.ToString());
+        Assert.AreEqual(patch, arguments.RootElement.GetProperty("input").GetString());
+    }
+
+    private const string FreeformTestGrammar = "start: TEXT\nTEXT: /[\\s\\S]+/\n";
+
+    private static OpenAIProviderOptions CreateFreeformTestProvider(string providerKind, RecordingOpenAIResponseClient client)
+        => new()
+        {
+            ProviderKey = providerKind,
+            ResponsesClientFactory = _ => client,
+            BaseUri = providerKind == "compatible" ? new Uri("http://localhost:1234/v1") : null,
+            CodexSubscription = providerKind == "codex"
+                ? new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "http", WebSearch = OpenAICodexWebSearchMode.Disabled }
+                : null,
+        };
+
+    private static AgentToolDefinition CreateFreeformTestTool(Func<AgentToolInvocation, AgentToolResult>? handler = null)
+        => new(
+            new AgentToolSpec(
+                "apply_text",
+                "Apply a text.",
+                JsonDocument.Parse("""{"type":"object","properties":{"input":{"type":"string"}},"required":["input"],"additionalProperties":false}""").RootElement.Clone())
+            {
+                FreeformInput = new AgentToolFreeformInput("input", AgentToolFreeformSyntax.Lark, FreeformTestGrammar)
+                {
+                    Description = "Send the text itself, not JSON.",
+                },
+            },
+            (invocation, _) => Task.FromResult(handler?.Invoke(invocation) ?? new AgentToolResult(true, [new AgentToolResultItem.Text("applied")])));
+
+    private static AgentToolDefinition CreateInspectTestTool()
+        => new(
+            new AgentToolSpec(
+                "inspect_file",
+                "Inspect a file.",
+                JsonDocument.Parse("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""").RootElement.Clone()),
+            static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ok")])));
+
+    [TestMethod]
     [DataRow(OpenAICodexWebSearchMode.Cached, false)]
     [DataRow(OpenAICodexWebSearchMode.Live, true)]
     [DataRow(OpenAICodexWebSearchMode.Disabled, null)]

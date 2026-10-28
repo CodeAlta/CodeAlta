@@ -35,6 +35,32 @@ public static partial class AgentBuiltInToolFactory
         "Rename or move a file or directory. Will not overwrite an existing destination.";
     private const string ApplyPatchToolDescription =
         "Use the `apply_patch` tool to edit files.";
+    // The raw-text form, as Codex declares it to the GPT-5 models and later: the format, which the schema of the JSON form
+    // describes, is in the description and the grammar.
+    private const string ApplyPatchFreeformDescription =
+        "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON: send the patch text itself, in the Codex/OpenAI apply_patch format. Start with '*** Begin Patch' and end with '*** End Patch'. Use '*** Add File:', '*** Delete File:', or '*** Update File:'. Paths resolve from the session working directory unless absolute, and may use '..'. An update may include '*** Move to:'. Hunks begin with '@@' or '@@ anchor text'; inside hunks use space for context, '-' for deletions, and '+' for additions.";
+    // The grammar of Codex (codex-rs/core/assets/tools/apply_patch.lark).
+    private static readonly string ApplyPatchGrammar = """
+        start: begin_patch hunk+ end_patch
+        begin_patch: "*** Begin Patch" LF
+        end_patch: "*** End Patch" LF?
+
+        hunk: add_hunk | delete_hunk | update_hunk
+        add_hunk: "*** Add File: " filename LF add_line+
+        delete_hunk: "*** Delete File: " filename LF
+        update_hunk: "*** Update File: " filename LF change_move? change?
+
+        filename: /(.+)/
+        add_line: "+" /(.*)/ LF -> line
+
+        change_move: "*** Move to: " filename LF
+        change: (change_context | change_line)+ eof_line?
+        change_context: ("@@" | "@@ " /(.+)/) LF
+        change_line: ("+" | "-" | " ") /(.*)/ LF
+        eof_line: "*** End of File" LF
+
+        %import common.LF
+        """.ReplaceLineEndings("\n");
     private const string ShellMaxOutputTokensArgument = "max_output_tokens";
     // The least output a call of shell_command can ask for: the head and the tail of each stream, and the note.
     private const int MinimumShellCommandOutputCharacters = 1_000;
@@ -262,7 +288,13 @@ public static partial class AgentBuiltInToolFactory
                 new AgentToolSpec(
                     "apply_patch",
                     ApplyPatchToolDescription,
-                    ApplyPatchSchema),
+                    ApplyPatchSchema)
+                {
+                    FreeformInput = new AgentToolFreeformInput("input", AgentToolFreeformSyntax.Lark, ApplyPatchGrammar)
+                    {
+                        Description = ApplyPatchFreeformDescription,
+                    },
+                },
                 (invocation, cancellationToken) => ApplyPatchAsync(options, invocation, cancellationToken)),
         ];
 

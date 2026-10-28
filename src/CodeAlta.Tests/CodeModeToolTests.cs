@@ -72,6 +72,60 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public void Exec_HasARawTextForm_WithTheGrammarOfCodex_AndKeepsItsJsonForm()
+    {
+        using var root = TestTempDirectory.Create();
+        var (dispatcher, _) = Dispatcher(root.Path);
+        var options = new CodeModeToolOptions { Runs = new CodeModeRunRegistry(null), Cache = new CodeModeScriptCache() };
+        foreach (var subSessions in new[] { true, false })
+        {
+            var caller = new AltaSessionToolOptions { CallerKind = "cli", WorkingDirectory = root.Path };
+            caller = caller with { SessionOptions = caller.SessionOptions with { SubSessions = subSessions } };
+            var tools = CodeModeToolFactory.Create(dispatcher, caller, options);
+            var exec = tools.Single(static tool => tool.Spec.Name == "exec");
+
+            Assert.IsTrue(exec.Spec.InputSchema.GetProperty("properties").TryGetProperty("code", out _));
+            Assert.IsFalse(exec.Spec.Description.Contains("FREEFORM", StringComparison.Ordinal));
+            var freeform = exec.Spec.FreeformInput;
+            Assert.IsNotNull(freeform);
+            Assert.AreEqual("code", freeform.ArgumentName);
+            Assert.AreEqual(AgentToolFreeformSyntax.Lark, freeform.Syntax);
+            StringAssert.StartsWith(freeform.Definition, "start: pragma_source | plain_source\n");
+            StringAssert.Contains(freeform.Definition, "PRAGMA_LINE: /[ \\t]*\\/\\/ @exec:[^\\r\\n]*/");
+            // The raw-text form says to send the source itself; the rest of its description is the JSON form's.
+            StringAssert.Contains(freeform.Description, "This is a FREEFORM tool: send the raw JavaScript source itself as the input, not JSON");
+            Assert.AreEqual(exec.Spec.Description, freeform.Description!.Replace(" This is a FREEFORM tool: send the raw JavaScript source itself as the input, not JSON, a quoted string or a Markdown code fence.", string.Empty, StringComparison.Ordinal));
+            // The wait tool stays a JSON function.
+            Assert.IsNull(tools.Single(static tool => tool.Spec.Name == "wait").Spec.FreeformInput);
+        }
+    }
+
+    [TestMethod]
+    public async Task Exec_ATextToolTakesItsTextAlone_OrInItsObject()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var invoker = new PatchTools();
+        var (exec, _) = Create(root.Path, runs);
+
+        var result = await InvokeAsync(exec, """
+            const a = await tools.apply_patch("*** Begin Patch\n*** Add File: a.txt\n+a\n*** End Patch");
+            const b = await tools.apply_patch({ input: "*** Begin Patch\n*** Add File: b.txt\n+b\n*** End Patch" });
+            let refused = "";
+            try { await tools.read_file("a.txt"); } catch (e) { refused = e.message; }
+            return { a, b, refused };
+            """, invoker);
+
+        Assert.IsTrue(result.Success, Text(result));
+        CollectionAssert.AreEqual(
+            new[] { "*** Begin Patch\n*** Add File: a.txt\n+a\n*** End Patch", "*** Begin Patch\n*** Add File: b.txt\n+b\n*** End Patch" },
+            invoker.Patches.ToArray());
+        using var value = ValueOf(result);
+        // A tool whose input is not one text takes an object only.
+        StringAssert.Contains(value.RootElement.GetProperty("refused").GetString(), "args must be an object");
+    }
+
+    [TestMethod]
     public async Task Exec_LeavesOutTheToolsOfTheModelAndItself()
     {
         using var root = TestTempDirectory.Create();
@@ -1115,7 +1169,7 @@ public sealed class CodeModeToolTests
         return (tools.Single(static tool => tool.Spec.Name == "exec"), tools.Single(static tool => tool.Spec.Name == "wait"));
     }
 
-    private static Task<AgentToolResult> InvokeAsync(AgentToolDefinition tool, string code, FakeTools invoker)
+    private static Task<AgentToolResult> InvokeAsync(AgentToolDefinition tool, string code, IAgentRunToolInvoker invoker)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -1159,6 +1213,31 @@ public sealed class CodeModeToolTests
     {
         using var document = JsonDocument.Parse(json);
         return document.RootElement.Clone();
+    }
+
+    // The tools of a run: apply_patch, whose input is one text, and read_file, whose input is an object.
+    private sealed class PatchTools : IAgentRunToolInvoker
+    {
+        public List<string> Patches { get; } = [];
+
+        public IReadOnlyList<AgentToolSpec> ListTools() =>
+        [
+            new("apply_patch", "Edits files.", Schema("""{"type":"object","properties":{"input":{"type":"string"}},"required":["input"]}"""))
+            {
+                FreeformInput = new AgentToolFreeformInput("input", AgentToolFreeformSyntax.Lark, "start: /[\\s\\S]+/"),
+            },
+            new("read_file", "Reads a file.", Schema("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""")),
+        ];
+
+        public Task<AgentToolResult> InvokeAsync(AgentNestedToolCall call, CancellationToken cancellationToken)
+        {
+            if (call.ToolName == "apply_patch")
+            {
+                lock (Patches) Patches.Add(call.Arguments.GetProperty("input").GetString()!);
+            }
+
+            return Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("done")]));
+        }
     }
 
     // The tools of a run: read_file with a structured result, a tool of an MCP server, a tool of the model only.

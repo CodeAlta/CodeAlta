@@ -150,6 +150,11 @@ public static class CodeModeDeclarations
         }
 
         var input = function.InputSchemaJson is null ? "Record<string, unknown>" : RenderType(function.InputSchemaJson);
+        if (function.TextArgument is not null)
+        {
+            input = "string | " + input;
+        }
+
         var optional = function.InputSchemaJson is null || !HasRequired(function.InputSchemaJson) ? "?" : string.Empty;
         var output = function.ResultType ?? (function.OutputSchemaJson is null ? "unknown" : RenderType(function.OutputSchemaJson));
         builder.Append(indent).Append(callSignature ? string.Empty : PropertyName(name)).Append("(args").Append(optional).Append(": ")

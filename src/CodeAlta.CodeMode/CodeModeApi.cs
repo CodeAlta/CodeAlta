@@ -113,7 +113,9 @@ public sealed class CodeModeApi
             };
             // A plain function that calls the host at once: an async function in between would hide the script's
             // frames from the engine's stack, which gives the host the line of each call.
-            const fn = (path) => function (args) {
+            const fn = (path, textArgument) => function (args) {
+              // A tool whose input is one text also takes that text alone: tools.apply_patch(patch).
+              if (typeof args === "string" && textArgument !== undefined) args = { [textArgument]: args };
               if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
                 return Promise.reject(new TypeError(`${path}(args): args must be an object, such as { path: "src/app.ts" }.`));
               }
@@ -291,7 +293,7 @@ public sealed class CodeModeApi
                 node = node.Child(segment);
             }
 
-            node.Function = function.Path;
+            node.Function = function;
         }
 
         foreach (var (name, node) in root.Children)
@@ -320,11 +322,11 @@ public sealed class CodeModeApi
     {
         if (node.Children.Count == 0)
         {
-            builder.Append("fn(").Append(Quote(node.Function!)).Append(')');
+            builder.Append(FunctionValue(node.Function!));
             return;
         }
 
-        builder.Append("guard(").Append(Quote(path)).Append(", freeze(Object.assign(").Append(node.Function is null ? "{}" : "fn(" + Quote(node.Function) + ")").Append(", {");
+        builder.Append("guard(").Append(Quote(path)).Append(", freeze(Object.assign(").Append(node.Function is null ? "{}" : FunctionValue(node.Function)).Append(", {");
         var first = true;
         foreach (var (name, child) in node.Children)
         {
@@ -343,7 +345,7 @@ public sealed class CodeModeApi
 
     private sealed class PathNode
     {
-        public string? Function { get; set; }
+        public CodeModeFunction? Function { get; set; }
 
         public List<(string Name, PathNode Node)> Children { get; } = [];
 
@@ -362,6 +364,11 @@ public sealed class CodeModeApi
             return added;
         }
     }
+
+    private static string FunctionValue(CodeModeFunction function)
+        => function.TextArgument is { } textArgument
+            ? "fn(" + Quote(function.Path) + ", " + Quote(textArgument) + ")"
+            : "fn(" + Quote(function.Path) + ")";
 
     private static string Quote(string value) => JsonSerializer.Serialize(value, CodeModeJsonContext.Default.String);
 }

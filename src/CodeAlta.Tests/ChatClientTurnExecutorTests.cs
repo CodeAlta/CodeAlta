@@ -155,6 +155,51 @@ public sealed class ChatClientTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ExecuteTurnAsync_DeclaresAFreeformTool_WithItsSchema_AndReplaysARawTextCall_AsAnOrdinaryCall()
+    {
+        const string patch = "*** Begin Patch\n*** Add File: a.txt\n+say \"hi\"\n*** End Patch\n";
+        var client = new RecordingChatClient { Updates = [new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("ok")])] };
+        var executor = new ChatClientTurnExecutor(
+            (_, _) => ValueTask.FromResult<IChatClient>(client),
+            static (_, _) => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]));
+        var request = CreateTurnRequest(
+            conversation:
+            [
+                new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("edit")]),
+                new AgentConversationMessage(
+                    AgentConversationRole.Assistant,
+                    [new AgentMessagePart.ToolCall("call-1", "apply_patch", AgentToolFreeformInput.CreateArguments("input", patch)) { Freeform = true }]),
+                new AgentConversationMessage(
+                    AgentConversationRole.Tool,
+                    [new AgentMessagePart.ToolResult("call-1", new AgentToolResult(true, [new AgentToolResultItem.Text("applied")]))]),
+            ]) with
+        {
+            Tools =
+            [
+                new AgentToolDefinition(
+                    new AgentToolSpec(
+                        "apply_patch",
+                        "Edit files.",
+                        JsonDocument.Parse("""{"type":"object","properties":{"input":{"type":"string"}},"required":["input"]}""").RootElement.Clone())
+                    {
+                        FreeformInput = new AgentToolFreeformInput("input", AgentToolFreeformSyntax.Lark, "start: /.+/") { Description = "Send the patch, not JSON." },
+                    },
+                    (_, _) => Task.FromResult(new AgentToolResult(true, []))),
+            ],
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask, CancellationToken.None).ConfigureAwait(false);
+
+        // The Anthropic Messages API has no raw-text input: the tool is a function with its JSON schema.
+        var declared = Assert.IsInstanceOfType<AIFunctionDeclaration>(client.LastOptions!.Tools!.Single());
+        Assert.AreEqual("Edit files.", declared.Description);
+        Assert.IsTrue(declared.JsonSchema.GetProperty("properties").TryGetProperty("input", out _));
+        var call = client.LastMessages!.SelectMany(static message => message.Contents).OfType<FunctionCallContent>().Single();
+        Assert.AreEqual("call-1", call.CallId);
+        Assert.AreEqual(patch, call.Arguments!["input"]?.ToString());
+    }
+
+    [TestMethod]
     public async Task ExecuteTurnAsync_MapsInlineImageDataWithMediaTypeIntoChatClientRequest()
     {
         var imageBytes = new byte[] { 1, 2, 3 };

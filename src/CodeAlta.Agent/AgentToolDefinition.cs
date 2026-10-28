@@ -120,6 +120,13 @@ public sealed record AgentToolSpec
     public bool StaysDirect { get; init; }
 
     /// <summary>
+    /// Gets the raw-text form of the tool's input, when the input is one text (the source of a script, a patch): a provider
+    /// that can declare it has the model send that text without JSON, and the handler still receives the JSON object that
+    /// <see cref="InputSchema"/> describes. Null for a tool declared with its JSON schema everywhere.
+    /// </summary>
+    public AgentToolFreeformInput? FreeformInput { get; init; }
+
+    /// <summary>
     /// Deconstructs this tool specification into its components.
     /// </summary>
     /// <param name="name">The tool name.</param>
