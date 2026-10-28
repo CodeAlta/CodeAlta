@@ -1082,7 +1082,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             return;
         }
 
-        var replayOutputItems = CreateAssistantItems(assistantMessage.Parts).ToArray();
+        var replayOutputItems = CreateAssistantItems(assistantMessage.Parts, OpenAIResponsesFreeformTools.Select(provider, request), customCallIds: null).ToArray();
         // A hosted web search is not replayed: the response kept by the provider has it already.
         if (replayOutputItems.Length != response.OutputItems.Count(static item => item is not WebSearchCallResponseItem))
         {
@@ -1418,7 +1418,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
         CodexSubscriptionRequestContext? requestContext,
         CancellationToken cancellationToken)
     {
-        var toolDefinitions = request.Tools.Select(CreateFunctionTool).Cast<ResponseTool>().ToArray();
+        var freeformTools = OpenAIResponsesFreeformTools.Select(provider, request);
+        var toolDefinitions = request.Tools.Select(tool => CreateTool(tool, freeformTools)).ToArray();
         var options = new CreateResponseOptions
         {
             Model = request.ModelId,
@@ -1446,7 +1447,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             options.InputItems.Add(ResponseItem.CreateUserMessageItem([ResponseContentPart.CreateInputTextPart(sessionInstructions)]));
         }
 
-        foreach (var inputItem in CreateConversationItems(conversation))
+        foreach (var inputItem in CreateConversationItems(conversation, freeformTools))
         {
             options.InputItems.Add(inputItem);
         }
@@ -1678,9 +1679,13 @@ internal sealed class OpenAIResponsesTurnExecutor(
     // The instructions of the session come last: what is before them is the same for every session of a prompt, and the
     // provider reads it from its prompt cache.
 
-    private static IReadOnlyList<ResponseItem> CreateConversationItems(IReadOnlyList<AgentConversationMessage> messages)
+    private static IReadOnlyList<ResponseItem> CreateConversationItems(
+        IReadOnlyList<AgentConversationMessage> messages,
+        IReadOnlyDictionary<string, AgentToolFreeformInput>? freeformTools)
     {
         var items = new List<ResponseItem>();
+        // The output of a call goes back in the kind of the call: a custom_tool_call_output for a custom_tool_call.
+        var customCallIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var message in messages)
         {
             switch (message.Role)
@@ -1700,10 +1705,10 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
                     break;
                 case AgentConversationRole.Assistant:
-                    items.AddRange(CreateAssistantItems(message.Parts));
+                    items.AddRange(CreateAssistantItems(message.Parts, freeformTools, customCallIds));
                     break;
                 case AgentConversationRole.Tool:
-                    items.AddRange(CreateToolResultItems(message.Parts));
+                    items.AddRange(CreateToolResultItems(message.Parts, customCallIds));
                     break;
             }
         }
@@ -1711,7 +1716,10 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return items;
     }
 
-    private static IEnumerable<ResponseItem> CreateAssistantItems(IReadOnlyList<AgentMessagePart> parts)
+    private static IEnumerable<ResponseItem> CreateAssistantItems(
+        IReadOnlyList<AgentMessagePart> parts,
+        IReadOnlyDictionary<string, AgentToolFreeformInput>? freeformTools,
+        HashSet<string>? customCallIds)
     {
         var items = new List<ResponseItem>();
         var contentParts = new List<ResponseContentPart>();
@@ -1743,10 +1751,18 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     break;
                 case AgentMessagePart.ToolCall toolCall:
                     FlushAssistantContent(items, contentParts);
+                    var registeredName = AgentToolBridge.GetRegisteredToolName(toolCall.Name);
+                    if (OpenAIResponsesFreeformTools.TryGetReplayText(toolCall, registeredName, freeformTools, out var freeformText))
+                    {
+                        items.Add(new CustomToolCallItem(toolCall.CallId, freeformText, registeredName));
+                        customCallIds?.Add(toolCall.CallId);
+                        break;
+                    }
+
                     items.Add(
                         ResponseItem.CreateFunctionCallItem(
                             toolCall.CallId,
-                            AgentToolBridge.GetRegisteredToolName(toolCall.Name),
+                            registeredName,
                             BinaryData.FromString(toolCall.Arguments.GetRawText())));
                     break;
             }
@@ -1767,14 +1783,32 @@ internal sealed class OpenAIResponsesTurnExecutor(
         contentParts.Clear();
     }
 
-    private static IEnumerable<ResponseItem> CreateToolResultItems(IReadOnlyList<AgentMessagePart> parts)
+    private static IEnumerable<ResponseItem> CreateToolResultItems(IReadOnlyList<AgentMessagePart> parts, HashSet<string> customCallIds)
     {
         foreach (var part in parts.OfType<AgentMessagePart.ToolResult>())
         {
+            var hasImages = part.Result.Items.Any(static item => item is AgentToolResultItem.Image);
+            if (customCallIds.Contains(part.CallId))
+            {
+                var customOutput = new CustomToolCallOutputItem(part.CallId, []);
+                // Its output is a string, as Codex sends it, or a list of input parts that carries the images.
+                if (hasImages)
+                {
+                    customOutput.Patch.Set("$.output"u8, CreateFunctionOutputParts(part.Result));
+                }
+                else
+                {
+                    customOutput.Patch.Set("$.output"u8, RenderToolResult(part.Result));
+                }
+
+                yield return customOutput;
+                continue;
+            }
+
             var item = ResponseItem.CreateFunctionCallOutputItem(
                 part.CallId,
                 RenderToolResult(part.Result));
-            if (part.Result.Items.Any(static item => item is AgentToolResultItem.Image))
+            if (hasImages)
             {
                 // The output of a function call is a string or a list of input parts: the list carries the images.
                 item.Patch.Set("$.output"u8, CreateFunctionOutputParts(part.Result));
@@ -1875,6 +1909,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return true;
     }
 
+    private static ResponseTool CreateTool(AgentToolDefinition tool, IReadOnlyDictionary<string, AgentToolFreeformInput>? freeformTools)
+        => freeformTools is not null && tool.Spec.FreeformInput is { } input
+            ? OpenAIResponsesFreeformTools.CreateTool(tool, input)
+            : CreateFunctionTool(tool);
+
     private static FunctionTool CreateFunctionTool(AgentToolDefinition tool)
         => ResponseTool.CreateFunctionTool(
             AgentToolBridge.GetRegisteredToolName(tool.Spec.Name),
@@ -1941,6 +1980,10 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         toolCall.CallId,
                         toolCall.FunctionName,
                         DeserializeJson(toolCall.FunctionArguments)));
+                    partContentIds.Add(null);
+                    break;
+                case CustomToolCallItem customToolCall:
+                    parts.Add(OpenAIResponsesFreeformTools.CreateToolCall(request, customToolCall));
                     partContentIds.Add(null);
                     break;
                 case WebSearchCallResponseItem webSearch:
@@ -4142,7 +4185,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             message.Contains("context window", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsToolCallResponseItem(ResponseItem item)
-        => item is FunctionCallResponseItem;
+        => item is FunctionCallResponseItem or CustomToolCallItem;
 
     private sealed class OpenAIResponsesStreamErrorException(
         string message,

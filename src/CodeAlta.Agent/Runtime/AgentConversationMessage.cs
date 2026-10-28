@@ -83,7 +83,16 @@ public abstract record AgentMessagePart
     /// <param name="CallId">The stable tool call identifier.</param>
     /// <param name="Name">The tool name.</param>
     /// <param name="Arguments">The tool arguments.</param>
-    public sealed record ToolCall(string CallId, string Name, JsonElement Arguments) : AgentMessagePart;
+    public sealed record ToolCall(string CallId, string Name, JsonElement Arguments) : AgentMessagePart
+    {
+        /// <summary>
+        /// Gets or initializes whether the model sent the input as raw text (a custom tool call of the OpenAI Responses
+        /// API, for a tool with an <see cref="AgentToolSpec.FreeformInput"/>): <see cref="Arguments"/> holds that text in
+        /// its JSON form, and a provider that declares the tool the same way sends the call back the way it came. Null for
+        /// a call with JSON arguments.
+        /// </summary>
+        public bool? Freeform { get; init; }
+    }
 
     /// <summary>
     /// A tool-result message part.
