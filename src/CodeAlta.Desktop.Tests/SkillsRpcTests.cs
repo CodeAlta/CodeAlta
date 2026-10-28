@@ -742,6 +742,26 @@ public sealed class SkillsRpcTests
         Assert.IsTrue(File.Exists(target));
     }
 
+    [TestMethod]
+    public async Task ALinkedSkillFolder_IsListed_ButNotRemovedThroughItsLink()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var library = Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, "library", "shared")).FullName;
+        File.WriteAllText(Path.Combine(library, "SKILL.md"), "---\nname: shared\ndescription: A skill of a shared library\n---\n\n# Shared\n");
+        try { Directory.CreateSymbolicLink(Path.Combine(fixture.GlobalRoot, "skills", "shared"), library); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Inconclusive($"Symbolic links are unavailable: {exception.Message}");
+        }
+
+        fixture.Trash.Available = true;
+        var shared = (await fixture.Service.ListAsync(new(Epoch, null), default)).Skills.Single(skill => skill.Name == "shared");
+        var request = new SkillsDetailRequest(Epoch, null, null, shared.Source, shared.Id);
+        Assert.AreNotEqual("ok", (await fixture.Service.DeleteAsync(request, default)).Status);
+        Assert.IsEmpty(fixture.Trash.Moved);
+        Assert.IsTrue(File.Exists(Path.Combine(library, "SKILL.md")));
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly string _root;

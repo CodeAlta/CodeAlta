@@ -280,6 +280,10 @@ internal sealed partial class SkillsService
             {
                 return new("read_only", 0, null);
             }
+
+            // As for the details, the document lookup refuses a skill reached through a link: discovery follows links,
+            // management does not act through them.
+            _ = await _management.GetFileDocumentAsync(skill.SkillFilePath, null, project.Root, cancellationToken).ConfigureAwait(false);
         }
         catch (InvalidDataException)
         {

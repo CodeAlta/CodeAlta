@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Globalization;
+using System.IO.Enumeration;
 using System.Text;
 using System.Text.Unicode;
 using SharpYaml;
@@ -345,16 +346,14 @@ public sealed class SkillCatalog
         var descriptors = new List<SkillDescriptor>(skillFilePaths.Count);
         foreach (var skillFilePath in skillFilePaths)
         {
-            // A descriptor depends only on its root and on the SKILL.md file: it is read again when the file changes.
-            var file = new FileInfo(skillFilePath);
-            var length = file.Exists ? file.Length : -1;
-            var lastWriteTimeUtc = file.Exists ? file.LastWriteTimeUtc : DateTime.MinValue;
+            // A descriptor depends only on its root and on the SKILL.md file: it is read again when the file changes, or
+            // the file it links to.
+            var stamp = PathStamp.Read(skillFilePath, isDirectory: false);
             if (previous is null ||
                 !previous.TryGetValue(skillFilePath, out var cached) ||
-                cached.Length != length ||
-                cached.LastWriteTimeUtc != lastWriteTimeUtc)
+                cached.Stamp != stamp)
             {
-                cached = new CachedSkillFile(length, lastWriteTimeUtc, await BuildDescriptorAsync(root, skillFilePath, cancellationToken).ConfigureAwait(false));
+                cached = new CachedSkillFile(stamp, await BuildDescriptorAsync(root, skillFilePath, cancellationToken).ConfigureAwait(false));
             }
 
             // A file that could not be read is tried again next time: a change of its permissions leaves its time as it was.
@@ -482,6 +481,8 @@ public sealed class SkillCatalog
             ? [FixedExclusionRules]
             : BuildNonGitRuleSets(rootPath, cancellationToken);
         // The walk that finds the skills also tells the folders it went through: the cache of that walk checks them.
+        // Links are followed, so that a library of skills shared with other tools can be linked into a root: the walker
+        // skips broken links and does not go again into a folder it is already in, so a cycle of links ends.
         return includeDirectories
             ? new FileTreeWalkOptions
             {
@@ -489,12 +490,14 @@ public sealed class SkillCatalog
                 RepositoryContext = repository,
                 AdditionalRuleSets = ruleSets,
                 IncludeDirectories = true,
+                FollowSymbolicLinks = true,
             }
             : new FileTreeWalkOptions
             {
                 CancellationToken = cancellationToken,
                 RepositoryContext = repository,
                 AdditionalRuleSets = ruleSets,
+                FollowSymbolicLinks = true,
             };
     }
 
@@ -505,6 +508,7 @@ public sealed class SkillCatalog
         {
             CancellationToken = cancellationToken,
             AdditionalRuleSets = [FixedExclusionRules],
+            FollowSymbolicLinks = true,
         };
 
         foreach (var entry in _walker.Enumerate(rootPath, discoveryOptions))
@@ -1230,7 +1234,7 @@ public sealed class SkillCatalog
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private sealed record CachedSkillFile(long Length, DateTime LastWriteTimeUtc, SkillDescriptor Descriptor);
+    private sealed record CachedSkillFile(PathStamp Stamp, SkillDescriptor Descriptor);
 
     // The repository a root is in, as the walk of the root uses it: a walk is taken again only within the same one.
     private readonly record struct RepositoryKey(string? WorkingTreeRoot, string? GitDirectory, string? GlobalExcludePath, string? InfoExcludePath)
@@ -1241,18 +1245,67 @@ public sealed class SkillCatalog
                 : new RepositoryKey(repository.WorkingTreeRoot, repository.GitDirectory, repository.GlobalExcludePath, repository.InfoExcludePath);
     }
 
-    // A folder or a file as a walk read it: its time and, for a file, its length; a missing one has neither.
-    private readonly record struct PathStamp(string Path, bool IsDirectory, long Length, DateTime LastWriteTimeUtc)
+    // A folder or a file as a walk read it: its time and, for a file, its length; a missing one has neither. The time
+    // of a link is that of the link itself, which a change in the folder or the file it leads to does not touch: a link
+    // is stamped with the final target it leads to, and the time and length of that target.
+    private readonly record struct PathStamp(string Path, PathStampKind Kind, string? Target, long Length, DateTime LastWriteTimeUtc)
     {
         public static PathStamp Read(string path, bool isDirectory)
         {
+            var kind = isDirectory ? PathStampKind.Directory : PathStampKind.File;
             FileSystemInfo info = isDirectory ? new DirectoryInfo(path) : new FileInfo(path);
-            return !info.Exists
-                ? new PathStamp(path, isDirectory, -1, DateTime.MinValue)
-                : new PathStamp(path, isDirectory, info is FileInfo file ? file.Length : 0, info.LastWriteTimeUtc);
+            if (info.Exists && (info.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                // A reparse point that is not a link (a cloud file placeholder) has no target: it is stamped as it is.
+                if (ResolveFinalTarget(info) is { } target)
+                {
+                    return Stamp(path, kind, target.FullName, target);
+                }
+            }
+
+            return Stamp(path, kind, target: null, info);
         }
 
-        public bool IsCurrent() => Read(Path, IsDirectory) == this;
+        // An entry the walk did not report, a link that may be broken or lead to a file or a folder: what it leads to.
+        public static PathStamp ReadLink(string path)
+        {
+            var target = ResolveFinalTarget(new FileInfo(path));
+            if (target is null)
+            {
+                return new PathStamp(path, PathStampKind.Link, null, -1, DateTime.MinValue);
+            }
+
+            return target.Exists
+                ? Stamp(path, PathStampKind.Link, target.FullName, target)
+                : Stamp(path, PathStampKind.Link, target.FullName, new DirectoryInfo(target.FullName));
+        }
+
+        public bool IsCurrent() => (Kind == PathStampKind.Link ? ReadLink(Path) : Read(Path, Kind == PathStampKind.Directory)) == this;
+
+        private static PathStamp Stamp(string path, PathStampKind kind, string? target, FileSystemInfo info)
+            => !info.Exists
+                ? new PathStamp(path, kind, target, -1, DateTime.MinValue)
+                : new PathStamp(path, kind, target, info is FileInfo file ? file.Length : 0, info.LastWriteTimeUtc);
+
+        private static FileSystemInfo? ResolveFinalTarget(FileSystemInfo info)
+        {
+            try
+            {
+                return info.ResolveLinkTarget(returnFinalTarget: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Too many levels of links, a cycle among them, a link that cannot be read: it is stamped as it is.
+                return null;
+            }
+        }
+    }
+
+    private enum PathStampKind
+    {
+        Directory,
+        File,
+        Link,
     }
 
     // What the walk of a root found, and the folders and ignore files it read: the walk holds while none changed.
@@ -1292,12 +1345,7 @@ public sealed class SkillCatalog
             {
                 stamps.Add(PathStamp.Read(directory, isDirectory: true));
                 stamps.Add(PathStamp.Read(System.IO.Path.Combine(directory, ".gitignore"), isDirectory: false));
-            }
-
-            // A root that is a link: what is added to the folder it leads to changes that folder, not the link.
-            if (new DirectoryInfo(root).ResolveLinkTarget(returnFinalTarget: true) is { } target)
-            {
-                stamps.Add(PathStamp.Read(target.FullName, isDirectory: true));
+                AddLinkStamps(directory, stamps);
             }
 
             if (repository is not null)
@@ -1321,6 +1369,23 @@ public sealed class SkillCatalog
             }
 
             return new RootWalk(repositoryKey, skillFiles, [.. stamps]);
+        }
+
+        // The links in a folder, broken ones included, which the walk skips without telling: a folder or a file that
+        // appears where one leads, or one that leads elsewhere, leaves the folder of the link as it was.
+        private static void AddLinkStamps(string directory, List<PathStamp> stamps)
+        {
+            var links = new FileSystemEnumerable<string>(
+                directory,
+                static (ref FileSystemEntry entry) => entry.ToFullPath(),
+                new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = true, RecurseSubdirectories = false })
+            {
+                ShouldIncludePredicate = static (ref FileSystemEntry entry) => (entry.Attributes & FileAttributes.ReparsePoint) != 0,
+            };
+            foreach (var link in links)
+            {
+                stamps.Add(PathStamp.ReadLink(link));
+            }
         }
 
         // Whether all it read last changed before that time: what changed later may have changed while it was read.

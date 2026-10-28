@@ -261,6 +261,39 @@ public sealed class DesktopSearchTests
         Assert.AreEqual(0, await FoundAsync("zebra"));
     }
 
+    [TestMethod]
+    public async Task TheBodyOfALinkedSkill_IsReadAgain_WhenTheFileItLeadsToChanges()
+    {
+        using var temp = new TempFolder();
+        var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var skill = Directory.CreateDirectory(Path.Combine(global, "skills", "crossing")).FullName;
+        var target = Path.Combine(Directory.CreateDirectory(Path.Combine(temp.Path, "library")).FullName, "SKILL.md");
+        File.WriteAllText(target, "---\nname: crossing\ndescription: Helps with roads.\n---\n# Crossing\n\nLook for the zebra stripes.\n");
+        // ERROR_PRIVILEGE_NOT_HELD: Windows without Developer Mode or elevation cannot create symbolic links.
+        try { File.CreateSymbolicLink(Path.Combine(skill, "SKILL.md"), target); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException || ex.HResult == unchecked((int)0x80070522))
+        { Assert.Inconclusive("Creating a symbolic link requires platform permission."); }
+        var relay = new DesktopSearchRelay();
+        await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        {
+            GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true, AutoApproveOwnedPermissions = true, OwnedCommandReceiptCapacity = 32,
+            PluginBuiltIns = [DesktopSearchPlugin.Definition(relay)],
+        }, CancellationToken.None);
+        await using var search = DesktopSearch.Start(host, relay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), null, temp.Path, [], null, null,
+            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, QuietStart = TimeSpan.Zero, FileQuiet = TimeSpan.FromMilliseconds(10) });
+        async Task<int> FoundAsync(string word)
+            => (await search.Service.SearchAsync(new SearchRequest(word, new SearchScope { Kinds = new HashSet<SearchKind> { SearchKind.Skill } }) { Mode = SearchMode.Keyword })).Hits.Count;
+
+        await UntilAsync(async () => await FoundAsync("zebra") == 1);
+        // The link stays as it was: the length and the time of the file it leads to tell the edit.
+        File.WriteAllText(target, "---\nname: crossing\ndescription: Helps with roads.\n---\n# Crossing\n\nWatch the giraffe cross.\n");
+        File.SetLastWriteTimeUtc(target, DateTime.UtcNow.AddMinutes(1));
+        search.Indexer.SignalPass();
+        await UntilAsync(async () => await FoundAsync("giraffe") == 1);
+        Assert.AreEqual(0, await FoundAsync("zebra"));
+    }
+
     private static async Task UntilAsync(Func<Task<bool>> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
