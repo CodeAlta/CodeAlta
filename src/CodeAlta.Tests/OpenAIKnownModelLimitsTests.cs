@@ -114,6 +114,7 @@ public sealed class OpenAIKnownModelLimitsTests
                 "models": {
                   "gpt-6-astra": { "id": "gpt-6-astra", "name": "GPT-6 Astra", "family": "gpt-astra", "limit": { "context": 1050000, "input": 922000, "output": 128000 } },
                   "gpt-6.1-sol": { "id": "gpt-6.1-sol", "name": "GPT-6.1 Sol", "family": "gpt-sol", "limit": { "context": 1050000, "input": 922000, "output": 128000 } },
+                  "gpt-5.6-sol": { "id": "gpt-5.6-sol", "name": "GPT-5.6 Sol", "family": "gpt-sol", "limit": { "context": 1050000, "input": 922000, "output": 128000 } },
                   "gpt-5.5": { "id": "gpt-5.5", "name": "GPT-5.5", "family": "gpt", "limit": { "context": 1050000, "input": 922000, "output": 128000 } }
                 }
               }

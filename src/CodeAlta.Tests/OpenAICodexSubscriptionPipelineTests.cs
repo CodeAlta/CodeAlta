@@ -1642,6 +1642,46 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual(244_800L, AgentTokenBudgetResolver.ResolveCompactionThreshold(272_000, astra, AgentCompactionSettings.Default));
     }
 
+    // The context_window of Codex's catalog is the input Codex sends at most (it compacts at 90% of it), for every model
+    // of the endpoint: it wins over the 922,000 input tokens models.dev gives GPT-5.6 and GPT-5.5.
+    [TestMethod]
+    public async Task ModelDiscovery_TheContextWindowOfTheEndpointIsTheInputLimit_AndCompactsAt90Percent()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {"models":[
+                {"slug":"gpt-5.6-sol","display_name":"GPT-5.6 Sol","supported_in_api":true,"visibility":"list","use_responses_lite":true,"context_window":272000},
+                {"slug":"gpt-5.5","display_name":"GPT-5.5","supported_in_api":true,"visibility":"list","context_window":272000}]}
+                """),
+        };
+        await using var catalog = new ModelsDevCatalogService(OpenAIKnownModelLimitsTests.CreateDatabase(), new ModelsDevCatalogServiceOptions());
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            StateRootPath = temp.Path,
+            ModelCatalog = catalog,
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(response)),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { ModelDiscovery = "codex_endpoint" },
+        };
+
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(provider, CreateProviderDescriptor(), CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(2, models.Count);
+        foreach (var model in models)
+        {
+            Assert.AreEqual("openai", model.Capabilities?["modelsDevProviderId"], model.Id);
+            var budget = AgentTokenBudgetResolver.Resolve(model, AgentCompactionSettings.Default);
+            Assert.AreEqual(272_000L, budget.InputContextLimit, model.Id);
+            Assert.AreEqual(128_000L, budget.MaxOutputTokens, model.Id);
+            Assert.AreEqual(244_800L, AgentTokenBudgetResolver.ResolveCompactionThreshold(budget.InputContextLimit!.Value, model, AgentCompactionSettings.Default), model.Id);
+        }
+    }
+
     [TestMethod]
     public async Task ModelDiscovery_UsesCurrentSummaryCapabilityAndBackwardCompatibleDefault()
     {

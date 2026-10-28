@@ -5,6 +5,7 @@ using System.ClientModel.Primitives;
 using System.Text.Json;
 using Azure.AI.OpenAI;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI.Codex;
 using OpenAI;
@@ -405,9 +406,14 @@ internal static class OpenAIProviderSdkFactory
             ["useResponsesLite"] = model.UseResponsesLite,
             ["requiresWebSocket"] = model.RequiresWebSocket,
         };
+        // Codex's context_window is the input it sends at most (it compacts at 90% of it), under the larger input a model
+        // accepts (models.dev gives 922,000 to GPT-5.5): it is the input limit of a session, as in OpenAIKnownModelLimits.
         if (model.ContextWindow is { } contextWindow)
         {
             capabilities["contextWindow"] = contextWindow;
+            capabilities["inputTokenLimit"] = contextWindow;
+            capabilities["maxInputTokens"] = contextWindow;
+            capabilities[AgentTokenBudgetResolver.CompactionRatioCapabilityKey] = OpenAIKnownModelLimits.CodexCompactionRatio;
         }
 
         if (!string.IsNullOrWhiteSpace(model.DefaultTextVerbosity))
