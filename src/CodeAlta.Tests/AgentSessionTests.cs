@@ -2201,20 +2201,121 @@ public sealed partial class AgentSessionTests
             CreateOptions(provider, temp.Path));
         // The answer of a child steers the run after its last look at what steers it, before it ends.
         AgentRunId? steeredInto = null;
+        var handedBack = 0;
         session.RunEnding = async runId =>
         {
             if (steeredInto is not null) return;
-            steeredInto = await session.SteerAsync(new AgentSteerOptions { Input = AgentInput.Text("The child is done."), ExpectedRunId = runId }).ConfigureAwait(false);
+            steeredInto = await session.SteerAsync(new AgentSteerOptions
+            {
+                Input = AgentInput.Text("The child is done."), ExpectedRunId = runId, NotTaken = () => Interlocked.Increment(ref handedBack),
+            }).ConfigureAwait(false);
         };
 
         var completedRunId = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") }).WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
 
         Assert.AreEqual(completedRunId, steeredInto, "The steer was taken by the run in progress.");
+        Assert.AreEqual(0, handedBack, "A steer the run took is not handed back.");
         var history = await session.GetHistoryAsync().ConfigureAwait(false);
         CollectionAssert.AreEqual(new[] { "Initial prompt", "The child is done." },
             history.OfType<AgentContentCompletedEvent>().Where(static evt => evt.Kind == AgentContentKind.User).Select(static evt => evt.Content).ToArray(),
             "A steer the run took is answered in it.");
         Assert.AreEqual("Second answer.", history.OfType<AgentContentCompletedEvent>().Last(static evt => evt.Kind == AgentContentKind.Assistant).Content);
+    }
+
+    [TestMethod]
+    public async Task AgentSession_ASteerOfARunThatFails_IsHandedBack_NotDropped()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-steer-failing");
+        var state = CreateState("session-steer-failing");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        AgentSession? steered = null;
+        AgentRunId? steeredInto = null;
+        var handedBack = 0;
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                async (request, _, _) =>
+                {
+                    // The answer of a child steers the run, whose request then fails.
+                    steeredInto = await steered!.SteerAsync(new AgentSteerOptions
+                    {
+                        Input = AgentInput.Text("The child is done."), ExpectedRunId = request.RunId,
+                        NotTaken = () => Interlocked.Increment(ref handedBack),
+                    }).ConfigureAwait(false);
+                    throw new InvalidOperationException("The provider failed.");
+                }),
+            CreateOptions(provider, temp.Path));
+        steered = session;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") }).WaitAsync(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
+
+        Assert.IsNotNull(steeredInto, "The failing run accepted the steer.");
+        Assert.AreEqual(1, handedBack, "The steer the failed run did not take is handed back to its sender.");
+        var history = await session.GetHistoryAsync().ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "Initial prompt" },
+            history.OfType<AgentContentCompletedEvent>().Where(static evt => evt.Kind == AgentContentKind.User).Select(static evt => evt.Content).ToArray(),
+            "The steer is not in the conversation: sending it again does not repeat it.");
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.SteerAsync(new AgentSteerOptions { Input = AgentInput.Text("Too late.") })).ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    public async Task AgentSession_ASteerOfARunThatIsAborted_IsHandedBack_NotDropped()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-steer-aborted");
+        var state = CreateState("session-steer-aborted");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        AgentSession? steered = null;
+        var steeredTurn = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handedBack = 0;
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                async (request, _, cancellationToken) =>
+                {
+                    await steered!.SteerAsync(new AgentSteerOptions
+                    {
+                        Input = AgentInput.Text("The child is done."), ExpectedRunId = request.RunId,
+                        NotTaken = () => Interlocked.Increment(ref handedBack),
+                    }).ConfigureAwait(false);
+                    steeredTurn.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                    throw new InvalidOperationException("The run was not aborted.");
+                }),
+            CreateOptions(provider, temp.Path));
+        steered = session;
+
+        var sendTask = session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") });
+        await steeredTurn.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        await session.AbortAsync().ConfigureAwait(false);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => sendTask.WaitAsync(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
+
+        Assert.AreEqual(1, handedBack, "The steer the aborted run did not take is handed back to its sender.");
+        var history = await session.GetHistoryAsync().ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "Initial prompt" },
+            history.OfType<AgentContentCompletedEvent>().Where(static evt => evt.Kind == AgentContentKind.User).Select(static evt => evt.Content).ToArray(),
+            "The steer is not in the conversation: sending it again does not repeat it.");
     }
 
     [TestMethod]

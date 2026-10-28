@@ -1444,6 +1444,7 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
         internal Exception? SteerFailure { get; set; }
         private int _steers;
         internal int Steers => Volatile.Read(ref _steers);
+        internal AgentSteerOptions? LastSteer { get; private set; }
         internal bool HoldIdleCompact { get; set; }
         internal TaskCompletionSource IdleCompactStarted { get; } = NewGate();
         internal TaskCompletionSource IdleCompactCancelled { get; } = NewGate();
@@ -1571,6 +1572,7 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
                 try
                 {
                     Interlocked.Increment(ref owner._steers);
+                    owner.LastSteer = steer;
                     using var registration = cancellationToken.Register(() => owner.SteerCancelled.TrySetResult());
                     owner.SteerStarted.TrySetResult();
                     await owner.ReleaseSteer.Task.ConfigureAwait(false);
