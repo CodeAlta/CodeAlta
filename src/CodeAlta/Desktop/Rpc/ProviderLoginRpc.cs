@@ -269,7 +269,7 @@ internal sealed class ProviderLoginService
     }
 
     // Hands an https address to the system browser, as the TUI does; a headless or locked-down host just reports false.
-    private static bool OpenBrowser(Uri uri)
+    internal static bool OpenBrowser(Uri uri)
     {
         try
         {

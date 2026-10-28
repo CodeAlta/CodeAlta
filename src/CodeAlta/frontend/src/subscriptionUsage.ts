@@ -6,7 +6,7 @@ export type UsageLimit = Readonly<{ id: string; name: string | null; usedPercent
   used: number | null; total: number | null; unit: string | null; unlimited: boolean; remaining: number | null }>;
 
 /** The provider types that are a subscription whose usage the host can read. */
-export const hasSubscriptionUsage = (type: string | null | undefined) => type === "codex" || type === "copilot" || type === "claude-code";
+export const hasSubscriptionUsage = (type: string | null | undefined) => type === "codex" || type === "codex-cli" || type === "copilot" || type === "claude-code";
 
 /** How old the limits a session reported may be before the provider is asked instead. */
 export const liveLimitsLifetime = 15 * 60 * 1000;

@@ -15,7 +15,7 @@ public sealed class RpcChannelBudgetTests
     private const int PageBudget = 35;
 
     /// <summary>The channel methods the services offer today. A new one takes room from the budget: count it here.</summary>
-    private const int Offered = 29;
+    private const int Offered = 30;
 
     [TestMethod]
     public void TheChannelsOfTheServices_AreCounted_AndStayWithinThePageBudget()

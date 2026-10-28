@@ -273,7 +273,11 @@ public static class CodexAccountUsage
         else
         {
             start.FileName = cli;
-            start.ArgumentList.Add("app-server");
+            // The standalone app-server of a Codex release is the server itself; the codex CLI starts one.
+            if (!string.Equals(Path.GetFileNameWithoutExtension(cli), "codex-app-server", StringComparison.OrdinalIgnoreCase))
+            {
+                start.ArgumentList.Add("app-server");
+            }
         }
 
         if (codexHome is not null)

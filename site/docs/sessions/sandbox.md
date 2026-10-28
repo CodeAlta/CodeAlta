@@ -114,10 +114,11 @@ An agent can turn a sandbox on for a session it creates, never turn one off.
 
 ## Providers
 
-A sandboxed session runs on the providers whose model CodeAlta drives with its own tools (the API providers, Codex, GitHub Copilot), on [Claude Code](claude-code.md) and on the ACP agents:
+A sandboxed session runs on the providers whose model CodeAlta drives with its own tools (the API providers, Codex, GitHub Copilot), on [Claude Code](claude-code.md), on [Codex CLI](../model-providers/setup.md#codex-cli) and on the ACP agents:
 
 - **Claude Code** runs in the sandbox of the session. It writes in its account folder (its sign-in and its transcripts), so the agent can read its own sign-in, never the ones of CodeAlta. It reaches the hosts of Anthropic, even with a profile without network. On Windows its commands run with the shell of CodeAlta, in the same sandbox.
 - **On macOS**, Claude Code keeps its sign-in in the Keychain, outside the sandbox: give it a token of its own: make one with `claude setup-token` in a terminal, and add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to the **Environment** of the provider (Settings > Providers). Its variables reach the sandbox with their values.
+- **Codex CLI** runs in the sandbox of the session, with its own sandbox off. It writes in the Codex folder of its provider (its sign-in and its threads), not in its settings, and reaches the hosts of OpenAI, even with a profile without network. It is signed in there as outside.
 - **The ACP agents** (Copilot CLI, Cursor, Grok Build and the others) run in the sandbox of the session, in a home folder of their own that each provider keeps between sessions. They are not signed in there at first: give the provider a token or an API key in its **Environment** (Settings > Providers), such as `COPILOT_GITHUB_TOKEN`, `CURSOR_API_KEY` or `XAI_API_KEY`. Its variables reach the sandbox with their values.
 - **An ACP agent CodeAlta does not know** reaches the hosts its provider lists in **Hosts in a sandbox**, besides those of the profile.
 

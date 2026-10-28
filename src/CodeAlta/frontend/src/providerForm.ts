@@ -110,6 +110,10 @@ export function providerProblem(reason: string | null | undefined): MessageKey |
     : reason === "acp-signed-out" ? "{provider} is not signed in. Sign in from its form, then test again."
     : reason === "acp-not-installed" ? "The command of {provider} was not found. Install the agent, or the tool that runs it, then test again."
     : reason === "acp-unavailable" ? "{provider} did not start or did not answer. Check its command, then test again."
+    // Codex CLI, a provider of a built-in plugin: CodeAlta downloads the app-server it runs.
+    : reason === "codex-cli-signed-out" ? "{provider} is not signed in. Sign in from its form, then test again."
+    : reason === "codex-cli-not-found" ? "{provider} could not find or download Codex. Check the connection, or the command in its form, then test again."
+    : reason === "codex-cli-unavailable" ? "{provider} did not start or did not answer. Check its command, then test again."
     : null;
 }
 
@@ -121,7 +125,7 @@ export function providerProblem(reason: string | null | undefined): MessageKey |
 export function providerStateProblem(state: Readonly<{ availability: string; reason: string | null }> | undefined, enabled: boolean)
   : Readonly<{ key: MessageKey; intent: "warning" | "danger"; signIn: boolean }> | null {
   if (!enabled || !state) return null;
-  if (state.reason === "acp-signed-out") return { key: "{provider} is not signed in: sign in below, then test it again.", intent: "warning", signIn: true };
+  if (state.reason === "acp-signed-out" || state.reason === "codex-cli-signed-out") return { key: "{provider} is not signed in: sign in below, then test it again.", intent: "warning", signIn: true };
   const known = providerProblem(state.reason);
   if (known) return { key: known, intent: isSignedOut(state.reason) ? "warning" : "danger", signIn: isSignedOut(state.reason) };
   return state.availability === "Failed" || state.availability === "Unsupported"
@@ -131,5 +135,5 @@ export function providerStateProblem(state: Readonly<{ availability: string; rea
 
 /** Whether a provider that is not ready only waits for its account to be signed in. */
 export function isSignedOut(reason: string | null | undefined): boolean {
-  return reason === "claude-code-signed-out" || reason === "acp-signed-out";
+  return reason === "claude-code-signed-out" || reason === "acp-signed-out" || reason === "codex-cli-signed-out";
 }

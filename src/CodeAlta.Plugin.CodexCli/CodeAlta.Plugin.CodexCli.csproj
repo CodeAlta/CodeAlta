@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Built-in Codex CLI plugin for CodeAlta: the official Codex app-server as a model provider, signed in with Codex's own login.</Description>
+    <Authors>Alexandre Mutel</Authors>
+    <PackageTags>codealta;plugin;codex;openai;agentic;ai</PackageTags>
+    <PackageProjectUrl>https://github.com/xoofx/CodeAlta</PackageProjectUrl>
+    <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeAlta.CodexAppServer\CodeAlta.CodexAppServer.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
+  </ItemGroup>
+</Project>

@@ -6,7 +6,7 @@ title: Model Providers
 
 A model provider is an account CodeAlta sends requests to: its credentials, its endpoint, its models, and the model and reasoning effort it uses by default. A session runs on one provider and model at a time, and can switch to another.
 
-- [Set up a provider](setup.md): Claude Code, Codex, Copilot, API keys and custom endpoints, one by one.
+- [Set up a provider](setup.md): Claude Code, Codex, Codex CLI, Copilot, API keys and custom endpoints, one by one.
 - [Configuration file](configuration.md): every provider setting of `~/.alta/config.toml`.
 - [Agents of the ACP registry](acp-agents.md): coding agents such as GitHub Copilot or Gemini CLI as providers.
 - [Model tiers and fallback](../model-tiers.md): **Complex**, **Standard** or **Quick** instead of a model, and another model when a provider fails.
@@ -128,7 +128,7 @@ color = "#22B8CD"
 
 ## Subscription usage
 
-Codex, Copilot and Claude Code are subscriptions with limits. CodeAlta Desktop shows how much of each limit is used and when it starts over:
+Codex, Codex CLI, Copilot and Claude Code are subscriptions with limits. CodeAlta Desktop shows how much of each limit is used and when it starts over:
 
 - in the **Usage** section of the provider, in **Settings > Providers**;
 - under **Subscription usage** in the [context usage](../workspace/prompt.md#context-usage) of a session.
@@ -144,6 +144,7 @@ Each limit is a meter. Its fill is what is used; the small mark shows how far th
 | Provider | What is shown | Where it comes from |
 |---|---|---|
 | Codex | The windows of the ChatGPT plan (5 hours, a week), the limits of a model, the credits | The Codex CLI of OpenAI (`codex` on the `PATH`, signed in with the same account) |
+| Codex CLI | The same, for the account of the provider | Codex, in the folder of the provider |
 | Copilot | The AI credits or premium requests of the month, chat and completions | GitHub, with the sign-in of the provider |
 | Claude Code | The 5-hour window, the week, the limits of a model, the extra usage | The Claude Code CLI |
 

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <IsAotCompatible>true</IsAotCompatible>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- The generated protocol types carry the descriptions of the schema, not XML docs for every member. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <Description>The JSON-RPC protocol of the Codex app-server (codex-app-server), as CodeAlta uses it: generated types, a client, the process and the pinned release.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="XenoAtom.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeAlta.NativeEngines\CodeAlta.NativeEngines.csproj" />
+  </ItemGroup>
+
+</Project>

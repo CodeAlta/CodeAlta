@@ -99,6 +99,16 @@ For ChatGPT:
 
 See [Codex (ChatGPT)](model-providers/setup.md#codex-chatgpt).
 
+### `3p_delegated_access_policy_denied`
+
+A ChatGPT Business or Enterprise workspace refuses the ChatGPT sign-in of the Codex (ChatGPT) provider, and its admin has no setting to allow it. Add a [Codex CLI](model-providers/setup.md#codex-cli) provider instead: Codex signs in with its own sign-in, which these workspaces accept.
+
+### Codex CLI
+
+- **Not signed in**: **Sign in** in the form of the provider (Settings > Providers), then test it again. Each provider has its own Codex folder: a sign-in of your own Codex CLI does not count.
+- **Codex could not be downloaded**: check the connection to `github.com`, then test the provider again; or name a `codex` you installed in its **Command**.
+- **The configuration could not be loaded**: a policy of your workspace forbids what CodeAlta runs Codex with. Ask its admin.
+
 ## Claude Code
 
 The `claude-code` provider runs the Claude Code CLI: the tested version once downloaded, else the one you installed. CodeAlta has no sign-in of its own for it. See [Claude Code](model-providers/setup.md#claude-code).
