@@ -51,6 +51,8 @@ A run uses the same [agent prompt](prompts.md) as CodeAlta Desktop, without the 
 | `notes` | Keep the progress in the sticky notes of the session | off |
 | `tasks` | Propose follow-up tasks for what it notices beside the request | off |
 | `review` | Ask you to review the changes before they are committed | off |
+| `reminders` | Set a reminder that brings it back later | off |
+| `ask` | Ask you a question when something is unclear | off |
 | `mode-handoff` | Switch to Plan mode; the list of the agent prompts | off |
 | `session-title` | Give the session a title | off with `--ephemeral` |
 
@@ -137,4 +139,4 @@ The commands an agent runs get `CODEALTA_SESSION_ID`, `CODEALTA_MODEL` and `AI_A
 
 The sessions it opens are those of CodeAlta Desktop and TUI, as with `altacli run`; the storage and configuration options above apply. The editor chooses the [agent prompt](prompts.md) as the mode, and the model and reasoning effort as options of the session; it can load an earlier session with its history. The updates are those of `--format jsonl`.
 
-You work with the agent in the editor, so its prompt keeps the [parts](#what-the-agent-is-asked-to-do) of CodeAlta Desktop, except `review`, whose commands `altacli` does not offer, and `session-title` with `--ephemeral`. `--enable` and `--disable` change them as for `altacli run`, and `--no-sub-sessions` creates its sessions without sub-sessions.
+You work with the agent in the editor, so its prompt keeps the [parts](#what-the-agent-is-asked-to-do) of CodeAlta Desktop, except `review`, `reminders` and `ask`, whose commands `altacli` does not offer, and `session-title` with `--ephemeral`. `--enable` and `--disable` change them as for `altacli run`, and `--no-sub-sessions` creates its sessions without sub-sessions.

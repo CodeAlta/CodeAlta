@@ -132,8 +132,8 @@ internal static class CliCommandLine
         };
         AddTools(runCommand, run, run.DisableTools);
         AddFeatures(runCommand, run,
-            "  Off by default: scratchpad, notes, tasks, review, mode-handoff; also",
-            "  session-title with --ephemeral.");
+            "  Off by default: scratchpad, notes, tasks, review, reminders, ask,",
+            "  mode-handoff; also session-title with --ephemeral.");
         AddStorage(runCommand, run);
         runCommand.Add("<>", "The words of the prompt");
         runCommand.Add(new HelpOption());
@@ -206,8 +206,8 @@ internal static class CliCommandLine
         };
         AddTools(acpCommand, acp, acp.DisableTools);
         AddFeatures(acpCommand, acp,
-            "  Off by default: review (its commands are not offered); also",
-            "  session-title with --ephemeral.");
+            "  Off by default: review, reminders, ask (their commands are not",
+            "  offered); also session-title with --ephemeral.");
         AddStorage(acpCommand, acp);
         acpCommand.Add(new HelpOption());
         acpCommand.Add(_);
@@ -472,9 +472,10 @@ internal static class CliCommandLine
         command.Add("Agent prompt:");
         command.Add("  --enable, --disable: parts of the agent prompt, comma separated, or `all`:");
         command.Add("  scratchpad (a copy of a long request), notes (sticky notes), tasks");
-        command.Add("  (follow-up tasks), review (by the user), mode-handoff (Plan mode, the");
-        command.Add("  list of agent prompts), session-title. The sub-agents follow the");
-        command.Add("  session: --no-sub-sessions removes them, their tools and their text.");
+        command.Add("  (follow-up tasks), review (by the user), reminders, ask (questions to");
+        command.Add("  the user), mode-handoff (Plan mode, the list of agent prompts),");
+        command.Add("  session-title. The sub-agents follow the session: --no-sub-sessions");
+        command.Add("  removes them, their tools and their text.");
         foreach (var line in defaults) command.Add(line);
         command.Add("enable=", "Keep the prompt parts {NAMES}; repeatable", v => options.EnableFeatures.Add(v!));
         command.Add("disable=", "Leave out the prompt parts {NAMES}; repeatable", v => options.DisableFeatures.Add(v!));

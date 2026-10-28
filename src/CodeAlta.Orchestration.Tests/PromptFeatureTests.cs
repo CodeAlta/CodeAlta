@@ -40,6 +40,8 @@ public sealed class PromptFeatureTests
     public void IsKnown_NamesTheFeaturesInLowerCase()
     {
         foreach (var feature in PromptFeatures.All) Assert.IsTrue(PromptFeatures.IsKnown(feature), feature);
+        Assert.IsTrue(PromptFeatures.IsKnown("reminders"));
+        Assert.IsTrue(PromptFeatures.IsKnown("ask"));
         Assert.IsFalse(PromptFeatures.IsKnown("Notes"));
         Assert.IsFalse(PromptFeatures.IsKnown("web"));
         Assert.IsFalse(PromptFeatures.IsKnown(null));
@@ -67,21 +69,24 @@ public sealed class PromptFeatureTests
         var all = Prompt("default");
         Assert.DoesNotContain("<!--", all, "No marker is left in the prompt.");
         foreach (var part in new[] { "write them down first", "alta notes set", "## Review by the user", "## Follow-up tasks", "## Sub-agents", "## Mode handoff",
-                     "Agent prompt profiles available", "- Scratchpad file:", "- Model tiers:", "and clear notes when done", "request their review as \"Review by the user\" says" })
+                     "Agent prompt profiles available", "- Scratchpad file:", "- Model tiers:", "and clear notes when done", "request their review as \"Review by the user\" says",
+                     "Otherwise set one reminder first, `alta reminder create --duration <delay> --stdin`", "set one reminder, for example `alta reminder create --duration 00:05:00",
+                     "(a background job, a reminder)", "Do not ask questions or use `alta ask --stdin` by default", "- Ambiguity: ask one targeted clarification" })
         {
             StringAssert.Contains(all, part);
         }
 
-        var lean = Prompt("default", PromptFeatures.Scratchpad, PromptFeatures.Notes, PromptFeatures.Tasks, PromptFeatures.Review, PromptFeatures.ModeHandoff);
+        var lean = Prompt("default", PromptFeatures.Scratchpad, PromptFeatures.Notes, PromptFeatures.Tasks, PromptFeatures.Review, PromptFeatures.Reminders, PromptFeatures.Ask, PromptFeatures.ModeHandoff);
         Assert.DoesNotContain("<!--", lean);
         foreach (var part in new[] { "write them down first", "alta notes", "## Review by the user", "## Follow-up tasks", "alta task", "## Mode handoff",
-                     "Agent prompt profiles available", "Scratchpad file", "\"Review by the user\"" })
+                     "Agent prompt profiles available", "Scratchpad file", "\"Review by the user\"", "reminder", "alta ask", "ask one targeted clarification" })
         {
             Assert.DoesNotContain(part, lean, part);
         }
 
-        // What a headless run keeps: the rules, the working loop, git branches, plan files and sub-agents.
-        foreach (var part in new[] { "## Working loop", "leave the changes uncommitted. The user's", "## Git branches", "## Executing plan files (if any)", "## Sub-agents", "- Model tiers:" })
+        // What a headless run keeps: the rules, the working loop, git branches, plan files and sub-agents; it decides by itself.
+        foreach (var part in new[] { "## Working loop", "leave the changes uncommitted. The user's", "## Git branches", "## Executing plan files (if any)", "## Sub-agents", "- Model tiers:",
+                     "Do not start a job for a command that ends in a few seconds.", "(a background job).", "- Ambiguity: choose the narrowest safe interpretation, and state what you assumed." })
         {
             StringAssert.Contains(lean, part);
         }
@@ -95,10 +100,11 @@ public sealed class PromptFeatureTests
         StringAssert.Contains(plan, "5. Review");
         StringAssert.Contains(plan, "## Review payload patterns");
         Assert.DoesNotContain("5. Result", plan);
-        var leanPlan = Prompt("plan", PromptFeatures.Review, PromptFeatures.Notes, PromptFeatures.SubAgents);
+        StringAssert.Contains(plan, "set one reminder with `alta reminder create");
+        var leanPlan = Prompt("plan", PromptFeatures.Review, PromptFeatures.Notes, PromptFeatures.SubAgents, PromptFeatures.Reminders);
         Assert.DoesNotContain("<!--", leanPlan);
         StringAssert.Contains(leanPlan, "5. Result");
-        foreach (var part in new[] { "5. Review", "## Review payload patterns", "sticky notes", "## Sub-agents", "explore them in parallel with sub-agents", "child sessions briefed" })
+        foreach (var part in new[] { "5. Review", "## Review payload patterns", "sticky notes", "## Sub-agents", "explore them in parallel with sub-agents", "child sessions briefed", "reminder" })
         {
             Assert.DoesNotContain(part, leanPlan, part);
         }
@@ -119,17 +125,84 @@ public sealed class PromptFeatureTests
         }).DeveloperInstructions!;
 
         var full = Prompt();
-        StringAssert.Contains(full, "gives each item an `agent()`");
+        StringAssert.Contains(full, "`agent()` starts a sub-agent and follows the rules of \"Sub-agents\"");
         StringAssert.Contains(full, "--no-sub-sessions");
 
         var lean = Prompt(PromptFeatures.SubAgents);
         StringAssert.Contains(lean, "# Code Mode");
-        StringAssert.Contains(lean, "A loop or batch of tool calls goes in one `exec`");
+        StringAssert.Contains(lean, "Several independent reads or searches: one `exec`");
+        StringAssert.Contains(lean, "Several edits you have decided: one `exec`");
         // What the session is told of being a sub-agent itself stays (the review, the branches): not the sessions it would start.
         foreach (var part in new[] { "agent(", "## Sub-agents", "your sub-agents", "alta session create", "--no-sub-sessions", "delegating implementation", "writing child" })
         {
             Assert.DoesNotContain(part, lean, part);
         }
+    }
+
+    [TestMethod]
+    public void TheTextWrittenForExec_IsInThePromptOfASessionInCodeModeOnly()
+    {
+        using var temp = new TempFolder();
+        var builder = new SystemPromptBuilder();
+        string Prompt(string codeMode, string agentPrompt = "default", params string[] disabledTools)
+        {
+            var bundle = builder.Build(new SystemPromptBuildRequest
+            {
+                ProviderKey = "fake",
+                SelectedPromptName = agentPrompt,
+                Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "fake", ProviderKey = "fake", WorkingDirectory = temp.Path, Kind = SessionViewKind.ProjectSession },
+                UserCodeAltaRoot = Path.Combine(temp.Path, "global"),
+                CodeMode = codeMode,
+                DisabledTools = disabledTools.ToHashSet(StringComparer.Ordinal),
+            });
+            return bundle.SystemMessage + "\n" + bundle.DeveloperInstructions;
+        }
+
+        const string batch = "make all the calls in the same response, or in one `exec` script.";
+        const string child = "`alta session send <child-id> --stdin`, or with `agent()` in an `exec` script.";
+        foreach (var mode in new[] { "on", "only" })
+        {
+            StringAssert.Contains(Prompt(mode), batch, mode);
+            StringAssert.Contains(Prompt(mode), child, mode);
+            StringAssert.Contains(Prompt(mode, "plan"), child, mode);
+        }
+
+        // Without Code Mode, or with exec turned off, the session has no exec: it is not told about it.
+        foreach (var prompt in new[] { Prompt("off"), Prompt("on", "default", "exec"), Prompt("off", "plan") })
+        {
+            Assert.DoesNotContain("`exec`", prompt);
+            Assert.DoesNotContain("<!--", prompt);
+        }
+
+        StringAssert.Contains(Prompt("off"), "make all the calls in the same response. When you have decided several edits");
+        StringAssert.Contains(Prompt("off"), "`alta session send <child-id> --stdin`. It inherits your model");
+    }
+
+    [TestMethod]
+    public void TheBackgroundWorkOfTheWorkingLoop_ReadsWithAndWithoutTheShellAndTheReminders()
+    {
+        using var temp = new TempFolder();
+        var builder = new SystemPromptBuilder();
+        string Bullet(string[] disabledTools, params string[] off)
+        {
+            var instructions = builder.Build(new SystemPromptBuildRequest
+            {
+                ProviderKey = "fake",
+                Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "fake", ProviderKey = "fake", WorkingDirectory = temp.Path, Kind = SessionViewKind.ProjectSession },
+                UserCodeAltaRoot = Path.Combine(temp.Path, "global"),
+                DisabledTools = disabledTools.ToHashSet(StringComparer.Ordinal),
+                DisabledFeatures = off.ToHashSet(StringComparer.Ordinal),
+            }).DeveloperInstructions!;
+            return instructions.Split('\n').Single(static line => line.StartsWith("- Do not end your turn saying", StringComparison.Ordinal)).TrimEnd('\r');
+        }
+
+        string[] shell = [];
+        string[] noShell = [PromptToolConditions.ShellCommand];
+        StringAssert.EndsWith(Bullet(shell), "a few seconds. Otherwise set one reminder first, `alta reminder create --duration <delay> --stdin`, with a delay that fits how long the thing takes and a content that says what to check, and set another when it fires too early. Say in your answer what brings you back: the job or the reminder.");
+        StringAssert.Contains(Bullet(shell, PromptFeatures.Reminders), "within the turn when that is short. When a command can do the waiting");
+        StringAssert.EndsWith(Bullet(shell, PromptFeatures.Reminders), "Do not start a job for a command that ends in a few seconds.");
+        StringAssert.EndsWith(Bullet(noShell), "within the turn when that is short. Set one reminder first, `alta reminder create --duration <delay> --stdin`, with a delay that fits how long the thing takes and a content that says what to check, and set another when it fires too early. Say in your answer what brings you back: the job or the reminder.");
+        StringAssert.EndsWith(Bullet(noShell, PromptFeatures.Reminders), "Wait for it within the turn when that is short.");
     }
 
     [TestMethod]

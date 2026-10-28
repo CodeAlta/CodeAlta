@@ -215,7 +215,7 @@ runtime context (date, platform, space, model tiers, commit trailer), tool guida
 instruction boundary to the working directory, named from the project root). Orchestration then appends plugin prompt
 parts, and plugin instruction processors may rewrite the result. An unreadable instruction file is skipped with a
 warning, never a failure. A host can leave parts of the agent workflow out (`PromptFeatures`: scratchpad, notes, tasks,
-review, sub-agents, mode handoff, session title) through `<!-- if-feature: x -->` blocks of the prompt files;
+review, reminders, ask, sub-agents, mode handoff, session title) through `<!-- if-feature: x -->` blocks of the prompt files;
 `altacli run` does for what nobody reads in a headless run.
 
 What is of one session alone is the session context, kept apart (`AgentTurnRequest.SessionInstructions`) and sent

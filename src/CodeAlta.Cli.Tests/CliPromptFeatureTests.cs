@@ -12,22 +12,25 @@ public sealed class CliPromptFeatureTests
     public void TryResolve_StartsFromTheDefaults_AndANameSaysMoreThanAll()
     {
         Assert.IsTrue(CliPromptFeatures.TryResolve(CliPromptFeatures.RunDefaults, false, [], [], out var run, out _));
-        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "review", "mode-handoff" }, run.ToArray());
+        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "review", "reminders", "ask", "mode-handoff" }, run.ToArray());
 
         Assert.IsTrue(CliPromptFeatures.TryResolve(CliPromptFeatures.RunDefaults, true, [], [], out var ephemeral, out _));
-        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "review", "mode-handoff", "session-title" }, ephemeral.ToArray());
+        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "review", "reminders", "ask", "mode-handoff", "session-title" }, ephemeral.ToArray());
 
         Assert.IsTrue(CliPromptFeatures.TryResolve(CliPromptFeatures.AcpDefaults, false, [], [], out var acp, out _));
-        CollectionAssert.AreEqual(new[] { "review" }, acp.ToArray());
+        CollectionAssert.AreEqual(new[] { "review", "reminders", "ask" }, acp.ToArray());
 
         Assert.IsTrue(CliPromptFeatures.TryResolve(CliPromptFeatures.RunDefaults, true, ["tasks,Notes", "session-title"], ["review"], out var changed, out _));
-        CollectionAssert.AreEqual(new[] { "scratchpad", "review", "mode-handoff" }, changed.ToArray());
+        CollectionAssert.AreEqual(new[] { "scratchpad", "review", "reminders", "ask", "mode-handoff" }, changed.ToArray());
+
+        Assert.IsTrue(CliPromptFeatures.TryResolve(CliPromptFeatures.RunDefaults, false, ["reminders,Ask"], [], out var asking, out _));
+        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "review", "mode-handoff" }, asking.ToArray());
 
         Assert.IsTrue(CliPromptFeatures.TryResolve(CliPromptFeatures.RunDefaults, true, ["all"], [], out var none, out _));
         Assert.AreEqual(0, none.Count);
 
         Assert.IsTrue(CliPromptFeatures.TryResolve(CliPromptFeatures.AcpDefaults, false, ["review"], ["all"], out var allButReview, out _));
-        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "mode-handoff", "session-title" }, allButReview.ToArray());
+        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "reminders", "ask", "mode-handoff", "session-title" }, allButReview.ToArray());
     }
 
     [TestMethod]
@@ -52,9 +55,11 @@ public sealed class CliPromptFeatureTests
         var run = await root.RunAsync(provider, ["run", Plain, "--format", "jsonl", "hello"]);
 
         Assert.AreEqual(CliExitCodes.Completed, run.ExitCode, run.Stderr);
-        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "review", "mode-handoff" }, DisabledFeatures(run));
+        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "review", "reminders", "ask", "mode-handoff" }, DisabledFeatures(run));
         var prompt = PromptOfLastRequest(provider);
-        foreach (var part in new[] { "Scratchpad file", "alta notes", "## Follow-up tasks", "## Review by the user", "## Mode handoff", "Agent prompt profiles available" })
+        // What the headless paragraph says is not available is not asked for elsewhere: no reminder, no question.
+        foreach (var part in new[] { "Scratchpad file", "alta notes", "## Follow-up tasks", "## Review by the user", "## Mode handoff", "Agent prompt profiles available",
+                     "alta reminder create", "alta ask --stdin", "ask one targeted clarification" })
         {
             Assert.DoesNotContain(part, prompt, part);
         }
@@ -77,7 +82,8 @@ public sealed class CliPromptFeatureTests
         Assert.AreEqual(CliExitCodes.Completed, all.ExitCode, all.Stderr);
         Assert.AreEqual(0, DisabledFeatures(all).Length);
         var prompt = PromptOfLastRequest(provider);
-        foreach (var part in new[] { "Scratchpad file", "alta notes set", "## Follow-up tasks", "## Review by the user", "## Mode handoff", "Agent prompt profiles available", "Session title:" })
+        foreach (var part in new[] { "Scratchpad file", "alta notes set", "## Follow-up tasks", "## Review by the user", "## Mode handoff", "Agent prompt profiles available", "Session title:",
+                     "alta reminder create --duration", "alta ask --stdin", "ask one targeted clarification" })
         {
             StringAssert.Contains(prompt, part);
         }
@@ -85,7 +91,7 @@ public sealed class CliPromptFeatureTests
         var ephemeral = await root.RunAsync(provider, ["run", Plain, "--ephemeral", "--format", "jsonl", "hello"]);
 
         Assert.AreEqual(CliExitCodes.Completed, ephemeral.ExitCode, ephemeral.Stderr);
-        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "review", "mode-handoff", "session-title" }, DisabledFeatures(ephemeral));
+        CollectionAssert.AreEqual(new[] { "scratchpad", "notes", "tasks", "review", "reminders", "ask", "mode-handoff", "session-title" }, DisabledFeatures(ephemeral));
         Assert.DoesNotContain("Session title:", PromptOfLastRequest(provider));
     }
 

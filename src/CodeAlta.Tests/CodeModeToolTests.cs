@@ -382,6 +382,48 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task AShortWait_LastsAtLeastTheFloor_SoThatTheEndOfTheRunIsItsResult()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var invoker = new FakeTools { Gate = new TaskCompletionSource() };
+        var (exec, wait) = Create(root.Path, runs);
+
+        await InvokeAsync(exec, """
+            // @exec: {"yield_ms": 10}
+            return (await tools.read_file({ path: "a.txt" })).content;
+            """, invoker);
+        var runId = runs.List("session-1").Single().Id;
+
+        // A wait of 100 ms is held to the floor (10 s): the run that ends after a second is its result, not a poll.
+        var waiting = InvokeAsync(wait, $$"""{"run":"{{runId}}","yield_ms":100}""");
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        Assert.IsFalse(waiting.IsCompleted, "the wait is not over after 100 ms");
+        invoker.Gate.SetResult();
+        var waited = await waiting.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.IsTrue(waited.Success, Text(waited));
+        StringAssert.Contains(Text(waited), "hello");
+    }
+
+    [TestMethod]
+    public async Task TheDescriptionsOfExecAndWait_AskForBatches_AndOneLongWait_TheSameForEverySession()
+    {
+        using var root = TestTempDirectory.Create();
+        await using var runs = new CodeModeRunRegistry(null);
+        var (exec, wait) = Create(root.Path, runs);
+        var (again, _) = Create(root.Path, runs);
+
+        StringAssert.Contains(exec.Spec.Description, "Use it to batch independent reads and searches, or edits you have decided, into one step");
+        StringAssert.Contains(exec.Spec.Description, "In a batch, use `Promise.allSettled`");
+        StringAssert.Contains(exec.Spec.Description, $"`max_output_tokens` is {CodeModeResultFormatter.DefaultMaxOutputTokens} by default");
+        Assert.DoesNotContain("\"max_output_tokens\": ", exec.Spec.Description);
+        StringAssert.Contains(wait.Spec.Description, "30000 by default");
+        StringAssert.Contains(wait.Spec.Description, "Prefer one long wait, or other work, to repeated short ones");
+        Assert.AreEqual(exec.Spec.Description, again.Spec.Description, "the prompt cache holds");
+    }
+
+    [TestMethod]
     public async Task AltaWorkflow_ListsReadsAndCancelsRuns_AndASessionCancelsOnlyRunsOfSessionsItReaches()
     {
         using var root = TestTempDirectory.Create();

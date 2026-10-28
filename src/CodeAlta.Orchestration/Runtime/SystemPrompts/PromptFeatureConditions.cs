@@ -5,7 +5,8 @@ namespace CodeAlta.Orchestration.Runtime.SystemPrompts;
 
 /// <summary>
 /// The parts of the workflow of an agent that a host can leave out of its prompt: a host without a user who reads the
-/// sticky notes, the follow-up tasks or the title of a session (a headless run) does not ask the agent for them.
+/// sticky notes, the follow-up tasks or the title of a session, or answers a question (a headless run), does not ask the
+/// agent for them.
 /// </summary>
 public static class PromptFeatures
 {
@@ -21,6 +22,12 @@ public static class PromptFeatures
     /// <summary>The review of the changes by the user before commit (<c>alta review</c>).</summary>
     public const string Review = "review";
 
+    /// <summary>The reminders that bring the agent back later (<c>alta reminder</c>).</summary>
+    public const string Reminders = "reminders";
+
+    /// <summary>The questions the agent asks the user (<c>alta ask</c>), and the clarification the rules allow it to ask for.</summary>
+    public const string Ask = "ask";
+
     /// <summary>
     /// The sub-agents, child sessions the agent creates to work in parallel. It is not a part a host turns off: it follows
     /// the option of the session (<see cref="CodeAlta.Agent.AgentSessionOptions.SubSessions"/>), so it is not in <see cref="All"/>.
@@ -34,7 +41,7 @@ public static class PromptFeatures
     public const string SessionTitle = "session-title";
 
     /// <summary>Every feature a host turns off, in the order the help lists them; <see cref="SubAgents"/> follows the session.</summary>
-    public static IReadOnlyList<string> All { get; } = [Scratchpad, Notes, Tasks, Review, ModeHandoff, SessionTitle];
+    public static IReadOnlyList<string> All { get; } = [Scratchpad, Notes, Tasks, Review, Reminders, Ask, ModeHandoff, SessionTitle];
 
     private static readonly FrozenSet<string> Known = All.ToFrozenSet(StringComparer.Ordinal);
 
