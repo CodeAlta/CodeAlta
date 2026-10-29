@@ -50,6 +50,9 @@ internal static class CodexCliPrompts
         }
 
         builder.AppendLine("- Where the instructions differ from your defaults, for example on when to commit or on the lines that end a commit message, follow the instructions: they are what the user set up in CodeAlta.");
+        // The workspace of a ChatGPT sign-in can turn on the attribution of Codex, which no setting of Codex turns off:
+        // as with Claude Code, it stays, and the trailer of CodeAlta, when the setting asks for it, goes beside it.
+        builder.AppendLine("- Commit attribution: when your workspace asks for the attribution of Codex and the instructions ask for the trailer of CodeAlta, a commit message ends with both trailers, `Co-authored-by: Codex <noreply@openai.com>` and the one of CodeAlta, each once, in its last paragraph with the other trailers, and a pull request body has the attribution lines of both: neither in place of the other.");
         builder.AppendLine("- Your commands and edits are approved by the user or by the policy of CodeAlta; when CodeAlta runs this session in a sandbox, its container is what limits them.");
 
         var instructions = developerInstructions?.Trim();

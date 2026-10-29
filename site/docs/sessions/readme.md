@@ -214,7 +214,7 @@ Say "commit on main" or "no branch" in a prompt to keep the work where it is. Th
 
 ### CodeAlta as co-author
 
-Agents end each commit message with this line, beside the lines their provider adds:
+Agents end each commit message with this line, beside the lines their provider adds, such as the co-author line of Claude Code, or of Codex when your ChatGPT workspace asks for it:
 
 ```text
 Co-authored-by: CodeAlta <noreply@codealta.io>

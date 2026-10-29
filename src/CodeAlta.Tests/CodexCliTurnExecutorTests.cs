@@ -25,6 +25,9 @@ public sealed class CodexCliTurnExecutorTests
         var start = server.RequestsOf("thread/start").Single()!.AsObject();
         StringAssert.Contains(start["developerInstructions"]!.GetValue<string>(), "The instructions of CodeAlta for this session:\n\nBe brief.");
         StringAssert.Contains(start["developerInstructions"]!.GetValue<string>(), "the MCP server named `codealta`");
+        // Codex's own attribution, which a ChatGPT workspace turns on, stays beside the trailer of CodeAlta.
+        StringAssert.Contains(start["developerInstructions"]!.GetValue<string>(), "`Co-authored-by: Codex <noreply@openai.com>`");
+        StringAssert.Contains(start["developerInstructions"]!.GetValue<string>(), "neither in place of the other");
         Assert.IsFalse(start.ContainsKey("baseInstructions"), "CodeAlta adds to the prompt of Codex and never replaces it.");
         Assert.AreEqual("danger-full-access", start["sandbox"]!.GetValue<string>());
         Assert.AreEqual("untrusted", start["approvalPolicy"]!.GetValue<string>());
