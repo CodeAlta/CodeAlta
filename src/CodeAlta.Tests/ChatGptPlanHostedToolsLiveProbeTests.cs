@@ -117,6 +117,62 @@ public sealed class ChatGptPlanHostedToolsLiveProbeTests
         StringAssert.Contains(result.Value.Text, "Unsupported tool type: programmatic_tool_calling");
     }
 
+    [TestMethod]
+    public async Task Live_TheSubscriptionTakesImageGeneration_AsCodexSendsIt()
+    {
+        // ChatGptPlanRequestNormalizer refuses image_generation without a probe of its own: this is that probe. The tool
+        // is sent as Codex sends it to its backend, at the top level beside the namespace of the local tools, and the
+        // events are written with their long strings (the base64 of the image) cut, to show the shape of the item.
+        var body = JsonNode.Parse(ChatGptPlanRequestNormalizer.Normalize(BinaryData.FromString(Request("""{"type":"web_search"}""")), isHttp: true).ToString())!.AsObject();
+        body["tools"]![1] = new JsonObject { ["type"] = "image_generation", ["output_format"] = "png" };
+        body["input"] = new JsonArray { new JsonObject { ["role"] = "user", ["content"] = "Generate a small, simple image of a red circle on a white background, then answer with the single word: done" } };
+        var result = await PostAsync(BinaryData.FromString(body.ToJsonString()));
+        if (result is null) return;
+
+        foreach (var line in result.Value.Text.Split('\n'))
+        {
+            if (!line.StartsWith("data: ", StringComparison.Ordinal)) continue;
+            try
+            {
+                var data = JsonNode.Parse(line[6..])!;
+                Strip(data);
+                TestContext.WriteLine(data.ToJsonString());
+            }
+            catch (JsonException)
+            {
+                TestContext.WriteLine(line[..Math.Min(300, line.Length)]);
+            }
+        }
+
+        Assert.AreEqual(200, result.Value.Status, result.Value.Text);
+        Assert.IsFalse(result.Value.Failed, result.Value.Text[..Math.Min(2000, result.Value.Text.Length)]);
+        StringAssert.Contains(result.Value.Text, "\"image_generation_call\"", "the model generated the image it was asked for");
+
+        static void Strip(JsonNode? node)
+        {
+            switch (node)
+            {
+                case JsonObject obj:
+                    foreach (var key in obj.Select(static pair => pair.Key).ToArray())
+                    {
+                        if (obj[key] is JsonValue value && value.TryGetValue<string>(out var text) && text.Length > 200)
+                        {
+                            obj[key] = $"<{text.Length} chars>";
+                        }
+                        else
+                        {
+                            Strip(obj[key]);
+                        }
+                    }
+
+                    break;
+                case JsonArray array:
+                    foreach (var item in array) Strip(item);
+                    break;
+            }
+        }
+    }
+
     private static string Request(string? hostedTool)
         => $$$"""
             {"model":"{{{Model}}}", "instructions":"You are a test agent.",

@@ -28,8 +28,9 @@ internal static class ChatGptPlanRequestNormalizer
                 if (property.Name == "tools" && property.Value.GetArrayLength() > 0)
                 {
                     // The local tools go in one namespace, which takes only functions and custom tools. Web search is
-                    // the one hosted tool the endpoint takes, beside it; it refuses the others, programmatic tool
-                    // calling included, whatever the model (live probe of 2026-10-17).
+                    // the one hosted tool the endpoint is known to take, beside it; it refuses tool search and
+                    // programmatic tool calling whatever the model (live probes of 2026-10-17). The others are refused
+                    // here without a probe: ChatGptPlanHostedToolsLiveProbeTests has the one of image generation.
                     var local = new List<JsonElement>();
                     var hosted = new List<JsonElement>();
                     foreach (var tool in property.Value.EnumerateArray())
