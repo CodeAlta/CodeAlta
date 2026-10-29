@@ -634,7 +634,31 @@ internal sealed class MistralChatClient : IChatClient
         var functionResult = message.Contents.OfType<FunctionResultContent>().FirstOrDefault();
         writer.WriteStartObject();
         writer.WriteString("role", "tool");
-        writer.WriteString("content", ToResultString(functionResult));
+        // A result of several items is a list of contents: their text, in text chunks. Its images go in the user
+        // message that follows the tool results, where the model sees them.
+        if (functionResult?.Result is IEnumerable<AIContent> contents && contents.Any(static content => content is TextContent or UriContent))
+        {
+            writer.WriteStartArray("content");
+            foreach (var content in contents)
+            {
+                switch (content)
+                {
+                    case TextContent text:
+                        WriteTextChunk(writer, text.Text);
+                        break;
+                    case UriContent uri:
+                        WriteTextChunk(writer, uri.Uri.ToString());
+                        break;
+                }
+            }
+
+            writer.WriteEndArray();
+        }
+        else
+        {
+            writer.WriteString("content", ToResultString(functionResult));
+        }
+
         if (!string.IsNullOrWhiteSpace(functionResult?.CallId))
         {
             writer.WriteString("tool_call_id", functionResult.CallId);
