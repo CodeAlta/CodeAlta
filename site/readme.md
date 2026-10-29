@@ -178,7 +178,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>12</span> Interactive canvases</p>
             <h3 id="feature-title-canvases">Beyond<br>the conversation.</h3>
-            <p>Boards, checklists and custom tools become interactive tabs. Ask an agent to build a plugin, then use its canvas right beside the conversation.</p>
+            <p>Boards, checklists, graphs and custom tools become interactive tabs. Ask an agent to build a plugin, then use its canvas right beside the conversation.</p>
             <a href="{{site.basepath}}/docs/plugins/ui/#canvases">Discover canvases <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-canvas-board.webp" alt="An agent session beside an interactive Board canvas with To do, Doing and Done columns" width="2400" height="1500" loading="lazy"></div>
@@ -232,7 +232,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>18</span> Your choice of AI</p>
             <h3 id="feature-title-models">Your AI.<br>Your choice.</h3>
-            <p>Use your Claude Code, Codex or GitHub Copilot subscriptions, even several accounts, run OpenAI's Codex agent itself with <a href="{{site.basepath}}/docs/model-providers/setup/#codex-cli">Codex CLI</a> (ChatGPT Business and Enterprise included), or connect an API-based provider, and continue in CodeAlta the Claude Code sessions you started in VS Code or a terminal. Add any agent of the <a href="{{site.basepath}}/docs/model-providers/acp-agents/">ACP registry</a>, such as Cursor, Gemini CLI or Qwen Code, in one click: it works with the tools and permissions of CodeAlta. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
+            <p>Use your Claude Code, Codex, GitHub Copilot or Mistral Vibe subscriptions, even several accounts, run OpenAI's Codex agent itself with <a href="{{site.basepath}}/docs/model-providers/setup/#codex-cli">Codex CLI</a> (ChatGPT Business and Enterprise included), or connect an API-based provider or a <a href="{{site.basepath}}/docs/model-providers/setup/#llamacpp">llama.cpp</a> server of your own, and continue in CodeAlta the Claude Code sessions you started in VS Code or a terminal. Add any agent of the <a href="{{site.basepath}}/docs/model-providers/acp-agents/">ACP registry</a>, such as Cursor, Gemini CLI or Qwen Code, in one click: it works with the tools and permissions of CodeAlta. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
             <a href="{{site.basepath}}/docs/model-providers/">See model providers <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-model-providers.webp" alt="The Model Providers window listing Claude Code, Codex, GitHub Copilot and API-based providers" width="2400" height="1500" loading="lazy"></div>

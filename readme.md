@@ -58,14 +58,14 @@ CodeAlta Desktop brings together:
 - **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues; start sessions and open PRs.
 - **Automations**: start sessions on a schedule, issue/PR events or on demand.
 - **On your phone**: [follow, answer, steer and start sessions from a phone, and answer the questions and review requests of agents](https://codealta.github.io/docs/plugins/mobile/), on your own tailnet through Tailscale.
-- **Canvases**: use interactive boards, checklists and custom tools beside your conversations.
+- **Canvases**: use interactive boards, checklists, graphs and custom tools beside your conversations.
 - **Plugins**: ask agents to build trusted local .NET canvases, dialogs, tools, commands and buttons for one project or the whole workspace, and [hooks](https://codealta.github.io/docs/plugins/developers/) that check, block or change the tool calls and prompts of sessions, or continue a session when its run ends.
 - **Local statistics**: track activity, models, tokens, costs, tool use, skills and MCP tools by project, session or sub-agent, all on your computer.
 - **Context usage**: see context pressure as a ring beside the prompt and when the prompt cache expires; inspect the last operation and session-wide token usage and costs.
 - **Spaces**: give each kind of work its own setup: its projects and chats, providers and accounts (a second Claude account too), MCP servers, skills, agent prompts and plugins, and the Git, GitHub, Jira and command line (Azure, AWS, kubectl…) identity its agents use. Switch spaces while agents keep working. Inside a space, nested labels group the projects in the Explorer.
 - **Welcome page**: jump back to recent projects and sessions, with useful shortcuts.
 - **Built-in documentation**: read the guide beside your work, or ask an agent to help.
-- **Model choice**: use Claude Code, Codex or GitHub Copilot subscriptions, or APIs, with several accounts of the same provider; choose provider, model and reasoning effort per session.
+- **Model choice**: use Claude Code, Codex, GitHub Copilot or Mistral Vibe subscriptions, APIs, or a llama.cpp server of your own, with several accounts of the same provider; choose provider, model and reasoning effort per session.
 - **Codex CLI**: run OpenAI's Codex agent as a provider, signed in from CodeAlta with Codex's own ChatGPT sign-in (ChatGPT Business and Enterprise included), with the instructions, tools, permissions and sandbox of CodeAlta.
 - **ACP agents**: add a coding agent of the [ACP registry](https://agentclientprotocol.com/get-started/registry) (GitHub Copilot, Gemini CLI, Cursor…) in one click as a provider, with the tools of CodeAlta, its models named and priced and the reasoning levels of each, and continue its sessions with any other provider.
 - **Model tiers & fallback**: pick Complex, Standard or Quick instead of a model, and optionally [go on with the next model of the tier](https://codealta.github.io/docs/model-tiers/) when a provider runs out of quota or goes down, or resume by itself once the limit resets.
