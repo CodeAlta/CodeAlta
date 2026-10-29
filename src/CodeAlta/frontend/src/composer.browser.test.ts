@@ -206,14 +206,16 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       assert.equal(await evaluate(`!!${select}`), false, "context is not in the main rows");
       await evaluate("document.querySelector('.composer-selection-more-button').click()");
       assert.equal(await wait(`!!${select} && !${select}.disabled`), true);
+      assert.equal(await wait("!!document.querySelector('.composer-selection-more-body .composer-selection-option')"), true, "sub-sessions is present beside context");
       assert.equal(await evaluate(`(() => {
         const context = ${select}.closest('.bp6-form-group');
         const body = context.parentElement;
         const subSessions = body.querySelector('.composer-selection-option');
         return body.classList.contains('composer-selection-more-body')
           && body.firstElementChild === context && context.nextElementSibling === subSessions
-          && parseFloat(getComputedStyle(body).paddingTop) > 0
-          && context.getBoundingClientRect().top > body.getBoundingClientRect().top;
+          && parseFloat(getComputedStyle(body).paddingTop) === 14
+          && parseFloat(getComputedStyle(context).marginBottom) === 4
+          && parseFloat(getComputedStyle(subSessions.querySelector('.bp6-control')).marginTop) === 0;
       })()`), true, "context follows the More options spacer and immediately precedes sub-sessions");
       assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.value)`), ["", "272000", "922000"]);
       assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.textContent)`), ["Default (272K)", "272K", "922K"]);
