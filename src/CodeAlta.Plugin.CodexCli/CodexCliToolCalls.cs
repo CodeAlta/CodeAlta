@@ -157,7 +157,10 @@ internal static class CodexCliToolCalls
             case ThreadItem.ImageViewThreadItem image:
                 return new AgentToolResult(true, [new AgentToolResultItem.Text($"Viewed {image.Path.Value}")]);
             case ThreadItem.ImageGenerationThreadItem generation:
-                return generation.Failure is null ? GeneratedImage(generation.SavedPath?.Value, generation.RevisedPrompt) : Failure("The image could not be generated.");
+                // Codex gives a failure detail only for a reached limit: a generation the image API refused just fails.
+                return generation.Failure is null && !string.Equals(generation.Status, "failed", StringComparison.Ordinal)
+                    ? GeneratedImage(generation.SavedPath?.Value, generation.RevisedPrompt)
+                    : Failure("The image could not be generated.");
             default:
                 return null;
         }

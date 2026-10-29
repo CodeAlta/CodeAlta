@@ -63,6 +63,7 @@ public sealed class CodexCliTurnExecutorTests
             {
                 await turn.GenerateImageAsync("A red circle on white.", saved);
                 await turn.GenerateImageAsync("A blue square.", missing);
+                await turn.GenerateImageAsync("A refused image.", null);
                 await turn.SendTextAsync("Here it is.");
             },
         };
@@ -77,7 +78,7 @@ public sealed class CodexCliTurnExecutorTests
         var conversation = await fixture.RunAsync([User("draw")]);
 
         var calls = conversation.SelectMany(static message => message.Parts.OfType<AgentMessagePart.ToolCall>()).ToArray();
-        CollectionAssert.AreEqual(new[] { "image_generation", "image_generation" }, calls.Select(static call => call.Name).ToArray());
+        CollectionAssert.AreEqual(new[] { "image_generation", "image_generation", "image_generation" }, calls.Select(static call => call.Name).ToArray());
         // Codex tells the call before it has the revised prompt: the result gives it.
         Assert.IsFalse(calls[0].Arguments.TryGetProperty("prompt", out _));
         var results = conversation.SelectMany(static message => message.Parts.OfType<AgentMessagePart.ToolResult>()).Select(static part => part.Result).ToArray();
@@ -93,6 +94,10 @@ public sealed class CodexCliTurnExecutorTests
         // A file that cannot be read leaves the path alone.
         Assert.IsTrue(results[1].Success);
         Assert.AreEqual($"Generated {missing}\nPrompt: A blue square.", ((AgentToolResultItem.Text)results[1].Items.Single()).Value);
+
+        // A generation the image API refused fails, though Codex gives a failure detail only for a reached limit.
+        Assert.IsFalse(results[2].Success);
+        Assert.AreEqual("The image could not be generated.", results[2].Error);
         Assert.AreEqual("Here it is.", Text(conversation[^1]));
     }
 

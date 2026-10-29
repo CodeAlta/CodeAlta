@@ -460,16 +460,21 @@ internal sealed class CodexFakeTurn(CodexFakeConnection connection, string threa
         await Connection.NotifyAsync("item/completed", Scope(new JsonObject { ["completedAtMs"] = 2, ["item"] = new JsonObject { ["type"] = "reasoning", ["id"] = id, ["summary"] = new JsonArray(summary) } }));
     }
 
-    /// <summary>Generates an image as Codex does: started, then completed with the path Codex saved it to.</summary>
-    public async Task GenerateImageAsync(string revisedPrompt, string savedPath)
+    /// <summary>
+    /// Generates an image as Codex does: started, then completed with the path Codex saved it to, or, without a path,
+    /// failed as Codex ends a generation the image API refused (no failure detail unless a limit was reached).
+    /// </summary>
+    public async Task GenerateImageAsync(string revisedPrompt, string? savedPath)
     {
         var id = NextItem();
         await Connection.NotifyAsync("item/started", Scope(new JsonObject { ["startedAtMs"] = 1, ["item"] = new JsonObject { ["type"] = "imageGeneration", ["id"] = id, ["status"] = "in_progress" } }));
-        await Connection.NotifyAsync("item/completed", Scope(new JsonObject
+        var item = new JsonObject { ["type"] = "imageGeneration", ["id"] = id, ["status"] = savedPath is null ? "failed" : "completed", ["revisedPrompt"] = revisedPrompt };
+        if (savedPath is not null)
         {
-            ["completedAtMs"] = 2,
-            ["item"] = new JsonObject { ["type"] = "imageGeneration", ["id"] = id, ["status"] = "completed", ["revisedPrompt"] = revisedPrompt, ["savedPath"] = savedPath },
-        }));
+            item["savedPath"] = savedPath;
+        }
+
+        await Connection.NotifyAsync("item/completed", Scope(new JsonObject { ["completedAtMs"] = 2, ["item"] = item }));
     }
 
     /// <summary>Runs a command: started, its approval asked when <paramref name="askApproval"/>, its output, completed or declined.</summary>
