@@ -63,3 +63,28 @@ body.session-row-dragging, body.session-row-dragging * { cursor: grabbing !impor
 .ide-shell .session-row > button:first-child > .session-twist { width: 14px; margin: -3px -5px -3px -14px; }
 /* What stands for the sub-agents that are not listed is pushed in like them. */
 .ide-shell .sub-agent-disclosure { padding-block: 1px 3px; }
+
+/* A sub-agent listed in another project, under the session that started it: a link, quieter than a row of its own. */
+.ide-shell .session-link-row > button:first-child { color: var(--muted); }
+.ide-shell .session-link-row > button:first-child:hover { color: var(--text); }
+.ide-shell .session-link-row .session-title { font-style: italic; }
+/* Its time is that of its own row: the room goes to its title and its marks. */
+.ide-shell .session-link-row .session-meta { display: none; }
+.sub-agent-elsewhere { margin-inline-start: 1px; }
+
+/* The session that started a session listed in another scope, on a line of its own under its row. */
+.ide-shell .session-origin { flex: 1 0 100%; display: flex; align-items: center; gap: 4px; min-width: 0; margin: -5px 0 3px; padding-block: 0; padding-right: 8px;
+  border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; line-height: 16px; text-align: left; }
+.ide-shell .session-origin > svg { flex: none; color: var(--agent-accent); }
+.ide-shell .session-origin > span { flex: none; white-space: nowrap; }
+.ide-shell .session-origin > .session-origin-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ide-shell .session-origin-scope { color: var(--agent-accent); font-weight: 600; }
+.ide-shell button.session-origin { cursor: pointer; }
+.ide-shell button.session-origin:hover > .session-origin-title { color: var(--text); text-decoration: underline; }
+.ide-shell .session-origin[data-archived] { font-style: italic; }
+
+/* The family of the session under the pointer: its parent, its children and its other rows, wherever they are listed. A closed
+   project that lists one of them has a dot. */
+.ide-shell .session-row[data-family] { background: color-mix(in srgb, var(--agent-accent) 12%, transparent); box-shadow: inset 2px 0 0 var(--agent-accent); }
+.ide-shell .project-action-row > button[data-family] > strong::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-start: 6px;
+  border-radius: 50%; background: var(--agent-accent); vertical-align: middle; }

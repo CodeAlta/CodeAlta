@@ -217,6 +217,7 @@ import { filterOpens, filterSessionRows, sidebarFilterView, toggleFilterFold, un
 import { SidebarFilterBox } from "./explorer/SidebarFilterBox";
 import { readQuery } from "./search/searchResults";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
+import { SessionFamilyContext, SessionLinkRow, SessionOriginLine, sessionFamilyHover, type SessionFamily } from "./explorer/sessionFamily";
 import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type SessionWidthControl } from "./SessionWidthGrips";
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
 import { startSplitterDrag } from "./splitterPress";
@@ -3699,6 +3700,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     return <><WaitingBadge count={spacesState.sessions.reduce((count, session) => count + (session.waiting && session.projectId && projects.has(session.projectId) ? 1 : 0), 0)} />
       <RunningSessionBadge controls={runtimeObservationControls()} projectIds={projects} /></>;
   }
+  // The family of a session listed in other scopes than its own: the links under a parent, and the origin of a child.
+  const sessionFamily: SessionFamily = {
+    scopeName: session => session.scopeKind === "project" ? snapshot?.projects.find(project => project.id === session.projectId)?.name ?? session.projectId ?? "" : t("Chats"),
+    open: session => revealSession(session),
+    marks: session => sessionMarks(session, session.scopeKind === "project" ? session.projectId : null),
+  };
   function scopeSessions(scope: string | null) {
     const shown = openScopes.get(scopeKey(scope));
     if (!shown || !snapshot) return null;
@@ -5200,7 +5207,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             {owned && <Button size="small" icon={<AppIcon name="plus" size={14} />} onClick={() => void addProjectFolder()}>{t("Add projects")}…</Button>}
           </div>)}
           </>;
-          return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
+          return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}
+            {...sessionFamilyHover(() => currentSnapshot.current?.sessions ?? [])}><SessionFamilyContext.Provider value={sessionFamily}>
           <LabelDragGhost view={railDrag.view} />
           {!snapshot && railHead}
           {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={id => showScopeDraft(id)} onKeep={id => showScopeDraft(id, true)} children={sessions}
@@ -5290,7 +5298,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           <SpaceActivityBar spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} calls={calls}
             onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onOpen={(id, session) => void openSpaceSession(id, session)} />
           <OverflowTip within={projectRail} target=".session-row > button:first-child" label=".session-title" />
-        </aside>; }}
+        </SessionFamilyContext.Provider></aside>; }}
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth(defaultIdeWidth)} />}
           sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
@@ -5309,7 +5317,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             {selectedList.entries.map((entry, index) => {
               if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
                 onMore={() => sessionTree.more(entry.parentId)} onFewer={() => sessionTree.fewer(entry.parentId)} />;
-              const { session, depth, diagnostic, tooltip, subAgents, parentElsewhere } = entry.row;
+              if (entry.kind === "link") return <SessionLinkRow key={`link:${entry.parentId}:${entry.session.id}`} entry={entry} />;
+              const { session, depth, diagnostic, tooltip, subAgents, parentElsewhere, childrenElsewhere } = entry.row;
               const twist = sessionTwist(entry, sessionTree.toggle);
               const menu = activeMenu?.id === session.id ? activeMenu : null;
               const access = sessionActionAccess(session,
@@ -5318,7 +5327,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
                 mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
                 renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
-              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} data-rename-keys {...sessionDragSource(session, projectId)}
+              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} data-family-id={session.id} data-rename-keys {...sessionDragSource(session, projectId)}
                 onContextMenu={event => {
                   const target = event.target as HTMLElement;
                   if (target.closest("input, textarea, select, [contenteditable='true'], .session-actions-menu")) return;
@@ -5349,13 +5358,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 data-full-text={plainTitle(session.fullTitle || session.title)} style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
                 onClick={() => protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); })}
                 onDoubleClick={() => keepSession(projectId, session)}>
-                <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} parentElsewhere={parentElsewhere} />{sessionMarks(session, projectId)}
+                <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} parentElsewhere={parentElsewhere} childrenElsewhere={childrenElsewhere} />{sessionMarks(session, projectId)}
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
                 tabIndex={tooltip.length > 256 ? 0 : undefined}>{tooltip}</span>
               <button type="button" className="icon-button session-actions-trigger" aria-label={t("Actions for {title} (ID: {id})", { title: session.title, id: session.id })}
                 aria-haspopup="menu" aria-expanded={!!menu}
                 onClick={event => openSessionMenu(session.id, event.currentTarget)}><AppIcon name="ellipsis" size={16} /></button>
+              <SessionOriginLine parent={parentElsewhere} depth={depth} />
               {menu && access.open && menuOrigin.current && <SessionRowMenu anchor={menuOrigin.current} container={document.body}
                 context={{ projectId: menu.projectId, sessionId: menu.id }}
                 title={t("Session actions for {title}", { title: session.title })} current={() => true}

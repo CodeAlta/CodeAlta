@@ -102,6 +102,12 @@ public sealed partial class OwnedSessionCommandService
     /// </summary>
     internal const int MaximumModelChoices = 2048;
 
+    /// <summary>
+    /// How many agent prompts the choices of a session and of a new session list: every prompt of a space, including
+    /// the ones a pack of prompts installs, since a send and <c>alta session set_agent</c> validate the prompt against them.
+    /// </summary>
+    internal const int MaximumPromptChoices = 1024;
+
     /// <summary>Reads effective prompt choices for a draft's exact catalog scope without creating a session or provider.</summary>
     /// <param name="scope">Exact project identity/path, or null for a global draft.</param>
     /// <param name="cancellationToken">Cancels the catalog read.</param>
@@ -133,7 +139,7 @@ public sealed partial class OwnedSessionCommandService
         var space = await _runtime.ResolveSpaceAsync(spaceId, project, cancellationToken).ConfigureAwait(false);
         lock (_gate) { if (_closed || _retained) return null; }
         cancellationToken.ThrowIfCancellationRequested();
-        var prompts = _runtime.ListOwnedPrompts(project?.ProjectPath, _runtime.LoadSpaceFilter(space.Id)).Where(p => p.PromptName.Length <= 256).Take(64)
+        var prompts = _runtime.ListOwnedPrompts(project?.ProjectPath, _runtime.LoadSpaceFilter(space.Id)).Where(p => p.PromptName.Length <= 256).Take(MaximumPromptChoices)
             .Select(p => new OwnedPromptChoice(p.PromptName, Bound(p.DisplayName))).ToArray();
         return new(prompts, AgentPromptCatalog.ResolveNewSessionPromptId(null, [.. prompts.Select(static p => p.Id)], space), space.Id);
     }
@@ -161,7 +167,7 @@ public sealed partial class OwnedSessionCommandService
         // The prompts of the session's own space, whatever space the window shows.
         var space = await _runtime.GetSpaceFilterAsync(session.SpaceId, project, cancellationToken).ConfigureAwait(false);
         var prompts = _runtime.ListOwnedPrompts(project?.ProjectPath, space)
-            .Where(p => p.PromptName.Length <= 256).Take(64)
+            .Where(p => p.PromptName.Length <= 256).Take(MaximumPromptChoices)
             .Select(p => new OwnedPromptChoice(p.PromptName, Bound(p.DisplayName))).ToArray();
         var provider = session.ResolvedProviderKey;
         var models = (observedOnly ? ObservedImageModels?.Invoke(new ModelProviderId(provider)) ?? [] : SelectionModels is null ? []

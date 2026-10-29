@@ -9,7 +9,8 @@ export const sessionMatches = (session: Readonly<Pick<WorkspaceSession, "title" 
 
 /**
  * The rows of a list of sessions the filter keeps: those whose title has every word, and the sessions they are under,
- * so that a sub-agent found stays under its session. The order of the tree is kept.
+ * so that a sub-agent found stays under its session. The order of the tree is kept. A row links only to the children
+ * listed elsewhere that the filter finds, and still counts them all, as it counts all its sub-agents.
  */
 export function filterSessionRows(rows: readonly SessionHierarchyRow[], words: readonly string[]): SessionHierarchyRow[] {
   if (!words.length) return [...rows];
@@ -20,7 +21,8 @@ export function filterSessionRows(rows: readonly SessionHierarchyRow[], words: r
     if (sessionMatches(row.session, words)) { kept.add(index); for (const parent of path) if (parent !== undefined) kept.add(parent); }
     path[row.depth] = index;
   });
-  return rows.filter((_, index) => kept.has(index));
+  return rows.flatMap((row, index) => !kept.has(index) ? [] : row.childrenElsewhere
+    ? [{ ...row, linked: row.childrenElsewhere.filter(session => sessionMatches(session, words)) }] : [row]);
 }
 
 /** The key the Claude Code sessions of no project are kept under, among those of the projects. */
