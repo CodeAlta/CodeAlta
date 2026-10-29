@@ -30,7 +30,10 @@ folders of the session and the computer (`SandboxHost`) into a `SandboxPolicy`:
   temporary folder, and the profile's home and caches under the sandbox data folder (`SandboxHostDiscovery.DefaultDataRoot`,
   outside `~/.alta`). Tools are pointed at them (`HOME`, `TEMP`, `NUGET_PACKAGES`...), so that nothing the sandbox
   downloads runs later in the user's own builds; NuGet reads the user's packages as a read-only fallback.
-- **Read-only**: the folders of the developer tools and of CodeAlta's own program.
+- **Read-only**: the folders of the developer tools and of CodeAlta's own program, and the session's own tool output
+  (`<session>.attachments/tool-output`): CodeAlta writes there, outside the sandbox, the whole of a result too long
+  for the model (`exec`, a command run outside the sandbox) and gives the agent its path. The runtime creates it before
+  the sandbox starts, since a grant applies to a folder that exists then; nothing else of `~/.alta` is granted.
 - **Protected**: the entries of the working tree that other programs run later (git hooks and configuration, the
   `.alta` settings and plugins, the folders of editors and coding agents). One that exists is read-only, one that
   does not is denied, which keeps it from being created.

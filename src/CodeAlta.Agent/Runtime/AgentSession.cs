@@ -2186,7 +2186,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // The whole of a long output goes beside the journal, and goes with the session.
             ResolveToolOutputDirectoryAsync = _store is IAgentSessionAttachmentStore attachments
                 ? async cancellationToken => await attachments.GetAttachmentDirectoryAsync(SessionId, cancellationToken).ConfigureAwait(false) is { } folder
-                    ? Path.Combine(folder, "tool-output")
+                    ? Path.Combine(folder, AgentBuiltInToolOptions.ToolOutputFolderName)
                     : null
                 : null,
         };

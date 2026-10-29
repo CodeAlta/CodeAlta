@@ -243,6 +243,51 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task TheWholeOfALongOutput_IsSavedWhereTheSandboxReadsIt_InTheToolOutputOfItsOwnSessionOnly()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        await f.CreateSessionAsync("s");
+        await f.CreateSessionAsync("other");
+        var store = f.Journal.CreateSessionStore();
+        var own = Path.Combine((await store.GetAttachmentDirectoryAsync("s", CancellationToken.None))!, "tool-output");
+        var others = Path.Combine((await store.GetAttachmentDirectoryAsync("other", CancellationToken.None))!, "tool-output");
+        // The folder where exec keeps a long result whole, and its parts, is the one the sandbox grants.
+        Assert.AreEqual(own, await f.Runtime.GetToolOutputDirectoryAsync("s", CancellationToken.None));
+        f.WriteConfig("[sandbox]\nall_sessions = \"workspace\"\n");
+        File.WriteAllText(Path.Combine(f.Project.ProjectPath, "a.txt"), "a");
+        var router = f.Runtime.CreateSandboxToolRouter("s", "codex", [f.Project.ProjectPath]);
+        Assert.IsNull(await router.RefuseRunAsync(false, CancellationToken.None));
+        var tools = f.RoutedTools("s", router, (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)));
+
+        Assert.IsTrue((await tools.CallAsync("read_file", new { path = "a.txt" })).Success);
+        var policy = backend.Starts.Single();
+        CollectionAssert.Contains(policy.ReadOnly.ToList(), own, "the agent reads the whole of an output it is told to read");
+        Assert.IsTrue(Directory.Exists(own), "a sandbox grants a folder that exists when it starts, before any output is saved there");
+        var granted = policy.ReadWrite.Concat(policy.ReadOnly).ToList();
+        Assert.IsFalse(granted.Any(grant => IsInside(grant, others)), "nothing of another session");
+        Assert.IsFalse(granted.Any(grant => IsInside(grant, Path.GetDirectoryName(own)!)), "nor the other files of its own");
+        Assert.IsFalse(policy.ReadWrite.Any(grant => IsInside(grant, own)), "it reads them only");
+
+        // A command the user lets run outside the sandbox saves its long output there too, not in the temporary folder of CodeAlta.
+        var command = OperatingSystem.IsWindows() ? "1..5000 | ForEach-Object { \"line-$_\" }" : "seq -f 'line-%g' 1 5000";
+        var outside = await tools.CallAsync("shell_command", new { command, outside_sandbox = "It needs the network of the host." });
+        Assert.IsTrue(outside.Success, outside.Error);
+        var saved = Directory.GetFiles(own).Single();
+        StringAssert.Contains(RoutedToolSet.Text(outside), saved);
+        var read = await tools.CallAsync("read_file", new { path = saved, offset = 2500, limit = 1 });
+        Assert.IsTrue(read.Success, read.Error);
+        StringAssert.Contains(RoutedToolSet.Text(read), "line-");
+        Assert.HasCount(1, backend.Starts, "the same worker reads what was saved after it started");
+    }
+
+    private static bool IsInside(string root, string path)
+    {
+        var relative = Path.GetRelativePath(root, path);
+        return relative == "." || (!relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative));
+    }
+
+    [TestMethod]
     public async Task TheAgentIsToldWhatItsSandboxAllows_OnceAndAgainWhenItChanges()
     {
         await using var f = await Fixture.CreateAsync(new InProcessBackend());

@@ -126,6 +126,12 @@ public sealed class AgentBuiltInToolOptions
     public Func<CancellationToken, ValueTask<string?>>? ResolveToolOutputDirectoryAsync { get; init; }
 
     /// <summary>
+    /// The name of the folder of a session's tool output, in the folder of its attachments: the whole of a long output is
+    /// kept there, and a sandboxed session reads it there.
+    /// </summary>
+    public const string ToolOutputFolderName = "tool-output";
+
+    /// <summary>
     /// Gets or initializes the maximum payload size fetched by <c>webget</c>.
     /// </summary>
     public int MaxWebGetBytes { get; init; } = 1_000_000;

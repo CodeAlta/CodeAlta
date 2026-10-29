@@ -80,6 +80,69 @@ public sealed class CliSandboxWorkerTests
     }
 
     [TestMethod]
+    public async Task TheWorkerInAContainer_ReadsTheToolOutputOfItsSession_AndNothingElseOfTheFolderOfCodeAlta()
+    {
+        var backend = new MxcSandboxBackend();
+        if (backend.GetAvailability() is { IsAvailable: false } availability) Assert.Inconclusive(availability.Reason ?? "No sandbox on this computer.");
+        var root = Directory.CreateDirectory(Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), "tests", "output-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+        // A folder of CodeAlta, which holds its secrets and the sessions, as ~/.alta does.
+        var alta = Directory.CreateDirectory(Path.Combine(root, "alta")).FullName;
+        var day = Directory.CreateDirectory(Path.Combine(alta, "sessions", "2026", "10", "29")).FullName;
+        var own = Directory.CreateDirectory(Path.Combine(day, "s1.attachments", "tool-output")).FullName;
+        var other = Path.Combine(Directory.CreateDirectory(Path.Combine(day, "s2.attachments", "tool-output")).FullName, "shell-1.txt");
+        File.WriteAllText(other, "the-output-of-another-session");
+        var journal = Path.Combine(day, "s1.jsonl");
+        File.WriteAllText(journal, "the-journal-of-the-session");
+        var settings = Path.Combine(alta, "config.toml");
+        File.WriteAllText(settings, "the-settings-of-codealta");
+        try
+        {
+            var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve(SandboxProfiles.Strict, []), new SandboxSessionFolders { WorkingDirectory = project, Readable = [own] },
+                SandboxHostDiscovery.Current(Path.Combine(root, "data"), [alta]), [], "test");
+            var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "altacli.exe" : "altacli");
+            await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{executable}\" {SandboxWorker.Option}", null,
+                new SandboxWorkerInit("s1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None)
+                .WaitAsync(Deadline);
+            var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
+
+            // Saved by CodeAlta after the worker started, as the result of exec is, with a part of it in a file of its own.
+            var result = Path.Combine(own, "script-run-1-result.json");
+            File.WriteAllText(result, "{\"the-whole-result\": true}");
+            var part = Path.Combine(own, "script-run-1-result.report.txt");
+            File.WriteAllText(part, "line 1\nthe-part-of-the-result\n");
+            var read = await worker.InvokeAsync(Call("read_file", new { path = result }), host, CancellationToken.None).WaitAsync(Deadline);
+            Assert.IsTrue(read.Success, Text(read));
+            Assert.Contains("the-whole-result", Text(read));
+            var readPart = await worker.InvokeAsync(Call("read_file", new { path = part, offset = 2, limit = 1 }), host, CancellationToken.None).WaitAsync(Deadline);
+            Assert.Contains("the-part-of-the-result", Text(readPart));
+
+            foreach (var (path, secret) in new[] { (other, "the-output-of-another-session"), (journal, "the-journal-of-the-session"), (settings, "the-settings-of-codealta") })
+            {
+                var refused = await worker.InvokeAsync(Call("read_file", new { path }), host, CancellationToken.None).WaitAsync(Deadline);
+                Assert.DoesNotContain(secret, Text(refused), path);
+            }
+
+            var write = OperatingSystem.IsWindows()
+                ? $"Set-Content -Path '{Path.Combine(own, "written.txt")}' -Value written; Get-Content '{result}'"
+                : $"echo written > '{Path.Combine(own, "written.txt")}'; cat '{result}'";
+            var shell = await worker.InvokeAsync(Call("shell_command", new { command = write }), host, CancellationToken.None).WaitAsync(Deadline);
+            Assert.Contains("the-whole-result", Text(shell), "commands read it too");
+            Assert.IsFalse(File.Exists(Path.Combine(own, "written.txt")), "the session reads its output, it does not write there");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    [TestMethod]
     public async Task TheDeveloperToolsOfThisComputer_RunInAContainer()
     {
         var backend = new MxcSandboxBackend();
