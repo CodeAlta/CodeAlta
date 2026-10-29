@@ -17,6 +17,8 @@
     <SelfContained>false</SelfContained>
     <PublishSelfContained>false</PublishSelfContained>
     <PublishAot>false</PublishAot>
+    <!-- Precompiled code in each runtime's package: the application starts without compiling its methods first. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
     <PackageTags>agentic;ai;coding-agent;llm;mcp;desktop</PackageTags>
     <PackageReadmeFile>readme.md</PackageReadmeFile>

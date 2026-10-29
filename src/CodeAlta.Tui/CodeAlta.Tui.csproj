@@ -17,6 +17,8 @@
     <IsAotCompatible>true</IsAotCompatible>
     <RuntimeIdentifiers>linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;win-x64;win-arm64;osx-arm64;osx-x64</RuntimeIdentifiers>
     <PublishSelfContained>false</PublishSelfContained>
+    <!-- Precompiled code in each runtime's package: the application starts without compiling its methods first. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <PropertyGroup>
