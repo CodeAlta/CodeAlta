@@ -2072,6 +2072,59 @@ public sealed partial class AgentSessionTests
         Assert.AreEqual("threshold", persistedState.LastCompactionTrigger);
     }
 
+    // The size of context a session chose among those of its model is its input limit: its usage and its compaction follow it.
+    [TestMethod]
+    public async Task AgentSession_SendAsync_UsesTheContextSizeOfTheSession()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider(AgentCompactionSettings.Default with { Ratio = 0.30 });
+        var summary = CreateSummary("session-context-size");
+        var state = CreateState("session-context-size");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var model = new AgentModelInfo("gpt-5.4", "GPT-5.4", Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["contextWindow"] = 600L,
+            ["inputTokenLimit"] = 500L,
+        })
+        { ContextSizes = [500, 2_000] };
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                [model],
+                summaryHandler: null,
+                (request, _, _) =>
+                {
+                    Assert.AreEqual(2_000L, request.ModelInfo!.GetContextSize());
+                    return Task.FromResult(new AgentTurnResponse
+                    {
+                        AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("First answer.")]),
+                        Usage = CreateUsageSnapshot(180, 20),
+                    });
+                }),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                ContextSize = 2_000,
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            });
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt") }).ConfigureAwait(false);
+
+        var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.AreEqual(2_000L, persistedState?.Usage?.TokenLimit);
+        Assert.IsNull(persistedState?.LastCompactionTrigger, "180 tokens are under 30% of 2,000");
+    }
+
     [TestMethod]
     public async Task AgentSession_SteerAsync_QueuesPendingInputIntoSameRun()
     {

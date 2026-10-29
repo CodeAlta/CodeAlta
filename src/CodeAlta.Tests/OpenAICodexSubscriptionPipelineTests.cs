@@ -1640,6 +1640,43 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual(272_000L, budget.InputContextLimit);
         Assert.AreEqual(272_000L, budget.TotalContextEnvelope);
         Assert.AreEqual(244_800L, AgentTokenBudgetResolver.ResolveCompactionThreshold(272_000, astra, AgentCompactionSettings.Default));
+        Assert.IsNull(astra.ContextSizes, "a model without max_context_window has one size");
+    }
+
+    // Codex's configuration raises the context of a model up to max_context_window: a session can use either size.
+    [TestMethod]
+    public async Task ModelDiscovery_MaxContextWindowIsASecondContextSize_ThatTheBudgetFollows()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"models":[{"slug":"gpt-6-astra","display_name":"GPT-6 Astra","supported_in_api":true,"visibility":"list","context_window":272000,"max_context_window":1000000}]}"""),
+        };
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            StateRootPath = temp.Path,
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(response)),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { ModelDiscovery = "codex_endpoint" },
+        };
+
+        var astra = (await OpenAIProviderSdkFactory.ListModelsAsync(provider, CreateProviderDescriptor(), CancellationToken.None)
+            .ConfigureAwait(false)).Single();
+
+        CollectionAssert.AreEqual(new long[] { 272_000, 1_000_000 }, astra.ContextSizes!.ToArray());
+        Assert.AreEqual(272_000L, astra.GetContextSize());
+        var larger = astra.WithContextSize(1_000_000);
+        var budget = AgentTokenBudgetResolver.Resolve(larger, AgentCompactionSettings.Default);
+        Assert.AreEqual(1_000_000L, budget.InputContextLimit);
+        Assert.AreEqual(1_000_000L, budget.TotalContextEnvelope);
+        Assert.AreEqual(900_000L, AgentTokenBudgetResolver.ResolveCompactionThreshold(1_000_000, larger, AgentCompactionSettings.Default));
+        Assert.AreSame(astra, astra.WithContextSize(500_000), "a size the model does not have");
+        Assert.AreSame(astra, astra.WithContextSize(null));
+        var cached = JsonSerializer.Deserialize(JsonSerializer.Serialize(astra, AgentJsonSerializerContext.Default.AgentModelInfo),
+            AgentJsonSerializerContext.Default.AgentModelInfo)!;
+        CollectionAssert.AreEqual(new long[] { 272_000, 1_000_000 }, cached.ContextSizes!.ToArray());
     }
 
     // The context_window of Codex's catalog is the input Codex sends at most (it compacts at 90% of it), for every model

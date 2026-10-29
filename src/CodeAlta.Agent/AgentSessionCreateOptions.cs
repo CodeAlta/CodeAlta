@@ -129,6 +129,12 @@ public class AgentSessionCreateOptions
     public AgentReasoningEffort? ReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets or initializes the size of context of the session, in input tokens: one of the sizes of its model
+    /// (<see cref="AgentModelInfo.ContextSizes"/>); null, or a size the model does not have, for the size of the model.
+    /// </summary>
+    public long? ContextSize { get; init; }
+
+    /// <summary>
     /// Gets or initializes whether nobody reads the summaries of the reasoning of the session (a headless run): its
     /// requests ask for none (<see cref="Runtime.AgentTurnRequest.OmitReasoningSummaries"/>). Default false.
     /// </summary>

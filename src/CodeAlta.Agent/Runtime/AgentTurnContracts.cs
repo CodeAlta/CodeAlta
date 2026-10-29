@@ -414,6 +414,13 @@ public sealed record AgentTurnRequest
     public AgentReasoningEffort? ReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets or initializes the size of context chosen for the session (<see cref="AgentSessionCreateOptions.ContextSize"/>),
+    /// in input tokens; null for the size of the model. <see cref="ModelInfo"/> already has it as its input limit: a
+    /// provider that runs its own agent (a CLI) starts it with that size.
+    /// </summary>
+    public long? ContextSize { get; init; }
+
+    /// <summary>
     /// Gets or initializes whether nobody reads the summaries of the reasoning (a headless run): a provider that asks
     /// the model for them asks for none. The reasoning itself is unchanged.
     /// </summary>

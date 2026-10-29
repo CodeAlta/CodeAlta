@@ -310,6 +310,12 @@ public sealed class CodeAltaProviderDocument
     public string? ReasoningEffort { get; set; }
 
     /// <summary>
+    /// Gets or sets the size of context, in input tokens, of the sessions of the provider whose model has that size.
+    /// </summary>
+    [JsonPropertyName("context_size")]
+    public long? ContextSize { get; set; }
+
+    /// <summary>
     /// Gets or sets the API key literal when configured directly.
     /// </summary>
     [JsonPropertyName("api_key")]

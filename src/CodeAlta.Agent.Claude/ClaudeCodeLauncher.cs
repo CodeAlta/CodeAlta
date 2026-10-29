@@ -12,7 +12,8 @@ namespace CodeAlta.Agent.Claude;
 /// <see cref="AgentToolPatterns.WebSearchToolName"/> or <see cref="AgentToolPatterns.WebFetchToolName"/>.
 /// </summary>
 internal sealed record ClaudeCodeLaunchKey(string? WorkingDirectory, string? Model, string? Effort,
-    AgentProcessEnvironment? Environment = null, bool WithoutShell = false, string? WithoutWebTools = null, string? ProcessHost = null)
+    AgentProcessEnvironment? Environment = null, bool WithoutShell = false, string? WithoutWebTools = null, string? ProcessHost = null,
+    bool WithoutExtendedContext = false)
 {
     /// <summary>Gets the web tools of the CLI a session does without, separated by commas, or null for none.</summary>
     /// <param name="disabledTools">The tools the session does without.</param>
@@ -238,6 +239,12 @@ internal static class ClaudeCodeLauncher
             environment[ClaudeCodeProjectFolders.ConfigDirectoryVariable] = configDirectory;
         }
 
+        // A session that chose 200K: the CLI keeps a model of 1M tokens to it.
+        if (key.WithoutExtendedContext)
+        {
+            environment[DisableExtendedContextVariable] = "1";
+        }
+
         // The CLI tells this side when a session is idle again, and names CodeAlta in its user agent.
         environment["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"] = "1";
         // A start the CLI refuses for a known reason (a conversation a background session runs, ...) ends with a result
@@ -250,6 +257,9 @@ internal static class ClaudeCodeLauncher
 
     /// <summary>The variable that makes the CLI write a result naming why it refused to start.</summary>
     public const string StartupFailureResultsVariable = "CLAUDE_CODE_STARTUP_FAILURE_RESULTS";
+
+    /// <summary>The variable that keeps the models of 1M tokens to 200K in the CLI.</summary>
+    public const string DisableExtendedContextVariable = "CLAUDE_CODE_DISABLE_1M_CONTEXT";
 
     // The hosts of Anthropic the CLI reaches: the API, and the sign-in and refresh of a subscription.
     private static readonly string[] VendorHosts = ["api.anthropic.com", "console.anthropic.com", "platform.claude.com", "claude.ai", "*.claude.ai"];

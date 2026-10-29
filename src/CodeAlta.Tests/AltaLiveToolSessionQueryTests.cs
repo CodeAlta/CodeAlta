@@ -156,6 +156,31 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionStatus_ShowsTheSizeOfContextTheSessionChose()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("context-size");
+        var runtime = CreateRuntime(options, new StatefulProviderRuntime(providerId));
+        await using var _ = runtime.ConfigureAwait(false);
+        SessionExecutionOptions Execution(AgentSessionOptions? sessionOptions) => new()
+        {
+            ProviderId = providerId, ProviderKey = providerId.Value, WorkingDirectory = root.Path, ProjectRoots = [], SessionOptions = sessionOptions,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var chosen = await runtime.CreateGlobalSessionAsync(Execution(new AgentSessionOptions { ContextSize = 200_000 }), "Chosen").ConfigureAwait(false);
+        var byDefault = await runtime.CreateGlobalSessionAsync(Execution(null), "Default").ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(new SessionViewCatalog(options)).Add(runtime));
+
+        async Task<System.Text.Json.JsonElement> OptionsAsync(string sessionId)
+            => ReadJsonLines((await dispatcher.InvokeAsync(["session", "status", sessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).Stdout)
+                .Single(static line => line.GetProperty("type").GetString() == "alta.session.status").GetProperty("options");
+        Assert.AreEqual(200_000, (await OptionsAsync(chosen.SessionId).ConfigureAwait(false)).GetProperty("contextSize").GetInt64());
+        Assert.IsFalse((await OptionsAsync(byDefault.SessionId).ConfigureAwait(false)).TryGetProperty("contextSize", out var _),
+            "a session that chose none follows its provider and its model");
+    }
+
+    [TestMethod]
     public async Task SessionList_ReadsTheSessionProjection_NeverAJournal()
     {
         using var root = TempDirectory.Create();

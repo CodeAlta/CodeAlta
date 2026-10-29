@@ -335,6 +335,31 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ContextSize_RunsThe1MFormOfTheModel_OrTurns1MOff()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var opus = new AgentModelInfo("opus") { ContextSizes = [ClaudeCodeModelCatalog.StandardContextSize, ClaudeCodeModelCatalog.ExtendedContextSize] };
+        var request = CreateRequest([User("one")]) with { ModelId = "opus", ModelInfo = opus };
+
+        await ExecuteAsync(executor, request with { SessionId = "default" });
+        CollectionAssert.IsSubsetOf(new[] { "--model", "opus" }, cli.Last.Launch.Arguments.ToArray());
+        Assert.IsFalse(cli.Last.Launch.Environment.ContainsKey(ClaudeCodeLauncher.DisableExtendedContextVariable));
+
+        await ExecuteAsync(executor, request with { SessionId = "extended", ContextSize = 1_000_000 });
+        CollectionAssert.IsSubsetOf(new[] { "--model", "opus[1m]" }, cli.Last.Launch.Arguments.ToArray());
+
+        await ExecuteAsync(executor, request with { SessionId = "standard", ContextSize = 200_000 });
+        CollectionAssert.IsSubsetOf(new[] { "--model", "opus" }, cli.Last.Launch.Arguments.ToArray());
+        Assert.AreEqual("1", cli.Last.Launch.Environment[ClaudeCodeLauncher.DisableExtendedContextVariable]);
+
+        // A size the model does not have changes nothing.
+        await ExecuteAsync(executor, request with { SessionId = "other", ContextSize = 500_000 });
+        CollectionAssert.IsSubsetOf(new[] { "--model", "opus" }, cli.Last.Launch.Arguments.ToArray());
+        Assert.IsFalse(cli.Last.Launch.Environment.ContainsKey(ClaudeCodeLauncher.DisableExtendedContextVariable));
+    }
+
+    [TestMethod]
     public async Task PermissionModeOfTheTurn_StartsTheCliInsteadOfTheOneOfTheProvider()
     {
         var cli = new ClaudeCodeFakeCli();

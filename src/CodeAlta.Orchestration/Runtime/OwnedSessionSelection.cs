@@ -42,6 +42,12 @@ public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<Agen
     /// model or its provider has none.
     /// </summary>
     public IReadOnlyList<AgentModelOption> Options { get; init; } = [];
+
+    /// <summary>Gets the sizes of context a session can use the model with (<see cref="AgentModelInfo.ContextSizes"/>); empty when it has one.</summary>
+    public IReadOnlyList<long> ContextSizes { get; init; } = [];
+
+    /// <summary>Gets the size of context of a session of the model that chose none: the one of its provider when the model has it, else its own.</summary>
+    public long? ContextSize { get; init; }
 }
 
 /// <summary>Session-scoped next-send choices; does not confer authority to mutate a running turn.</summary>
@@ -184,7 +190,8 @@ public sealed partial class OwnedSessionCommandService
         return new(new(provider, session.AgentPromptId ?? "default", modelId, effort) { PermissionMode = session.PermissionMode }, prompts,
             models.Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])
                 { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort,
-                  EffortsComplete = AgentReasoningEffortCapability.IsListComplete(m), Options = m.Options?.Take(16).ToArray() ?? [] }).ToArray())
+                  EffortsComplete = AgentReasoningEffortCapability.IsListComplete(m), Options = m.Options?.Take(16).ToArray() ?? [],
+                  ContextSizes = m.ContextSizes?.Take(16).ToArray() ?? [], ContextSize = m.WithContextSize(configured?.DefaultContextSize).GetContextSize() }).ToArray())
         {
             PermissionModes = modes,
             // What a session without a mode runs in: the mode of its provider, else the one that names the policy of the host.

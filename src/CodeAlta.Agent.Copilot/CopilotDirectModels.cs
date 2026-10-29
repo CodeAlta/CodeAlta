@@ -42,6 +42,8 @@ internal sealed class CopilotModelDiscoveryClient
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential.Token);
             request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
             CopilotDirectHeaders.ApplyStaticHeaders(request.Headers);
+            // The version whose models give the prompt each of their prices covers (billing.token_prices): their sizes of context.
+            request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2026-08-01");
             using var response = await _httpClient.SendAsync(request, timeout.Token).ConfigureAwait(false);
             var json = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
@@ -154,6 +156,7 @@ internal sealed class CopilotModelDiscoveryClient
             supports?.AdaptiveThinking == true ||
             supports?.MaxThinkingBudget is not null ||
             supports?.MinThinkingBudget is not null;
+        var contextSizes = ContextSizes(item);
         var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["family"] = item.Capabilities?.Family,
@@ -162,7 +165,8 @@ internal sealed class CopilotModelDiscoveryClient
             ["supportedEndpoints"] = item.SupportedEndpoints,
             ["copilotEndpointKind"] = endpointKind.ToString(),
             ["contextWindow"] = limits?.MaxContextWindowTokens,
-            ["inputTokenLimit"] = limits?.MaxPromptTokens,
+            // A model with a long-context price keeps to its standard price unless a session chooses more, as Copilot does.
+            ["inputTokenLimit"] = contextSizes?[0] ?? limits?.MaxPromptTokens,
             ["outputTokenLimit"] = limits?.MaxOutputTokens,
             ["supportsReasoning"] = supportsReasoning,
             ["supportsToolCall"] = supports?.ToolCalls,
@@ -185,7 +189,25 @@ internal sealed class CopilotModelDiscoveryClient
             Provider: providerDescriptor.ProviderKey,
             DefaultReasoningEffort: defaultReasoningEffort,
             SupportedReasoningEfforts: supportedReasoningEfforts,
-            Capabilities: capabilities);
+            Capabilities: capabilities)
+        {
+            ContextSizes = contextSizes,
+        };
+    }
+
+    // Copilot bills a prompt past the size of its default price at its long-context price: both sizes, the larger no more
+    // than the prompt the model takes.
+    private static IReadOnlyList<long>? ContextSizes(CopilotModelItem item)
+    {
+        if (item.Billing?.TokenPrices is not { Default: { } standardPrice, LongContext: { } longPrice } ||
+            (standardPrice.MaxPromptTokens ?? standardPrice.ContextMax) is not { } standard || standard <= 0)
+        {
+            return null;
+        }
+
+        var limit = item.Capabilities?.Limits?.MaxPromptTokens;
+        var full = Math.Min(longPrice.MaxPromptTokens ?? longPrice.ContextMax ?? limit ?? 0, limit ?? long.MaxValue);
+        return full > standard ? [standard, full] : null;
     }
 
     private static IReadOnlyList<AgentReasoningEffort> MapReasoningEfforts(CopilotModelSupports? supports)
@@ -367,6 +389,34 @@ internal sealed class CopilotModelItem
 
     [JsonPropertyName("capabilities")]
     public CopilotModelCapabilities? Capabilities { get; set; }
+
+    [JsonPropertyName("billing")]
+    public CopilotModelBilling? Billing { get; set; }
+}
+
+internal sealed class CopilotModelBilling
+{
+    [JsonPropertyName("token_prices")]
+    public CopilotModelTokenPrices? TokenPrices { get; set; }
+}
+
+internal sealed class CopilotModelTokenPrices
+{
+    [JsonPropertyName("default")]
+    public CopilotModelTokenPrice? Default { get; set; }
+
+    [JsonPropertyName("long_context")]
+    public CopilotModelTokenPrice? LongContext { get; set; }
+}
+
+internal sealed class CopilotModelTokenPrice
+{
+    [JsonPropertyName("max_prompt_tokens")]
+    public long? MaxPromptTokens { get; set; }
+
+    // The earlier name of max_prompt_tokens.
+    [JsonPropertyName("context_max")]
+    public long? ContextMax { get; set; }
 }
 
 internal sealed class CopilotModelPolicy

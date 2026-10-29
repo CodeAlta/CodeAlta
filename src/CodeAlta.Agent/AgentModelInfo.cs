@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Agent;
 
@@ -31,4 +32,42 @@ public sealed record AgentModelInfo(
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<AgentModelOption>? Options { get; init; }
+
+    /// <summary>
+    /// Gets the sizes of context, in input tokens, a session can use the model with, from the smallest, as its provider
+    /// gives them: the size of the model (<see cref="GetContextSize"/>) is one of them. Null for a model that has one.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<long>? ContextSizes { get; init; }
+
+    /// <summary>Gets the size of context of the model, in input tokens: the input it takes at most, null when it is not known.</summary>
+    /// <returns>The size, or null.</returns>
+    public long? GetContextSize() => AgentTokenBudgetResolver.Resolve(this, AgentCompactionSettings.Default).InputContextLimit;
+
+    /// <summary>
+    /// Gets the model as a session uses it with a size of context: one of <see cref="ContextSizes"/> becomes the input it
+    /// takes at most, which its usage and its compaction follow. Another size, or null, leaves the model as it is.
+    /// </summary>
+    /// <param name="size">The size, in input tokens, or null.</param>
+    /// <returns>The model with that size.</returns>
+    public AgentModelInfo WithContextSize(long? size)
+    {
+        if (size is not { } tokens || ContextSizes?.Contains(tokens) != true || GetContextSize() == tokens)
+        {
+            return this;
+        }
+
+        var capabilities = Capabilities is null
+            ? new Dictionary<string, object?>(StringComparer.Ordinal)
+            : new Dictionary<string, object?>(Capabilities, StringComparer.Ordinal);
+        capabilities["inputTokenLimit"] = tokens;
+        capabilities["maxInputTokens"] = tokens;
+        // The whole context of the model holds at least that input.
+        if (AgentTokenBudgetResolver.Resolve(this, AgentCompactionSettings.Default).TotalContextEnvelope is not { } envelope || envelope < tokens)
+        {
+            capabilities["contextWindow"] = tokens;
+        }
+
+        return this with { Capabilities = capabilities };
+    }
 }

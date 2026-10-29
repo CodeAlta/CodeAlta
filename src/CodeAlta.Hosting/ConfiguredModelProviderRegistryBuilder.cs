@@ -1107,6 +1107,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             DefaultModelId = NormalizeText(definition.SingleModelId) ?? NormalizeText(definition.Model),
             ModelOrder = ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider),
             DefaultReasoningEffort = ParseReasoningEffort(definition.ReasoningEffort),
+            DefaultContextSize = definition.ContextSize is > 0 ? definition.ContextSize : null,
         };
     }
 

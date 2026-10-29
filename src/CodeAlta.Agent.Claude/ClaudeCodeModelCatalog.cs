@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Agent.Claude;
 
@@ -35,6 +36,12 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
 
     // The model an entry of the CLI runs, which several entries can share (an alias and the default).
     private const string ResolvedModelCapability = "resolvedModel";
+
+    /// <summary>The window the CLI keeps a model of 1M tokens to when 1M is turned off for it.</summary>
+    public const long StandardContextSize = 200_000;
+
+    /// <summary>The window of a model of 1M tokens, which the CLI runs it with by default or as its <c>[1m]</c> form.</summary>
+    public const long ExtendedContextSize = 1_000_000;
 
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromMinutes(5);
 
@@ -341,6 +348,12 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
         if (extended)
         {
             foreach (var limit in (string[])["contextWindow", "contextWindowTokens", "inputTokenLimit", "maxInputTokens"]) capabilities.Remove(limit);
+        }
+        else if (AgentTokenBudgetResolver.Resolve(described, AgentCompactionSettings.Default).TotalContextEnvelope >= ExtendedContextSize)
+        {
+            // A session runs a model of 1M tokens with 200K or 1M (ClaudeCodeSession), all of which is its context.
+            capabilities["inputTokenLimit"] = ExtendedContextSize;
+            return model with { Capabilities = capabilities, ContextSizes = [StandardContextSize, ExtendedContextSize] };
         }
 
         return model with { Capabilities = capabilities };

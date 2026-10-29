@@ -2287,6 +2287,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DeveloperInstructions = developerInstructions,
             SessionInstructions = sessionInstructions,
             ReasoningEffort = _options.ReasoningEffort,
+            ContextSize = _options.ContextSize,
             OmitReasoningSummaries = _options.OmitReasoningSummaries,
             // A run has the mode it started with, or the one it was given since (ApplyPermissionModeNowAsync); what
             // runs outside one takes the current mode.
@@ -5546,7 +5547,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 _cachedModels = await modelCatalog.ListModelsAsync(Provider, cancellationToken).ConfigureAwait(false);
             }
 
-            _resolvedModelInfo = AgentModelIdentity.FindBestMatch(_cachedModels, modelId);
+            _resolvedModelInfo = AgentModelIdentity.FindBestMatch(_cachedModels, modelId)?.WithContextSize(_options.ContextSize);
         }
         catch (OperationCanceledException)
         {

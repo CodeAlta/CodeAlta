@@ -85,6 +85,12 @@ public sealed record ModelProviderDescriptor
     public AgentReasoningEffort? DefaultReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets the configured size of context of the sessions of the provider, in input tokens, when any: used by a model
+    /// that has that size (<see cref="AgentModelInfo.ContextSizes"/>) in a session that chose none.
+    /// </summary>
+    public long? DefaultContextSize { get; init; }
+
+    /// <summary>
     /// Gets the permission modes a session of this provider can be given, empty when the provider has none.
     /// </summary>
     public IReadOnlyList<string> PermissionModes { get; init; } = [];

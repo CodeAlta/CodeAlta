@@ -288,6 +288,78 @@ public sealed class CopilotDirectProviderTests
     }
 
     [TestMethod]
+    public async Task CopilotDirect_ListModels_OffersTheSizeOfEachPrice_FromTheStandardOne()
+    {
+        // A prompt past max_prompt_tokens of the default price is billed at the long-context price, up to its own
+        // max_prompt_tokens: a session keeps to the first unless it chooses the second. A model with one price has one size.
+        var handler = new StubHandler(request =>
+        {
+            Assert.AreEqual("2026-08-01", request.Headers.GetValues("X-GitHub-Api-Version").Single(), "the version whose models give their prices by size");
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+            Content = new StringContent(
+                """
+                {
+                  "data": [
+                    {
+                      "model_picker_enabled": true, "id": "claude-opus-4.7", "name": "Claude Opus 4.7", "version": "claude-opus-4.7",
+                      "supported_endpoints": ["/v1/messages"], "policy": { "state": "enabled" },
+                      "capabilities": { "family": "claude-opus-4.7", "limits": { "max_context_window_tokens": 1000000, "max_output_tokens": 64000, "max_prompt_tokens": 936000 } },
+                      "billing": { "token_prices": { "default": { "input_price": 5, "output_price": 25, "max_prompt_tokens": 200000 },
+                        "long_context": { "input_price": 10, "output_price": 37.5, "max_prompt_tokens": 936000 } } }
+                    },
+                    {
+                      "model_picker_enabled": true, "id": "gpt-5.5", "name": "GPT-5.5", "version": "gpt-5.5",
+                      "supported_endpoints": ["/responses"], "policy": { "state": "enabled" },
+                      "capabilities": { "family": "gpt-5.5", "limits": { "max_context_window_tokens": 400000, "max_output_tokens": 128000, "max_prompt_tokens": 272000 } },
+                      "billing": { "token_prices": { "default": { "input_price": 1.25, "output_price": 10, "max_prompt_tokens": 272000 } } }
+                    }
+                  ]
+                }
+                """,
+                Encoding.UTF8,
+                "application/json"),
+            };
+        });
+        var providerRuntime = new CopilotDirectModelProviderRuntime(new CopilotDirectModelProviderRuntimeOptions
+        {
+            StateRootPath = Path.GetTempPath(),
+            Providers =
+            {
+                new CopilotDirectProviderOptions
+                {
+                    ProviderKey = "github-copilot",
+                    Auth = new CopilotDirectAuthOptions
+                    {
+                        AuthSource = CopilotDirectAuthSources.CopilotTokenEnvironment,
+                        CopilotTokenEnvironmentVariable = "CODEALTA_TEST_COPILOT_TOKEN",
+                    },
+                    HttpClient = new HttpClient(handler),
+                },
+            },
+        });
+
+        Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", "test-token");
+        try
+        {
+            var models = await providerRuntime.ListModelsAsync().ConfigureAwait(false);
+
+            var opus = models.Single(static model => model.Id == "claude-opus-4.7");
+            CollectionAssert.AreEqual(new long[] { 200_000, 936_000 }, opus.ContextSizes!.ToArray());
+            Assert.AreEqual(200_000L, opus.GetContextSize(), "the size of the default price by default");
+            Assert.AreEqual(936_000L, opus.WithContextSize(936_000).GetContextSize());
+            var gpt = models.Single(static model => model.Id == "gpt-5.5");
+            Assert.IsNull(gpt.ContextSizes);
+            Assert.AreEqual(272_000L, gpt.GetContextSize());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", null);
+            await providerRuntime.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
     public async Task CopilotDirect_ListModels_MapsGeminiToOpenAIChatWithoutReasoningEffort()
     {
         var handler = new StubHandler(request =>

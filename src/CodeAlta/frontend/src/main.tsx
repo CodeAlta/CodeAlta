@@ -385,7 +385,7 @@ import { externalEditors as externalEditorsApi } from "#neoastra";
 import { sandboxSettings, type SandboxScopeItem, type SandboxSessionResponse } from "#neoastra";
 import { notSandboxed, sessionSandboxSummary } from "./sandbox/sandboxChoices";
 import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
-import { changedSessionOptions, sessionOptionsOf } from "./sessionSettings/sessionOptions";
+import { changedSessionOptions, sessionContextSize, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { SandboxSettings } from "./sandbox/SandboxSettings";
 import { SessionSandboxSelect } from "./sandbox/SessionSandboxSelect";
 import { createExternalOpener, ExternalOpenerContext } from "./externalEditors/externalEditors";
@@ -2927,6 +2927,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [draftSandboxScopes, setDraftSandboxScopes] = useState<SandboxSessionResponse | null>(null);
   // The options of the new session (sub-sessions), sent with its creation; null for the defaults.
   const [draftOptions, setDraftOptions] = useState<SessionOptionsChoice | null>(null);
+  // What the meter of the draft measures: the size of context chosen under More options, else the window of its model.
+  const draftContextModel = draftChoices.models.find(model => model.id === draftChoices.value.modelId);
+  const draftContextTokens = sessionContextSize(draftContextModel, draftOptions) ?? draftContextModel?.contextTokens ?? null;
   const draftSandboxProvider = draftChoices.value.providerKey || null, draftSandboxModel = draftChoices.value.modelId || null;
   useEffect(() => {
     if (!status?.hostEpoch || !owned) { setDraftSandboxScopes(null); return; }
@@ -4470,8 +4473,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         onChange={next => setDraftReview(next)} />}
       sandbox={draftSandboxScopes && <SessionSandboxSelect id={`composer-sandbox-${choiceId}`} own={draftSandbox} inherited={draftSandboxScopes.profile}
         choices={draftSandboxScopes.choices} disabled={locked} onChange={next => setDraftSandbox(next)} />}
-      options={{ changed: changedSessionOptions(draftOptions),
-        content: <SessionOptionsFields id={choiceId} value={draftOptions} disabled={locked} onChange={next => setDraftOptions(next)} /> }}
+      options={{ changed: changedSessionOptions(draftOptions, draftModel ?? null),
+        content: <SessionOptionsFields id={choiceId} value={draftOptions} disabled={locked} onChange={next => setDraftOptions(next)}
+          context={draftModel} /> }}
       permission={permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${choiceId}`} value={value.permissionMode} modes={permissionModes}
         defaultMode={draftChoices.defaultPermissionMode} disabled={locked} onChange={next => change("permissionMode", next)} /> : undefined}
       agent={<HTMLSelect fill id={`composer-agent-${choiceId}`} aria-label={t("Agent prompt")} value={value.agentPromptId}
@@ -5604,7 +5608,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   localDraft={{ read: () => localDrafts.peek(draftScope)?.text ?? "", subscribe: localDrafts.subscribe, edit: editLocalDraft, options: creationProviderChoice(),
                     disabled: newPromptDisabled, busy: creatingScope?.projectId === projectId, submit: () => void createSelectedSession(true),
                     surface: owned && status?.hostEpoch ? { epoch: status.hostEpoch, onOpenProviders: () => navigate("providers"),
-                      contextTokens: draftChoices.models.find(model => model.id === draftChoices.value.modelId)?.contextTokens ?? null } : undefined,
+                      contextTokens: draftContextTokens } : undefined,
                     action: <>
                       {draftChoices.failed && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} disabled={creatingBusy}
                         aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={draftChoices.refresh} />}

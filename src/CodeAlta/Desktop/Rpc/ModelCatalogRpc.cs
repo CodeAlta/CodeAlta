@@ -173,7 +173,7 @@ internal sealed class ModelCatalogService(
                 DesktopJsonContext.Default.ModelCatalogModelsResponse).Length;
             foreach (var model in valid.Take(MaximumModels))
             {
-                var projected = ProjectModel(model);
+                var projected = ProjectModel(model, descriptor.DefaultContextSize);
                 var nextBytes = JsonSerializer.SerializeToUtf8Bytes(projected, DesktopJsonContext.Default.ModelCatalogModel).Length;
                 if (bytes + nextBytes + (models.Count > 0 ? 1 : 0) > MaximumModelsResponseBytes) break;
                 bytes += nextBytes + (models.Count > 0 ? 1 : 0);
@@ -210,7 +210,7 @@ internal sealed class ModelCatalogService(
         && value.Trim() == value && !value.Any(char.IsControl);
     private static string Bound(string? value, int length) => value is { Length: > 0 } ? value[..Math.Min(value.Length, length)] : "Unknown";
 
-    private ModelCatalogModel ProjectModel(AgentModelInfo model)
+    private ModelCatalogModel ProjectModel(AgentModelInfo model, long? defaultContextSize)
     {
         // A provider that describes its models by none of models.dev (the agent of a plugin) has them described by
         // their vendor, for this page only.
@@ -236,6 +236,8 @@ internal sealed class ModelCatalogService(
             AgentImageInputCapability.Read(model))
         {
             EffortsComplete = AgentReasoningEffortCapability.IsListComplete(model) ? true : null,
+            ContextSizes = model.ContextSizes is { Count: > 0 } sizes ? [.. sizes.Where(static size => size <= int.MaxValue).Select(static size => (int)size)] : null,
+            ContextSize = model.WithContextSize(defaultContextSize).GetContextSize() is { } size and <= int.MaxValue ? (int)size : null,
             Deprecated = IsDeprecated(metadata) ? true : null,
             RetiresAt = IsDeprecated(metadata) ? Date(metadata, "retiresAt") : null,
             Price = inputCost is null && outputCost is null ? null : new ModelCatalogPrice(inputCost, outputCost,
@@ -379,6 +381,14 @@ internal sealed record ModelCatalogModel(string Id, string Name, string? Descrip
     // True when Efforts is all the model has and its provider sends no other one (Claude Code); absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? EffortsComplete { get; init; }
+
+    // The sizes of context, in input tokens, a session can choose for the model; absent for a model that has one.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<int>? ContextSizes { get; init; }
+
+    // The size of a session that chose none: the one of its provider when the model has it, else its own.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ContextSize { get; init; }
 
     // True when the provider or models.dev says the model is deprecated: it still runs until it retires; absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

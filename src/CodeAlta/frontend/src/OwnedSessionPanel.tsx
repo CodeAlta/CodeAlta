@@ -18,7 +18,7 @@ import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
 import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionSteerRequest, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
 import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
-import { changedSessionOptions, sessionOptionsOf } from "./sessionSettings/sessionOptions";
+import { changedSessionOptions, sessionContextSize, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, pluginPromptOutcome, refreshSubmissions, sendAvailable, type PluginPromptOutcome, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -1273,6 +1273,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   }
   const selectedModel = activeChoices?.models.find(m => m.id === selected?.modelId);
   const efforts = selectedModel?.efforts ?? null;
+  // The size of context the session uses where its model has several: the meter shows it at once.
+  const contextLimit = sessionContextSize(selectedModel, shownOptions);
   const reasoning = reasoningShown(selected?.reasoningEffort ?? null, selectedModel);
   // The permission mode is shown where the host offers modes.
   const permissionModes = offeredPermissionModes(activeChoices);
@@ -1489,12 +1491,13 @@ ${value}` : value);
         disabled={invalidEpoch} onChange={value => void applyReview(value)} />}
       sandbox={shownSandbox && <SessionSandboxSelect id={`composer-sandbox-${sessionId}`} own={shownSandbox.reply.own} inherited={shownSandbox.inherited}
         choices={shownSandbox.reply.choices} disabled={invalidEpoch} onChange={value => void applySandbox(value)} />}
-      options={shownOptions && { changed: changedSessionOptions(shownOptions),
-        content: <SessionOptionsFields id={sessionId} value={shownOptions} disabled={invalidEpoch} onChange={value => void applyOptions(value)} /> }}
+      options={shownOptions && { changed: changedSessionOptions(shownOptions, selectedModel ?? null),
+        content: <SessionOptionsFields id={sessionId} value={shownOptions} context={selectedModel} disabled={invalidEpoch} onChange={value => void applyOptions(value)} /> }}
       permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
         disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined} /></>}
     meters={usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} persisted={persistedUsage} onOpenDocumentation={onOpenDocumentation}
+        limit={contextLimit === null ? null : String(contextLimit)}
         provider={selected?.providerKey ?? observedProvider ?? null} model={selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : null}
         refreshKey={`${observing}:${composerBusy}:${compacting}:${runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.activeRunId ?? "" : ""}:${liveState?.snapshot?.revision ?? ""}`} />}
     more={{ attention: moreAttention, label: moreLabel, question: archive?.question, items: <>
