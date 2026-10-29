@@ -136,14 +136,17 @@ export function singleSessionTab<T extends SessionTabs>(state: T): T {
  * The sessions whose pane is kept without a tab, out of sight: those named, as the catalog lists them, but the ones
  * that have a tab. They are the sessions whose tab was closed, or taken by another session, while prompts wait above
  * their composer, which is what sends them. A session the catalog does not list once, or lists under another scope,
- * has no pane.
+ * has no pane. A session the shown space does not list at all (one of another space) is resolved in `whole`, the
+ * catalog of every space, when it is given: its prompts are sent while the window shows another space.
  */
-export function backgroundSessionTabs(snapshot: WorkspaceSnapshot, sessionIds: readonly string[], open: readonly SessionTab[]): SessionTab[] {
+export function backgroundSessionTabs(snapshot: WorkspaceSnapshot, sessionIds: readonly string[], open: readonly SessionTab[],
+  whole: WorkspaceSnapshot | null = null): SessionTab[] {
   const tabs: SessionTab[] = [];
   for (const id of new Set(sessionIds)) {
     if (open.some(tab => tab.sessionId === id) || tabs.length >= sessionTabLimit) continue;
-    const row = snapshot.sessions.find(value => value.id === id);
-    const tab = row ? selectedTab(snapshot, row.scopeKind === "project" ? row.projectId : null, id) : null;
+    const listed = snapshot.sessions.some(value => value.id === id) ? snapshot : whole;
+    const row = listed?.sessions.find(value => value.id === id);
+    const tab = listed && row ? selectedTab(listed, row.scopeKind === "project" ? row.projectId : null, id) : null;
     if (tab) tabs.push(tab);
   }
   return tabs;

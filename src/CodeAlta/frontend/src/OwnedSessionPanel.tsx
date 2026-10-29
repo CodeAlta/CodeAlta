@@ -258,8 +258,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     setSelection(value.selection);
     setChoicesNotice("The agent, the model and the effort apply on Send; the permission mode applies at once, also to a running turn.");
   }), [epoch, sessionId, capability, selections]);
+  // A pane out of sight reads them too while prompts wait above it: a queued prompt goes with the selection it was
+  // queued with, which is checked against them before it is sent.
   useEffect(() => {
-    if (!observing) { setLoadingChoices(false); return; }
+    if (!watching) { setLoadingChoices(false); return; }
     const controller = new AbortController();
     const revision = selectionRevision.current;
     setChoicesNotice("Loading session choices…");
@@ -291,7 +293,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       }).catch(() => { if (!controller.signal.aborted && revision === selectionRevision.current) setChoicesNotice("Session choices could not be loaded. Reopen the Model selector to try again."); })
       .finally(() => { if (!controller.signal.aborted) setLoadingChoices(false); });
     return () => controller.abort();
-  }, [epoch, sessionId, capability, selections, choicesRevision, observing]);
+  }, [epoch, sessionId, capability, selections, choicesRevision, watching]);
   // A session shown in the window shows the turns made outside CodeAlta (in VS Code, in a terminal) on the conversation
   // of its provider: the host adds them to its journal, which the timeline then reads. Nothing is read again when
   // nothing changed, and the next message adds them all the same.
@@ -681,7 +683,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const chosen = selections.current(epoch, sessionId) ?? selection;
     const usable = chosen && activeChoices && validSelection(activeChoices, chosen) ? chosen : null;
     const sendSelection = next.selection ?? usable ?? (next.images ? activeChoices?.current ?? null : null);
-    if (next.selection && (!activeChoices || !validSelection(activeChoices, next.selection))) {
+    // The choices of the session are read before a selection is judged: the row waits for them, it is not refused.
+    if (next.selection && !activeChoices) return;
+    if (next.selection && !validSelection(activeChoices!, next.selection)) {
       queue.fail(next.id, "invalid_selection"); return;
     }
     // A file goes to any model; an image needs one that reads images.
@@ -807,6 +811,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const lifetime = scope.current?.signal;
     if (!lifetime || lifetime.aborted || request.signal?.aborted || !canAdmit() || !capability.canMutate()) return false;
     const signal = request.signal ? AbortSignal.any([lifetime, request.signal]) : lifetime;
+    // A queued prompt is the queue's, not this composer's: it outlives the pane (a closed tab, another space shown), and
+    // whichever pane of the session is mounted sends it. Only the one who asked can take it back before it leaves.
+    const queued = request.signal ?? queue.signal;
     const value = request.text ?? "";
     let result: boolean | null = null;
     const received = (reply: SubmissionResult) => {
@@ -832,7 +839,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       if (chosen && (!activeChoices || !validSelection(activeChoices, chosen))) return false;
       // Enqueue has always meant a deferred Send, including when this saved session is unattached.
       // Keep the requested next-send selection and await the row's original downstream receipt.
-      return await queue.admit(epoch, sessionId, value, signal, chosen);
+      return await queue.admit(epoch, sessionId, value, queued, chosen);
     } else {
       const chosen = selections.current(epoch, sessionId) ?? selected;
       if (chosen && (!activeChoices || !validSelection(activeChoices, chosen))) return false;
@@ -847,10 +854,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         received(reply);
       });
       // Preserve ordinary Send's busy-race behavior, but still await actual downstream admission of
-      // the deferred Send. Close/unmount after the refusal conclusively prevents the new attempt.
-      if (becameBusy && !signal.aborted && canAdmit() && capability.canMutate()) {
+      // the deferred Send. A Close by the one who asked, after the refusal, conclusively prevents the new attempt.
+      if (becameBusy && !queued.aborted && canAdmit() && capability.canMutate()) {
         submissions.acknowledgeOutgoing([outgoingKey(command)]);
-        return await queue.admit(epoch, sessionId, value, signal, chosen);
+        return await queue.admit(epoch, sessionId, value, queued, chosen);
       }
     }
     return result;

@@ -275,6 +275,16 @@ test("the sessions that keep a pane without a tab are the named ones the catalog
   assert.deepEqual(backgroundSessionTabs({ ...catalog, projects: [] }, ["one", "global"], []), [tab("global", null)]);
 });
 
+test("a session of another space keeps its pane out of sight while prompts wait above its composer", () => {
+  // The window shows a space that does not list "two": the whole catalog does, and its prompts are sent from there.
+  const shown = { ...catalog, sessions: catalog.sessions.filter(row => row.id !== "two") };
+  assert.deepEqual(backgroundSessionTabs(shown, ["two"], []), [], "without the whole catalog it has no pane");
+  assert.deepEqual(backgroundSessionTabs(shown, ["two", "one"], [], catalog), [tab("two"), tab("one")]);
+  assert.deepEqual(backgroundSessionTabs(shown, ["missing"], [], catalog), [], "a session no catalog lists has no pane");
+  // A session the shown space lists is resolved there, whatever the whole catalog says.
+  assert.deepEqual(backgroundSessionTabs({ ...catalog, projects: [] }, ["one"], [], catalog), []);
+});
+
 test("a pane at the top keeps its tabs in the title row while they have room beside the title bar, and goes below it when crowded", () => {
   const window = { left: 0, right: 1600, top: 0, width: 1600 };
   const pane = (left: number, right: number) => ({ left, right, top: 0, width: right - left });

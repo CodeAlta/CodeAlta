@@ -11,6 +11,7 @@ import { createComposerQueue } from "./composerQueue";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
 import { createNextSendSelectionStore } from "./nextSendSelection";
+import { askPluginComposer } from "./pluginUi";
 import type { SessionAbortRunRequest, SessionAdmission, SessionCompactRequest, SessionReceiptView, SessionRuntimeBackgroundTaskResponse, SessionRuntimeStateResponse,
   SessionSendRequest, SessionSteerRequest } from "#neoastra";
 
@@ -92,6 +93,19 @@ const fixture = {
   enqueueWithImage(text: string) {
     queue.add("Queue", epoch, sessionId, text, [{ title: "Image 1", mediaType: "image/png", base64: "AAAA" }]);
   },
+  /** What the shell asks of the composer (a work item started in this session): its answer, and how its prompt ended once it did. */
+  ask(kind: "send" | "enqueue", text: string) {
+    const request = askPluginComposer(kind, sessionId, text);
+    const asked = { handled: request.handled, result: request.result, outcome: undefined as boolean | null | undefined };
+    void request.completion?.then(value => { asked.outcome = value; }, () => { asked.outcome = null; });
+    return asked;
+  },
+  /**
+   * The pane of the session leaves and comes back, as it does when the window shows another space: out of sight
+   * (`hidden`), as the pane that sends the queued prompts of a session without a tab, or shown again.
+   */
+  unmount() { app.render(null); },
+  mount(hidden = false) { app.render(shell(hidden)); },
 };
 Object.assign(window, { fixture });
 
@@ -109,6 +123,8 @@ const props = {
       pendingAgentPromptId: "default", activity: null },
     runtimeInstanceId: runtime, coordinatorTransitionInProgress: false } satisfies SessionRuntimeStateResponse)),
 };
-createRoot(document.getElementById("app")!).render(createElement("div", { id: "workspace-shell", className: "ide-shell" },
+const shell = (hidden = false) => createElement("div", { id: "workspace-shell", className: "ide-shell" },
   createElement("div", { className: "session-workspace" },
-    createElement("div", { className: "composer-region" }, createElement(OwnedSessionPanel, props)))));
+    createElement("div", { className: "composer-region" }, createElement(OwnedSessionPanel, { ...props, observing: !hidden, active: !hidden }))));
+const app = createRoot(document.getElementById("app")!);
+app.render(shell());
