@@ -5080,12 +5080,18 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const presented = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
   // A secondary window starts no session: it has no tab for the prompt of a new one, but while it holds nothing else.
   const tabView = secondary && presented.open.length + fileTabs.open.length > 0 ? { ...presented, noPrompt: true } : presented;
-  const backgroundTabs = snapshot && status?.hostEpoch ? backgroundSessionTabs(snapshot, queue.sessions(status.hostEpoch), tabView.open) : undefined;
+  // The sessions whose prompts wait above a composer they have no tab for. One of another space is read in the whole
+  // catalog: its pane, out of sight, sends them while the window shows this space.
+  const queuedSessions = status?.hostEpoch ? queue.sessions(status.hostEpoch) : [];
+  const wholeCatalog = snapshot && catalog.current && queuedSessions.some(id => !snapshot.sessions.some(row => row.id === id)) ? withoutArchived(catalog.current) : null;
+  const backgroundTabs = snapshot && status?.hostEpoch ? backgroundSessionTabs(snapshot, queuedSessions, tabView.open, wholeCatalog) : undefined;
+  const paneCatalog = (shown: WorkspaceSnapshot, tab: SessionTab) => wholeCatalog && !shown.sessions.some(row => row.id === tab.sessionId)
+    && backgroundTabs?.some(value => value.sessionId === tab.sessionId) ? wholeCatalog : shown;
   // A rewind made here is known before the list of sessions says it; one made elsewhere (the alta tool) comes with the list.
   const paneRewinds = (id: string, rewindCount: number) => Math.max(rewindCount, rewoundHere.get(id) ?? 0);
   // The owners of the panes that are no longer mounted go once the dock has let them go.
   useEffect(() => {
-    if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
+    if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
   return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
@@ -5419,8 +5425,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             windowEntries={windowMenuEntries} dragOut={tabDragOut} externalDrag={externalDrag} arrival={arrival} onArrived={() => setArrival(null)}
             newSessionLabel={secondary ? t("Move a tab here") : newSessionTabLabel(selectedProject, creatingScope?.projectId === projectId)}
             renderSession={(tab, visible) => {
-              const row = snapshot && resolveSessionTab(snapshot, tab);
               if (!snapshot) return null;
+              const listing = paneCatalog(snapshot, tab);
+              const row = resolveSessionTab(listing, tab);
               if (!row) return <NonIdealState className="session-unavailable" icon={<AppIcon name="error" size={32} />} title={t("Session unavailable")}
                 description={t("This session is no longer in the catalog. Close the tab or refresh the projects.")} />;
               const rewinds = paneRewinds(row.id, row.rewindCount);
@@ -5435,7 +5442,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               return <SessionRetentionGate key={ownerKey} available={admitted()}
                 fallback={<NonIdealState className="session-unavailable" icon={<AppIcon name="error" size={32} />} title={t("Session unavailable")} />}>
                 <ProjectReferenceContext.Provider value={admitted() && owned && status?.hostEpoch && tab.projectId !== null
-                && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
+                && listing.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
               <SessionWorkspace sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} subSessions={workingBelow.get(row.id)}
@@ -5445,7 +5452,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   question: sessionArchiving?.from === "composer" ? sessionArchiveQuestion(row, "top-end") : null } : null} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
-                remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
+                remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={listing} selectedProjectId={tab.projectId}
                 origin={row.automationId ? (() => {
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
                   return <SessionOrigin name={origin.name} summary={origin.summary} onOpen={owned ? () => openAutomations(origin.id) : undefined} />;
