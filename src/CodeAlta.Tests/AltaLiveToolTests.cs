@@ -5419,7 +5419,13 @@ public sealed partial class AltaLiveToolTests
         providerRuntime.PublishIdle(ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!, new AgentRunId("run-1"));
         await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 2).ConfigureAwait(false);
         Assert.AreEqual("queued prompt", ExtractText(providerRuntime.SentOptions[1].Input));
-        var drainedState = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
+        // The provider has the prompt before the drain records the run it started ("submitting", then "submitted").
+        SessionViewLocalState drainedState = null!;
+        await WaitUntilAsync(async () =>
+        {
+            drainedState = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
+            return drainedState.QueuedPrompts.Single().State == "submitted";
+        }).ConfigureAwait(false);
         var drainedItem = drainedState.QueuedPrompts.Single();
         Assert.AreEqual("submitted", drainedItem.State);
         Assert.IsFalse(string.IsNullOrWhiteSpace(drainedItem.RunId));
