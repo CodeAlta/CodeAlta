@@ -18,6 +18,16 @@ export function defaultContextSummary(model: ContextModel | null | undefined, lo
   return tokens != null && Number.isSafeInteger(tokens) && tokens > 0 ? formatContextTokens(tokens, locale) : null;
 }
 
+/** Preview only host-resolved input limits. An unknown or unverified choice has no draft usage meter. */
+export function draftContextInputTokens(model: (ContextModel & {
+  defaultInputTokens?: number | null;
+  contextInputTokens?: Readonly<Record<string, number | null>> | null;
+}) | null | undefined, choice: ContextChoice): number | null {
+  if (!validContext(choice, model)) return null;
+  const tokens = choice?.tokens == null ? model?.defaultInputTokens : model?.contextInputTokens?.[choice.tokens];
+  return tokens != null && Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null;
+}
+
 /** Always use K, retaining exact token precision rather than rounding distinct capacities to the same label. */
 export function formatContextTokens(tokens: number, locale: string): string {
   // Dividing a large safe integer first can round adjacent token counts to the same label.

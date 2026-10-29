@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contextSizes, defaultContextSummary, hasProviderContextOption, validContext } from "./contextSizes";
+import { contextSizes, defaultContextSummary, draftContextInputTokens, hasProviderContextOption, validContext } from "./contextSizes";
 
 test("context choices are exact positive safe endpoints, never inferred from a maximum", () => {
   assert.deepEqual(contextSizes({ contextSizes: [272000, 1050000, 272000, -1, 0, 1.5, Infinity, NaN] }), [272000, 1050000]);
@@ -32,4 +32,22 @@ test("default summary formats only a positive safe resolved capacity", () => {
 test("ACP keeps its existing context option", () => {
   assert.equal(hasProviderContextOption([{ id: "context", name: "Context size" }]), true);
   assert.equal(hasProviderContextOption([{ id: "fast", name: "Fast mode" }]), false);
+});
+
+test("draft meter uses host-resolved input budgets, never raw capacities or unverified choices", () => {
+  const model = { contextSizes: [272000, 922000], defaultContextTokens: 272000, contextTokens: 1050000,
+    defaultInputTokens: 272000, contextInputTokens: { "272000": 272000, "922000": 922000 } };
+  assert.equal(draftContextInputTokens(model, undefined), 272000);
+  assert.equal(draftContextInputTokens(model, { tokens: 922000 }), 922000);
+  assert.equal(draftContextInputTokens(model, { tokens: null }), 272000);
+  assert.equal(draftContextInputTokens({ ...model, defaultInputTokens: 922000 }, null), 922000, "Default follows the provider preference");
+  assert.equal(draftContextInputTokens({ ...model, defaultInputTokens: 258400,
+    contextInputTokens: { "922000": 875900 } }, { tokens: 922000 }), 875900, "headroom is resolved by the host, not duplicated in the UI");
+  assert.equal(draftContextInputTokens(model, { tokens: 500000 }), null);
+  assert.equal(draftContextInputTokens(undefined, { tokens: 922000 }), null);
+  assert.equal(draftContextInputTokens({ ...model, defaultInputTokens: null, contextInputTokens: { "922000": null } }, null), null);
+  assert.equal(draftContextInputTokens({ ...model, contextInputTokens: { "922000": null } }, { tokens: 922000 }), null);
+  assert.equal(draftContextInputTokens({ contextSizes: model.contextSizes, defaultContextTokens: 272000 }, null), null);
+  for (const tokens of [-1, 0, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1])
+    assert.equal(draftContextInputTokens({ ...model, defaultInputTokens: tokens }, null), null);
 });

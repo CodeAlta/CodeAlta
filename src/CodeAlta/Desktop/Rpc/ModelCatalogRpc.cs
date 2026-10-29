@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
 using CodeAlta.Agent.ModelCatalog;
+using CodeAlta.Agent.Runtime.Compaction;
 using NeoAstra.Rpc;
 using XenoAtom.Logging;
 
@@ -173,11 +174,15 @@ internal sealed class ModelCatalogService(
                 DesktopJsonContext.Default.ModelCatalogModelsResponse).Length;
             foreach (var model in valid.Take(MaximumModels))
             {
+                var preference = descriptor.ContextPreferences?.TryGetValue(model.Id, out var preferred) == true ? preferred : (long?)null;
                 var projected = ProjectModel(model) with
                 {
                     AdvertisedContextTokens = AgentModelContextSizes.DefaultCapacity(model, null),
-                    DefaultContextTokens = AgentModelContextSizes.DefaultCapacity(model,
-                        descriptor.ContextPreferences?.TryGetValue(model.Id, out var preference) == true ? preference : null),
+                    DefaultContextTokens = AgentModelContextSizes.DefaultCapacity(model, preference),
+                    DefaultInputTokens = ContextInputTokens(model, null, preference),
+                    ContextInputTokens = model.ContextSizes?.TokenCounts.ToDictionary(
+                        static tokens => tokens.ToString(CultureInfo.InvariantCulture),
+                        tokens => ContextInputTokens(model, tokens, null)),
                 };
                 var nextBytes = JsonSerializer.SerializeToUtf8Bytes(projected, DesktopJsonContext.Default.ModelCatalogModel).Length;
                 if (bytes + nextBytes + (models.Count > 0 ? 1 : 0) > MaximumModelsResponseBytes) break;
@@ -214,6 +219,14 @@ internal sealed class ModelCatalogService(
     private static bool ValidId(string? value) => value is { Length: > 0 and <= 256 } && !string.IsNullOrWhiteSpace(value)
         && value.Trim() == value && !value.Any(char.IsControl);
     private static string Bound(string? value, int length) => value is { Length: > 0 } ? value[..Math.Min(value.Length, length)] : "Unknown";
+
+    // The new-chat meter previews the same usable input limit as the runtime, not the catalog's total envelope.
+    // Keep provider headroom, output reservations and provider-owned unknown windows out of frontend arithmetic.
+    private static decimal? ContextInputTokens(AgentModelInfo model, long? tokens, long? preference)
+        => AgentTokenBudgetResolver.Resolve(model with
+        {
+            EffectiveContextWindowTokens = model.ContextSizes?.Resolve(tokens, preference),
+        }, AgentCompactionSettings.Default).InputContextLimit;
 
     private ModelCatalogModel ProjectModel(AgentModelInfo model)
     {
@@ -388,6 +401,10 @@ internal sealed record ModelCatalogModel(string Id, string Name, string? Descrip
     public decimal? DefaultContextTokens { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public decimal? AdvertisedContextTokens { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? DefaultInputTokens { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, decimal?>? ContextInputTokens { get; init; }
 
     // True when Efforts is all the model has and its provider sends no other one (Claude Code); absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

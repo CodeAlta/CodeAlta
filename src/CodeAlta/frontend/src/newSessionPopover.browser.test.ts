@@ -196,8 +196,8 @@ test("a new session is created from a form beside the row of its project or of t
     assert.equal(await shown("#composer-context-create"), false, "context does not clutter the main picker");
     await press(".composer-selection-more-button");
     await until("!!document.querySelector('#composer-context-create')", "context is under More options");
-    await select("#composer-context-create", "1050000");
-    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(chip)}).textContent.includes('1,050,000')`), false, "no duplicate context in the chip");
+    await select("#composer-context-create", "922000");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(chip)}).textContent.includes('922K')`), false, "no duplicate context in the chip");
     assert.equal(await shown(form), true, "the form stayed open through every choice");
     // Escape in the choices closes them alone.
     await escape();
@@ -233,7 +233,7 @@ test("a new session is created from a form beside the row of its project or of t
     assert.equal(await evaluate("newSessionFixture.creates[0].permissionMode"), "bypassPermissions", "the session is created in the mode chosen");
     // The session starts in that mode: its own composer names it, as the mode of the session.
     await until("[...document.querySelectorAll('.owned-session .composer-selection')].some(node=>/Plan.*New model.*Low.*Bypass permissions/.test(node.textContent)&&node.title.includes('Provider: Alternate'))", "the choices are those of its first Send");
-    assert.equal(await evaluate("JSON.parse(localStorage.getItem('codealta.desktop.selection.created-1')).selection.context.tokens"), 1050000,
+    assert.equal(await evaluate("JSON.parse(localStorage.getItem('codealta.desktop.selection.created-1')).selection.context.tokens"), 922000,
       "context is handed to the owned session, not a provider-wide mutation");
     assert.deepEqual(await evaluate("settingsShellFixture.sends"), [], "a creation sends nothing");
     assert.deepEqual(await remembered(), { [projectScope]: { providerKey: "alternate", modelId: "new", reasoningEffort: "Low", permissionMode: "bypassPermissions" } });
@@ -475,7 +475,25 @@ test("a new session is created from a form beside the row of its project or of t
     // The name of the row: its buttons take the rest of it once the pointer is there.
     await press(projectRow, 0.15);
     await until(`document.querySelector(${JSON.stringify(projectRow)}).getAttribute("aria-pressed") === "true" && !!document.querySelector('#catalog-prompt textarea')`, "the prompt of a new session of the project");
-    await evaluate("document.querySelector('#catalog-prompt').focus()");
+    const draftMeter = "#active-session-content .context-usage";
+    await until(`!!document.querySelector(${JSON.stringify(draftMeter)})`, "the draft context meter");
+    assert.equal(await text(`${draftMeter} .context-usage-tokens`), "0/272k",
+      "the draft meter uses the effective default input budget, not the 1.05M total envelope");
+    await press("#active-session-content .composer-selection");
+    await until("!!document.querySelector('#composer-model-new')", "the draft picker");
+    if (!await shown("#composer-context-new"))
+      await evaluate("[...document.querySelectorAll('.composer-selection-form button')].find(node=>node.textContent.trim()==='More options').click()");
+    await until("!!document.querySelector('#composer-context-new')", "the draft context selector");
+    await select("#composer-context-new", "922000");
+    await until(`document.querySelector(${JSON.stringify(`${draftMeter} .context-usage-tokens`)})?.textContent === '0/922k'`, "the draft meter follows an explicit choice");
+    await select("#composer-context-new", "");
+    await until(`document.querySelector(${JSON.stringify(`${draftMeter} .context-usage-tokens`)})?.textContent === '0/272k'`, "Default restores the effective input budget");
+    await escape();
+    await gone(".composer-selection-form", "the draft picker is closed");
+    assert.equal(await evaluate("newSessionFixture.creates.length"), 0, "previewing capacities starts no session");
+    // Refocus the editor after closing the picker, not Monaco's hidden, read-only IME textarea.
+    await evaluate("document.querySelector('#catalog-prompt [role=textbox]').focus()");
+    await until("document.querySelector('#catalog-prompt').contains(document.activeElement) && document.activeElement?.getAttribute('role') === 'textbox'", "the draft editor has focus");
     await command("Input.insertText", { text: "Original local draft" });
     // The worktree is made as soon as the prompt is typed, from the branch chosen: the prompt waits for it, and says so.
     await until("newSessionFixture.prepares.length === 1 && !!document.querySelector('.worktree-preparation')", "the worktree being made");

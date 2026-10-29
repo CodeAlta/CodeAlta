@@ -30,7 +30,8 @@ const prepared = (status: string, hostEpoch: string, baseBranch: string | null):
   steps: status === "ready" ? [] : [{ kind: "checkout", state: "running", detail: "Updating files:  45% (450/1000)", elapsedMilliseconds: 1200, message: null }] });
 // A model with several efforts, so that the reasoning has a slider, and one without any.
 const models = () => [{ id: "new", name: "New model", efforts: ["Low", "Medium", "High"], defaultEffort: "Medium",
-  contextSizes: [272000, 1050000], defaultContextTokens: 272000 },
+  contextSizes: [272000, 922000], defaultContextTokens: 272000, contextTokens: 1050000,
+  defaultInputTokens: 272000, contextInputTokens: { "272000": 272000, "922000": 922000 } },
   { id: "old", name: "Old model", efforts: [] as string[], defaultEffort: null }].filter(model => !fixture.missingModel || model.id !== "new");
 // The alternate provider has the permission modes of Claude Code, configured with one of them; the other one has none.
 const permissionModes = (providerId: string | null) => providerId === "alternate" ? ["default", "acceptEdits", "auto", "dontAsk", "bypassPermissions"].map(id => ({ id })) : [];
