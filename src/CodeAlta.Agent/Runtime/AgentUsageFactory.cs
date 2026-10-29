@@ -79,9 +79,9 @@ internal static class AgentUsageFactory
 
     public static AgentSessionUsage? AttachModelInfo(AgentSessionUsage? usage, AgentModelInfo? modelInfo, bool replaceCapacity = false)
     {
-        if (usage is null)
+        if (usage is null || modelInfo?.ContextSizes?.IsProviderManaged == true)
         {
-            return null;
+            return usage;
         }
 
         var budget = GetModelTokenBudget(modelInfo);
@@ -123,6 +123,11 @@ internal static class AgentUsageFactory
         DateTimeOffset updatedAt,
         string? label = null)
     {
+        if (modelInfo?.ContextSizes?.IsProviderManaged == true)
+        {
+            return usage;
+        }
+
         if (messageCount is not >= 0 && currentTokens is null)
         {
             return usage;

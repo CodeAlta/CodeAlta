@@ -175,6 +175,7 @@ internal sealed class ModelCatalogService(
             {
                 var projected = ProjectModel(model) with
                 {
+                    AdvertisedContextTokens = AgentModelContextSizes.DefaultCapacity(model, null),
                     DefaultContextTokens = AgentModelContextSizes.DefaultCapacity(model,
                         descriptor.ContextPreferences?.TryGetValue(model.Id, out var preference) == true ? preference : null),
                 };
@@ -385,6 +386,8 @@ internal sealed record ModelCatalogModel(string Id, string Name, string? Descrip
     public IReadOnlyList<decimal>? ContextSizes { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public decimal? DefaultContextTokens { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? AdvertisedContextTokens { get; init; }
 
     // True when Efforts is all the model has and its provider sends no other one (Claude Code); absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

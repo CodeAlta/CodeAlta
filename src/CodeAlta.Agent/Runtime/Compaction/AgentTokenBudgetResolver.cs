@@ -41,12 +41,24 @@ internal static class AgentTokenBudgetResolver
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        var contextWindow = modelInfo?.EffectiveContextWindowTokens ?? AgentModelContextSizes.DefaultCapacity(modelInfo, null);
+        // An external agent applies the choice and reports its own context, including any runtime headroom.
+        if (modelInfo?.ContextSizes?.IsProviderManaged == true)
+        {
+            return new AgentTokenBudget(null, null, null);
+        }
+
+        var selectedCapacity = modelInfo?.EffectiveContextWindowTokens ?? AgentModelContextSizes.DefaultCapacity(modelInfo, null);
+        var inputBudget = modelInfo?.ContextSizes?.IsInputBudget == true;
+        var contextWindow = inputBudget ? ReadContextCapacity(modelInfo) : selectedCapacity;
         var inputTokenLimit = TryReadCapability(modelInfo, InputTokenCapabilityKeys);
         var outputTokenLimit = TryReadCapability(modelInfo, OutputTokenCapabilityKeys);
         var percent = TryReadCapability(modelInfo, [EffectiveContextPercentKey]);
         long? usable = null;
-        if (contextWindow is > 0 && percent is > 0 and <= 100)
+        if (inputBudget && selectedCapacity is > 0)
+        {
+            usable = selectedCapacity;
+        }
+        else if (contextWindow is > 0 && percent is > 0 and <= 100)
         {
             usable = Math.Max((long)((decimal)contextWindow.Value * percent.Value / 100), 1L);
         }

@@ -58,7 +58,7 @@ export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "u
       models: [(window as Window & { fixtureNoReasoning?: boolean }).fixtureNoReasoning
         ? { id: "fixture-model", name: "Fixture model", efforts: [], effortsComplete: true, imageInput: null, startEffort: null }
         : { id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"], imageInput: null, startEffort: "high",
-          ...(context() ? { contextSizes: [272000, 1050000], defaultContextTokens: 272000 } : {}),
+          ...(context() ? { contextSizes: [272000, 922000], defaultContextTokens: 272000 } : {}),
           ...(modelOptions() ? { options: optionsOf(modelOptions()!) } : {}) }],
       ...(modes ? { permissionModes: [{ id: "default" }, { id: "acceptEdits" }, { id: "bypassPermissions" }], defaultPermissionMode: "bypassPermissions" } : {}),
       // The provider of the session was taken out of its space.

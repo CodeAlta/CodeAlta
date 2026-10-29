@@ -4,6 +4,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Catalog;
 
 namespace CodeAlta.Tests;
@@ -11,6 +12,71 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class CopilotDirectProviderTests
 {
+    [TestMethod]
+    [DataRow("""{"token_prices":{"default":{"max_prompt_tokens":272000},"long_context":{"max_prompt_tokens":922000}}}""", "272000,922000", 272000L)]
+    [DataRow("""{"token_prices":{"default":{"context_max":272000}}}""", "272000,922000", 272000L)]
+    [DataRow("""{"token_prices":{"default":{"max_prompt_tokens":272000,"context_max":128000}}}""", "272000,922000", 272000L)]
+    [DataRow("""{"token_prices":{"default":{"max_prompt_tokens":922000}}}""", "922000", 922000L)]
+    [DataRow("{}", "922000", 922000L)]
+    [DataRow("""{"token_prices":{"default":{"max_prompt_tokens":-1}}}""", "", 922000L)]
+    [DataRow("""{"token_prices":{"default":{"max_prompt_tokens":1050000}}}""", "", 922000L)]
+    public async Task CopilotDirect_ContextChoicesUseAdvertisedPromptTiers(string billing, string choices, long defaultTokens)
+    {
+        string? apiVersion = null;
+        var handler = new StubHandler(request =>
+        {
+            apiVersion = request.Headers.TryGetValues("X-GitHub-Api-Version", out var versions) ? versions.Single() : null;
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent($$$"""
+                    {"data":[{
+                      "model_picker_enabled":true,"id":"context-test","name":"Context test",
+                      "supported_endpoints":["/responses"],"policy":{"state":"enabled"},
+                      "capabilities":{"family":"gpt","limits":{
+                        "max_context_window_tokens":1050000,"max_output_tokens":128000,"max_prompt_tokens":922000}},
+                      "billing":{{{billing}}}
+                    }]}
+                    """, Encoding.UTF8, "application/json"),
+            };
+        });
+        const string tokenVariable = "CODEALTA_TEST_COPILOT_CONTEXT_TOKEN";
+        await using var runtime = new CopilotDirectModelProviderRuntime(new()
+        {
+            StateRootPath = Path.GetTempPath(),
+            Providers =
+            {
+                new()
+                {
+                    ProviderKey = "github-copilot",
+                    Auth = new() { AuthSource = CopilotDirectAuthSources.CopilotTokenEnvironment, CopilotTokenEnvironmentVariable = tokenVariable },
+                    HttpClient = new HttpClient(handler),
+                },
+            },
+        });
+        Environment.SetEnvironmentVariable(tokenVariable, "test-token");
+        try
+        {
+            var model = (await runtime.ListModelsAsync()).Single();
+            Assert.IsNotNull(model.ContextSizes);
+            Assert.AreEqual(choices, string.Join(',', model.ContextSizes.TokenCounts));
+            Assert.AreEqual(defaultTokens, model.ContextSizes.DefaultTokens);
+            Assert.AreEqual(defaultTokens, AgentTokenBudgetResolver.Resolve(model, AgentCompactionSettings.Default).InputContextLimit,
+                "A prompt budget already reserves output; do not subtract it twice.");
+            foreach (var tokens in model.ContextSizes.TokenCounts)
+            {
+                var selected = AgentModelContextResolver.Resolve(model, model.Id, "github-copilot", tokens, null)!;
+                var budget = AgentTokenBudgetResolver.Resolve(selected, AgentCompactionSettings.Default);
+                Assert.AreEqual(tokens, budget.InputContextLimit);
+                Assert.AreEqual(1050000L, budget.TotalContextEnvelope);
+                Assert.AreEqual(128000L, budget.MaxOutputTokens);
+                var usage = AgentUsageFactory.AttachModelInfo(new AgentSessionUsage(Window: new(1000, 1, 2)), selected);
+                Assert.AreEqual(tokens, usage!.TokenLimit);
+            }
+            Assert.AreEqual("2026-08-01", apiVersion, "Discovery must request the version that exposes tiered billing.");
+        }
+        finally { Environment.SetEnvironmentVariable(tokenVariable, null); }
+    }
+
     [TestMethod]
     public void ValidateGlobalConfigContent_AcceptsCopilotDirectProvider()
     {
@@ -447,6 +513,8 @@ public sealed class CopilotDirectProviderTests
 
             Assert.AreEqual(new Uri("https://api.github.com/copilot_internal/v2/token"), request.RequestUri);
             Assert.AreEqual("Bearer github-token", request.Headers.Authorization?.ToString());
+            CollectionAssert.AreEqual(new[] { "2022-11-28" }, request.Headers.GetValues("X-GitHub-Api-Version").ToArray(),
+                "The GitHub authentication API keeps its own version, without a duplicate Copilot endpoint header.");
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
@@ -488,6 +556,7 @@ public sealed class CopilotDirectProviderTests
             Assert.AreEqual(HttpMethod.Post, request.Method);
             Assert.AreEqual(new Uri("https://api.individual.githubcopilot.com/chat/completions"), request.RequestUri);
             Assert.AreEqual("Bearer test-token", request.Headers.Authorization?.ToString());
+            CollectionAssert.AreEqual(new[] { "2026-08-01" }, request.Headers.GetValues("X-GitHub-Api-Version").ToArray());
             Assert.IsTrue(request.Headers.TryGetValues("X-Initiator", out var initiator));
             Assert.AreEqual("user", initiator.Single());
             return new HttpResponseMessage(HttpStatusCode.OK)

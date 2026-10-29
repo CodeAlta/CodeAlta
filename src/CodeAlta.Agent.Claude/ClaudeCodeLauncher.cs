@@ -12,7 +12,8 @@ namespace CodeAlta.Agent.Claude;
 /// <see cref="AgentToolPatterns.WebSearchToolName"/> or <see cref="AgentToolPatterns.WebFetchToolName"/>.
 /// </summary>
 internal sealed record ClaudeCodeLaunchKey(string? WorkingDirectory, string? Model, string? Effort,
-    AgentProcessEnvironment? Environment = null, bool WithoutShell = false, string? WithoutWebTools = null, string? ProcessHost = null)
+    AgentProcessEnvironment? Environment = null, bool WithoutShell = false, string? WithoutWebTools = null, string? ProcessHost = null,
+    long? ContextWindowTokens = null)
 {
     /// <summary>Gets the web tools of the CLI a session does without, separated by commas, or null for none.</summary>
     /// <param name="disabledTools">The tools the session does without.</param>
@@ -230,6 +231,27 @@ internal static class ClaudeCodeLauncher
         foreach (var (name, value) in options.EnvironmentVariables)
         {
             environment[name] = value;
+        }
+
+        // Only this process is restricted. Default does not set or clear inherited/provider configuration.
+        if (key.ContextWindowTokens == 200_000)
+        {
+            // Windows applies environment names without regard to case. Remove every spelling first: updating an
+            // earlier key in this ordinal dictionary would let a later, differently cased key undo the restriction.
+            if (OperatingSystem.IsWindows())
+            {
+                foreach (var name in environment.Keys.Where(static name =>
+                             string.Equals(name, ClaudeCodeContextSizes.DisableVariable, StringComparison.OrdinalIgnoreCase)).ToArray())
+                {
+                    environment.Remove(name);
+                }
+            }
+            environment[ClaudeCodeContextSizes.DisableVariable] = "1";
+        }
+        else if (key.ContextWindowTokens == 1_000_000 &&
+                 (ClaudeCodeContextSizes.IsRestricted(options) || ClaudeCodeContextSizes.IsRestricted(environment)))
+        {
+            throw new InvalidOperationException("Claude Code's 1M context is disabled by the process environment. Select Default or 200K.");
         }
 
         // The account of the provider: its login, settings, memory and transcripts are in that folder.

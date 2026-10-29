@@ -42,6 +42,7 @@ internal sealed class CopilotModelDiscoveryClient
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential.Token);
             request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
             CopilotDirectHeaders.ApplyStaticHeaders(request.Headers);
+            request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", CopilotDirectHeaders.ApiVersion);
             using var response = await _httpClient.SendAsync(request, timeout.Token).ConfigureAwait(false);
             var json = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
@@ -185,7 +186,28 @@ internal sealed class CopilotModelDiscoveryClient
             Provider: providerDescriptor.ProviderKey,
             DefaultReasoningEffort: defaultReasoningEffort,
             SupportedReasoningEfforts: supportedReasoningEfforts,
-            Capabilities: capabilities);
+            Capabilities: capabilities)
+        {
+            ContextSizes = ContextSizes(item),
+        };
+    }
+
+    private static AgentModelContextSizes? ContextSizes(CopilotModelItem item)
+    {
+        if (item.Capabilities?.Limits?.MaxPromptTokens is not long full || full is <= 0 or > AgentModelContextSizes.MaximumTokens)
+        {
+            return null;
+        }
+
+        // Copilot's direct selector uses billing.token_prices.default's prompt cap and the endpoint's full
+        // max_prompt_tokens (VS Code getContextSizeOptions). These are input budgets, not total envelopes.
+        var tier = item.Billing?.TokenPrices?.Default;
+        var standard = tier?.MaxPromptTokens ?? tier?.ContextMax;
+        return standard is null
+            ? new(full, [full]) { IsInputBudget = true }
+            : standard > 0 && standard <= full
+                ? new(standard, [standard.Value, full]) { IsInputBudget = true }
+                : new(full, []) { IsInputBudget = true };
     }
 
     private static IReadOnlyList<AgentReasoningEffort> MapReasoningEfforts(CopilotModelSupports? supports)
@@ -367,6 +389,30 @@ internal sealed class CopilotModelItem
 
     [JsonPropertyName("capabilities")]
     public CopilotModelCapabilities? Capabilities { get; set; }
+
+    [JsonPropertyName("billing")]
+    public CopilotModelBilling? Billing { get; set; }
+}
+
+internal sealed class CopilotModelBilling
+{
+    [JsonPropertyName("token_prices")]
+    public CopilotModelTokenPrices? TokenPrices { get; set; }
+}
+
+internal sealed class CopilotModelTokenPrices
+{
+    [JsonPropertyName("default")]
+    public CopilotModelTokenPrice? Default { get; set; }
+}
+
+internal sealed class CopilotModelTokenPrice
+{
+    [JsonPropertyName("max_prompt_tokens")]
+    public long? MaxPromptTokens { get; set; }
+
+    [JsonPropertyName("context_max")]
+    public long? ContextMax { get; set; }
 }
 
 internal sealed class CopilotModelPolicy

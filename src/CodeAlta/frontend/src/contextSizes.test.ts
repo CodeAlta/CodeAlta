@@ -16,8 +16,14 @@ test("context choices are exact positive safe endpoints, never inferred from a m
 
 test("default summary formats only a positive safe resolved capacity", () => {
   const model = { contextSizes: [272000, 1050000], defaultContextTokens: 272000 };
-  assert.equal(defaultContextSummary(model), "272,000");
-  assert.equal(defaultContextSummary(model, "de"), "272.000");
+  assert.equal(defaultContextSummary(model), "272K");
+  assert.equal(defaultContextSummary(model, "de"), "272K");
+  assert.equal(defaultContextSummary({ defaultContextTokens: 922000 }), "922K");
+  assert.equal(defaultContextSummary({ defaultContextTokens: 1050000 }), "1,050K");
+  assert.equal(defaultContextSummary({ defaultContextTokens: 131072 }), "131.072K");
+  assert.equal(defaultContextSummary({ defaultContextTokens: 131072 }, "de"), "131,072K");
+  assert.equal(defaultContextSummary({ defaultContextTokens: Number.MAX_SAFE_INTEGER - 1 }), "9,007,199,254,740.99K");
+  assert.equal(defaultContextSummary({ defaultContextTokens: Number.MAX_SAFE_INTEGER }), "9,007,199,254,740.991K");
   assert.equal(defaultContextSummary(undefined), null);
   for (const defaultContextTokens of [-1, 0, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1])
     assert.equal(defaultContextSummary({ defaultContextTokens }), null);

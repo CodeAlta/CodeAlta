@@ -83,6 +83,9 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets what a result says of the models of the conversation. The default names the model that answers.</summary>
     public Func<JsonObject>? ModelUsage { get; set; }
 
+    /// <summary>Gets or sets the exact model entries returned by initialize, instead of the standard fixture.</summary>
+    public JsonArray? Models { get; set; }
+
     /// <summary>Adds the cost of a turn to its conversation and returns the total, which is what the CLI reports.</summary>
     public double AddCost(string conversationId, double cost)
         => _totalCosts.AddOrUpdate(conversationId, cost, (_, total) => total + cost);
@@ -158,19 +161,22 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
 
     /// <summary>The options of a provider that runs this CLI.</summary>
     public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code", string? configDirectory = null, TimeSpan? startupTimeout = null,
-        AgentProviderProcesses? providerProcesses = null)
+        AgentProviderProcesses? providerProcesses = null, string? inheritedContextRestriction = null,
+        IReadOnlyDictionary<string, string>? environmentVariables = null)
         => new()
         {
             ProviderKey = providerKey,
             ProviderProcesses = providerProcesses,
             ConfigDirectory = configDirectory,
             DisplayName = "Claude Code",
+            EnvironmentVariables = environmentVariables ?? new Dictionary<string, string>(StringComparer.Ordinal),
             TransportFactory = this,
             LocateTranscript = LocateTranscript,
             ResolveCli = static () => new ClaudeCodeCliResolution("/fake/bin/claude", null),
             // Not the environment of the machine that runs the tests, where an API key may wait for an answer, nor
             // its registry of live sessions.
-            GetEnvironmentVariable = name => name == ClaudeCodeProjectFolders.ConfigDirectoryVariable ? ConfigRoot : null,
+            GetEnvironmentVariable = name => name == ClaudeCodeProjectFolders.ConfigDirectoryVariable ? ConfigRoot
+                : name == "CLAUDE_CODE_DISABLE_1M_CONTEXT" ? inheritedContextRestriction : null,
             ProcessProbe = Probe,
             HeldConversationPollInterval = TimeSpan.FromMilliseconds(20),
             IdleTimeout = TimeSpan.Zero,
@@ -672,7 +678,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                 var initialized = new JsonObject
                 {
                     ["commands"] = new JsonArray(),
-                    ["models"] = new JsonArray(
+                    ["models"] = _cli.Models?.DeepClone() ?? new JsonArray(
                         new JsonObject
                         {
                             ["value"] = "default",

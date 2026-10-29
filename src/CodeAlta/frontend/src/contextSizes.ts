@@ -15,7 +15,17 @@ export function validContext(choice: ContextChoice, model: ContextModel | null |
 /** Formats the resolved Default capacity; explicit and unverified choices are rendered by the selector. */
 export function defaultContextSummary(model: ContextModel | null | undefined, locale = "en"): string | null {
   const tokens = model?.defaultContextTokens;
-  return tokens != null && Number.isSafeInteger(tokens) && tokens > 0 ? tokens.toLocaleString(locale) : null;
+  return tokens != null && Number.isSafeInteger(tokens) && tokens > 0 ? formatContextTokens(tokens, locale) : null;
+}
+
+/** Always use K, retaining exact token precision rather than rounding distinct capacities to the same label. */
+export function formatContextTokens(tokens: number, locale: string): string {
+  // Dividing a large safe integer first can round adjacent token counts to the same label.
+  const whole = Math.floor(tokens / 1000).toLocaleString(locale);
+  const fraction = new Intl.NumberFormat(locale, { maximumFractionDigits: 3 })
+    .formatToParts((tokens % 1000) / 1000)
+    .filter(part => part.type === "decimal" || part.type === "fraction").map(part => part.value).join("");
+  return `${whole}${fraction}K`;
 }
 
 /** ACP's existing provider-global context option remains the only context control for that model. */

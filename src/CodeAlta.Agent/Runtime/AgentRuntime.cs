@@ -488,8 +488,9 @@ public sealed class AgentRuntime : IAsyncDisposable
                                summary.ModelId ??
                                state.Usage?.LastOperation?.Model ??
                                summary.Usage?.LastOperation?.Model;
-        var replaceCapacity = provider.TurnExecutor is not IAgentProviderCompaction ||
-                              options.ContextWindowTokens is not null || options.PreferredContextWindowTokens is not null;
+        var replaceCapacity = provider.TurnExecutor is not IAgentProviderKeptConversation &&
+                              (provider.TurnExecutor is not IAgentProviderCompaction ||
+                               options.ContextWindowTokens is not null || options.PreferredContextWindowTokens is not null);
         // Local budgets are resolved anew even when both options are null (clearing to Default). With no
         // discovery, keep counts but not a formerly selected capacity. Agents owning their context keep theirs.
         if (replaceCapacity)

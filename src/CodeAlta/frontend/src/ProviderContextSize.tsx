@@ -28,7 +28,7 @@ export function ProviderContextSize({ epoch, providerId, modelId, preferences, d
   const chosen = modelId || model?.id || "";
   return <FormGroup label={t("Context size")} labelFor="provider-context">
     <ContextSizeSelect id="provider-context" value={preferences[chosen] ?? null}
-      model={model ? { contextSizes: model.contextSizes } : undefined}
+      model={model ? { contextSizes: model.contextSizes, defaultContextTokens: model.advertisedContextTokens } : undefined}
       loading={!!providerId && (!current || current.loading)} disabled={disabled}
       onChange={tokens => { if (chosen) onChange(chosen, tokens); }} />
   </FormGroup>;

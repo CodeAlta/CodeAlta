@@ -14,8 +14,9 @@ const readModels = async (request: ModelCatalogModelsRequest): Promise<ModelCata
   state.calls.push(request);
   const reply = { status: state.status, epoch: state.replyEpoch, providerId: state.replyProvider ?? request.providerId, availability: "Ready", truncated: state.truncated,
     models: (state.empty ? [] : ["fast", "reasoning", ...Array.from({ length: state.listed }, (_, index) => `listed-${String(index).padStart(3, "0")}`)]).map(id => ({ id: `${request.providerId}-${id}`, name: `${id} model`, description: null, efforts: [],
-      defaultEffort: null, contextTokens: null, contextSizes: id === "fast" ? [128000] : [272000, 1050000],
-      defaultContextTokens: id === "fast" ? 128000 : 272000,
+      defaultEffort: null, contextTokens: null, contextSizes: id === "fast" ? [128000] : [272000, 922000],
+      defaultContextTokens: id === "fast" ? 128000 : 922000,
+      advertisedContextTokens: id === "fast" ? 128000 : 272000,
       inputTokens: null, outputTokens: null, reasoning: null, tools: null, structuredOutput: null, imageInput: null })) };
   if (state.hold) await new Promise<void>(resolve => state.pending.push(resolve));
   return reply;
@@ -30,6 +31,6 @@ const config = {
 Object.assign(window, { modelsFixture: state });
 createRoot(document.getElementById("root")!).render(<StrictMode><ProviderSettings epoch="epoch" config={config} readModels={readModels}
   readRuntime={async () => ({ status: "ok", epoch: "epoch", providers: [], truncated: false })}
-  probe={async request => ({ status: "ok", epoch: "epoch", providerId: request.providerId, availability: "Ready", reason: null })}
+  probe={async request => { state.status = "ok"; return { status: "ok", epoch: "epoch", providerId: request.providerId, availability: "Ready", reason: null }; }}
   filesApi={{ list: async () => ({ status: "ok", platform: "windows", locations: [] }), open: async () => ({ status: "ok" }), reveal: async () => ({ status: "ok" }) }}
   onOpenModels={() => {}} onOpenConfiguration={() => {}} /></StrictMode>);

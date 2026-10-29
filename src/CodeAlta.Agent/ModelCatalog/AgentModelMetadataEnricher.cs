@@ -92,11 +92,14 @@ internal static class AgentModelMetadataEnricher
             ApplyOverride(capabilities, modelOverride);
             if (contextSizes is not null &&
                 (modelOverride.InputTokenLimit is not null ||
-                 modelOverride.ContextWindowTokens is { } overriddenContext && overriddenContext != contextSizes.DefaultTokens))
+                 modelOverride.ContextWindowTokens is { } overriddenContext && (contextSizes.IsInputBudget || overriddenContext != contextSizes.DefaultTokens)))
             {
                 // These are legacy metadata overrides, not verified context preferences. Keep their budget but
                 // do not continue advertising discovery choices whose limits the user has replaced.
-                contextSizes = new AgentModelContextSizes(modelOverride.ContextWindowTokens ?? contextSizes.DefaultTokens, []);
+                contextSizes = new AgentModelContextSizes(modelOverride.ContextWindowTokens ?? contextSizes.DefaultTokens, [])
+                {
+                    IsInputBudget = modelOverride.ContextWindowTokens is null && contextSizes.IsInputBudget,
+                };
             }
 
             if (!string.IsNullOrWhiteSpace(modelOverride.DisplayName))

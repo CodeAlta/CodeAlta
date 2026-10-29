@@ -82,7 +82,7 @@ public sealed class ModelCatalogRpcTests
         {
             ContextPreferences = new Dictionary<string, long>(StringComparer.Ordinal)
             {
-                ["model"] = 1000000, ["unknown"] = 1000000,
+                ["model"] = 1000000, ["unknown"] = 1000000, ["managed-preferred"] = 1000000,
             },
         };
         AgentModelInfo[] models =
@@ -90,6 +90,9 @@ public sealed class ModelCatalogRpcTests
             new("model") { ContextSizes = new(200000, [200000, 1000000]) },
             new("Model") { ContextSizes = new(200000, [200000, 1000000]) },
             new("unknown", Capabilities: new Dictionary<string, object?> { ["contextWindow"] = 200000L }),
+            new("managed", Capabilities: new Dictionary<string, object?> { ["contextWindow"] = 999999L })
+                { ContextSizes = new(null, [200000, 1000000], IsProviderManaged: true) },
+            new("managed-preferred") { ContextSizes = new(null, [200000, 1000000], IsProviderManaged: true) },
         ];
         registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => models));
         var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch");
@@ -98,9 +101,18 @@ public sealed class ModelCatalogRpcTests
 
         CollectionAssert.AreEqual(new decimal[] { 200000, 1000000 }, response.Models.Single(model => model.Id == "model").ContextSizes!.ToArray());
         Assert.AreEqual(1000000m, response.Models.Single(model => model.Id == "model").DefaultContextTokens);
+        Assert.AreEqual(200000m, response.Models.Single(model => model.Id == "model").AdvertisedContextTokens,
+            "Clearing the provider preference must show the advertised default, not the preference being cleared.");
         Assert.AreEqual(200000m, response.Models.Single(model => model.Id == "Model").DefaultContextTokens);
         Assert.AreEqual(200000m, response.Models.Single(model => model.Id == "unknown").DefaultContextTokens);
         Assert.IsNull(response.Models.Single(model => model.Id == "unknown").ContextSizes);
+        var managed = response.Models.Single(model => model.Id == "managed");
+        CollectionAssert.AreEqual(new decimal[] { 200000, 1000000 }, managed.ContextSizes!.ToArray());
+        Assert.IsNull(managed.AdvertisedContextTokens, "Catalog metadata cannot invent an external agent's default.");
+        Assert.IsNull(managed.DefaultContextTokens);
+        var preferred = response.Models.Single(model => model.Id == "managed-preferred");
+        Assert.IsNull(preferred.AdvertisedContextTokens);
+        Assert.AreEqual(1000000m, preferred.DefaultContextTokens, "Chat Default follows a verified preference even when the CLI default is unknown.");
     }
 
     [TestMethod]

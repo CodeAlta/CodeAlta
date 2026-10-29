@@ -289,6 +289,7 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
             ["Editor-Version"] = "CodeAlta/1.0",
             ["Editor-Plugin-Version"] = "codealta/1.0",
             ["Copilot-Integration-Id"] = "vscode-chat",
+            ["X-GitHub-Api-Version"] = CopilotDirectHeaders.ApiVersion,
             ["Openai-Intent"] = "conversation-edits",
             ["X-Initiator"] = IsAgentInitiated(request) ? "agent" : "user",
         };

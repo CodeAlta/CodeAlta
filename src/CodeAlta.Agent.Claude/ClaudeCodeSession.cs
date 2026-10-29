@@ -502,15 +502,17 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                      (request.ReasoningEffort is not { } requested || modelInfo.SupportedReasoningEfforts?.Contains(requested) != true)
             ? null
             : ClaudeCodeLauncher.ToEffort(request.ReasoningEffort);
+        var context = ClaudeCodeContextSizes.Resolve(request, _options);
         var key = new ClaudeCodeLaunchKey(
             string.IsNullOrWhiteSpace(request.WorkingDirectory) ? null : request.WorkingDirectory,
-            ClaudeCodeLauncher.ToModelOption(request.ModelId),
+            context.Model,
             effort,
             request.Environment is { IsEmpty: false } environment ? environment : null,
             request.DisabledTools?.Contains(ShellCommandTool) == true,
             ClaudeCodeLaunchKey.WebToolsOf(request.DisabledTools),
             // A process started in another sandbox, or out of one, is another process: it resumes the conversation.
-            request.ProcessHost?.Key);
+            request.ProcessHost?.Key,
+            context.Tokens);
         var permissionMode = ClaudeCodeLauncher.PermissionMode(NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode), key.WithoutShell);
         lock (_gate)
         {

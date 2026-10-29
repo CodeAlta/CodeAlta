@@ -104,6 +104,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [probing, setProbing] = useState(false);
+  const [modelInventoryRevision, setModelInventoryRevision] = useState(0);
   const [confirmRemove, setConfirmRemove] = useState(false);  const [generation, setGeneration] = useState(0);
   const alive = useRef(true);
   // After a save, select the saved provider once the refreshed listing arrives.
@@ -263,6 +264,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
       const reply = await probe({ expectedEpoch: epoch, providerId: original.key }, { signal: new AbortController().signal, timeoutMilliseconds: 45000 });
       if (!alive.current) return;
       if (reply.status === "ok" && reply.epoch === epoch) {
+        setModelInventoryRevision(value => value + 1);
         const id = original.key.toLowerCase();
         setAvailability(current => new Map(current).set(id, { availability: reply.availability, reason: reply.reason ?? null, capabilities: current.get(id)?.capabilities ?? null }));
         // What an agent can do is known once it ran: the listing of the runtime has it after the test.
@@ -384,7 +386,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
                 <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
               </HTMLSelect></FormGroup>
-            <ProviderContextSize key={`${selected}:${listing.revision}`} epoch={epoch} providerId={modelProvider}
+            <ProviderContextSize key={`${selected}:${listing.revision}:${modelInventoryRevision}`} epoch={epoch} providerId={modelProvider}
               modelId={form.model.trim() || fallback("model") || ""} preferences={form.contextPreferences} disabled={busy}
               readModels={readModels} onChange={(model, tokens) => edit(providerContextPreference(form, model, tokens))} />
             {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}

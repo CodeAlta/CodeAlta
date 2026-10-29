@@ -215,9 +215,10 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
           && parseFloat(getComputedStyle(body).paddingTop) > 0
           && context.getBoundingClientRect().top > body.getBoundingClientRect().top;
       })()`), true, "context follows the More options spacer and immediately precedes sub-sessions");
-      assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.value)`), ["", "272000", "1050000"]);
-      await choose("1050000");
-      assert.equal(await evaluate(`${chip}.textContent.includes('1,050,000')`), false, "capacity is not duplicated in the chip");
+      assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.value)`), ["", "272000", "922000"]);
+      assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.textContent)`), ["Default (272K)", "272K", "922K"]);
+      await choose("922000");
+      assert.equal(await evaluate(`${chip}.textContent.includes('922K')`), false, "capacity is not duplicated in the chip");
       assert.equal(await evaluate("fixture.sendCalls.length"), 0, "choosing context calls no model");
       await evaluate(`${chip}.click(); fixture.startRun()`);
       assert.equal(await wait(running), true);
@@ -227,7 +228,7 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       await choose("");
       await evaluate(`${chip}.click(); fixture.finishRun()`);
       assert.equal(await wait(`fixture.sendCalls.length === 1`), true);
-      assert.equal(await evaluate("fixture.sendCalls[0].selection.context.tokens"), 1050000, "queue owns its original context");
+      assert.equal(await evaluate("fixture.sendCalls[0].selection.context.tokens"), 922000, "queue owns its original context");
       await openContext();
       assert.equal(await wait(`!!${select} && !${select}.disabled && ${select}.value === ''`), true, "newer unsent Default was not overwritten");
       await evaluate(`${chip}.click(); fixture.finishRun()`);
@@ -239,10 +240,13 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       await openContext();
       assert.equal(await wait(`!!${select} && !${select}.disabled && ${select}.value === '272000'`), true,
         "a context-only change from another window refreshes a settled selection");
-      await choose("1050000");
+      // Opening the picker can read choices before the runtime observes 272K. If we reset to null first,
+      // the runtime sees no transition at all; wait for its observation rather than depending on polling timing.
+      assert.equal(await wait("fixtureObservedContext === 272000"), true);
+      await choose("922000");
       const contextReads = await evaluate("fixtureChoiceReads");
       await evaluate("fixtureContext.tokens = null");
-      assert.equal(await wait(`fixtureChoiceReads > ${contextReads} && !${select}.disabled && ${select}.value === '1050000'`), true, "an unsent context remains chosen");
+      assert.equal(await wait(`fixtureChoiceReads > ${contextReads} && !${select}.disabled && ${select}.value === '922000'`), true, "an unsent context remains chosen");
       await evaluate("window.fixtureChoicesFail = true; fixtureContext.tokens = 272000");
       assert.equal(await wait(`${select}.selectedOptions[0].textContent.includes('Unverified')`), true,
         "a failed refresh retains the choice but cannot keep advertising stale endpoints");

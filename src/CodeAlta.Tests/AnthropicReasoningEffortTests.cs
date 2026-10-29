@@ -4,6 +4,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Tests;
 
@@ -132,6 +133,24 @@ public sealed class AnthropicReasoningEffortTests
         data: {"type":"message_stop"}
 
         """;
+
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_ContextSizesUseTheAdvertisedInputBudget()
+    {
+        await using var runtime = CreateRuntime([]);
+        var models = await runtime.ListModelsAsync();
+        foreach (var (id, tokens) in new[] { ("claude-haiku-4-5", 200000L), ("claude-sonnet-5-5", 1000000L) })
+        {
+            var model = models.Single(model => model.Id == id);
+            Assert.IsNotNull(model.ContextSizes);
+            Assert.IsTrue(model.ContextSizes.IsInputBudget);
+            CollectionAssert.AreEqual(new[] { tokens }, model.ContextSizes.TokenCounts.ToArray(),
+                "A maximum input limit is one verified budget, not evidence of a second context mode.");
+            var selected = AgentModelContextResolver.Resolve(model, id, model.Provider!, tokens, null)!;
+            Assert.AreEqual(tokens, AgentModelContextSizes.DefaultCapacity(model, null));
+            Assert.AreEqual(tokens, AgentTokenBudgetResolver.Resolve(selected, AgentCompactionSettings.Default).InputContextLimit);
+        }
+    }
 
     [TestMethod]
     public async Task AnthropicModelProviderRuntime_ListModels_ReadsTheEffortsOfTheModelsApi()

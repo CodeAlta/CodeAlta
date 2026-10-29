@@ -56,6 +56,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
     private readonly SemaphoreSlim _gate = new(1, 1);
     private ClaudeCodeInspection? _cached;
     private DateTimeOffset _cachedAt;
+    private bool _cachedContextRestricted;
     private (string Path, DateTime Written, string? Version)? _version;
 
     public ClaudeCodeModelCatalog(ClaudeCodeModelProviderRuntimeOptions options)
@@ -89,6 +90,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
             // An answer is kept while the same executable would answer: a download of the pinned version replaces
             // the CLI of the user at once.
             if (_cached is { } cached && DateTimeOffset.UtcNow - _cachedAt < CacheLifetime &&
+                _cachedContextRestricted == ClaudeCodeContextSizes.IsRestricted(_options) &&
                 string.Equals(_options.ResolveExecutable().Path, cached.ExecutablePath, StringComparison.Ordinal))
             {
                 return cached;
@@ -99,6 +101,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
             // A signed-out answer is not kept: the user signs in in a terminal and tests the provider again.
             _cached = inspection.IsSignedIn ? inspection : null;
             _cachedAt = DateTimeOffset.UtcNow;
+            _cachedContextRestricted = ClaudeCodeContextSizes.IsRestricted(_options);
             return inspection;
         }
         finally
@@ -231,6 +234,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
                 [ImageInputCapability] = true,
                 [AgentPdfInputs.CapabilityKey] = true,
                 [AgentReasoningEffortCapability.CompleteListKey] = true,
+                [ClaudeCodeContextSizes.ListedCapability] = !string.Equals(value, DefaultModelId, StringComparison.OrdinalIgnoreCase),
             };
             if (ClaudeCodeJson.GetString(entry, "resolvedModel") is { Length: > 0 } resolvedModel)
             {
@@ -321,7 +325,8 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
         return (true, ClaudeCodeJson.GetString(account, "subscriptionType") ?? (hasApiKey ? "API key" : null));
     }
 
-    private IReadOnlyList<AgentModelInfo> Filter(IReadOnlyList<AgentModelInfo> models) => [.. Select(models).Select(Describe)];
+    private IReadOnlyList<AgentModelInfo> Filter(IReadOnlyList<AgentModelInfo> models)
+        => ClaudeCodeContextSizes.Describe([.. Select(models).Select(Describe)], _options);
 
     /// <summary>
     /// Adds what models.dev knows of the model an entry of the CLI runs: its family, its limits, what it takes.

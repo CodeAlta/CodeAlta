@@ -56,12 +56,13 @@ test("provider context reuses inventory across model edits, preserves offline ch
     })()`);
     await page.until(`document.querySelector('#provider-context')`, "context selector");
     await choose("#provider-model", "first-reasoning");
-    await page.until(`document.querySelector('#provider-context option[value="1050000"]')`, "exact expanded endpoint");
-    assert.deepEqual(await page.evaluate(`[...document.querySelector('#provider-context').options].map(option => option.value)`), ["", "272000", "1050000"]);
+    await page.until(`document.querySelector('#provider-context option[value="922000"]')`, "exact expanded endpoint");
+    assert.deepEqual(await page.evaluate(`[...document.querySelector('#provider-context').options].map(option => option.value)`), ["", "272000", "922000"]);
+    assert.deepEqual(await page.evaluate(`[...document.querySelector('#provider-context').options].map(option => option.textContent)`), ["Default (272K)", "272K", "922K"]);
     await page.click('#provider-context');
     await page.key('End', 35);
     await page.key('Enter', 13);
-    await page.until(`document.querySelector('#provider-context').value === '1050000'`, "keyboard-selected context");
+    await page.until(`document.querySelector('#provider-context').value === '922000'`, "keyboard-selected context");
     assert.equal(await page.evaluate(`modelsFixture.saved.length`), 0);
     const reads = await page.evaluate(`modelsFixture.calls.length`);
     await choose("#provider-model", "first-fast");
@@ -70,7 +71,7 @@ test("provider context reuses inventory across model edits, preserves offline ch
     await choose("#provider-model", "first-reasoning-custom");
     await page.until(`document.querySelector('#provider-context').options.length === 1`, "unknown model offers only Default");
     await choose("#provider-model", "first-reasoning");
-    await page.until(`document.querySelector('#provider-context').value === '1050000'`, "per-model preference restored");
+    await page.until(`document.querySelector('#provider-context').value === '922000'`, "per-model preference restored");
     assert.equal(await page.evaluate(`modelsFixture.calls.length`), reads, "model edits reuse the provider inventory");
     // An unrelated form edit and a failed discovery must preserve the exact saved choice as unverified.
     await page.evaluate(`modelsFixture.status = 'unavailable'`);
@@ -81,7 +82,7 @@ test("provider context reuses inventory across model edits, preserves offline ch
     await page.until(`document.querySelector('#provider-context option:checked')?.textContent.includes('Unverified')`, "offline preference retained");
     await page.clickText('.provider-settings-footer button', 'Save and apply');
     await page.until(`modelsFixture.saved.length === 1`, "explicit save");
-    assert.deepEqual(await page.evaluate(`modelsFixture.saved[0].provider.contextPreferences`), { "first-reasoning": 1050000 });
+    assert.deepEqual(await page.evaluate(`modelsFixture.saved[0].provider.contextPreferences`), { "first-reasoning": 922000 });
     // A pending provider inventory resolves against the latest model, not the one selected when it started.
     await page.evaluate(`modelsFixture.status = 'ok'; modelsFixture.hold = true`);
     await choose("#provider-url", "http://localhost/changed");
@@ -91,7 +92,7 @@ test("provider context reuses inventory across model edits, preserves offline ch
     await choose("#provider-model", "first-fast");
     await page.evaluate(`modelsFixture.hold = false; modelsFixture.pending.splice(0).forEach(resolve => resolve())`);
     await page.until(`document.querySelector('#provider-context option[value="128000"]')`, "current model response");
-    assert.equal(await page.evaluate(`!!document.querySelector('#provider-context option[value="1050000"]')`), false);
+    assert.equal(await page.evaluate(`!!document.querySelector('#provider-context option[value="922000"]')`), false);
     // A late reply for the old provider cannot replace the new provider's inventory.
     await page.evaluate(`modelsFixture.hold = true`);
     await choose("#provider-url", "http://localhost/changed");
@@ -101,9 +102,23 @@ test("provider context reuses inventory across model edits, preserves offline ch
     await page.click('[data-provider-key="second"]');
     await page.until(`document.querySelector('#provider-context option[value="128000"]')`, "new provider's default model");
     await page.evaluate(`modelsFixture.pending.splice(0).forEach(resolve => resolve())`);
-    assert.equal(await page.evaluate(`!!document.querySelector('#provider-context option[value="1050000"]')`), false);
+    assert.equal(await page.evaluate(`!!document.querySelector('#provider-context option[value="922000"]')`), false);
     assert.equal(await page.evaluate(`document.querySelector('#provider-context').value`), "");
   }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts", width: 1600, height: 1000, ratio: 1.5 });
+});
+
+test("testing a recovered provider refreshes its context choices without saving", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('#provider-context')`, "initial context selector");
+    await page.evaluate(`modelsFixture.status = 'unavailable'`);
+    await page.click('[data-provider-key="second"]');
+    await page.until(`document.querySelector('#provider-context-notice').textContent.includes('unavailable')`, "offline inventory");
+    assert.equal(await page.evaluate(`document.querySelector('#provider-context').options.length`), 1);
+    await page.clickText('.provider-settings-footer button', 'Test selected provider');
+    await page.until(`document.querySelector('#provider-context option[value="128000"]')`, "refreshed choices after test");
+    assert.equal(await page.evaluate(`document.querySelector('#provider-context option').textContent`), "Default (128K)");
+    assert.equal(await page.evaluate(`modelsFixture.saved.length`), 0, "testing never saves a preference");
+  }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts" });
 });
 
 test("a default model the provider's complete inventory does not list is named above its models", { skip: !edge, timeout: 90_000 }, async () => {

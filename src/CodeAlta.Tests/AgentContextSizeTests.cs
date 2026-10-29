@@ -72,6 +72,61 @@ public sealed class AgentContextSizeTests
     }
 
     [TestMethod]
+    public void InputBudget_RoundTripsAndKeepsHardLimitsWithoutReservingOutputAgain()
+    {
+        var model = new AgentModelInfo("input-budget", Provider: "fixture", Capabilities: new Dictionary<string, object?>
+        {
+            ["contextWindow"] = 1050000L, ["inputTokenLimit"] = 922000L, ["outputTokenLimit"] = 128000L,
+        }) { ContextSizes = new(272000, [272000, 922000]) { IsInputBudget = true } };
+        var restored = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(model, AgentJsonSerializerContext.Default.AgentModelInfo),
+            AgentJsonSerializerContext.Default.AgentModelInfo)!;
+        Assert.IsTrue(restored.ContextSizes!.IsInputBudget);
+        var expanded = AgentModelContextResolver.Resolve(restored, model.Id, model.Provider!, null, 922000)!;
+        Assert.AreEqual(922000L, AgentTokenBudgetResolver.Resolve(expanded, AgentCompactionSettings.Default).InputContextLimit);
+        var limited = AgentModelMetadataEnricher.EnrichModel(restored, null, null,
+            new Dictionary<string, AgentModelOverride> { [model.Id] = new() { InputTokenLimit = 100000 } });
+        Assert.IsTrue(limited.ContextSizes!.IsInputBudget);
+        Assert.IsEmpty(limited.ContextSizes.TokenCounts);
+        Assert.AreEqual(100000L, AgentTokenBudgetResolver.Resolve(limited, AgentCompactionSettings.Default).InputContextLimit);
+        var totalOverride = AgentModelMetadataEnricher.EnrichModel(restored, null, null,
+            new Dictionary<string, AgentModelOverride> { [model.Id] = new() { ContextWindowTokens = 200000 } });
+        Assert.IsFalse(totalOverride.ContextSizes!.IsInputBudget, "A legacy total-context override is not an input budget.");
+        Assert.IsEmpty(totalOverride.ContextSizes.TokenCounts);
+        Assert.AreEqual(72000L, AgentTokenBudgetResolver.Resolve(totalOverride, AgentCompactionSettings.Default).InputContextLimit);
+    }
+
+    [TestMethod]
+    public void ProviderManagedChoices_AllowUnknownDefaultButNeverCreateLocalUsageOrBudget()
+    {
+        var sizes = new AgentModelContextSizes(null, [200_000, 1_000_000], IsProviderManaged: true);
+        var model = new AgentModelInfo("managed", Provider: "fixture", Capabilities: new Dictionary<string, object?>
+        {
+            ["contextWindow"] = 999_999L, ["inputTokenLimit"] = 900_000L, ["outputTokenLimit"] = 128_000L,
+        }) { ContextSizes = sizes };
+        var restored = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(model, AgentJsonSerializerContext.Default.AgentModelInfo),
+            AgentJsonSerializerContext.Default.AgentModelInfo)!;
+        Assert.IsTrue(restored.ContextSizes!.IsProviderManaged);
+        CollectionAssert.AreEqual(sizes.TokenCounts.ToArray(), restored.ContextSizes.TokenCounts.ToArray());
+        Assert.IsNull(AgentModelContextSizes.DefaultCapacity(restored, null), "Catalog enrichment is not the CLI's default.");
+        var selected = AgentModelContextResolver.Resolve(restored, "managed", "fixture", 200_000, null)!;
+        Assert.AreEqual(200_000L, selected.EffectiveContextWindowTokens);
+        Assert.AreEqual(1_000_000L, AgentModelContextResolver.Resolve(restored, "managed", "fixture", null, 1_000_000)!.EffectiveContextWindowTokens);
+        Assert.IsNull(AgentModelContextResolver.Resolve(restored, "managed", "fixture", null, null)!.EffectiveContextWindowTokens);
+        var budget = AgentTokenBudgetResolver.Resolve(selected, AgentCompactionSettings.Default);
+        Assert.IsNull(budget.TotalContextEnvelope);
+        Assert.IsNull(budget.InputContextLimit);
+        var usage = new AgentSessionUsage(Window: new(15_000, 173_000, 5, TotalContextEnvelope: 200_000),
+            LastOperation: new(InputTokens: 15_000), Source: AgentUsageSource.ProviderUsage);
+        Assert.AreSame(usage, AgentUsageFactory.AttachModelInfo(usage, selected, replaceCapacity: true));
+        Assert.AreSame(usage, AgentUsageFactory.AttachWindowEstimate(usage, selected, 900_000, 8, DateTimeOffset.UtcNow));
+        Assert.IsEmpty(new AgentModelContextSizes(null, [200_000]).TokenCounts, "Missing-default Codex metadata remains invalid.");
+        Assert.IsEmpty(new AgentModelContextSizes(-1, [200_000], IsProviderManaged: true).TokenCounts);
+        Assert.IsEmpty(new AgentModelContextSizes(null, [-1], IsProviderManaged: true).TokenCounts);
+    }
+
+    [TestMethod]
     public void Budget_CodexHeadroomAndCompactionThresholdHaveDistinctBases()
     {
         var model = new AgentModelInfo("context-test", Provider: "codex", Capabilities: new Dictionary<string, object?>

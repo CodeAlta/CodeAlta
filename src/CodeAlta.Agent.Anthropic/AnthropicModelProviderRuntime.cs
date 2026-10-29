@@ -659,7 +659,13 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             Provider: provider.ProviderKey,
             DefaultReasoningEffort: ReadDefaultEffort(model.RawData),
             SupportedReasoningEfforts: efforts,
-            Capabilities: capabilities);
+            Capabilities: capabilities)
+        {
+            // The Models API reports an input ceiling, not a menu of total-context modes.
+            ContextSizes = model.MaxInputTokens is > 0 and <= AgentModelContextSizes.MaximumTokens
+                ? new(model.MaxInputTokens, [model.MaxInputTokens.Value]) { IsInputBudget = true }
+                : null,
+        };
     }
 
     // The efforts a model takes, from the capabilities of the Models API:

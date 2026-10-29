@@ -1,5 +1,5 @@
 import { HTMLSelect } from "@blueprintjs/core";
-import { contextSizes, defaultContextSummary, type ContextModel } from "./contextSizes";
+import { contextSizes, defaultContextSummary, formatContextTokens, type ContextModel } from "./contextSizes";
 import { useShellLanguage } from "./shellLanguage";
 
 /** Default is always available; discovery never turns an unsupported retained choice into an offered endpoint. */
@@ -18,11 +18,11 @@ export function ContextSizeSelect({ id, value, model, loading = false, disabled 
         if (tokens === null || sizes.includes(tokens)) onChange(tokens);
       }}>
       <option value="">{effectiveDefault ? t("Default ({value})", { value: effectiveDefault }) : t("Default")}</option>
-      {sizes.map(tokens => <option key={tokens} value={tokens}>{tokens.toLocaleString(locale)}</option>)}
-      {unverified && <option value={value} disabled>{value.toLocaleString(locale)} · {t("Unverified")}</option>}
+      {sizes.map(tokens => <option key={tokens} value={tokens}>{formatContextTokens(tokens, locale)}</option>)}
+      {unverified && <option value={value} disabled>{formatContextTokens(value, locale)} · {t("Unverified")}</option>}
     </HTMLSelect>
     <small id={`${id}-notice`} role="status">{t(loading ? "Loading compatible context sizes…" : !model || unverified
       ? "Compatible context sizes unavailable. Saved choices remain unverified."
-      : "Total context capacity; the usable input budget may be smaller.")}</small>
+      : "Context budget; output reservations depend on the provider.")}</small>
   </div>;
 }

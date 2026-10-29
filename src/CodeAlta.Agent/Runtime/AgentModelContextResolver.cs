@@ -14,6 +14,12 @@ internal static class AgentModelContextResolver
             return model with { ContextSizes = null, EffectiveContextWindowTokens = null };
         }
 
-        return model with { EffectiveContextWindowTokens = model.ContextSizes?.Resolve(sessionTokens, preferenceTokens) };
+        var sizes = model.ContextSizes;
+        // A provider-owned default means leave its launch alone, not explicitly request its advertised capacity.
+        var selected = sizes?.IsProviderManaged == true
+            ? sessionTokens is not null && sizes.Supports(sessionTokens) ? sessionTokens
+                : preferenceTokens is not null && sizes.Supports(preferenceTokens) ? preferenceTokens : null
+            : sizes?.Resolve(sessionTokens, preferenceTokens);
+        return model with { EffectiveContextWindowTokens = selected };
     }
 }

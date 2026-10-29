@@ -257,6 +257,9 @@ through the same turn executor, and records a `local.compactionCheckpoint`; a re
   An attachment resolves its session choice, matching provider preference and advertised default into a private model
   snapshot. Requests, compaction and usage share that budget without changing catalog metadata. A choice changes only
   through idle reattachment; retained history is compacted by the normal path when the next request needs it.
+  Discovery distinguishes input budgets from total envelopes, so output is never reserved twice. For an adapter
+  that owns the conversation, a choice controls its launch instead of imposing a local budget; its reported usage
+  and compaction limits remain authoritative, including across resume.
 - **Triggers.** Manual (`CompactAsync`, `alta session compact`), threshold (projected context reaches `ratio` of the
   input limit, before a turn and after idle), and overflow recovery after a context-limit failure.
 - **Unknown limits.** A model that reports no input limit is compacted against `DefaultAssumedInputContextLimit`
