@@ -219,9 +219,9 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
           && parseFloat(getComputedStyle(subSessions.querySelector('.bp6-control')).marginTop) === 0;
       })()`), true, "context follows the More options spacer, with space before sub-sessions");
       assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.value)`), ["", "272000", "922000"]);
-      assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.textContent)`), ["Default (272K)", "272K", "922K"]);
+      assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.textContent)`), ["Default (272k)", "272k", "922k"]);
       await choose("922000");
-      assert.equal(await evaluate(`${chip}.textContent.includes('922K')`), false, "capacity is not duplicated in the chip");
+      assert.equal(await evaluate(`${chip}.textContent.includes('922k')`), false, "capacity is not duplicated in the chip");
       assert.equal(await evaluate("fixture.sendCalls.length"), 0, "choosing context calls no model");
       await evaluate(`${chip}.click(); fixture.startRun()`);
       assert.equal(await wait(running), true);

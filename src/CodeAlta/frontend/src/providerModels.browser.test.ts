@@ -58,7 +58,7 @@ test("provider context reuses inventory across model edits, preserves offline ch
     await choose("#provider-model", "first-reasoning");
     await page.until(`document.querySelector('#provider-context option[value="922000"]')`, "exact expanded endpoint");
     assert.deepEqual(await page.evaluate(`[...document.querySelector('#provider-context').options].map(option => option.value)`), ["", "272000", "922000"]);
-    assert.deepEqual(await page.evaluate(`[...document.querySelector('#provider-context').options].map(option => option.textContent)`), ["Default (272K)", "272K", "922K"]);
+    assert.deepEqual(await page.evaluate(`[...document.querySelector('#provider-context').options].map(option => option.textContent)`), ["Default (272k)", "272k", "922k"]);
     await page.click('#provider-context');
     await page.key('End', 35);
     await page.key('Enter', 13);
@@ -116,7 +116,7 @@ test("testing a recovered provider refreshes its context choices without saving"
     assert.equal(await page.evaluate(`document.querySelector('#provider-context').options.length`), 1);
     await page.clickText('.provider-settings-footer button', 'Test selected provider');
     await page.until(`document.querySelector('#provider-context option[value="128000"]')`, "refreshed choices after test");
-    assert.equal(await page.evaluate(`document.querySelector('#provider-context option').textContent`), "Default (128K)");
+    assert.equal(await page.evaluate(`document.querySelector('#provider-context option').textContent`), "Default (128k)");
     assert.equal(await page.evaluate(`modelsFixture.saved.length`), 0, "testing never saves a preference");
   }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts" });
 });

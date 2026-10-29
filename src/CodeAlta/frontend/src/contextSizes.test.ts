@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ContextSizeSelect } from "./ContextSizeSelect";
+import { compactTokens } from "./contextUsage";
+import { DraftUsage } from "./promptSurface/PromptSurfaceParts";
 import { contextSizes, defaultContextSummary, draftContextInputTokens, hasProviderContextOption, validContext } from "./contextSizes";
 
 test("context choices are exact positive safe endpoints, never inferred from a maximum", () => {
@@ -15,18 +20,23 @@ test("context choices are exact positive safe endpoints, never inferred from a m
 });
 
 test("default summary formats only a positive safe resolved capacity", () => {
-  const model = { contextSizes: [272000, 1050000], defaultContextTokens: 272000 };
-  assert.equal(defaultContextSummary(model), "272K");
-  assert.equal(defaultContextSummary(model, "de"), "272K");
-  assert.equal(defaultContextSummary({ defaultContextTokens: 922000 }), "922K");
-  assert.equal(defaultContextSummary({ defaultContextTokens: 1050000 }), "1,050K");
-  assert.equal(defaultContextSummary({ defaultContextTokens: 131072 }), "131.072K");
-  assert.equal(defaultContextSummary({ defaultContextTokens: 131072 }, "de"), "131,072K");
-  assert.equal(defaultContextSummary({ defaultContextTokens: Number.MAX_SAFE_INTEGER - 1 }), "9,007,199,254,740.99K");
-  assert.equal(defaultContextSummary({ defaultContextTokens: Number.MAX_SAFE_INTEGER }), "9,007,199,254,740.991K");
+  for (const tokens of [272000, 922000, 1000000, 1050000, 131072, Number.MAX_SAFE_INTEGER - 1, Number.MAX_SAFE_INTEGER])
+    assert.equal(defaultContextSummary({ defaultContextTokens: tokens }), compactTokens(String(tokens)), "reuse the chat meter's compact units");
+  assert.equal(defaultContextSummary({ defaultContextTokens: 1000000 }), "1M");
   assert.equal(defaultContextSummary(undefined), null);
   for (const defaultContextTokens of [-1, 0, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1])
     assert.equal(defaultContextSummary({ defaultContextTokens }), null);
+});
+
+test("context selectors and the chat meter share million-token labels without changing option values", () => {
+  const model = { defaultContextTokens: 1000000, contextSizes: [200000, 1000000] };
+  const picker = renderToStaticMarkup(createElement(ContextSizeSelect, { id: "context", value: null, model, onChange: () => {} }));
+  assert.match(picker, /Default \(1M\)/);
+  assert.match(picker, /value="200000"[^>]*>200k<\/option>/);
+  assert.match(picker, /value="1000000"[^>]*>1M<\/option>/);
+  assert.match(renderToStaticMarkup(createElement(DraftUsage, { contextTokens: 1000000 })), /0\/1M/);
+  const offline = renderToStaticMarkup(createElement(ContextSizeSelect, { id: "context", value: 1000000, onChange: () => {} }));
+  assert.match(offline, /value="1000000"[^>]*>1M · Unverified<\/option>/);
 });
 
 test("ACP keeps its existing context option", () => {

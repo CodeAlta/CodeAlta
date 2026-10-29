@@ -206,7 +206,7 @@ test("a new session is created from a form beside the row of its project or of t
         && parseFloat(getComputedStyle(subSessions.querySelector('.bp6-control')).marginTop) === 0;
     })()`), true, "the section spacer stays above Context size, with space before Sub-sessions");
     await select("#composer-context-create", "922000");
-    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(chip)}).textContent.includes('922K')`), false, "no duplicate context in the chip");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(chip)}).textContent.includes('922k')`), false, "no duplicate context in the chip");
     assert.equal(await shown(form), true, "the form stayed open through every choice");
     // Escape in the choices closes them alone.
     await escape();
