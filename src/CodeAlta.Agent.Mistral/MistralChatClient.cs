@@ -20,15 +20,22 @@ internal sealed class MistralChatClient : IChatClient
     private static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(30);
 
     private readonly MistralProviderOptions _provider;
+    private readonly string? _apiKey;
     private readonly HttpClient _httpClient;
     private readonly bool _disposeHttpClient;
     private ChatClientMetadata? _metadata;
 
     public MistralChatClient(MistralProviderOptions provider)
+        : this(provider, provider?.ApiKey)
+    {
+    }
+
+    public MistralChatClient(MistralProviderOptions provider, string? apiKey)
     {
         ArgumentNullException.ThrowIfNull(provider);
 
         _provider = provider;
+        _apiKey = apiKey;
         _httpClient = provider.HttpClient ?? new HttpClient();
         _disposeHttpClient = provider.HttpClient is null;
     }
@@ -101,9 +108,9 @@ internal sealed class MistralChatClient : IChatClient
     private HttpRequestMessage CreateRequest(IEnumerable<ChatMessage> messages, ChatOptions? options)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, CreateChatUri());
-        if (!string.IsNullOrWhiteSpace(_provider.ApiKey))
+        if (!string.IsNullOrWhiteSpace(_apiKey))
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _provider.ApiKey);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         }
 
         if (_provider.ExtraHeaders is { Count: > 0 } extraHeaders)

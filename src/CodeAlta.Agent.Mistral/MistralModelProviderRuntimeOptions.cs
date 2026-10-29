@@ -52,9 +52,27 @@ public sealed class MistralProviderOptions
     public string? ApiKey { get; set; }
 
     /// <summary>
+    /// Gets or sets what gives the API key before each request, for a key the configuration does not hold, such as
+    /// the one a Mistral Vibe sign-in stored; null uses <see cref="ApiKey"/>. It throws when there is no key, with a
+    /// message the user reads.
+    /// </summary>
+    public Func<CancellationToken, ValueTask<string>>? ApiKeyProvider { get; set; }
+
+    /// <summary>
     /// Gets or sets the base endpoint for the provider.
     /// </summary>
     public Uri? BaseUri { get; set; }
+
+    /// <summary>
+    /// Gets or sets the API the turns use: Chat Completions by default, or the Responses API.
+    /// </summary>
+    public MistralApi Api { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the models are the ones Mistral Vibe offers (<c>/v1/model-catalog?surface=vibe-code</c>),
+    /// with their reasoning efforts, instead of every model of the account (<c>/v1/models</c>).
+    /// </summary>
+    public bool UsesVibeModelCatalog { get; set; }
 
     /// <summary>
     /// Gets or sets whether this provider is the default registration for the provider runtime.
@@ -111,4 +129,19 @@ public sealed class MistralProviderOptions
     internal int? MaxRetryAttempts { get; set; }
 
     internal Func<TimeSpan, CancellationToken, Task>? RetryDelayAsync { get; set; }
+
+    internal async ValueTask<string?> ResolveApiKeyAsync(CancellationToken cancellationToken)
+        => ApiKeyProvider is null ? ApiKey : await ApiKeyProvider(cancellationToken).ConfigureAwait(false);
+}
+
+/// <summary>
+/// The API of Mistral that a provider uses for its turns.
+/// </summary>
+public enum MistralApi
+{
+    /// <summary>The Chat Completions API (<c>/v1/chat/completions</c>).</summary>
+    ChatCompletions,
+
+    /// <summary>The Responses API (<c>/v1/responses</c>), stateless: the whole conversation goes with each request.</summary>
+    Responses,
 }

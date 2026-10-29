@@ -1,0 +1,87 @@
+event: response.created
+data: {"response":{"id":"resp_9e6c1888a99846b6b0efef9f3ab5105b","created_at":1793306417.0,"error":null,"incomplete_details":null,"instructions":null,"metadata":{},"model":"mistral-small-latest","object":"response","output":[],"parallel_tool_calls":true,"temperature":null,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]},"strict":null,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Weather of a city","output_schema":null}],"top_p":null,"background":false,"completed_at":null,"conversation":null,"max_output_tokens":null,"max_tool_calls":null,"moderation":null,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_options":null,"prompt_cache_retention":null,"reasoning":{"context":null,"effort":"high","generate_summary":null,"mode":null,"summary":null},"safety_identifier":null,"service_tier":null,"status":"in_progress","text":{"format":{"type":"text"},"verbosity":null},"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"store":false},"sequence_number":0,"type":"response.created"}
+
+event: response.in_progress
+data: {"response":{"id":"resp_9e6c1888a99846b6b0efef9f3ab5105b","created_at":1793306417.0,"error":null,"incomplete_details":null,"instructions":null,"metadata":{},"model":"mistral-small-latest","object":"response","output":[],"parallel_tool_calls":true,"temperature":null,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]},"strict":null,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Weather of a city","output_schema":null}],"top_p":null,"background":false,"completed_at":null,"conversation":null,"max_output_tokens":null,"max_tool_calls":null,"moderation":null,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_options":null,"prompt_cache_retention":null,"reasoning":{"context":null,"effort":"high","generate_summary":null,"mode":null,"summary":null},"safety_identifier":null,"service_tier":null,"status":"in_progress","text":{"format":{"type":"text"},"verbosity":null},"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"store":false},"sequence_number":1,"type":"response.in_progress"}
+
+event: response.output_item.added
+data: {"item":{"id":"rs_3511212c04924f50aead5ea380adcb3f","summary":[],"type":"reasoning","content":[],"encrypted_content":null,"status":"in_progress"},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+event: response.content_part.added
+data: {"content_index":0,"item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"part":{"text":"","type":"reasoning_text"},"sequence_number":3,"type":"response.content_part.added"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":"The","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":4,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" user is","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":5,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" asking for the weather","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":6,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" in Paris and","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":7,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" specifically","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":8,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" wants me to use","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":9,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" a","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":10,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" tool. I need","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":11,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" to use","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":12,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" the `","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":13,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":"get_weather`","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":14,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" function with","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":15,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" the city parameter","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":16,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":" set to \"Paris","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":17,"type":"response.reasoning_text.delta"}
+
+event: response.reasoning_text.delta
+data: {"content_index":0,"delta":"\".","item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":18,"type":"response.reasoning_text.delta"}
+
+event: response.output_item.added
+data: {"item":{"arguments":"","call_id":"JRYJS54ss","name":"get_weather","type":"function_call","id":"fc_06c4232ac05e448bb7c6db72436ea196","status":"in_progress"},"output_index":1,"sequence_number":19,"type":"response.output_item.added"}
+
+event: response.function_call_arguments.delta
+data: {"delta":"{\"","item_id":"fc_06c4232ac05e448bb7c6db72436ea196","output_index":1,"sequence_number":20,"type":"response.function_call_arguments.delta"}
+
+event: response.function_call_arguments.delta
+data: {"delta":"city\": \"Paris","item_id":"fc_06c4232ac05e448bb7c6db72436ea196","output_index":1,"sequence_number":21,"type":"response.function_call_arguments.delta"}
+
+event: response.function_call_arguments.delta
+data: {"delta":"\"}","item_id":"fc_06c4232ac05e448bb7c6db72436ea196","output_index":1,"sequence_number":22,"type":"response.function_call_arguments.delta"}
+
+event: response.reasoning_text.done
+data: {"content_index":0,"item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"sequence_number":23,"text":"The user is asking for the weather in Paris and specifically wants me to use a tool. I need to use the `get_weather` function with the city parameter set to \"Paris\".","type":"response.reasoning_text.done"}
+
+event: response.content_part.done
+data: {"content_index":0,"item_id":"rs_3511212c04924f50aead5ea380adcb3f","output_index":0,"part":{"text":"The user is asking for the weather in Paris and specifically wants me to use a tool. I need to use the `get_weather` function with the city parameter set to \"Paris\".","type":"reasoning_text"},"sequence_number":24,"type":"response.content_part.done"}
+
+event: response.output_item.done
+data: {"item":{"id":"rs_3511212c04924f50aead5ea380adcb3f","summary":[],"type":"reasoning","content":[{"text":"The user is asking for the weather in Paris and specifically wants me to use a tool. I need to use the `get_weather` function with the city parameter set to \"Paris\".","type":"reasoning_text"}],"encrypted_content":null,"status":"completed"},"output_index":0,"sequence_number":25,"type":"response.output_item.done"}
+
+event: response.function_call_arguments.done
+data: {"arguments":"{\"city\": \"Paris\"}","item_id":"fc_06c4232ac05e448bb7c6db72436ea196","name":"get_weather","output_index":1,"sequence_number":26,"type":"response.function_call_arguments.done"}
+
+event: response.output_item.done
+data: {"item":{"arguments":"{\"city\": \"Paris\"}","call_id":"JRYJS54ss","name":"get_weather","type":"function_call","id":"fc_06c4232ac05e448bb7c6db72436ea196","status":"completed"},"output_index":1,"sequence_number":27,"type":"response.output_item.done"}
+
+event: response.completed
+data: {"response":{"id":"resp_9e6c1888a99846b6b0efef9f3ab5105b","created_at":1793306417.0,"error":null,"incomplete_details":null,"instructions":null,"metadata":{},"model":"mistral-small-latest","object":"response","output":[{"id":"rs_3511212c04924f50aead5ea380adcb3f","summary":[],"type":"reasoning","content":[{"text":"The user is asking for the weather in Paris and specifically wants me to use a tool. I need to use the `get_weather` function with the city parameter set to \"Paris\".","type":"reasoning_text"}],"encrypted_content":null,"status":"completed"},{"arguments":"{\"city\": \"Paris\"}","call_id":"JRYJS54ss","name":"get_weather","type":"function_call","id":"fc_06c4232ac05e448bb7c6db72436ea196","status":"completed"}],"parallel_tool_calls":true,"temperature":null,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]},"strict":null,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Weather of a city","output_schema":null}],"top_p":null,"background":false,"completed_at":1793306417.0,"conversation":null,"max_output_tokens":null,"max_tool_calls":null,"moderation":null,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_options":null,"prompt_cache_retention":null,"reasoning":{"context":null,"effort":"high","generate_summary":null,"mode":null,"summary":null},"safety_identifier":null,"service_tier":null,"status":"completed","text":{"format":{"type":"text"},"verbosity":null},"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":85,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":64},"output_tokens":52,"output_tokens_details":{"reasoning_tokens":38},"total_tokens":137},"user":null,"store":false},"sequence_number":28,"type":"response.completed"}
+

@@ -37,4 +37,9 @@
     <ProjectReference Include="..\CodeAlta.Tests.TinyMcpServer\CodeAlta.Tests.TinyMcpServer.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Streams captured from the providers, replayed by the tests. -->
+    <None Include="TestData\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
