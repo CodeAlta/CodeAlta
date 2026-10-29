@@ -469,6 +469,8 @@ internal sealed class AgentCompactionSummarizer(
             ? throw new InvalidOperationException("Chunked compaction did not produce a final summary.")
             : finalResult with
             {
+                // The last request summarized one chunk, or merged them: the compaction summarized them all.
+                MessagesSummarized = preparation.MessagesToSummarize.Count,
                 ChunkCount = Math.Max(totalChunkCount, chunks.Count),
                 SummaryCallCount = Math.Max(totalSummaryCallCount, 1),
                 SummaryPromptInputTokens = totalSummaryPromptInputTokens,

@@ -3529,6 +3529,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             throw new InvalidOperationException("The resolved input-context limit is not usable.");
         }
 
+        // The conversation is measured against the limit the session has now: a change of its model or of its size of
+        // context leaves the one of its last usage behind until a request reports again.
+        if (!budget.IsInputContextLimitAssumed && _state.Usage is { Window: { } lastWindow } lastUsage && lastWindow.TokenLimit != budget.InputContextLimit)
+        {
+            _state = _state with { Usage = lastUsage with { Window = lastWindow with { TokenLimit = budget.InputContextLimit } } };
+        }
+
         var started = new AgentSessionUpdateEvent(
             ProviderId,
             SessionId,
