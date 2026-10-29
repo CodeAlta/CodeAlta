@@ -1,6 +1,10 @@
+import type { WorkspaceSession } from "#neoastra";
 import type { SessionHierarchyRow } from "../sessionHierarchy";
 
-/** A line of the tree of the sessions of a scope: a session, or what stands for the sub-agents of a session that are not listed. */
+/**
+ * A line of the tree of the sessions of a scope: a session, a link to a sub-agent of a session that is listed in
+ * another project or among the chats, or what stands for the sub-agents of a session that are not listed.
+ */
 export type SessionTreeEntry =
   | Readonly<{
     kind: "session";
@@ -8,6 +12,14 @@ export type SessionTreeEntry =
     /** Whether it has sub-agents, listed under it unless it is collapsed. */
     parent: boolean;
     collapsed: boolean;
+  }>
+  | Readonly<{
+    kind: "link";
+    /** The sub-agent, which its own scope lists. */
+    session: WorkspaceSession;
+    /** The session that started it. */
+    parentId: string;
+    depth: number;
   }>
   | Readonly<{
     kind: "more";
@@ -46,12 +58,13 @@ export type SessionListLimits = Readonly<{
   active: string | null;
 }>;
 
-type Level = { parentId: string | null; limit: number; seen: number; hidden: number; extended: boolean };
+type Level = { parentId: string | null; limit: number; seen: number; hidden: number; extended: boolean; links: readonly WorkspaceSession[] };
 
 /**
  * What the Explorer lists of the sessions of a scope, from its rows in tree order. Each level has its own
  * count: the sessions of the scope, then the sub-agents of each session. A collapsed session lists none of
- * its sub-agents, the selected one included.
+ * its sub-agents, the selected one included. The sub-agents of a session that other scopes list follow its own,
+ * as links, and count with them.
  */
 export function sessionList(rows: readonly SessionHierarchyRow[], limits: SessionListLimits): { entries: SessionTreeEntry[]; hidden: number } {
   // The selected row and the rows it is under.
@@ -64,11 +77,15 @@ export function sessionList(rows: readonly SessionHierarchyRow[], limits: Sessio
   });
 
   const entries: SessionTreeEntry[] = [];
-  const levels: Level[] = [{ parentId: null, limit: limits.count, seen: 0, hidden: 0, extended: false }];
-  // The sub-agents of a session end here: what is not listed of them is said after them.
+  const levels: Level[] = [{ parentId: null, limit: limits.count, seen: 0, hidden: 0, extended: false, links: [] }];
+  // The sub-agents of a session end here, with the links to those listed elsewhere: what is not listed of them is said after them.
   const close = (depth: number) => {
     while (levels.length > depth + 1) {
       const level = levels.pop()!;
+      for (const session of level.links) {
+        if (level.seen++ >= level.limit) level.hidden++;
+        else entries.push({ kind: "link", session, parentId: level.parentId!, depth: levels.length });
+      }
       if (level.parentId !== null && (level.hidden > 0 || level.extended))
         entries.push({ kind: "more", parentId: level.parentId, depth: levels.length, hidden: level.hidden, extended: level.extended });
     }
@@ -83,13 +100,14 @@ export function sessionList(rows: readonly SessionHierarchyRow[], limits: Sessio
     const level = levels[Math.min(row.depth, levels.length - 1)];
     if (level.seen++ >= level.limit && !lineage.has(index)) { level.hidden++; skip = row.depth; return; }
     const id = row.session.id;
-    const parent = (rows[index + 1]?.depth ?? 0) > row.depth;
+    const links = row.linked ?? row.childrenElsewhere ?? [];
+    const parent = (rows[index + 1]?.depth ?? 0) > row.depth || links.length > 0;
     const collapsed = parent && limits.collapsed(id);
     entries.push({ kind: "session", row, parent, collapsed });
     if (collapsed) skip = row.depth;
     else if (parent) {
       const extra = Math.max(0, limits.extra(id));
-      levels.push({ parentId: id, limit: limits.subCount + extra, seen: 0, hidden: 0, extended: extra > 0 });
+      levels.push({ parentId: id, limit: limits.subCount + extra, seen: 0, hidden: 0, extended: extra > 0, links });
     }
   });
   close(0);

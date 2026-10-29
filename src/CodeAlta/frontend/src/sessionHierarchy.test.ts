@@ -80,6 +80,10 @@ test("a row says how many sessions it started, and a session of another scope is
   const sessions = [row("parent"), row("first", "parent", 2), row("second", "parent", 3), row("nested", "first", 4), row("alone")];
   const counts = Object.fromEntries(sessionHierarchy(sessions, sessions, "p1").map(item => [item.session.id, item.subAgents]));
   assert.deepEqual(counts, { parent: 2, second: 0, first: 1, nested: 0, alone: 0 });
+  // A child of another scope is not a sub-agent of the row: it is one of its children listed elsewhere.
+  const away = { ...row("away", "parent", 5), projectId: "p2", workspacePath: "/p2" };
+  const parent = sessionHierarchy(sessions, [...sessions, away], "p1").find(item => item.session.id === "parent")!;
+  assert.deepEqual([parent.subAgents, parent.childrenElsewhere?.map(item => item.id)], [2, ["away"]]);
   // A child whose parent is not shown is a root: its parent is not there to count it.
   assert.deepEqual(sessionHierarchy([sessions[1]], sessions, "p1").map(item => [item.session.id, item.depth, item.subAgents]), [["first", 0, 0]]);
 });

@@ -22,4 +22,8 @@ test("a message between agents names its session by its title, which opens it", 
 test("a session that started sessions shows how many", () => {
   assert.equal(render(createElement(SubAgentBadge, { count: 0 })), "");
   assert.match(render(createElement(SubAgentBadge, { count: 3 })), /^<span class="sub-agent-badge" role="img" aria-label="3 sub-agent\(s\)" title="3 sub-agent\(s\)">.*<span aria-hidden="true">3<\/span><\/span>$/);
+  // Those listed elsewhere are counted, said, and marked with an arrow.
+  const elsewhere = render(createElement(SubAgentBadge, { count: 3, elsewhere: 2 }));
+  assert.match(elsewhere, /aria-label="3 sub-agent\(s\), 2 listed elsewhere"/);
+  assert.match(elsewhere, /<span aria-hidden="true">3<\/span><svg[^>]*class="[^"]*sub-agent-elsewhere/);
 });
