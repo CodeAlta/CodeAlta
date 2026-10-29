@@ -129,6 +129,36 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task SelectionChoices_ListEveryAgentPromptOfALargeCatalogAndASendRunsWithALateOne() => Fixture.RunAsync(async f =>
+    {
+        // A pack of agent prompts can bring a space past 64 of them: the ones after the 64th were once left out of the
+        // Agent picker of the composer and of a new session, and refused at Send.
+        var folder = Path.Combine(f.GlobalRoot, "prompts", "agents");
+        Directory.CreateDirectory(folder);
+        for (var i = 0; i < 80; i++)
+            File.WriteAllText(Path.Combine(folder, $"pack-{i:D2}.prompt.md"), $"---\nname: Pack {i:D2}\n---\nAgent {i}.\n");
+        File.WriteAllText(Path.Combine(folder, "zz-late.prompt.md"), "---\nname: Zz Late\n---\nLate agent.\n");
+
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        Assert.IsGreaterThan(64, choices.Prompts.Count);
+        CollectionAssert.Contains(choices.Prompts.Select(static prompt => prompt.Id).ToArray(), "zz-late");
+        var drafts = await f.Observe(f.Host.Commands.GetDraftPromptsAsync(null, null));
+        Assert.IsNotNull(drafts);
+        CollectionAssert.Contains(drafts.Prompts.Select(static prompt => prompt.Id).ToArray(), "zz-late");
+
+        var selection = new OwnedSessionSelection(choices.Current.ProviderKey, "zz-late", null, null);
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, selection));
+        var admission = f.AdmitSend(new OwnedTextSendRequest("late-prompt-send", f.SessionId, "input") { Selection = selection });
+        Assert.IsNotNull(admission.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "send with an agent prompt listed after the 64th");
+        var runtime = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
+        Assert.AreEqual("zz-late", runtime.Entry!.AgentPromptId);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
+    });
+
+    [TestMethod]
     public Task SelectionOfAModelWithoutEfforts_TakesTheEffortItIsGiven() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;
