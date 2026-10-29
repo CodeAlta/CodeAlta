@@ -159,7 +159,7 @@ The `codex-cli` provider runs OpenAI's Codex agent itself, with your ChatGPT pla
 | | Codex (ChatGPT) | Codex CLI |
 | --- | --- | --- |
 | Runs the model loop | CodeAlta | Codex |
-| Tools | CodeAlta's | Codex's shell, `apply_patch` and web search, with the tools of CodeAlta (`alta`, plugins, MCP) |
+| Tools | CodeAlta's | Codex's shell, `apply_patch`, web search and image generation, with the tools of CodeAlta (`alta`, plugins, MCP) |
 | Sign-in | CodeAlta's ChatGPT sign-in | Codex's ChatGPT sign-in, run by CodeAlta |
 | Business and Enterprise workspaces | refused by most | accepted |
 
@@ -185,6 +185,7 @@ display_name = "Codex CLI"
 
 - **Its own folder.** Each provider has a Codex folder of its own (`CODEX_HOME`), separate from the `~/.codex` of your Codex CLI: CodeAlta writes the settings of that folder, so your own settings, MCP servers and skills do not apply. Several accounts are several providers. `~/.codex` cannot be used.
 - **CodeAlta's way.** Codex gets CodeAlta's instructions and tools. Its own sub-agents, skills, plugins, hooks and memories are off: sub-agents are CodeAlta sessions you see, skills are CodeAlta's. The AGENTS.md of the project reaches it with CodeAlta's instructions.
+- **Images.** With a model that reads images, Codex can generate one when you ask for it. The image shows in the session after its call, and CodeAlta keeps a copy with the session. Codex also saves it in its folder, under `generated_images`.
 - **Permissions.** `default` asks you before the commands and edits Codex asks for, `acceptEdits` allows the edits, `bypassPermissions` allows everything. Codex's own sandbox is off: a [sandboxed session](../sessions/sandbox.md#providers) runs Codex in CodeAlta's sandbox.
 - **Sessions.** A session keeps its Codex thread: it goes on after a restart, and a fork or a rewind continues from the same point of the thread. Codex compacts its own context. A message sent while Codex works steers its turn, and ends a wait of Codex, which shows as a call.
 - **The version.** A provider without `command` runs the version CodeAlta is tested with, and moves to the next one with CodeAlta. A program you name runs as it is; its status says when it is another version.

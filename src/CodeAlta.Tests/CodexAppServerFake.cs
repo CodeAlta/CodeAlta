@@ -460,6 +460,23 @@ internal sealed class CodexFakeTurn(CodexFakeConnection connection, string threa
         await Connection.NotifyAsync("item/completed", Scope(new JsonObject { ["completedAtMs"] = 2, ["item"] = new JsonObject { ["type"] = "reasoning", ["id"] = id, ["summary"] = new JsonArray(summary) } }));
     }
 
+    /// <summary>
+    /// Generates an image as Codex does: started, then completed with the path Codex saved it to, or, without a path,
+    /// failed as Codex ends a generation the image API refused (no failure detail unless a limit was reached).
+    /// </summary>
+    public async Task GenerateImageAsync(string revisedPrompt, string? savedPath)
+    {
+        var id = NextItem();
+        await Connection.NotifyAsync("item/started", Scope(new JsonObject { ["startedAtMs"] = 1, ["item"] = new JsonObject { ["type"] = "imageGeneration", ["id"] = id, ["status"] = "in_progress" } }));
+        var item = new JsonObject { ["type"] = "imageGeneration", ["id"] = id, ["status"] = savedPath is null ? "failed" : "completed", ["revisedPrompt"] = revisedPrompt };
+        if (savedPath is not null)
+        {
+            item["savedPath"] = savedPath;
+        }
+
+        await Connection.NotifyAsync("item/completed", Scope(new JsonObject { ["completedAtMs"] = 2, ["item"] = item }));
+    }
+
     /// <summary>Runs a command: started, its approval asked when <paramref name="askApproval"/>, its output, completed or declined.</summary>
     public async Task<string?> RunCommandAsync(string command, string output, bool askApproval = false)
     {
