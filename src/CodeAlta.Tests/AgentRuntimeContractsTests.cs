@@ -154,6 +154,24 @@ public sealed class AgentRuntimeContractsTests
     }
 
     [TestMethod]
+    public void AgentReasoningReplay_DifferentModel_DropsTheReasoningAModelWroteAsText()
+    {
+        var source = CreateTurnRequest("openai-responses", "llama", AgentTransportKind.OpenAIResponses, "qwen");
+        var target = CreateTurnRequest("openai-responses", "openai", AgentTransportKind.OpenAIResponses, "gpt-5.5");
+        var reasoning = new AgentMessagePart.Reasoning("The whole reasoning of the model.", null, AgentReasoningReplay.CreateProvenance(source)) { RawText = true };
+        var conversation = new[]
+        {
+            new AgentConversationMessage(AgentConversationRole.Assistant, [reasoning, new AgentMessagePart.Text("visible answer")]),
+        };
+
+        // It is not a summary: another model is not given it as one, and the model that wrote it gets it back as it is.
+        var sanitized = AgentReasoningReplay.SanitizeForRequest(conversation, target);
+        Assert.AreEqual(1, sanitized[0].Parts.Count);
+        Assert.AreEqual("visible answer", ((AgentMessagePart.Text)sanitized[0].Parts[0]).Value);
+        Assert.AreSame(conversation, AgentReasoningReplay.SanitizeForRequest(conversation, source));
+    }
+
+    [TestMethod]
     public void AgentReasoningReplay_LegacyReasoningWithoutProvenance_DowngradesToText()
     {
         var target = CreateTurnRequest("openai-responses", "openai", AgentTransportKind.OpenAIResponses, "gpt-5.5");

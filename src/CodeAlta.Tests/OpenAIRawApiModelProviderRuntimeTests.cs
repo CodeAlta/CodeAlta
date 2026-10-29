@@ -1923,6 +1923,72 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_KeepsTheReasoningTextOfAReasoningItemWithoutSummary_AndReplaysItAsText()
+    {
+        // llama.cpp, like the open-weight models, sends the reasoning as reasoning_text content, with an empty summary.
+        const string reasoningItem = """{"id":"rs_text","summary":[],"type":"reasoning","content":[{"text":"Thinking it through.","type":"reasoning_text"}],"encrypted_content":""}""";
+        const string messageItem = """{"type":"message","status":"completed","id":"msg_text","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"Hi there!"}],"role":"assistant"}""";
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                DeserializeStreamingResponseUpdate("""{"type":"response.output_item.added","output_index":0,"item":{"id":"rs_text","summary":[],"type":"reasoning","content":[],"encrypted_content":"","status":"in_progress"}}"""),
+                DeserializeStreamingResponseUpdate("""{"type":"response.reasoning_text.delta","output_index":0,"content_index":0,"delta":"Thinking it through.","item_id":"rs_text"}"""),
+                DeserializeStreamingResponseUpdate($$"""{"type":"response.output_item.done","output_index":0,"item":{{reasoningItem}}}"""),
+                DeserializeStreamingResponseUpdate("""{"type":"response.output_item.added","output_index":1,"item":{"content":[],"id":"msg_text","role":"assistant","status":"in_progress","type":"message"}}"""),
+                DeserializeStreamingResponseUpdate("""{"type":"response.output_text.delta","item_id":"msg_text","output_index":1,"content_index":0,"delta":"Hi there!"}"""),
+                DeserializeStreamingResponseUpdate($$"""{"type":"response.output_item.done","output_index":1,"item":{{messageItem}}}"""),
+                DeserializeStreamingResponseUpdate($$$"""{"type":"response.completed","response":{"id":"resp_text","object":"response","created_at":1793273560,"status":"completed","model":"gpt-test","output":[{{{reasoningItem}}},{{{messageItem}}}]}}"""),
+            ],
+            [CreateTextOnlyAssistantResponseUpdate("response-next", "gpt-test", "Done.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+        var deltas = new List<AgentTurnDelta>();
+        var request = CreateTurnRequest();
+
+        var response = await executor.ExecuteTurnAsync(
+            request,
+            (delta, _) =>
+            {
+                deltas.Add(delta);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+
+        // The completed reasoning keeps the text and the id it streamed with: it replaces the streamed one and is kept.
+        var parts = response.AssistantMessage.Parts.ToList();
+        var reasoningIndex = parts.FindIndex(static part => part is AgentMessagePart.Reasoning);
+        var reasoning = (AgentMessagePart.Reasoning)parts[reasoningIndex];
+        Assert.AreEqual(("Thinking it through.", true), (reasoning.Value, reasoning.RawText));
+        Assert.IsNull(reasoning.SummaryParts);
+        Assert.AreEqual(
+            deltas.Single(static delta => delta.Kind == AgentContentKind.Reasoning).ContentId,
+            response.AssistantPartContentIds![reasoningIndex]);
+        Assert.AreEqual("rs_text", response.AssistantPartContentIds[reasoningIndex]);
+
+        // The next turn sends it back as it came: as text, which llama.cpp requires, not as a summary.
+        _ = await executor.ExecuteTurnAsync(
+            request with
+            {
+                Conversation =
+                [
+                    .. request.Conversation,
+                    response.AssistantMessage,
+                    new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("And then?")]),
+                ],
+            },
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var replayed = responsesClient.Requests[1].InputItems.OfType<ReasoningResponseItem>().Single();
+        using var json = JsonDocument.Parse(SerializeModel(replayed));
+        Assert.AreEqual(0, json.RootElement.GetProperty("summary").GetArrayLength());
+        var content = json.RootElement.GetProperty("content").EnumerateArray().Single();
+        Assert.AreEqual(("reasoning_text", "Thinking it through."), (content.GetProperty("type").GetString(), content.GetProperty("text").GetString()));
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_MapsErrorUpdateToContextOverflowFailure()
     {
         var responsesClient = new RecordingOpenAIResponseClient(

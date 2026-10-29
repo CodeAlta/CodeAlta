@@ -75,6 +75,13 @@ public abstract record AgentMessagePart
         /// for any other reasoning.
         /// </summary>
         public bool? Redacted { get; init; }
+
+        /// <summary>
+        /// Gets or initializes whether the provider sent the reasoning as its own text rather than as a summary (the
+        /// <c>reasoning_text</c> content of a reasoning item of the OpenAI Responses API): <see cref="Value"/> is that
+        /// text, which goes back the way it came. Null for any other reasoning.
+        /// </summary>
+        public bool? RawText { get; init; }
     }
 
     /// <summary>

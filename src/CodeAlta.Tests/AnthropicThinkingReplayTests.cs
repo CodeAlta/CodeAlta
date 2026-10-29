@@ -66,6 +66,17 @@ public sealed class AnthropicThinkingReplayTests
     }
 
     [TestMethod]
+    public void TheRawTextMark_IsWrittenOnlyWhenSet_AndReadBack()
+    {
+        var plain = JsonSerializer.Serialize<AgentMessagePart>(new AgentMessagePart.Reasoning("summary"), AgentJsonSerializerContext.Default.AgentMessagePart);
+        Assert.IsFalse(plain.Contains("rawText", StringComparison.OrdinalIgnoreCase), plain);
+
+        var text = JsonSerializer.Serialize<AgentMessagePart>(new AgentMessagePart.Reasoning("thinking") { RawText = true }, AgentJsonSerializerContext.Default.AgentMessagePart);
+        var read = JsonSerializer.Deserialize(text, AgentJsonSerializerContext.Default.AgentMessagePart);
+        Assert.AreEqual(true, Assert.IsInstanceOfType<AgentMessagePart.Reasoning>(read).RawText);
+    }
+
+    [TestMethod]
     public void TheRedactedMark_IsWrittenOnlyWhenSet()
     {
         var plain = JsonSerializer.Serialize<AgentMessagePart>(new AgentMessagePart.Reasoning("text", "sig"), AgentJsonSerializerContext.Default.AgentMessagePart);

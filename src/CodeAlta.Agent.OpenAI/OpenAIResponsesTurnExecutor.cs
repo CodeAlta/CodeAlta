@@ -1739,9 +1739,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     break;
                 case AgentMessagePart.Reasoning reasoning:
                     FlushAssistantContent(items, contentParts);
-                    var reasoningItem = reasoning.SummaryParts is { Count: > 0 } summaryParts
-                        ? new ReasoningResponseItem(summaryParts.Select(ReasoningSummaryPart.CreateTextPart))
-                        : ResponseItem.CreateReasoningItem(reasoning.Value ?? string.Empty);
+                    var reasoningItem = reasoning.RawText == true
+                        ? CreateReasoningTextItem(reasoning.Value ?? string.Empty)
+                        : reasoning.SummaryParts is { Count: > 0 } summaryParts
+                            ? new ReasoningResponseItem(summaryParts.Select(ReasoningSummaryPart.CreateTextPart))
+                            : ResponseItem.CreateReasoningItem(reasoning.Value ?? string.Empty);
                     if (!string.IsNullOrWhiteSpace(reasoning.ProtectedData))
                     {
                         reasoningItem.EncryptedContent = reasoning.ProtectedData;
@@ -1964,13 +1966,18 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         .Select(static part => part.Text ?? string.Empty)
                         .ToArray();
                     var summaryText = string.Concat(summaryParts);
-                    if (!string.IsNullOrWhiteSpace(summaryText) || !string.IsNullOrWhiteSpace(reasoning.EncryptedContent))
+                    // A reasoning item may carry the text of the reasoning instead of a summary (open-weight models).
+                    var reasoningText = string.IsNullOrWhiteSpace(summaryText) ? ReadReasoningText(reasoning) : null;
+                    if (!string.IsNullOrWhiteSpace(summaryText) || reasoningText is not null || !string.IsNullOrWhiteSpace(reasoning.EncryptedContent))
                     {
                         parts.Add(new AgentMessagePart.Reasoning(
-                            summaryText,
+                            reasoningText ?? summaryText,
                             string.IsNullOrWhiteSpace(reasoning.EncryptedContent) ? null : reasoning.EncryptedContent,
                             reasoningProvenance,
-                            summaryParts));
+                            reasoningText is null ? summaryParts : null)
+                        {
+                            RawText = reasoningText is null ? null : true,
+                        });
                         partContentIds.Add(stableItemId);
                     }
 
@@ -1993,6 +2000,54 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         return (new AgentConversationMessage(AgentConversationRole.Assistant, parts), partContentIds, activities);
+    }
+
+    // The reasoning_text parts of the content of a reasoning item, which the SDK does not model; null when it has none.
+    private static string? ReadReasoningText(ReasoningResponseItem reasoning)
+    {
+        if (!reasoning.Patch.TryGetJson("$.content"u8, out var json))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var text = new System.Text.StringBuilder();
+        foreach (var part in document.RootElement.EnumerateArray())
+        {
+            if (part.ValueKind == JsonValueKind.Object &&
+                part.TryGetProperty("type", out var type) && type.ValueEquals("reasoning_text") &&
+                part.TryGetProperty("text", out var value) && value.ValueKind == JsonValueKind.String)
+            {
+                text.Append(value.GetString());
+            }
+        }
+
+        var result = text.ToString();
+        return string.IsNullOrWhiteSpace(result) ? null : result;
+    }
+
+    // Reasoning sent as text goes back as text: llama.cpp refuses a reasoning item without it in its content.
+    private static ReasoningResponseItem CreateReasoningTextItem(string text)
+    {
+        var item = new ReasoningResponseItem(Array.Empty<ReasoningSummaryPart>());
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartArray();
+            writer.WriteStartObject();
+            writer.WriteString("type", "reasoning_text");
+            writer.WriteString("text", text);
+            writer.WriteEndObject();
+            writer.WriteEndArray();
+        }
+
+        item.Patch.Set("$.content"u8, BinaryData.FromBytes(stream.ToArray()));
+        return item;
     }
 
     // The answer cites its sources in its own text: the activity shows what was searched or opened.

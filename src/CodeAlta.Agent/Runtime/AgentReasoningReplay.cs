@@ -148,7 +148,8 @@ public static class AgentReasoningReplay
         }
 
         changed = true;
-        return string.IsNullOrWhiteSpace(reasoning.Value)
+        // The reasoning a model wrote as its own text is not a summary: another model is not given it.
+        return string.IsNullOrWhiteSpace(reasoning.Value) || reasoning.RawText == true
             ? null
             : new AgentMessagePart.Text(CreateReasoningSummaryText(reasoning.Value));
     }
