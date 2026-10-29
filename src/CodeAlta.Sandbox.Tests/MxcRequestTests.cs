@@ -64,6 +64,46 @@ public sealed class MxcRequestTests
     }
 
     [TestMethod]
+    public void AFileLockedAMomentAsTheSandboxStarts_IsDeniedOnceItIsFree()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The chain of parent folders is for Windows.");
+        using var temp = new TempTree();
+        var project = temp.Folder("parent/project");
+        // A journal of another session writing its header (FileShare.None) as the sandbox starts: left out of the denied
+        // entries, it would stay readable through the grant of its folder for the whole life of the container.
+        var journal = Path.Combine(temp.Root, "parent", "other.journal");
+        var holder = new FileStream(journal, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+        var filesystem = new FilesystemPolicy();
+        filesystem.ReadwritePaths.Add(project);
+
+        // The journal is written by the time the chain waits for it.
+        MxcRequests.AddParentChain(filesystem, grantParents: true, wait: _ => holder.Dispose());
+
+        holder.Dispose();
+        CollectionAssert.Contains(filesystem.DeniedPaths, journal);
+    }
+
+    [TestMethod]
+    public void AFileHeldAllTheWhileTheSandboxStarts_IsLeftOutAfterAShortWait()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The chain of parent folders is for Windows.");
+        using var temp = new TempTree();
+        var project = temp.Folder("parent/project");
+        var held = Path.Combine(temp.Root, "parent", "held.lock");
+        using var holder = new FileStream(held, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+        var filesystem = new FilesystemPolicy();
+        filesystem.ReadwritePaths.Add(project);
+        var waited = TimeSpan.Zero;
+
+        MxcRequests.AddParentChain(filesystem, grantParents: true, wait: delay => waited += delay);
+
+        // Nobody reads it while it is held, and the start waits for it a moment only.
+        CollectionAssert.DoesNotContain(filesystem.DeniedPaths, held);
+        Assert.IsGreaterThan(TimeSpan.Zero, waited);
+        Assert.IsLessThanOrEqualTo(TimeSpan.FromMilliseconds(500), waited);
+    }
+
+    [TestMethod]
     public void TheNetwork_IsOffWithTheContainersOwnLoopback_ThroughTheProxy_OrOnWithoutTheHost()
     {
         using var temp = new TempTree();

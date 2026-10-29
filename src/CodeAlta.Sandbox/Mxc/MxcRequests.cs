@@ -52,9 +52,13 @@ internal static class MxcRequests
     // Tools resolve a path one folder at a time from the volume root (git, node) and fail on a folder that is not
     // granted. A read-only grant cascades to everything below it, so each parent folder of a read-write grant is
     // granted read-only with every other entry denied; the volume root goes in the read-write list, where a root does
-    // not cascade and cannot be written. A file the system holds open (NTUSER.DAT) cannot be denied, and nobody else
-    // can read it: it is left out. So is a file another program holds delete-on-close (the temporary files of %TEMP%):
-    // the container opens a denied path without sharing its deletion, which such a file refuses, and does not start.
+    // not cascade and cannot be written. A file another program holds open is told apart by how it refuses to open:
+    // - delete-on-close (the temporary files of %TEMP%): the container opens a denied path without sharing its deletion,
+    //   which such a file refuses, and would not start; it is left out;
+    // - held by the system for the whole sign-in (NTUSER.DAT and its logs): nobody else reads it; it is left out;
+    // - locked a moment (a journal writing its header): it is checked again a few times, and denied once it is free,
+    //   since left out it would stay readable through the grant of its folder for the whole life of the container.
+    //   One still held then is left out: nobody reads it while it is.
     // On macOS (grantParents false) the parents are not granted: Seatbelt lets every path be looked up, but shows the
     // metadata of every file, so a file in a parent folder (.editorconfig, Directory.Build.props) seems there and
     // cannot be opened, and builds fail. Its other entries are denied with their metadata, so that they are not there,
@@ -62,7 +66,8 @@ internal static class MxcRequests
     // grants in the data folder of the sandboxes (`unchained`) are left out too: tools walk up from the project, and
     // mxc takes about half a second more to start with the hundreds of entries of `~/Library` and its caches denied.
     // Only the folders inside `within` (the home folder) deny their entries: those of `/private` are the system's own.
-    internal static void AddParentChain(FilesystemPolicy filesystem, bool grantParents, string? unchained = null, string? within = null)
+    internal static void AddParentChain(FilesystemPolicy filesystem, bool grantParents, string? unchained = null, string? within = null,
+        Action<TimeSpan>? wait = null)
     {
         var comparer = SandboxPolicyBuilder.PathComparer;
         var grants = new HashSet<string>(filesystem.ReadwritePaths.Concat(filesystem.ReadonlyPaths).Select(static path => Path.TrimEndingDirectorySeparator(path)), comparer);
@@ -91,6 +96,7 @@ internal static class MxcRequests
         }
 
         var denied = 0;
+        var locked = new List<string>();
         foreach (var folder in chain.Where(folder => !grants.Any(grant => SandboxPolicyBuilder.IsInside(grant, folder))
                      && (within is null || SandboxPolicyBuilder.IsInside(within, folder))).Order(comparer))
         {
@@ -110,10 +116,39 @@ internal static class MxcRequests
             {
                 // An entry that leads to a grant stays (the data folder of the sandboxes, when it is not chained).
                 if (chain.Contains(entry) || grants.Any(grant => SandboxPolicyBuilder.IsInside(entry, grant))) continue;
-                if (grantParents ? File.Exists(entry) && IsHeldOpen(entry) : IsLink(entry)) continue;
+                if (!grantParents)
+                {
+                    if (IsLink(entry)) continue;
+                }
+                else if (File.Exists(entry) && HoldOf(entry) is var hold && hold != FileHold.Free)
+                {
+                    if (hold == FileHold.Locked && !IsRegistryHive(entry)) locked.Add(entry);
+                    continue;
+                }
+
                 filesystem.DeniedPaths.Add(entry);
                 denied++;
             }
+        }
+
+        if (locked.Count > 0) DenyOnceFree(filesystem, locked, wait ?? Thread.Sleep);
+    }
+
+    // The waits for a file locked a moment, about a quarter of a second in all: only a start beside such a file waits.
+    private static ReadOnlySpan<int> LockWaits => [10, 20, 40, 80, 100];
+
+    private static void DenyOnceFree(FilesystemPolicy filesystem, List<string> locked, Action<TimeSpan> wait)
+    {
+        foreach (var milliseconds in LockWaits)
+        {
+            wait(TimeSpan.FromMilliseconds(milliseconds));
+            locked.RemoveAll(path =>
+            {
+                var hold = HoldOf(path);
+                if (hold == FileHold.Free) filesystem.DeniedPaths.Add(path);
+                return hold != FileHold.Locked;
+            });
+            if (locked.Count == 0) return;
         }
     }
 
@@ -198,21 +233,54 @@ internal static class MxcRequests
         }
     }
 
-    private static bool IsHeldOpen(string path)
+    private enum FileHold
     {
-        try
+        /// <summary>It opens as the container opens it: it is denied.</summary>
+        Free,
+
+        /// <summary>It is no longer there: the container refuses a path it cannot find.</summary>
+        Gone,
+
+        /// <summary>It opens only when its deletion is shared: another program holds it delete-on-close.</summary>
+        DeleteOnClose,
+
+        /// <summary>It does not open at all: another program locks it, or the system holds it.</summary>
+        Locked,
+    }
+
+    private static FileHold HoldOf(string path)
+    {
+        // Without FileShare.Delete first, as the container opens it: a file open delete-on-close refuses that open.
+        return Open(path, FileShare.ReadWrite) is { } plain ? plain
+            : Open(path, FileShare.ReadWrite | FileShare.Delete) is { } shared ? shared == FileHold.Free ? FileHold.DeleteOnClose : shared
+            : FileHold.Locked;
+
+        static FileHold? Open(string path, FileShare share)
         {
-            // Without FileShare.Delete, as the container opens it: a file open delete-on-close refuses that open.
-            using var _ = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (IOException)
-        {
-            return true;
+            try
+            {
+                using var _ = new FileStream(path, FileMode.Open, FileAccess.Read, share);
+                return FileHold.Free;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Not readable here: denied as any other entry.
+                return FileHold.Free;
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return FileHold.Gone;
+            }
+            catch (IOException)
+            {
+                return null;
+            }
         }
     }
+
+    // The registry hive of the user (NTUSER.DAT and its logs, at the root of the profile) stays locked by the system for
+    // the whole sign-in: no start waits for it.
+    private static bool IsRegistryHive(string path)
+        => Path.GetFileName(path).StartsWith("ntuser.", StringComparison.OrdinalIgnoreCase)
+           && string.Equals(Path.GetDirectoryName(path), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), StringComparison.OrdinalIgnoreCase);
 }
