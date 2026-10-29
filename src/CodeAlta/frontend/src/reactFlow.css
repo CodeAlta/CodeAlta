@@ -1,0 +1,21 @@
+/* React Flow in the colors of the window, light and dark: the graphs of the window (workflows) and the ones of canvases, whose
+   scripts import the window's `@xyflow/react` (src/lent). A view sets its own on top of these. */
+.react-flow { --xy-background-color: transparent; --xy-background-pattern-color: color-mix(in srgb, var(--muted) 24%, transparent);
+  --xy-edge-stroke: var(--line-strong); --xy-edge-stroke-selected: var(--accent); --xy-connectionline-stroke: var(--accent);
+  --xy-edge-label-background-color: var(--panel); --xy-edge-label-color: var(--text);
+  --xy-node-background-color: var(--panel); --xy-node-color: var(--text); --xy-node-border: 1px solid var(--line); --xy-node-border-radius: 10px;
+  --xy-node-boxshadow-selected: 0 0 0 1.5px var(--accent); --xy-node-group-background-color: color-mix(in srgb, var(--panel-3) 50%, transparent);
+  --xy-handle-background-color: var(--line-strong); --xy-handle-border-color: var(--panel);
+  --xy-selection-background-color: color-mix(in srgb, var(--accent) 12%, transparent); --xy-selection-border: 1px dotted var(--accent);
+  --xy-resize-background-color: var(--accent);
+  --xy-controls-button-background-color: var(--panel); --xy-controls-button-background-color-hover: var(--panel-3); --xy-controls-button-color: var(--text);
+  --xy-controls-button-color-hover: var(--text); --xy-controls-button-border-color: var(--line); --xy-controls-box-shadow: 0 8px 20px -12px #000;
+  --xy-minimap-background-color: var(--panel); --xy-minimap-mask-background-color: color-mix(in srgb, var(--bg) 62%, transparent);
+  --xy-minimap-mask-stroke-color: var(--line-strong); --xy-minimap-node-background-color: var(--panel-3); --xy-minimap-node-stroke-color: transparent;
+  color: var(--text); font: inherit; }
+/* The credit of React Flow stays, quiet, and is not a link out of the window. */
+.react-flow__attribution { padding: 0 4px; background: none; opacity: .45; pointer-events: none; }
+.react-flow__attribution a { color: var(--muted); font-size: 9px; }
+.react-flow__controls { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+.react-flow__controls-button svg { fill: currentColor; }
+.react-flow__minimap { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }

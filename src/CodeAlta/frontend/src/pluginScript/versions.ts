@@ -12,4 +12,5 @@ export const lentVersions: Readonly<Record<string, string>> = Object.freeze({
   "@blueprintjs/table": "6.3.0",
   "flexlayout-react": "0.11.0",
   "lucide-react": "0.511.0",
+  "@xyflow/react": "12.12.0",
 });

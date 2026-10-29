@@ -9,7 +9,7 @@ namespace CodeAlta.Plugins.Abstractions;
 /// A module has one of two forms. It exports a React component (<c>export default function Board()</c>), which the
 /// application draws in its own tree; or it exports <c>mount(root, alta)</c>, which fills the element that holds the
 /// fragment and may return a function that is called when the content goes away. Either gets the libraries of the
-/// application by their usual names (<c>react</c>, <c>@blueprintjs/core</c>, <c>flexlayout-react</c>, <c>lucide-react</c>) and
+/// application by their usual names (<c>react</c>, <c>@blueprintjs/core</c>, <c>flexlayout-react</c>, <c>lucide-react</c>, <c>@xyflow/react</c>) and
 /// the small module <c>codealta</c>, and reaches the application through the <c>alta</c> object.
 /// </para>
 /// <para>

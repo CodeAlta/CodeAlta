@@ -383,6 +383,7 @@ The `codealta-plugin-runtime` skill ships complete plugins that CodeAlta's tests
 | `saved-data` | Data kept between runs with `Services.State` |
 | `canvas-checklist` | A canvas for the application, a project and a session, ticked from the page, a command or an agent; buttons in the title bar and the project menu |
 | `canvas-board` | A canvas drawn by a React script with Blueprint, a chart and `alta.host`, whose board lives in the plugin and is read with `alta.rpc` |
+| `canvas-flow` | A canvas that draws a pipeline with React Flow: custom nodes, links, a minimap, the graph kept in the plugin |
 | `landing-card` | A welcome page card, two commands and a canvas |
 | `report-dialog` | A dialog with Markdown, a diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
