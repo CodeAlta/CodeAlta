@@ -116,7 +116,7 @@ public sealed class ModelCatalogRpcTests
     }
 
     [TestMethod]
-    public async Task DraftContextBudgets_UseRuntimeInputLimitsAndMatchingPreferences()
+    public async Task DraftContextWindows_KeepCapacitiesSeparateFromInternalBudgets()
     {
         await using var registry = new ModelProviderRegistry();
         var descriptor = new ModelProviderDescriptor(new("fixture"), "Fixture")
@@ -135,8 +135,9 @@ public sealed class ModelCatalogRpcTests
             copilot, copilot with { Id = "preferred" }, copilot with { Id = "invalid-preference" },
             new("codex", Capabilities: new Dictionary<string, object?> { ["effectiveContextWindowPercent"] = 95L })
                 { ContextSizes = new(272000, [272000, 1050000]) },
-            new("reserved", Capabilities: new Dictionary<string, object?> { ["outputTokenLimit"] = 10000L })
+            new("reserved", Capabilities: new Dictionary<string, object?> { ["outputTokenLimit"] = 64000L })
                 { ContextSizes = new(200000, [200000, 1000000]) },
+            new("unpaired", Capabilities: new Dictionary<string, object?> { ["contextWindow"] = 200000L, ["outputTokenLimit"] = 64000L }),
             new("legacy", Capabilities: new Dictionary<string, object?> { ["contextWindow"] = 200000L, ["inputTokenLimit"] = 180000L }),
             new("managed", Capabilities: new Dictionary<string, object?> { ["contextWindow"] = 1000000L })
                 { ContextSizes = new(null, [200000, 1000000], IsProviderManaged: true) },
@@ -147,23 +148,22 @@ public sealed class ModelCatalogRpcTests
 
         var response = await service.Models(new("epoch", "fixture"), CancellationToken.None);
         var standard = response.Models.Single(model => model.Id == "copilot");
-        Assert.AreEqual(1050000, standard.ContextTokens, "The catalog's total envelope is not the draft's input budget.");
-        Assert.AreEqual(272000m, standard.DefaultInputTokens);
-        Assert.AreEqual(272000m, standard.ContextInputTokens!["272000"]);
-        Assert.AreEqual(922000m, standard.ContextInputTokens["922000"]);
-        Assert.AreEqual(922000m, response.Models.Single(model => model.Id == "preferred").DefaultInputTokens);
-        Assert.AreEqual(272000m, response.Models.Single(model => model.Id == "invalid-preference").DefaultInputTokens);
+        Assert.AreEqual(1050000, standard.ContextTokens, "The catalog envelope must not replace the provider's selectable capacities.");
+        Assert.AreEqual(272000m, standard.DefaultContextTokens);
+        CollectionAssert.AreEqual(new decimal[] { 272000, 922000 }, standard.ContextSizes!.ToArray());
+        Assert.AreEqual(922000m, response.Models.Single(model => model.Id == "preferred").DefaultContextTokens);
+        Assert.AreEqual(272000m, response.Models.Single(model => model.Id == "invalid-preference").DefaultContextTokens);
         var codex = response.Models.Single(model => model.Id == "codex");
-        Assert.AreEqual(258400m, codex.DefaultInputTokens);
-        Assert.AreEqual(997500m, codex.ContextInputTokens!["1050000"]);
+        Assert.AreEqual(272000m, codex.DefaultContextTokens);
+        CollectionAssert.AreEqual(new decimal[] { 272000, 1050000 }, codex.ContextSizes!.ToArray());
         var reserved = response.Models.Single(model => model.Id == "reserved");
-        Assert.AreEqual(190000m, reserved.DefaultInputTokens);
-        Assert.AreEqual(990000m, reserved.ContextInputTokens!["1000000"]);
-        Assert.AreEqual(180000m, response.Models.Single(model => model.Id == "legacy").DefaultInputTokens);
+        Assert.AreEqual(200000m, reserved.DefaultContextTokens);
+        CollectionAssert.AreEqual(new decimal[] { 200000, 1000000 }, reserved.ContextSizes!.ToArray());
+        Assert.AreEqual(200000m, response.Models.Single(model => model.Id == "unpaired").DefaultContextTokens);
+        Assert.AreEqual(200000m, response.Models.Single(model => model.Id == "legacy").DefaultContextTokens);
         var managed = response.Models.Single(model => model.Id == "managed");
-        Assert.IsNull(managed.DefaultInputTokens, "Only the CLI can report its effective window.");
-        Assert.IsTrue(managed.ContextInputTokens!.Values.All(tokens => tokens is null));
-        Assert.IsNull(response.Models.Single(model => model.Id == "unknown").DefaultInputTokens);
+        Assert.AreEqual(1000000m, managed.DefaultContextTokens, "A verified preference is displayed without a local output reservation.");
+        Assert.IsNull(response.Models.Single(model => model.Id == "unknown").DefaultContextTokens);
     }
 
     [TestMethod]

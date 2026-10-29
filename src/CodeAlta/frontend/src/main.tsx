@@ -122,7 +122,7 @@ import { resourceSpacesOf } from "./spaces/SpaceChips";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { ContextSizeSelect } from "./ContextSizeSelect";
-import { draftContextInputTokens } from "./contextSizes";
+import { draftContextTokens } from "./contextSizes";
 import { ReviewBeforeCommitSelect } from "./ReviewBeforeCommitSelect";
 import { validSelection } from "./sessionSelection";
 import { AppIcon, type IconName } from "./AppIcon";
@@ -5595,7 +5595,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   localDraft={{ read: () => localDrafts.peek(draftScope)?.text ?? "", subscribe: localDrafts.subscribe, edit: editLocalDraft, options: creationProviderChoice(),
                     disabled: newPromptDisabled, busy: creatingScope?.projectId === projectId, submit: () => void createSelectedSession(true),
                     surface: owned && status?.hostEpoch ? { epoch: status.hostEpoch, onOpenProviders: () => navigate("providers"),
-                      contextTokens: draftContextInputTokens(draftChoices.models.find(model => model.id === draftChoices.value.modelId), draftChoices.value.context) } : undefined,
+                      contextTokens: draftContextTokens(draftChoices.models.find(model => model.id === draftChoices.value.modelId), draftChoices.value.context) } : undefined,
                     action: <>
                       {draftChoices.failed && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} disabled={creatingBusy}
                         aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={draftChoices.refresh} />}

@@ -68,7 +68,7 @@ test("a new session is created from a form beside the row of its project or of t
     };
     const until = async (condition: string, what: string) => {
       assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true,
-        `${what}; ${exceptions.join("\n")}; form: ${await evaluate(`document.querySelector(${JSON.stringify(form)})?.textContent`)}`);
+        `${what}; ${exceptions.join("\n")}; form: ${await evaluate(`document.querySelector(${JSON.stringify(form)})?.textContent`)}; draft: ${await evaluate(`JSON.stringify({ meter: document.querySelector('#active-session-content .context-usage')?.textContent, model: document.querySelector('#composer-model-new')?.textContent, context: document.querySelector('#composer-context-new')?.value, picker: document.querySelector('.composer-model-picker')?.textContent })`)}`);
     };
     const text = (selector: string) => evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`) as Promise<string | null>;
     const shown = (selector: string) => evaluate(`!!document.querySelector(${JSON.stringify(selector)})`) as Promise<boolean>;
@@ -487,7 +487,7 @@ test("a new session is created from a form beside the row of its project or of t
     const draftMeter = "#active-session-content .context-usage";
     await until(`!!document.querySelector(${JSON.stringify(draftMeter)})`, "the draft context meter");
     assert.equal(await text(`${draftMeter} .context-usage-tokens`), "0/272k",
-      "the draft meter uses the effective default input budget, not the 1.05M total envelope");
+      "the draft meter uses the default capacity, not the unrelated 1.05M catalog envelope");
     await press("#active-session-content .composer-selection");
     await until("!!document.querySelector('#composer-model-new')", "the draft picker");
     if (!await shown("#composer-context-new"))
@@ -496,10 +496,29 @@ test("a new session is created from a form beside the row of its project or of t
     await select("#composer-context-new", "922000");
     await until(`document.querySelector(${JSON.stringify(`${draftMeter} .context-usage-tokens`)})?.textContent === '0/922k'`, "the draft meter follows an explicit choice");
     await select("#composer-context-new", "");
-    await until(`document.querySelector(${JSON.stringify(`${draftMeter} .context-usage-tokens`)})?.textContent === '0/272k'`, "Default restores the effective input budget");
+    await until(`document.querySelector(${JSON.stringify(`${draftMeter} .context-usage-tokens`)})?.textContent === '0/272k'`, "Default restores the default capacity");
+    await press("#composer-model-new");
+    await until("!!document.querySelector('.composer-model-picker [data-model-id=old]')", "the model with an output reservation");
+    // At the bottom composer the menu opens upward; choose through its focused search rather than coordinates.
+    await until("document.activeElement === document.querySelector('.composer-model-picker input')", "the model search has focus");
+    await command("Input.insertText", { text: "old" });
+    await until("document.querySelectorAll('.composer-model-picker [data-model-id]').length === 1", "the 200k model is the only match");
+    await enter();
+    await gone(".composer-model-picker", "the 200k model was selected");
+    await until(`document.querySelector(${JSON.stringify(`${draftMeter} .context-usage-tokens`)})?.textContent === '0/200k'`, "a 200k window is not reduced to 136k");
+    await select("#composer-context-new", "1000000");
+    await until(`document.querySelector(${JSON.stringify(`${draftMeter} .context-usage-tokens`)})?.textContent === '0/1M'`, "a 1M window is displayed without output subtraction");
+    await press("#composer-model-new");
+    await until("!!document.querySelector('.composer-model-picker [data-model-id=new]')", "the original model");
+    await until("document.activeElement === document.querySelector('.composer-model-picker input')", "the model search has focus again");
+    await command("Input.insertText", { text: "new" });
+    await until("document.querySelectorAll('.composer-model-picker [data-model-id]').length === 1", "the original model is the only match");
+    await enter();
+    await until(`document.querySelector(${JSON.stringify(`${draftMeter} .context-usage-tokens`)})?.textContent === '0/272k'`, "switching models restores Default");
     await escape();
     await gone(".composer-selection-form", "the draft picker is closed");
     assert.equal(await evaluate("newSessionFixture.creates.length"), 0, "previewing capacities starts no session");
+    const storedAfterModelChoices = await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`);
     // Refocus the editor after closing the picker, not Monaco's hidden, read-only IME textarea.
     await evaluate("document.querySelector('#catalog-prompt [role=textbox]').focus()");
     await until("document.querySelector('#catalog-prompt').contains(document.activeElement) && document.activeElement?.getAttribute('role') === 'textbox'", "the draft editor has focus");
@@ -514,7 +533,8 @@ test("a new session is created from a form beside the row of its project or of t
     assert.deepEqual(await creates(), [{ scope: "project", title: null, providerId: "alternate", worktree: true, baseBranch: "feature" }]);
     assert.equal(await evaluate("newSessionFixture.creates[0].preparedWorktreeId === newSessionFixture.prepares[0].requestId"), true, "the session works in the worktree made for it");
     assert.equal(await evaluate("settingsShellFixture.sends[0].text"), "Original local draft");
-    assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`), stored);
+    assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`), storedAfterModelChoices,
+      "sending preserves the model preferences chosen in the draft");
     // The session took the place of the prompt it was started from: that prompt has no tab of its own.
     assert.equal((await evaluate(dockTabs) as string[]).some(name => name.startsWith("New session")), false, JSON.stringify(await evaluate(dockTabs)));
 

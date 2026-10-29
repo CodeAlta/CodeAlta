@@ -20,13 +20,10 @@ export function defaultContextSummary(model: ContextModel | null | undefined): s
   return tokens != null && Number.isSafeInteger(tokens) && tokens > 0 ? compactTokens(String(tokens)) : null;
 }
 
-/** Preview only host-resolved input limits. An unknown or unverified choice has no draft usage meter. */
-export function draftContextInputTokens(model: (ContextModel & {
-  defaultInputTokens?: number | null;
-  contextInputTokens?: Readonly<Record<string, number | null>> | null;
-}) | null | undefined, choice: ContextChoice): number | null {
+/** Preview the chosen window, not the internal prompt budget after output reservations. */
+export function draftContextTokens(model: ContextModel | null | undefined, choice: ContextChoice): number | null {
   if (!validContext(choice, model)) return null;
-  const tokens = choice?.tokens == null ? model?.defaultInputTokens : model?.contextInputTokens?.[choice.tokens];
+  const tokens = choice?.tokens ?? model?.defaultContextTokens;
   return tokens != null && Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null;
 }
 

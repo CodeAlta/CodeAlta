@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ContextSizeSelect } from "./ContextSizeSelect";
 import { compactTokens } from "./contextUsage";
 import { DraftUsage } from "./promptSurface/PromptSurfaceParts";
-import { contextSizes, defaultContextSummary, draftContextInputTokens, hasProviderContextOption, validContext } from "./contextSizes";
+import { contextSizes, defaultContextSummary, draftContextTokens, hasProviderContextOption, validContext } from "./contextSizes";
 
 test("context choices are exact positive safe endpoints, never inferred from a maximum", () => {
   assert.deepEqual(contextSizes({ contextSizes: [272000, 1050000, 272000, -1, 0, 1.5, Infinity, NaN] }), [272000, 1050000]);
@@ -44,20 +44,35 @@ test("ACP keeps its existing context option", () => {
   assert.equal(hasProviderContextOption([{ id: "fast", name: "Fast mode" }]), false);
 });
 
-test("draft meter uses host-resolved input budgets, never raw capacities or unverified choices", () => {
+test("draft meter shows the chosen window without output reservations or headroom deductions", () => {
   const model = { contextSizes: [272000, 922000], defaultContextTokens: 272000, contextTokens: 1050000,
     defaultInputTokens: 272000, contextInputTokens: { "272000": 272000, "922000": 922000 } };
-  assert.equal(draftContextInputTokens(model, undefined), 272000);
-  assert.equal(draftContextInputTokens(model, { tokens: 922000 }), 922000);
-  assert.equal(draftContextInputTokens(model, { tokens: null }), 272000);
-  assert.equal(draftContextInputTokens({ ...model, defaultInputTokens: 922000 }, null), 922000, "Default follows the provider preference");
-  assert.equal(draftContextInputTokens({ ...model, defaultInputTokens: 258400,
-    contextInputTokens: { "922000": 875900 } }, { tokens: 922000 }), 875900, "headroom is resolved by the host, not duplicated in the UI");
-  assert.equal(draftContextInputTokens(model, { tokens: 500000 }), null);
-  assert.equal(draftContextInputTokens(undefined, { tokens: 922000 }), null);
-  assert.equal(draftContextInputTokens({ ...model, defaultInputTokens: null, contextInputTokens: { "922000": null } }, null), null);
-  assert.equal(draftContextInputTokens({ ...model, contextInputTokens: { "922000": null } }, { tokens: 922000 }), null);
-  assert.equal(draftContextInputTokens({ contextSizes: model.contextSizes, defaultContextTokens: 272000 }, null), null);
+  assert.equal(draftContextTokens(model, undefined), 272000);
+  assert.equal(draftContextTokens(model, { tokens: 922000 }), 922000);
+  assert.equal(draftContextTokens(model, { tokens: null }), 272000);
+  assert.equal(draftContextTokens({ ...model, defaultContextTokens: 922000 }, null), 922000, "Default follows the provider preference");
+  const withHeadroom = { ...model, defaultInputTokens: 258400, contextInputTokens: { "922000": 875900 } };
+  assert.equal(draftContextTokens(withHeadroom, { tokens: 922000 }), 922000, "internal headroom does not redefine the displayed window");
+  assert.equal(draftContextTokens(model, { tokens: 500000 }), null);
+  assert.equal(draftContextTokens(undefined, { tokens: 922000 }), null);
+  assert.equal(draftContextTokens({ ...model, defaultContextTokens: null }, null), null);
+  assert.equal(draftContextTokens({ contextSizes: [200000, 1000000], defaultContextTokens: null }, { tokens: 1000000 }), 1000000);
+  assert.equal(draftContextTokens({ contextSizes: model.contextSizes, defaultContextTokens: 272000 }, null), 272000);
   for (const tokens of [-1, 0, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1])
-    assert.equal(draftContextInputTokens({ ...model, defaultInputTokens: tokens }, null), null);
+    assert.equal(draftContextTokens({ ...model, defaultContextTokens: tokens }, null), null);
+});
+
+test("Claude windows display 200k and 1M, including models without selectable pairs", () => {
+  for (const [capacity, inputBudget, label] of [[200000, 136000, "200k"], [1000000, 872000, "1M"]] as const) {
+    const model = { contextSizes: [200000, 1000000], defaultContextTokens: capacity,
+      defaultInputTokens: inputBudget, contextInputTokens: { [capacity]: inputBudget } };
+    for (const tokens of [
+      draftContextTokens(model, null),
+      draftContextTokens(model, { tokens: capacity }),
+      draftContextTokens({ ...model, contextSizes: [] }, null),
+    ]) {
+      assert.equal(tokens, capacity);
+      assert.ok(renderToStaticMarkup(createElement(DraftUsage, { contextTokens: tokens })).includes(`0/${label}`));
+    }
+  }
 });
