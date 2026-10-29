@@ -31,6 +31,18 @@ public sealed class SandboxNetworkProxyTests
     }
 
     [TestMethod]
+    public async Task AProxyDisposedAsSoonAsItStarts_EndsWithoutThrowing()
+    {
+        // A worker that fails to start disposes its proxy at once. Its listener stops only once the accept loop ended:
+        // a loop that ran after the stop would get "Not listening" in the place of the failure of the start.
+        for (var index = 0; index < 500; index++)
+        {
+            var proxy = SandboxNetworkProxy.Start([], [], []);
+            await proxy.DisposeAsync().AsTask().WaitAsync(Deadline);
+        }
+    }
+
+    [TestMethod]
     public async Task APlainHttpRequest_GoesOnInTheFormAnOriginServerReads_AsTheOnlyOneOfItsConnection()
     {
         using var upstream = new EchoServer();

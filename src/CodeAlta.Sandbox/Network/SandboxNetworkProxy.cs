@@ -107,8 +107,9 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        // The accept loop ends first, then the listener stops: a loop that called the listener after it stopped would
+        // throw "Not listening" (InvalidOperationException), in the place of what made the sandbox stop at once.
         await _closing.CancelAsync().ConfigureAwait(false);
-        _listener.Stop();
         try
         {
             await _accepting.ConfigureAwait(false);
@@ -117,6 +118,7 @@ public sealed class SandboxNetworkProxy : IAsyncDisposable
         {
         }
 
+        _listener.Stop();
         _closing.Dispose();
     }
 
