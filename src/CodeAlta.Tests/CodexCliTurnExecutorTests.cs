@@ -93,6 +93,33 @@ public sealed class CodexCliTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task AWaitOfCodex_IsACallOfTheSession_WithItsDuration()
+    {
+        var server = new CodexAppServerFake
+        {
+            OnTurn = async turn =>
+            {
+                await turn.SleepAsync(30_000);
+                await turn.SleepAsync(1_800_000);
+                await turn.SendTextAsync("Done.");
+            },
+        };
+        await using var fixture = new Fixture(server);
+
+        var conversation = await fixture.RunAsync([User("wait")]);
+
+        // The session shows the wait while it lasts: a message sent meanwhile steers the turn and ends it.
+        var calls = conversation.SelectMany(static message => message.Parts.OfType<AgentMessagePart.ToolCall>()).ToArray();
+        CollectionAssert.AreEqual(new[] { "sleep", "sleep" }, calls.Select(static call => call.Name).ToArray());
+        Assert.AreEqual(30_000, calls[0].Arguments.GetProperty("duration_ms").GetInt64());
+        var results = conversation.SelectMany(static message => message.Parts.OfType<AgentMessagePart.ToolResult>()).Select(static part => part.Result).ToArray();
+        Assert.IsTrue(results[0].Success);
+        Assert.AreEqual("Waited up to 30 s.", ((AgentToolResultItem.Text)results[0].Items.Single()).Value);
+        Assert.AreEqual("Waited up to 30 min.", ((AgentToolResultItem.Text)results[1].Items.Single()).Value);
+        Assert.AreEqual("Done.", Text(conversation[^1]));
+    }
+
+    [TestMethod]
     public async Task ANewProcess_ResumesTheThread_WithItsTools()
     {
         var server = new CodexAppServerFake();

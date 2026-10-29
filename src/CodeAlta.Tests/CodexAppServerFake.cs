@@ -527,6 +527,15 @@ internal sealed class CodexFakeTurn(CodexFakeConnection connection, string threa
         return result;
     }
 
+    /// <summary>Waits with the sleep tool of Codex: a <c>sleep</c> item started, then completed when the wait ends.</summary>
+    public async Task SleepAsync(ulong durationMs)
+    {
+        var id = NextItem();
+        var item = new JsonObject { ["type"] = "sleep", ["id"] = id, ["durationMs"] = durationMs };
+        await Connection.NotifyAsync("item/started", Scope(new JsonObject { ["startedAtMs"] = 1, ["item"] = item.DeepClone() }));
+        await Connection.NotifyAsync("item/completed", Scope(new JsonObject { ["completedAtMs"] = 2, ["item"] = item }));
+    }
+
     public Task UpdatePlanAsync(params (string Step, string Status)[] steps)
         => Connection.NotifyAsync("turn/plan/updated", Scope(new JsonObject
         {

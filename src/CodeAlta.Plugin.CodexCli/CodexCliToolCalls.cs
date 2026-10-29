@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
@@ -65,6 +66,9 @@ internal static class CodexCliToolCalls
                 return new CodexCliToolCall(mcp.Id, HarnessToolCallBridge.SanitizeName($"{mcp.Server}__{mcp.Tool}"), Arguments(mcp.Arguments), false);
             case ThreadItem.DynamicToolCallThreadItem dynamic:
                 return new CodexCliToolCall(dynamic.Id, HarnessToolCallBridge.SanitizeName(dynamic.Tool), Arguments(dynamic.Arguments), false);
+            case ThreadItem.SleepThreadItem sleep:
+                // A wait of Codex holds its turn: the call shows it while it lasts, and a message sent meanwhile ends it.
+                return new CodexCliToolCall(sleep.Id, "sleep", Build(writer => writer.WriteNumber("duration_ms", sleep.DurationMs)), false);
             case ThreadItem.WebSearchThreadItem search:
                 return new CodexCliToolCall(search.Id, "web_search", Build(writer => writer.WriteString("query", search.Query)), false);
             case ThreadItem.ImageViewThreadItem image:
@@ -142,6 +146,9 @@ internal static class CodexCliToolCalls
 
                 var content = dynamic.ContentItems is { Count: > 0 } items ? string.Join("\n", items.Select(static item => JsonSerializer.Serialize(item, CodexProtocolJsonContext.Default.DynamicToolCallOutputContentItem))) : "(no output)";
                 return new AgentToolResult(dynamic.Success != false, [new AgentToolResultItem.Text(Limit(content))]);
+            case ThreadItem.SleepThreadItem sleep:
+                // The item does not say whether a message ended the wait early.
+                return new AgentToolResult(true, [new AgentToolResultItem.Text($"Waited up to {Duration(sleep.DurationMs)}.")]);
             case ThreadItem.WebSearchThreadItem search:
                 return new AgentToolResult(true, [new AgentToolResultItem.Text($"Searched the web: {search.Query}")]);
             case ThreadItem.ImageViewThreadItem image:
@@ -200,6 +207,14 @@ internal static class CodexCliToolCalls
 
         return builder.ToString();
     }
+
+    private static string Duration(ulong milliseconds) => milliseconds switch
+    {
+        < 1_000 => string.Create(CultureInfo.InvariantCulture, $"{milliseconds} ms"),
+        < 120_000 => string.Create(CultureInfo.InvariantCulture, $"{milliseconds / 1_000d:0.#} s"),
+        < 7_200_000 => string.Create(CultureInfo.InvariantCulture, $"{milliseconds / 60_000d:0.#} min"),
+        _ => string.Create(CultureInfo.InvariantCulture, $"{milliseconds / 3_600_000d:0.#} h"),
+    };
 
     private static string KindOf(PatchChangeKind kind) => kind switch
     {
