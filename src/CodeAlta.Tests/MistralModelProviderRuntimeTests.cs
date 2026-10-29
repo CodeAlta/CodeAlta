@@ -248,6 +248,40 @@ public sealed class MistralModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task MistralTurnExecutor_KeepsTheNameOfAToolCallThatLaterChunksSendEmpty()
+    {
+        // As GLM and DeepSeek stream on Mistral: the chunks after the first one carry an empty name.
+        using var handler = new CapturingMistralHandler("""
+            data: {"id":"cmpl-glm","created":1,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-a5f8","type":"function","function":{"name":"lookup_weather","arguments":""},"index":0}],"content":""},"finish_reason":null}]}
+
+            data: {"id":"cmpl-glm","created":1,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"tool_calls":[{"id":"","type":"function","function":{"name":"","arguments":"{\"city\": \"Paris\"}"},"index":0}],"content":""},"finish_reason":null}]}
+
+            data: {"id":"cmpl-glm","created":1,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"content":""},"finish_reason":"tool_calls"}]}
+
+            data: [DONE]
+
+            """);
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://mistral.test/") };
+        var executor = MistralModelProviderRuntime.CreateTurnExecutor(new MistralProviderOptions
+        {
+            ProviderKey = "mistral",
+            ApiKey = "test-key",
+            HttpClient = httpClient,
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(
+                conversation: [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Use the tool")])],
+                tools: []),
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var toolCall = response.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single();
+        Assert.AreEqual("chatcmpl-tool-a5f8", toolCall.CallId);
+        Assert.AreEqual("lookup_weather", toolCall.Name);
+        Assert.AreEqual("Paris", toolCall.Arguments.GetProperty("city").GetString());
+    }
+
+    [TestMethod]
     public async Task MistralTurnExecutor_ParsesThinkingChunksAndUsageDetails()
     {
         using var handler = new CapturingMistralHandler("""

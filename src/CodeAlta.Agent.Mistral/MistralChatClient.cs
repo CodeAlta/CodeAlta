@@ -926,10 +926,12 @@ internal sealed class MistralChatClient : IChatClient
                 toolCallBuilders.Add(index, builder);
             }
 
-            builder.Id = GetString(toolCall, "id") ?? builder.Id;
+            // The chunks after the first one of a call may name it with an empty string (GLM and DeepSeek on Mistral):
+            // only a value replaces what an earlier chunk gave.
+            builder.Id = GetNonEmptyString(toolCall, "id") ?? builder.Id;
             if (toolCall.TryGetProperty("function", out var function) && function.ValueKind == JsonValueKind.Object)
             {
-                builder.Name = GetString(function, "name") ?? builder.Name;
+                builder.Name = GetNonEmptyString(function, "name") ?? builder.Name;
                 if (TryExtractText(function, "arguments", out var arguments))
                 {
                     builder.Arguments.Append(arguments);
@@ -1259,6 +1261,9 @@ internal sealed class MistralChatClient : IChatClient
         => element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
             ? property.GetString()
             : null;
+
+    private static string? GetNonEmptyString(JsonElement element, string propertyName)
+        => GetString(element, propertyName) is { Length: > 0 } value ? value : null;
 
     private static int? GetInt32(JsonElement element, string propertyName)
         => element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var value)
