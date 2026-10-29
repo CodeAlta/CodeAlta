@@ -424,7 +424,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var tailnet = options.McpHost is null ? new Mcp.DesktopTailnetChoice(shell.McpTailnet, shell.SetMcpTailnet, Mcp.DesktopTailnet.FindAsync) : null;
             mcp = new Mcp.DesktopMcpServer(Mcp.DesktopMcpEndpoint.For(options), McpTools, options.StateRoot ?? options.CatalogRoot!,
                 DesktopCommandLine.Version, shell.McpServer, shell.SetMcpServer, tailnet);
-            _ = mcp.StartAsync(); // A server that cannot listen says so in Settings: the application does not wait for it.
+            // A server that cannot listen says so in Settings: the application does not wait for it. Nothing in its start waits on a
+            // loopback address, so it would build and start its web host on this thread, before the window is shown.
+            _ = Task.Run(mcp.StartAsync);
             // The installed tool becomes an application of this desktop; the page says so the first time.
             var entry = options.Developer || roots.Home is not null ? Task.FromResult(default(DesktopIntegration.DesktopEntryChange))
                 : Task.Run(() =>
