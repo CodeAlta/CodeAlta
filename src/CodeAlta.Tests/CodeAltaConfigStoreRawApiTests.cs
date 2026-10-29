@@ -940,9 +940,61 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    [DataRow("mistral", null, null)]
+    [DataRow("mistral", "chat", null)]
+    [DataRow("mistral", " Responses ", "responses")]
+    [DataRow("vibe", "responses", "responses")]
+    public void Mistral_KeepsItsApi(string type, string? configured, string? expected)
+    {
+        using var temp = TestTempDirectory.Create();
+        var path = Path.Combine(temp.Path, "config.toml");
+        var key = type == "mistral" ? "api_key_env = \"MISTRAL_KEY\"\n" : "";
+        File.WriteAllText(path, $"[providers.m]\ntype = \"{type}\"\n{key}" + (configured is null ? "" : $"api = \"{configured}\"\n"));
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
+        Assert.AreEqual(expected, provider.Api);
+        store.SaveGlobalProviderDefinitions([provider]);
+        Assert.AreEqual(expected, store.LoadGlobalProviderDefinitions(includeDisabled: true).Single().Api);
+        Assert.AreEqual(expected is not null, File.ReadAllText(path).Contains("api =", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void MistralVibe_SignsIn_NeedsNoKey_AndHasItsName()
+    {
+        using var temp = TestTempDirectory.Create();
+        var path = Path.Combine(temp.Path, "config.toml");
+        File.WriteAllText(path, "[providers.vibe]\ntype = \"mistral-vibe\"\nenabled = true\n");
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
+        Assert.AreEqual(("mistral-vibe", "Mistral Vibe"), (provider.ProviderType, provider.DisplayName));
+
+        // Saved enabled without a key, and without the name it has by default.
+        store.SaveGlobalProviderDefinitions([provider]);
+        Assert.IsFalse(File.ReadAllText(path).Contains("display_name", StringComparison.Ordinal));
+        Assert.AreEqual("Mistral Vibe", store.LoadGlobalProviderDefinitions(includeDisabled: true).Single().DisplayName);
+    }
+
+    [TestMethod]
+    [DataRow("api_key = \"key\"")]
+    [DataRow("api_key_env = \"MISTRAL_KEY\"")]
+    public void MistralVibe_RefusesAKey(string setting)
+    {
+        using var temp = TestTempDirectory.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "config.toml"), $"[providers.vibe]\ntype = \"mistral-vibe\"\n{setting}\n");
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "api_key");
+    }
+
+    [TestMethod]
     [DataRow("openai-chat", "responses")]
     [DataRow("openai-responses", "chat")]
     [DataRow("llama-cpp", "completions")]
+    [DataRow("mistral", "completions")]
+    [DataRow("google-genai", "responses")]
     public void Api_IsRejectedWhereNotSupported(string type, string value)
     {
         using var temp = TestTempDirectory.Create();

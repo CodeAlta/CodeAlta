@@ -10,7 +10,7 @@ Providers are tables of `~/.alta/config.toml`. The provider editor writes the sa
 
 Each provider is a `[providers.<key>]` table. Keys are lower case. `codex` and `copilot` get their type when `type` is left out.
 
-The types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, `vertex-ai`, `mistral`, `claude-code` and `llama-cpp`. Plugins add others, such as `acp` for the [agents of the ACP registry](acp-agents.md) and `codex-cli` for [Codex CLI](setup.md#codex-cli). Aliases such as `openai`, `responses`, `aoai`, `gemini`, `vertex` and `github-copilot` are read as these types.
+The types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, `vertex-ai`, `mistral`, `mistral-vibe`, `claude-code` and `llama-cpp`. Plugins add others, such as `acp` for the [agents of the ACP registry](acp-agents.md) and `codex-cli` for [Codex CLI](setup.md#codex-cli). Aliases such as `openai`, `responses`, `aoai`, `gemini`, `vertex` and `github-copilot` are read as these types.
 
 A type your version of CodeAlta does not know, one a newer version added, leaves that provider out; its table stays in the file as written.
 
@@ -49,7 +49,9 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 | `llama-cpp` | no key unless the server asks for one; optional `api_url` (`http://127.0.0.1:9931/v1` by default) | `api` (`chat`, the default, or `responses`), `network_timeout_seconds`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `extra_body`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` (see [llama.cpp](setup.md#llamacpp)) |
 | `azure-openai` | `api_key` or `api_key_env`; the `api_url` of the Azure resource | `network_timeout_seconds`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `anthropic` | `api_key` or `api_key_env`; optional `api_url` | `prompt_cache_ttl`, `refusal_fallback`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
-| `google-genai`, `mistral` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
+| `google-genai` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
+| `mistral` | `api_key` or `api_key_env`; optional `api_url` | `api` (`chat`, the default, or `responses`), and the same as `google-genai` (see [Mistral](setup.md#mistral)) |
+| `mistral-vibe` | Mistral Vibe sign-in: `api_key` and `api_key_env` are refused; optional `api_url` | the same as `mistral` (see [Mistral Vibe](setup.md#mistral-vibe)) |
 | `vertex-ai` | `project` and `location`; optional `api_url` | the same as `google-genai` |
 | `codex` | ChatGPT sign-in, no key; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `service_tier`, `web_search`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `codex_home`, `profile`, `compaction`, `protocol_trace` |
 | `copilot` | GitHub sign-in; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |

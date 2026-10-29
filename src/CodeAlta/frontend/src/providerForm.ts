@@ -86,7 +86,7 @@ export function modelsOrderLabel(order: string, t: (key: MessageKey) => string):
 
 /** Provider types that sign in through their own account flow instead of an API key. */
 export function usesAccountSignIn(type: string): boolean {
-  return type === "codex" || type === "copilot" || type === "xai";
+  return type === "codex" || type === "copilot" || type === "xai" || type === "mistral-vibe";
 }
 
 /**

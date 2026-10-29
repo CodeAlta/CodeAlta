@@ -271,6 +271,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             case "vertex-ai":
                 return TryCreateVertexAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case "mistral":
+            case "mistral-vibe":
                 return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case ClaudeCodeModelProviderRuntime.ProviderType:
                 return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, providerProcesses, out descriptor, out createRuntime);
@@ -1030,8 +1031,11 @@ public static class ConfiguredModelProviderRegistryBuilder
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
-        var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
-        if (string.IsNullOrWhiteSpace(apiKey))
+        // Mistral Vibe takes the key its sign-in stored, read for each request: a provider signed out is registered,
+        // and signs in from its form.
+        var vibe = string.Equals(definition.ProviderType, "mistral-vibe", StringComparison.Ordinal);
+        var apiKey = vibe ? null : ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
+        if (!vibe && string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
                 $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=missing-credentials");
@@ -1043,6 +1047,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         var providerId = new ModelProviderId(definition.ProviderKey);
         var displayName = ResolveProviderDisplayName(definition);
         var baseUri = ParseUri(definition.ApiUrl);
+        var responses = string.Equals(definition.Api, "responses", StringComparison.Ordinal);
+        var login = new MistralVibeLoginOptions(definition.ProviderKey, stateRootPath);
         var options = new MistralModelProviderRuntimeOptions
         {
             ProviderIdOverride = providerId,
@@ -1055,9 +1061,12 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ProviderKey = definition.ProviderKey,
                     DisplayName = displayName,
                     ApiKey = apiKey,
+                    ApiKeyProvider = vibe ? cancellationToken => MistralVibeLoginManager.GetApiKeyAsync(login, cancellationToken) : null,
                     BaseUri = baseUri,
+                    Api = responses ? MistralApi.Responses : MistralApi.ChatCompletions,
+                    UsesVibeModelCatalog = vibe,
                     IsDefault = true,
-                    Profile = CreateMistralProfile(definition.Profile),
+                    Profile = CreateMistralProfile(definition.Profile, responses),
                     Compaction = CreateCompactionSettings(definition.Compaction),
                     ModelsDevProviderId = ResolveModelsDevProviderId(
                         definition.ModelsDevProviderId,
@@ -1083,7 +1092,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
         createRuntime = () => new MistralModelProviderRuntime(options);
         LogInfo(
-            $"Registered model provider key={providerId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)}");
+            $"Registered model provider key={providerId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} api={(responses ? "responses" : "chat")}");
         return true;
     }
 
@@ -1289,7 +1298,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             document);
     }
 
-    private static AgentProviderProfile? CreateMistralProfile(CodeAltaProviderProfileDocument? document)
+    private static AgentProviderProfile? CreateMistralProfile(CodeAltaProviderProfileDocument? document, bool responses)
     {
         if (document is null)
         {
@@ -1297,13 +1306,15 @@ public static class ConfiguredModelProviderRegistryBuilder
         }
 
         return ApplyProfileOverrides(
-            new AgentProviderProfile
-            {
-                SupportsDeveloperRole = true,
-                SupportsStore = false,
-                StreamsUsage = true,
-                MaxTokensFieldName = "max_tokens",
-            },
+            responses
+                ? MistralResponsesTurnExecutor.DefaultProfile
+                : new AgentProviderProfile
+                {
+                    SupportsDeveloperRole = true,
+                    SupportsStore = false,
+                    StreamsUsage = true,
+                    MaxTokensFieldName = "max_tokens",
+                },
             document);
     }
 

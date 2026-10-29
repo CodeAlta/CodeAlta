@@ -46,6 +46,9 @@ public sealed partial class CodeAltaConfigStore
     private const string AnthropicProviderType = "anthropic";
     private const string LlamaCppProviderType = "llama-cpp";
     private const string LlamaCppDefaultDisplayName = "llama.cpp";
+    private const string MistralProviderType = "mistral";
+    private const string MistralVibeProviderType = "mistral-vibe";
+    private const string MistralVibeDefaultDisplayName = "Mistral Vibe";
     // The address llama-server listens on by default since llama.cpp 0.8.0.
     private const string LlamaCppDefaultApiUrl = "http://127.0.0.1:9931/v1";
     private const string ClaudeCodeDefaultDisplayName = "Claude Code";
@@ -2500,7 +2503,8 @@ public sealed partial class CodeAltaConfigStore
             "anthropic" or "anthropic-messages" or "messages" or "message" => "anthropic",
             "google" or "google-genai" or "google_genai" or "gemini" or "genai" => "google-genai",
             "vertex" or "vertex-ai" or "google-vertex" or "google_vertex" => "vertex-ai",
-            "mistral" or "mistral-chat" or "mistral_chat" => "mistral",
+            "mistral" or "mistral-chat" or "mistral_chat" => MistralProviderType,
+            "mistral-vibe" or "mistral_vibe" or "vibe" => MistralVibeProviderType,
             "codex" => CodexSubscriptionProviderType,
             "copilot" => CopilotDirectProviderType,
             "xai" or "xai-grok" or "grok" or "x-ai" => XaiDirectProviderType,
@@ -2528,13 +2532,14 @@ public sealed partial class CodeAltaConfigStore
         definition.Enabled ??= GetDefaultProviderEnabled(definition.ProviderKey);
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType)
             ?? throw new InvalidOperationException(
-                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, mistral, xai, claude-code, llama-cpp.");
+                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, mistral, mistral-vibe, xai, claude-code, llama-cpp.");
         definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, DefaultCompaction);
         ApplyCodexSubscriptionDefaults(definition);
         ApplyCopilotDirectDefaults(definition);
         ApplyXaiDirectDefaults(definition);
         ApplyClaudeCodeDefaults(definition);
         ApplyLlamaCppDefaults(definition);
+        ApplyMistralDefaults(definition);
         if (string.Equals(definition.ProviderType, AnthropicProviderType, StringComparison.Ordinal))
         {
             // On is the absence of the setting.
@@ -2561,13 +2566,31 @@ public sealed partial class CodeAltaConfigStore
         definition.DisplayName ??= LlamaCppDefaultDisplayName;
         definition.ApiUrl ??= LlamaCppDefaultApiUrl;
         // Chat Completions, the most mature API of llama-server, is the absence of the setting.
-        definition.Api = NormalizeText(definition.Api)?.ToLowerInvariant() switch
+        NormalizeApi(definition);
+    }
+
+    private static void ApplyMistralDefaults(CodeAltaProviderDocument definition)
+    {
+        if (string.Equals(definition.ProviderType, MistralVibeProviderType, StringComparison.Ordinal))
+        {
+            definition.DisplayName ??= MistralVibeDefaultDisplayName;
+        }
+        else if (!string.Equals(definition.ProviderType, MistralProviderType, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        // Chat Completions is the absence of the setting; the Responses API of Mistral is in preview.
+        NormalizeApi(definition);
+    }
+
+    private static void NormalizeApi(CodeAltaProviderDocument definition)
+        => definition.Api = NormalizeText(definition.Api)?.ToLowerInvariant() switch
         {
             null or "chat" or "chat-completions" or "chat_completions" => null,
             "responses" => "responses",
             var other => throw new InvalidOperationException($"providers.{definition.ProviderKey} api must be \"chat\" or \"responses\", not \"{other}\"."),
         };
-    }
 
     private static void ApplyCodexSubscriptionDefaults(CodeAltaProviderDocument definition)
     {
@@ -2674,7 +2697,7 @@ public sealed partial class CodeAltaConfigStore
             throw new InvalidOperationException($"providers.{definition.ProviderKey} env: '{variable}' is not the name of a variable (letters, digits and '_', not starting with a digit).");
         }
 
-        if (!string.Equals(definition.ProviderType, LlamaCppProviderType, StringComparison.Ordinal))
+        if (definition.ProviderType is not (LlamaCppProviderType or MistralProviderType or MistralVibeProviderType))
         {
             RejectUnsupportedField(definition, "api", definition.Api);
         }
@@ -2812,7 +2835,13 @@ public sealed partial class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "model_request", definition.ModelRequest);
                 break;
 
-            case "mistral":
+            case MistralVibeProviderType:
+                // The key comes from the sign-in to Mistral Vibe, kept by CodeAlta: the configuration holds none.
+                RejectUnsupportedField(definition, "api_key", definition.ApiKey);
+                RejectUnsupportedField(definition, "api_key_env", definition.ApiKeyEnv);
+                goto case MistralProviderType;
+
+            case MistralProviderType:
                 RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
                 RejectUnsupportedField(definition, "project_id", definition.ProjectId);
                 RejectUnsupportedField(definition, "project", definition.Project);
@@ -3314,8 +3343,10 @@ public sealed partial class CodeAltaConfigStore
             }
         }
 
-        if (string.Equals(definition.ProviderType, ClaudeCodeProviderType, StringComparison.Ordinal) &&
-            string.Equals(definition.DisplayName, ClaudeCodeDefaultDisplayName, StringComparison.Ordinal))
+        if ((string.Equals(definition.ProviderType, ClaudeCodeProviderType, StringComparison.Ordinal) &&
+             string.Equals(definition.DisplayName, ClaudeCodeDefaultDisplayName, StringComparison.Ordinal)) ||
+            (string.Equals(definition.ProviderType, MistralVibeProviderType, StringComparison.Ordinal) &&
+             string.Equals(definition.DisplayName, MistralVibeDefaultDisplayName, StringComparison.Ordinal)))
         {
             definition.DisplayName = null;
         }

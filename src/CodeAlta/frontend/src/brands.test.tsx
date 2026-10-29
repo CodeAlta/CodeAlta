@@ -14,7 +14,7 @@ test("every provider CodeAlta ships is shown with the logo of its brand", () => 
     ["alibaba", "openai-chat", "Alibaba", "alibaba"], ["anthropic", "anthropic", "Anthropic", "anthropic"], ["azure-openai", "azure-openai", "Azure OpenAI", "azure"],
     ["claude-code", "claude-code", "Claude Code", "claudecode"], ["codex", "codex", "Codex", "codex"], ["copilot", "copilot", "Copilot", "githubcopilot"],
     ["deepseek", "openai-chat", "DeepSeek", "deepseek"], ["gemini", "google-genai", "Gemini", "gemini"], ["kimi-for-coding", "anthropic", "Kimi for Coding", "kimi"],
-    ["minimax", "anthropic", "MiniMax", "minimax"], ["mistral", "mistral", "Mistral", "mistral"], ["openai", "openai-responses", "OpenAI", "openai"],
+    ["minimax", "anthropic", "MiniMax", "minimax"], ["mistral", "mistral", "Mistral", "mistral"], ["mistral-vibe", "mistral-vibe", "Mistral Vibe", "mistral"],["openai", "openai-responses", "OpenAI", "openai"],
     ["openrouter", "openai-chat", "OpenRouter", "openrouter"], ["xiaomi", "openai-chat", "Xiaomi", "xiaomimimo"], ["xai", "xai", "xAI Grok", "xai"], ["zai", "openai-chat", "Z.ai", "zai"],
   ];
   for (const [key, type, name, icon] of shipped) assert.deepEqual(providerBrand({ key, type, name }), { icon }, key);
