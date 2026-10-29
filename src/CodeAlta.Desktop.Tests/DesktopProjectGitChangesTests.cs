@@ -360,10 +360,12 @@ public sealed class DesktopProjectGitChangesTests
         {
             var start = new ProcessStartInfo("git") { WorkingDirectory = Root, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
             foreach (var argument in arguments) start.ArgumentList.Add(argument);
-            // Nothing of the machine's or the user's configuration decides what these repositories do.
+            // Nothing of the machine's or the user's configuration decides what these repositories do, not even the
+            // variables of the shell, such as the GIT_AUTHOR_NAME an agent's shell sets, which win over user.name.
+            foreach (var inherited in start.Environment.Keys.Where(static name => name.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)).ToArray())
+                start.Environment.Remove(inherited);
             start.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
             start.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(_home, "no-global-config");
-            foreach (var inherited in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" }) start.Environment.Remove(inherited);
             using var process = Process.Start(start)!;
             var error = process.StandardError.ReadToEndAsync();
             process.StandardOutput.ReadToEnd();
