@@ -526,7 +526,10 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             }
         }
 
-        handle.Record(AgentWorkflowEventKind.RunStarted, record => record with { Title = title, ResumesRunId = start?.ResumesRunId, RecordsScripts = true });
+        handle.Record(AgentWorkflowEventKind.RunStarted, record => record with
+        {
+            Title = title, ResumesRunId = start?.ResumesRunId, RecordsScripts = true, ForUser = start is { ForUser: true } ? true : null,
+        });
         handle.Start(run, OnEndedAsync);
         refusal = null;
         return handle;
@@ -1177,6 +1180,10 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
             DurationMs = (long)record.Duration.TotalMilliseconds,
         });
     }
+
+    // A part the script showed the user: its card reads it from the journal, as it comes and after a restart.
+    void ICodeModeRunObserver.Presented(CodeModePresentation part)
+        => Record(AgentWorkflowEventKind.Presented, record => record with { StepId = part.StepId, Markdown = part.Markdown });
 
     void ICodeModeRunObserver.SleepStarted(CodeModeSleep sleep)
     {

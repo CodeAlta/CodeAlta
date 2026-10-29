@@ -41,6 +41,38 @@ public sealed class DesktopMessageTextTests
     }
 
     [TestMethod]
+    public async Task APartAScriptPresented_IsTheTextOfItsRow_AndIsReadWhole()
+    {
+        var markdown = string.Concat(Enumerable.Range(0, 20_000).Select(static index => $"- finding {index}\n"));
+        var part = new AgentWorkflowEvent(new("codealta"), Session, DateTimeOffset.UnixEpoch, null, AgentWorkflowEventKind.Presented, "run-7f3c2a")
+        {
+            CallId = "call-1", StepId = "scan", Markdown = markdown,
+        };
+        var service = new ToolCallsService((_, offset, _) => Task.FromResult<AgentEvent?>(offset == 10 ? part : null), null, Epoch);
+
+        var row = WorkspaceService.ProjectHistory(new([new AgentSessionHistoryEntry(10, part)], null, false)).Entries.Single();
+        Assert.AreEqual("workflow", row.EventType);
+        Assert.AreEqual("Presented", row.Kind);
+        Assert.AreEqual("scan", row.ActivityId);
+        Assert.AreEqual("call-1", row.ParentActivityId);
+        Assert.IsTrue(row.TextTruncated);
+        StringAssert.StartsWith(markdown, row.Text!);
+        Assert.IsFalse(row.Details!.Contains("finding", StringComparison.Ordinal), "the part is not in its details too");
+
+        var read = new System.Text.StringBuilder();
+        MessageTextResponse reply;
+        do
+        {
+            reply = await service.ReadMessageAsync(new(Epoch, Session, "10", read.Length), CancellationToken.None);
+            Assert.AreEqual("ok", reply.Status);
+            read.Append(reply.Text!.Text);
+        }
+        while (reply.Text.More);
+
+        Assert.AreEqual(markdown, read.ToString());
+    }
+
+    [TestMethod]
     public async Task OnlyAMessage_OfTheCurrentHost_FromAPositionInIt_IsRead()
     {
         var message = new AgentContentCompletedEvent(new("provider"), Session, DateTimeOffset.UnixEpoch, new("run"), AgentContentKind.User, "content", null, "short");

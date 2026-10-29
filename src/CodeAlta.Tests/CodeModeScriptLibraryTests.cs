@@ -111,6 +111,22 @@ public sealed class CodeModeScriptLibraryTests
     }
 
     [TestMethod]
+    public void TheCodeThePromptAsksFor_IsARunOfTheScript_AndOtherCodeIsNot()
+    {
+        using var root = TestTempDirectory.Create();
+        var (library, project) = Create(root.Path);
+        library.Save("review", CodeModeScriptScope.Project, Review, project, null);
+        var prompt = CodeModeScriptRunPrompt.Build(library, "review", """{"pr":1,"depth":"a; b"}""", null, project, out _)!.ReplaceLineEndings("\n");
+        var code = prompt[(prompt.IndexOf("```js\n", StringComparison.Ordinal) + 6)..prompt.LastIndexOf("\n```", StringComparison.Ordinal)];
+
+        Assert.IsTrue(CodeModeScriptRunPrompt.IsRunOfScript(code), code);
+        Assert.IsTrue(CodeModeScriptRunPrompt.IsRunOfScript("```js\n" + code + "\n```"), "as a model may send it");
+        Assert.IsTrue(CodeModeScriptRunPrompt.IsRunOfScript(code.Replace("\n", "\r\n", StringComparison.Ordinal)));
+        Assert.IsFalse(CodeModeScriptRunPrompt.IsRunOfScript("const r = await workflow(\"review\", {});\nreturn r;"));
+        Assert.IsFalse(CodeModeScriptRunPrompt.IsRunOfScript("present(\"x\");\nreturn await workflow(\"review\", {});"));
+    }
+
+    [TestMethod]
     public async Task AltaScriptRun_FromATerminalWhoseCodeAltaEndsWithTheCommand_IsRefusedWithWhatToDoInstead()
     {
         using var root = TestTempDirectory.Create();

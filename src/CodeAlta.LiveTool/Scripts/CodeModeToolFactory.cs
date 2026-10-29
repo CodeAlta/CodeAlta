@@ -116,7 +116,8 @@ public static class CodeModeToolFactory
         - `workflow("name", args)` runs a script of the library (the project's `.alta/scripts`, the user's, the samples) and resolves with what it returns: `codemode.search` finds them as `workflow:<name>`, and `codemode.describe({ path: "workflow:<name>" })` gives their arguments. `workflow({ scriptPath }, args)` runs a script file.
         - `ask(question, { choices, default })` asks the user and resolves with the answer; it throws an `AskError` (code `cancelled` or `unavailable`, as in an automation).
         - `sleep(duration)` waits (milliseconds, or "30s", "5m", "2h", "1d"; 7 days at most): a run CodeAlta ended during goes on by itself when it wakes.
-        - `step(id, fn)` groups the calls of one part of the work; `log(...)`, `console.log(...)` and `text(...)` write output; `args` holds the arguments of the run. `image(path, { title })` attaches a picture to the result: the user sees it, and you too.
+        - `step(id, fn)` groups the calls of one part of the work; `log(...)`, `console.log(...)` and `text(...)` write output; `args` holds the arguments of the run.
+        - `present(markdown)` shows Markdown to the user on the card of the run, at once; call it again to add a part. Use it when the user waits on a long run (progress, intermediate findings) or for a report the script writes for them; the result tells you what was presented, so do not repeat it. A quick script needs none: your answer presents its result. `image(path, { title })` attaches a picture to the result: the user sees it, and you too.
         - `store(key, value)` keeps a JSON value for the later scripts of this session, and `load(key)` reads it back (undefined when there is none).
 
         Calls run at the same time under `Promise.all`; tools that change files run one at a time. Await every call whose result matters: calls still pending when the script returns are cancelled. A failed call throws an error you can catch (a `ToolError` for a tool), and the calls made before a failure are not undone. In a batch, use `Promise.allSettled`, or `parallel()`, which turns a failure into `null`, so that one failure does not lose the other results.
@@ -125,7 +126,7 @@ public static class CodeModeToolFactory
     private const string ExecDescriptionEnd = """
 
 
-        A string the script returns is its result as it is, Markdown the user sees rendered; another value comes back as JSON. A result longer than `max_output_tokens` keeps its start and its end, and names the file that keeps the whole of it.
+        What the script returns is its result for you, not for the user: a string comes back as it is, another value as JSON. A result longer than `max_output_tokens` keeps its start and its end, and names the file that keeps the whole of it.
 
         The result says where the source of the run was kept: to fix a long script, edit that file with your file tools and run it again with `return await workflow({ scriptPath: "<path>" })` instead of sending it whole.
 
@@ -356,6 +357,8 @@ public static class CodeModeToolFactory
         {
             ArgumentsJson = plan?.Run.ArgumentsJson,
             ResumesRunId = plan?.Run.Id,
+            // The run a launcher of the library asked the session for: its value is for the user, not for an agent to work from.
+            ForUser = options.Runs.RequiresCodeMode(sessionId) && CodeModeScriptRunPrompt.IsRunOfScript(plan?.Source ?? code),
             IsIdempotent = path => path.StartsWith(AltaScriptBinding.Namespace + ".", StringComparison.Ordinal) ? alta.IsReadOnly(path)
                 : path.StartsWith(CodeModeDiscovery.Namespace + ".", StringComparison.Ordinal) ? !CodeModeAgentBinding.Paths.Contains(path) || path == CodeModeAgentBinding.ClosePath
                 : tools?.IsIdempotent(path) == true,

@@ -391,6 +391,78 @@ public sealed class CodeModeRunTests
     }
 
     [TestMethod]
+    public async Task Present_ShowsPartsInTheirOrder_WithTheirStep_AsTheyCome()
+    {
+        var observer = new RecordingObserver();
+        var result = await RunAsync("""
+            present("## Started");
+            await step("scan", async () => { present("- found **2**"); await tools.echo({}); });
+            present("");
+            return { files: 2 };
+            """, observer: observer);
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        CollectionAssert.AreEqual(new[] { new CodeModePresentation("## Started", null), new CodeModePresentation("- found **2**", "scan") }, result.Presented.ToArray());
+        CollectionAssert.AreEqual(new[] { "present ## Started", "step scan", "present - found **2**", "call tools.echo" },
+            observer.Events.Where(static e => e.StartsWith("present", StringComparison.Ordinal) || e.StartsWith("step", StringComparison.Ordinal) || e.StartsWith("call", StringComparison.Ordinal)).ToArray());
+        Assert.AreEqual("""{"files":2}""", result.ValueJson, "the value stays the model's");
+    }
+
+    [TestMethod]
+    public async Task Present_WithoutAText_IsATypeError()
+    {
+        var result = await RunAsync("""
+            const errors = [];
+            for (const call of [() => present(), () => present(42), () => present({ markdown: "x" })]) {
+              try { call(); } catch (e) { errors.push(`${e.name}: ${e.message}`); }
+            }
+            return errors;
+            """);
+
+        using var errors = JsonDocument.Parse(result.ValueJson!);
+        Assert.AreEqual(3, errors.RootElement.GetArrayLength());
+        foreach (var error in errors.RootElement.EnumerateArray())
+        {
+            StringAssert.StartsWith(error.GetString(), "TypeError: present(markdown):");
+        }
+
+        Assert.IsEmpty(result.Presented);
+    }
+
+    [TestMethod]
+    public async Task Present_BeyondItsLimits_KeepsTheStart_AndWarns()
+    {
+        var result = await RunAsync($$"""
+            present("x".repeat({{CodeModePresentation.MaxCharacters + 10}}));
+            for (let i = 0; i < {{CodeModePresentation.MaxPerRun + 2}}; i++) present(`part ${i}`);
+            """);
+
+        Assert.HasCount(CodeModePresentation.MaxPerRun, result.Presented);
+        Assert.AreEqual(CodeModePresentation.MaxCharacters, result.Presented[0].Markdown.Length);
+        var warnings = result.Output.Where(static entry => entry.Kind == CodeModeOutputKind.Warning).Select(static entry => entry.Text).ToArray();
+        Assert.HasCount(4, warnings);
+        Assert.AreEqual("present: a part has 32,000 characters at most; 10 were left out.", warnings[0]);
+        StringAssert.StartsWith(warnings[1], "present: the part is not shown: a run presents 64 parts");
+    }
+
+    [TestMethod]
+    public async Task Present_InAScriptWorkflowRuns_IsAPartOfTheRunThatStartedIt()
+    {
+        var observer = new RecordingObserver();
+        var nested = CodeModeSource.Prepare("""present("from the library"); return 1;""", "lib.js");
+        var result = await RunAsync("""
+            present("before");
+            const value = await workflow("lib", {});
+            present("after");
+            return value;
+            """, options: new() { ResolveScript = (_, _) => ValueTask.FromResult(nested) }, observer: observer);
+
+        Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
+        CollectionAssert.AreEqual(new[] { "before", "from the library", "after" }, result.Presented.Select(static part => part.Markdown).ToArray());
+        Assert.AreEqual(3, observer.Events.Count(static e => e.StartsWith("present ", StringComparison.Ordinal)), "each part is seen once");
+    }
+
+    [TestMethod]
     public async Task Image_WithoutAPathString_IsATypeError()
     {
         var result = await RunAsync("""

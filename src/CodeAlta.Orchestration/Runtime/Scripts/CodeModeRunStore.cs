@@ -17,6 +17,12 @@ public sealed record CodeModeRunStart(string Source)
     public string? ResumesRunId { get; init; }
 
     /// <summary>
+    /// Gets whether the host started the run to run a script of the library for the user (<see cref="CodeModeScriptRunPrompt"/>):
+    /// its start says so (<see cref="AgentWorkflowEvent.ForUser"/>), and its card shows its value as Markdown.
+    /// </summary>
+    public bool ForUser { get; init; }
+
+    /// <summary>
     /// Gets whether a call of a function may run again with the same effect, by its path (<c>tools.read_file</c>). The calls
     /// of the others are recorded as they start and end, so that a resume knows those that were in flight. Null records every call.
     /// </summary>

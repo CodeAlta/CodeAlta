@@ -696,8 +696,58 @@ public sealed class CodeModeToolTests
         StringAssert.EndsWith(text, "Result:\ndone\n");
     }
 
+    [TestMethod]
+    public async Task Exec_JournalsEachPresentedPart_AndTellsThemOnceWithTheResult()
+    {
+        using var root = TestTempDirectory.Create();
+        var records = new List<AgentWorkflowEvent>();
+        await using var runs = new CodeModeRunRegistry(null) { Journal = (_, record) => { lock (records) records.Add(record); return Task.CompletedTask; } };
+        var (exec, _) = Create(root.Path, runs);
+
+        var result = await InvokeAsync(exec, """
+            present("## Reading");
+            const content = await step("read", async () => { const read = await tools.read_file({ path: "a.txt" }); present(`- read **${read.content.length}** characters`); return read.content; });
+            return { content };
+            """, new FakeTools());
+
+        var text = Text(result);
+        Assert.IsTrue(result.Success, text);
+        await runs.FindAny(runs.List("session-1").Single().Id)!.JournalWritten;
+        AgentWorkflowEvent[] presented;
+        lock (records) presented = [.. records.Where(static record => record.Kind == AgentWorkflowEventKind.Presented)];
+        CollectionAssert.AreEqual(new[] { ("## Reading", (string?)null), ("- read **5** characters", "read") }, presented.Select(static record => (record.Markdown!, record.StepId)).ToArray());
+        Assert.IsTrue(presented.All(static record => record.CallId == "call-1"), "the card of the call reads them");
+        Assert.IsNull(records.Single(static record => record.Kind == AgentWorkflowEventKind.RunStarted).ForUser, "a run of an agent");
+        Assert.AreEqual(1, text.Split(CodeModeResultFormatter.PresentedHeading).Length - 1, "told once");
+        StringAssert.Contains(text, CodeModeResultFormatter.PresentedHeading + "\n```markdown\n## Reading\n\n- read **5** characters\n```\n");
+        StringAssert.EndsWith(text, "Result:\n```json\n{\"content\":\"hello\"}\n```\n");
+    }
+
+    [TestMethod]
+    public async Task ARunALauncherOfTheLibraryAsksFor_IsForTheUser()
+    {
+        using var root = TestTempDirectory.Create();
+        var records = new List<AgentWorkflowEvent>();
+        await using var runs = new CodeModeRunRegistry(null) { Journal = (_, record) => { lock (records) records.Add(record); return Task.CompletedTask; } };
+        var (exec, _) = Create(root.Path, runs);
+        const string Code = """
+            // @exec: {"title": "review", "yield_ms": 600000}
+            return await workflow("review", {"pr":1});
+            """;
+
+        await InvokeAsync(exec, Code, new FakeTools());
+        runs.RequireCodeMode("session-1");
+        await InvokeAsync(exec, Code, new FakeTools());
+        await InvokeAsync(exec, "const value = await workflow(\"review\", {});\nreturn value;", new FakeTools());
+        foreach (var run in runs.List("session-1")) await runs.FindAny(run.Id)!.JournalWritten;
+
+        bool?[] forUser;
+        lock (records) forUser = [.. records.Where(static record => record.Kind == AgentWorkflowEventKind.RunStarted).Select(static record => record.ForUser)];
+        CollectionAssert.AreEqual(new bool?[] { null, true, null }, forUser, "only the call a launcher asks for, in a session it started");
+    }
+
     // A picture of one pixel.
-    private static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=");
+    private static readonly byte[] Png =Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=");
 
     [TestMethod]
     public async Task ARunOverTheLimitOfItsSession_IsRefused()

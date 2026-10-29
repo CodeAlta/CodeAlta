@@ -155,7 +155,7 @@ internal sealed class WorkflowsService
         if (await _runs!.ReadDetailAsync(request.RunId).ConfigureAwait(false) is not { } detail) return new("not_found", null, [], null, null, null);
         IReadOnlyList<AgentWorkflowEvent> records = _records is null ? [] : await _records(detail.Info.SessionId, request.RunId, cancellationToken).ConfigureAwait(false);
         return new("ok", ItemOf(detail.Info), [.. records.Select(static record => new WorkflowRecordItem(record.Kind.ToString(), record.ChildSessionId ?? record.StepId,
-                record.Status, record.Title ?? record.Message, record.ToJson(), record.Timestamp))],
+                record.Status, record.Markdown ?? record.Title ?? record.Message, (record.Markdown is null ? record : record with { Markdown = null }).ToJson(), record.Timestamp))],
             detail.Source, detail.Result, CodeModeRunGraph.ToMermaid(CodeModeRunGraph.Read(records)));
     }
 

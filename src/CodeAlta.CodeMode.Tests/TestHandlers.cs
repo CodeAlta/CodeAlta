@@ -44,6 +44,8 @@ internal sealed class RecordingObserver : ICodeModeRunObserver
     public void StepStarted(string stepId) => Events.Enqueue("step " + stepId);
 
     public void Output(CodeModeOutputEntry entry) => Events.Enqueue("output " + entry.Text);
+
+    public void Presented(CodeModePresentation part) => Events.Enqueue("present " + part.Markdown);
 }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(string))]

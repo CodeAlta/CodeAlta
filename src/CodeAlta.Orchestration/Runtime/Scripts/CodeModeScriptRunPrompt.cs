@@ -10,7 +10,7 @@ namespace CodeAlta.Orchestration.Runtime.Scripts;
 /// <c>alta script run</c> all send it, after the same checks: the script is in the library of the project and in the space
 /// of the session, parses, and accepts its arguments.
 /// </summary>
-public static class CodeModeScriptRunPrompt
+public static partial class CodeModeScriptRunPrompt
 {
     /// <summary>Checks a script and its arguments, and writes the prompt that runs it.</summary>
     /// <param name="library">The library of the host.</param>
@@ -120,6 +120,22 @@ public static class CodeModeScriptRunPrompt
             Do not run it again. Answer with its parameters in a few lines.
             """;
     }
+
+    /// <summary>
+    /// Gets whether code is the call the prompt that runs a script asks for (<see cref="Build(CodeModeScriptLibrary, string, string?, string?, string?, SpaceFilter?, out string?)"/>):
+    /// one <c>return await workflow("name", args)</c>, after an optional line of options.
+    /// </summary>
+    /// <param name="code">The code <c>exec</c> was given.</param>
+    /// <returns>True for that call.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="code"/> is null.</exception>
+    public static bool IsRunOfScript(string code)
+    {
+        ArgumentNullException.ThrowIfNull(code);
+        return RunOfScript().IsMatch(code);
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex("""\A\s*(?:\x60{3}(?:js|javascript)?\s*\n)?(?://\s*@exec:[^\n]*\n)?\s*return\s+await\s+workflow\(\s*"[a-z][a-z0-9-]*"\s*(?:,[\s\S]*)?\)\s*;?\s*(?:\x60{3}\s*)?\z""")]
+    private static partial System.Text.RegularExpressions.Regex RunOfScript();
 
     private static string FirstLine(string message)
     {

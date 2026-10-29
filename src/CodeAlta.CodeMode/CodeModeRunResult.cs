@@ -167,6 +167,24 @@ public sealed record CodeModeImage(string Path, string? Title, string? StepId)
     public const int MaxPerRun = 8;
 }
 
+/// <summary>
+/// A part of what a script shows the user with <c>present(markdown)</c>: shown on the card of its run as it is presented,
+/// and told to the model with the result, as already shown.
+/// </summary>
+/// <param name="Markdown">The Markdown, at most <see cref="MaxCharacters"/> characters.</param>
+/// <param name="StepId">The step that presented it, or null.</param>
+public sealed record CodeModePresentation(string Markdown, string? StepId)
+{
+    /// <summary>The most parts one run presents; <c>present()</c> beyond them writes a warning instead.</summary>
+    public const int MaxPerRun = 64;
+
+    /// <summary>The most characters of one part: a longer one keeps its start, with a warning.</summary>
+    public const int MaxCharacters = 32_000;
+
+    /// <summary>The most characters of all the parts of a run: a part beyond them is not presented, with a warning.</summary>
+    public const int MaxCharactersPerRun = 256_000;
+}
+
 /// <summary>What a run did.</summary>
 /// <param name="Status">How it ended.</param>
 /// <param name="Duration">Its wall time.</param>
@@ -189,6 +207,12 @@ public sealed record CodeModeRunResult(CodeModeRunStatus Status, TimeSpan Durati
 
     /// <summary>Gets the pictures the script attached to its result (<c>image()</c>), in their order; at most <see cref="CodeModeImage.MaxPerRun"/>.</summary>
     public IReadOnlyList<CodeModeImage> Images { get; init; } = [];
+
+    /// <summary>
+    /// Gets the parts the script showed the user (<c>present()</c>), in their order, those of the scripts <c>workflow()</c>
+    /// ran included; at most <see cref="CodeModePresentation.MaxPerRun"/>.
+    /// </summary>
+    public IReadOnlyList<CodeModePresentation> Presented { get; init; } = [];
 
     /// <summary>Gets how many characters of output were dropped beyond the log limit.</summary>
     public int DroppedOutputCharacters { get; init; }

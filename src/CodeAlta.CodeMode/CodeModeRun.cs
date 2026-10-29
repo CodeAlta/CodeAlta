@@ -59,6 +59,8 @@ internal sealed partial class CodeModeRun
     private int _userWaits;
     private readonly List<CodeModeOutputEntry> _output = [];
     private readonly List<CodeModeImage> _images = [];
+    private readonly List<CodeModePresentation> _presented = [];
+    private int _presentedCharacters;
     private int _outputCharacters;
     private int _droppedOutput;
     private int _callCount;
@@ -154,6 +156,7 @@ internal sealed partial class CodeModeRun
                 Steps = [.. _steps],
                 Output = [.. _output],
                 Images = [.. _images],
+                Presented = [.. _presented],
                 DroppedOutputCharacters = _droppedOutput,
                 MaxCallsAtOnce = _maxRunning,
                 ScriptTime = Stopwatch.GetElapsedTime(0, Interlocked.Read(ref _scriptTicks)),
@@ -195,6 +198,7 @@ internal sealed partial class CodeModeRun
         engine.SetValue("__host", new ClrFunction(engine, "__host", Call, 2));
         engine.SetValue("__output", new ClrFunction(engine, "__output", Output, 2));
         engine.SetValue("__image", new ClrFunction(engine, "__image", Image, 2));
+        engine.SetValue("__present", new ClrFunction(engine, "__present", Present, 1));
         engine.SetValue("__stepBegin", new ClrFunction(engine, "__stepBegin", StepBegin, 1));
         engine.SetValue("__stepRun", new ClrFunction(engine, "__stepRun", StepRun, 2));
         engine.SetValue("__stepEnd", new ClrFunction(engine, "__stepEnd", StepEnd, 4));
@@ -630,6 +634,58 @@ internal sealed partial class CodeModeRun
         }
 
         AppendOutput(CodeModeOutputKind.Warning, $"image: {image.Path} is not attached: a result has {CodeModeImage.MaxPerRun} pictures at most.", image.StepId);
+    }
+
+    // present(markdown): the prelude checked that it is a text. A part goes to the run exec started, also from a script
+    // workflow() runs, so that the parts keep their order and one limit counts them all; the observer sees it at once.
+    private JsValue Present(JsValue self, JsValue[] arguments)
+    {
+        Touch();
+        var markdown = arguments.Length > 0 && arguments[0].IsString() ? arguments[0].AsString() : string.Empty;
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            return JsValue.Undefined;
+        }
+
+        var stepId = _tracker.Current?.Id;
+        if (markdown.Length > CodeModePresentation.MaxCharacters)
+        {
+            var keep = char.IsHighSurrogate(markdown[CodeModePresentation.MaxCharacters - 1]) ? CodeModePresentation.MaxCharacters - 1 : CodeModePresentation.MaxCharacters;
+            AppendOutput(CodeModeOutputKind.Warning, $"present: a part has {CodeModePresentation.MaxCharacters:N0} characters at most; {markdown.Length - keep:N0} were left out.", stepId);
+            markdown = markdown[..keep];
+        }
+
+        var root = this;
+        while (root._options.ParentRun is { } parent)
+        {
+            root = parent;
+        }
+
+        root.AddPresentation(new CodeModePresentation(markdown, stepId), this);
+        return JsValue.Undefined;
+    }
+
+    private void AddPresentation(CodeModePresentation part, CodeModeRun from)
+    {
+        var added = false;
+        lock (_gate)
+        {
+            if (_presented.Count < CodeModePresentation.MaxPerRun && _presentedCharacters + part.Markdown.Length <= CodeModePresentation.MaxCharactersPerRun)
+            {
+                _presented.Add(part);
+                _presentedCharacters += part.Markdown.Length;
+                added = true;
+            }
+        }
+
+        if (added)
+        {
+            _observer?.Presented(part);
+        }
+        else
+        {
+            from.AppendOutput(CodeModeOutputKind.Warning, $"present: the part is not shown: a run presents {CodeModePresentation.MaxPerRun} parts and {CodeModePresentation.MaxCharactersPerRun:N0} characters at most.", part.StepId);
+        }
     }
 
     private void AppendOutput(CodeModeOutputKind kind, string text, string? stepId)

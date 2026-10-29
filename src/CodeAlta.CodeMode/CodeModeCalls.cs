@@ -117,6 +117,10 @@ public interface ICodeModeRunObserver
     /// <param name="entry">The output.</param>
     void Output(CodeModeOutputEntry entry) { }
 
+    /// <summary>The script showed the user a part (<c>present(markdown)</c>), once per part, those of nested scripts included.</summary>
+    /// <param name="part">The part.</param>
+    void Presented(CodeModePresentation part) { }
+
     /// <summary>The script started a sleep (<c>sleep(duration)</c>), which wakes at <see cref="CodeModeSleep.WakeAt"/>.</summary>
     /// <param name="sleep">The sleep.</param>
     void SleepStarted(CodeModeSleep sleep) { }

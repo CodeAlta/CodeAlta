@@ -8,7 +8,7 @@ internal sealed partial class ToolCallsService
     /// <summary>
     /// Returns the text of a message of a session, whole, in parts: what a history row shows only the start of when the
     /// text is longer than its share of a page (<see cref="WorkspaceService.ProjectHistory"/>). A user message loses the
-    /// lines that name its images and its files, as its row does.
+    /// lines that name its images and its files, as its row does. The Markdown a script presented reads the same way.
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
     /// <exception cref="OperationCanceledException">The read is canceled.</exception>
@@ -27,10 +27,21 @@ internal sealed partial class ToolCallsService
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (ToolCallRefusal refusal) { return new(refusal.Status, null); }
-        if (record is not AgentContentCompletedEvent { Content: { } content } message) return new("missing_record", null);
-        string? text = content, details = null;
-        HistoryImageProjection.Project(message, ref text, ref details, out _, out _);
-        text ??= string.Empty;
+        string? text;
+        if (record is AgentWorkflowEvent { Markdown: { } presented })
+        {
+            // A part a script presented: its row has the start of it, as of a message.
+            text = presented;
+        }
+        else
+        {
+            if (record is not AgentContentCompletedEvent { Content: { } content } message) return new("missing_record", null);
+            string? details = null;
+            text = content;
+            HistoryImageProjection.Project(message, ref text, ref details, out _, out _);
+            text ??= string.Empty;
+        }
+
         return request.Position > text.Length ? new("invalid", null) : new("ok", Part(text, request.Position));
     }
 }

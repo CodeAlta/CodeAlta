@@ -16,7 +16,7 @@ public sealed class CodeModeApi
     public static IReadOnlySet<string> ReservedNames { get; } = new[]
     {
         "args", "console", "log", "text", "step", "meta", "workflow", "agent", "ask", "sleep", "session", "parallel",
-        "pipeline", "phase", "budget", "store", "load", "image", "exit", "globalThis", "Math", "JSON", "Promise",
+        "pipeline", "phase", "budget", "store", "load", "image", "present", "exit", "globalThis", "Math", "JSON", "Promise",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     private readonly FrozenDictionary<string, CodeModeFunction> _byPath;
@@ -95,8 +95,8 @@ public sealed class CodeModeApi
             "use strict";
             const host = globalThis.__host, writeOutput = globalThis.__output, stepRun = globalThis.__stepRun,
               stepBegin = globalThis.__stepBegin, stepEnd = globalThis.__stepEnd, random = globalThis.__random,
-              argsJson = globalThis.__args, attachImage = globalThis.__image;
-            for (const name of ["__host", "__output", "__stepRun", "__stepBegin", "__stepEnd", "__random", "__args", "__image"]) delete globalThis[name];
+              argsJson = globalThis.__args, attachImage = globalThis.__image, presentPart = globalThis.__present;
+            for (const name of ["__host", "__output", "__stepRun", "__stepBegin", "__stepEnd", "__random", "__args", "__image", "__present"]) delete globalThis[name];
             const stringify = JSON.stringify, parse = JSON.parse, freeze = Object.freeze, define = Object.defineProperty;
             class CodeModeError extends Error {
               constructor(e) {
@@ -141,6 +141,11 @@ public sealed class CodeModeApi
               }
               const title = options === undefined || options.title === undefined || options.title === null ? undefined : String(options.title);
               attachImage(path, title);
+            });
+            // present(markdown): a part of what the run shows the user, on its card at once; the result tells the model it was shown.
+            global("present", (markdown) => {
+              if (typeof markdown !== "string") throw new TypeError('present(markdown): markdown is a text, such as "## Findings\n- …".');
+              presentPart(markdown);
             });
             // The value of a step as the host records it for a resume: its JSON, "" for undefined, null when it is not JSON.
             const recordOf = (v) => {

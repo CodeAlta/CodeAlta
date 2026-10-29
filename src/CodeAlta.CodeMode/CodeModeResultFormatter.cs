@@ -38,15 +38,22 @@ public sealed record CodeModeResultText(string Text, CodeModeResultKind Kind)
 }
 
 /// <summary>
-/// Writes what a run did as the text the model reads, which the user is shown too: a header with the status, the time
-/// and the calls; for a failure the source line and the calls already made, which are not undone; the output; and the
-/// result last. A text the script returns is written as it is, Markdown; a longer result than the budget is a preview of
-/// its start and its end, and names the file beside the session that keeps the whole of it.
+/// Writes what a run did as the text the model reads: a header with the status, the time and the calls; for a failure the
+/// source line and the calls already made, which are not undone; the output; what the script showed the user
+/// (<c>present()</c>), marked as already shown; and the result last. A text the script returns is written as it is; a
+/// longer result than the budget is a preview of its start and its end, and names the file beside the session that keeps
+/// the whole of it.
 /// </summary>
 public static class CodeModeResultFormatter
 {
     /// <summary>The output budget of a result, in tokens, when the script sets none.</summary>
     public const int DefaultMaxOutputTokens = 10_000;
+
+    /// <summary>
+    /// The line before the parts the script showed the user (<c>present()</c>), which follow it in a block: the model reads
+    /// that the user saw them, so that it does not repeat them.
+    /// </summary>
+    public const string PresentedHeading = "Presented to the user (they saw it on the card of the run; do not repeat it):";
 
     /// <summary>The line that names the file that keeps the whole of a result, before the result: <c>Full result: &lt;path&gt; (…)</c>.</summary>
     public const string FullResultPrefix = "Full result: ";
@@ -272,7 +279,7 @@ public static class CodeModeResultFormatter
         if (result.Output.Count > 0)
         {
             builder.Append("Output:\n");
-            AppendOutput(builder, result, result.ValueJson is null ? budget : budget / 3);
+            AppendOutput(builder, result, result.ValueJson is null && result.Presented.Count == 0 ? budget : budget / 3);
         }
 
         var notAwaited = result.Calls.Where(static call => call.Status == CodeModeCallStatus.Cancelled && call.ErrorMessage?.StartsWith("Not awaited", StringComparison.Ordinal) == true).ToList();
@@ -297,6 +304,11 @@ public static class CodeModeResultFormatter
             builder.Append(note).Append('\n');
         }
 
+        if (result.Presented.Count > 0)
+        {
+            AppendPresented(builder, result, result.ValueJson is null ? budget - Math.Min(budget / 3, OutputLength(result)) : budget / 3);
+        }
+
         // The result comes last: everything after its line is the value, which the window shows as Markdown.
         if (result.ValueJson is { } value)
         {
@@ -308,9 +320,21 @@ public static class CodeModeResultFormatter
 
     private static int Budget(int maxOutputTokens) => Math.Max(1_000, maxOutputTokens * CharactersPerToken);
 
-    // The result has the budget the output leaves it: the output takes at most a third.
+    // The result has the budget the output and the presented parts leave it: each takes at most a third.
     private static int ResultBudget(CodeModeRunResult result, int budget)
-        => result.Output.Count > 0 ? budget - Math.Min(budget / 3, OutputLength(result)) : budget;
+        => budget - (result.Output.Count > 0 ? Math.Min(budget / 3, OutputLength(result)) : 0)
+            - (result.Presented.Count > 0 ? Math.Min(budget / 3, PresentedText(result).Length) : 0);
+
+    private static string PresentedText(CodeModeRunResult result) => string.Join("\n\n", result.Presented.Select(static part => part.Markdown.Trim('\n', '\r')));
+
+    // What the user was shown, in a block after its line: the model knows it was shown, and the window that reads the text
+    // tells it from the result. Over its budget, it keeps its start and its end: the user saw it whole.
+    private static void AppendPresented(StringBuilder builder, CodeModeRunResult result, int budget)
+    {
+        var text = CodeModeMarkdownExcerpt.Cut(PresentedText(result), Math.Max(200, budget), "the user saw them on the card of the run");
+        var fence = CodeModeMarkdownExcerpt.FenceFor(text);
+        builder.Append(PresentedHeading).Append('\n').Append(fence).Append("markdown\n").Append(text).Append('\n').Append(fence).Append('\n');
+    }
 
     // The text of a value as the result writes it whole: an object or an array in a block of JSON.
     private static string Shown(CodeModeResultText text) => text.Kind == CodeModeResultKind.Json ? "```json\n" + text.Text + "\n```" : text.Text;

@@ -639,6 +639,12 @@ public enum AgentWorkflowEventKind
     /// <see cref="AgentWorkflowEvent.ScriptScope"/>. A run that writes none ran only the code sent to <c>exec</c>.
     /// </summary>
     ScriptLoaded,
+
+    /// <summary>
+    /// The script showed the user a part (<c>present(markdown)</c>): <see cref="AgentWorkflowEvent.Markdown"/>, with its step.
+    /// The card of the run shows the parts in their order, as they come.
+    /// </summary>
+    Presented,
 }
 
 /// <summary>A step a script declares in its <c>meta</c>, for the graph of its run.</summary>
@@ -740,6 +746,16 @@ public sealed record AgentWorkflowEvent(
     /// loads, for the start of a run: a run recorded before these records existed has none, and which script it ran is not known.
     /// </summary>
     public bool? RecordsScripts { get; init; }
+
+    /// <summary>
+    /// Gets whether the run is the one the host started to run a script of the library for the user (the Workflows tab, an
+    /// automation, <c>alta script run</c>), for the start of a run: no agent works from its value, which its card shows as
+    /// Markdown. Null for a run of an agent, whose value is data for the agent.
+    /// </summary>
+    public bool? ForUser { get; init; }
+
+    /// <summary>Gets the Markdown the script showed the user, for <see cref="AgentWorkflowEventKind.Presented"/>.</summary>
+    public string? Markdown { get; init; }
 }
 
 /// <summary>

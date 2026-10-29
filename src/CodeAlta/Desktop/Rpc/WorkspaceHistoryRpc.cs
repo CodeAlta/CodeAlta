@@ -161,8 +161,9 @@ internal sealed partial class WorkspaceService
                 // A record of a run of a script: the card of its exec call reads it (activity: the call, name: the run).
                 case AgentWorkflowEvent workflow:
                     type = "workflow"; kind = workflow.Kind.ToString(); phase = workflow.Status; activityId = workflow.ChildSessionId ?? workflow.StepId;
-                    parentId = workflow.CallId; name = workflow.WorkflowRunId; text = workflow.Title ?? workflow.Message;
-                    details = workflow.ToJson();
+                    parentId = workflow.CallId; name = workflow.WorkflowRunId; text = workflow.Markdown ?? workflow.Title ?? workflow.Message;
+                    // A part the script presented is its text, which a long one has the start of: not twice in its details.
+                    details = (workflow.Markdown is null ? workflow : workflow with { Markdown = null }).ToJson();
                     break;
                 case AgentErrorEvent error:
                     type = "error"; text = error.Message;

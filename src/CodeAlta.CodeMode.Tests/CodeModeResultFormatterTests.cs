@@ -31,6 +31,48 @@ public sealed class CodeModeResultFormatterTests
     }
 
     [TestMethod]
+    public void ThePresentedParts_GoBeforeTheResult_MarkedAsShown()
+    {
+        var result = Completed(new { files = 3 }, "checked") with
+        {
+            Presented = [new CodeModePresentation("## Findings\n- one", null), new CodeModePresentation("```cs\nResult:\n```\n", "review")],
+        };
+
+        var text = CodeModeResultFormatter.Format(result);
+
+        Assert.AreEqual("Script completed · 2.0 s · no calls\nOutput:\n```\nchecked\n```\n"
+            + CodeModeResultFormatter.PresentedHeading + "\n````markdown\n## Findings\n- one\n\n```cs\nResult:\n```\n````\n"
+            + "Result:\n```json\n{\"files\":3}\n```\n", text);
+    }
+
+    [TestMethod]
+    public void ThePresentedParts_KeepTheirStartAndEnd_WithinTheBudget()
+    {
+        var report = string.Join('\n', Enumerable.Range(1, 3_000).Select(static i => $"- finding {i}"));
+        var result = Completed("data") with { Presented = [new CodeModePresentation(report, null)] };
+
+        var text = CodeModeResultFormatter.Format(result, 1_000);
+
+        StringAssert.Contains(text, CodeModeResultFormatter.PresentedHeading + "\n```markdown\n- finding 1\n");
+        StringAssert.Contains(text, "the user saw them on the card of the run");
+        StringAssert.Contains(text, "- finding 3000\n```\nResult:\ndata\n");
+        // A third of the budget of 1,000 tokens (4,000 characters), and the rest of the text.
+        Assert.IsLessThan(4_000 / 3 + 400, text.Length);
+        Assert.IsNull(CodeModeResultFormatter.ResultToKeep(result, 1_000), "the result has what the parts leave it");
+    }
+
+    [TestMethod]
+    public void TheResult_HasTheBudgetThePresentedPartsLeaveIt()
+    {
+        var value = new string('v', 3_000);
+        var bare = Completed(value);
+        var presenting = bare with { Presented = [new CodeModePresentation(new string('p', 2_000), null)] };
+
+        Assert.IsNull(CodeModeResultFormatter.ResultToKeep(bare, 1_000));
+        Assert.IsNotNull(CodeModeResultFormatter.ResultToKeep(presenting, 1_000), "the parts take up to a third of the budget");
+    }
+
+    [TestMethod]
     public void TheAnswersOfSubAgents_AreSectionsOfMarkdown()
     {
         var presented = CodeModeResultFormatter.Present(JsonSerializer.Serialize(new[] { "## One\nfirst\n", "## Two\nsecond" }));
