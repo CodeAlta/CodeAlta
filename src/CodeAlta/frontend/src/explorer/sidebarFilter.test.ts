@@ -29,6 +29,13 @@ test("the filter keeps the sessions found and the sessions they are under, in th
   assert.deepEqual(filterSessionRows(rows, []).map(value => value.session.id), ["a", "a1", "a2", "b", "c"]);
 });
 
+test("a session kept by the filter links only to the children listed elsewhere that it finds", () => {
+  const away = [session("x", "p2", "Shader port", "a"), session("y", "p2", "Docs", "a")];
+  const rows = [{ ...row(session("a", "p1", "Shader plan")), childrenElsewhere: away }, { ...row(session("b", "p1", "Shader cache")), childrenElsewhere: [away[1]] }];
+  assert.deepEqual(filterSessionRows(rows, ["shader"]).map(value => [value.session.id, value.childrenElsewhere?.map(item => item.id)]), [["a", ["x"]], ["b", undefined]]);
+  assert.deepEqual(filterSessionRows(rows, []).map(value => value.childrenElsewhere?.length), [2, 1]);
+});
+
 test("the projects shown are those whose name, a session or a Claude Code session is found; the Claude Code ones by their group", () => {
   const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
     projects: [project("p1", "Stride"), project("p2", "Docs"), project("p3", "Shaders"), project("p4", "Empty")],

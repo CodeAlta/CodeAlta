@@ -3,7 +3,9 @@ import type { WorkspaceSession } from "#neoastra";
 /** A row of the list of sessions: `subAgents` is how many sessions it started (its sub-agents), shown under it. */
 export type SessionHierarchyRow = { session: WorkspaceSession; depth: number; diagnostic: string | null; tooltip: string; subAgents?: number;
   /** Its parent, listed in another project, among the chats or in another space: the row is at the top of its list. */
-  parentElsewhere?: WorkspaceSession };
+  parentElsewhere?: WorkspaceSession;
+  /** The sessions it started that are listed in another project or among the chats, newest first: links to them are shown under it. */
+  childrenElsewhere?: readonly WorkspaceSession[] };
 
 // Keep the server's bounded order for ties. Resolve only an exact persisted scope; a missing
 // header or a missing/truncated parent can never manufacture a same-scope relationship.
@@ -78,6 +80,17 @@ export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all:
       childrenById.get(parent.id)!.push(session);
     }
   }
+  // The children of a listed session that are listed elsewhere: those of the snapshot that this scope does not list.
+  // An archived child is not shown, as it is not in its own list.
+  const away = new Map<string, WorkspaceSession[]>();
+  for (const session of all) {
+    if (!session.parentSessionId || session.archived || known.has(session.id)) continue;
+    const parent = only(session.parentSessionId);
+    if (!parent || !known.has(parent.id)) continue;
+    if (!away.has(parent.id)) away.set(parent.id, []);
+    away.get(parent.id)!.push(session);
+  }
+  const newest = (a: WorkspaceSession, b: WorkspaceSession) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0) || a.id.localeCompare(b.id);
   const stack = visibleScope.filter(session => !parentOf.has(session.id)).sort(order)
     .reverse().map(session => ({ session, depth: 0 }));
   const seen = new Set<string>();
@@ -87,11 +100,12 @@ export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all:
     seen.add(session.id);
     const diagnostic = issue.get(session.id) ?? null;
     const parent = parentOf.get(session.id);
-    const away = elsewhere.get(session.id);
+    const home = elsewhere.get(session.id);
     const tooltip = [session.fullTitle + (session.fullTitleTruncated ? " [title truncated]" : ""),
-      diagnostic ?? (parent ? `Child of '${parent.fullTitle}'` : away ? `Child of '${away.fullTitle}', ${away.archived ? "archived" : "listed elsewhere"}` : null)].filter(Boolean).join(" | ");
+      diagnostic ?? (parent ? `Child of '${parent.fullTitle}'` : home ? `Child of '${home.fullTitle}', ${home.archived ? "archived" : "listed elsewhere"}` : null)].filter(Boolean).join(" | ");
     const children = (childrenById.get(session.id) ?? []).sort(order);
-    rows.push({ session, depth, diagnostic, tooltip, subAgents: children.length, ...(away ? { parentElsewhere: away } : {}) });
+    const links = away.get(session.id)?.sort(newest);
+    rows.push({ session, depth, diagnostic, tooltip, subAgents: children.length, ...(home ? { parentElsewhere: home } : {}), ...(links ? { childrenElsewhere: links } : {}) });
     for (const child of children.reverse()) stack.push({ session: child, depth: depth + 1 });
   }
   // A malformed graph must not silently drop a row, even if its parent was excluded.

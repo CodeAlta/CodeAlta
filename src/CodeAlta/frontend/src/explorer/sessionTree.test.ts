@@ -14,7 +14,8 @@ const limits = (value: Partial<SessionListLimits> & { collapsedIds?: readonly st
 });
 // A line for each entry: the session with its depth, "-" before a collapsed one, or what its parent does not list.
 const lines = (rows: readonly SessionHierarchyRow[], value: SessionListLimits) => sessionList(rows, value).entries.map(entry =>
-  entry.kind === "session" ? `${entry.collapsed ? "-" : ""}${entry.row.session.id}@${entry.row.depth}` : `more ${entry.parentId}@${entry.depth} ${entry.hidden}${entry.extended ? " extended" : ""}`);
+  entry.kind === "session" ? `${entry.collapsed ? "-" : ""}${entry.row.session.id}@${entry.row.depth}`
+    : entry.kind === "link" ? `link ${entry.session.id}@${entry.depth}<${entry.parentId}` : `more ${entry.parentId}@${entry.depth} ${entry.hidden}${entry.extended ? " extended" : ""}`);
 
 // Two sessions: "a" has six sub-agents, the second of which has three of its own; "b" has none. Newest first.
 const sessions = [row("a", null, 20), row("b", null, 10),
@@ -84,4 +85,25 @@ test("the Claude Code sessions started elsewhere close the list of a project, wh
   assert.deepEqual(withClaudeCodeSessions(entries, "p1", false), entries);
   // An empty project has the group all the same: its sessions may all have been started elsewhere.
   assert.deepEqual(withClaudeCodeSessions([], "p1", true), [{ kind: "claude-code", projectId: "p1" }]);
+});
+
+test("the sub-agents of a session listed in other projects follow its own as links, and count with them", () => {
+  const away = (id: string, parent: string, day: number): WorkspaceSession => ({ ...row(id, parent, day), projectId: "p2", workspacePath: "/p2" });
+  const all = [row("a", null, 20), row("a1", "a", 19), row("b", null, 10), away("x1", "a", 5), away("x2", "a", 8), away("y", "b", 3), away("z", "a1", 2)];
+  const listed = rowsOf(all.filter(value => value.projectId === "p1"));
+  // The hierarchy is given every session of the snapshot: those of p2 are links, newest first.
+  const linked = sessionHierarchy(all.filter(value => value.projectId === "p1"), all, "p1");
+  assert.deepEqual(linked.map(item => [item.session.id, item.subAgents, item.childrenElsewhere?.map(value => value.id) ?? []]),
+    [["a", 1, ["x2", "x1"]], ["a1", 0, ["z"]], ["b", 0, ["y"]]]);
+  assert.deepEqual(listed.map(item => item.childrenElsewhere), [undefined, undefined, undefined]);
+  assert.deepEqual(lines(linked, limits()), ["a@0", "a1@1", "link z@2<a1", "link x2@1<a", "link x1@1<a", "b@0", "link y@1<b"]);
+  // A session whose only sub-agents are elsewhere has a twist all the same, and collapsing it hides them.
+  const b = sessionList(linked, limits()).entries.find(entry => entry.kind === "session" && entry.row.session.id === "b");
+  assert.equal(b?.kind === "session" && b.parent, true);
+  assert.deepEqual(lines(linked, limits({ collapsedIds: ["b", "a1"] })), ["a@0", "-a1@1", "link x2@1<a", "link x1@1<a", "-b@0"]);
+  // The links count with the sub-agents of their parent.
+  assert.deepEqual(lines(linked, limits({ subCount: 2 })), ["a@0", "a1@1", "link z@2<a1", "link x2@1<a", "more a@1 1", "b@0", "link y@1<b"]);
+  // An archived child is not linked, nor is one whose parent is not listed here.
+  const archived = [...all.slice(0, 3), { ...away("gone", "a", 9), archived: true }, away("orphan", "missing", 9)];
+  assert.deepEqual(sessionHierarchy(archived.filter(value => value.projectId === "p1"), archived, "p1").map(item => item.childrenElsewhere), [undefined, undefined, undefined]);
 });

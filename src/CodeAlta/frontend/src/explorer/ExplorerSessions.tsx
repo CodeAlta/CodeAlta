@@ -14,6 +14,7 @@ import { openElsewhereEntries } from "../claudeCodeOpen/openElsewhereEntries";
 import { useShellLanguage } from "../shellLanguage";
 import { sessionEntries, type SessionListEntry } from "./sessionTree";
 import type { SessionRowDrag } from "./sessionDrag";
+import { SessionLinkRow, SessionOriginLine } from "./sessionFamily";
 
 /** How far a row is pushed in for each level of its session under its parents. */
 export const sessionRowIndent = (depth: number) => 14 + Math.min(depth, 8) * 12;
@@ -41,7 +42,7 @@ export function sessionTwistKey(event: KeyboardEvent, twist: SessionTwist | unde
  * The icon and the title of a session row: a session started by another one has an icon of its own, and so has a
  * session started by an automation. A session that has sub-agents starts with the twist that hides them.
  */
-export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist, parentElsewhere }: Pick<SessionHierarchyRow, "session" | "depth" | "diagnostic" | "subAgents" | "parentElsewhere"> & { twist?: SessionTwist }) {
+export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist, parentElsewhere, childrenElsewhere }: Pick<SessionHierarchyRow, "session" | "depth" | "diagnostic" | "subAgents" | "parentElsewhere" | "childrenElsewhere"> & { twist?: SessionTwist }) {
   const { t } = useShellLanguage();
   const automated = !!session.automationId;
   const logo = useProviderBrand(session.providerKey);
@@ -56,7 +57,8 @@ export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist, 
     <AppIcon name={depth > 0 || parentElsewhere ? "childSession" : "automation"} size={13} /></span>}
     <span className="session-icon session-provider" data-file-tone={logo.icon || logo.symbol ? undefined : "purple"} title={provider ?? undefined}>
       <ProviderIcon providerKey={session.providerKey} size={13} fallback="assistant" /></span>
-    <span className="session-title">{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span><SubAgentBadge count={subAgents ?? 0} /></>;
+    <span className="session-title">{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span>
+    <SubAgentBadge count={(subAgents ?? 0) + (childrenElsewhere?.length ?? 0)} elsewhere={childrenElsewhere?.length ?? 0} /></>;
 }
 
 /** What follows the listed sub-agents of a session when it has more, or lists more than at first. */
@@ -127,11 +129,12 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
     {sessionEntries(entries).map((entry, index) => {
       if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
         onMore={() => tree.more(entry.parentId)} onFewer={() => tree.fewer(entry.parentId)} />;
-      const { session, depth, diagnostic, tooltip, subAgents, parentElsewhere } = entry.row;
+      if (entry.kind === "link") return <SessionLinkRow key={`link:${entry.parentId}:${entry.session.id}`} entry={entry} />;
+      const { session, depth, diagnostic, tooltip, subAgents, parentElsewhere, childrenElsewhere } = entry.row;
       const twist = sessionTwist(entry, tree.toggle);
       const shown = menu?.id === session.id ? menu : null;
       const allowed = shown ? access(session) : null;
-      return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id} data-rename-keys {...drag?.(session)}
+      return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id} data-family-id={session.id} data-rename-keys {...drag?.(session)}
         onContextMenu={event => {
           if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
           event.preventDefault();
@@ -158,11 +161,12 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
         }}>
         <button type="button" aria-pressed={false} aria-expanded={twist && !twist.collapsed} aria-describedby={`${tipId}-${index}`} title={tooltip} data-full-text={plainTitle(session.fullTitle || session.title)} style={{ paddingLeft: sessionRowIndent(depth) }}
           onClick={() => onAction(session, "open")} onDoubleClick={() => onKeep?.(session)} onKeyDown={event => sessionTwistKey(event, twist)}>
-          <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} parentElsewhere={parentElsewhere} />{marks(session)}
+          <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} parentElsewhere={parentElsewhere} childrenElsewhere={childrenElsewhere} />{marks(session)}
         </button>
         <span id={`${tipId}-${index}`} role="tooltip" className="session-tooltip">{tooltip}</span>
         <button type="button" className="icon-button session-actions-trigger" aria-label={t("Actions for {title} (ID: {id})", { title: session.title, id: session.id })}
           aria-haspopup="menu" aria-expanded={!!shown} onClick={event => show(session.id, event.currentTarget)}><AppIcon name="ellipsis" size={16} /></button>
+        <SessionOriginLine parent={parentElsewhere} depth={depth} />
         {shown && allowed && <SessionTabMenu anchor={shown.anchor} container={document.body} title={t("Session actions for {title}", { title: session.title })}
           current={() => true} onClose={() => queueMicrotask(() => setMenu(value => value === shown ? null : value))}
           items={[

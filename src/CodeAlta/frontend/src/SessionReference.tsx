@@ -22,10 +22,14 @@ export function SessionReference({ sessionId }: { sessionId: string }) {
     <AppIcon name="childSession" size={12} /><span>{title}</span></button>;
 }
 
-/** The mark of a session that has sub-agents: how many sessions it started. */
-export function SubAgentBadge({ count }: { count: number }) {
+/**
+ * The mark of a session that has sub-agents: how many sessions it started. Those that are listed in another project
+ * or among the chats (`elsewhere`, counted in `count`) add an arrow that says so.
+ */
+export function SubAgentBadge({ count, elsewhere = 0 }: { count: number; elsewhere?: number }) {
   const { t } = useShellLanguage();
   if (count <= 0) return null;
-  const label = t("{count} sub-agent(s)", { count });
-  return <span className="sub-agent-badge" role="img" aria-label={label} title={label}><AppIcon name="branch" size={11} /><span aria-hidden="true">{count}</span></span>;
+  const label = elsewhere > 0 ? t("{count} sub-agent(s), {elsewhere} listed elsewhere", { count, elsewhere }) : t("{count} sub-agent(s)", { count });
+  return <span className="sub-agent-badge" role="img" aria-label={label} title={label}><AppIcon name="branch" size={11} /><span aria-hidden="true">{count}</span>
+    {elsewhere > 0 && <AppIcon name="openExternal" size={10} className="sub-agent-elsewhere" />}</span>;
 }
