@@ -98,6 +98,48 @@ public sealed class CodexAppServerInstallerTests
     }
 
     [TestMethod]
+    public async Task Install_InstallsAgain_WhenTheExecutableWasRemoved()
+    {
+        using var temp = TestTempDirectory.Create();
+        var archive = CreatePackage(CodexPinnedRelease.Version, Target);
+        var handler = new PackageHandler(archive);
+        using var installer = new CodexAppServerInstaller(Path.Combine(temp.Path, "cache"), handler, Package(archive));
+        var installed = await installer.EnsureInstalledAsync(null, CancellationToken.None);
+
+        // An antivirus quarantines the executable: the folder keeps its marker.
+        File.Delete(installed.Executable);
+        Assert.IsNull(installer.Installed);
+
+        var again = await installer.EnsureInstalledAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.AreEqual(installed, again);
+        Assert.IsTrue(File.Exists(again.Executable));
+        Assert.AreEqual(2, handler.Requests, "the package is downloaded again");
+    }
+
+    [TestMethod]
+    public async Task Install_FailsOnce_WhenTheFolderIsStillIncompleteAfterTheInstall()
+    {
+        using var temp = TestTempDirectory.Create();
+        // A package without the entry point it names: what an antivirus that removes it as it is unpacked leaves.
+        var archive = CreatePackage(CodexPinnedRelease.Version, Target, entrypoint: "bin/missing-app-server");
+        var handler = new PackageHandler(archive);
+        var root = Path.Combine(temp.Path, "cache");
+        using var installer = new CodexAppServerInstaller(root, handler, Package(archive));
+
+        var exception = await Assert.ThrowsExactlyAsync<CodexInstallException>(
+            () => installer.EnsureInstalledAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30)));
+
+        Assert.AreEqual("disk", exception.Code);
+        StringAssert.Contains(exception.Message, Path.Combine(root, CodexPinnedRelease.Version, Target, "bin", "missing-app-server") + " is missing.");
+        Assert.AreEqual(1, handler.Requests, "an install that ends incomplete is not tried again");
+
+        // The next call removes the incomplete folder and installs once more, then fails the same way.
+        await Assert.ThrowsExactlyAsync<CodexInstallException>(() => installer.EnsureInstalledAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.AreEqual(2, handler.Requests);
+    }
+
+    [TestMethod]
     public void DescribeCause_NamesTheTypeAndTheHResult_EvenWithoutAMessage()
     {
         // A failure of the system can come with no message: its type and its HRESULT still say what it was.
@@ -137,7 +179,7 @@ public sealed class CodexAppServerInstallerTests
     private static CodexAppServerPackage Package(byte[] archive) => new(Target, archive.Length, Convert.ToHexStringLower(SHA256.HashData(archive)));
 
     // A package laid out as Codex publishes it: the entry point, a tool on the PATH, and the manifest.
-    private static byte[] CreatePackage(string version, string target)
+    private static byte[] CreatePackage(string version, string target, string entrypoint = "bin/codex-app-server")
     {
         using var stream = new MemoryStream();
         using (var gzip = new GZipStream(stream, CompressionLevel.Fastest, leaveOpen: true))
@@ -152,7 +194,7 @@ public sealed class CodexAppServerInstallerTests
             const UnixFileMode executable = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
             Add("bin/codex-app-server", "#!/bin/sh\necho codex\n", executable);
             Add("codex-path/rg", "#!/bin/sh\n", executable);
-            Add("codex-package.json", $$"""{"layoutVersion":1,"version":"{{version}}","target":"{{target}}","variant":"codex-app-server","entrypoint":"bin/codex-app-server","resourcesDir":"codex-resources","pathDir":"codex-path"}""",
+            Add("codex-package.json", $$"""{"layoutVersion":1,"version":"{{version}}","target":"{{target}}","variant":"codex-app-server","entrypoint":"{{entrypoint}}","resourcesDir":"codex-resources","pathDir":"codex-path"}""",
                 UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
 

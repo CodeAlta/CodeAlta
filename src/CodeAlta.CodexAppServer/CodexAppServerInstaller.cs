@@ -104,11 +104,26 @@ public sealed class CodexAppServerInstaller : IDisposable
         {
             var target = CodexPinnedRelease.GetInstallDirectory(_root, package.Target);
             var waited = System.Diagnostics.Stopwatch.StartNew();
-            while (FindInstalled(target) is null)
+            while (true)
             {
+                if (FindInstalled(target) is { } found)
+                {
+                    return found;
+                }
+
                 var attempt = new Attempt(progress, package, target);
                 try
                 {
+                    // A folder with its marker but without a file of the package lost it after the install, to an
+                    // antivirus for example: without its marker, the downloader removes it and installs it again.
+                    // Checked again just before: the other instance may have completed the folder since.
+                    var marker = Path.Combine(target, CodexPinnedRelease.MarkerFileName);
+                    if (File.Exists(marker) && FindInstalled(target) is null)
+                    {
+                        attempt.Removing();
+                        File.Delete(marker);
+                    }
+
                     progress?.Report(new CodexInstallProgress($"Downloading Codex {CodexPinnedRelease.Version}…", 0, package.Size));
                     await InstallAsync(package, target, attempt, cancellationToken).ConfigureAwait(false);
                 }
@@ -117,6 +132,7 @@ public sealed class CodexAppServerInstaller : IDisposable
                     // The other instance of CodeAlta downloads it: this one waits for its folder.
                     progress?.Report(new CodexInstallProgress($"Codex {CodexPinnedRelease.Version} is being downloaded by another CodeAlta…"));
                     await Task.Delay(BusyRetryDelay, cancellationToken).ConfigureAwait(false);
+                    continue;
                 }
                 catch (PinnedDownloadException exception)
                 {
@@ -127,9 +143,11 @@ public sealed class CodexAppServerInstaller : IDisposable
                     var code = exception is HttpRequestException ? "network" : "disk";
                     throw new CodexInstallException(code, Describe(code, attempt, exception), exception);
                 }
-            }
 
-            return FindInstalled(target) ?? throw new CodexInstallException("disk", $"Codex {CodexPinnedRelease.Version} is not complete in {target}.");
+                // An install that ends without a complete folder is not tried again: the next one would end the same.
+                return Inspect(target, out var missing) ?? throw new CodexInstallException("disk",
+                    $"Codex {CodexPinnedRelease.Version} is not complete in {target}: {missing} Something, such as an antivirus, may have removed it once unpacked.");
+            }
         }
         finally
         {
@@ -150,18 +168,34 @@ public sealed class CodexAppServerInstaller : IDisposable
     public static CodexAppServerInstallation? FindInstalled(string directory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
-        if (!File.Exists(Path.Combine(directory, CodexPinnedRelease.MarkerFileName)) ||
-            ReadManifest(Path.Combine(directory, CodexPinnedRelease.PackageManifestFileName)) is not { } manifest)
+        return Inspect(directory, out _);
+    }
+
+    // Reads an installation folder; when it is not a complete one, says which of its files is missing, as a sentence.
+    private static CodexAppServerInstallation? Inspect(string directory, out string missing)
+    {
+        var marker = Path.Combine(directory, CodexPinnedRelease.MarkerFileName);
+        var manifestPath = Path.Combine(directory, CodexPinnedRelease.PackageManifestFileName);
+        if (!File.Exists(marker))
         {
+            missing = $"{marker} is missing.";
+            return null;
+        }
+
+        if (ReadManifest(manifestPath) is not { } manifest)
+        {
+            missing = $"{manifestPath} is missing or invalid.";
             return null;
         }
 
         var executable = Path.GetFullPath(Path.Combine([directory, .. manifest.Entrypoint.Split('/', StringSplitOptions.RemoveEmptyEntries)]));
         if (!File.Exists(executable))
         {
+            missing = $"{executable} is missing.";
             return null;
         }
 
+        missing = string.Empty;
         var pathDirectory = manifest.PathDirectory is { } relative ? Path.GetFullPath(Path.Combine([directory, .. relative.Split('/', StringSplitOptions.RemoveEmptyEntries)])) : null;
         return new CodexAppServerInstallation(executable, pathDirectory is not null && Directory.Exists(pathDirectory) ? pathDirectory : null, manifest.Version);
     }
@@ -321,5 +355,7 @@ public sealed class CodexAppServerInstaller : IDisposable
         }
 
         public void Installing() => _failure = $"Codex {CodexPinnedRelease.Version} was unpacked, but could not be moved to {target}.";
+
+        public void Removing() => _failure = $"Codex {CodexPinnedRelease.Version} is not complete in {target}, and could not be removed to be installed again.";
     }
 }
