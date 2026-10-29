@@ -21,6 +21,9 @@ internal static class CodexCliToolCalls
     /// <summary>The most text a result keeps; the rest is cut.</summary>
     private const int ResultLimit = 60_000;
 
+    /// <summary>The largest generated image read for the session, as the session reads any image of a tool.</summary>
+    private const long GeneratedImageLimit = 64L * 1024 * 1024;
+
     /// <summary>
     /// Maps an item to the tool call the session records, or returns <see langword="null"/> for an item that is not a
     /// tool call (a message, reasoning, a plan, a compaction). A tool of CodeAlta keeps its name and arguments; a tool
@@ -70,7 +73,14 @@ internal static class CodexCliToolCalls
             case ThreadItem.ImageViewThreadItem image:
                 return new CodexCliToolCall(image.Id, "view_image", Build(writer => writer.WriteString("path", Full(image.Path.Value, workingDirectory))), false);
             case ThreadItem.ImageGenerationThreadItem generation:
-                return new CodexCliToolCall(generation.Id, "image_generation", Build(writer => writer.WriteString("prompt", generation.RevisedPrompt ?? string.Empty)), false);
+                // The call is told when it starts, before Codex has its revised prompt: the result gives it.
+                return new CodexCliToolCall(generation.Id, "image_generation", Build(writer =>
+                {
+                    if (!string.IsNullOrWhiteSpace(generation.RevisedPrompt))
+                    {
+                        writer.WriteString("prompt", generation.RevisedPrompt);
+                    }
+                }), false);
             default:
                 return null;
         }
@@ -147,9 +157,7 @@ internal static class CodexCliToolCalls
             case ThreadItem.ImageViewThreadItem image:
                 return new AgentToolResult(true, [new AgentToolResultItem.Text($"Viewed {image.Path.Value}")]);
             case ThreadItem.ImageGenerationThreadItem generation:
-                return generation.Failure is null
-                    ? new AgentToolResult(true, [new AgentToolResultItem.Text(generation.SavedPath is { } saved ? $"Generated {saved.Value}" : "Generated an image.")])
-                    : Failure("The image could not be generated.");
+                return generation.Failure is null ? GeneratedImage(generation.SavedPath?.Value, generation.RevisedPrompt) : Failure("The image could not be generated.");
             default:
                 return null;
         }
@@ -170,6 +178,32 @@ internal static class CodexCliToolCalls
         }
 
         return builder.Length == 0 ? "Plan updated." : builder.ToString().TrimEnd();
+    }
+
+    // The image Codex saved in its home, as an image of the result: the session keeps a copy beside its journal and
+    // shows it. Only the text is left when the file cannot be read.
+    private static AgentToolResult GeneratedImage(string? path, string? revisedPrompt)
+    {
+        var prompt = string.IsNullOrWhiteSpace(revisedPrompt) ? string.Empty : $"\nPrompt: {revisedPrompt.Trim()}";
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return new AgentToolResult(true, [new AgentToolResultItem.Text("Generated an image." + prompt)]);
+        }
+
+        var text = new AgentToolResultItem.Text($"Generated {path}{prompt}");
+        try
+        {
+            var file = new FileInfo(path);
+            if (file.Exists && file.Length is > 0 and <= GeneratedImageLimit)
+            {
+                return new AgentToolResult(true, [text, new AgentToolResultItem.Image(Convert.ToBase64String(File.ReadAllBytes(path)), "image/png", file.Name)]);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or ArgumentException or NotSupportedException)
+        {
+        }
+
+        return new AgentToolResult(true, [text]);
     }
 
     private static string RenderContent(McpToolCallResult? result)

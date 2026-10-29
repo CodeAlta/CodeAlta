@@ -48,7 +48,52 @@ public sealed class CodexCliTurnExecutorTests
         var config = File.ReadAllText(Path.Combine(fixture.Home, "config.toml"));
         StringAssert.Contains(config, "sandbox_mode = \"danger-full-access\"");
         StringAssert.Contains(config, "multi_agent = false");
+        Assert.IsFalse(config.Contains("image_generation", StringComparison.Ordinal), "Codex generates images, as it does by default.");
         Assert.AreEqual(fixture.Home, server.Connections.Single().Request.Home);
+    }
+
+    [TestMethod]
+    public async Task AGeneratedImage_IsTheImageOfTheResultOfItsCall()
+    {
+        var saved = string.Empty;
+        var missing = string.Empty;
+        var server = new CodexAppServerFake
+        {
+            OnTurn = async turn =>
+            {
+                await turn.GenerateImageAsync("A red circle on white.", saved);
+                await turn.GenerateImageAsync("A blue square.", missing);
+                await turn.SendTextAsync("Here it is.");
+            },
+        };
+        await using var fixture = new Fixture(server);
+        // Where Codex saves an image: generated_images/<thread>/<call>.png in its home.
+        saved = Path.Combine(fixture.Home, "generated_images", "thread-1", "ig_1.png");
+        missing = Path.Combine(fixture.Home, "generated_images", "thread-1", "ig_2.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(saved)!);
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        await File.WriteAllBytesAsync(saved, png);
+
+        var conversation = await fixture.RunAsync([User("draw")]);
+
+        var calls = conversation.SelectMany(static message => message.Parts.OfType<AgentMessagePart.ToolCall>()).ToArray();
+        CollectionAssert.AreEqual(new[] { "image_generation", "image_generation" }, calls.Select(static call => call.Name).ToArray());
+        // Codex tells the call before it has the revised prompt: the result gives it.
+        Assert.IsFalse(calls[0].Arguments.TryGetProperty("prompt", out _));
+        var results = conversation.SelectMany(static message => message.Parts.OfType<AgentMessagePart.ToolResult>()).Select(static part => part.Result).ToArray();
+
+        // The image is in the result: the session saves its own copy and shows it.
+        Assert.IsTrue(results[0].Success);
+        Assert.AreEqual($"Generated {saved}\nPrompt: A red circle on white.", ((AgentToolResultItem.Text)results[0].Items[0]).Value);
+        var image = (AgentToolResultItem.Image)results[0].Items[1];
+        CollectionAssert.AreEqual(png, Convert.FromBase64String(image.Base64Data));
+        Assert.AreEqual("image/png", image.MediaType);
+        Assert.AreEqual("ig_1.png", image.DisplayName);
+
+        // A file that cannot be read leaves the path alone.
+        Assert.IsTrue(results[1].Success);
+        Assert.AreEqual($"Generated {missing}\nPrompt: A blue square.", ((AgentToolResultItem.Text)results[1].Items.Single()).Value);
+        Assert.AreEqual("Here it is.", Text(conversation[^1]));
     }
 
     [TestMethod]

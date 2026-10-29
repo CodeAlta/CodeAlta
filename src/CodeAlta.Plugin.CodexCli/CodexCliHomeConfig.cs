@@ -81,10 +81,11 @@ internal static class CodexCliHomeConfig
         builder.AppendLine("skills = { include_instructions = false, bundled = { enabled = false } }");
         builder.AppendLine();
         builder.AppendLine("[features]");
+        // Image generation stays on: Codex saves each image in the home, and the session shows it as the result of the call.
         foreach (var feature in (string[])
                  [
                      "multi_agent", "multi_agent_v2", "apps", "plugins", "remote_plugin", "hooks", "tool_suggest",
-                     "guardian_approval", "goals", "image_generation", "browser_use", "computer_use", "in_app_browser", "skill_search",
+                     "guardian_approval", "goals", "browser_use", "computer_use", "in_app_browser", "skill_search",
                      "skill_mcp_dependency_install", "memories",
                  ])
         {
