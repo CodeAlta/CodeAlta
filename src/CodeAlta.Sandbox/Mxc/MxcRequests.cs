@@ -53,7 +53,8 @@ internal static class MxcRequests
     // granted. A read-only grant cascades to everything below it, so each parent folder of a read-write grant is
     // granted read-only with every other entry denied; the volume root goes in the read-write list, where a root does
     // not cascade and cannot be written. A file the system holds open (NTUSER.DAT) cannot be denied, and nobody else
-    // can read it: it is left out.
+    // can read it: it is left out. So is a file another program holds delete-on-close (the temporary files of %TEMP%):
+    // the container opens a denied path without sharing its deletion, which such a file refuses, and does not start.
     // On macOS (grantParents false) the parents are not granted: Seatbelt lets every path be looked up, but shows the
     // metadata of every file, so a file in a parent folder (.editorconfig, Directory.Build.props) seems there and
     // cannot be opened, and builds fail. Its other entries are denied with their metadata, so that they are not there,
@@ -201,7 +202,8 @@ internal static class MxcRequests
     {
         try
         {
-            using var _ = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            // Without FileShare.Delete, as the container opens it: a file open delete-on-close refuses that open.
+            using var _ = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             return false;
         }
         catch (UnauthorizedAccessException)

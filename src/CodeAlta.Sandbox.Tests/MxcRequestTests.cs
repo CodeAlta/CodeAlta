@@ -44,6 +44,26 @@ public sealed class MxcRequestTests
     }
 
     [TestMethod]
+    public void AFileAnotherProgramHoldsDeleteOnClose_IsLeftOutOfTheChain()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The chain of parent folders is for Windows.");
+        using var temp = new TempTree();
+        var project = temp.Folder("parent/project");
+        var parent = Path.Combine(temp.Root, "parent");
+        var plain = Path.Combine(parent, "plain.txt");
+        File.WriteAllText(plain, "x");
+        // A temporary file of another program, as %TEMP% holds many: the container fails to start (0x80070020) with
+        // it denied, because it opens a denied path without sharing its deletion.
+        var held = Path.Combine(parent, "held.tmp");
+        using var holder = new FileStream(held, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.DeleteOnClose);
+
+        var request = MxcRequests.Create(Policy(temp, project, SandboxNetwork.Off), "cmd /c echo", null);
+
+        CollectionAssert.Contains(request.Filesystem!.DeniedPaths, plain);
+        CollectionAssert.DoesNotContain(request.Filesystem.DeniedPaths, held);
+    }
+
+    [TestMethod]
     public void TheNetwork_IsOffWithTheContainersOwnLoopback_ThroughTheProxy_OrOnWithoutTheHost()
     {
         using var temp = new TempTree();
