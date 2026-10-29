@@ -62,10 +62,13 @@ Runs belong to the host (`CodeModeRunRegistry`, owned by `CodeAltaHost`), not to
 - `exec` waits for its run until the yield time; the run then goes on in the background, and the turn may end.
 - Its result is taken once: by the `exec` that waited, by a `wait` that waits when it ends, or else delivered to its
   session as a prompt of provenance `workflow`.
-- That result is one text for the model and the window (`CodeModeResultFormatter`), the value last: a text as Markdown,
-  which the timeline renders. A value over the output budget is written whole once per run with the attachments of its
-  session (`tool-output/`, as a long command output is), and the text is a short preview of its start and its end that
-  names the file.
+- That result is one text for the model (`CodeModeResultFormatter`), the value last. The value is data for the model,
+  never Markdown for the user: what is for the user, the script shows with `present()` (see [records](#records)), and the
+  result tells the model what was shown, in a block of its own, so that it does not repeat it. The window shows the value
+  folded, as plain text, except for a run a launcher of the library started for the user (`ForUser` on its start), which
+  no agent works from. A value over the output budget is written whole once per run with the attachments of its session
+  (`tool-output/`, as a long command output is), and the text is a short preview of its start and its end that names the
+  file; the output and the presented parts each take at most a third of the budget.
 - Limits count runs (per session, per host) and refuse a run over them, never queue it.
 - The host stops every run before its sessions close.
 
@@ -93,8 +96,10 @@ Code loads `exec` and `wait` with `alta` instead of deferring them behind its to
 ## Records
 
 A run writes `AgentWorkflowEvent` records in the journal of its session (`RunStarted`, `StepsDeclared`, steps,
-sessions, waits, `ScriptLoaded`, `RunEnded`), all before its result is given, so what reads the journal after the result
-sees the whole run. Their `RunId` is null: a run outlives the turn that started it. The card of the run and its tab read
+sessions, waits, `ScriptLoaded`, `Presented`, `RunEnded`), all before its result is given, so what reads the journal after the result
+sees the whole run. Each `present()` is a `Presented` record as it happens, which is how its card shows the part at once
+and again after a restart; a part of a script `workflow()` runs belongs to the run that started it, so the parts keep one
+order and one limit. Their `RunId` is null: a run outlives the turn that started it. The card of the run and its tab read
 these records; they keep no state of their own, and pass over a kind they do not draw.
 
 `ScriptLoaded` names each library script `workflow("name")` resolves (its name and its scope), and `RunStarted` says

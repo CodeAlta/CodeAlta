@@ -1,4 +1,4 @@
-// Lists the open issues, classifies each with a session of its own, and reports them by kind and priority.
+// Lists the open issues, classifies each with a session of its own, and shows them by kind and priority.
 export const meta = {
   name: "triage-issues",
   title: "Triage the open issues",
@@ -33,13 +33,15 @@ const classes = await step("classify", () => parallel(issues.map((issue) => () =
       },
     }))));
 
+// The report is shown to the user; what returns is the triage as data, for what acts on it (labels, assignments).
 return step("report", () => {
   const order = { high: 0, medium: 1, low: 2 };
   const rows = issues.map((issue, i) => ({ issue, triage: classes[i] }))
     .sort((a, b) => (order[a.triage?.priority] ?? 3) - (order[b.triage?.priority] ?? 3));
-  return [
+  present([
     `| Issue | Kind | Priority | Summary |`,
     `| --- | --- | --- | --- |`,
     ...rows.map(({ issue, triage }) => `| [#${issue.id}](${issue.url}) | ${triage?.kind ?? "?"} | ${triage?.priority ?? "?"} | ${triage?.summary ?? "(not classified)"} |`),
-  ].join("\n");
+  ].join("\n"));
+  return rows.map(({ issue, triage }) => ({ id: issue.id, kind: triage?.kind ?? null, priority: triage?.priority ?? null }));
 });

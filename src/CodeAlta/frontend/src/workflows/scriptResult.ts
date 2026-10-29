@@ -1,8 +1,9 @@
 /**
  * The text of the result of a script of Code Mode, as the host writes it for the model (CodeModeResultFormatter): a
- * header ("Script completed · 2.0 s · 3 calls"), then what the run wrote (an error, its output, its profile), then the
- * result last, as Markdown, after a line `Result:`. A result longer than its budget keeps its start and its end, and a
- * line `Full result: <path> (<lines> lines, <n> characters; …)` before it names the file that keeps the whole of it.
+ * header ("Script completed · 2.0 s · 3 calls"), then what the run wrote (an error, its output, its profile), what it
+ * showed the user (`present()`, in a block after its line), then the result last, after a line `Result:`. A result
+ * longer than its budget keeps its start and its end, and a line `Full result: <path> (<lines> lines, <n> characters; …)`
+ * before it names the file that keeps the whole of it.
  */
 export type ScriptResult = Readonly<{
   /** The header of the text: "Script completed · 36m50s · 4 calls, 4 at once". */
@@ -10,6 +11,8 @@ export type ScriptResult = Readonly<{
   phase: "completed" | "failed" | "canceled";
   /** What the run wrote before its result, as Markdown; empty when it wrote nothing. */
   notes: string;
+  /** What the run showed the user (`present()`), as Markdown, as the model was told it: null when it presented nothing. */
+  presented: string | null;
   /** The result, as Markdown, or null when the script returned nothing. */
   result: string | null;
   /** The file that keeps the whole result, when the text has only its start and its end. */
@@ -20,6 +23,9 @@ export type ScriptResult = Readonly<{
 export type WorkflowResult = ScriptResult & Readonly<{ runId: string; title: string | null }>;
 
 const header = /^Script (completed|stopped|failed)\b/;
+/** The line before the parts a script presented (CodeModeResultFormatter.PresentedHeading). */
+export const presentedHeading = "Presented to the user (they saw it on the card of the run; do not repeat it):";
+const presentedFence = /^(`{3,})markdown$/;
 // "(52,341 characters; …)" before, "(930 lines, 52,341 characters; …)" or "(1,204 lines of indented JSON, … characters; …)" now.
 const fullResultLine = /^Full result: (.+) \((?:[\d.,\s  ]+ lines?(?: of indented JSON)?, )?([\d.,\s  ]+) characters?[^)]*\)$/;
 const fence = /^ {0,3}(`{3,}|~{3,})/;
@@ -30,10 +36,22 @@ export function parseScriptResult(text: string | null | undefined): ScriptResult
   const match = lines && header.exec(lines[0]);
   if (!lines || !match) return null;
   const phase = match[1] === "completed" ? "completed" : match[1] === "stopped" ? "canceled" : "failed";
-  // The line of the result is the first one outside a block of code: the output is in one.
+  // The line of the result is the first one outside a block of code: the output is in one, and so are the parts the run
+  // presented, which are read apart.
   let open: string | null = null, resultLine = -1;
+  let presented: string | null = null, presentedFrom = -1, presentedTo = -1;
   for (let index = 1; index < lines.length; index++) {
     const line = lines[index];
+    const opening = open === null && line === presentedHeading ? presentedFence.exec(lines[index + 1] ?? "")?.[1] : undefined;
+    if (opening) {
+      const end = lines.indexOf(opening, index + 2);
+      if (end > 0) {
+        presented = lines.slice(index + 2, end).join("\n");
+        presentedFrom = index; presentedTo = end;
+        index = end;
+        continue;
+      }
+    }
     const marker = fence.exec(line)?.[1];
     if (marker) {
       if (open === null) open = marker;
@@ -42,15 +60,17 @@ export function parseScriptResult(text: string | null | undefined): ScriptResult
     }
     if (open === null && line === "Result:") { resultLine = index; break; }
   }
-  if (resultLine < 0) return { status: lines[0], phase, notes: lines.slice(1).join("\n").trim(), result: null, fullResult: null };
+  const noted = (from: number, to: number) => lines.slice(from, to).filter((_, offset) => from + offset < presentedFrom || from + offset > presentedTo);
+  if (resultLine < 0) return { status: lines[0], phase, notes: noted(1, lines.length).join("\n").trim(), presented, result: null, fullResult: null };
   const full = fullResultLine.exec(lines[resultLine - 1] ?? "");
-  const notes = lines.slice(1, full ? resultLine - 1 : resultLine);
+  const notes = noted(1, full ? resultLine - 1 : resultLine);
   const rest = lines.slice(resultLine + 1);
   // A text written before the result came last: the result was JSON, and what the run wrote followed it.
   const older = olderResult(rest);
   return {
     status: lines[0], phase,
     notes: [...notes, ...(older?.after ?? [])].join("\n").trim(),
+    presented,
     result: older ? older.result : prettyJson(rest.join("\n").trimEnd()),
     fullResult: full ? { path: full[1], characters: full[2] } : null,
   };
@@ -62,6 +82,11 @@ export function parseWorkflowResult(text: string | null | undefined): WorkflowRe
   if (!match) return null;
   const result = parseScriptResult(text.slice(match[0].length));
   return result && { ...result, runId: match[1], title: match[2] || null };
+}
+
+/** The result as plain text, as the model reads it: an object without the block of JSON it is shown in. */
+export function plainResult(result: string): string {
+  return /^```json\n([\s\S]*)\n```$/.exec(result)?.[1] ?? result;
 }
 
 // An object the result gives as a block of JSON is shown indented.

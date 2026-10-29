@@ -14,6 +14,8 @@ import { OpenRunContext } from "./openRun";
 import { blockFit, blockPlan, compactTokens, estimateFlowSize, flowElements, runMermaid, runPhase, runTotals, tabCanvasHeight, workflowGraph, type FlowElements, type FlowMode } from "./runFlow";
 import type { FlowLayout } from "./runFlowLayout";
 import { graphState, type RunGraph } from "./runGraph";
+import { MarkdownLinkScopeContext, MarkdownLinksContext } from "../MarkdownContent";
+import { PresentedParts } from "./PresentedParts";
 
 // React Flow and dagre are a chunk of their own, loaded with the first graph shown.
 const WorkflowFlow = lazy(() => import("./WorkflowFlow").then(module => ({ default: module.WorkflowFlow })));
@@ -83,8 +85,9 @@ function RunCanvas({ graph, elements, mode, width, near, label }: { graph: RunGr
 /**
  * A run of a script in the timeline, as its own block at the place of its call, outside the folded tool calls: a header
  * (its title and id, a pill of its state with the time it runs, its sessions, tokens and duration, and discreet actions),
- * what it waits for, and its graph left to right: a node per step with its state and the sessions it started, an edge per
- * `after`. The graph takes the width of the conversation; its height follows it.
+ * what it waits for, its graph left to right (a node per step with its state and the sessions it started, an edge per
+ * `after`), and what the script showed the user (`present()`), part after part as they come. The graph takes the width of
+ * the conversation; its height follows it.
  */
 export const WorkflowBlock = memo(function WorkflowBlock({ run, title = null, rowKey, onOpenCall }: {
   run: ScriptRun; title?: string | null;
@@ -95,6 +98,9 @@ export const WorkflowBlock = memo(function WorkflowBlock({ run, title = null, ro
   const { t } = useShellLanguage();
   const actions = useContext(ScriptRunActionsContext);
   const openRun = useContext(OpenRunContext);
+  // The links of what the script presented start from the folder of its session, as those of a message.
+  const openLink = useContext(MarkdownLinksContext);
+  const linkScope = useContext(MarkdownLinkScopeContext);
   const offers = actions ? scriptRunOffers(run) : null;
   const graph = useMemo(() => workflowGraph(run), [run]);
   const [expanded, toggle] = useExpandedSteps();
@@ -204,6 +210,7 @@ export const WorkflowBlock = memo(function WorkflowBlock({ run, title = null, ro
       </ul>}
       {graph.loose.length > 0 && <ul className="script-run-sessions">{graph.loose.map(session => <li key={session.sessionId}><ScriptSessionBox session={session} /></li>)}</ul>}
     </div>}
+    {run.presented && run.presented.length > 0 && <PresentedParts parts={run.presented} onOpenLink={openLink && (address => openLink(address, linkScope))} />}
     {problem && <p role="alert" className="script-run-problem">{problem}</p>}
   </section>;
 });

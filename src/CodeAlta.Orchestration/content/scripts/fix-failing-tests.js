@@ -1,4 +1,4 @@
-// Finds the failing tests, then fixes them one session per test, and reports what each session changed.
+// Finds the failing tests, then fixes them one session per test, and shows what each session changed as it ends.
 export const meta = {
   name: "fix-failing-tests",
   title: "Fix failing tests",
@@ -21,13 +21,21 @@ const failing = await step("find", () => agent(
   `Run the tests with \`${command}\` and list the tests that fail, by their full name. Change nothing.`,
   { tier: "quick", title: "Find the failing tests", schema: { type: "array", items: { type: "string" } } }));
 const chosen = failing.slice(0, args.max ?? meta.params.max.default);
+present(failing.length === 0 ? "No test fails." : [`## ${failing.length} failing tests`, ...failing.map((test) => `- \`${test}\``),
+  ...chosen.length < failing.length ? ["", `This run fixes the first ${chosen.length}.`] : []].join("\n"));
 
-const fixes = await step("fix", () => parallel(chosen.map((test) => () =>
-  agent(`The test \`${test}\` fails (\`${command}\` runs the tests). Find why, and make it pass with the smallest right change: ` +
+// What each session changed is shown as it ends.
+const fixes = await step("fix", () => parallel(chosen.map((test) => async () => {
+  const answer = await agent(`The test \`${test}\` fails (\`${command}\` runs the tests). Find why, and make it pass with the smallest right change: ` +
     `fix the code when the code is wrong, the test only when the test is wrong. Do not commit. Run the test again, then say what you changed and why.`,
-    { title: `Fix ${test}` })), { limit: args.at_once ?? meta.params.at_once.default }));
+    { title: `Fix ${test}` });
+  present(`### ${test}\n${answer}`);
+  return answer;
+}), { limit: args.at_once ?? meta.params.at_once.default }));
 
-return step("report", () => [
-  `${chosen.length} of ${failing.length} failing tests given to a session.`,
-  ...chosen.map((test, i) => `## ${test}\n${fixes[i] ?? "(the session failed)"}`),
-].join("\n\n"));
+return step("report", () => {
+  const failed = chosen.filter((_, i) => fixes[i] === null);
+  const names = failed.map((test) => "`" + test + "`").join(", ");
+  present(`${chosen.length} of ${failing.length} failing tests given to a session.` + (failed.length > 0 ? ` The sessions of ${names} failed.` : ""));
+  return { failing, given: chosen, failed };
+});

@@ -33,7 +33,9 @@ import type { MessageKey } from "./localization";
 import { ScriptCalls } from "./scriptCard/ScriptCalls";
 import { ScriptRunView } from "./scriptCard/ScriptRunView";
 import { hasWorkflowBlock } from "./workflows/runFlow";
+import { PresentedParts } from "./workflows/PresentedParts";
 import { ScriptResultFacts } from "./workflows/ScriptResultFacts";
+import { parseWorkflowResult } from "./workflows/scriptResult";
 import { useWholeMessage, WholeMessageNote } from "./WholeMessageNote";
 import { flashTimelineTarget } from "./timelineReveal";
 
@@ -146,9 +148,14 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const body = item.markdown;
   // A text longer than its share of the history page arrives with its start only: the card says so, and reads the rest
   // from the journal when asked. A tool call and a job have windows of their own, which read their records whole.
-  const shortened = !!item.textShortened && !!body && !job && item.category !== "tool" && /^\d+$/u.test(item.key);
+  const shortened = !!item.textShortened && (!!body || !!item.workflowResult) && !job && item.category !== "tool" && /^\d+$/u.test(item.key);
   const whole = useWholeMessage(shortened ? item.key : null);
-  const shownBody = whole.state.status === "ok" ? wholeMessageBody(item, whole.state.text) : body;
+  const shownBody = whole.state.status === "ok" && body ? wholeMessageBody(item, whole.state.text) : body;
+  // The result of a run: what it presented (its records, else what its session was told), and its value, folded as
+  // data for the agent unless the run is the user's.
+  const workflow = item.workflowResult && whole.state.status === "ok" ? parseWorkflowResult(whole.state.text) ?? item.workflowResult : item.workflowResult;
+  const presentedParts = item.workflowRun?.presented ?? (workflow?.presented
+    ? [{ key: "presented", markdown: workflow.presented, stepId: null, offset: null, shortened: false }] : null);
   // Conversation messages always render their supplied Markdown. Optional
   // disclosure is reserved for long supporting diagnostics, never the conversation.
   const longBody = item.category !== "user" && item.category !== "assistant" && (body?.length ?? 0) > longBodyThreshold;
@@ -307,7 +314,8 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       </div>}
       {toolTile && item.scriptRun && !workflowBlock && <ScriptRunView run={item.scriptRun} title={item.scriptTitle ?? null} />}
       {toolTile && item.scriptCalls && !workflowBlock && <ScriptCalls calls={item.scriptCalls} />}
-      {item.workflowResult && <ScriptResultFacts result={item.workflowResult} run={item.workflowResult} onOpenLink={messageLink} />}
+      {presentedParts && <PresentedParts parts={presentedParts} onOpenLink={messageLink} />}
+      {workflow && <ScriptResultFacts result={workflow} run={workflow} onOpenLink={messageLink} foldResult={!item.workflowRun?.forUser} />}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}

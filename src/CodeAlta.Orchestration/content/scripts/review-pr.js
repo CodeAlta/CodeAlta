@@ -34,14 +34,20 @@ const brief = [
   pr.description ?? "(no description)",
 ].join("\n");
 
+present(`## Review of #${pr.id}: ${pr.title}\nReviewing ${lenses.map((lens) => `**${lens}**`).join(", ")}, one session each.`);
+
 // One session per angle, at the same time: a session that fails is null, and the merge says so.
 const findings = await step("review", () => parallel(lenses.map((lens) => () =>
   agent(`Review this pull request for ${lens}, and only that. Read its changes with git (the diff of its branch against ${pr.targetBranch ?? "the default branch"}). ` +
     `List concrete findings, each with its file and line, the most serious first; answer "none" when there are none. Change nothing.\n\n${brief}`,
     { tier, title: `Review #${pr.id}: ${lens}` }))));
 
-return await step("merge", () => agent(
-  `Merge these reviews of pull request #${pr.id} into one review: remove duplicates, keep the most serious findings first, ` +
-  `and end with a verdict: approve, or changes requested.\n\n` +
+// The review is shown to the user; what returns is its verdict, for what acts on it.
+const merged = await step("merge", () => agent(
+  `Merge these reviews of pull request #${pr.id} into one review in Markdown: remove duplicates, keep the most serious findings first. ` +
+  `Then give the verdict: approve, or changes requested.\n\n` +
   lenses.map((lens, i) => `## ${lens}\n${findings[i] ?? "(this review failed)"}`).join("\n\n"),
-  { tier, title: `Review #${pr.id}` }));
+  { tier, title: `Review #${pr.id}`, schema: { type: "object", properties: { review: { type: "string" }, verdict: { type: "string", enum: ["approve", "changes requested"] } },
+    required: ["review", "verdict"] } }));
+present(`${merged.review}\n\n**Verdict:** ${merged.verdict}`);
+return { pr: pr.id, url: pr.url, verdict: merged.verdict, failedLenses: lenses.filter((_, i) => findings[i] === null) };

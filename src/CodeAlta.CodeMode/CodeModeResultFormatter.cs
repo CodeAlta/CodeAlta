@@ -309,7 +309,7 @@ public static class CodeModeResultFormatter
             AppendPresented(builder, result, result.ValueJson is null ? budget - Math.Min(budget / 3, OutputLength(result)) : budget / 3);
         }
 
-        // The result comes last: everything after its line is the value, which the window shows as Markdown.
+        // The result comes last: everything after its line is the value, which the window reads apart from what precedes it.
         if (result.ValueJson is { } value)
         {
             AppendResult(builder, Present(value), ResultBudget(result, budget), fullResultPath);

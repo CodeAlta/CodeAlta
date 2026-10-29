@@ -24,4 +24,6 @@ const verdict = await step("judge", () => agent(
   args.models.map((model, i) => `## Answer ${i + 1} (${model})\n${answers[i] ?? "(no answer: the session failed)"}`).join("\n\n"),
   { title: "Judge", ...(args.judge ? { model: args.judge } : {}) }));
 
-return { answers: args.models.map((model, i) => ({ model, answer: answers[i] })), verdict };
+// The verdict is shown to the user; the answers return as data, for what goes on with the best one.
+present(`## Verdict\n${verdict}`);
+return { answers: args.models.map((model, i) => ({ model, answer: answers[i] })) };

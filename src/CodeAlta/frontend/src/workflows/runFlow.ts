@@ -4,9 +4,12 @@
 import type { ScriptRun, ScriptSession, ScriptStep } from "../timeline";
 import { foldSessions, graphState, runGraph, type GraphNode, type GraphState, type RunGraph, type SessionFold } from "./runGraph";
 
-/** Whether a run draws its block in the timeline: it ran steps or started sessions, or its scripts declare steps. Another keeps its compact card. */
+/**
+ * Whether a run draws its block in the timeline: it ran steps or started sessions, its scripts declare steps, or it showed
+ * the user something (`present()`), which the block shows outside the folded calls. Another keeps its compact card.
+ */
 export function hasWorkflowBlock(run: ScriptRun): boolean {
-  return run.steps.length > 0 || run.sessions.length > 0 || (run.declared?.length ?? 0) > 0;
+  return run.steps.length > 0 || run.sessions.length > 0 || (run.declared?.length ?? 0) > 0 || (run.presented?.length ?? 0) > 0;
 }
 
 /**

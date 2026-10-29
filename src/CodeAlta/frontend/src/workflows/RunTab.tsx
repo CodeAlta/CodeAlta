@@ -6,12 +6,13 @@ import { AppIcon } from "../AppIcon";
 import { Chart, type ChartDatum } from "../charts";
 import { SessionLinksContext } from "../SessionReference";
 import { useShellLanguage } from "../shellLanguage";
-import { scriptRunOf } from "../timeline";
+import { scriptRunOf, type ScriptRun } from "../timeline";
 import { formatDuration } from "../toolCall";
 import { graphStateLabel } from "./flowActions";
 import { graphState, timelineBars, timelineOption, timelineStates, type GraphState } from "./runGraph";
 import { MarkdownContent, MarkdownLinkScopeContext, MarkdownLinksContext } from "../MarkdownContent";
-import { parseScriptResult } from "./scriptResult";
+import { parseScriptResult, plainResult } from "./scriptResult";
+import { PresentedParts } from "./PresentedParts";
 import { ScriptResultFacts } from "./ScriptResultFacts";
 import { ScriptSource } from "./ScriptSource";
 import { RunTabGraph } from "./WorkflowBlock";
@@ -60,16 +61,28 @@ export const runTabRefreshMilliseconds = 2000;
  * its session), a timeline of its steps and sessions, its script and its result, and Copy as Mermaid, the text `alta
  * workflow show --format mermaid` gives. It reads the run again while it runs. A run the host no longer keeps closes its tab.
  */
-// The result as its session was given it: the value as Markdown, what the run wrote beside; a text of another form as written.
-// Its links start from the folder of the run's session.
-function RunResult({ text, sessionId }: { text: string; sessionId: string }) {
+// The result as its session was given it, what the run wrote beside; a text of another form as written. The value is
+// Markdown for a run of a script the user started from the library, which no agent works from; the value of a run of an
+// agent is data, shown as plain text. Its links start from the folder of the run's session.
+function RunResult({ text, sessionId, forUser }: { text: string; sessionId: string; forUser: boolean }) {
   const opener = useContext(MarkdownLinksContext);
   const parsed = useMemo(() => parseScriptResult(text), [text]);
   const scope = useMemo(() => ({ sessionId }), [sessionId]);
   if (!parsed) return <pre className="workflow-run-text">{text}</pre>;
   return <MarkdownLinkScopeContext.Provider value={scope}>
     <ScriptResultFacts result={parsed} onOpenLink={opener && (address => opener(address, scope))} />
-    <div className="workflow-run-result"><MarkdownContent source={parsed.result ?? parsed.notes} timelineCodeBlocks /></div>
+    {forUser ? <div className="workflow-run-result"><MarkdownContent source={parsed.result ?? parsed.notes} timelineCodeBlocks /></div>
+      : parsed.result !== null ? <pre className="workflow-run-result workflow-run-value">{plainResult(parsed.result)}</pre>
+      : parsed.notes && <div className="workflow-run-result"><MarkdownContent source={parsed.notes} timelineCodeBlocks /></div>}
+  </MarkdownLinkScopeContext.Provider>;
+}
+
+// What the script showed the user, part after part; its links start from the folder of the run's session.
+function RunPresented({ run, sessionId }: { run: ScriptRun; sessionId: string }) {
+  const opener = useContext(MarkdownLinksContext);
+  const scope = useMemo(() => ({ sessionId }), [sessionId]);
+  return <MarkdownLinkScopeContext.Provider value={scope}>
+    <PresentedParts parts={run.presented ?? []} onOpenLink={opener && (address => opener(address, scope))} />
   </MarkdownLinkScopeContext.Provider>;
 }
 
@@ -181,9 +194,13 @@ export function RunTab({ api, epoch, runId, visible, onActivate, onGone, write =
       <h3>{t("Timeline")}</h3>
       <Chart option={option} ariaLabel={t("Timeline of the steps and sessions of the run")} height={Math.min(560, 64 + bars.length * 24)} visible={visible} onSelect={select} />
     </section>}
+    {run.presented && run.presented.length > 0 && <section className="workflow-run-section">
+      <h3>{t("Presented")}</h3>
+      <RunPresented run={run} sessionId={info.sessionId} />
+    </section>}
     {detail.result && <section className="workflow-run-section">
       <h3>{t("Result")}</h3>
-      <RunResult text={detail.result} sessionId={info.sessionId} />
+      <RunResult text={detail.result} sessionId={info.sessionId} forUser={run.forUser === true} />
     </section>}
     {detail.source && <section className="workflow-run-section">
       <h3>{t("Script")}</h3>

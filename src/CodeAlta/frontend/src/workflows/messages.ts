@@ -84,6 +84,8 @@ export const workflowMessages = {
     "{characters} 文字のうち先頭と末尾だけを表示しています。",
     "仅显示 {characters} 个字符的开头和结尾。"],
   "Run details": ["Detalles de la ejecución", "Détails de l’exécution", "Details der Ausführung", "実行の詳細", "运行详情"],
+  "Presented": ["Presentado", "Présenté", "Präsentiert", "表示した内容", "已呈现"],
+  "Presented by the script": ["Presentado por el script", "Présenté par le script", "Vom Skript präsentiert", "スクリプトが表示した内容", "脚本呈现的内容"],
   // The library, by where its scripts are, and how a workflow is made.
   "Agents write workflows: ask for one in a session, or click Save as script… on the card of a run that went well.": [
     "Los agentes escriben los flujos de trabajo: pide uno en una sesión, o haz clic en Guardar como script… en la tarjeta de una ejecución que salió bien.",

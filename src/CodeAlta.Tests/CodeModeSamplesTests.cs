@@ -71,11 +71,15 @@ public sealed class CodeModeSamplesTests
             ["type"] = "alta.issue", ["kind"] = "pull_request", ["id"] = arguments["id"]!.GetValue<string>(), ["title"] = "Fix the parser",
             ["url"] = "https://example.com/pr/12", ["sourceBranch"] = "fix/parser", ["targetBranch"] = "main", ["description"] = "Fixes quoted keys.",
         };
+        fakes.Values["Review #12"] = new JsonObject { ["review"] = "- A quoted key loses its quotes.", ["verdict"] = "changes requested" };
 
         var result = await RunAsync("review-pr", """{"pr":12,"lenses":["correctness","security"]}""", fakes);
 
         Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
-        Assert.AreEqual("\"findings: Review #12\"", result.ValueJson);
+        // The review is shown to the user as it is written; the verdict returns as data.
+        CollectionAssert.AreEqual(new[] { "## Review of #12: Fix the parser\nReviewing **correctness**, **security**, one session each.",
+            "- A quoted key loses its quotes.\n\n**Verdict:** changes requested" }, result.Presented.Select(static part => part.Markdown).ToArray());
+        Assert.AreEqual("""{"pr":"12","url":"https://example.com/pr/12","verdict":"changes requested","failedLenses":[]}""", result.ValueJson);
         var show = fakes.Calls.Single(static call => call.Path == "alta.issue.show");
         Assert.AreEqual("""{"id":"12","kind":"pr"}""", show.ArgumentsJson);
         var reviews = fakes.Agents.Where(static request => request.Step == "review").ToArray();
@@ -84,6 +88,7 @@ public sealed class CodeModeSamplesTests
             && request.Prompt.Contains("Fixes quoted keys.", StringComparison.Ordinal)));
         Assert.AreEqual(2, fakes.MostAtOnce, "the lenses are reviewed at the same time");
         var merge = fakes.Agents.Single(static request => request.Step == "merge");
+        StringAssert.Contains(merge.Schema, "\"verdict\"");
         StringAssert.Contains(merge.Prompt, "## correctness\nfindings: Review #12: correctness");
         StringAssert.Contains(merge.Prompt, "## security\nfindings: Review #12: security");
     }
@@ -114,7 +119,10 @@ public sealed class CodeModeSamplesTests
         var result = await RunAsync("research", """{"question":"How are TOML keys parsed?","angles":2}""", fakes);
 
         Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
-        Assert.AreEqual("\"findings: Write the answer\"", result.ValueJson);
+        // The plan and the answer are shown to the user; what was researched returns as data.
+        Assert.AreEqual("## How are TOML keys parsed?\nResearching 2 sub-questions, one session each:\n- Where is it parsed?\n- Where is it tested?", result.Presented[0].Markdown);
+        Assert.AreEqual("findings: Write the answer", result.Presented[^1].Markdown);
+        Assert.AreEqual("""{"question":"How are TOML keys parsed?","researched":["Where is it parsed?"],"failed":["Where is it tested?"]}""", result.ValueJson);
         var plan = fakes.Agents.Single(static request => request.Step == "plan");
         Assert.AreEqual("quick", plan.Tier);
         StringAssert.Contains(plan.Schema, "\"maxItems\":2");
@@ -139,8 +147,9 @@ public sealed class CodeModeSamplesTests
         var result = await RunAsync("triage-issues", "{}", fakes);
 
         Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
-        var report = JsonNode.Parse(result.ValueJson!)!.GetValue<string>().Split('\n');
+        var report = result.Presented.Single().Markdown.Split('\n');
         CollectionAssert.AreEqual(new[] { "| [#2](u2) | bug | high | It crashes. |", "| [#1](u1) | docs | low | A typo. |" }, report[2..]);
+        Assert.AreEqual("""[{"id":"2","kind":"bug","priority":"high"},{"id":"1","kind":"docs","priority":"low"}]""", result.ValueJson, "the triage as data");
     }
 
     [TestMethod]
@@ -153,6 +162,8 @@ public sealed class CodeModeSamplesTests
         Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
         CollectionAssert.AreEquivalent(new[] { "a:one", "b:two" }, fakes.Agents.Where(static request => request.Step == "answer").Select(static request => request.Model).ToArray());
         Assert.AreEqual("c:three", fakes.Agents.Single(static request => request.Step == "judge").Model);
+        Assert.AreEqual("## Verdict\nfindings: Judge", result.Presented.Single().Markdown);
+        StringAssert.StartsWith(result.ValueJson, """{"answers":[{"model":"a:one","answer":"findings: Answer: a:one"}""");
     }
 
     [TestMethod]
@@ -166,7 +177,10 @@ public sealed class CodeModeSamplesTests
         Assert.AreEqual(CodeModeRunStatus.Completed, result.Status, result.Error?.Message);
         CollectionAssert.AreEqual(new[] { "Fix A.One", "Fix A.Two" }, fakes.Agents.Where(static request => request.Step == "fix").Select(static request => request.Title).ToArray());
         Assert.AreEqual(1, fakes.MostAtOnce, "the sessions share the folder of the project: one at a time by default");
-        StringAssert.Contains(result.ValueJson, "2 of 2 failing tests");
+        // The failing tests, what each session changed as it ended, then the count are shown to the user.
+        CollectionAssert.AreEqual(new[] { "## 2 failing tests\n- `A.One`\n- `A.Two`", "### A.One\nfindings: Fix A.One", "### A.Two\nfindings: Fix A.Two",
+            "2 of 2 failing tests given to a session." }, result.Presented.Select(static part => part.Markdown).ToArray());
+        Assert.AreEqual("""{"failing":["A.One","A.Two"],"given":["A.One","A.Two"],"failed":[]}""", result.ValueJson);
     }
 
     private static Task<CodeModeRunResult> RunAsync(string name, string argumentsJson, Fakes fakes)

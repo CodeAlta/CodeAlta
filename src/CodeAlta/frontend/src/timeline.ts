@@ -68,8 +68,13 @@ export type TimelineItem = Readonly<{
   sourceSessionId?: string;
   /** The recorded result of a background job, shown as a compact card with its facts and output in a window. */
   jobResult?: JobResult;
-  /** The result of a script that ended in the background: its Markdown is the body, its facts and what it wrote are beside. */
+  /**
+   * The result of a script that ended in the background: what the run presented and its facts, its value folded; the value
+   * is the body only for a run of a script the user started from the library (`forUser`), which no agent works from.
+   */
   workflowResult?: WorkflowResult;
+  /** The run of that result, from its records in the window, when they are there. */
+  workflowRun?: ScriptRun;
   /** True when the history page gave only the start of the text of the record: the card reads the rest on demand. */
   textShortened?: boolean;
   /** True for the message of a turn the provider started by itself: nobody wrote it, and it is not a prompt to continue from. */
@@ -105,14 +110,24 @@ export type TimelineItem = Readonly<{
 export type ScriptRun = Readonly<{ runId: string; status: string | null; steps: ReadonlyArray<ScriptStep>; sessions: ReadonlyArray<ScriptSession>;
   waiting?: ScriptWait | null; resumesAt?: string | null; declared?: ReadonlyArray<ScriptDeclaredStep>; startedAt?: string | null; endedAt?: string | null;
   /** The title its start gives it, when it has one. */
-  title?: string | null }>;
+  title?: string | null;
+  /** What its script showed the user (`present()`), in their order. */
+  presented?: ReadonlyArray<ScriptPresented>;
+  /** True for a run the host started to run a script of the library for the user: its value is for them, not for an agent. */
+  forUser?: boolean }>;
+
+/**
+ * A part a script showed the user (`present(markdown)`). `offset` is the journal offset of its record, by which a part
+ * the history page gave the start of (`shortened`) is read whole; null where the record is whole (the tab of the run).
+ */
+export type ScriptPresented = Readonly<{ key: string; markdown: string; stepId: string | null; offset: string | null; shortened: boolean }>;
 
 /** A step a script of a run declares: `after` the steps it runs after (null: the one declared before it; empty: the start), `each` a fan-out. */
 export type ScriptDeclaredStep = Readonly<{ id: string; title: string; after: readonly string[] | null; each: boolean }>;
 
 /** A record of a run as the card reads it: a `workflow` row of the history, or a record the tab of the run reads from the host. */
 export type ScriptRunRecord = Readonly<{ kind?: string | null; activityId?: string | null; phase?: string | null; text?: string | null; details?: string | null;
-  name?: string | null; timestamp?: string | null }>;
+  name?: string | null; timestamp?: string | null; offset?: string | null; textTruncated?: boolean | null }>;
 
 /**
  * What a running script waits for: the answer of an `ask()`, the approval of one of its calls, or the end of a `sleep()`
@@ -235,6 +250,7 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
   // The calls a script made are lines of the card of the call that ran it, not rows of their own.
   const children = scriptChildren(calls);
   const runRecords = scriptRunRecords(entries);
+  const resultRuns = scriptRunsById(entries);
   const deltas = new Map<string, TimelineItem>();
   const outputs = new Map<string, HistoryEntry>();
   for (const entry of entries) {
@@ -279,7 +295,8 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     }
     const call = entry.eventType === "activity" && entry.activityId ? calls.get(activityKey(entry)) : undefined;
     if (!call) {
-      const item = presentedItem(entry);
+      let item = presentedItem(entry);
+      if (item.workflowResult) item = withRunOfResult(item, resultRuns.get(item.workflowResult.runId));
       result.push(item.category === "user" && entry.runId && unsent.has(entry.runId) ? notSentItem(item) : item);
       continue;
     }
@@ -313,6 +330,31 @@ function callItem(first: HistoryEntry, last: HistoryEntry, output: HistoryEntry 
   return item;
 }
 
+// The records of the runs of scripts by the id of each run, for the cards of their results.
+function scriptRunsById(entries: readonly HistoryEntry[]): Map<string, HistoryEntry[]> {
+  const runs = new Map<string, HistoryEntry[]>();
+  for (const entry of entries) {
+    if (entry.eventType !== "workflow" || !entry.name) continue;
+    let list = runs.get(entry.name);
+    if (!list) runs.set(entry.name, list = []);
+    list.push(entry);
+  }
+  return runs;
+}
+
+// The card of the result of a run with its run, kept while its records stay the same. The value of a run of the user is the
+// body of its card, as Markdown: no agent works from it.
+const resultItems = new WeakMap<TimelineItem, { run: ScriptRun | undefined; item: TimelineItem }>();
+function withRunOfResult(item: TimelineItem, records: ReadonlyArray<HistoryEntry> | undefined): TimelineItem {
+  const run = records ? scriptRunOf(records, item.workflowResult!.runId) : undefined;
+  const known = resultItems.get(item);
+  if (known && known.run === run) return known.item;
+  const result = item.workflowResult!;
+  const shown = !run ? item : { ...item, workflowRun: run, ...run.forUser ? { markdown: result.result ?? (result.notes || null) } : {} };
+  resultItems.set(item, { run, item: shown });
+  return shown;
+}
+
 // The records of the runs of scripts, by the session and the tool call that ran each (its `parentActivityId`).
 function scriptRunRecords(entries: readonly HistoryEntry[]): Map<string, HistoryEntry[]> {
   const runs = new Map<string, HistoryEntry[]>();
@@ -344,6 +386,8 @@ export function scriptRunOf(records: ReadonlyArray<ScriptRunRecord>, runId?: str
   let resumesAt: string | null = null;
   let endedAt: string | null = null;
   let title: string | null = null;
+  let forUser = false;
+  const presented: ScriptPresented[] = [];
   const steps: ScriptStep[] = [];
   const sessions: ScriptSession[] = [];
   const declared: ScriptDeclaredStep[] = [];
@@ -354,6 +398,11 @@ export function scriptRunOf(records: ReadonlyArray<ScriptRunRecord>, runId?: str
     switch (record.kind) {
       case "RunStarted":
         title ??= record.text?.trim() || null;
+        forUser ||= details?.forUser === true;
+        break;
+      case "Presented":
+        if (record.text) presented.push({ key: record.offset ?? String(presented.length), markdown: record.text, stepId: record.activityId ?? null,
+          offset: record.offset && /^\d+$/u.test(record.offset) ? record.offset : null, shortened: record.textTruncated === true });
         break;
       case "StepsDeclared": {
         const listed = details?.steps;
@@ -414,7 +463,8 @@ export function scriptRunOf(records: ReadonlyArray<ScriptRunRecord>, runId?: str
   }
   const startedAt = records[0]?.timestamp ?? null;
   const run: ScriptRun = { runId: runId ?? last?.name ?? "", status, steps, sessions, ...waiting ? { waiting } : {}, ...resumesAt ? { resumesAt } : {},
-    ...declared.length > 0 ? { declared } : {}, ...startedAt ? { startedAt } : {}, ...endedAt ? { endedAt } : {}, ...title ? { title } : {} };
+    ...declared.length > 0 ? { declared } : {}, ...startedAt ? { startedAt } : {}, ...endedAt ? { endedAt } : {}, ...title ? { title } : {},
+    ...presented.length > 0 ? { presented } : {}, ...forUser ? { forUser } : {} };
   if (last) scriptRuns.set(last, { count: records.length, run });
   return run;
 }
@@ -552,7 +602,8 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       category = "user"; icon = delegated ? "branch" : job ? "terminal" : hostPrompt ? promptProvenanceIcon(hostPrompt) : "user";
       title = delegated ? "Agent message" : job ? "Background job" : hostPrompt ? userTitle(hostPrompt) : "You";
       if (delegated) markdown = delegated.body;
-      if (workflow) markdown = workflow.result ?? (workflow.notes || null);
+      // The value of a run is for the agent that reads it: the card folds it (ScriptResultFacts), unless the run is the user's.
+      if (workflow) markdown = null;
       if (job) {
         markdown = job.body;
         summary = job.title || job.command || job.jobId;
@@ -675,7 +726,8 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     metadata,
     truncated: entry.textTruncated || entry.detailsTruncated,
     bodyOmitted: entry.bodyOmitted,
-    copyMarkdown: job ? [job.title, job.result, job.body].filter(Boolean).join("\n\n") : copyMarkdown,
+    copyMarkdown: job ? [job.title, job.result, job.body].filter(Boolean).join("\n\n")
+      : workflow ? [workflow.presented, workflow.result ?? workflow.notes].filter(Boolean).join("\n\n") || null : copyMarkdown,
     fileChanges,
     images: category === "user" ? projectTimelineImages(entry.images) : category === "image" ? toolImages : undefined,
     attachments: category === "user" ? projectTimelineAttachments(entry.attachments) : undefined,

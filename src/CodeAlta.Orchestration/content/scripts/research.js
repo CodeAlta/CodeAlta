@@ -23,12 +23,17 @@ const questions = await step("plan", () => agent(
   `Split this question into at most ${angles} sub-questions that can be researched separately and that together answer it.\n\n${args.question}`,
   { tier: "quick", title: "Split the question", schema: { type: "array", items: { type: "string" }, maxItems: angles } }));
 
+present(`## ${args.question}\nResearching ${questions.length} sub-questions, one session each:\n${questions.map((question) => `- ${question}`).join("\n")}`);
+
 const notes = await step("explore", () => parallel(questions.map((question) => () =>
   agent(`Research this question, part of a larger one, with the tools you have (search and read the code, the documentation, the web if you can). ` +
     `Answer with what you found and where, and say what you could not find.\n\nQuestion: ${question}\nLarger question: ${args.question}`,
     { tier, title: `Research: ${question.slice(0, 60)}` }))));
 
-return await step("synthesize", () => agent(
+// The answer is shown to the user; what returns says what was researched, and what could not be.
+const answer = await step("synthesize", () => agent(
   `Answer this question from the notes below, citing where each fact comes from, and say what remains unknown.\n\n# ${args.question}\n\n` +
   questions.map((question, i) => `## ${question}\n${notes[i] ?? "(this research failed)"}`).join("\n\n"),
   { tier, title: "Write the answer" }));
+present(answer);
+return { question: args.question, researched: questions.filter((_, i) => notes[i] !== null), failed: questions.filter((_, i) => notes[i] === null) };

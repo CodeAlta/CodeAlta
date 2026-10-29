@@ -292,6 +292,19 @@ button.workflow-session:focus-visible { outline: 2px solid var(--accent); outlin
 .script-result-notes > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
 .script-result-notes .markdown-content { margin-top: 4px; }
 .workflow-run-result { max-height: 520px; overflow: auto; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+/* The value of a run an agent reads: plain text, as the output of a tool (over the font a message gives its blocks). */
+.script-result-facts pre.script-result-text, .workflow-run-section pre.workflow-run-value { margin: 4px 0 0; padding: 8px 10px; overflow: auto;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: 12px/1.5 var(--code-font); white-space: pre-wrap;
+  overflow-wrap: anywhere; }
+.script-result-facts pre.script-result-text { max-height: 320px; }
+.workflow-run-section pre.workflow-run-value { padding: 8px 12px; }
+/* What a script showed the user: its parts one under the other, each the Markdown of a message. */
+.script-presented { display: grid; gap: 6px; min-width: 0; }
+.script-presented-part { min-width: 0; overflow-wrap: anywhere; }
+.script-presented-part + .script-presented-part { padding-top: 6px; border-top: 1px dashed color-mix(in srgb, var(--line) 80%, transparent); }
+.script-presented-part > .markdown-content > :first-child { margin-top: 0; }
+.script-presented-part > .markdown-content > :last-child { margin-bottom: 0; }
+.workflow-block > .script-presented { padding: 2px 4px 0; }
 /* The source of a script: its lines numbered and colored, in a frame of its own that scrolls both ways. */
 .workflow-script-source { display: flex; max-height: 420px; min-width: 0; }
 .workflow-script-source .tool-code-lines { border-top: 1px solid var(--line); border-radius: 8px; padding: 6px 0; }
