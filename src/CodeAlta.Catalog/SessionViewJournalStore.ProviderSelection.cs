@@ -80,6 +80,7 @@ public sealed partial class SessionViewJournalStore
         local.ProviderKey = target.ProviderId.Value;
         local.ModelId = carryOver?.ModelId;
         local.ReasoningEffort = carryOver?.ReasoningEffort;
+        local.ContextWindowTokens = null;
         // The modes are those of a provider: the session starts on the new one with its configured mode, unless the
         // switch names the mode it keeps.
         local.PermissionMode = carryOver?.PermissionMode;

@@ -67,6 +67,9 @@ public sealed record SessionRuntimeCurrentEntry(long AttachmentGeneration, bool 
     string? ActiveRunId, bool QueueDrainInProgress, string ProviderId, string ProviderKey, string? ModelId,
     AgentReasoningEffort? ReasoningEffort, string? AgentPromptId, string? PendingAgentPromptId)
 {
+    /// <summary>Gets the explicit context capacity of this attachment; null for Default.</summary>
+    public long? ContextWindowTokens { get; init; }
+
     /// <summary>Last valid timestamp admitted from this attachment's session/provider-correlated agent events, not historical latest activity.</summary>
     public SessionRuntimeActivity? Activity { get; init; }
 

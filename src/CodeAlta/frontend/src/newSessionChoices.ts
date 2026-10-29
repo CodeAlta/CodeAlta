@@ -4,6 +4,7 @@ import type { createMutationCapability } from "./sessionOperations";
 import { chosenNewSessionPreference, newSessionPreferencesKey, newSessionProvider, newSessionSelection, newSessionTier, providersInSpace, newSessionTierProvider, rememberNewSessionPreference,
   restoreNewSessionPreferences, tierNewSessionPreference, type NewSessionChoiceField } from "./newSessionPreferences";
 import { useTiers } from "./modelTiers";
+import { validContext } from "./contextSizes";
 
 // Catalogs only. Draft choices are preferences, never send or provider-switch authority.
 export function useNewSessionChoices(epoch: string | undefined | null, projectId: string | null, projectPath: string | null,
@@ -21,6 +22,8 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   // The agent prompt chosen in the draft of a project (or of the chats): for the session that draft starts, never
   // remembered for the next ones, which start with the agent prompt of their space.
   const [draftPrompts, setDraftPrompts] = useState<ReadonlyMap<string, string>>(new Map());
+  // Context is a choice of this draft only, never part of remembered new-session preferences.
+  const [draftContext, setDraftContext] = useState<{ key: string; tokens: number | null } | null>(null);
   const draftPrompt = draftPrompts.get(scope);
   // With tiers in the settings, a new session the user chose nothing for starts on the standard tier.
   const tiers = useTiers(epoch, spaceId ? { spaceId } : null);
@@ -77,12 +80,16 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   const configured = providers.find(candidate => candidate.id === provider);
   const selection = newSessionSelection(draftPrompt ? { ...saved, agentPromptId: draftPrompt } : saved, provider, prompts?.key === key ? prompts.rows : [], models?.key === key ? models.rows : [], configured, standard,
     prompts?.key === key ? prompts.defaultId : null);
+  const contextKey = JSON.stringify([epoch, scope, provider, selection.modelId]);
+  useEffect(() => { setDraftContext(null); }, [contextKey]);
   // The mode chosen while the provider still offers it; none runs the session in the default one, as an existing session.
-  const value = { ...selection, permissionMode: permissionModes.find(mode => mode.id === saved?.permissionMode)?.id ?? null };
+  const value = { ...selection, permissionMode: permissionModes.find(mode => mode.id === saved?.permissionMode)?.id ?? null,
+    ...(draftContext?.key === contextKey ? { context: { tokens: draftContext.tokens } } : {}) };
   const tier = newSessionTier(saved, value, tiers?.choices);
   // The modes are read before a creation, so that a mode chosen earlier is not left out while they load.
   const ready = !!provider && prompts?.key === key && prompts.rows.some(prompt => prompt.id === value.agentPromptId) && permissions?.key === key
     && models?.key === key && !models.loading && !models.failed
+    && validContext(value.context, models.rows.find(model => model.id === value.modelId))
     && (value.modelId === null ? models.rows.length === 0 && value.reasoningEffort === null : models.rows.some(model => model.id === value.modelId
       && (value.reasoningEffort === null || model.efforts.includes(value.reasoningEffort))));
   return {
@@ -95,6 +102,10 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
     /** The mode a session without one runs in; null where the CLI of the provider decides. */
     defaultPermissionMode: permissions?.key === key ? permissions.defaultMode : null,
     failed: prompts?.key === key && prompts.failed || models?.key === key && models.failed,
+    changeContext(tokens: number | null) {
+      if (validContext({ tokens }, models?.key === key ? models.rows.find(model => model.id === value.modelId) : undefined))
+        setDraftContext({ key: contextKey, tokens });
+    },
     // Only a choice of the user is remembered: a default that is shown stays the default of the settings.
     change(field: NewSessionChoiceField | "agentPromptId", next: string) {
       if (field === "agentPromptId") {
@@ -118,6 +129,7 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
     forgetDraftPrompt(project: string | null, path: string | null) {
       const created = JSON.stringify([project, path]);
       setDraftPrompts(current => { if (!current.has(created)) return current; const map = new Map(current); map.delete(created); return map; });
+      if (created === scope) setDraftContext(current => current === draftContext ? null : current);
     },
     refresh: () => setRevision(previous => previous + 1),
   };

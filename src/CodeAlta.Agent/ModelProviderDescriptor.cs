@@ -84,6 +84,9 @@ public sealed record ModelProviderDescriptor
     /// </summary>
     public AgentReasoningEffort? DefaultReasoningEffort { get; init; }
 
+    /// <summary>Gets requested context capacities keyed by exact model id; these are preferences, not capabilities.</summary>
+    public IReadOnlyDictionary<string, long>? ContextPreferences { get; init; }
+
     /// <summary>
     /// Gets the permission modes a session of this provider can be given, empty when the provider has none.
     /// </summary>

@@ -30,9 +30,11 @@ let steerMode: "accept" | "refuse" | "expired" = "accept";
 const operationId = () => `22222222-2222-4222-8222-${String(++operations).padStart(12, "0")}`;
 
 const queue = createComposerQueue();
+const context = () => (window as Window & { fixtureContext?: { tokens: number | null } }).fixtureContext;
 const submissions = createOwnedSubmissions(async (request): Promise<SessionAdmission> => {
   fixture.sendCalls.push(request);
   if (sendMode !== "accept") return { status: sendMode === "busy" ? "busy" : "invalid_request", epoch: request.expectedEpoch, receipt: null };
+  if (context() && request.selection?.context) context()!.tokens = request.selection.context.tokens;
   // An accepted Send is a run: the session works until the test ends it.
   run = `run-${++runs}`;
   return { status: "accepted", epoch: request.expectedEpoch, receipt: { kind: "Send", clientRequestId: request.clientRequestId,
@@ -105,6 +107,7 @@ const props = {
     : ({ status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
     entry: { attachmentGeneration: "12", activeRunId: run, isRetiring: false, isTerminated: false, backgroundTasks: background, queueDrainInProgress: draining,
       providerId: "fixture-provider", providerKey: "fixture-provider", modelId: null, reasoningEffort: null, agentPromptId: null,
+      contextWindowTokens: context()?.tokens,
       // An idle attachment can have a next-turn prompt selection: normal Send consumes it.
       pendingAgentPromptId: "default", activity: null },
     runtimeInstanceId: runtime, coordinatorTransitionInProgress: false } satisfies SessionRuntimeStateResponse)),

@@ -5531,7 +5531,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return _resolvedModelInfo;
         }
 
-        _resolvedModelInfoLoaded = true;
         var modelId = _summary.ModelId ?? _options.Model;
         if (string.IsNullOrWhiteSpace(modelId))
         {
@@ -5546,7 +5545,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 _cachedModels = await modelCatalog.ListModelsAsync(Provider, cancellationToken).ConfigureAwait(false);
             }
 
-            _resolvedModelInfo = AgentModelIdentity.FindBestMatch(_cachedModels, modelId);
+            _resolvedModelInfo = AgentModelContextResolver.Resolve(
+                AgentModelIdentity.FindBestMatch(_cachedModels, modelId), modelId, _providerKey,
+                _options.ContextWindowTokens, _options.PreferredContextWindowTokens);
         }
         catch (OperationCanceledException)
         {
@@ -5557,6 +5558,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             _resolvedModelInfo = null;
         }
 
+        _resolvedModelInfoLoaded = true;
         return _resolvedModelInfo;
     }
 }

@@ -862,6 +862,7 @@ public sealed record PluginAgentRunAugmentation
             ProjectRoots = source.ProjectRoots,
             Model = source.Model,
             ReasoningEffort = source.ReasoningEffort,
+            Context = source.Context,
             PermissionMode = source.PermissionMode,
             SessionOptions = source.SessionOptions,
             AgentPromptId = source.AgentPromptId,

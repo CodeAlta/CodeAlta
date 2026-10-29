@@ -37,6 +37,9 @@ public sealed class SessionExecutionOptions
     /// </summary>
     public AgentReasoningEffort? ReasoningEffort { get; init; }
 
+    /// <summary>Gets the session context choice; null keeps it and null tokens explicitly reset it to Default.</summary>
+    public AgentContextSelection? Context { get; init; }
+
     /// <summary>
     /// Gets or initializes the permission mode a session is created with, one of the modes of its provider or of
     /// the host. Null, the default, gives it none. A session that exists keeps the mode saved with it.

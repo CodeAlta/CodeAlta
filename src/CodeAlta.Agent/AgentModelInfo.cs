@@ -24,6 +24,14 @@ public sealed record AgentModelInfo(
     [property: JsonConverter(typeof(AgentObjectDictionaryJsonConverter))]
     IReadOnlyDictionary<string, object?>? Capabilities = null)
 {
+    /// <summary>Gets verified session-scoped context choices. Null means the adapter supports Default only.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentModelContextSizes? ContextSizes { get; init; }
+
+    // A session-local copy only; never advertised or persisted as a capability.
+    [JsonIgnore]
+    internal long? EffectiveContextWindowTokens { get; init; }
+
     /// <summary>
     /// Gets the choices of the model other than its reasoning effort, such as the size of its context or a fast mode,
     /// with the values they have now: set through <see cref="IModelProviderModelOptions"/>. Null or empty for a model

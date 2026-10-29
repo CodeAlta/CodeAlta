@@ -217,6 +217,31 @@ public sealed class SessionFallbackTests
     }
 
     [TestMethod]
+    public async Task ModelFallbackOfTheSameProvider_ClearsThePreviousContextChoice()
+    {
+        await using var f = await Fixture.CreateAsync("""
+            [models.tiers]
+            standard = ["prov-a:model-a@high", "prov-a:model-c@high"]
+            [models.fallback]
+            enabled = true
+            """);
+        var state = await f.ChildStateAsync();
+        state.ContextWindowTokens = 1000000;
+        await f.Journal.AppendStateAsync(f.Child, state, CancellationToken.None);
+        await f.RestartAsync();
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.ModelUnavailable)));
+
+        f.Send("continue with another model");
+        var first = await f.NextSendAsync(f.A);
+        Assert.AreEqual(1000000L, first.Options.ContextWindowTokens);
+        var continuation = await f.NextSendAsync(f.A);
+
+        Assert.AreEqual("model-c", continuation.Options.Model);
+        Assert.IsNull(continuation.Options.ContextWindowTokens);
+        Assert.IsNull((await f.ChildStateAsync()).ContextWindowTokens);
+    }
+
+    [TestMethod]
     public async Task AuthFailure_DoesNotSwitch_AndTheParentIsTold()
     {
         await using var f = await Fixture.CreateAsync(Tiers);

@@ -77,7 +77,7 @@ internal static class AgentUsageFactory
         };
     }
 
-    public static AgentSessionUsage? AttachModelInfo(AgentSessionUsage? usage, AgentModelInfo? modelInfo)
+    public static AgentSessionUsage? AttachModelInfo(AgentSessionUsage? usage, AgentModelInfo? modelInfo, bool replaceCapacity = false)
     {
         if (usage is null)
         {
@@ -85,8 +85,9 @@ internal static class AgentUsageFactory
         }
 
         var budget = GetModelTokenBudget(modelInfo);
-        var tokenLimit = usage.Window?.TokenLimit ?? budget.InputContextLimit;
-        if (tokenLimit is null)
+        replaceCapacity |= modelInfo?.ContextSizes is not null;
+        var tokenLimit = replaceCapacity ? budget.InputContextLimit : usage.Window?.TokenLimit ?? budget.InputContextLimit;
+        if (tokenLimit is null && (!replaceCapacity || usage.Window is null))
         {
             return usage;
         }
@@ -98,8 +99,8 @@ internal static class AgentUsageFactory
             TokenLimit: tokenLimit,
             MessageCount: usage.Window?.MessageCount,
             Label: label,
-            TotalContextEnvelope: usage.Window?.TotalContextEnvelope ?? budget.TotalContextEnvelope,
-            MaxOutputTokens: usage.Window?.MaxOutputTokens ?? budget.MaxOutputTokens);
+            TotalContextEnvelope: replaceCapacity ? budget.TotalContextEnvelope : usage.Window?.TotalContextEnvelope ?? budget.TotalContextEnvelope,
+            MaxOutputTokens: replaceCapacity ? budget.MaxOutputTokens : usage.Window?.MaxOutputTokens ?? budget.MaxOutputTokens);
         if (Equals(window, usage.Window))
         {
             return usage;
@@ -128,7 +129,7 @@ internal static class AgentUsageFactory
         }
 
         var budget = GetModelTokenBudget(modelInfo);
-        var tokenLimit = usage?.Window?.TokenLimit ?? budget.InputContextLimit;
+        var tokenLimit = modelInfo?.ContextSizes is not null ? budget.InputContextLimit : usage?.Window?.TokenLimit ?? budget.InputContextLimit;
         if (currentTokens is null && tokenLimit is null)
         {
             return usage;
@@ -142,8 +143,8 @@ internal static class AgentUsageFactory
             TokenLimit: tokenLimit,
             MessageCount: messageCount,
             Label: resolvedLabel,
-            TotalContextEnvelope: usage?.Window?.TotalContextEnvelope ?? budget.TotalContextEnvelope,
-            MaxOutputTokens: usage?.Window?.MaxOutputTokens ?? budget.MaxOutputTokens);
+            TotalContextEnvelope: modelInfo?.ContextSizes is not null ? budget.TotalContextEnvelope : usage?.Window?.TotalContextEnvelope ?? budget.TotalContextEnvelope,
+            MaxOutputTokens: modelInfo?.ContextSizes is not null ? budget.MaxOutputTokens : usage?.Window?.MaxOutputTokens ?? budget.MaxOutputTokens);
         if (usage is not null &&
             Equals(window, usage.Window) &&
             usage.Scope == AgentUsageScope.CurrentWindow)

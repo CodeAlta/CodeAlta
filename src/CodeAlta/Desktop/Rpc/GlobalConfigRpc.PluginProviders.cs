@@ -119,6 +119,7 @@ internal sealed partial class GlobalConfigService
                     Color = Bound(settings.GetString("color")),
                     PermissionMode = Bound(settings.PermissionMode),
                     ModelsOrder = ConfiguredModelsOrder(settings.GetString(ModelsOrderKey), settings.GetBoolean(SortModelsKey)),
+                    ContextPreferences = PluginModelProviderTypes.ReadContextPreferences(settings).ToDictionary(static entry => entry.Key, static entry => (decimal)entry.Value, StringComparer.Ordinal),
                     Plugin = new GlobalConfigPluginProviderValues(
                         Bound(contribution.Tag),
                         [.. contribution.Settings.Select(setting => ToValue(setting, settings))],
@@ -191,6 +192,8 @@ internal sealed partial class GlobalConfigService
             return new("invalid", null, "A provider field is too long.", null, null, 0);
         if (!TryReadModelsOrder(request.ModelsOrder, out var modelsOrder))
             return new("invalid", null, $"An order of the models is one of: {string.Join(", ", ModelOrdering.Values)}.", null, null, 0);
+        if (!TryReadContextPreferences(request.ContextPreferences, out var contextPreferences))
+            return new("invalid", null, "Context preferences must map exact model ids to positive integral token capacities.", null, null, 0);
 
         return MutateExternal(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, store =>
         {
@@ -208,6 +211,8 @@ internal sealed partial class GlobalConfigService
             Set(values, "color", color);
             Set(values, "model", Optional(request.Model));
             Set(values, "reasoning_effort", Optional(request.ReasoningEffort));
+            if (request.ContextPreferences is not null)
+                Set(values, "context_preferences", contextPreferences?.ToDictionary(static entry => entry.Key, static entry => (object?)entry.Value, StringComparer.Ordinal));
             Set(values, "permission_mode", permissionMode);
             // The older sort_models gives way to the order the form names.
             Set(values, ModelsOrderKey, modelsOrder);
@@ -669,6 +674,10 @@ internal sealed record GlobalConfigPluginMapEntry(string Name, string Value);
 internal sealed record GlobalConfigSavePluginProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? OriginalKey, string? Key, string? Type, bool Enabled,
     string? DisplayName, string? Model, string? ReasoningEffort, IReadOnlyList<GlobalConfigPluginSettingValue>? Values, bool MakeDefault)
 {
+    /// <summary>Null preserves the saved preferences; an empty map clears them.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, decimal>? ContextPreferences { get; init; }
+
     public string? Icon { get; init; }
 
     public string? Color { get; init; }

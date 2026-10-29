@@ -62,6 +62,7 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
 - **Agent prompt**: built-in prompts, then yours and the project's (see [Agent Prompts](../prompts.md)). A new session starts with the agent prompt of its [space](../spaces.md), **Default** unless you changed it; a prompt you pick, such as **Plan**, is for that session only.
 - **Model**: type part of a name or id in the search box and press `Enter`. [Model tiers](../model-tiers.md) come first, with the model each gives now. **Settings > Models** sets how many models the list shows.
 - **Reasoning effort**: the efforts of the model. For Claude Code, Copilot and the Anthropic API, a model that lists none has none. With other providers, an effort the model does not list is marked **Unverified**.
+- **Context size**, under **More options**: the total capacity for this session, applied with its next prompt. **Default** follows the matching preference in **Settings > Providers**, otherwise the model's default. Codex offers its advertised default and maximum when both are supported; other providers may offer only **Default**. Changing provider or model resets this choice. A queued prompt keeps the choice it was queued with.
 - **Model options**, for a model whose provider offers some, such as **Context** and **Fast** for Cursor's models: a list or a switch under the reasoning effort. An option belongs to the model: it applies to every session of the provider that uses this model.
 - **Review before commit**: **On**, **Off**, or **Default** (the setting of **Settings > Sessions**). See [Review before commit](../reviews.md#review-before-commit).
 - **Sandbox**: a profile, **Off**, or **Default** (what the settings choose for this provider, project or space). A small mark on the chip shows a sandboxed session. See [Sandbox](../sessions/sandbox.md).
@@ -72,7 +73,7 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
   <figcaption class="small text-secondary mt-2">Type in the search box of the model list to find a model.</figcaption>
 </figure>
 
-The picker of a new session has the same rows, except the model options: the session starts with your choices, and the next new session of the project starts from them, except **More options**, which are for that session only.
+The picker of a new session has the same rows, except the model options: the session starts with your choices, and the next new session of the project starts from them, except **More options** (including **Context size**), which are for that session only.
 
 Agents use the same choices: `alta session choices <session-id>` lists the models, efforts, agent prompts, permission modes and sandboxes of a session, and `alta session send` and `alta session queue` take `--model`, `--reasoning`, `--prompt-id`, `--permission-mode` and `--sandbox`.
 

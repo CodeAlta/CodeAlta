@@ -1,4 +1,4 @@
-import { Button, Checkbox, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
+import { Button, Checkbox, Classes, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
 import { Fragment, StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
@@ -121,6 +121,7 @@ import { providersInSpace } from "./newSessionPreferences";
 import { resourceSpacesOf } from "./spaces/SpaceChips";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
+import { ContextSizeSelect } from "./ContextSizeSelect";
 import { ReviewBeforeCommitSelect } from "./ReviewBeforeCommitSelect";
 import { validSelection } from "./sessionSelection";
 import { AppIcon, type IconName } from "./AppIcon";
@@ -4463,8 +4464,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         onChange={next => setDraftReview(next)} />}
       sandbox={draftSandboxScopes && <SessionSandboxSelect id={`composer-sandbox-${choiceId}`} own={draftSandbox} inherited={draftSandboxScopes.profile}
         choices={draftSandboxScopes.choices} disabled={locked} onChange={next => setDraftSandbox(next)} />}
-      options={{ changed: changedSessionOptions(draftOptions),
-        content: <SessionOptionsFields id={choiceId} value={draftOptions} disabled={locked} onChange={next => setDraftOptions(next)} /> }}
+      options={{ changed: changedSessionOptions(draftOptions) + (value.context?.tokens != null ? 1 : 0),
+        content: <>
+          <FormGroup label={t("Context size")} labelFor={`composer-context-${choiceId}`}>
+            <ContextSizeSelect id={`composer-context-${choiceId}`} value={value.context?.tokens ?? null} model={draftModel}
+              loading={draftChoices.loadingModels} disabled={locked} onChange={tokens => { invalidateCreation(); draftChoices.changeContext(tokens); }} />
+          </FormGroup>
+          <SessionOptionsFields id={choiceId} value={draftOptions} disabled={locked} onChange={next => setDraftOptions(next)} />
+        </> }}
       permission={permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${choiceId}`} value={value.permissionMode} modes={permissionModes}
         defaultMode={draftChoices.defaultPermissionMode} disabled={locked} onChange={next => change("permissionMode", next)} /> : undefined}
       agent={<HTMLSelect fill id={`composer-agent-${choiceId}`} aria-label={t("Agent prompt")} value={value.agentPromptId}

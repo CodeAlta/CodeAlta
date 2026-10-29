@@ -457,6 +457,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return null;
     }
 
+    private long? GetContextPreference(string providerKey, string? model)
+    {
+        if (model is null) return null;
+        var provider = _agentHub.SelectionProviders.FirstOrDefault(p => p.ProviderId.Value == providerKey);
+        return provider?.ContextPreferences?.TryGetValue(model, out var tokens) == true ? tokens : null;
+    }
+
     /// <summary>Gets application-owned pending permissions, independent of attached frontend presentations.</summary>
     public SessionPermissionService Permissions { get; }
 
@@ -726,12 +733,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var activeProviderKey = descriptor.ProviderKey;
             var activeModelId = descriptor.ModelId;
             var activeReasoningEffort = descriptor.ReasoningEffort;
+            var activeContextTokens = descriptor.ContextWindowTokens;
             var activeAgentPromptId = descriptor.AgentPromptId;
 
             ApplyPersistedSessionLocalState(descriptor, localState);
 
             descriptor.ProviderId = activeProviderId;
             descriptor.ProviderKey = activeProviderKey;
+            descriptor.ContextWindowTokens = activeContextTokens;
             if (!string.IsNullOrWhiteSpace(activeModelId))
             {
                 descriptor.ModelId = activeModelId;
@@ -1173,6 +1182,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         // Only the local state says it, and none is a choice too: the mode of the provider.
         session.PermissionMode = NormalizeOptionalText(localState.PermissionMode);
+        session.ContextWindowTokens = localState.ContextWindowTokens;
         session.Sandbox = NormalizeOptionalText(localState.Sandbox);
         session.Options = AgentSessionOptions.Stored(localState.Options);
         session.TitleMode = AgentSessionTitles.ParseMode(localState.TitleMode) is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null;
@@ -1207,6 +1217,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = localState.ModelId,
             ReasoningEffort = localState.ReasoningEffort,
             PermissionMode = localState.PermissionMode,
+            ContextWindowTokens = localState.ContextWindowTokens,
             Sandbox = localState.Sandbox,
             Options = localState.Options,
             TitleMode = localState.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null,
@@ -1594,6 +1605,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = options.Model,
             ReasoningEffort = options.ReasoningEffort,
             PermissionMode = NormalizeOptionalText(options.PermissionMode),
+            ContextWindowTokens = options.Context?.Tokens,
             Sandbox = await CreatedSandboxAsync(options.Sandbox, createdBy, options.ProviderKey ?? options.ProviderId.Value, options.Model, null, spaceId,
                 cancellationToken).ConfigureAwait(false),
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
@@ -1806,6 +1818,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = options.Model,
             ReasoningEffort = options.ReasoningEffort,
             PermissionMode = NormalizeOptionalText(options.PermissionMode),
+            ContextWindowTokens = options.Context?.Tokens,
             Sandbox = await CreatedSandboxAsync(options.Sandbox, createdBy, options.ProviderKey ?? options.ProviderId.Value, options.Model, project.Id, spaceId,
                 cancellationToken).ConfigureAwait(false),
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
@@ -2204,6 +2217,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // The permission mode is the one saved with the session: what attaches it does not have to know it. So is
         // how the session titles itself, which is the setting unless the session has a mode of its own.
         var savedLocalState = startNewSession ? null : await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false);
+        var contextTokens = options.Context is { } context ? context.Tokens
+            : string.Equals(startNewSession ? session.ResolvedProviderKey : savedLocalState?.ProviderKey,
+                options.ProviderKey ?? options.ProviderId.Value, StringComparison.Ordinal)
+                && string.Equals(startNewSession ? session.ModelId : savedLocalState?.ModelId, options.Model, StringComparison.Ordinal)
+                ? (startNewSession ? session.ContextWindowTokens : savedLocalState?.ContextWindowTokens) : null;
         var permissionMode = NormalizeOptionalText(startNewSession ? session.PermissionMode : savedLocalState?.PermissionMode);
         // So is the sandbox chosen for the session; its scopes are read again at each command.
         var ownSandbox = NormalizeOptionalText(startNewSession ? session.Sandbox : savedLocalState?.Sandbox);
@@ -2241,6 +2259,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ReasoningEffort = options.ReasoningEffort,
             // Nobody reads the reasoning of a headless run: its summaries are not asked for.
             OmitReasoningSummaries = Headless,
+            ContextWindowTokens = contextTokens,
+            PreferredContextWindowTokens = GetContextPreference(options.ProviderKey ?? session.ResolvedProviderKey, options.Model),
             PermissionMode = permissionMode,
             Streaming = true,
             WorkingDirectory = options.WorkingDirectory,
@@ -2314,6 +2334,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         session.WorktreeDirectory = worktree;
         session.ModelId = options.Model;
         session.ReasoningEffort = options.ReasoningEffort;
+        session.ContextWindowTokens = contextTokens;
         session.PermissionMode = permissionMode;
         session.Sandbox = ownSandbox;
         session.TitleMode = ownTitleMode is { } ownMode ? AgentSessionTitles.NameOf(ownMode) : null;
@@ -2381,6 +2402,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Identity = identity,
             ProcessEnvironment = processEnvironment,
             ProviderRegistrationVersion = providerVersion,
+            ContextWindowTokens = contextTokens,
             PermissionMode = permissionMode,
             OwnSandbox = ownSandbox,
             Options = AgentSessionOptions.Of(session.Options),
@@ -3429,7 +3451,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 entry.ActiveRunId?.Value, entry.QueueDrainInProgress, entry.ProviderId.Value, entry.ProviderKey,
                 entry.Model, entry.ReasoningEffort, entry.AgentPromptId, entry.PendingAgentPromptId)
             { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents), BackgroundTasks = WithJobTasks(entry.BackgroundTasks, sessionId),
-              RemoteControl = entry.RemoteControl, PromptSuggestion = entry.PromptSuggestion };
+              RemoteControl = entry.RemoteControl, PromptSuggestion = entry.PromptSuggestion, ContextWindowTokens = entry.ContextWindowTokens };
         return new(_runtimeInstanceId, sessionId, _transitions.ContainsKey(sessionId), snapshot);
     }
 
@@ -3912,6 +3934,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         localState.ProviderKey = session.ResolvedProviderKey;
         localState.ModelId = session.ModelId;
         localState.ReasoningEffort = session.ReasoningEffort;
+        localState.ContextWindowTokens = session.ContextWindowTokens;
         localState.AgentPromptId = NormalizeOptionalText(session.AgentPromptId);
         // Whether the session is archived is kept as it was read: only an archive or a restore changes it. The status
         // of a descriptor says it too of an attachment that ended, which is no archive.
@@ -5528,6 +5551,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = session.ModelId,
             ReasoningEffort = session.ReasoningEffort,
             PermissionMode = session.PermissionMode,
+            ContextWindowTokens = session.ContextWindowTokens,
             Sandbox = session.Sandbox,
             TitleMode = session.TitleMode,
             TitleSource = session.TitleSource,
@@ -5908,6 +5932,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         localState.ProviderKey = session.ResolvedProviderKey;
         localState.ModelId = session.ModelId;
         localState.ReasoningEffort = session.ReasoningEffort;
+        localState.ContextWindowTokens = session.ContextWindowTokens;
         localState.AgentPromptId = NormalizeOptionalText(session.AgentPromptId);
         // Only an archive or a restore changes whether the session is archived (see CopySessionMetadata).
         if (archive && !localState.Archived)
@@ -6118,6 +6143,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public AgentReasoningEffort? ReasoningEffort { get; }
 
+        public long? ContextWindowTokens { get; init; }
+
         public string? AgentPromptId { get; }
 
         public string? PendingAgentPromptId { get; set; }
@@ -6208,6 +6235,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 LastActiveAt = LastTerminalEventAt == DateTimeOffset.MinValue ? CreatedAt : LastTerminalEventAt,
                 ModelId = PendingModel is { } pending ? pending.ModelId : Model,
                 ReasoningEffort = PendingModel is { } pendingEffort ? pendingEffort.ReasoningEffort : ReasoningEffort,
+                ContextWindowTokens = PendingModel is { } contextModel && contextModel.ModelId != Model ? null : ContextWindowTokens,
                 AgentPromptId = PendingAgentPromptId ?? AgentPromptId,
             };
 
@@ -6220,6 +6248,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ProjectRoots = ProjectRoots,
                 Model = PendingModel is { } pending ? pending.ModelId : Model,
                 ReasoningEffort = PendingModel is { } pendingEffort ? pendingEffort.ReasoningEffort : ReasoningEffort,
+                Context = new(PendingModel is { } contextModel && contextModel.ModelId != Model ? null : ContextWindowTokens),
                 AgentPromptId = PendingAgentPromptId ?? AgentPromptId,
                 Tools = Tools,
                 AdditionalSystemMessage = AdditionalSystemMessage,
@@ -6238,6 +6267,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 && string.Equals(WorkingDirectory, options.WorkingDirectory, StringComparison.Ordinal)
                 && string.Equals(Model, options.Model, StringComparison.Ordinal)
                 && ReasoningEffort == options.ReasoningEffort
+                && (options.Context is null || ContextWindowTokens == options.Context.Tokens)
                 && string.Equals(AgentPromptId, resolvedAgentPromptId, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(AdditionalSystemMessage, options.AdditionalSystemMessage, StringComparison.Ordinal)
                 && string.Equals(AdditionalDeveloperInstructions, options.AdditionalDeveloperInstructions, StringComparison.Ordinal)

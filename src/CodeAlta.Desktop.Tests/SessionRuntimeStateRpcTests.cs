@@ -12,6 +12,31 @@ public sealed class SessionRuntimeStateRpcTests
     private const string Epoch = "00000000-0000-0000-0000-000000000001";
 
     [TestMethod]
+    public void ContextChoiceWire_RejectsFractionalNegativeAndInexactCapacities()
+    {
+        Assert.IsTrue(SessionContextChoice.Valid(null));
+        Assert.IsTrue(SessionContextChoice.Valid(new(null)));
+        Assert.IsTrue(SessionContextChoice.Valid(new(1000000)));
+        Assert.IsTrue(SessionContextChoice.Valid(new(AgentModelContextSizes.MaximumTokens)));
+        foreach (var tokens in new[] { -1m, 0m, 1.5m, 9007199254740992m })
+            Assert.IsFalse(SessionContextChoice.Valid(new(tokens)), tokens.ToString());
+    }
+
+    [TestMethod]
+    public async Task ContextChoice_ProjectsTheSessionOverrideAndExplicitDefault()
+    {
+        var entry = new SessionRuntimeCurrentEntry(1, false, false, null, false, "fake", "fake", "model", null, null, null)
+        {
+            ContextWindowTokens = 1000000,
+        };
+        var state = new SessionRuntimeCurrentState(Guid.NewGuid(), "session", false, entry);
+        var service = new SessionRuntimeStateService((_, _) => Task.FromResult(state), Epoch);
+        Assert.AreEqual(1000000m, (await service.CurrentAsync(new(Epoch, "session"), default)).Entry!.ContextWindowTokens);
+        state = state with { Entry = entry with { ContextWindowTokens = null } };
+        Assert.IsNull((await service.CurrentAsync(new(Epoch, "session"), default)).Entry!.ContextWindowTokens);
+    }
+
+    [TestMethod]
     public async Task BackgroundTasksAreListedWithinTheWire_AndWhatDoesNotFitIsLeftOutOrCut()
     {
         var started = DateTimeOffset.Parse("2026-01-01T12:00:00+02:00", System.Globalization.CultureInfo.InvariantCulture);
@@ -246,7 +271,7 @@ public sealed class SessionRuntimeStateRpcTests
         {
             [typeof(SessionRuntimeScopedResponse)] = ["HostEpoch", "Observation", "ProjectId", "ProjectPath", "Scope", "SessionId", "Status"],
             [typeof(SessionRuntimeStateResponse)] = ["CoordinatorTransitionInProgress", "Entry", "HostEpoch", "RuntimeInstanceId", "SessionId", "Status"],
-            [typeof(SessionRuntimeStateEntry)] = ["Activity", "ActiveRunId", "AgentPromptId", "AttachmentGeneration", "BackgroundTasks", "IsRetiring", "IsTerminated",
+            [typeof(SessionRuntimeStateEntry)] = ["Activity", "ActiveRunId", "AgentPromptId", "AttachmentGeneration", "BackgroundTasks", "ContextWindowTokens", "IsRetiring", "IsTerminated",
                 "ModelId", "PendingAgentPromptId", "PromptSuggestion", "ProviderId", "ProviderKey", "QueueDrainInProgress", "ReasoningEffort", "RemoteControl"],
             [typeof(SessionRuntimeActivityResponse)] = ["AdmittedEvents", "OmittedEvents", "Source", "Timestamp"],
             [typeof(SessionRuntimeBackgroundTaskResponse)] = ["EndedAt", "ExitCode", "IsJob", "Kind", "StartedAt", "State", "TaskId", "ToolCallId", "Description"],

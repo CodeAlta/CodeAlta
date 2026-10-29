@@ -165,6 +165,35 @@ public sealed class AltaSessionSelectionTests
     }
 
     [TestMethod]
+    [DataRow("large", "xhigh", null)]
+    [DataRow("small", "low", 1000000L)]
+    public async Task QueuedSelection_ReopenedSessionResetsContextOnlyWhenModelChanges(string model, string effort, long? expectedContext)
+    {
+        using var temp = new TempFolder();
+        var provider = new GatedProvider();
+        string sessionId;
+        DateTimeOffset createdAt;
+        await using (var firstHost = await CreateHostAsync(temp, provider, inherit: () => false))
+        {
+            var session = await firstHost.Commands.CreateDraftSessionAsync(firstHost.CurrentProject, provider.Descriptor, "Context");
+            sessionId = session.SessionId;
+            createdAt = session.CreatedAt;
+            session.ContextWindowTokens = 1000000;
+            await firstHost.RuntimeService.PersistSessionLocalStateAsync(session);
+        }
+
+        await using var host = await CreateHostAsync(temp, provider, inherit: () => false);
+        Assert.IsNull((await host.RuntimeService.GetCurrentStateAsync(sessionId)).Entry);
+        var commands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()));
+        var queued = await commands.InvokeAsync(["session", "queue", sessionId, "--message", "next", "--model", model, "--reasoning", effort],
+            caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.Success, queued.ExitCode, queued.Transcript);
+        var saved = await host.SessionViewCatalog.JournalStore.ReadLatestStateAsync(sessionId, createdAt);
+        Assert.AreEqual(model, saved!.ModelId);
+        Assert.AreEqual(expectedContext, saved.ContextWindowTokens);
+    }
+
+    [TestMethod]
     public async Task Choices_RefuseWithoutTheOwnerOfTheSessions()
     {
         var dispatcher = new AltaCommandDispatcher(new AltaCommandRegistry(), new AltaServiceCollection());
@@ -230,9 +259,11 @@ public sealed class AltaSessionSelectionTests
                 Models =
                 [
                     new AgentModelInfo("small", DisplayName: "Small Model", DefaultReasoningEffort: AgentReasoningEffort.High,
-                        SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High]),
+                        SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High])
+                        { ContextSizes = new(200000, [200000, 1000000]) },
                     new AgentModelInfo("large", DisplayName: "Large Model", DefaultReasoningEffort: AgentReasoningEffort.Medium,
-                        SupportedReasoningEfforts: [AgentReasoningEffort.Medium, AgentReasoningEffort.XHigh]),
+                        SupportedReasoningEfforts: [AgentReasoningEffort.Medium, AgentReasoningEffort.XHigh])
+                        { ContextSizes = new(200000, [200000, 1000000]) },
                 ],
                 SelectedModelId = "small",
             });

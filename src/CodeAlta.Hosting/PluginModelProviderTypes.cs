@@ -239,6 +239,22 @@ public sealed class PluginModelProviderTypes
         }
     }
 
+    /// <summary>Reads valid requested context capacities without treating them as provider capabilities.</summary>
+    /// <param name="settings">The provider's settings.</param>
+    /// <returns>Preferences keyed by exact model identity, or an empty dictionary.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="settings"/> is null.</exception>
+    public static IReadOnlyDictionary<string, long> ReadContextPreferences(PluginProviderSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var result = new Dictionary<string, long>(StringComparer.Ordinal);
+        if (settings.Values.TryGetValue("context_preferences", out var raw) && raw is IReadOnlyDictionary<string, object?> values)
+            foreach (var (model, value) in values)
+                if (!string.IsNullOrWhiteSpace(model) && model == model.Trim() && !model.Any(char.IsControl)
+                    && value is long tokens and > 0 and <= AgentModelContextSizes.MaximumTokens)
+                    result[model] = tokens;
+        return result;
+    }
+
     private static ModelProviderDescriptor CreateDescriptor(PluginModelProviderContribution contribution, PluginProviderSettings settings)
     {
         var permissionMode = settings.PermissionMode;
@@ -248,6 +264,7 @@ public sealed class PluginModelProviderTypes
             IsEnabled = settings.IsEnabled,
             DefaultModelId = settings.DefaultModelId,
             DefaultReasoningEffort = settings.DefaultReasoningEffort,
+            ContextPreferences = ReadContextPreferences(settings),
             // A value a newer version of CodeAlta wrote is left to the type.
             ModelOrder = ModelOrdering.Resolve(settings.GetString("models_order"), settings.GetBoolean("sort_models"), contribution.ModelOrder),
             PermissionModes = contribution.PermissionModes,

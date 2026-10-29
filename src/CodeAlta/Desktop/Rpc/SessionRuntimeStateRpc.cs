@@ -101,7 +101,7 @@ internal sealed class SessionRuntimeStateService
             projected = new(entry.AttachmentGeneration.ToString(CultureInfo.InvariantCulture), entry.IsTerminated, entry.IsRetiring,
                 entry.ActiveRunId, entry.QueueDrainInProgress, entry.ProviderId, entry.ProviderKey, entry.ModelId,
                 entry.ReasoningEffort?.ToString(), entry.AgentPromptId, entry.PendingAgentPromptId)
-            { Activity = activity, BackgroundTasks = [.. entry.BackgroundTasks.Select(ProjectTask).OfType<SessionRuntimeBackgroundTaskResponse>().Take(MaximumBackgroundTasks)],
+            { Activity = activity, ContextWindowTokens = entry.ContextWindowTokens, BackgroundTasks = [.. entry.BackgroundTasks.Select(ProjectTask).OfType<SessionRuntimeBackgroundTaskResponse>().Take(MaximumBackgroundTasks)],
               RemoteControl = entry.RemoteControl.Status == CodeAlta.Agent.AgentRemoteControlStatus.Off ? null : SessionRemoteControlResponse.From(entry.RemoteControl),
               // A suggestion is sent as it is or not at all: one that is cut is not a prompt to send.
               PromptSuggestion = entry.PromptSuggestion is { Length: > 0 } suggestion && Text(suggestion) ? suggestion : null };
@@ -150,9 +150,10 @@ internal sealed class SessionRuntimeStateService
         Object(6);
         Text(state.Status); Text(state.HostEpoch); Text(state.SessionId); Text(state.RuntimeInstanceId);
         if (state.Entry is not { } entry) return bound;
-        Object(15);
+        Object(16);
         Text(entry.AttachmentGeneration); Text(entry.ActiveRunId); Text(entry.ProviderId); Text(entry.ProviderKey); Text(entry.ModelId);
         Text(entry.ReasoningEffort); Text(entry.AgentPromptId); Text(entry.PendingAgentPromptId); Text(entry.PromptSuggestion);
+        Text(entry.ContextWindowTokens?.ToString(CultureInfo.InvariantCulture));
         if (entry.Activity is { } activity)
         {
             Object(4);
@@ -194,6 +195,9 @@ internal sealed record SessionRuntimeStateEntry(string AttachmentGeneration, boo
     string? ActiveRunId, bool QueueDrainInProgress, string ProviderId, string ProviderKey, string? ModelId,
     string? ReasoningEffort, string? AgentPromptId, string? PendingAgentPromptId)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? ContextWindowTokens { get; init; }
+
     public SessionRuntimeActivityResponse? Activity { get; init; }
 
     /// <summary>What the provider does in the background outside its runs: the tasks that go on, then the last that failed or were stopped.</summary>

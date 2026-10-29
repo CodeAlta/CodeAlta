@@ -22,6 +22,100 @@ namespace CodeAlta.Tests;
 public sealed class OpenAICodexSubscriptionPipelineTests
 {
     [TestMethod]
+    [DataRow("""{"context_window":272000,"max_context_window":872000}""", 272000L, "272000,872000")]
+    [DataRow("""{"context_window":272000,"max_context_window":272000}""", 272000L, "272000")]
+    [DataRow("""{"max_context_window":872000}""", 872000L, "872000")]
+    [DataRow("""{"context_window":272000}""", 272000L, "")]
+    [DataRow("""{"context_window":272000,"max_context_window":200000}""", 272000L, "")]
+    [DataRow("""{"context_window":272000,"max_context_window":"872000"}""", 272000L, "")]
+    [DataRow("""{"context_window":272000,"max_context_window":872000.5}""", 272000L, "")]
+    [DataRow("""{"context_window":272000,"max_context_window":-1}""", 272000L, "")]
+    [DataRow("""{"context_window":272000,"max_context_window":9223372036854775808}""", 272000L, "")]
+    [DataRow("""{"context_window":272000,"max_context_window":9007199254740992}""", 272000L, "")]
+    [DataRow("""{"context_window":272000,"max_context_window":872000,"max_context_window":972000}""", 272000L, "")]
+    [DataRow("""{"context_window":272000,"max_context_window":872000,"effective_context_window_percent":101}""", 272000L, "")]
+    [DataRow("""{"context_window":272000,"max_context_window":872000,"auto_compact_token_limit":"200000"}""", 272000L, "")]
+    [DataRow("""{"context_window":272000,"contextWindow":400000,"max_context_window":872000}""", 272000L, "")]
+    [DataRow("""{"context_window":"272000","max_context_window":872000}""", 0L, "")]
+    [DataRow("""{"context_window":0,"max_context_window":872000}""", 0L, "")]
+    [DataRow("""{"context_window":-1,"max_context_window":872000}""", 0L, "")]
+    [DataRow("""{"unknown_context_size":872000}""", 0L, "")]
+    public async Task ContextDiscovery_OffersOnlyVerifiedExactChoices(string fields, long defaultTokens, string expectedChoices)
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path);
+        var content = """{"models":[{"slug":"context-test","visibility":"list",""" + fields[1..] + "]}";
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex", StateRootPath = temp.Path,
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content),
+            })),
+            CodexSubscription = new() { ModelDiscovery = "codex_endpoint" },
+        }, CreateProviderDescriptor(), CancellationToken.None);
+        var model = models.Single();
+        Assert.AreEqual(defaultTokens == 0 ? (long?)null : defaultTokens, model.ContextSizes!.DefaultTokens);
+        Assert.AreEqual(expectedChoices, string.Join(',', model.ContextSizes.TokenCounts));
+        Assert.IsTrue(model.ContextSizes.Supports(null));
+        Assert.IsFalse(model.ContextSizes.Supports(500_000));
+    }
+
+    [TestMethod]
+    public async Task ContextDiscovery_DistinctDefaultMaximumKeepHeadroomAndHardInputCeilings()
+    {
+        // Bounded fixture for the official ModelInfo contract, not a live request to a paid model.
+        // openai/codex: protocol/src/openai_models.rs (usable_context_window/auto_compact_token_limit),
+        // models-manager/src/model_info.rs (with_config_overrides), core/src/client.rs and
+        // codex-api/src/common.rs (Responses request: no context-window parameter).
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path);
+        await using var catalog = new ModelsDevCatalogService(OpenAIKnownModelLimitsTests.CreateDatabase(), new ModelsDevCatalogServiceOptions());
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex", StateRootPath = temp.Path, ModelCatalog = catalog,
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                    {"models":[{"slug":"gpt-6-astra","visibility":"list","context_window":272000,
+                    "max_context_window":872000,"effective_context_window_percent":95,"auto_compact_token_limit":800000}]}
+                    """),
+            })),
+            CodexSubscription = new() { ModelDiscovery = "codex_endpoint" },
+        }, CreateProviderDescriptor(), CancellationToken.None);
+        var model = models.Single();
+        CollectionAssert.AreEqual(new long[] { 272_000, 872_000 }, model.ContextSizes!.TokenCounts.ToArray());
+        var selected = AgentModelContextResolver.Resolve(model, model.Id, model.Provider!, 872_000, null);
+        var budget = AgentTokenBudgetResolver.Resolve(selected, AgentCompactionSettings.Default);
+        Assert.AreEqual(872_000L, budget.TotalContextEnvelope);
+        Assert.AreEqual(828_400L, budget.InputContextLimit);
+        Assert.AreEqual(128_000L, budget.MaxOutputTokens);
+        Assert.AreEqual(922_000L, model.Capabilities!["inputTokenLimit"]);
+        Assert.AreEqual(784_800L, AgentTokenBudgetResolver.ResolveCompactionThreshold(budget.InputContextLimit!.Value, selected, AgentCompactionSettings.Default));
+        Assert.AreEqual(272_000L, model.Capabilities["contextWindow"]);
+    }
+
+    [TestMethod]
+    public async Task ContextDiscovery_ConflictingDuplicateModelsAreDefaultOnly()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path);
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex", StateRootPath = temp.Path,
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                    {"models":[{"slug":"context-test","context_window":272000,"max_context_window":872000},
+                    {"slug":"context-test","context_window":272000,"max_context_window":400000}]}
+                    """),
+            })),
+            CodexSubscription = new() { ModelDiscovery = "codex_endpoint" },
+        }, CreateProviderDescriptor(), CancellationToken.None);
+        Assert.IsEmpty(models.Single().ContextSizes!.TokenCounts);
+    }
+
+    [TestMethod]
     public void RequestContext_OfAForkedSession_NamesItsSourceForTheCache_AndItselfEverywhereElse()
     {
         var fork = new CodexSubscriptionRequestContext(
@@ -1613,7 +1707,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
 
     // The endpoint gives the window of Codex's catalog; models.dev, the 922,000 input tokens a GPT-6 model accepts.
     [TestMethod]
-    public async Task ModelDiscovery_AGpt6ModelKeepsTo272000InputTokens_AndCompactsAt90Percent()
+    public async Task ModelDiscovery_AGpt6ModelReservesHeadroom_AndCompactsAt90PercentOfCapacity()
     {
         using var temp = TempDirectory.Create();
         await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
@@ -1637,15 +1731,14 @@ public sealed class OpenAICodexSubscriptionPipelineTests
 
         Assert.AreEqual("openai", astra.Capabilities?["modelsDevProviderId"]);
         var budget = AgentTokenBudgetResolver.Resolve(astra, AgentCompactionSettings.Default);
-        Assert.AreEqual(272_000L, budget.InputContextLimit);
+        Assert.AreEqual(258_400L, budget.InputContextLimit);
         Assert.AreEqual(272_000L, budget.TotalContextEnvelope);
-        Assert.AreEqual(244_800L, AgentTokenBudgetResolver.ResolveCompactionThreshold(272_000, astra, AgentCompactionSettings.Default));
+        Assert.AreEqual(244_800L, AgentTokenBudgetResolver.ResolveCompactionThreshold(budget.InputContextLimit!.Value, astra, AgentCompactionSettings.Default));
     }
 
-    // The context_window of Codex's catalog is the input Codex sends at most (it compacts at 90% of it), for every model
-    // of the endpoint: it wins over the 922,000 input tokens models.dev gives GPT-5.6 and GPT-5.5.
+    // Codex reserves 5% headroom and compacts at 90% of capacity; models.dev's input limit is independent.
     [TestMethod]
-    public async Task ModelDiscovery_TheContextWindowOfTheEndpointIsTheInputLimit_AndCompactsAt90Percent()
+    public async Task ModelDiscovery_TheContextWindowOfTheEndpointReservesHeadroom_AndCompactsAt90Percent()
     {
         using var temp = TempDirectory.Create();
         await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
@@ -1676,7 +1769,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         {
             Assert.AreEqual("openai", model.Capabilities?["modelsDevProviderId"], model.Id);
             var budget = AgentTokenBudgetResolver.Resolve(model, AgentCompactionSettings.Default);
-            Assert.AreEqual(272_000L, budget.InputContextLimit, model.Id);
+            Assert.AreEqual(258_400L, budget.InputContextLimit, model.Id);
             Assert.AreEqual(128_000L, budget.MaxOutputTokens, model.Id);
             Assert.AreEqual(244_800L, AgentTokenBudgetResolver.ResolveCompactionThreshold(budget.InputContextLimit!.Value, model, AgentCompactionSettings.Default), model.Id);
         }

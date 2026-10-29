@@ -109,6 +109,85 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task DirectResume_InheritsContextOnlyForTheSameProviderAndModel(bool changeProvider) => Fixture.RunAsync(async f =>
+    {
+        var metadata = await f.Observe(f.Host.SessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(f.SessionId));
+        Assert.IsNotNull(metadata);
+        var session = new SessionViewDescriptor
+        {
+            SessionId = f.SessionId, Kind = SessionViewKind.ProjectSession,
+            ProjectRef = f.Host.CurrentProject.Id, WorkingDirectory = f.ProjectRoot,
+            ProviderId = f.Provider.Descriptor.ProviderId.Value, ProviderKey = f.Provider.Descriptor.ProviderId.Value,
+            ModelId = "fixture-model", CreatedAt = metadata.CreatedAt, ContextWindowTokens = 1000000,
+        };
+        await f.Observe(f.Host.RuntimeService.PersistSessionLocalStateAsync(session));
+        var target = changeProvider ? new ControlledProvider("other-fixture") : f.Provider;
+        target.ReleaseAll();
+        f.Host.ModelProviderRegistry.RegisterOrReplace(target.Descriptor with
+        {
+            ContextPreferences = new Dictionary<string, long> { ["fixture-model"] = 200000 },
+        }, target.CreateRuntime);
+        await f.Observe(f.Host.RuntimeService.EnsureCoordinatorSessionAsync(session, new SessionExecutionOptions
+        {
+            ProviderId = target.Descriptor.ProviderId, ProviderKey = target.Descriptor.ProviderId.Value,
+            Model = "fixture-model", WorkingDirectory = f.ProjectRoot, ProjectRoots = [f.ProjectRoot],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
+        }));
+        Assert.IsNotNull(target.Options);
+        Assert.AreEqual(changeProvider ? null : (long?)1000000, target.Options.ContextWindowTokens);
+        Assert.AreEqual(200000L, target.Options.PreferredContextWindowTokens);
+    });
+
+    [TestMethod]
+    public Task ContextSelection_IsSessionLocal_Persists_AndDefaultClearsIt() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        var configured = f.Provider.Descriptor with
+        {
+            ContextPreferences = new Dictionary<string, long> { ["fixture-model"] = 200000 },
+        };
+        f.Host.ModelProviderRegistry.RegisterOrReplace(configured, f.Provider.CreateRuntime);
+        var choices = (await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId)))!;
+        Assert.AreEqual(200000L, choices.Models.Single(m => m.Id == "fixture-model").DefaultContextTokens);
+        var selection = choices.Current with { Context = new(1000000) };
+        var first = f.AdmitSend(new OwnedTextSendRequest("context-send", f.SessionId, "input") { Selection = selection });
+        Assert.IsNotNull(first.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, first.Receipt, "context send");
+        Assert.AreEqual(1000000L, f.Provider.Options!.ContextWindowTokens);
+        Assert.AreEqual(200000L, f.Provider.Options.PreferredContextWindowTokens);
+        var current = (await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId)))!;
+        Assert.AreEqual(1000000L, current.Current.Context?.Tokens);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(first.Receipt.Completion)).Outcome);
+        // The controlled provider returns its run id before it emits Idle, like a remote executor.
+        // Changing context must wait for that idle boundary, not only command-receipt completion.
+        const string idleMarker = "context-first-turn-idle";
+        f.Provider.RecordIdle(idleMarker);
+        using (var timeout = new CancellationTokenSource(TestDeadlines.Hang))
+        {
+            await foreach (var value in f.Host.RuntimeService.StreamEventsAsync(timeout.Token))
+                if (value is SessionAgentEvent { Event: AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle } update }
+                    && update.Message == idleMarker) break;
+        }
+        Assert.IsNull((await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId))).Entry!.ActiveRunId);
+        f.Provider.ReleaseAbort.TrySetResult(); // Retirement joins the old attachment's controlled abort.
+        var created = await f.Observe(f.Host.Commands.CreateDraftSessionAsync(null, configured, "Other session"));
+        Assert.IsNull(created.ContextWindowTokens);
+        var second = f.AdmitSend(new OwnedTextSendRequest("default-context-send", f.SessionId, "again")
+        {
+            Selection = current.Current with { Context = new(null) },
+        });
+        Assert.IsNotNull(second.Receipt);
+        await f.ObserveReadiness(f.Provider.SecondSendStarted.Task, second.Receipt, "default context send");
+        Assert.IsNull(f.Provider.Options!.ContextWindowTokens);
+        f.Provider.ReleaseSecondSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(second.Receipt.Completion)).Outcome);
+        Assert.IsNull((await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId)))!.Current.Context?.Tokens);
+    });
+
+    [TestMethod]
     public Task SelectionChoices_ListEveryModelOfALargeInventoryAndASendRunsWithALateOne() => Fixture.RunAsync(async f =>
     {
         // Azure OpenAI lists 475 models in one page: the ones after the 128th were once left out, and refused at Send.
@@ -2716,7 +2795,7 @@ public sealed class OwnedSessionCommandServiceTests
             ProbeStarted.TrySetResult();
             if (ProbeDependency is { } dependency) await dependency.ConfigureAwait(false);
             return new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId,
-                Models = [new("fixture-model"), new("selected-model", SupportedReasoningEfforts: [AgentReasoningEffort.High]),
+                Models = [new("fixture-model") { ContextSizes = new(200000, [200000, 1000000]) }, new("selected-model", SupportedReasoningEfforts: [AgentReasoningEffort.High]),
                     new("image-model", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = true }),
                     new("text-model", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = false,
                         [AgentReasoningEffortCapability.CompleteListKey] = true }),

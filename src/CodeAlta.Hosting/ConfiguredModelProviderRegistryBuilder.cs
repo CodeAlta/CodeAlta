@@ -834,6 +834,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         };
 
         descriptor = ClaudeCodeModelProviderRuntime.CreateDescriptor(options);
+        descriptor = descriptor with { ContextPreferences = definition.ContextPreferences is { } contexts ? new Dictionary<string, long>(contexts, StringComparer.Ordinal) : null };
         createRuntime = () => new ClaudeCodeModelProviderRuntime(options);
         LogInfo(
             $"Registered model provider key={definition.ProviderKey} type={definition.ProviderType} displayName={options.DisplayName} command={options.Command ?? "claude"} configDir={options.ConfigDirectory ?? "(default)"}");
@@ -1107,6 +1108,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             DefaultModelId = NormalizeText(definition.SingleModelId) ?? NormalizeText(definition.Model),
             ModelOrder = ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider),
             DefaultReasoningEffort = ParseReasoningEffort(definition.ReasoningEffort),
+            ContextPreferences = definition.ContextPreferences is { } contexts ? new Dictionary<string, long>(contexts, StringComparer.Ordinal) : null,
         };
     }
 

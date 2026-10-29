@@ -208,7 +208,10 @@ public sealed partial class CodeAltaConfigStore
         var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, value) in table)
         {
-            values[key] = ToValue(value);
+            // Model ids are case-sensitive even though provider setting names are not.
+            values[key] = key.Equals("context_preferences", StringComparison.OrdinalIgnoreCase) && value is TomlTable contexts
+                ? contexts.ToDictionary(static entry => entry.Key, static entry => entry.Value, StringComparer.Ordinal)
+                : ToValue(value);
         }
 
         return values;

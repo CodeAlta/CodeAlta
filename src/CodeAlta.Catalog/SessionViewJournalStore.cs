@@ -693,6 +693,7 @@ public sealed partial class SessionViewJournalStore
             ModelId = state.ModelId,
             ReasoningEffort = state.ReasoningEffort,
             PermissionMode = state.PermissionMode,
+            ContextWindowTokens = state.ContextWindowTokens,
             Sandbox = state.Sandbox,
             TitleMode = state.TitleMode,
             ReviewBeforeCommit = state.ReviewBeforeCommit,

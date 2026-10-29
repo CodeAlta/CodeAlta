@@ -24,6 +24,7 @@ const removed = () => (window as Window & { fixtureRemoved?: RemovedFixture }).f
  */
 type OptionsFixture = { context: string; fast: string; calls: string[] };
 const modelOptions = () => (window as Window & { fixtureModelOptions?: OptionsFixture }).fixtureModelOptions;
+const context = () => (window as Window & { fixtureContext?: { tokens: number | null } }).fixtureContext;
 const optionsOf = (fixture: OptionsFixture) => [
   { id: "context", name: "Context", value: fixture.context, values: [{ value: "300k", name: "300K" }, { value: "1m", name: "1M" }] },
   { id: "fast", name: "Fast", value: fixture.fast, values: [{ value: "false", name: "Off" }, { value: "true", name: "On" }], toggle: true }];
@@ -50,12 +51,14 @@ export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "u
     : gone ? { status: "ok", current: { providerKey: "fixture-removed", agentPromptId: "default", modelId: "removed-model", reasoningEffort: "medium" },
       prompts: [{ id: "default", name: "Default agent" }], models: [], providerUnavailable: true, replacementProvider: removed()!.replacement }
     : { status: "ok", current: { providerKey: "fixture-provider", agentPromptId: "default", modelId: "fixture-model", reasoningEffort: modes?.effort ?? "medium",
+        ...(context() ? { context: { tokens: context()!.tokens } } : {}),
         ...(modes ? { permissionMode: modes.mode } : {}) },
       prompts: [{ id: "default", name: "Default agent" }, ...(modes ? [{ id: "plan", name: "Plan agent" }] : [])],
       // A model whose provider says it has no reasoning effort (Haiku of Claude Code), when the test asks for one.
       models: [(window as Window & { fixtureNoReasoning?: boolean }).fixtureNoReasoning
         ? { id: "fixture-model", name: "Fixture model", efforts: [], effortsComplete: true, imageInput: null, startEffort: null }
         : { id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"], imageInput: null, startEffort: "high",
+          ...(context() ? { contextSizes: [272000, 1050000], defaultContextTokens: 272000 } : {}),
           ...(modelOptions() ? { options: optionsOf(modelOptions()!) } : {}) }],
       ...(modes ? { permissionModes: [{ id: "default" }, { id: "acceptEdits" }, { id: "bypassPermissions" }], defaultPermissionMode: "bypassPermissions" } : {}),
       // The provider of the session was taken out of its space.

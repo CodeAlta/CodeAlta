@@ -261,6 +261,10 @@ public enum SessionViewDraftScope
 /// </summary>
 public sealed class SessionViewLocalState
 {
+    /// <summary>Gets or sets the session's requested total context capacity, or null for Default.</summary>
+    [JsonPropertyName("context_window_tokens")]
+    public long? ContextWindowTokens { get; set; }
+
     /// <summary>
     /// Gets or sets the provider key selected for this session.
     /// </summary>

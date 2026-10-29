@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigProvider } from "#neoastra";
-import { modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
+import { modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerContextPreference, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
 
 const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
@@ -9,13 +9,25 @@ const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled
   defaults: { displayName: "local", model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null,
   permissionMode: null, configDir: null, command: null, environment: null, modelsOrder: null };
 
+test("context preferences preserve offline and unrelated models, clear exactly and participate in dirty state", () => {
+  const saved = { ...local, contextPreferences: { "model-a": 1050000, "Model-A": 272000, "offline": 999999 } };
+  const form = providerForm(saved, null, types);
+  assert.equal(providerFormDirty(form, providerForm(saved, null, types)), false);
+  const cleared = { ...form, ...providerContextPreference(form, "model-a", null) };
+  assert.equal(providerFormDirty(cleared, form), true);
+  assert.deepEqual(providerEdit(cleared).contextPreferences, { "Model-A": 272000, "offline": 999999 });
+  assert.deepEqual(providerEdit({ ...form, model: "another", displayName: "renamed" }).contextPreferences, saved.contextPreferences);
+  assert.deepEqual(form.contextPreferences, saved.contextPreferences, "editing never mutates the baseline");
+  assert.deepEqual(providerEdit({ ...form, contextPreferences: {} }).contextPreferences, {}, "an empty map explicitly clears");
+});
+
 test("a form starts from the written values, never from the stored secret", () => {
   const form = providerForm(local, "local", types);
   assert.deepEqual(form, { key: "local", type: "openai-chat", enabled: true, displayName: "Local", model: "model-a", reasoningEffort: "",
-    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", plugin: {} });
+    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", contextPreferences: {}, plugin: {} });
   assert.equal(providerForm(local, "other", types).makeDefault, false);
   assert.deepEqual(providerForm(null, "local", types), { key: "", type: "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "",
-    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", plugin: {} });
+    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", contextPreferences: {}, plugin: {} });
   assert.equal(providerFormDirty(form, form), false);
   assert.equal(providerFormDirty({ ...form, model: "model-b" }, form), true);
 });
@@ -39,7 +51,7 @@ test("the wire edit sends blank fields as null and keeps an untouched secret", (
   const form = providerForm(local, "local", types);
   assert.deepEqual(providerEdit({ ...form, key: " Local ", model: "  " }), { key: "local", type: "openai-chat", enabled: true, displayName: "Local",
     model: null, reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, apiKey: null, clearApiKey: false, icon: null, color: null, anthropicApiKey: null,
-    permissionMode: null, configDir: null, environment: null, modelsOrder: null });
+    permissionMode: null, configDir: null, environment: null, modelsOrder: null, contextPreferences: {} });
   assert.equal(providerEdit({ ...form, apiKey: "new-secret" }).apiKey, "new-secret");
   const cleared = providerEdit({ ...form, apiKey: "ignored", clearApiKey: true });
   assert.equal(cleared.apiKey, null);

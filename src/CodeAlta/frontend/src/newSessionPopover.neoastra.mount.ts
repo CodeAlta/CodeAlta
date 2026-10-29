@@ -29,7 +29,8 @@ const prepared = (status: string, hostEpoch: string, baseBranch: string | null):
   projectId: null, branch: status === "ready" ? "alta/quiet-heron-k2m4" : null, reason: null, message: null, warning: null,
   steps: status === "ready" ? [] : [{ kind: "checkout", state: "running", detail: "Updating files:  45% (450/1000)", elapsedMilliseconds: 1200, message: null }] });
 // A model with several efforts, so that the reasoning has a slider, and one without any.
-const models = () => [{ id: "new", name: "New model", efforts: ["Low", "Medium", "High"], defaultEffort: "Medium" },
+const models = () => [{ id: "new", name: "New model", efforts: ["Low", "Medium", "High"], defaultEffort: "Medium",
+  contextSizes: [272000, 1050000], defaultContextTokens: 272000 },
   { id: "old", name: "Old model", efforts: [] as string[], defaultEffort: null }].filter(model => !fixture.missingModel || model.id !== "new");
 // The alternate provider has the permission modes of Claude Code, configured with one of them; the other one has none.
 const permissionModes = (providerId: string | null) => providerId === "alternate" ? ["default", "acceptEdits", "auto", "dontAsk", "bypassPermissions"].map(id => ({ id })) : [];
@@ -103,7 +104,8 @@ export const sessionOperations = { ...baseOperations, choices: async (request: S
   return { status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
     current: { providerKey, agentPromptId: "default", modelId: "old", reasoningEffort: null, permissionMode: creation?.permissionMode ?? null },
     prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }],
-    models: models().map(model => ({ id: model.id, name: model.name, efforts: model.efforts, startEffort: model.defaultEffort, imageInput: fixture.imageInput })),
+    models: models().map(model => ({ id: model.id, name: model.name, efforts: model.efforts, startEffort: model.defaultEffort, imageInput: fixture.imageInput,
+      contextSizes: model.contextSizes, defaultContextTokens: model.defaultContextTokens })),
     permissionModes: permissionModes(providerKey), defaultPermissionMode: defaultPermissionMode(providerKey) };
 } };
 export const projectGit = { status: async () => ({ status: "ok", projectId: "project", branch: "main", detached: false, changes: { insertions: 0, deletions: 0, files: 0 } }) };

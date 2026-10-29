@@ -88,6 +88,12 @@ public class AgentSessionCreateOptions
     /// </summary>
     public string? Model { get; init; }
 
+    /// <summary>Gets the session's requested total context capacity; null follows the matching preference or default.</summary>
+    public long? ContextWindowTokens { get; init; }
+
+    /// <summary>Gets the preference for this exact provider/model, revalidated against its discovered choices.</summary>
+    public long? PreferredContextWindowTokens { get; init; }
+
     /// <summary>
     /// Gets or initializes the working directory for the session.
     /// </summary>

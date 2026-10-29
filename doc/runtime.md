@@ -253,6 +253,10 @@ needs no new attachment.
 Compaction (`AgentSession`, `CodeAlta.Agent.Runtime.Compaction`) summarizes the history with the session's own model
 through the same turn executor, and records a `local.compactionCheckpoint`; a resume replays from the last checkpoint.
 
+- **Budget ownership.** Selectable capacities are verified provider/model capabilities, not configuration overrides.
+  An attachment resolves its session choice, matching provider preference and advertised default into a private model
+  snapshot. Requests, compaction and usage share that budget without changing catalog metadata. A choice changes only
+  through idle reattachment; retained history is compacted by the normal path when the next request needs it.
 - **Triggers.** Manual (`CompactAsync`, `alta session compact`), threshold (projected context reaches `ratio` of the
   input limit, before a turn and after idle), and overflow recovery after a context-limit failure.
 - **Unknown limits.** A model that reports no input limit is compacted against `DefaultAssumedInputContextLimit`

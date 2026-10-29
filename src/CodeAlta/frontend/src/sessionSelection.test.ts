@@ -11,6 +11,20 @@ const choices: SessionChoicesResponse = { status: "ok", epoch: "epoch", sessionI
     { id: "two", name: "Two", efforts: ["Low", "Medium"], imageInput: null, startEffort: "Medium" },
     { id: "plain", name: "Plain", efforts: [], imageInput: null, startEffort: null }] };
 
+test("context is session-scoped, exact, clearable offline and reset on a model change", () => {
+  const available = { ...choices, models: choices.models.map(model => ({ ...model, contextSizes: [272000, 1050000] })) };
+  const selected = changeSelection(available, current, "context", "1050000")!;
+  assert.deepEqual(selected.context, { tokens: 1050000 });
+  assert.equal(changeSelection(available, current, "context", "500000"), null);
+  assert.equal(validSelection(choices, selected), false);
+  assert.deepEqual(changeSelection(choices, selected, "context", "")?.context, { tokens: null });
+  assert.deepEqual(changeSelection(available, selected, "modelId", "two")?.context, { tokens: null });
+  const send = captureSubmission("epoch", "session", "hello", "key", selected)!;
+  selected.context!.tokens = 272000;
+  assert.equal(send.selection?.context?.tokens, 1050000);
+  assert.equal(Object.isFrozen(send.selection?.context), true);
+});
+
 test("another model starts with its own effort; prompt and supported effort changes are functional", () => {
   const changed = changeSelection(choices, current, "modelId", "two")!;
   assert.equal(changed.modelId, "two");

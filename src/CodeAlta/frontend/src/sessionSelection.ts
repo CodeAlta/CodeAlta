@@ -1,5 +1,6 @@
 import type { SessionChoicesResponse, SessionSelection } from "#neoastra";
 import { offeredPermissionModes, providerPermissionMode } from "./permissionModes";
+import { validContext } from "./contextSizes";
 
 /**
  * A selection names a model its provider lists and one of the efforts of that model. There is no "default" one:
@@ -11,8 +12,9 @@ import { offeredPermissionModes, providerPermissionMode } from "./permissionMode
 export function validSelection(choices: SessionChoicesResponse, value: SessionSelection): boolean {
   if (value.providerKey !== choices.current?.providerKey || !choices.prompts.some(p => p.id === value.agentPromptId)) return false;
   if (!validPermissionMode(choices, value.permissionMode)) return false;
+  const model = choices.models.find(model => model.id === value.modelId);
+  if (!validContext(value.context, model)) return false;
   if (value.modelId === null) return value.reasoningEffort === null && choices.models.length === 0;
-  const model = choices.models.find(m => m.id === value.modelId);
   return !!model && (model.efforts.length === 0 || value.reasoningEffort !== null && model.efforts.includes(value.reasoningEffort));
 }
 
@@ -40,10 +42,18 @@ export function restoreSelection(load: () => string | null, choices: SessionChoi
 }
 
 export function changeSelection(choices: SessionChoicesResponse, current: SessionSelection,
-  field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", value: string): SessionSelection | null {
+  field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode" | "context", value: string): SessionSelection | null {
+  if (field === "context") {
+    const next = { ...current, context: { tokens: value === "" ? null : Number(value) } };
+    // Default can clear a retained override even while its model is unavailable. Send still validates the model.
+    return value === "" || validSelection(choices, next) ? next : null;
+  }
   const next = { ...current, [field]: value || null };
   // Another model starts with its own effort. It keeps the permission mode: the mode belongs to the session.
-  if (field === "modelId") next.reasoningEffort = choices.models.find(model => model.id === next.modelId)?.startEffort ?? null;
+  if (field === "modelId") {
+    next.reasoningEffort = choices.models.find(model => model.id === next.modelId)?.startEffort ?? null;
+    if (next.modelId !== current.modelId && current.context != null) next.context = { tokens: null };
+  }
   // A saved mode the provider no longer offers does not hold back another change: the session keeps it.
   if (field !== "permissionMode" && !validPermissionMode(choices, next.permissionMode)) next.permissionMode = null;
   // The mode the session already has is no change; going back to the provider's from another one is named. The mode

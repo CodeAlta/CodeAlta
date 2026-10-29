@@ -5,7 +5,8 @@ import { edge, withCanvas } from "./statistics/browserHarness";
 test("provider default-model picker lists, searches and selects without saving and rejects obsolete reads", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#provider-model')`, "provider form");
-    assert.equal(await page.evaluate(`modelsFixture.calls.length`), 0, "no provider is queried before opening its picker");
+    await page.until(`modelsFixture.calls.length > 0`, "context metadata for the current provider");
+    assert.equal(await page.evaluate(`modelsFixture.saved.length`), 0, "discovery never saves");
     await page.click('[aria-label="Choose a model"]');
     await page.until(`document.querySelector('[data-model-id="first-fast"]')`, "available provider models");
     await page.click('[aria-label="Search models"]');
@@ -43,6 +44,65 @@ test("provider default-model picker lists, searches and selects without saving a
     await page.clickText('.provider-settings-footer button', 'Save and apply');
     await page.until(`modelsFixture.saved.length === 1`, "explicit save");
     assert.equal(await page.evaluate(`modelsFixture.saved[0].provider.model`), 'second-fast');
+  }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts", width: 1600, height: 1000, ratio: 1.5 });
+});
+
+test("provider context reuses inventory across model edits, preserves offline choices, and fences obsolete reads", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const choose = (selector: string, value: string) => page.evaluate(`(() => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      Object.getOwnPropertyDescriptor(${selector === "#provider-context" ? "HTMLSelectElement" : "HTMLInputElement"}.prototype, 'value').set.call(element, ${JSON.stringify(value)});
+      element.dispatchEvent(new Event(${selector === "#provider-context" ? "'change'" : "'input'"}, { bubbles: true }));
+    })()`);
+    await page.until(`document.querySelector('#provider-context')`, "context selector");
+    await choose("#provider-model", "first-reasoning");
+    await page.until(`document.querySelector('#provider-context option[value="1050000"]')`, "exact expanded endpoint");
+    assert.deepEqual(await page.evaluate(`[...document.querySelector('#provider-context').options].map(option => option.value)`), ["", "272000", "1050000"]);
+    await page.click('#provider-context');
+    await page.key('End', 35);
+    await page.key('Enter', 13);
+    await page.until(`document.querySelector('#provider-context').value === '1050000'`, "keyboard-selected context");
+    assert.equal(await page.evaluate(`modelsFixture.saved.length`), 0);
+    const reads = await page.evaluate(`modelsFixture.calls.length`);
+    await choose("#provider-model", "first-fast");
+    await page.until(`document.querySelector('#provider-context option[value="128000"]')`, "other model's endpoints");
+    assert.equal(await page.evaluate(`document.querySelector('#provider-context').value`), "", "new model starts at Default");
+    await choose("#provider-model", "first-reasoning-custom");
+    await page.until(`document.querySelector('#provider-context').options.length === 1`, "unknown model offers only Default");
+    await choose("#provider-model", "first-reasoning");
+    await page.until(`document.querySelector('#provider-context').value === '1050000'`, "per-model preference restored");
+    assert.equal(await page.evaluate(`modelsFixture.calls.length`), reads, "model edits reuse the provider inventory");
+    // An unrelated form edit and a failed discovery must preserve the exact saved choice as unverified.
+    await page.evaluate(`modelsFixture.status = 'unavailable'`);
+    await choose("#provider-url", "http://localhost/changed");
+    await page.until(`document.querySelector('[aria-label="Choose a model"]').disabled`, "unsaved connection invalidates inventory");
+    await choose("#provider-url", "http://localhost/v1");
+    await page.until(`modelsFixture.calls.length > ${reads} && !document.querySelector('#provider-context-notice').textContent.includes('Loading')`, "failed refreshed discovery");
+    await page.until(`document.querySelector('#provider-context option:checked')?.textContent.includes('Unverified')`, "offline preference retained");
+    await page.clickText('.provider-settings-footer button', 'Save and apply');
+    await page.until(`modelsFixture.saved.length === 1`, "explicit save");
+    assert.deepEqual(await page.evaluate(`modelsFixture.saved[0].provider.contextPreferences`), { "first-reasoning": 1050000 });
+    // A pending provider inventory resolves against the latest model, not the one selected when it started.
+    await page.evaluate(`modelsFixture.status = 'ok'; modelsFixture.hold = true`);
+    await choose("#provider-url", "http://localhost/changed");
+    await choose("#provider-model", "first-reasoning");
+    await choose("#provider-url", "http://localhost/v1");
+    await page.until(`modelsFixture.pending.length > 0`, "held context read");
+    await choose("#provider-model", "first-fast");
+    await page.evaluate(`modelsFixture.hold = false; modelsFixture.pending.splice(0).forEach(resolve => resolve())`);
+    await page.until(`document.querySelector('#provider-context option[value="128000"]')`, "current model response");
+    assert.equal(await page.evaluate(`!!document.querySelector('#provider-context option[value="1050000"]')`), false);
+    // A late reply for the old provider cannot replace the new provider's inventory.
+    await page.evaluate(`modelsFixture.hold = true`);
+    await choose("#provider-url", "http://localhost/changed");
+    await choose("#provider-url", "http://localhost/v1");
+    await page.until(`modelsFixture.pending.length > 0`, "held obsolete provider read");
+    await page.evaluate(`modelsFixture.hold = false`);
+    await page.click('[data-provider-key="second"]');
+    await page.until(`document.querySelector('#provider-context option[value="128000"]')`, "new provider's default model");
+    await page.evaluate(`modelsFixture.pending.splice(0).forEach(resolve => resolve())`);
+    assert.equal(await page.evaluate(`!!document.querySelector('#provider-context option[value="1050000"]')`), false);
+    assert.equal(await page.evaluate(`document.querySelector('#provider-context').value`), "");
   }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts", width: 1600, height: 1000, ratio: 1.5 });
 });
 

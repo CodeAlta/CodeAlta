@@ -78,6 +78,8 @@ function validSend(request: SessionSendRequest, checkAttachments = true): boolea
     && (request.selection == null || identity(request.selection.providerKey, 256) && identity(request.selection.agentPromptId, 256)
       && (request.selection.modelId === null || identity(request.selection.modelId, 256))
       && (request.selection.reasoningEffort === null || identity(request.selection.reasoningEffort, 32))
+      && (request.selection.context == null || request.selection.context.tokens === null
+        || Number.isSafeInteger(request.selection.context.tokens) && request.selection.context.tokens > 0)
       && (request.selection.permissionMode == null || identity(request.selection.permissionMode, 256)));
 }
 /** What the composer says of a Send or a steering prompt a plugin answered itself, so that it never looks sent: a message and its parameters. */
@@ -126,10 +128,11 @@ function freezeReferences(value: SessionReferenceScope | null): Readonly<Session
   return value == null ? null : Object.freeze({ projectId: value.projectId, projectPath: value.projectPath });
 }
 
-function freezeSelection(value: SessionSelection | null): Readonly<SessionSelection> | null {
+export function freezeSelection(value: SessionSelection | null): Readonly<SessionSelection> | null {
   // A selection without a mode keeps the session's: the field is left out, as the host leaves it out.
   return value == null ? null : Object.freeze({ providerKey: value.providerKey, agentPromptId: value.agentPromptId,
-    modelId: value.modelId, reasoningEffort: value.reasoningEffort, ...(value.permissionMode != null ? { permissionMode: value.permissionMode } : {}) });
+    modelId: value.modelId, reasoningEffort: value.reasoningEffort, ...(value.permissionMode != null ? { permissionMode: value.permissionMode } : {}),
+    ...(value.context != null ? { context: Object.freeze({ tokens: value.context.tokens }) } : {}) });
 }
 
 // Match the existing wire validation. Legacy outcome/code/run nullability is deliberately independent

@@ -51,6 +51,7 @@ internal static class AgentModelMetadataEnricher
         var displayName = model.DisplayName;
         var description = model.Description;
         var efforts = model.SupportedReasoningEfforts;
+        var contextSizes = model.ContextSizes;
         var capabilities = model.Capabilities is null
             ? null
             : new Dictionary<string, object?>(model.Capabilities, StringComparer.Ordinal);
@@ -78,7 +79,8 @@ internal static class AgentModelMetadataEnricher
         }
 
         // What the provider knows better than models.dev, under what the user set.
-        if (AgentModelKnownLimit.Find(knownLimits, model.Id) is { } knownLimit)
+        // A verified endpoint default supersedes the fallback default, not an independent models.dev input ceiling.
+        if (model.ContextSizes?.DefaultTokens is null && AgentModelKnownLimit.Find(knownLimits, model.Id) is { } knownLimit)
         {
             capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
             ApplyKnownLimit(capabilities, knownLimit);
@@ -88,6 +90,14 @@ internal static class AgentModelMetadataEnricher
         {
             capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
             ApplyOverride(capabilities, modelOverride);
+            if (contextSizes is not null &&
+                (modelOverride.InputTokenLimit is not null ||
+                 modelOverride.ContextWindowTokens is { } overriddenContext && overriddenContext != contextSizes.DefaultTokens))
+            {
+                // These are legacy metadata overrides, not verified context preferences. Keep their budget but
+                // do not continue advertising discovery choices whose limits the user has replaced.
+                contextSizes = new AgentModelContextSizes(modelOverride.ContextWindowTokens ?? contextSizes.DefaultTokens, []);
+            }
 
             if (!string.IsNullOrWhiteSpace(modelOverride.DisplayName))
             {
@@ -117,6 +127,7 @@ internal static class AgentModelMetadataEnricher
             Capabilities: capabilities ?? model.Capabilities)
         {
             Options = model.Options,
+            ContextSizes = contextSizes,
         };
     }
 

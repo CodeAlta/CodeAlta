@@ -31,6 +31,8 @@ public sealed class SessionStateRowTests
             ("tier", static state => state.Tier = "quick"),
             ("title", static state => state.TitleMode = "last_message"),
             ("permission", static state => state.PermissionMode = "plan"),
+            ("context", static state => state.ContextWindowTokens = 1000000),
+            ("default-context", static state => state.ContextWindowTokens = null),
             ("sandbox", static state => state.Sandbox = "strict"),
             ("options", static state => state.Options = new AgentSessionOptions { SubSessions = false }),
             ("queue", static state => state.QueuedPrompts.Add(Queued("later", "queued"))),
@@ -80,6 +82,7 @@ public sealed class SessionStateRowTests
         var session = await CreateSessionAsync(options, "session-options");
         var state = (await catalog.JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt))!;
         state.Options = new AgentSessionOptions { SubSessions = false };
+        state.ContextWindowTokens = 1000000;
         await catalog.JournalStore.AppendStateAsync(session, state);
         var fork = CreateDescriptor("session-options-fork");
         await catalog.JournalStore.ForkAsync(session, fork, beforeRunId: null, activeRunId: null);
@@ -92,6 +95,7 @@ public sealed class SessionStateRowTests
             var kept = listed.Single(item => item.SessionId == id).ViewState?.Options;
             Assert.IsNotNull(kept, id);
             Assert.IsFalse(kept.SubSessions, id);
+            Assert.AreEqual(1000000L, listed.Single(item => item.SessionId == id).ViewState?.ContextWindowTokens, id);
         }
     }
 
@@ -112,7 +116,29 @@ public sealed class SessionStateRowTests
 
         Assert.AreEqual(session.SessionId, listed.Single().SessionId);
         await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(10, await database.GetVersionAsync("session_cache"));
+        Assert.AreEqual(11, await database.GetVersionAsync("session_cache"));
+    }
+
+    [TestMethod]
+    public async Task ACacheOfVersion10_AddsDefaultContextWithoutReadingTheJournal()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var session = await CreateSessionAsync(options, "session-v10");
+        await ExecuteAsync(options, """
+            ALTER TABLE session_projection_cache DROP COLUMN local_context_tokens;
+            UPDATE app_meta SET version = 10 WHERE owner = 'session_cache';
+            """);
+        BlankJournal(JournalPath(options, session));
+
+        var restarted = new SessionViewCatalog(options).JournalStore;
+        var state = await restarted.ReadLatestStateAsync(session.SessionId, session.CreatedAt);
+
+        Assert.IsNotNull(state);
+        Assert.IsNull(state.ContextWindowTokens);
+        Assert.AreEqual(0, restarted.JournalStateReadCount);
+        await using var database = ApplicationDatabase.Create(options);
+        Assert.AreEqual(11, await database.GetVersionAsync("session_cache"));
     }
 
     [TestMethod]
@@ -168,7 +194,7 @@ public sealed class SessionStateRowTests
         Assert.AreEqual(1, first.JournalStateReadCount, "The first read takes the state from the journal.");
         await using (var database = ApplicationDatabase.Create(options))
         {
-            Assert.AreEqual(10, await database.GetVersionAsync("session_cache"));
+            Assert.AreEqual(11, await database.GetVersionAsync("session_cache"));
         }
 
         AssertSameJson(expected, ReadRowState(options, session.SessionId), "The state read is written to the row.");

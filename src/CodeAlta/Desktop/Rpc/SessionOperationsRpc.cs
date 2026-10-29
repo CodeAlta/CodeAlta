@@ -116,6 +116,7 @@ internal sealed class SessionOperationsService
             if (request.Selection is { } selection && (!Identity(selection.ProviderKey, 256) || !Identity(selection.AgentPromptId, 256)
                 || selection.ModelId is not null && !Identity(selection.ModelId, 256)
                 || selection.PermissionMode is not null && !Identity(selection.PermissionMode, 256)
+                || !SessionContextChoice.Valid(selection.Context)
                 || selection.ReasoningEffort is not null && (!Enum.TryParse<AgentReasoningEffort>(selection.ReasoningEffort, out var effort)
                     || !Enum.IsDefined(effort) || effort.ToString() != selection.ReasoningEffort)))
                 return new("invalid_request", _epoch, null);
@@ -125,7 +126,8 @@ internal sealed class SessionOperationsService
                 References = request.References is { } scope ? new(scope.ProjectId, scope.ProjectPath) : null,
                 // The mode is checked against the provider by the host: null keeps the session's, "provider" leaves it to the provider.
                 Selection = request.Selection is { } value ? new(value.ProviderKey, value.AgentPromptId, value.ModelId,
-                    value.ReasoningEffort is null ? null : Enum.Parse<AgentReasoningEffort>(value.ReasoningEffort)) { PermissionMode = value.PermissionMode } : null,
+                    value.ReasoningEffort is null ? null : Enum.Parse<AgentReasoningEffort>(value.ReasoningEffort))
+                    { PermissionMode = value.PermissionMode, Context = value.Context is { } context ? new(context.Tokens is { } tokens ? (long)tokens : null) : null } : null,
             }, cancellationToken)); }
             catch (ArgumentException) { return new("invalid_request", _epoch, null); }
             catch (OperationCanceledException) { throw; }
@@ -197,11 +199,13 @@ internal sealed class SessionOperationsService
             var space = _commands is null ? null : await _commands.GetSessionSpaceProvidersAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
             return new("ok", _epoch, request.SessionId,
                 new(choices.Current.ProviderKey, choices.Current.AgentPromptId, choices.Current.ModelId, choices.Current.ReasoningEffort?.ToString())
-                    { PermissionMode = choices.Current.PermissionMode },
+                    { PermissionMode = choices.Current.PermissionMode, Context = new(choices.Current.Context?.Tokens) },
                 choices.Prompts.Select(p => new SessionPromptChoice(p.Id, p.Name)).ToArray(),
                 choices.Models.Select(m => new SessionModelChoice(m.Id, m.Name, m.Efforts.Select(e => e.ToString()).ToArray())
                     {
                         ImageInput = m.ImageInput, StartEffort = m.StartEffort?.ToString(), EffortsComplete = m.EffortsComplete ? true : null,
+                        ContextSizes = m.ContextSizes?.TokenCounts.Select(static tokens => (decimal)tokens).ToArray(),
+                        DefaultContextTokens = m.DefaultContextTokens,
                         Options = m.Options.Count == 0 ? null : [.. m.Options.Select(static option => new SessionModelOption(Bound(option.Id), Bound(option.Name),
                             [.. option.Values.Take(32).Select(static value => new SessionModelOptionValue(Bound(value.Value), Bound(value.Name ?? value.Value)))], Bound(option.Value))
                             {
@@ -807,16 +811,29 @@ internal sealed record SessionReferenceSpan(int Start, int Length, string Status
 internal sealed record SessionReferenceObservationResponse(string Status, string? Epoch, IReadOnlyList<SessionReferenceSpan> Items, bool Omitted);
 internal sealed record SessionSelection(string ProviderKey, string AgentPromptId, string? ModelId, string? ReasoningEffort)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SessionContextChoice? Context { get; init; }
+
     // The mode chosen for the session, or null: in a send, null keeps the session's and "provider" goes back to the
     // provider's; in choices, null means the session runs in the provider's.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PermissionMode { get; init; }
+}
+internal sealed record SessionContextChoice(decimal? Tokens)
+{
+    internal static bool Valid(SessionContextChoice? value)
+        => value?.Tokens is not { } tokens || tokens is > 0 and <= AgentModelContextSizes.MaximumTokens && tokens == decimal.Truncate(tokens);
 }
 internal sealed record SessionChoicesRequest(string ExpectedEpoch, string SessionId);
 internal sealed record SessionPromptChoice(string Id, string Name);
 internal sealed record SessionPromptImage(string Title, string MediaType, string Base64);
 internal sealed record SessionModelChoice(string Id, string Name, IReadOnlyList<string> Efforts)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<decimal>? ContextSizes { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? DefaultContextTokens { get; init; }
+
     public bool? ImageInput { get; init; }
     // The effort a session starts this model with: one of Efforts, null when the model reports none.
     public string? StartEffort { get; init; }

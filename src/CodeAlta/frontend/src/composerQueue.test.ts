@@ -10,6 +10,18 @@ const steer = (key: string, text = "steer text"): SessionSteerRequest => ({ expe
 const receipt = (key: string, kind: string, outcome: string | null = "Completed"): SessionReceiptView => ({ clientRequestId: key, sessionId: "session",
   operationId: "operation", targetOperationId: null, kind, state: outcome ? "terminal" : "pending", outcome, code: null, runId: "run" });
 
+test("queued context is a deep immutable capture, including an explicit Default", () => {
+  const queue = createComposerQueue();
+  const selection = { providerKey: "key", modelId: "model", agentPromptId: "default", reasoningEffort: null, context: { tokens: 1050000 as number | null } };
+  const first = queue.add("Queue", "epoch", "session", "first", null, selection)!;
+  selection.context.tokens = null;
+  const second = queue.add("Queue", "epoch", "session", "second", null, selection)!;
+  selection.context.tokens = 272000;
+  assert.equal(first.selection?.context?.tokens, 1050000);
+  assert.deepEqual(second.selection?.context, { tokens: null });
+  assert.equal(Object.isFrozen(first.selection?.context), true);
+});
+
 test("programmatic enqueue preserves its selection and awaits downstream ownership, not local insertion", async () => {
   const owner = createComposerQueue();
   const selection = { providerId: "provider", providerKey: "key", modelId: "model", agentPromptId: "default", reasoningEffort: null, permissionMode: null };

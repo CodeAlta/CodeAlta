@@ -7,6 +7,7 @@ import { environmentEntries, environmentProblem, environmentText, pluginFieldVal
 /** Editable provider fields; empty strings mean "left to the provider's default". */
 export type ProviderForm = Readonly<{
   key: string; type: string; enabled: boolean; displayName: string; model: string; reasoningEffort: string;
+  contextPreferences: Readonly<Record<string, number>>;
   apiUrl: string; apiKeyEnv: string; apiKey: string; clearApiKey: boolean; makeDefault: boolean;
   /** The id of the icon chosen for the provider, and the color it is drawn in; blank when they follow the provider. */
   icon: string; color: string;
@@ -31,16 +32,27 @@ export type ProviderForm = Readonly<{
 export function providerForm(provider: GlobalConfigProvider | null, defaultProvider: string | null, types: readonly string[]): ProviderForm {
   return provider
     ? { key: provider.key, type: provider.type, enabled: provider.enabled, displayName: provider.displayName ?? "", model: provider.model ?? "",
-      reasoningEffort: provider.reasoningEffort ?? "", apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
+      reasoningEffort: provider.reasoningEffort ?? "", contextPreferences: { ...provider.contextPreferences }, apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
       clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "",
       anthropicApiKey: provider.anthropicApiKey ?? "", permissionMode: provider.permissionMode ?? "",
       configDir: provider.configDir ?? "", environment: environmentText(provider.environment), modelsOrder: provider.modelsOrder ?? "", plugin: pluginFieldValues(provider) }
-    : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
+    : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", contextPreferences: {}, apiUrl: "", apiKeyEnv: "",
       apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", plugin: {} };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
-  return (Object.keys(form) as (keyof ProviderForm)[]).some(field => field === "plugin" ? !samePluginFieldValues(form.plugin, baseline.plugin) : form[field] !== baseline[field]);
+  return (Object.keys(form) as (keyof ProviderForm)[]).some(field => field === "plugin" ? !samePluginFieldValues(form.plugin, baseline.plugin)
+    : field === "contextPreferences" ? Object.keys(form.contextPreferences).length !== Object.keys(baseline.contextPreferences).length
+      || Object.entries(form.contextPreferences).some(([key, tokens]) => baseline.contextPreferences[key] !== tokens)
+      : form[field] !== baseline[field]);
+}
+
+/** Default removes only this exact model's preference; unrelated/offline entries survive every save. */
+export function providerContextPreference(form: ProviderForm, modelId: string, tokens: number | null): Partial<ProviderForm> {
+  const contextPreferences = { ...form.contextPreferences };
+  if (tokens === null) delete contextPreferences[modelId];
+  else contextPreferences[modelId] = tokens;
+  return { contextPreferences };
 }
 
 /** The first problem that prevents saving, or null. `originalKey` is null for a new provider. */
@@ -63,7 +75,8 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
   // A provider that runs its own CLI takes none of the API fields: what another type left in the form is not sent.
   const cli = runsOwnCli(form.type);
   return { key: form.key.trim().toLowerCase(), type: form.type, enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model),
-    reasoningEffort: optional(form.reasoningEffort), apiUrl: cli ? null : optional(form.apiUrl), apiKeyEnv: cli ? null : optional(form.apiKeyEnv),
+    reasoningEffort: optional(form.reasoningEffort), contextPreferences: { ...form.contextPreferences },
+    apiUrl: cli ? null : optional(form.apiUrl), apiKeyEnv: cli ? null : optional(form.apiKeyEnv),
     apiKey: cli || form.clearApiKey || !form.apiKey ? null : form.apiKey, clearApiKey: cli ? true : form.clearApiKey,
     icon: optional(form.icon)?.toLowerCase() ?? null, color: optional(form.color), anthropicApiKey: cli ? optional(form.anthropicApiKey) : null,
     // Only a provider that runs its own CLI takes a permission mode: the configuration file refuses it elsewhere.

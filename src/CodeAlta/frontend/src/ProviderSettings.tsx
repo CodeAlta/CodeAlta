@@ -13,7 +13,8 @@ import { providerBrand } from "./brands";
 import { Logo, ProviderIcon } from "./ProviderIcon";
 import { ProviderColorInput, ProviderIconPicker } from "./ProviderIconFields";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
-import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerContextPreference, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { ProviderContextSize } from "./ProviderContextSize";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { SettingsFileLocations } from "./SettingsFileLocation";
@@ -222,6 +223,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
       const key = form.key.trim().toLowerCase();
       void settle(() => plugins.savePluginProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null, key, type: form.type,
         enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model), reasoningEffort: optional(form.reasoningEffort),
+        contextPreferences: { ...form.contextPreferences },
         values: pluginSettingValues(formPlugin, form.plugin), makeDefault: form.makeDefault, icon: optional(form.icon)?.toLowerCase() ?? null,
         color: optional(form.color), permissionMode: optional(form.permissionMode), modelsOrder: optional(form.modelsOrder) }, { timeoutMilliseconds: 60000 }), key, renamed(key));
       return;
@@ -363,7 +365,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             <FormGroup label={t("Provider key")} labelFor="provider-key" helperText={original ? t("Sessions refer to a provider by its key; renaming it does not update them.") : undefined}>
               <InputGroup id="provider-key" value={form.key} disabled={busy} maxLength={64} spellCheck={false} onChange={event => edit({ key: event.target.value })} placeholder="my-provider" /></FormGroup>
             <FormGroup label={t("Adapter type")} labelFor="provider-type">
-              <HTMLSelect id="provider-type" fill value={form.type} disabled={busy} onChange={event => edit({ type: event.target.value })}
+              <HTMLSelect id="provider-type" fill value={form.type} disabled={busy} onChange={event => edit({ type: event.target.value, contextPreferences: {} })}
                 options={[...new Set([form.type, ...listing.providerTypes])]} /></FormGroup>
             <FormGroup label={t("Display name")} labelFor="provider-name">
               <DefaultedInput id="provider-name" value={form.displayName} fallback={fallback("displayName") ?? (form.key.trim() || null)} disabled={busy} onChange={displayName => edit({ displayName })} /></FormGroup>
@@ -382,6 +384,9 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
                 <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
               </HTMLSelect></FormGroup>
+            <ProviderContextSize key={`${selected}:${listing.revision}`} epoch={epoch} providerId={modelProvider}
+              modelId={form.model.trim() || fallback("model") || ""} preferences={form.contextPreferences} disabled={busy}
+              readModels={readModels} onChange={(model, tokens) => edit(providerContextPreference(form, model, tokens))} />
             {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}
             {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">
               <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></FormGroup>}

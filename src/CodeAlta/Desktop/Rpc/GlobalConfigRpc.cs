@@ -464,6 +464,7 @@ internal sealed partial class GlobalConfigService
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
                         { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
                           ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command), ModelsOrder = ConfiguredModelsOrder(definition?.ModelsOrder, definition?.SortModels),
+                           ContextPreferences = definition?.ContextPreferences?.ToDictionary(static entry => entry.Key, static entry => (decimal)entry.Value, StringComparer.Ordinal),
                           Environment = definition?.Env is { Count: > 0 } variables ? [.. variables.Take(MaximumEnvironmentVariables).Select(static pair => new GlobalConfigPluginMapEntry(Bound(pair.Key)!, Bound(pair.Value)!))] : null };
                     }).Concat(ListPluginProviders(document)).ToArray();
                 var pluginTypes = DescribePluginTypes();
@@ -563,6 +564,8 @@ internal sealed partial class GlobalConfigService
             return new("invalid", null, $"A permission mode is one of: {string.Join(", ", PermissionModes)}.", null, null, 0);
         if (!TryReadModelsOrder(edit.ModelsOrder, out var modelsOrder))
             return new("invalid", null, $"An order of the models is one of: {string.Join(", ", ModelOrdering.Values)}.", null, null, 0);
+        if (!TryReadContextPreferences(edit.ContextPreferences, out var contextPreferences))
+            return new("invalid", null, "Context preferences must map exact model ids to positive integral token capacities.", null, null, 0);
         if (!TryReadEnvironment(edit.Environment, out var environment, out var environmentProblem))
             return new("invalid", null, environmentProblem, null, null, 0);
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
@@ -582,6 +585,8 @@ internal sealed partial class GlobalConfigService
             definition.Color = color;
             definition.Model = Optional(edit.Model);
             definition.ReasoningEffort = Optional(edit.ReasoningEffort);
+            // An older client omits the field. An empty map explicitly clears it; discovery is not needed to save.
+            if (edit.ContextPreferences is not null) definition.ContextPreferences = contextPreferences;
             definition.ApiUrl = Optional(edit.ApiUrl);
             definition.ApiKeyEnv = Optional(edit.ApiKeyEnv);
             // Only the CLI of Claude Code reads that variable by itself.
@@ -851,6 +856,17 @@ internal sealed partial class GlobalConfigService
             : !string.IsNullOrWhiteSpace(modelsOrder) ? Bound(modelsOrder.Trim())
             : sortModels is { } sort ? ModelOrdering.Format(sort ? ModelOrder.Name : ModelOrder.Provider)
             : null;
+
+    private static bool TryReadContextPreferences(IReadOnlyDictionary<string, decimal>? values, out Dictionary<string, long>? contexts)
+    {
+        contexts = null;
+        if (values is null) return true;
+        if (values.Count > 2048 || values.Any(static entry => string.IsNullOrWhiteSpace(entry.Key)
+            || entry.Key.Length > 256 || entry.Key != entry.Key.Trim() || entry.Key.Any(char.IsControl)
+            || entry.Value is <= 0 or > AgentModelContextSizes.MaximumTokens || entry.Value != decimal.Truncate(entry.Value))) return false;
+        contexts = values.Count == 0 ? null : values.ToDictionary(static entry => entry.Key, static entry => (long)entry.Value, StringComparer.Ordinal);
+        return true;
+    }
 
     // An order of the form: blank for the order of the type, else one this version knows.
     private static bool TryReadModelsOrder(string? value, out string? modelsOrder)
@@ -1152,6 +1168,9 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     string? Model, string? ReasoningEffort, string? ApiUrl, string? EffectiveApiUrl, string? ApiKeyEnv, bool HasApiKey,
     GlobalConfigProviderDefaults Defaults)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, decimal>? ContextPreferences { get; init; }
+
     /// <summary>The id of the brand icon the file gives the provider; null when the icon follows its key and type.</summary>
     public string? Icon { get; init; }
 
@@ -1203,6 +1222,10 @@ internal sealed record GlobalConfigProviderTypeDefaults(string Type, GlobalConfi
 internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool Enabled, string? DisplayName, string? Model,
     string? ReasoningEffort, string? ApiUrl, string? ApiKeyEnv, string? ApiKey, bool ClearApiKey)
 {
+    /// <summary>Null preserves the saved preferences; an empty map clears them.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, decimal>? ContextPreferences { get; init; }
+
     /// <summary>The id of the brand icon of the provider; blank for the icon that goes with its key and type.</summary>
     public string? Icon { get; init; }
 

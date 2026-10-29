@@ -8,6 +8,11 @@ internal static class AgentTokenBudgetResolver
     /// </summary>
     public const string CompactionRatioCapabilityKey = "compactionRatio";
 
+    // Provider-neutral budget metadata: headroom replaces an output reservation where the adapter owns it.
+    internal const string EffectiveContextPercentKey = "effectiveContextWindowPercent";
+    internal const string ContextCompactionRatioKey = "contextCompactionRatio";
+    internal const string AutoCompactTokenLimitKey = "autoCompactTokenLimit";
+
     private static readonly string[] ContextWindowCapabilityKeys =
     [
         "contextWindow",
@@ -36,10 +41,23 @@ internal static class AgentTokenBudgetResolver
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        var contextWindow = TryReadCapability(modelInfo, ContextWindowCapabilityKeys);
+        var contextWindow = modelInfo?.EffectiveContextWindowTokens ?? AgentModelContextSizes.DefaultCapacity(modelInfo, null);
         var inputTokenLimit = TryReadCapability(modelInfo, InputTokenCapabilityKeys);
         var outputTokenLimit = TryReadCapability(modelInfo, OutputTokenCapabilityKeys);
-        var inputContextLimit = ResolveInputContextLimit(contextWindow, inputTokenLimit, outputTokenLimit);
+        var percent = TryReadCapability(modelInfo, [EffectiveContextPercentKey]);
+        long? usable = null;
+        if (contextWindow is > 0 && percent is > 0 and <= 100)
+        {
+            usable = Math.Max((long)((decimal)contextWindow.Value * percent.Value / 100), 1L);
+        }
+        else if (modelInfo?.ContextSizes is not null && contextWindow is > 0)
+        {
+            // An independent hard input ceiling must not replace (and exceed) a smaller selected envelope.
+            usable = Math.Max(contextWindow.Value - (outputTokenLimit ?? 0), 1L);
+        }
+        var inputContextLimit = usable is { } limit
+            ? inputTokenLimit is > 0 ? Math.Min(limit, inputTokenLimit.Value) : limit
+            : ResolveInputContextLimit(contextWindow, inputTokenLimit, outputTokenLimit);
 
         return new AgentTokenBudget(
             TotalContextEnvelope: contextWindow,
@@ -92,8 +110,25 @@ internal static class AgentTokenBudgetResolver
             ratio = modelRatio;
         }
 
-        return Math.Max((long)Math.Floor(inputContextLimit * ratio), 1L);
+        var threshold = Math.Max((long)Math.Floor(inputContextLimit * ratio), 1L);
+        var capacity = modelInfo?.EffectiveContextWindowTokens ?? AgentModelContextSizes.DefaultCapacity(modelInfo, null);
+        if (capacity is > 0 && modelInfo?.Capabilities is { } contextCapabilities &&
+            contextCapabilities.TryGetValue(ContextCompactionRatioKey, out var contextRawRatio) &&
+            TryConvertToDouble(contextRawRatio, out var contextRatio) && contextRatio is > 0 and <= 1)
+        {
+            threshold = Math.Min(threshold, Math.Max((long)Math.Floor(capacity.Value * contextRatio), 1L));
+        }
+
+        if (TryReadCapability(modelInfo, [AutoCompactTokenLimitKey]) is { } explicitLimit)
+        {
+            threshold = Math.Min(threshold, explicitLimit);
+        }
+
+        return threshold;
     }
+
+    internal static long? ReadContextCapacity(AgentModelInfo? modelInfo)
+        => TryReadCapability(modelInfo, ContextWindowCapabilityKeys);
 
     // A capability read back from a cache can be another number type, or JSON.
     private static bool TryConvertToDouble(object? value, out double converted)

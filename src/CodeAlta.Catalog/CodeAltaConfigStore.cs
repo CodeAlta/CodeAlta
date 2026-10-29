@@ -2257,6 +2257,8 @@ public sealed partial class CodeAltaConfigStore
         definition.SingleModelId = NormalizeModel(definition.SingleModelId);
         definition.ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex);
         definition.ModelsOrder = NormalizeText(definition.ModelsOrder)?.ToLowerInvariant();
+        if (definition.ContextPreferences is { } contexts)
+            definition.ContextPreferences = contexts.Count == 0 ? null : new(contexts, StringComparer.Ordinal);
         definition.ExtraBody = NormalizeExtraBody(definition.ExtraBody);
         definition.Request = NormalizeRequest(definition.Request);
         definition.Profile = NormalizeProfile(definition.Profile);
@@ -2715,6 +2717,10 @@ public sealed partial class CodeAltaConfigStore
         }
 
         ValidateModelsIncludeRegex(definition);
+        if (definition.ContextPreferences?.Any(static entry => string.IsNullOrWhiteSpace(entry.Key)
+            || entry.Key != entry.Key.Trim() || entry.Key.Any(char.IsControl)
+            || entry.Value is <= 0 or > AgentModelContextSizes.MaximumTokens) == true)
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} context_preferences must map exact model ids to positive integral token capacities.");
         if (definition.ModelsOrder is not null && !ModelOrdering.TryParse(definition.ModelsOrder, out _))
         {
             throw new InvalidOperationException($"providers.{definition.ProviderKey} models_order must be one of: {string.Join(", ", ModelOrdering.Values)}.");
@@ -3402,6 +3408,7 @@ public sealed partial class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.ModelsIncludeRegex) ||
                definition.SortModels is not null ||
                !string.IsNullOrWhiteSpace(definition.ModelsOrder) ||
+               definition.ContextPreferences is { Count: > 0 } ||
                definition.ExtraBody is { Count: > 0 } ||
                definition.Request is not null ||
                definition.Profile is not null ||
@@ -3514,6 +3521,7 @@ public sealed partial class CodeAltaConfigStore
             ModelsIncludeRegex = definition.ModelsIncludeRegex,
             SortModels = definition.SortModels,
             ModelsOrder = definition.ModelsOrder,
+            ContextPreferences = definition.ContextPreferences is { } contexts ? new(contexts, StringComparer.Ordinal) : null,
             ExtraBody = CloneExtraBody(definition.ExtraBody),
             Request = CloneRequest(definition.Request),
             Profile = CloneProfile(definition.Profile),

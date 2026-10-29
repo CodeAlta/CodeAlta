@@ -488,6 +488,16 @@ public sealed class AgentRuntime : IAsyncDisposable
                                summary.ModelId ??
                                state.Usage?.LastOperation?.Model ??
                                summary.Usage?.LastOperation?.Model;
+        var replaceCapacity = provider.TurnExecutor is not IAgentProviderCompaction ||
+                              options.ContextWindowTokens is not null || options.PreferredContextWindowTokens is not null;
+        // Local budgets are resolved anew even when both options are null (clearing to Default). With no
+        // discovery, keep counts but not a formerly selected capacity. Agents owning their context keep theirs.
+        if (replaceCapacity)
+        {
+            summary = summary with { Usage = AgentUsageFactory.AttachModelInfo(summary.Usage, null, replaceCapacity: true) };
+            state = state with { Usage = AgentUsageFactory.AttachModelInfo(state.Usage, null, replaceCapacity: true) };
+        }
+
         if (!string.IsNullOrWhiteSpace(effectiveModelId))
         {
             try
@@ -495,11 +505,13 @@ public sealed class AgentRuntime : IAsyncDisposable
                 var models = GetCachedModels(provider);
                 if (models.Count > 0)
                 {
-                    var modelInfo = AgentModelIdentity.FindBestMatch(models, effectiveModelId);
+                    var modelInfo = AgentModelContextResolver.Resolve(
+                        AgentModelIdentity.FindBestMatch(models, effectiveModelId), effectiveModelId, provider.Provider.ProviderKey,
+                        options.ContextWindowTokens, options.PreferredContextWindowTokens);
                     if (modelInfo is not null)
                     {
-                        summary = summary with { Usage = AgentUsageFactory.AttachModelInfo(summary.Usage, modelInfo) };
-                        state = state with { Usage = AgentUsageFactory.AttachModelInfo(state.Usage, modelInfo) };
+                        summary = summary with { Usage = AgentUsageFactory.AttachModelInfo(summary.Usage, modelInfo, replaceCapacity: replaceCapacity) };
+                        state = state with { Usage = AgentUsageFactory.AttachModelInfo(state.Usage, modelInfo, replaceCapacity: replaceCapacity) };
                     }
                 }
             }

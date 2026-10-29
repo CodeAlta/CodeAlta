@@ -541,6 +541,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
              || string.IsNullOrWhiteSpace(selection.AgentPromptId) || selection.AgentPromptId.Length > 256
              || selection.ModelId is { } model && (string.IsNullOrWhiteSpace(model) || model.Length > 256)
              || selection.ReasoningEffort is { } effort && !Enum.IsDefined(effort)
+             || selection.Context?.Tokens is <= 0 or > AgentModelContextSizes.MaximumTokens
              || selection.PermissionMode is { } permissionMode && (string.IsNullOrWhiteSpace(permissionMode) || permissionMode.Length > 256)))
             throw new ArgumentException("Invalid next-send selection.", nameof(request));
         if (!string.Equals(request.SessionId, request.SessionId.Trim(), StringComparison.Ordinal))
@@ -1070,7 +1071,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 policy, ToolsFor(session.SessionId, project, project is null ? _catalog.GlobalRoot : WorkFolder(session, project), session.ResolvedProviderKey, modelId,
                     session.Options, spaces),
                 _runtime.Permissions.OwnedDefaultPermissionHandler,
-                _runtime.Permissions.OwnedDefaultUserInputHandler);
+                _runtime.Permissions.OwnedDefaultUserInputHandler, permissionMode: null, sessionOptions: null, context: selection?.Context);
             // The space decides which plugins apply to the session.
             var spaceId = Plugins is null ? null
                 : (await _runtime.ResolveSpaceAsync(session.SpaceId, project, operation.Execution.Token).ConfigureAwait(false)).Id;

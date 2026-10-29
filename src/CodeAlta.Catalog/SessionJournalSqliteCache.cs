@@ -12,7 +12,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 {
     private const string Owner = "session_cache";
     private const string TablePrefix = "session_projection_cache";
-    private const int SchemaVersion = 10;
+    private const int SchemaVersion = 11;
     private const int ProjectionVersion = 1;
 
     // The longest preview of the last answer of a session a row keeps: the answer itself is in the history of the journal.
@@ -24,7 +24,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         session_id, journal_path, journal_last_write_utc_ticks, journal_length, created_at_utc_ticks, updated_at_utc_ticks,
         protocol_family, provider_id, provider_key, working_directory, title, summary, model_id, reasoning_effort, agent_prompt_id,
         parent_session_id, created_by_session_id, created_by_run_id, provider_session_id, summary_json, local_provider_key,
-        local_model_id, local_reasoning_effort, local_agent_prompt_id, local_permission_mode, local_title_mode, local_sandbox, local_options, archived,
+        local_model_id, local_reasoning_effort, local_context_tokens, local_agent_prompt_id, local_permission_mode, local_title_mode, local_sandbox, local_options, archived,
         local_archived_at_utc_ticks, local_queued_prompt_count, message_count, local_parent_session_id, created_by_json,
         local_state_cached, space_id, journal_header_json, journal_header_read
         """;
@@ -719,6 +719,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         local_provider_key = $local_provider_key,
         local_model_id = $local_model_id,
         local_reasoning_effort = $local_reasoning_effort,
+        local_context_tokens = $local_context_tokens,
         local_agent_prompt_id = $local_agent_prompt_id,
         local_permission_mode = $local_permission_mode,
         local_title_mode = $local_title_mode,
@@ -738,6 +739,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_provider_key", NormalizeOptionalText(state.ProviderKey));
         AddParameter(command, "$local_model_id", NormalizeOptionalText(state.ModelId));
         AddParameter(command, "$local_reasoning_effort", FormatReasoningEffort(state.ReasoningEffort));
+        AddParameter(command, "$local_context_tokens", state.ContextWindowTokens);
         AddParameter(command, "$local_agent_prompt_id", NormalizeOptionalText(state.AgentPromptId));
         AddParameter(command, "$local_permission_mode", NormalizeOptionalText(state.PermissionMode));
         AddParameter(command, "$local_title_mode", FormatTitleMode(state.TitleMode));
@@ -1594,6 +1596,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         }
 
         await AddPermissionModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
+        await AddContextTokensColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddTitleModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddSandboxColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddOptionsColumnAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -1606,6 +1609,16 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_working_directory ON session_projection_cache(working_directory COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_project_ref ON session_projection_cache(project_ref COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS ux_session_projection_cache_journal_path ON session_projection_cache(journal_path COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task AddContextTokensColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_context_tokens';";
+        if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0) return;
+        // Old sessions have no explicit context choice; retain their rows without scanning journals.
+        command.CommandText = "ALTER TABLE session_projection_cache ADD COLUMN local_context_tokens INTEGER;";
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     // A cache written before the permission mode of a session was kept has no column for it, and rows that do not
@@ -1993,6 +2006,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_provider_key,
                 local_model_id,
                 local_reasoning_effort,
+                local_context_tokens,
                 local_agent_prompt_id,
                 local_permission_mode,
                 local_title_mode,
@@ -2036,6 +2050,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 $local_provider_key,
                 $local_model_id,
                 $local_reasoning_effort,
+                $local_context_tokens,
                 $local_agent_prompt_id,
                 $local_permission_mode,
                 $local_title_mode,
@@ -2081,6 +2096,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_provider_key = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_provider_key ELSE session_projection_cache.local_provider_key END,
                 local_model_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_model_id ELSE session_projection_cache.local_model_id END,
                 local_reasoning_effort = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_reasoning_effort ELSE session_projection_cache.local_reasoning_effort END,
+                local_context_tokens = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_context_tokens ELSE session_projection_cache.local_context_tokens END,
                 local_agent_prompt_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_agent_prompt_id ELSE session_projection_cache.local_agent_prompt_id END,
                 local_permission_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_permission_mode ELSE session_projection_cache.local_permission_mode END,
                 local_title_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_title_mode ELSE session_projection_cache.local_title_mode END,
@@ -2132,6 +2148,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_provider_key", NormalizeOptionalText(localState?.ProviderKey));
         AddParameter(command, "$local_model_id", NormalizeOptionalText(localState?.ModelId));
         AddParameter(command, "$local_reasoning_effort", FormatReasoningEffort(localState?.ReasoningEffort));
+        AddParameter(command, "$local_context_tokens", localState?.ContextWindowTokens);
         AddParameter(command, "$local_agent_prompt_id", NormalizeOptionalText(localState?.AgentPromptId));
         AddParameter(command, "$local_permission_mode", NormalizeOptionalText(localState?.PermissionMode));
         AddParameter(command, "$local_title_mode", localState?.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null);
@@ -2236,6 +2253,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 CreatedByJson: GetString(reader, "created_by_json"))
             {
                 PermissionMode = GetString(reader, "local_permission_mode"),
+                ContextWindowTokens = GetNullableInt64(reader, "local_context_tokens"),
                 Sandbox = GetString(reader, "local_sandbox"),
                 Options = ParseOptions(GetString(reader, "local_options")),
                 TitleMode = AgentSessionTitles.ParseMode(GetString(reader, "local_title_mode")),
@@ -2283,6 +2301,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             CreatedByJson: SerializeCreatedBy(state.CreatedBy))
         {
             PermissionMode = NormalizeOptionalText(state.PermissionMode),
+            ContextWindowTokens = state.ContextWindowTokens,
             Sandbox = NormalizeOptionalText(state.Sandbox),
             Options = AgentSessionOptions.Stored(state.Options),
             TitleMode = AgentSessionTitles.ParseMode(state.TitleMode),

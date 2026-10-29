@@ -3,6 +3,7 @@ import test from "node:test";
 import type { SessionChoicesResponse, SessionSelection } from "#neoastra";
 import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { captureSubmission, createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
+import { changeSelection, validSelection } from "./sessionSelection";
 
 const current: SessionSelection = { providerKey: "alpha", agentPromptId: "plan", modelId: "old", reasoningEffort: "High" };
 const choices: SessionChoicesResponse = { status: "ok", epoch: "epoch", sessionId: "one", current,
@@ -10,6 +11,51 @@ const choices: SessionChoicesResponse = { status: "ok", epoch: "epoch", sessionI
   models: [{ id: "old", name: "Old", efforts: ["High"], imageInput: null, startEffort: "High" },
     { id: "new", name: "New", efforts: ["Low", "Medium"], imageInput: null, startEffort: "Low" }] };
 const target = { epoch: "epoch", sessionId: "one", providerKey: "alpha", modelId: "new", reasoningEffort: null };
+
+test("a context-only host refresh updates a settled selection but preserves a newer unsent context", () => {
+  const host = { ...choices, current: { ...current, context: { tokens: null } }, models: choices.models.map(model => ({ ...model, contextSizes: [272000, 1050000] })) };
+  const storage = new Map<string, string>();
+  const store = createNextSendSelectionStore(key => storage.get(key) ?? null, (key, value) => { storage.set(key, value); });
+  store.set("epoch", "one", host, host.current);
+  const outside = { ...host, current: { ...host.current, context: { tokens: 1050000 } } };
+  assert.equal(store.get("epoch", "one", outside)?.context?.tokens, 1050000, "another window's applied choice is observed");
+  const expanded = { ...host.current, context: { tokens: 1050000 } };
+  store.set("epoch", "one", host, expanded);
+  store.set("epoch", "one", host, { ...host.current, context: { tokens: null } });
+  store.sent("epoch", "one", expanded);
+  assert.equal(store.get("epoch", "one", outside)?.context?.tokens, null, "Default chosen while an earlier expanded Send was in flight survives");
+  const reopened = createNextSendSelectionStore(key => storage.get(key) ?? null, () => {});
+  assert.equal(reopened.get("epoch", "one", outside)?.context?.tokens, null);
+  const switched = { ...outside, current: { ...outside.current, modelId: "new", reasoningEffort: "Low", context: { tokens: null } } };
+  assert.equal(store.get("epoch", "one", switched), null, "model fallback still resets the entire override");
+});
+
+test("an offline reopened context is retained as unverified and Default can clear it", () => {
+  const host = { ...choices, current: { ...current, context: { tokens: null } }, models: choices.models.map(model => ({ ...model, contextSizes: [272000, 1050000] })) };
+  const storage = new Map<string, string>();
+  const store = createNextSendSelectionStore(key => storage.get(key) ?? null, (key, value) => { storage.set(key, value); });
+  store.set("epoch", "one", host, { ...host.current, context: { tokens: 1050000 } });
+  const reopened = createNextSendSelectionStore(key => storage.get(key) ?? null, () => {});
+  assert.equal(reopened.get("epoch", "one", choices), null, "unverified is not sendable");
+  assert.equal(reopened.current("epoch", "one")?.context?.tokens, 1050000, "but it remains visible");
+  assert.equal(reopened.set("epoch", "one", choices, { ...current, context: { tokens: null } }), true);
+});
+
+test("Default remains selectable when an offline catalog no longer lists the session's model", () => {
+  const host = { ...choices, current: { ...current, context: { tokens: null } }, models: choices.models.map(model => ({ ...model, contextSizes: [1050000] })) };
+  const storage = new Map<string, string>();
+  const store = createNextSendSelectionStore(key => storage.get(key) ?? null, (key, value) => { storage.set(key, value); });
+  store.set("epoch", "one", host, { ...host.current, context: { tokens: 1050000 } });
+  const offline = { ...host, models: [] };
+  const reopened = createNextSendSelectionStore(key => storage.get(key) ?? null, () => {});
+  assert.equal(reopened.get("epoch", "one", offline), null);
+  const retained = reopened.current("epoch", "one")!;
+  assert.equal(retained.context?.tokens, 1050000);
+  const cleared = changeSelection(offline, retained, "context", "")!;
+  assert.equal(reopened.set("epoch", "one", offline, cleared), true);
+  assert.equal(reopened.current("epoch", "one")?.context?.tokens, null);
+  assert.equal(validSelection(offline, cleared), false, "clearing does not manufacture model support or make Send valid");
+});
 
 test("catalog model handoff preserves session prompt, starts the model with its effort and freezes the next Send", async () => {
   const storage = new Map<string, string>();

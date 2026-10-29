@@ -53,6 +53,9 @@ public sealed class SessionExecutionRequest
     /// <summary>Gets the captured reasoning preference.</summary>
     public AgentReasoningEffort? ReasoningEffort { get; }
 
+    /// <summary>Gets the captured session context choice, or null when none was supplied.</summary>
+    public AgentContextSelection? Context { get; init; }
+
     /// <summary>Gets the normalized agent prompt preference.</summary>
     public string? AgentPromptId { get; }
 }

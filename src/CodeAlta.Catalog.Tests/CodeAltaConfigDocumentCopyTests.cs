@@ -25,6 +25,31 @@ public sealed class CodeAltaConfigDocumentCopyTests
     }
 
     [TestMethod]
+    public void Copy_ContextPreferences_KeepExactModelIdentityAndOwnTheirValues()
+    {
+        var original = new CodeAltaConfigDocument
+        {
+            Providers = new()
+            {
+                ["provider"] = new()
+                {
+                    ContextPreferences = new(StringComparer.Ordinal)
+                    {
+                        ["model"] = 200000,
+                        ["Model"] = 1000000,
+                    },
+                },
+            },
+        };
+        var copy = CodeAltaConfigDocumentCopy.Copy(original);
+        var preferences = copy.Providers!["provider"].ContextPreferences!;
+        Assert.AreEqual(200000L, preferences["model"]);
+        Assert.AreEqual(1000000L, preferences["Model"]);
+        preferences["model"] = 400000;
+        Assert.AreEqual(200000L, original.Providers["provider"].ContextPreferences!["model"]);
+    }
+
+    [TestMethod]
     public void Copy_OfAParsedConfiguration_WritesTheSameToml()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-config-copy-" + Guid.NewGuid().ToString("N"));

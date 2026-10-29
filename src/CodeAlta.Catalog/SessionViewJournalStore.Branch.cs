@@ -174,6 +174,7 @@ public sealed partial class SessionViewJournalStore
             ModelId = sourceLocal?.ModelId,
             ReasoningEffort = sourceLocal?.ReasoningEffort,
             PermissionMode = sourceLocal?.PermissionMode,
+            ContextWindowTokens = sourceLocal?.ContextWindowTokens,
             // A fork keeps the sandbox of its source: it continues the same work, written by the same model. The one
             // the runtime gives it comes first: the sandbox of the session that forks, when that one is sandboxed.
             Sandbox = string.IsNullOrWhiteSpace(target.Sandbox) ? sourceLocal?.Sandbox : target.Sandbox,

@@ -703,6 +703,78 @@ type = "fake-agent"
     }
 
     [TestMethod]
+    public async Task ContextPreferences_RoundTripWithoutDiscovery_PreserveOnOmission_AndClearExplicitly()
+    {
+        await using var fixture = new Fixture(ProvidersConfig);
+        var edit = new GlobalConfigProviderEdit("local", "openai-chat", true, "Local", "model-a", "high",
+            "http://127.0.0.1:9999/v1", null, null, false)
+        {
+            ContextPreferences = new Dictionary<string, decimal>(StringComparer.Ordinal) { ["model-a"] = 1000000, ["Model-A"] = 200000 },
+        };
+        var listed = fixture.Service.Providers(new(Epoch));
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, "local", edit, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        var after = fixture.Service.Providers(new(Epoch));
+        var preferences = after.Providers.Single(p => p.Key == "local").ContextPreferences!;
+        Assert.AreEqual(1000000m, preferences["model-a"]);
+        Assert.AreEqual(200000m, preferences["Model-A"]);
+        saved = fixture.Service.SaveProvider(new(Epoch, after.Revision, "local",
+            edit with { Model = "model-b", ContextPreferences = null }, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        after = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual(2, after.Providers.Single(p => p.Key == "local").ContextPreferences!.Count);
+        var invalid = fixture.Service.SaveProvider(new(Epoch, after.Revision, "local",
+            edit with { ContextPreferences = new Dictionary<string, decimal> { ["model-a"] = 1.5m } }, false, false));
+        Assert.AreEqual("invalid", invalid.Status);
+        saved = fixture.Service.SaveProvider(new(Epoch, after.Revision, "local",
+            edit with { ContextPreferences = new Dictionary<string, decimal>() }, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        Assert.IsNull(fixture.Service.Providers(new(Epoch)).Providers.Single(p => p.Key == "local").ContextPreferences);
+    }
+
+    [TestMethod]
+    public async Task PluginContextPreferences_PreserveExactModelKeysOnUnrelatedSave()
+    {
+        await using var fixture = new Fixture("""
+            [providers.fixture]
+            type = "fake-agent"
+            enabled = false
+            command = "keep-this-command"
+            [providers.fixture.context_preferences]
+            model = 200000
+            Model = 1000000
+            """);
+        await using var endpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints();
+        var types = new CodeAlta.Hosting.PluginModelProviderTypes(endpoints);
+        types.Attach(static () => [new CodeAlta.Plugins.Abstractions.PluginModelProviderContribution
+        {
+            ProviderType = "fake-agent", DisplayName = "Fake agent",
+            CreateRuntime = static _ => throw new AssertFailedException("Disabled fixture must never start."),
+        }]);
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch)
+        {
+            PluginProviderTypes = types,
+        };
+        var before = service.Providers(new(Epoch));
+        var preferences = before.Providers.Single(provider => provider.Key == "fixture").ContextPreferences!;
+        Assert.AreEqual(200000m, preferences["model"]);
+        Assert.AreEqual(1000000m, preferences["Model"]);
+        var edit = new GlobalConfigSavePluginProviderRequest(Epoch, before.Revision, "fixture", "fixture", "fake-agent",
+            false, "Renamed fixture", "other-model", null, [], false);
+        var saved = service.SavePluginProvider(edit);
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        var after = service.Providers(new(Epoch));
+        Assert.AreEqual(2, after.Providers.Single(provider => provider.Key == "fixture").ContextPreferences!.Count);
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "keep-this-command");
+        saved = service.SavePluginProvider(edit with
+        {
+            ExpectedRevision = after.Revision, ContextPreferences = new Dictionary<string, decimal>(),
+        });
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        Assert.IsEmpty(service.Providers(new(Epoch)).Providers.Single(provider => provider.Key == "fixture").ContextPreferences!);
+    }
+
+    [TestMethod]
     public async Task CodeMode_IsOnByDefault_OffIsWritten_AndOnRemovesItsTable()
     {
         await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");

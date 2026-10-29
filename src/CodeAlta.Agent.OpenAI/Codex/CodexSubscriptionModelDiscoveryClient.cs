@@ -239,12 +239,40 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
                 GetString(modelElement, "default_text_verbosity") ??
                     GetString(modelElement, "defaultTextVerbosity") ??
                     GetString(modelElement, "default_verbosity"),
-                GetInt64(modelElement, "context_window") ?? GetInt64(modelElement, "contextWindow"),
+                ReadContextSizes(modelElement),
+                GetInt64(modelElement, "effective_context_window_percent") is > 0 and <= 100 and var percent ? percent : 95,
+                GetInt64(modelElement, "auto_compact_token_limit") is > 0 and var compactLimit ? compactLimit : null,
                 GetServiceTiers(modelElement),
                 etag));
         }
 
         return models;
+    }
+
+    private static AgentModelContextSizes ReadContextSizes(JsonElement element)
+    {
+        // OpenAI/codex: protocol/src/openai_models.rs and models-manager/src/model_info.rs.
+        // model_context_window changes local metadata, bounded by max_context_window; neither Responses wire
+        // request has a context-size field. Only these exact endpoint values authorize an expanded budget.
+        var advertisedDefault = GetInt64(element, "context_window") ?? GetInt64(element, "contextWindow");
+        var maximum = GetInt64(element, "max_context_window");
+        var defaultMissing = !element.TryGetProperty("context_window", out var defaultValue) || defaultValue.ValueKind is JsonValueKind.Null;
+        var defaultTokens = advertisedDefault is > 0 ? advertisedDefault : defaultMissing && maximum is > 0 ? maximum : null;
+        var valid = defaultTokens is > 0 && maximum >= defaultTokens &&
+                    (!element.TryGetProperty("effective_context_window_percent", out _) ||
+                     GetInt64(element, "effective_context_window_percent") is > 0 and <= 100) &&
+                    (!element.TryGetProperty("auto_compact_token_limit", out var compact) ||
+                     compact.ValueKind is JsonValueKind.Null || GetInt64(element, "auto_compact_token_limit") is > 0);
+        // Duplicate JSON properties are ambiguous even though JsonElement would otherwise take the last one.
+        var contextFields = element.EnumerateObject().Where(static property => property.Name is
+            "context_window" or "contextWindow" or "max_context_window" or "effective_context_window_percent" or "auto_compact_token_limit");
+        valid &= !contextFields.GroupBy(static property => property.Name, StringComparer.Ordinal).Any(static group => group.Count() > 1);
+        if (element.TryGetProperty("context_window", out _) && element.TryGetProperty("contextWindow", out _))
+        {
+            valid &= GetInt64(element, "context_window") == GetInt64(element, "contextWindow");
+        }
+
+        return new AgentModelContextSizes(defaultTokens, valid ? [defaultTokens!.Value, maximum!.Value] : []);
     }
 
     private static IReadOnlyList<string> GetServiceTiers(JsonElement element)
@@ -373,7 +401,9 @@ internal sealed record CodexSubscriptionDiscoveredModel(
     IReadOnlyList<string>? SupportedReasoningEfforts,
     string? DefaultReasoningEffort,
     string? DefaultTextVerbosity,
-    long? ContextWindow,
+    AgentModelContextSizes ContextSizes,
+    long EffectiveContextWindowPercent,
+    long? AutoCompactTokenLimit,
     IReadOnlyList<string> ServiceTiers,
     string? ETag);
 

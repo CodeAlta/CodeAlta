@@ -1075,6 +1075,8 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-selection-separator { opacity: .55; }
 .composer-selection-form { display: grid; width: min(420px, calc(100vw - 32px)); padding: 14px 16px 10px; }
 .composer-selection-form .bp6-form-group { margin: 0 0 12px; }
+.context-size-control { display: grid; gap: 5px; min-width: 0; }
+.context-size-control small { color: var(--muted); font-size: 11px; line-height: 1.4; }
 /* The switch of the defaults heads the form of a session started by an automation, a task or an issue. */
 .composer-selection-form .composer-selection-defaults { margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 /* There, the chip is a control of a form, outlined like the others. */

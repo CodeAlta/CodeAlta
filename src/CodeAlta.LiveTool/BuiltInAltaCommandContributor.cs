@@ -3973,6 +3973,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (selection is { ModelId: { } modelId })
         {
             await runtime.SetActiveSessionModelAsync(session.SessionId, modelId, selection.ReasoningEffort, context.CancellationToken).ConfigureAwait(false);
+            if (!string.Equals(session.ModelId, modelId, StringComparison.Ordinal))
+                session.ContextWindowTokens = null;
             session.ModelId = modelId;
             session.ReasoningEffort = selection.ReasoningEffort;
             model = new AltaModelSelection

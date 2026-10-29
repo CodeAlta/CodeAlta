@@ -75,6 +75,35 @@ public sealed class ModelCatalogRpcTests
     }
 
     [TestMethod]
+    public async Task ContextChoices_ProjectVerifiedSizesAndOnlyMatchingPreferences()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new("fixture"), "Fixture")
+        {
+            ContextPreferences = new Dictionary<string, long>(StringComparer.Ordinal)
+            {
+                ["model"] = 1000000, ["unknown"] = 1000000,
+            },
+        };
+        AgentModelInfo[] models =
+        [
+            new("model") { ContextSizes = new(200000, [200000, 1000000]) },
+            new("Model") { ContextSizes = new(200000, [200000, 1000000]) },
+            new("unknown", Capabilities: new Dictionary<string, object?> { ["contextWindow"] = 200000L }),
+        ];
+        registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => models));
+        var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch");
+
+        var response = await service.Models(new("epoch", "fixture"), CancellationToken.None);
+
+        CollectionAssert.AreEqual(new decimal[] { 200000, 1000000 }, response.Models.Single(model => model.Id == "model").ContextSizes!.ToArray());
+        Assert.AreEqual(1000000m, response.Models.Single(model => model.Id == "model").DefaultContextTokens);
+        Assert.AreEqual(200000m, response.Models.Single(model => model.Id == "Model").DefaultContextTokens);
+        Assert.AreEqual(200000m, response.Models.Single(model => model.Id == "unknown").DefaultContextTokens);
+        Assert.IsNull(response.Models.Single(model => model.Id == "unknown").ContextSizes);
+    }
+
+    [TestMethod]
     public async Task ADeprecatedModelIsMarked_WithTheDateItRetires()
     {
         await using var registry = new ModelProviderRegistry();

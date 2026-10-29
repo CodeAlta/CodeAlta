@@ -1,3 +1,4 @@
+import { freezeSelection } from "./sessionOperations";
 import type { SessionReceiptPage, SessionSendRequest, SessionSteerRequest } from "#neoastra";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
@@ -85,7 +86,7 @@ export function createComposerQueue() {
     if (items.length >= maximumItems || !validText(text, attached)
       || attached && items.filter(item => item.images).length >= maximumImagePrompts) return null;
     const item: ComposerQueueItem = Object.freeze({ id: crypto.randomUUID(), kind, epoch, sessionId, text, images: attached,
-      ...(selection ? { selection: Object.freeze({ ...selection }) } : {}), count: 1, state: "waiting" });
+      ...(selection ? { selection: freezeSelection(selection) } : {}), count: 1, state: "waiting" });
     items = [...items, item];
     if (notify) change.changed();
     return item;
@@ -103,7 +104,8 @@ export function createComposerQueue() {
     sessions(epoch: string): readonly string[] {
       return [...new Set(items.filter(item => item.epoch === epoch).map(item => item.sessionId))];
     },
-    add: (kind: ComposerQueueItem["kind"], epoch: string, sessionId: string, text: string, images: QueueImages | null = null) => add(kind, epoch, sessionId, text, images),
+    add: (kind: ComposerQueueItem["kind"], epoch: string, sessionId: string, text: string, images: QueueImages | null = null,
+      selection?: SessionSendRequest["selection"]) => add(kind, epoch, sessionId, text, images, selection),
     /** A local insertion is not acceptance: resolve only at a receipt or conclusive no-late-work cancellation. */
     admit(epoch: string, sessionId: string, text: string, signal: AbortSignal, selection?: SessionSendRequest["selection"]): Promise<boolean> {
       if (signal.aborted) return Promise.resolve(false);

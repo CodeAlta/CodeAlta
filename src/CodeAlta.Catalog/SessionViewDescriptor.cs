@@ -145,6 +145,10 @@ public sealed class SessionViewDescriptor
     [JsonPropertyName("reasoning_effort")]
     public CodeAlta.Agent.AgentReasoningEffort? ReasoningEffort { get; set; }
 
+    /// <summary>Gets or sets the requested total context capacity, or null for Default.</summary>
+    [JsonPropertyName("context_window_tokens")]
+    public long? ContextWindowTokens { get; set; }
+
     /// <summary>
     /// Gets or sets the permission mode chosen for the session, or <see langword="null"/> for the one its provider is
     /// configured with.

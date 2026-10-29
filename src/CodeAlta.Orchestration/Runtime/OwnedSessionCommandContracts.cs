@@ -66,6 +66,9 @@ public sealed record OwnedProjectReferenceScope(string ProjectId, string Project
 /// <param name="ReasoningEffort">Supported effort, or null for the model default.</param>
 public sealed record OwnedSessionSelection(string ProviderKey, string AgentPromptId, string? ModelId, AgentReasoningEffort? ReasoningEffort)
 {
+    /// <summary>Gets the immutable session choice; null keeps it, a selection with null tokens clears it.</summary>
+    public AgentContextSelection? Context { get; init; }
+
     /// <summary>
     /// The <see cref="PermissionMode"/> that takes the session back to the mode its provider is configured with. It is
     /// never the identifier of a mode.

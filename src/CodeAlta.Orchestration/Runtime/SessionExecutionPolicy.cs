@@ -57,7 +57,10 @@ public static class SessionExecutionPolicy
         return new SessionExecutionRequest(
             session.Kind, session.SessionId, isGlobal ? null : session.ProjectRef, workingDirectory,
             !isGlobal && resolvedProject is not null ? [resolvedProject.ProjectPath] : [],
-            new ModelProviderId(providerKey), providerKey, model, reasoningEffort, agentPromptOverride ?? session.AgentPromptId);
+            new ModelProviderId(providerKey), providerKey, model, reasoningEffort, agentPromptOverride ?? session.AgentPromptId)
+        {
+            Context = new(providerKey == session.ResolvedProviderKey && model == session.ModelId ? session.ContextWindowTokens : null),
+        };
     }
 
     /// <summary>Assembles options from captured policy and host-specific tools and interaction adapters.</summary>
@@ -90,6 +93,14 @@ public static class SessionExecutionPolicy
     public static SessionExecutionOptions BuildOptions(
         SessionExecutionRequest request, IReadOnlyList<AgentToolDefinition>? tools,
         AgentPermissionRequestHandler onPermissionRequest, AgentUserInputRequestHandler? onUserInputRequest, string? permissionMode, AgentSessionOptions? sessionOptions)
+        => BuildOptions(request, tools, onPermissionRequest, onUserInputRequest, permissionMode, sessionOptions, request?.Context);
+
+    /// <summary>Assembles options with an explicit session context choice; null preserves the captured choice.</summary>
+    /// <exception cref="ArgumentNullException">The request or permission handler is null.</exception>
+    public static SessionExecutionOptions BuildOptions(
+        SessionExecutionRequest request, IReadOnlyList<AgentToolDefinition>? tools,
+        AgentPermissionRequestHandler onPermissionRequest, AgentUserInputRequestHandler? onUserInputRequest, string? permissionMode,
+        AgentSessionOptions? sessionOptions, AgentContextSelection? context)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(onPermissionRequest);
@@ -102,6 +113,7 @@ public static class SessionExecutionPolicy
             ProjectRoots = request.ProjectRoots,
             Model = request.Model,
             ReasoningEffort = request.ReasoningEffort,
+            Context = context ?? request.Context,
             PermissionMode = permissionMode,
             AgentPromptId = request.AgentPromptId,
             Tools = tools is null ? null : Array.AsReadOnly(tools.ToArray()),

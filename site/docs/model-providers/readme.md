@@ -62,6 +62,10 @@ In CodeAlta Desktop, the **Models** button beside **Default model** lists the mo
 
 When the provider no longer lists the default model, for example a model it retired, the list says so: choose another one. Until then, a new session without a model takes the first model the provider lists.
 
+**Context size**, beside reasoning in CodeAlta Desktop, sets the preferred total capacity for this provider and the selected model. Choose a size, then **Save and apply**. **Default** uses the model's advertised default. Each model keeps its own preference; a session can override it in the [Agent picker](../workspace/prompt.md#agent-and-model).
+
+Explicit sizes are offered only when the adapter supports them: Codex can offer its advertised default and maximum. **Default** remains available without discovery. An unavailable saved preference is kept but not used to enlarge the window until it can be verified. The context meter shows the usable input budget, which can be smaller than this total capacity because output and headroom are reserved.
+
 ### Changes and deleted providers
 
 Saved settings reach the sessions already open: an idle session takes them at its next prompt, and a running turn finishes with the settings it started with.

@@ -173,7 +173,11 @@ internal sealed class ModelCatalogService(
                 DesktopJsonContext.Default.ModelCatalogModelsResponse).Length;
             foreach (var model in valid.Take(MaximumModels))
             {
-                var projected = ProjectModel(model);
+                var projected = ProjectModel(model) with
+                {
+                    DefaultContextTokens = AgentModelContextSizes.DefaultCapacity(model,
+                        descriptor.ContextPreferences?.TryGetValue(model.Id, out var preference) == true ? preference : null),
+                };
                 var nextBytes = JsonSerializer.SerializeToUtf8Bytes(projected, DesktopJsonContext.Default.ModelCatalogModel).Length;
                 if (bytes + nextBytes + (models.Count > 0 ? 1 : 0) > MaximumModelsResponseBytes) break;
                 bytes += nextBytes + (models.Count > 0 ? 1 : 0);
@@ -236,6 +240,7 @@ internal sealed class ModelCatalogService(
             AgentImageInputCapability.Read(model))
         {
             EffortsComplete = AgentReasoningEffortCapability.IsListComplete(model) ? true : null,
+            ContextSizes = model.ContextSizes?.TokenCounts.Select(static tokens => (decimal)tokens).ToArray(),
             Deprecated = IsDeprecated(metadata) ? true : null,
             RetiresAt = IsDeprecated(metadata) ? Date(metadata, "retiresAt") : null,
             Price = inputCost is null && outputCost is null ? null : new ModelCatalogPrice(inputCost, outputCost,
@@ -376,6 +381,11 @@ internal sealed record ModelCatalogModelsResponse(string Status, string? Epoch, 
 internal sealed record ModelCatalogModel(string Id, string Name, string? Description, IReadOnlyList<string> Efforts, string? DefaultEffort,
     int? ContextTokens, int? InputTokens, int? OutputTokens, bool? Reasoning, bool? Tools, bool? StructuredOutput, bool? ImageInput)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<decimal>? ContextSizes { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? DefaultContextTokens { get; init; }
+
     // True when Efforts is all the model has and its provider sends no other one (Claude Code); absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? EffortsComplete { get; init; }

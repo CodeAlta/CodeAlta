@@ -426,6 +426,7 @@ internal sealed partial class SessionFallbackCoordinator
                 Selection = new OwnedSessionSelection(next.Target.ProviderKey, notice.AgentPromptId ?? "default", next.Target.ModelId, reasoning)
                 {
                     PermissionMode = permissionMode,
+                    Context = new(null),
                 },
                 Provenance = AgentPromptProvenance.ModelFallback,
             });

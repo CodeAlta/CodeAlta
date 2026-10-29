@@ -1,4 +1,4 @@
-import { Button, HTMLSelect } from "@blueprintjs/core";
+import { Button, FormGroup, HTMLSelect } from "@blueprintjs/core";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { createPortal } from "react-dom";
 import { AttachMenu, AttachMenuItems, PromptImageAttachments } from "./PromptImageAttachments";
@@ -43,6 +43,8 @@ import { AppIcon } from "./AppIcon";
 import type { PromptInput } from "./PromptEditor";
 import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHistory";
 import { changeSelection, validSelection } from "./sessionSelection";
+import { ContextSizeSelect } from "./ContextSizeSelect";
+import { hasProviderContextOption } from "./contextSizes";
 import { ProviderChooser } from "./ProviderChooser";
 import { useProviderName } from "./ProviderIcon";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
@@ -256,6 +258,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     selectionRevision.current++;
     setChoices(value.choices);
     setSelection(value.selection);
+    setLoadingChoices(false);
     setChoicesNotice("The agent, the model and the effort apply on Send; the permission mode applies at once, also to a running turn.");
   }), [epoch, sessionId, capability, selections]);
   useEffect(() => {
@@ -264,6 +267,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const revision = selectionRevision.current;
     setChoicesNotice("Loading session choices…");
     setLoadingChoices(true);
+    const unavailableContext = () => setChoices(previous => previous && { ...previous,
+      models: previous.models.map(model => ({ ...model, contextSizes: undefined, defaultContextTokens: undefined })) });
     const current = () => !controller.signal.aborted && revision === selectionRevision.current && capability.canMutate();
     const read = async () => {
       const value = await sessions.choices({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 15000 });
@@ -279,6 +284,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         capability.observe(value);
         if (controller.signal.aborted || revision !== selectionRevision.current || value.sessionId !== sessionId) return;
         if (value.status !== "ok" || value.epoch !== epoch || !value.current) {
+          unavailableContext();
           setChoicesNotice(`Session choices unavailable (${value.status}).`); return;
         }
         setChoices(value);
@@ -288,8 +294,13 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         // Keep it visibly unverified; normal Send still requires validSelection.
         setSelection(verified ?? (retained?.providerKey === value.current.providerKey ? retained : null));
         setChoicesNotice("The agent, the model and the effort apply on Send; the permission mode applies at once, also to a running turn.");
-      }).catch(() => { if (!controller.signal.aborted && revision === selectionRevision.current) setChoicesNotice("Session choices could not be loaded. Reopen the Model selector to try again."); })
-      .finally(() => { if (!controller.signal.aborted) setLoadingChoices(false); });
+      }).catch(() => {
+        if (!controller.signal.aborted && revision === selectionRevision.current) {
+          unavailableContext();
+          setChoicesNotice("Session choices could not be loaded. Reopen the Model selector to try again.");
+        }
+      })
+      .finally(() => { if (!controller.signal.aborted && revision === selectionRevision.current) setLoadingChoices(false); });
     return () => controller.abort();
   }, [epoch, sessionId, capability, selections, choicesRevision, observing]);
   // A session shown in the window shows the turns made outside CodeAlta (in VS Code, in a terminal) on the conversation
@@ -321,7 +332,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // What the session runs with as the host has it: the agent switches its own agent prompt (`alta session set_agent`),
   // the alta tool or a tier gives it another model or effort. The composer shows it at once.
   const observedEntry = runtimeState?.kind === "ready" ? runtimeState.snapshot.entry : undefined;
-  const observedSettings = observedEntry ? [observedEntry.pendingAgentPromptId ?? observedEntry.agentPromptId, observedEntry.modelId, observedEntry.reasoningEffort] : null;
+  const observedSettings = observedEntry ? [observedEntry.pendingAgentPromptId ?? observedEntry.agentPromptId, observedEntry.modelId, observedEntry.reasoningEffort, observedEntry.contextWindowTokens] : null;
   // Lifecycle observations, not polling: reconcile persisted selection after attach/detach/switch, and after a change
   // of the host to the agent prompt, the model or the effort of the session.
   const catalogObservation = useRef<string | null>(null);
@@ -567,7 +578,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // for the running turn. Only the composer's own text takes its images along.
   function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
     if (pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted) return false;
-    if (!queue.add(kind, epoch, sessionId, value, attached.length ? attached : null)) return false;
+    const queuedSelection = kind === "Queue" ? selections.current(epoch, sessionId) ?? selection ?? activeChoices?.current : null;
+    if (!queue.add(kind, epoch, sessionId, value, attached.length ? attached : null, queuedSelection)) return false;
     if (value === latestText.current) {
       inputRevision.current++; clearText();
       if (attached.length) imageOwner.replace(imageKey, attached, []);
@@ -1072,7 +1084,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       return true;
     } catch { return false; }
   }
-  function select(field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", value: string) {
+  function select(field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode" | "context", value: string) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted || !activeChoices || !selected || selectionDisabled) return;
     if (field === "permissionMode") { void applyPermissionMode(activeChoices, selected, value, scope.current.signal); return; }
     const next = changeSelection(activeChoices, selected, field, value);
@@ -1482,8 +1494,15 @@ ${value}` : value);
         disabled={invalidEpoch} onChange={value => void applyReview(value)} />}
       sandbox={shownSandbox && <SessionSandboxSelect id={`composer-sandbox-${sessionId}`} own={shownSandbox.reply.own} inherited={shownSandbox.inherited}
         choices={shownSandbox.reply.choices} disabled={invalidEpoch} onChange={value => void applySandbox(value)} />}
-      options={shownOptions && { changed: changedSessionOptions(shownOptions),
-        content: <SessionOptionsFields id={sessionId} value={shownOptions} disabled={invalidEpoch} onChange={value => void applyOptions(value)} /> }}
+      options={!hasProviderContextOption(selectedModel?.options) || shownOptions ? {
+        changed: (shownOptions ? changedSessionOptions(shownOptions) : 0) + (!hasProviderContextOption(selectedModel?.options) && selected?.context?.tokens != null ? 1 : 0),
+        content: <>
+          {!hasProviderContextOption(selectedModel?.options) && <FormGroup label={t("Context size")} labelFor={`composer-context-${sessionId}`}>
+            <ContextSizeSelect id={`composer-context-${sessionId}`} value={selected?.context?.tokens ?? null} model={selectedModel}
+              loading={loadingChoices} disabled={selectionDisabled} onChange={tokens => select("context", tokens === null ? "" : String(tokens))} />
+          </FormGroup>}
+          {shownOptions && <SessionOptionsFields id={sessionId} value={shownOptions} disabled={invalidEpoch} onChange={value => void applyOptions(value)} />}
+        </> } : null}
       permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
         disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined} /></>}

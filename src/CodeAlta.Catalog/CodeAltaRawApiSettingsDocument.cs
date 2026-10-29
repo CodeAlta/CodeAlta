@@ -591,6 +591,10 @@ public sealed class CodeAltaProviderDocument
     [JsonPropertyName("models_order")]
     public string? ModelsOrder { get; set; }
 
+    /// <summary>Gets or sets preferred total context capacities by exact model id, validated against live capabilities at execution.</summary>
+    [JsonPropertyName("context_preferences")]
+    public Dictionary<string, long>? ContextPreferences { get; set; }
+
     /// <summary>
     /// Gets or sets provider-specific OpenAI-compatible request-body fields that should be added to outgoing requests.
     /// </summary>

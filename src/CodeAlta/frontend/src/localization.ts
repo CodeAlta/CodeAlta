@@ -50,6 +50,10 @@ function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Context size": ["Tamaño del contexto", "Taille du contexte", "Kontextgröße", "コンテキストサイズ", "上下文大小"],
+  "Loading compatible context sizes…": ["Cargando tamaños de contexto compatibles…", "Chargement des tailles de contexte compatibles…", "Kompatible Kontextgrößen werden geladen…", "対応するコンテキストサイズを読み込み中…", "正在加载兼容的上下文大小…"],
+  "Compatible context sizes unavailable. Saved choices remain unverified.": ["No hay tamaños de contexto compatibles disponibles. Las opciones guardadas siguen sin verificar.", "Tailles de contexte compatibles indisponibles. Les choix enregistrés restent non vérifiés.", "Kompatible Kontextgrößen nicht verfügbar. Gespeicherte Auswahlen bleiben ungeprüft.", "対応するコンテキストサイズを取得できません。保存済みの選択は未検証のままです。", "兼容的上下文大小不可用。已保存的选择仍未验证。"],
+  "Total context capacity; the usable input budget may be smaller.": ["Capacidad total del contexto; el presupuesto de entrada utilizable puede ser menor.", "Capacité totale du contexte ; le budget d’entrée utilisable peut être inférieur.", "Gesamte Kontextkapazität; das nutzbare Eingabebudget kann kleiner sein.", "コンテキストの総容量です。使用可能な入力枠はこれより小さい場合があります。", "上下文总容量；可用的输入额度可能更小。"],
   "Theme and colors": ["Tema y colores", "Thème et couleurs", "Design und Farben", "テーマと色", "主题与颜色"],
   "Conversation and changes": ["Conversación y cambios", "Conversation et modifications", "Unterhaltung und Änderungen", "会話と変更", "对话与更改"],
   "Startup and closing": ["Inicio y cierre", "Démarrage et fermeture", "Starten und Schließen", "起動と終了", "启动与关闭"],

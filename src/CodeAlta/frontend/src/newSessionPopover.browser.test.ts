@@ -193,6 +193,11 @@ test("a new session is created from a form beside the row of its project or of t
       "the provider is shown beside its model, and the chip has two lines");
     await select("#composer-agent-create", "plan");
     await until(`/^Plan.*New model.*Low.*Bypass permissions$/.test(document.querySelector(${JSON.stringify(chip)}).textContent)`, "the agent prompt chosen before");
+    assert.equal(await shown("#composer-context-create"), false, "context does not clutter the main picker");
+    await press(".composer-selection-more-button");
+    await until("!!document.querySelector('#composer-context-create')", "context is under More options");
+    await select("#composer-context-create", "1050000");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(chip)}).textContent.includes('1,050,000')`), false, "no duplicate context in the chip");
     assert.equal(await shown(form), true, "the form stayed open through every choice");
     // Escape in the choices closes them alone.
     await escape();
@@ -228,6 +233,8 @@ test("a new session is created from a form beside the row of its project or of t
     assert.equal(await evaluate("newSessionFixture.creates[0].permissionMode"), "bypassPermissions", "the session is created in the mode chosen");
     // The session starts in that mode: its own composer names it, as the mode of the session.
     await until("[...document.querySelectorAll('.owned-session .composer-selection')].some(node=>/Plan.*New model.*Low.*Bypass permissions/.test(node.textContent)&&node.title.includes('Provider: Alternate'))", "the choices are those of its first Send");
+    assert.equal(await evaluate("JSON.parse(localStorage.getItem('codealta.desktop.selection.created-1')).selection.context.tokens"), 1050000,
+      "context is handed to the owned session, not a provider-wide mutation");
     assert.deepEqual(await evaluate("settingsShellFixture.sends"), [], "a creation sends nothing");
     assert.deepEqual(await remembered(), { [projectScope]: { providerKey: "alternate", modelId: "new", reasoningEffort: "Low", permissionMode: "bypassPermissions" } });
 
@@ -241,6 +248,9 @@ test("a new session is created from a form beside the row of its project or of t
     // Escape closes the picker that is open, and a second Escape the form: the row has the focus again.
     await press(chip);
     await until("!!document.querySelector('#composer-agent-create')", "the choices of the chip");
+    await press(".composer-selection-more-button");
+    await until("!!document.querySelector('#composer-context-create')", "the next draft's More options");
+    assert.equal(await evaluate("document.querySelector('#composer-context-create').value"), "", "the next new session starts at Default");
     // An Escape that reaches the form while a picker is open, as in the moment before the picker has the focus, closes nothing.
     await evaluate(`document.querySelector(${JSON.stringify(`${form} input`)}).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`);
     assert.equal(await shown(form), true, "the form is not closed in the place of its picker");

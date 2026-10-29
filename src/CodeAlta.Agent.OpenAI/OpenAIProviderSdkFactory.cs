@@ -374,7 +374,14 @@ internal static class OpenAIProviderSdkFactory
         var supportedModels = discoveredModels
             .Where(model => includeWebSocketRequiredModels || !model.RequiresWebSocket)
             .GroupBy(static model => model.Id, StringComparer.OrdinalIgnoreCase)
-            .Select(static group => group.First())
+            .Select(static group =>
+            {
+                var first = group.First();
+                return group.Any(model => model.ContextSizes.DefaultTokens != first.ContextSizes.DefaultTokens ||
+                                          !model.ContextSizes.TokenCounts.SequenceEqual(first.ContextSizes.TokenCounts))
+                    ? first with { ContextSizes = new(first.ContextSizes.DefaultTokens, []) }
+                    : first;
+            })
             .ToArray();
 
         return supportedModels
@@ -406,14 +413,19 @@ internal static class OpenAIProviderSdkFactory
             ["useResponsesLite"] = model.UseResponsesLite,
             ["requiresWebSocket"] = model.RequiresWebSocket,
         };
-        // Codex's context_window is the input it sends at most (it compacts at 90% of it), under the larger input a model
-        // accepts (models.dev gives 922,000 to GPT-5.5): it is the input limit of a session, as in OpenAIKnownModelLimits.
-        if (model.ContextWindow is { } contextWindow)
+        // Codex reserves usable input headroom separately from its total capacity. Do not turn its default
+        // context into an independent hard input ceiling: that would prevent a verified maximum selection.
+        if (model.ContextSizes.DefaultTokens is { } contextWindow)
         {
             capabilities["contextWindow"] = contextWindow;
-            capabilities["inputTokenLimit"] = contextWindow;
-            capabilities["maxInputTokens"] = contextWindow;
-            capabilities[AgentTokenBudgetResolver.CompactionRatioCapabilityKey] = OpenAIKnownModelLimits.CodexCompactionRatio;
+            capabilities["contextWindowTokens"] = contextWindow;
+            capabilities[AgentTokenBudgetResolver.EffectiveContextPercentKey] = model.EffectiveContextWindowPercent;
+            capabilities[AgentTokenBudgetResolver.ContextCompactionRatioKey] = OpenAIKnownModelLimits.CodexCompactionRatio;
+        }
+
+        if (model.AutoCompactTokenLimit is { } compactLimit)
+        {
+            capabilities[AgentTokenBudgetResolver.AutoCompactTokenLimitKey] = compactLimit;
         }
 
         if (!string.IsNullOrWhiteSpace(model.DefaultTextVerbosity))
@@ -432,7 +444,10 @@ internal static class OpenAIProviderSdkFactory
             Provider: providerDescriptor.ProviderKey,
             DefaultReasoningEffort: ParseReasoningEffort(model.DefaultReasoningEffort),
             SupportedReasoningEfforts: GetSupportedReasoningEfforts(model),
-            Capabilities: capabilities);
+            Capabilities: capabilities)
+        {
+            ContextSizes = model.ContextSizes,
+        };
     }
 
     private static IReadOnlyList<AgentReasoningEffort> GetSupportedReasoningEfforts(

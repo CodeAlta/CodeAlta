@@ -14,7 +14,9 @@ const readModels = async (request: ModelCatalogModelsRequest): Promise<ModelCata
   state.calls.push(request);
   const reply = { status: state.status, epoch: state.replyEpoch, providerId: state.replyProvider ?? request.providerId, availability: "Ready", truncated: state.truncated,
     models: (state.empty ? [] : ["fast", "reasoning", ...Array.from({ length: state.listed }, (_, index) => `listed-${String(index).padStart(3, "0")}`)]).map(id => ({ id: `${request.providerId}-${id}`, name: `${id} model`, description: null, efforts: [],
-      defaultEffort: null, contextTokens: null, inputTokens: null, outputTokens: null, reasoning: null, tools: null, structuredOutput: null, imageInput: null })) };
+      defaultEffort: null, contextTokens: null, contextSizes: id === "fast" ? [128000] : [272000, 1050000],
+      defaultContextTokens: id === "fast" ? 128000 : 272000,
+      inputTokens: null, outputTokens: null, reasoning: null, tools: null, structuredOutput: null, imageInput: null })) };
   if (state.hold) await new Promise<void>(resolve => state.pending.push(resolve));
   return reply;
 };

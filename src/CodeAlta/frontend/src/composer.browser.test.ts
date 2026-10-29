@@ -24,9 +24,10 @@ const scenarios = [
   { name: "composer asks for another provider when the one of the session is not in its space", mac: false, permission: false, outside: true, removed: false, options: false },
   { name: "composer switches a session whose provider was removed to the default provider", mac: false, permission: false, outside: false, removed: true, options: false },
   { name: "composer sets the options of the model of the session", mac: false, permission: false, outside: false, removed: false, options: true },
+  { name: "composer context travels with queued Send and newer unsent Default survives a runtime refresh", mac: false, permission: false, outside: false, removed: false, options: false, contextSize: true },
   { name: "composer compacts only an attached idle session, says why not otherwise, and shows a failed compaction", mac: false, permission: false, outside: false, removed: false, options: false, compaction: true },
 ];
-for (const { name, mac, permission, outside, removed, options, compaction = false } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
+for (const { name, mac, permission, outside, removed, options, compaction = false, contextSize = false } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -109,6 +110,7 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       ${permission ? "window.fixturePermission={effort:'max',mode:null,status:'ok',calls:[]};" : ""}
       ${outside ? "window.fixtureOutsideSpace=true;" : ""}
       ${removed ? "window.fixtureRemoved={replacement:'fixture-provider',switched:[]};" : ""}
+      ${contextSize ? "window.fixtureContext={tokens:null};" : ""}
       ${options ? "window.fixtureModelOptions={context:'300k',fast:'false',calls:[]};" : ""}` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -185,6 +187,71 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       return;
     }
 
+    if (contextSize) {
+      const select = "document.querySelector('#composer-context-fixture-session')";
+      const chip = "document.querySelector('.composer-selection')";
+      const openContext = async () => {
+        await evaluate(`${chip}.click()`);
+        assert.equal(await wait("!!document.querySelector('.composer-selection-more-button')"), true);
+        await evaluate("(() => { const button = document.querySelector('.composer-selection-more-button'); if (button.getAttribute('aria-expanded') === 'false') button.click(); })()");
+        assert.equal(await wait(`!!${select} && !${select}.disabled`), true);
+      };
+      const choose = async (value: string) => {
+        await evaluate(`(() => { const node = ${select}; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(node, ${JSON.stringify(value)});
+          node.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await wait(`${select}.value === ${JSON.stringify(value)}`), true);
+      };
+      await evaluate(`${chip}.click()`);
+      assert.equal(await wait("!!document.querySelector('.composer-selection-more-button')"), true);
+      assert.equal(await evaluate(`!!${select}`), false, "context is not in the main rows");
+      await evaluate("document.querySelector('.composer-selection-more-button').click()");
+      assert.equal(await wait(`!!${select} && !${select}.disabled`), true);
+      assert.equal(await evaluate(`(() => {
+        const context = ${select}.closest('.bp6-form-group');
+        const body = context.parentElement;
+        const subSessions = body.querySelector('.composer-selection-option');
+        return body.classList.contains('composer-selection-more-body')
+          && body.firstElementChild === context && context.nextElementSibling === subSessions
+          && parseFloat(getComputedStyle(body).paddingTop) > 0
+          && context.getBoundingClientRect().top > body.getBoundingClientRect().top;
+      })()`), true, "context follows the More options spacer and immediately precedes sub-sessions");
+      assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.value)`), ["", "272000", "1050000"]);
+      await choose("1050000");
+      assert.equal(await evaluate(`${chip}.textContent.includes('1,050,000')`), false, "capacity is not duplicated in the chip");
+      assert.equal(await evaluate("fixture.sendCalls.length"), 0, "choosing context calls no model");
+      await evaluate(`${chip}.click(); fixture.startRun()`);
+      assert.equal(await wait(running), true);
+      await write("expanded queued"); await enter();
+      assert.equal(await wait(`fixture.rows().some(row => row.endsWith(':expanded queued'))`), true);
+      await openContext();
+      await choose("");
+      await evaluate(`${chip}.click(); fixture.finishRun()`);
+      assert.equal(await wait(`fixture.sendCalls.length === 1`), true);
+      assert.equal(await evaluate("fixture.sendCalls[0].selection.context.tokens"), 1050000, "queue owns its original context");
+      await openContext();
+      assert.equal(await wait(`!!${select} && !${select}.disabled && ${select}.value === ''`), true, "newer unsent Default was not overwritten");
+      await evaluate(`${chip}.click(); fixture.finishRun()`);
+      assert.equal(await wait(idle), true);
+      await write("default next"); await enter();
+      assert.equal(await wait("fixture.sendCalls.length === 2"), true);
+      assert.equal(await evaluate("fixture.sendCalls[1].selection.context.tokens"), null, "Default is an explicit clear on Send");
+      await evaluate("fixture.finishRun(); fixtureContext.tokens = 272000");
+      await openContext();
+      assert.equal(await wait(`!!${select} && !${select}.disabled && ${select}.value === '272000'`), true,
+        "a context-only change from another window refreshes a settled selection");
+      await choose("1050000");
+      const contextReads = await evaluate("fixtureChoiceReads");
+      await evaluate("fixtureContext.tokens = null");
+      assert.equal(await wait(`fixtureChoiceReads > ${contextReads} && !${select}.disabled && ${select}.value === '1050000'`), true, "an unsent context remains chosen");
+      await evaluate("window.fixtureChoicesFail = true; fixtureContext.tokens = 272000");
+      assert.equal(await wait(`${select}.selectedOptions[0].textContent.includes('Unverified')`), true,
+        "a failed refresh retains the choice but cannot keep advertising stale endpoints");
+      assert.equal(await evaluate(`${select}.options.length`), 2, "only Default and the retained unverified choice remain");
+      await choose("");
+      assert.deepEqual(exceptions, []);
+      return;
+    }
+
     if (options) {
       // The options are under the reasoning: a list for the context, a switch for the fast mode.
       const chip = "document.querySelector('.composer-selection')";
@@ -192,6 +259,7 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       const fast = "document.querySelector('#composer-option-fixture-session-fast')";
       await evaluate(`${chip}.click()`);
       assert.equal(await wait(`!!${context} && !!${fast}`), true, "the form of the Agent chip has the options of the model");
+      assert.equal(await evaluate("document.querySelector('#composer-context-fixture-session')"), null, "ACP keeps one context control");
       assert.equal(await evaluate(`${context}.value`), "300k");
       assert.equal(await evaluate(`${fast}.checked`), false);
       await evaluate(`(() => { const select = ${context}; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, '1m');

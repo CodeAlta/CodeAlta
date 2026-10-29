@@ -24,6 +24,12 @@ public sealed record OwnedDraftPrompts(IReadOnlyList<OwnedPromptChoice> Prompts,
 /// </param>
 public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<AgentReasoningEffort> Efforts)
 {
+    /// <summary>Gets verified selectable context capacities, or null when the adapter has no contract.</summary>
+    public AgentModelContextSizes? ContextSizes { get; init; }
+
+    /// <summary>Gets the validated capacity of Default, including the matching provider preference.</summary>
+    public long? DefaultContextTokens { get; init; }
+
     /// <summary>Gets observed image capability: true available, false unsupported, null unknown.</summary>
     public bool? ImageInput { get; init; }
 
@@ -175,10 +181,13 @@ public sealed partial class OwnedSessionCommandService
         // CodeAlta, whose requests the host answers: where the mode of a session decides that, it offers the modes of the host.
         var modes = configured?.PermissionModes.Where(static mode => !ProviderOnlyPermissionModes.Contains(mode)).Take(16).ToArray() ?? [];
         if (modes.Length == 0 && _runtime.SessionPermissionModes) modes = [.. SessionPermissionModes.HostModes];
-        return new(new(provider, session.AgentPromptId ?? "default", modelId, effort) { PermissionMode = session.PermissionMode }, prompts,
+        return new(new(provider, session.AgentPromptId ?? "default", modelId, effort) { PermissionMode = session.PermissionMode, Context = new(session.ContextWindowTokens) }, prompts,
             models.Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])
                 { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort,
-                  EffortsComplete = AgentReasoningEffortCapability.IsListComplete(m), Options = m.Options?.Take(16).ToArray() ?? [] }).ToArray())
+                  EffortsComplete = AgentReasoningEffortCapability.IsListComplete(m), Options = m.Options?.Take(16).ToArray() ?? [],
+                  ContextSizes = m.ContextSizes,
+                  DefaultContextTokens = AgentModelContextSizes.DefaultCapacity(m,
+                      configured?.ContextPreferences?.TryGetValue(m.Id, out var preferred) == true ? preferred : null) }).ToArray())
         {
             PermissionModes = modes,
             // What a session without a mode runs in: the mode of its provider, else the one that names the policy of the host.
@@ -290,9 +299,10 @@ public sealed partial class OwnedSessionCommandService
             || !choices.Prompts.Any(p => p.Id == selection.AgentPromptId)) return false;
         if (selection.PermissionMode is { } mode && mode != OwnedSessionSelection.ProviderPermissionMode
             && !choices.PermissionModes.Contains(mode, StringComparer.Ordinal)) return false;
+        var model = choices.Models.FirstOrDefault(m => m.Id == (selection.ModelId ?? choices.Current.ModelId));
+        if (selection.Context?.Tokens is { } tokens && model?.ContextSizes?.Supports(tokens) != true) return false;
         // No model keeps the session's own, which the send completes with a model of the provider.
         if (selection.ModelId is null) return selection.ReasoningEffort is null;
-        var model = choices.Models.FirstOrDefault(m => m.Id == selection.ModelId);
         // A model that lists no effort takes the one it is given, as the alta tool, the automations and the work items
         // give it one: its provider did not say which efforts it has, and the turn passes the effort on.
         return model is not null && (selection.ReasoningEffort is null || model.Efforts.Count == 0
