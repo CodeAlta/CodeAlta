@@ -305,6 +305,8 @@ internal static class AgentModelMetadataEnricher
         SetWhenValue(capabilities, "supportsReasoning", modelOverride.SupportsReasoning);
         SetWhenValue(capabilities, "supportsToolCall", modelOverride.SupportsToolCall);
         SetWhenValue(capabilities, "supportsAttachments", modelOverride.SupportsAttachments);
+        // The model reads images and attachments: images are what the composer and the tools check (#57).
+        SetWhenValue(capabilities, "supportsImageInput", modelOverride.SupportsAttachments);
         SetWhenValue(capabilities, "supportsStructuredOutput", modelOverride.SupportsStructuredOutput);
     }
 

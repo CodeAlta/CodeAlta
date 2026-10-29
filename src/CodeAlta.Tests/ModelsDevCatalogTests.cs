@@ -87,6 +87,24 @@ public sealed class ModelsDevCatalogTests
     }
 
     [TestMethod]
+    public void AgentModelMetadataEnricher_SupportsAttachmentsOverride_IsTheImageInputOfTheModel()
+    {
+        // A local model no catalog knows reads images when the override says it does (#57), and not when it says not.
+        var model = new AgentModelInfo(@"E:\llama.cpp\models\unsloth_Qwen3.8-27B-GGUF\Qwen3.8-27B-Q6_K.gguf", Provider: "none");
+        Assert.IsNull(AgentImageInputCapability.Read(model));
+
+        var reads = AgentModelMetadataEnricher.EnrichModel(model, catalog: null, modelsDevProviderId: null,
+            new Dictionary<string, AgentModelOverride>(StringComparer.OrdinalIgnoreCase) { [model.Id] = new() { SupportsAttachments = true } });
+        var readsNot = AgentModelMetadataEnricher.EnrichModel(
+            model with { Capabilities = new Dictionary<string, object?> { ["supportsImageInput"] = true } },
+            catalog: null, modelsDevProviderId: null,
+            new Dictionary<string, AgentModelOverride>(StringComparer.OrdinalIgnoreCase) { [model.Id] = new() { SupportsAttachments = false } });
+
+        Assert.AreEqual(true, AgentImageInputCapability.Read(reads));
+        Assert.AreEqual(false, AgentImageInputCapability.Read(readsNot));
+    }
+
+    [TestMethod]
     public async Task AgentModelMetadataEnricher_AppliesOverridesForCanonicalModelAliases()
     {
         await using var catalog = CreateCatalog();
