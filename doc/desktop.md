@@ -243,10 +243,11 @@ icons, localization, Markdown) stays at the root.
   in place.
 - No layout read (`getBoundingClientRect`, `scrollTop`) in an effect that runs on every render.
 - **Window regions never move a box.** Everything with `app-region` (the tab strips of the title bar, the rail,
-  dialogs, popovers, menus, toasts) is sent to the native window again by Chromium after any frame in which one of
+  dialogs, popovers, menus) is sent to the native window again by Chromium after any frame in which one of
   its boxes moved, and on Windows the host's UI thread then spends kernel time on every frame, until the mouse of the
   whole desktop lags. What animates there changes opacity, color or paint only (a painted angle, `clip-path`), and
-  `regionChurn.browser.test.ts` measures it.
+  `regionChurn.browser.test.ts` measures it. Toasts are no region: they sit below the title bar, and Blueprint slides
+  each one in, the ones of every start included.
 - A performance change is measured in the developer instance before and after: the CPU of the `alta` process, and
   `regionChurnScript` run in the page over `codealta-dev`. A fix whose "before" was not seen to be bad is not a fix.
 

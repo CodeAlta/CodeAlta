@@ -34,3 +34,22 @@ test("nothing that animates in a region of the window moves a box", { skip: !edg
     assert.deepEqual(page.problems, []);
   }, options);
 });
+
+// The toasts of every start (the cleanup of sessions, of the scratchpad) slid in as regions of the window: each frame of
+// their entrance sent the regions to the window again, a burst of kernel work at the start that the mouse of the whole
+// desktop waited for. A toast sits below the title bar: it is no region.
+test("a toast that slides in moves no box of a region of the window", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('#tab') !== null`, "the title bar");
+    await page.evaluate(`(() => { const toast = document.createElement('div'); toast.id = 'sliding-toast'; toast.className = 'bp6-toast bp6-overlay-content';
+      toast.style.cssText = 'position: absolute; left: 400px; top: 46px; width: 320px; height: 40px;'; toast.textContent = 'Session cleanup is running';
+      document.querySelector('.ide-shell').append(toast);
+      const sheet = new CSSStyleSheet(); sheet.replaceSync('@keyframes slide-in { from { transform: translateY(-40px); } to { transform: translateY(0); } } #sliding-toast { animation: slide-in .3s infinite; }');
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]; })()`);
+    assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('#sliding-toast')).getPropertyValue('app-region')`), "none", "a toast is no region");
+    const churn = await page.evaluate<Churn>(regionChurnScript(1000));
+    assert.ok(churn.frames > 30, `the regions were measured: ${JSON.stringify(churn)}`);
+    assert.equal(churn.moved, 0, `the toast moved a box of a region of the window: ${JSON.stringify(churn)}`);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});

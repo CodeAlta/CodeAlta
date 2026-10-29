@@ -1896,7 +1896,9 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 .shell-notice { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); font-size: 12px; }
 .shell-notice[role="alert"] { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
 /* Windows, menus and popovers that reach into the title bar stay clickable there. */
-.app-window, dialog[open]:not(.app-window-layer), .bp6-overlay-content, .bp6-toast, .session-tab-popup { app-region: no-drag; }
+/* A toast is no region: it sits below the title bar, and each frame of a toast sliding in sent the regions to the
+   window again, a window move in the kernel that the mouse of the whole desktop waits for. */
+.app-window, dialog[open]:not(.app-window-layer), .bp6-overlay-content:not(.bp6-toast), .session-tab-popup { app-region: no-drag; }
 
 /* Session tabs: browser-style tabs resting on the content they select. */
 .ide-shell .flexlayout__tabset_tabbar_outer_top { height: 34px; padding: 0; align-items: stretch; border-bottom: 0; background: var(--panel); box-shadow: inset 0 -1px var(--line); font-size: 12px; }
