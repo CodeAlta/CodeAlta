@@ -2,6 +2,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Harness;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Orchestration.Runtime.SystemPrompts;
 using CodeAlta.Plugin.CodexCli;
 
 namespace CodeAlta.Tests;
@@ -84,6 +85,56 @@ public sealed class CodexCliLiveTests
         fixture.OnToolCall = null;
         var conversation = await fixture.RunAsync([User("Run the shell command `sleep 60`, then answer done."), User("Forget that. Answer with one word: stopped.")]);
         StringAssert.Contains(Text(conversation[^1]).ToLowerInvariant(), "stopped");
+    }
+
+    [TestMethod]
+    public async Task Turn_GeneratesAnImage_ShownAsTheImageOfItsCall()
+    {
+        await using var fixture = LiveFixture.Create(turns: true);
+
+        var conversation = await fixture.RunAsync("Generate a small image of a red circle on a white background with your image generation tool, then answer with one word: done.");
+
+        var call = conversation.SelectMany(static message => message.Parts.OfType<AgentMessagePart.ToolCall>()).First(static call => call.Name == "image_generation");
+        var result = conversation.SelectMany(static message => message.Parts.OfType<AgentMessagePart.ToolResult>()).Single(part => part.CallId == call.CallId).Result;
+        Assert.IsTrue(result.Success, result.Error);
+        var image = result.Items.OfType<AgentToolResultItem.Image>().Single();
+        Assert.AreEqual("image/png", image.MediaType);
+        Assert.IsGreaterThan(100, Convert.FromBase64String(image.Base64Data).Length);
+        Console.WriteLine(((AgentToolResultItem.Text)result.Items[0]).Value);
+    }
+
+    [TestMethod]
+    public async Task Turn_ACommit_EndsWithTheTrailerOfCodeAlta_BesideTheOneOfCodex()
+    {
+        await using var fixture = LiveFixture.Create(turns: true);
+        fixture.Mode = "bypassPermissions";
+        // The line the instructions of a session have while the co-author setting is on.
+        fixture.DeveloperInstructions = $"Be brief.\n- Commit messages: end the message of every git commit you create with the trailer `{SystemPromptBuilder.CoAuthorTrailer}`, in its last paragraph with the other trailers. Add it beside the co-author or attribution lines your own tools ask for, never in place of them.";
+        foreach (var arguments in new[] { "init -q", "config user.name Test", "config user.email test@example.invalid", "config commit.gpgsign false" })
+        {
+            await GitAsync(fixture.WorkingDirectory, arguments);
+        }
+
+        await fixture.RunAsync("Create the file note.txt with the text hello, then commit it with the subject \"Add the note\". Answer with one word: done.");
+
+        var message = await GitAsync(fixture.WorkingDirectory, "log -1 --format=%B");
+        Console.WriteLine(message);
+        var trailers = message.TrimEnd().Split("\n\n")[^1];
+        Assert.AreEqual(1, Count(trailers, SystemPromptBuilder.CoAuthorTrailer), message);
+        // The trailer of Codex is there only when the ChatGPT workspace turns its attribution on: then once, beside it.
+        Assert.IsLessThanOrEqualTo(1, Count(message, "Co-authored-by: Codex <noreply@openai.com>"), message);
+        Assert.AreEqual(Count(message, "Co-authored-by: Codex <noreply@openai.com>"), Count(trailers, "Co-authored-by: Codex <noreply@openai.com>"), message);
+    }
+
+    private static int Count(string text, string value) => text.Split(value).Length - 1;
+
+    private static async Task<string> GitAsync(string directory, string arguments)
+    {
+        using var git = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git", arguments) { WorkingDirectory = directory, RedirectStandardOutput = true, UseShellExecute = false })!;
+        var output = await git.StandardOutput.ReadToEndAsync();
+        await git.WaitForExitAsync();
+        Assert.AreEqual(0, git.ExitCode, $"git {arguments}");
+        return output.ReplaceLineEndings("\n");
     }
 
     private static string DescribeRequest(AgentPermissionRequest request) => request switch
@@ -220,9 +271,15 @@ public sealed class CodexCliLiveTests
             await _endpoints.DisposeAsync();
             try
             {
+                // Git writes its objects read-only, which Windows does not delete.
+                foreach (var file in Directory.EnumerateFiles(WorkingDirectory, "*", SearchOption.AllDirectories))
+                {
+                    File.SetAttributes(file, FileAttributes.Normal);
+                }
+
                 Directory.Delete(WorkingDirectory, recursive: true);
             }
-            catch (IOException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
             }
         }
