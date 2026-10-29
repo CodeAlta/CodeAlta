@@ -100,9 +100,12 @@ const fixture = {
     void request.completion?.then(value => { asked.outcome = value; }, () => { asked.outcome = null; });
     return asked;
   },
-  /** The pane of the session leaves and comes back, as it does when the window shows another space and then this one again. */
+  /**
+   * The pane of the session leaves and comes back, as it does when the window shows another space: out of sight
+   * (`hidden`), as the pane that sends the queued prompts of a session without a tab, or shown again.
+   */
   unmount() { app.render(null); },
-  mount() { app.render(shell()); },
+  mount(hidden = false) { app.render(shell(hidden)); },
 };
 Object.assign(window, { fixture });
 
@@ -120,8 +123,8 @@ const props = {
       pendingAgentPromptId: "default", activity: null },
     runtimeInstanceId: runtime, coordinatorTransitionInProgress: false } satisfies SessionRuntimeStateResponse)),
 };
-const shell = () => createElement("div", { id: "workspace-shell", className: "ide-shell" },
+const shell = (hidden = false) => createElement("div", { id: "workspace-shell", className: "ide-shell" },
   createElement("div", { className: "session-workspace" },
-    createElement("div", { className: "composer-region" }, createElement(OwnedSessionPanel, props))));
+    createElement("div", { className: "composer-region" }, createElement(OwnedSessionPanel, { ...props, observing: !hidden, active: !hidden }))));
 const app = createRoot(document.getElementById("app")!);
 app.render(shell());

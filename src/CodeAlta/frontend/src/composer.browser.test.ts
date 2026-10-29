@@ -164,12 +164,15 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       await evaluate("new Promise(resolve=>setTimeout(()=>resolve(true),200))");
       assert.deepEqual(await rows(), ["Queue:waiting:1:Carry out the task."]);
       assert.equal(await evaluate("window.asked.outcome===undefined"), true, "a pane that leaves does not refuse the prompt it queued");
-      // The pane is back: the turn ends and the prompt is sent, which is the session taking it.
-      await evaluate("fixture.mount()");
-      assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${running}`), true);
+      // The pane is back out of sight, as the one that sends the queued prompts of a session of another space: the
+      // turn ends and the prompt is sent with the selection it was queued with, which is the session taking it.
+      await evaluate("fixture.mount(true)");
+      assert.equal(await wait("document.querySelector('.composer-status-line')?.textContent.startsWith('Thinking')"), true);
       await evaluate("fixture.finishRun()");
-      assert.equal(await wait("fixture.sendCalls.length===1 && window.asked.outcome===true"), true);
+      assert.equal(await wait("fixture.sendCalls.length===1 && window.asked.outcome===true"), true,
+        JSON.stringify(await evaluate("JSON.stringify(window.asked)")));
       assert.deepEqual(await sends(), ["Carry out the task."]);
+      assert.equal(await evaluate("fixture.sendCalls[0].selection?.providerKey"), "fixture-provider");
       assert.equal(await wait("fixture.rows().length===0"), true);
       assert.deepEqual(exceptions, []);
       return;
