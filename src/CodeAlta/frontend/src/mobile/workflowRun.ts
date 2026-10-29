@@ -36,6 +36,10 @@ export type WorkflowRun = Readonly<{
   startedAt: string | null;
   endedAt: string | null;
   durationMs: number | null;
+  /** What the script showed the user (`present()`), as Markdown, in its order. */
+  presented: readonly string[];
+  /** Whether the host started the run to run a script of the library for the user: its value is then for the user. */
+  forUser: boolean;
   version: string;
 }>;
 
@@ -74,6 +78,8 @@ export function foldWorkflows(events: readonly TimelineEvent[]): WorkflowRun[] {
 export function workflowRun(runId: string, records: readonly TimelineEvent[]): WorkflowRun {
   let callId: string | null = null, title: string | null = null, declaredTitle: string | null = null, message: string | null = null;
   let state: WorkflowState = "running", waiting: WorkflowWait | null = null, endedAt: string | null = null, durationMs: number | null = null;
+  let forUser = false;
+  const presented: string[] = [];
   const declared: { id: string; title: string }[] = [];
   const instances: Instance[] = [];
   const sessions: WorkflowSession[] = [];
@@ -83,7 +89,8 @@ export function workflowRun(runId: string, records: readonly TimelineEvent[]): W
     callId ??= facts.callId ?? null;
     const kind = event.kind.slice("workflow.".length);
     switch (kind) {
-      case "runStarted": title ??= facts.title?.trim() || event.text?.trim() || null; break;
+      case "runStarted": title ??= facts.title?.trim() || event.text?.trim() || null; forUser ||= facts.forUser === true; break;
+      case "presented": if (event.text?.trim()) presented.push(event.text); break;
       case "stepsDeclared":
         declaredTitle ??= facts.title?.trim() || null;
         for (const step of facts.steps ?? []) if (step?.id && !declared.some(known => known.id === step.id)) declared.push({ id: step.id, title: step.title || step.id });
@@ -131,7 +138,7 @@ export function workflowRun(runId: string, records: readonly TimelineEvent[]): W
   return {
     runId, callId, title: title ?? declaredTitle, state: !ended(state) && waiting ? "waiting" : state, waiting, steps, sessions,
     done: steps.filter(item => ended(item.state)).length, total: steps.length, current: now?.title ?? null, message,
-    startedAt: records[0]?.at ?? null, endedAt, durationMs, version: `${records.length}:${records.at(-1)?.seq ?? 0}`,
+    startedAt: records[0]?.at ?? null, endedAt, durationMs, presented, forUser, version: `${records.length}:${records.at(-1)?.seq ?? 0}`,
   };
 }
 

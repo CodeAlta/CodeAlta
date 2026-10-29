@@ -635,7 +635,9 @@ public sealed class MobileSessionsTests
                     ["runId"] = "run-1", ["callId"] = "call-1", ["title"] = "Compare", ["steps"] = new JsonArray(new JsonObject { ["id"] = "research", ["title"] = "Research" }),
                 }),
                 With(Event(8, "workflow.stepEnded", ""), new JsonObject { ["runId"] = "run-1", ["callId"] = "call-1", ["stepId"] = "research", ["status"] = "completed", ["durationMs"] = 1200 }),
-                Event(9, "assistant.message", "Here: ![The shot](/tmp/shot.png)\n\n```\n![not](a.png)\n```")));
+                Event(9, "assistant.message", "Here: ![The shot](/tmp/shot.png)\n\n```\n![not](a.png)\n```"),
+                With(Event(10, "workflow.runStarted", "Review"), new JsonObject { ["runId"] = "run-2", ["callId"] = "call-3", ["forUser"] = true }),
+                With(Event(11, "workflow.presented", "## Findings\n- one"), new JsonObject { ["runId"] = "run-2", ["callId"] = "call-3" })));
         var sessions = new MobileSessions(alta, new FakeSpaces(), new MobileLive());
 
         var events = (JsonArray)(await sessions.EventsAsync("a", 0, default))!["events"]!;
@@ -654,6 +656,8 @@ public sealed class MobileSessionsTests
         var linked = (JsonArray)events[8]!["images"]!;
         Assert.AreEqual(1, linked.Count, "A picture written in code is none.");
         Assert.AreEqual(("0", "The shot", "/tmp/shot.png"), ((string?)linked[0]!["id"], (string?)linked[0]!["title"], (string?)linked[0]!["src"]));
+        Assert.IsTrue((bool?)events[9]!["workflow"]!["forUser"], "A run the host started for the user says so.");
+        Assert.AreEqual(("## Findings\n- one", "run-2"), ((string?)events[10]!["text"], (string?)events[10]!["workflow"]!["runId"]), "What a script presented is the text of its record.");
     }
 
     [TestMethod]

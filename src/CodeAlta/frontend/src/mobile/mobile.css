@@ -546,6 +546,10 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .host-source .ico:first-child { flex: none; }
 .host-body { padding: .125rem .75rem .5rem; border-top: 1px solid var(--line); }
 .host-result { color: var(--muted); font-size: .8125rem; }
+/* The value a script returned: data for the agent, folded, as it is. */
+.host-value { margin: .25rem 0 0; }
+.host-value > summary { cursor: pointer; color: var(--muted); font-size: .8125rem; }
+.host-value > pre { margin: .25rem 0 0; padding: .625rem; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); font: .8rem/1.5 var(--code-font); white-space: pre; }
 .msg-host > .thumbs, .msg-host > .msg-files { padding: 0 .75rem .5rem; }
 
 /* Images: a fixed box each, so the timeline does not move while they load. */
@@ -593,6 +597,8 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .wf-chevron { color: var(--muted); font-size: .875rem; transition: transform .15s; } .wf-head[aria-expanded="true"] .wf-chevron { transform: rotate(90deg); }
 .wf-bar { height: 3px; margin: 0 .625rem .375rem; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
 .wf-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--wf-tone); transition: width .3s; }
+/* What the script presented: whole, as an answer, under the line of its run. */
+.wf-presented { display: flex; flex-direction: column; gap: .5rem; padding: .25rem .625rem .5rem; border-top: 1px solid var(--line); min-width: 0; }
 .wf-body { display: flex; flex-direction: column; gap: .25rem; padding: .25rem .625rem .5rem; border-top: 1px solid var(--line); }
 .wf-steps, .wf-sessions { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
 .wf-step, .wf-session { --step-tone: var(--muted); display: flex; align-items: center; gap: .5rem; min-width: 0; min-height: 2rem; font-size: .8125rem; }

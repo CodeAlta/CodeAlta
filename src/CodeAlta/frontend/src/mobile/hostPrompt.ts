@@ -7,19 +7,21 @@ import { promptProvenance, promptProvenanceIds, promptProvenanceTitle } from "..
 import { parseWorkflowResult, type WorkflowResult } from "../workflows/scriptResult";
 import type { TimelineEvent } from "./contract";
 import type { TimelineIconName } from "./timelineIcons";
+import type { WorkflowRun } from "./workflowRun";
 
 /** How a background job ended, for the chip of its card: its outcome, its exit code and how long it ran. */
 export type JobOutcome = Readonly<{ state: "succeeded" | "failed" | "stopped"; label: string; exitCode: number | null; duration: string | null }>;
 
 /**
  * A message of the host. `job`: the end of a background job; `agent`: a message of another agent session (`sourceSessionId`,
- * when known, opens it); `workflow`: the result of a script that ended in the background; `host`: any other provenance (a
+ * when known, opens it); `workflow`: the result of a script that ended in the background, whose body is what the script
+ * presented (its value is data for the agent, shown apart), with its run when its records are there; `host`: any other provenance (a
  * reminder, a review round, a model fallback, an automation...), titled by it.
  */
 export type HostPrompt =
   | Readonly<{ kind: "job"; title: string; icon: TimelineIconName; job: JobResult; outcome: JobOutcome }>
   | Readonly<{ kind: "agent"; title: string; icon: TimelineIconName; sourceSessionId: string | null; label: string | null; body: string }>
-  | Readonly<{ kind: "workflow"; title: string; icon: TimelineIconName; result: WorkflowResult; body: string }>
+  | Readonly<{ kind: "workflow"; title: string; icon: TimelineIconName; result: WorkflowResult; body: string; run?: WorkflowRun | null }>
   | Readonly<{ kind: "host"; title: string; icon: TimelineIconName; provenance: string; body: string }>;
 
 // The icons of the provenances the phone knows; another one gets the icon of the host.
@@ -62,7 +64,7 @@ export function hostPromptOf(event: Pick<TimelineEvent, "kind" | "text" | "prove
   const job = parseJobResult(text);
   if (job) return { kind: "job", title: "Background job", icon: "terminal", job, outcome: jobOutcome(job) };
   const workflow = provenance === promptProvenanceIds.workflow ? parseWorkflowResult(text) : null;
-  if (workflow) return { kind: "workflow", title: "Workflow", icon: "code", result: workflow, body: workflow.result ?? workflow.notes };
+  if (workflow) return { kind: "workflow", title: "Workflow", icon: "code", result: workflow, body: workflow.presented ?? "" };
   if (provenance) return { kind: "host", title: provenanceTitle(provenance), icon: provenanceIcon(provenance), provenance, body: text };
   return null;
 }

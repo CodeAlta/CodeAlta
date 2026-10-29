@@ -7085,9 +7085,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Add("inputTokens", workflow.InputTokens);
         Add("outputTokens", workflow.OutputTokens);
         Add("wakeAt", workflow.WakeAt);
+        Add("forUser", workflow.ForUser);
         Add("steps", workflow.Steps?.Select(static step => new { id = step.Id, title = step.Title, after = step.After, each = step.Each }).ToArray());
         var kind = workflow.Kind.ToString();
-        return new MappedEvent($"workflow.{char.ToLowerInvariant(kind[0])}{kind[1..]}", "workflow", workflow.Title ?? workflow.Message, metadata);
+        // What the script showed the user (present()) is the text of its record.
+        var text = workflow.Kind == AgentWorkflowEventKind.Presented ? workflow.Markdown : workflow.Title ?? workflow.Message;
+        return new MappedEvent($"workflow.{char.ToLowerInvariant(kind[0])}{kind[1..]}", "workflow", text, metadata);
     }
 
     private static MappedEvent MapAgentEvent(AgentEvent agentEvent)

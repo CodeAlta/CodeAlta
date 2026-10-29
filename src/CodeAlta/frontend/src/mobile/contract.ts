@@ -99,6 +99,8 @@ export type WorkflowStepDeclaration = Readonly<{ id: string; title: string }>;
 export type WorkflowFacts = Readonly<{
   runId: string; callId?: string | null; stepId?: string | null; childSessionId?: string | null; status?: string | null; title?: string | null;
   message?: string | null; durationMs?: number | null; wakeAt?: string | null; steps?: readonly WorkflowStepDeclaration[] | null;
+  /** For the start of a run: the host started it to run a script of the library for the user, so its value is for the user. */
+  forUser?: boolean | null;
 }>;
 
 /**

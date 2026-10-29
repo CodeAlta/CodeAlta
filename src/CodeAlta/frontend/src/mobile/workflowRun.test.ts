@@ -48,3 +48,13 @@ test("a run CodeAlta ended while it ran: what still ran was interrupted; runs ar
   assert.deepEqual([run.state, run.steps[0].state, run.sessions[0].state], ["interrupted", "interrupted", "interrupted"]);
   assert.deepEqual([second.runId, second.title, second.callId, second.state], ["run-2", "Other", "call-9", "running"]);
 });
+
+test("what a run presented, in its order, and whether the host started it for the user", () => {
+  const records = [record("runStarted", 0, { title: "Review", forUser: true }), record("presented", 1, { stepId: "read" }, "## Reading"),
+    record("presented", 2, {}, "  "), record("presented", 3, { stepId: "report" }, "## Findings\n- one")];
+  const [run] = foldWorkflows(records);
+  assert.deepEqual(run.presented, ["## Reading", "## Findings\n- one"], "an empty part shows nothing");
+  assert.equal(run.forUser, true);
+  const [ofAgent] = foldWorkflows([record("runStarted", 0, { title: "Read" })]);
+  assert.deepEqual([ofAgent.presented, ofAgent.forUser], [[], false], "a run of an agent presented nothing yet");
+});

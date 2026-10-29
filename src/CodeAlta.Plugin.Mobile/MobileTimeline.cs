@@ -145,6 +145,8 @@ internal static partial class MobileTimeline
         if (MobileAlta.Text(metadata, "message") is { } message) workflow["message"] = message.Length > MaximumWords ? message[..MaximumWords] + "…" : message;
         foreach (var name in (string[])["durationMs", "calls", "inputTokens", "outputTokens"])
             if (metadata[name] is JsonValue value && value.TryGetValue<long>(out var number)) workflow[name] = number;
+        // A run the host started for the user: its value is for the user, as the desktop shows it.
+        if (metadata["forUser"] is JsonValue forUser && forUser.TryGetValue<bool>(out var ofUser) && ofUser) workflow["forUser"] = true;
         if (metadata["steps"] is JsonArray steps)
         {
             workflow["steps"] = new JsonArray([.. steps.OfType<JsonObject>().Take(MaximumSteps)

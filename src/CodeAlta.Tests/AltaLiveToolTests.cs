@@ -3059,6 +3059,7 @@ public sealed partial class AltaLiveToolTests
             new AgentActivityEvent(providerId, sessionId, timestamp, new AgentRunId("run"), AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "call-1", null, "view_image", null),
             new AgentContentCompletedEvent(providerId, sessionId, timestamp, new AgentRunId("run"), AgentContentKind.ToolOutput, "out-1", "call-1", "the text of the tool", toolDetails.RootElement.Clone()),
             new AgentContentCompletedEvent(providerId, sessionId, timestamp, new AgentRunId("run"), AgentContentKind.ToolOutput, "out-2", "call-1", "no image here"),
+            new AgentWorkflowEvent(providerId, sessionId, timestamp, null, AgentWorkflowEventKind.RunStarted, "run-7f3c2a") { CallId = "call-1", Title = "Compare", ForUser = true },
             new AgentWorkflowEvent(providerId, sessionId, timestamp, null, AgentWorkflowEventKind.StepsDeclared, "run-7f3c2a")
             {
                 CallId = "call-1", Title = "Compare", Steps = [new AgentWorkflowStep("research", "Research")],
@@ -3067,6 +3068,7 @@ public sealed partial class AltaLiveToolTests
             {
                 CallId = "call-1", ChildSessionId = "child-1", StepId = "research", Status = "completed", DurationMs = 1200,
             },
+            new AgentWorkflowEvent(providerId, sessionId, timestamp, null, AgentWorkflowEventKind.Presented, "run-7f3c2a") { CallId = "call-1", StepId = "research", Markdown = "## Findings\n- one" },
         ]).ConfigureAwait(false);
         var runtime = CreateRuntime(options, providerId);
         await using var _ = runtime.ConfigureAwait(false);
@@ -3080,7 +3082,7 @@ public sealed partial class AltaLiveToolTests
 
         Assert.AreEqual(AltaExitCodes.Success, events.ExitCode, events.Stderr);
         var records = ReadJsonLines(events.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.event").ToArray();
-        CollectionAssert.AreEqual(new[] { "user.message", "user.message", "tool.output", "workflow.stepsDeclared", "workflow.sessionEnded" },
+        CollectionAssert.AreEqual(new[] { "user.message", "user.message", "tool.output", "workflow.runStarted", "workflow.stepsDeclared", "workflow.sessionEnded", "workflow.presented" },
             records.Select(static record => record.GetProperty("kind").GetString()).ToArray(), "The output without an image is left out; the records of the script are there.");
         Assert.AreEqual("background-job", records[0].GetProperty("metadata").GetProperty("provenance").GetString());
         Assert.AreEqual("agent-session", records[1].GetProperty("metadata").GetProperty("provenance").GetString());
@@ -3089,10 +3091,13 @@ public sealed partial class AltaLiveToolTests
         var image = records[2].GetProperty("metadata").GetProperty("images")[0];
         Assert.AreEqual(("Screenshot", "image/png", "shot.png"), (image.GetProperty("title").GetString(), image.GetProperty("mediaType").GetString(), image.GetProperty("id").GetString()));
         Assert.AreEqual("call-1", records[2].GetProperty("metadata").GetProperty("parentActivityId").GetString());
-        var declared = records[3].GetProperty("metadata");
+        Assert.IsTrue(records[3].GetProperty("metadata").GetProperty("forUser").GetBoolean(), "A run the host started for the user says so: its value is for the user.");
+        var declared = records[4].GetProperty("metadata");
         Assert.AreEqual(("run-7f3c2a", "call-1", "research"), (declared.GetProperty("runId").GetString(), declared.GetProperty("callId").GetString(), declared.GetProperty("steps")[0].GetProperty("id").GetString()));
-        var ended = records[4].GetProperty("metadata");
+        var ended = records[5].GetProperty("metadata");
         Assert.AreEqual(("child-1", "completed", 1200L), (ended.GetProperty("childSessionId").GetString(), ended.GetProperty("status").GetString(), ended.GetProperty("durationMs").GetInt64()));
+        Assert.AreEqual("## Findings\n- one", records[6].GetProperty("content")[0].GetProperty("text").GetString(), "What the script presented is the text of its record.");
+        Assert.AreEqual("research", records[6].GetProperty("metadata").GetProperty("stepId").GetString());
     }
 
     [TestMethod]

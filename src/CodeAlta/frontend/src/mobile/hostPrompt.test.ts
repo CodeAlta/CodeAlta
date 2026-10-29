@@ -44,7 +44,12 @@ test("a message of another agent names the session it comes from, by its envelop
 test("the result of a script of the background is a workflow; another provenance is titled by it", () => {
   const workflow = hostPromptOf({ kind: "user.message", provenance: "workflow", text: "Script run-7f3c2a (Nightly) ended:\nScript completed · 2.0 s · 3 calls\n\nResult:\nAll **good**." });
   assert.equal(workflow?.kind, "workflow");
-  if (workflow?.kind === "workflow") { assert.equal(workflow.result.title, "Nightly"); assert.equal(workflow.body, "All **good**."); }
+  // What it returned is data for the agent: the card shows what the script presented, and its value apart.
+  if (workflow?.kind === "workflow") { assert.equal(workflow.result.title, "Nightly"); assert.equal(workflow.body, ""); assert.equal(workflow.result.result, "All **good**."); }
+  const presented = hostPromptOf({ kind: "user.message", provenance: "workflow",
+    text: "Script run-1 (Review) ended:\nScript completed · 4.0 s · 2 calls\nPresented to the user (they saw it on the card of the run; do not repeat it):\n````markdown\n## Findings\n- one\n````\nResult:\n```json\n{ \"issues\": 1 }\n```" });
+  if (presented?.kind === "workflow") { assert.equal(presented.body, "## Findings\n- one"); assert.match(presented.result.result ?? "", /"issues"/); }
+  else assert.fail("a workflow");
   const titles = ["reminder", "user-review", "model-fallback", "automation", "user-answer", "plugin", "code-review"].map(provenance => {
     const read = hostPromptOf({ kind: "user.message", provenance, text: "Check the build." });
     return read?.kind === "host" ? [read.title, read.icon] : null;

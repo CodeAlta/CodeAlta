@@ -106,7 +106,9 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     event("user.message", job, 100, { provenance: "background-job" }),
     event("user.message", "Redis wins on latency; the in-process LRU wins on cost. Details are in `docs/cache.md`.", 120, { provenance: "agent-session", sourceSessionId: "s2" }),
     event("user.message", "Check that the nightly build is green before you merge.", 140, { provenance: "reminder" }),
-    event("user.message", "Script run-9d1e (Nightly report) ended:\nScript completed · 2.0 s · 3 calls\n\nResult:\nAll **3** checks passed.", 160, { provenance: "workflow" }),
+    event("user.message", "Script run-9d1e (Nightly report) ended:\nScript completed · 2.0 s · 3 calls\nPresented to the user (they saw it on the card of the run; do not repeat it):\n````markdown\n## Nightly\nAll **3** checks passed.\n````\nResult:\n```json\n{ \"checks\": 3, \"source\": \"// <summary> *not* Markdown\" }\n```", 160, { provenance: "workflow" }),
+    // Last, so that the numbers of the events before stay those the fixture serves pictures by.
+    done("presented", 59, { stepId: "report" }, "## Report\nRedis wins on **latency**."),
   ]);
   const live = run("run-b2", "exec-2");
   server.state.events.set("t2", [
@@ -207,6 +209,10 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     assert.equal(await evaluate("document.querySelector('[data-host=agent] .host-source').textContent"), "Write the docs");
     assert.match(await evaluate<string>("document.querySelector('[data-host=agent] .host-preview').textContent"), /^Redis wins on latency/);
     assert.deepEqual(await texts("[data-host=host] .host-name, [data-host=workflow] .host-name"), ["Reminder", "Nightly report"]);
+    // The result of a script of the background shows what it presented, whole, as an answer; its value is data, folded, as text.
+    assert.deepEqual(await texts("[data-host=workflow] .host-body h2, [data-host=workflow] .host-body strong"), ["Nightly", "3"], "shown without a tap");
+    assert.equal(await evaluate("document.querySelector('[data-host=workflow] .host-value').open"), false, "the value is folded");
+    assert.match(await evaluate<string>("document.querySelector('[data-host=workflow] .host-value pre').textContent"), /"checks": 3.*<summary> \*not\* Markdown/s, "as it is, not as Markdown");
 
     // Images: the files of a prompt as pictures in fixed boxes, read by their id; a tap shows them full screen.
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.msg-user .thumb img')].map(i => [new URL(i.src).pathname, i.alt, i.loading])"),
@@ -226,6 +232,8 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     // The run of the script: done, 3 of 3, which opens on its steps and the sessions it started; the calls of the script are not rows.
     assert.equal(await evaluate("document.querySelector('.wf-card').dataset.state"), "completed");
     assert.equal(await evaluate("document.querySelector('.wf-card .wf-progress').textContent"), "3/3");
+    // What the script presented shows on its card, whole and without a tap, as it does on the desktop.
+    assert.deepEqual(await texts(".wf-card .wf-presented h2, .wf-card .wf-presented strong"), ["Report", "latency"]);
     assert.match(await evaluate<string>("document.querySelector('.wf-card .wf-sub').textContent"), /^Done · 55s · 1 session$/);
     await click(".activity .act-toggle");
     await waitFor(`document.querySelector(".activity .act-body")`, "the rows of the activity");

@@ -3,6 +3,7 @@
 // images its tools gave the model and the runs of its scripts, and the images of a message. A card is one line that opens
 // on a tap; what is open stays open while the page shows the session.
 import { activityDuration } from "../timelineActivity/activityText";
+import { plainResult } from "../workflows/scriptResult";
 import { activityLine, el, icon } from "./dom";
 import { previewLine, type HostPrompt } from "./hostPrompt";
 import { linkedImageUrl, matchLinkedImages, savedImageUrl, splitFiles, type ImageItem } from "./imageModel";
@@ -45,11 +46,13 @@ export function createTimelineView(options: TimelineViewOptions) {
   const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string | null, text?: string | number | null) => el(document, tag, className, text);
   // The cards open on this page, by key: a message of the host, a run of a script.
   let open = new Set<string>();
+  // The results of scripts already drawn: such a card shows what the script presented, open as an answer, until a tap folds it.
+  let shownResults = new Set<string>();
   // The images of each group (a message, an activity), which the viewer goes through.
   let groups = new Map<string, ImageItem[]>();
 
   /** Forgets what was open: another session is shown. */
-  function reset() { open = new Set(); groups = new Map(); }
+  function reset() { open = new Set(); shownResults = new Set(); groups = new Map(); }
 
   function button(className: string, label?: string): HTMLButtonElement {
     const item = make("button", className);
@@ -196,6 +199,7 @@ export function createTimelineView(options: TimelineViewOptions) {
       row.append(from);
     }
     item.append(row);
+    if (host.kind === "workflow" && !shownResults.has(block.key)) { shownResults.add(block.key); open.add(block.key); }
     if (open.has(block.key)) openHost(item, block, host);
     return { element: item, version: block.key, diagram: false };
   }
@@ -206,11 +210,25 @@ export function createTimelineView(options: TimelineViewOptions) {
     item.dataset.open = "true";
     if (item.querySelector(":scope > .host-body")) return;
     const body = make("div", "host-body markdown-content");
-    const text = host.kind === "job" ? host.job.body || host.job.result : host.body;
+    const value = host.kind === "workflow" ? host.result.result : null;
+    // The result of a script: what it presented, read from its run when its records are there; a value for the user (a run
+    // of the library the host started for them) as Markdown after it, any other value as data, folded, as it is.
+    const forUser = host.kind === "workflow" && host.run?.forUser === true;
+    const text = host.kind === "job" ? host.job.body || host.job.result
+      : host.kind === "workflow" ? [host.run?.presented.length ? host.run.presented.join("\n\n") : host.body, forUser ? value ?? "" : ""].filter(part => part.trim()).join("\n\n")
+      : host.body;
     if (host.kind === "job" && host.job.title) body.append(make("p", "host-result", host.job.result));
     const content = make("div");
     fillMessage(content, block, text);
     body.append(...Array.from(content.childNodes));
+    if (host.kind === "workflow") {
+      body.append(make("p", "host-result", host.result.status));
+      if (value !== null && !forUser) {
+        const folded = make("details", "host-value");
+        folded.append(make("summary", null, "Result"), make("pre", null, plainResult(value)));
+        body.append(folded);
+      }
+    }
     item.append(body);
     files(item, block);
   }
@@ -327,6 +345,17 @@ export function createTimelineView(options: TimelineViewOptions) {
       fill.style.width = `${Math.round(run.done / run.total * 100)}%`;
       bar.append(fill);
       card.append(bar);
+    }
+    // What the script presented shows whole, open or not: it is what the run says to the user.
+    if (run.presented.length) {
+      const parts = make("div", "wf-presented");
+      for (const part of run.presented) {
+        const content = make("div", "markdown-content");
+        const redraw = () => { options.fill(content, part, redraw); };
+        options.fill(content, part, redraw);
+        parts.append(content);
+      }
+      card.append(parts);
     }
     if (isOpen) card.append(workflowBody(run));
     return card;

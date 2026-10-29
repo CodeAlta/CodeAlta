@@ -66,7 +66,9 @@ export function foldEvents(events: readonly TimelineEvent[]): TimelineBlock[] {
       const files = role === "user" ? (event.attachments ?? []).filter(file => typeof file?.title === "string" && file.title.trim().length > 0)
         .map(file => ({ title: file.title, mediaType: typeof file.mediaType === "string" ? file.mediaType : "application/octet-stream", id: typeof file.id === "string" ? file.id : null })) : [];
       const text = event.text ?? "";
-      const host = role === "user" ? hostPromptOf(event) : null;
+      const read = role === "user" ? hostPromptOf(event) : null;
+      // The result of a script of the background goes with its run: what it presented, and whether its value is for the user.
+      const host = read?.kind === "workflow" ? { ...read, run: runs.find(item => item.runId === read.result.runId) ?? null } : read;
       const images = role === "assistant" ? (event.images ?? []).filter(image => typeof image?.id === "string") : [];
       if (text.trim() || files.length || role === "error" || host)
         blocks.push({ kind: "message", key: `m${event.seq}`, role, text, seq: event.seq, ...(files.length ? { attachments: files } : {}), ...(host ? { host } : {}), ...(images.length ? { images } : {}) });
