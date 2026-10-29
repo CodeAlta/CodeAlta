@@ -472,6 +472,13 @@ public sealed class CodeAltaProviderDocument
     public string? TextVerbosity { get; set; }
 
     /// <summary>
+    /// Gets or sets the API of the server a <c>llama-cpp</c> provider sends its requests to: <c>chat</c> (Chat
+    /// Completions, the default, held as null) or <c>responses</c> (the Responses API).
+    /// </summary>
+    [JsonPropertyName("api")]
+    public string? Api { get; set; }
+
+    /// <summary>
     /// Gets or sets the Codex subscription service tier: <c>priority</c> (alias <c>fast</c>)
     /// opts into fast routing when advertised by the model; <c>default</c> or null uses standard routing.
     /// Applies provider-wide, including child sessions and compaction, and may increase subscription usage or cost.

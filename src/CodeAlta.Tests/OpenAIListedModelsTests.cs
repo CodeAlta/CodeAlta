@@ -76,6 +76,51 @@ public sealed class OpenAIListedModelsTests
     }
 
     [TestMethod]
+    public async Task ListModels_OfALlamaCppServer_ReadsItsContextAndWhetherItReadsImages()
+    {
+        // As llama-server 0.8.0 answers: the context in the meta of the data, the capabilities in a "models" array.
+        const string llamaCppModelsJson =
+            """
+            {
+              "models": [
+                { "name": "qwen-vision", "model": "qwen-vision", "type": "model", "capabilities": ["completion", "multimodal"] },
+                { "name": "qwen-text", "model": "qwen-text", "type": "model", "capabilities": ["completion"] }
+              ],
+              "object": "list",
+              "data": [
+                { "id": "qwen-vision", "aliases": ["qwen-vision"], "object": "model", "created": 1793273553, "owned_by": "llamacpp", "meta": { "n_ctx": 217088, "n_ctx_train": 262144 } },
+                { "id": "qwen-text", "aliases": ["qwen-text"], "object": "model", "created": 1793273553, "owned_by": "llamacpp" }
+              ]
+            }
+            """;
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "llama",
+            ApiKey = "no-key",
+            BaseUri = new Uri("http://127.0.0.1:9931/v1"),
+            HttpClient = new HttpClient(new StubHandler(static request =>
+            {
+                Assert.AreEqual("/v1/models", request.RequestUri!.AbsolutePath);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(llamaCppModelsJson, Encoding.UTF8, "application/json") };
+            })),
+        };
+        provider.ModelListAsync = cancellationToken => LlamaCppModelCatalog.ListModelsAsync(provider, cancellationToken);
+
+        var models = await OpenAIProviderSdkFactory.ListModelsAsync(
+            provider,
+            new ModelProviderRuntimeDescriptor { ProtocolFamily = "openai", ProviderKey = "llama", DisplayName = "llama.cpp", TransportKind = AgentTransportKind.OpenAIChatCompletions },
+            CancellationToken.None).ConfigureAwait(false);
+
+        var vision = models.Single(static model => model.Id == "qwen-vision");
+        Assert.AreEqual(217_088L, vision.Capabilities!["contextWindow"], "The context the server was started with, not the one the model was trained with.");
+        Assert.AreEqual(true, AgentImageInputCapability.Read(vision));
+        var text = models.Single(static model => model.Id == "qwen-text");
+        Assert.AreEqual(false, AgentImageInputCapability.Read(text), "A model the server lists without multimodal reads no image.");
+        Assert.IsFalse(text.Capabilities!.ContainsKey("contextWindow"));
+        Assert.IsNull(text.SupportedReasoningEfforts, "The reasoning of the model stays the user's choice.");
+    }
+
+    [TestMethod]
     public void TheHighestEffort_IsSentAsTheLevelTheCatalogGivesTheModel()
     {
         var maxOnly = new AgentModelInfo("max-only", Capabilities: new Dictionary<string, object?> { [AgentReasoningEffortCapability.HighestEffortKey] = "max" });

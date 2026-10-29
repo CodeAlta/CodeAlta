@@ -149,6 +149,7 @@ internal static class CodeAltaConfigDocumentCopy
         AccountId = provider.AccountId,
         MaxConcurrentRequests = provider.MaxConcurrentRequests,
         TextVerbosity = provider.TextVerbosity,
+        Api = provider.Api,
         ServiceTier = provider.ServiceTier,
         WebSearch = provider.WebSearch,
         IncludeEncryptedReasoning = provider.IncludeEncryptedReasoning,

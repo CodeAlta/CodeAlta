@@ -418,6 +418,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
             AccountId = definition.AccountId,
             MaxConcurrentRequests = definition.MaxConcurrentRequests,
             TextVerbosity = definition.TextVerbosity,
+            Api = definition.Api,
             ServiceTier = definition.ServiceTier,
             WebSearch = definition.WebSearch,
             IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning,

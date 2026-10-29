@@ -919,6 +919,43 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    [DataRow(null, null)]
+    [DataRow("chat", null)]
+    [DataRow(" Responses ", "responses")]
+    public void LlamaCpp_NeedsNoKey_HasItsDefaults_AndKeepsItsApi(string? configured, string? expected)
+    {
+        using var temp = TestTempDirectory.Create();
+        var path = Path.Combine(temp.Path, "config.toml");
+        File.WriteAllText(path, "[providers.llama]\ntype = \"llama.cpp\"\n" + (configured is null ? "" : $"api = \"{configured}\"\n"));
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
+        Assert.AreEqual(("llama-cpp", "llama.cpp", "http://127.0.0.1:9931/v1", expected), (provider.ProviderType, provider.DisplayName, provider.ApiUrl, provider.Api));
+        Assert.AreNotEqual(false, provider.Enabled);
+
+        // Saved without a key: a local server needs none.
+        store.SaveGlobalProviderDefinitions([provider]);
+        Assert.AreEqual(expected, store.LoadGlobalProviderDefinitions(includeDisabled: true).Single().Api);
+        Assert.AreEqual(expected is not null, File.ReadAllText(path).Contains("api =", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    [DataRow("openai-chat", "responses")]
+    [DataRow("openai-responses", "chat")]
+    [DataRow("llama-cpp", "completions")]
+    public void Api_IsRejectedWhereNotSupported(string type, string value)
+    {
+        using var temp = TestTempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            $"[providers.p]\ntype = \"{type}\"\napi_key = \"key\"\napi = \"{value}\"\n");
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "api");
+    }
+
+    [TestMethod]
     [DataRow("openai-responses", "verbose")]
     [DataRow("openai-chat", "low")]
     [DataRow("anthropic", "low")]

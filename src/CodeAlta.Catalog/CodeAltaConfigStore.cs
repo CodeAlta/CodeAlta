@@ -44,6 +44,10 @@ public sealed partial class CodeAltaConfigStore
     private const string XaiDirectProviderType = "xai";
     private const string ClaudeCodeProviderType = "claude-code";
     private const string AnthropicProviderType = "anthropic";
+    private const string LlamaCppProviderType = "llama-cpp";
+    private const string LlamaCppDefaultDisplayName = "llama.cpp";
+    // The address llama-server listens on by default since llama.cpp 0.8.0.
+    private const string LlamaCppDefaultApiUrl = "http://127.0.0.1:9931/v1";
     private const string ClaudeCodeDefaultDisplayName = "Claude Code";
     private static readonly string[] ClaudeCodePermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
     private static readonly string[] ClaudeCodeApiKeyChoices = ["use", "ignore"];
@@ -2501,6 +2505,7 @@ public sealed partial class CodeAltaConfigStore
             "copilot" => CopilotDirectProviderType,
             "xai" or "xai-grok" or "grok" or "x-ai" => XaiDirectProviderType,
             "claude-code" or "claude_code" or "claudecode" or "claude-cli" or "claude-code-cli" => ClaudeCodeProviderType,
+            "llama-cpp" or "llama.cpp" or "llamacpp" or "llama_cpp" or "llama-server" => LlamaCppProviderType,
             _ => null,
         };
 
@@ -2523,12 +2528,13 @@ public sealed partial class CodeAltaConfigStore
         definition.Enabled ??= GetDefaultProviderEnabled(definition.ProviderKey);
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType)
             ?? throw new InvalidOperationException(
-                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, mistral, xai, claude-code.");
+                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, mistral, xai, claude-code, llama-cpp.");
         definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, DefaultCompaction);
         ApplyCodexSubscriptionDefaults(definition);
         ApplyCopilotDirectDefaults(definition);
         ApplyXaiDirectDefaults(definition);
         ApplyClaudeCodeDefaults(definition);
+        ApplyLlamaCppDefaults(definition);
         if (string.Equals(definition.ProviderType, AnthropicProviderType, StringComparison.Ordinal))
         {
             // On is the absence of the setting.
@@ -2543,6 +2549,24 @@ public sealed partial class CodeAltaConfigStore
         }
 
         ValidateProviderFields(definition);
+    }
+
+    private static void ApplyLlamaCppDefaults(CodeAltaProviderDocument definition)
+    {
+        if (!string.Equals(definition.ProviderType, LlamaCppProviderType, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        definition.DisplayName ??= LlamaCppDefaultDisplayName;
+        definition.ApiUrl ??= LlamaCppDefaultApiUrl;
+        // Chat Completions, the most mature API of llama-server, is the absence of the setting.
+        definition.Api = NormalizeText(definition.Api)?.ToLowerInvariant() switch
+        {
+            null or "chat" or "chat-completions" or "chat_completions" => null,
+            "responses" => "responses",
+            var other => throw new InvalidOperationException($"providers.{definition.ProviderKey} api must be \"chat\" or \"responses\", not \"{other}\"."),
+        };
     }
 
     private static void ApplyCodexSubscriptionDefaults(CodeAltaProviderDocument definition)
@@ -2650,6 +2674,11 @@ public sealed partial class CodeAltaConfigStore
             throw new InvalidOperationException($"providers.{definition.ProviderKey} env: '{variable}' is not the name of a variable (letters, digits and '_', not starting with a digit).");
         }
 
+        if (!string.Equals(definition.ProviderType, LlamaCppProviderType, StringComparison.Ordinal))
+        {
+            RejectUnsupportedField(definition, "api", definition.Api);
+        }
+
         if (!string.Equals(definition.ProviderType, AnthropicProviderType, StringComparison.Ordinal))
         {
             RejectUnsupportedField(definition, "refusal_fallback", definition.RefusalFallback);
@@ -2701,6 +2730,13 @@ public sealed partial class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "project", definition.Project);
                 RejectUnsupportedField(definition, "location", definition.Location);
                 ValidateTextVerbosity(definition);
+                break;
+
+            case LlamaCppProviderType:
+                RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
+                RejectUnsupportedField(definition, "project_id", definition.ProjectId);
+                RejectUnsupportedField(definition, "project", definition.Project);
+                RejectUnsupportedField(definition, "location", definition.Location);
                 break;
 
             case "azure-openai":
@@ -3018,7 +3054,7 @@ public sealed partial class CodeAltaConfigStore
            string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsOpenAISdkProviderType(string? providerType)
-        => providerType is "openai-chat" or "openai-responses" or "azure-openai" or CodexSubscriptionProviderType;
+        => providerType is "openai-chat" or "openai-responses" or "azure-openai" or CodexSubscriptionProviderType or LlamaCppProviderType;
 
     // A folder the CLI of a provider is given: a relative one would depend on the folder CodeAlta was started in.
     private static void ValidateFolderField(CodeAltaProviderDocument definition, string fieldName, string? value)
@@ -3347,6 +3383,7 @@ public sealed partial class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.AccountId) ||
                definition.MaxConcurrentRequests is not null ||
                !string.IsNullOrWhiteSpace(definition.TextVerbosity) ||
+               !string.IsNullOrWhiteSpace(definition.Api) ||
                !string.IsNullOrWhiteSpace(definition.ServiceTier) ||
                !string.IsNullOrWhiteSpace(definition.WebSearch) ||
                definition.IncludeEncryptedReasoning is not null ||
@@ -3458,6 +3495,7 @@ public sealed partial class CodeAltaConfigStore
             AccountId = definition.AccountId,
             MaxConcurrentRequests = definition.MaxConcurrentRequests,
             TextVerbosity = definition.TextVerbosity,
+            Api = definition.Api,
             ServiceTier = definition.ServiceTier,
             WebSearch = definition.WebSearch,
             IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning,

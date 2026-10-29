@@ -42,6 +42,31 @@ public sealed class ConfiguredProviderRegistrationTests
     }
 
     [TestMethod]
+    [DataRow(null, AgentTransportKind.OpenAIChatCompletions)]
+    [DataRow("responses", AgentTransportKind.OpenAIResponses)]
+    public async Task LlamaCppRegistration_NeedsNoKey_AndUsesTheApiOfTheFile(string? api, AgentTransportKind expected)
+    {
+        using var temp = TestTempDirectory.Create();
+        Assert.IsTrue(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(
+            new CodeAltaProviderDocument { ProviderKey = "llama", ProviderType = "llama-cpp", ApiUrl = "http://127.0.0.1:9931/v1", Api = api },
+            temp.Path, null, out var descriptor, out var createRuntime));
+        await using var runtime = createRuntime();
+        var agentRuntime = Assert.IsInstanceOfType<IAgentModelProviderRuntime>(runtime);
+        var executor = agentRuntime.CreateTurnExecutor();
+        var providerField = executor.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Single(static field => field.FieldType == typeof(OpenAIProviderOptions));
+        var options = Assert.IsInstanceOfType<OpenAIProviderOptions>(providerField.GetValue(executor));
+
+        Assert.AreEqual(("llama", "llama-cpp"), (descriptor.ProviderId.Value, descriptor.ProviderType));
+        Assert.AreEqual(expected, agentRuntime.RuntimeDescriptor.TransportKind);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(options.ApiKey), "The OpenAI client is given a key the server ignores.");
+        Assert.IsNotNull(options.ModelListAsync, "The models come from the list of the server.");
+        Assert.IsNull(options.ModelCatalog, "A local model gets no price from models.dev.");
+        // Chat Completions gives the server back the reasoning in the field it sends it in.
+        Assert.AreEqual(api is null ? "reasoning_content" : null, options.Profile?.ReasoningInputFieldName);
+    }
+
+    [TestMethod]
     [DataRow(null, OpenAICodexWebSearchMode.Cached)]
     [DataRow("live", OpenAICodexWebSearchMode.Live)]
     [DataRow("disabled", OpenAICodexWebSearchMode.Disabled)]

@@ -10,7 +10,7 @@ Providers are tables of `~/.alta/config.toml`. The provider editor writes the sa
 
 Each provider is a `[providers.<key>]` table. Keys are lower case. `codex` and `copilot` get their type when `type` is left out.
 
-The types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, `vertex-ai`, `mistral` and `claude-code`. Plugins add others, such as `acp` for the [agents of the ACP registry](acp-agents.md) and `codex-cli` for [Codex CLI](setup.md#codex-cli). Aliases such as `openai`, `responses`, `aoai`, `gemini`, `vertex` and `github-copilot` are read as these types.
+The types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, `vertex-ai`, `mistral`, `claude-code` and `llama-cpp`. Plugins add others, such as `acp` for the [agents of the ACP registry](acp-agents.md) and `codex-cli` for [Codex CLI](setup.md#codex-cli). Aliases such as `openai`, `responses`, `aoai`, `gemini`, `vertex` and `github-copilot` are read as these types.
 
 A type your version of CodeAlta does not know, one a newer version added, leaves that provider out; its table stays in the file as written.
 
@@ -27,7 +27,7 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 | `reasoning_effort` | Default effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Each model offers its own values. |
 | `api_key` / `api_key_env` | The API key, or the environment variable that holds it. Prefer `api_key_env`. |
 | `api_url` | Endpoint. Azure OpenAI, Codex and Copilot require HTTPS, except on localhost. |
-| `network_timeout_seconds` | Network timeout of `openai-chat`, `openai-responses`, `azure-openai` and `codex`; 100 seconds when unset. |
+| `network_timeout_seconds` | Network timeout of `openai-chat`, `openai-responses`, `azure-openai`, `codex` and `llama-cpp`; 100 seconds when unset. |
 | `protocol_trace` | Traces the requests of the OpenAI, Codex and Copilot providers. |
 | `models_dev_provider_id` | The models.dev provider that describes the models. |
 | `single_model_id` | The one model of an endpoint that lists none. |
@@ -46,6 +46,7 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 | Type | Credentials and endpoint | Other fields |
 | --- | --- | --- |
 | `openai-chat`, `openai-responses` | `api_key` or `api_key_env`; optional `api_url`, `organization_id`, `project_id` | `network_timeout_seconds`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `extra_body`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace`; `text_verbosity` for `openai-responses` only |
+| `llama-cpp` | no key unless the server asks for one; optional `api_url` (`http://127.0.0.1:9931/v1` by default) | `api` (`chat`, the default, or `responses`), `network_timeout_seconds`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `extra_body`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` (see [llama.cpp](setup.md#llamacpp)) |
 | `azure-openai` | `api_key` or `api_key_env`; the `api_url` of the Azure resource | `network_timeout_seconds`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `anthropic` | `api_key` or `api_key_env`; optional `api_url` | `prompt_cache_ttl`, `refusal_fallback`, `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `google-genai`, `mistral` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |

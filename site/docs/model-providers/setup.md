@@ -331,6 +331,24 @@ api_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 CodeAlta already sends what this API expects: no developer role, no `store`, `max_tokens` for the output limit, no `reasoning_effort`, the usage of a streamed answer, and Alibaba's thinking with `enable_thinking` and `preserve_thinking`. Other Alibaba parameters (`thinking_budget`, `top_k`, `enable_search`, `search_options`) are yours to add in `request.extra_body`; see [Request customizations](configuration.md#request-customizations).
 
+## llama.cpp
+
+A llama.cpp server (`llama-server`) has a type of its own, `llama-cpp`:
+
+```toml
+[providers.llama]
+type = "llama-cpp"
+api_url = "http://localhost:9931/v1"  # optional: the address of llama-server 0.8.0 by default
+```
+
+- **No key** is needed. Give one with `api_key` or `api_key_env` only for a server started with `--api-key`, or behind a proxy that asks for it.
+- **The model** is the one the server loaded. The context it was started with (`--ctx-size`) sizes the compaction, and a model started with its vision projector (`--mmproj`) takes pasted images. **Refresh** reads them again after you restart the server with another model.
+- **The API** is Chat Completions. Set `api = "responses"` for the Responses API of llama-server 0.8.0 or later; with an older server, the answer of a reasoning model shows twice there.
+- **Reasoning** follows the options of the server, such as `--reasoning-effort`: the server lists no efforts for its model, so CodeAlta offers none.
+- A slow model on a small machine may need a longer `network_timeout_seconds`.
+
+The server runs the model: what one model does wrong (a tool call left in its thinking, a template that ignores the effort) is fixed in llama.cpp or with its options, not in CodeAlta.
+
 ## Other endpoints
 
 Any endpoint that speaks a supported API works as a provider of your own: **Custom provider…** in **Add provider**, or a table in the file with its `type`, `api_url` and key.
@@ -338,5 +356,5 @@ Any endpoint that speaks a supported API works as a provider of your own: **Cust
 - **DeepSeek, MiniMax, Kimi and Z.ai** are built in, with what their APIs expect already set; see the [built-in providers](readme.md#built-in-providers).
 - **OpenRouter** and similar services use `openai-responses` or `openai-chat`; see [Request customizations](configuration.md#request-customizations) for their headers.
 - **OpenCode Go and Zen** need a header with the session id: see [Session values in headers](configuration.md#session-values-in-headers).
-- **Local servers** such as Ollama use `openai-chat` with their local `api_url`.
+- **Local servers** such as Ollama use `openai-chat` with their local `api_url`; llama.cpp has [its own type](#llamacpp).
 - An endpoint that serves one model, or lists none, takes `single_model_id` (see [Single-model endpoints](configuration.md#single-model-endpoints)); one that behaves differently from the API it imitates takes a [compatibility profile](configuration.md#compatibility-profile).

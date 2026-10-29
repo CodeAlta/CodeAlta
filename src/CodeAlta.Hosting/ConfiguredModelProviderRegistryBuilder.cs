@@ -32,6 +32,8 @@ namespace CodeAlta.Hosting;
 public static class ConfiguredModelProviderRegistryBuilder
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.RawApi");
+    private const string LlamaCppProviderType = "llama-cpp";
+    private const string LlamaCppNoApiKey = "no-key";
 
     /// <summary>
     /// Registers enabled global provider definitions without models.dev metadata enrichment.
@@ -272,6 +274,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                 return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case ClaudeCodeModelProviderRuntime.ProviderType:
                 return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, providerProcesses, out descriptor, out createRuntime);
+            case LlamaCppProviderType:
+                return TryCreateLlamaCppProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -423,6 +427,69 @@ public static class ConfiguredModelProviderRegistryBuilder
         createRuntime = () => new OpenAIResponsesModelProviderRuntime(options);
         LogInfo(
             $"Registered model provider key={providerId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)}");
+        return true;
+    }
+
+    // A llama.cpp server (llama-server) through its OpenAI API: Chat Completions unless the file names the Responses API.
+    // The server needs no key unless it was started with one, and its list of models gives the context it was started
+    // with and whether it reads images. Its models get no price nor limit from models.dev unless the file asks for it.
+    private static bool TryCreateLlamaCppProvider(
+        CodeAltaProviderDocument definition,
+        string stateRootPath,
+        ModelsDevCatalogService? modelCatalog,
+        out ModelProviderDescriptor descriptor,
+        out Func<IModelProviderRuntime> createRuntime)
+    {
+        var responses = string.Equals(definition.Api, "responses", StringComparison.Ordinal);
+        var transportKind = responses ? AgentTransportKind.OpenAIResponses : AgentTransportKind.OpenAIChatCompletions;
+        var providerId = new ModelProviderId(definition.ProviderKey);
+        var displayName = ResolveProviderDisplayName(definition);
+        var baseUri = ParseUri(definition.ApiUrl);
+        var modelsDevProviderId = NormalizeText(definition.ModelsDevProviderId);
+        var profile = CreateOpenAIBaseProfile(transportKind, definition.ProviderKey, baseUri, responses);
+        // The server takes back the reasoning of a model in the field it sends it in.
+        profile = responses ? profile : profile with { ReasoningInputFieldName = "reasoning_content" };
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = definition.ProviderKey,
+            DisplayName = displayName,
+            // The OpenAI client sends a key in any case: a server started without --api-key ignores it.
+            ApiKey = NormalizeText(ResolveSecret(definition.ApiKey, definition.ApiKeyEnv)) ?? LlamaCppNoApiKey,
+            BaseUri = baseUri,
+            NetworkTimeout = CreateNetworkTimeout(definition),
+            IsDefault = true,
+            Profile = definition.Profile is null ? profile : ApplyProfileOverrides(profile, definition.Profile),
+            Compaction = CreateCompactionSettings(definition.Compaction),
+            ModelsDevProviderId = modelsDevProviderId,
+            SingleModelId = NormalizeText(definition.SingleModelId),
+            ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex),
+            ExtraHeaders = CreateRequestHeaders(transportKind, definition.ProviderKey, baseUri, definition.Request),
+            ExtraBody = CreateOpenAIExtraBody(transportKind, definition.ProviderKey, baseUri, definition),
+            ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
+            ModelRequestOverrides = CreateModelRequestOverrides(definition.ModelRequest),
+            ModelCatalog = modelsDevProviderId is null ? null : modelCatalog,
+            ProtocolTracing = CreateOpenAIProtocolTraceOptions(definition, stateRootPath),
+        };
+        provider.ModelListAsync = cancellationToken => LlamaCppModelCatalog.ListModelsAsync(provider, cancellationToken);
+
+        descriptor = CreateProviderDescriptor(definition, displayName, baseUri);
+        createRuntime = responses
+            ? () => new OpenAIResponsesModelProviderRuntime(new OpenAIResponsesModelProviderRuntimeOptions
+            {
+                ProviderIdOverride = providerId,
+                DisplayNameOverride = displayName,
+                StateRootPath = stateRootPath,
+                Providers = { provider },
+            })
+            : () => new OpenAIChatModelProviderRuntime(new OpenAIChatModelProviderRuntimeOptions
+            {
+                ProviderIdOverride = providerId,
+                DisplayNameOverride = displayName,
+                StateRootPath = stateRootPath,
+                Providers = { provider },
+            });
+        LogInfo(
+            $"Registered model provider key={providerId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)} api={(responses ? "responses" : "chat")}");
         return true;
     }
 
