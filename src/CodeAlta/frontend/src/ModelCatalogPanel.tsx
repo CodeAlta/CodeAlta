@@ -12,6 +12,9 @@ import { maximumProviderModels } from "./providerModels";
 import { ModelPickerSettings } from "./ModelPickerSettings";
 import { ModelTierSettings, type TierProviderSpaces } from "./ModelTierSettings";
 
+// As many agent prompts as the host sends (OwnedSessionCommandService.MaximumPromptChoices).
+const maximumAgentPrompts = 1024;
+
 type ProvidersRead = (request: ModelCatalogProvidersRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogProvidersResponse>;
 type ModelsRead = (request: ModelCatalogModelsRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogModelsResponse>;
 type ChoicesRead = (request: SessionChoicesRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<SessionChoicesResponse>;
@@ -109,7 +112,7 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
           : { key: "Session choices unavailable ({status}).", status: value.status }); return;
       }
       if (typeof value.current.providerKey !== "string" || typeof value.current.agentPromptId !== "string"
-        || !Array.isArray(value.prompts) || value.prompts.length > 64 || !Array.isArray(value.models) || value.models.length > maximumProviderModels
+        || !Array.isArray(value.prompts) || value.prompts.length > maximumAgentPrompts || !Array.isArray(value.models) || value.models.length > maximumProviderModels
         || value.models.some(model => typeof model.id !== "string" || model.id.length > 256 || !Array.isArray(model.efforts)
           || model.efforts.length > 8 || model.efforts.some((effort: unknown) => typeof effort !== "string"))) {
         setChoicesError("Invalid session choices. No selection was applied."); return;
