@@ -2927,7 +2927,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [draftSandboxScopes, setDraftSandboxScopes] = useState<SandboxSessionResponse | null>(null);
   // The options of the new session (sub-sessions), sent with its creation; null for the defaults.
   const [draftOptions, setDraftOptions] = useState<SessionOptionsChoice | null>(null);
-  // What the meter of the draft measures: the size of context chosen under More options, else the window of its model.
+  // The model of the draft; what its meter measures: the size of context chosen under More options, else its window.
   const draftContextModel = draftChoices.models.find(model => model.id === draftChoices.value.modelId);
   const draftContextTokens = sessionContextSize(draftContextModel, draftOptions) ?? draftContextModel?.contextTokens ?? null;
   const draftSandboxProvider = draftChoices.value.providerKey || null, draftSandboxModel = draftChoices.value.modelId || null;
@@ -4449,7 +4449,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     </HTMLSelect>;
     const locked = creatingBusy || !owned;
     const value = draftChoices.value;
-    const draftModel = draftChoices.models.find(model => model.id === value.modelId);
+    const draftModel = draftContextModel;
     const efforts = draftModel?.efforts ?? null;
     const reasoning = reasoningShown(value.reasoningEffort ?? null, draftModel);
     const choiceId = inPopover ? "create" : "new";
@@ -4473,7 +4473,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         onChange={next => setDraftReview(next)} />}
       sandbox={draftSandboxScopes && <SessionSandboxSelect id={`composer-sandbox-${choiceId}`} own={draftSandbox} inherited={draftSandboxScopes.profile}
         choices={draftSandboxScopes.choices} disabled={locked} onChange={next => setDraftSandbox(next)} />}
-      options={{ changed: changedSessionOptions(draftOptions, draftModel ?? null),
+      options={{ changed: changedSessionOptions(draftOptions, draftModel),
         content: <SessionOptionsFields id={choiceId} value={draftOptions} disabled={locked} onChange={next => setDraftOptions(next)}
           context={draftModel} /> }}
       permission={permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${choiceId}`} value={value.permissionMode} modes={permissionModes}

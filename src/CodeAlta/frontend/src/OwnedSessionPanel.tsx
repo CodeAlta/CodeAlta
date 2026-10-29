@@ -1491,7 +1491,7 @@ ${value}` : value);
         disabled={invalidEpoch} onChange={value => void applyReview(value)} />}
       sandbox={shownSandbox && <SessionSandboxSelect id={`composer-sandbox-${sessionId}`} own={shownSandbox.reply.own} inherited={shownSandbox.inherited}
         choices={shownSandbox.reply.choices} disabled={invalidEpoch} onChange={value => void applySandbox(value)} />}
-      options={shownOptions && { changed: changedSessionOptions(shownOptions, selectedModel ?? null),
+      options={shownOptions && { changed: changedSessionOptions(shownOptions, selectedModel),
         content: <SessionOptionsFields id={sessionId} value={shownOptions} context={selectedModel} disabled={invalidEpoch} onChange={value => void applyOptions(value)} /> }}
       permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}

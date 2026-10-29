@@ -208,8 +208,7 @@ internal sealed class SessionOperationsService
                                 Description = option.Description is null ? null : Bound(option.Description),
                                 Toggle = option.IsToggle ? true : null,
                             })],
-                        ContextSizes = m.ContextSizes.Count == 0 ? null : [.. m.ContextSizes.Where(static size => size <= int.MaxValue).Select(static size => (int)size)],
-                        ContextSize = m.ContextSize is <= int.MaxValue ? (int)m.ContextSize : null,
+                        ContextSizes = ContextSizeContract.Of(m.ContextSizes), ContextSize = ContextSizeContract.Of(m.ContextSize),
                     }).ToArray())
             {
                 PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode)).ToArray(),

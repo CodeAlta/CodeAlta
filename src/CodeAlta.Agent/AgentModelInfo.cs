@@ -44,6 +44,22 @@ public sealed record AgentModelInfo(
     /// <returns>The size, or null.</returns>
     public long? GetContextSize() => AgentTokenBudgetResolver.Resolve(this, AgentCompactionSettings.Default).InputContextLimit;
 
+    /// <summary>Gets the first of some sizes of context, in input tokens, that the model has (<see cref="ContextSizes"/>).</summary>
+    /// <param name="sizes">The sizes, from the preferred one; a null one is skipped.</param>
+    /// <returns>The first size the model has, or null when it has none of them.</returns>
+    public long? ChooseContextSize(params ReadOnlySpan<long?> sizes)
+    {
+        foreach (var size in sizes)
+        {
+            if (size is { } tokens && ContextSizes?.Contains(tokens) == true)
+            {
+                return tokens;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Gets the model as a session uses it with a size of context: one of <see cref="ContextSizes"/> becomes the input it
     /// takes at most, which its usage and its compaction follow. Another size, or null, leaves the model as it is.
@@ -52,7 +68,13 @@ public sealed record AgentModelInfo(
     /// <returns>The model with that size.</returns>
     public AgentModelInfo WithContextSize(long? size)
     {
-        if (size is not { } tokens || ContextSizes?.Contains(tokens) != true || GetContextSize() == tokens)
+        if (size is not { } tokens || ContextSizes?.Contains(tokens) != true)
+        {
+            return this;
+        }
+
+        var budget = AgentTokenBudgetResolver.Resolve(this, AgentCompactionSettings.Default);
+        if (budget.InputContextLimit == tokens)
         {
             return this;
         }
@@ -63,7 +85,7 @@ public sealed record AgentModelInfo(
         capabilities["inputTokenLimit"] = tokens;
         capabilities["maxInputTokens"] = tokens;
         // The whole context of the model holds at least that input.
-        if (AgentTokenBudgetResolver.Resolve(this, AgentCompactionSettings.Default).TotalContextEnvelope is not { } envelope || envelope < tokens)
+        if (budget.TotalContextEnvelope is not { } envelope || envelope < tokens)
         {
             capabilities["contextWindow"] = tokens;
         }

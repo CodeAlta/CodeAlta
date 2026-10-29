@@ -236,8 +236,8 @@ internal sealed class ModelCatalogService(
             AgentImageInputCapability.Read(model))
         {
             EffortsComplete = AgentReasoningEffortCapability.IsListComplete(model) ? true : null,
-            ContextSizes = model.ContextSizes is { Count: > 0 } sizes ? [.. sizes.Where(static size => size <= int.MaxValue).Select(static size => (int)size)] : null,
-            ContextSize = model.WithContextSize(defaultContextSize).GetContextSize() is { } size and <= int.MaxValue ? (int)size : null,
+            ContextSizes = ContextSizeContract.Of(model.ContextSizes),
+            ContextSize = model.ContextSizes is { Count: > 0 } ? ContextSizeContract.Of(model.ChooseContextSize(defaultContextSize) ?? model.GetContextSize()) : null,
             Deprecated = IsDeprecated(metadata) ? true : null,
             RetiresAt = IsDeprecated(metadata) ? Date(metadata, "retiresAt") : null,
             Price = inputCost is null && outputCost is null ? null : new ModelCatalogPrice(inputCost, outputCost,

@@ -199,15 +199,19 @@ internal sealed class CopilotModelDiscoveryClient
     // than the prompt the model takes.
     private static IReadOnlyList<long>? ContextSizes(CopilotModelItem item)
     {
-        if (item.Billing?.TokenPrices is not { Default: { } standardPrice, LongContext: { } longPrice } ||
-            (standardPrice.MaxPromptTokens ?? standardPrice.ContextMax) is not { } standard || standard <= 0)
+        if (item.Billing?.TokenPrices is not { Default.PromptTokens: { } standard, LongContext: { } longPrice } || standard <= 0)
         {
             return null;
         }
 
         var limit = item.Capabilities?.Limits?.MaxPromptTokens;
-        var full = Math.Min(longPrice.MaxPromptTokens ?? longPrice.ContextMax ?? limit ?? 0, limit ?? long.MaxValue);
-        return full > standard ? [standard, full] : null;
+        var full = longPrice.PromptTokens ?? limit;
+        if (full > limit)
+        {
+            full = limit;
+        }
+
+        return full > standard ? [standard, full.Value] : null;
     }
 
     private static IReadOnlyList<AgentReasoningEffort> MapReasoningEfforts(CopilotModelSupports? supports)
@@ -417,6 +421,10 @@ internal sealed class CopilotModelTokenPrice
     // The earlier name of max_prompt_tokens.
     [JsonPropertyName("context_max")]
     public long? ContextMax { get; set; }
+
+    // The prompt the price covers, by either name.
+    [JsonIgnore]
+    public long? PromptTokens => MaxPromptTokens ?? ContextMax;
 }
 
 internal sealed class CopilotModelPolicy

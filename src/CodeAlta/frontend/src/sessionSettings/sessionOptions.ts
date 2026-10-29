@@ -20,17 +20,16 @@ export function sessionOptionsOf(options: SessionOptionsChoice | null | undefine
 }
 
 /**
- * How many options differ from their default: the form shows them without being asked, the chip marks them. Given the
- * model of the session, a size of context counts only where the model has it: another one is kept, and not used.
+ * How many options differ from their default: the form shows them without being asked, the chip marks them. A size of
+ * context counts only where the model of the session has it: another one is kept, and not used; without a model, none.
  */
 export function changedSessionOptions(options: SessionOptionsChoice | null | undefined, model?: ModelContextSizes | null): number {
   const value = sessionOptionsOf(options);
-  const size = value.contextSize && (model === undefined || model?.contextSizes?.includes(value.contextSize));
-  return (value.subSessions ? 0 : 1) + (size ? 1 : 0);
+  return (value.subSessions ? 0 : 1) + (value.contextSize && model?.contextSizes?.includes(value.contextSize) ? 1 : 0);
 }
 
 /** What a choice records: null for the defaults, so that a session without a choice records nothing. */
 export function storedSessionOptions(options: SessionOptionsChoice | null | undefined): SessionOptionsChoice | null {
-  return options && changedSessionOptions(options) > 0
+  return options && (!options.subSessions || options.contextSize)
     ? { subSessions: options.subSessions, ...(options.contextSize ? { contextSize: options.contextSize } : {}) } : null;
 }

@@ -464,7 +464,7 @@ internal sealed partial class GlobalConfigService
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
                         { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
                           ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command), ModelsOrder = ConfiguredModelsOrder(definition?.ModelsOrder, definition?.SortModels),
-                          ContextSize = definition?.ContextSize is > 0 and <= int.MaxValue ? (int)definition.ContextSize : null,
+                          ContextSize = ContextSizeContract.Of(definition?.ContextSize),
                           Environment = definition?.Env is { Count: > 0 } variables ? [.. variables.Take(MaximumEnvironmentVariables).Select(static pair => new GlobalConfigPluginMapEntry(Bound(pair.Key)!, Bound(pair.Value)!))] : null };
                     }).Concat(ListPluginProviders(document)).ToArray();
                 var pluginTypes = DescribePluginTypes();

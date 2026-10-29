@@ -353,7 +353,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         CollectionAssert.IsSubsetOf(new[] { "--model", "opus" }, cli.Last.Launch.Arguments.ToArray());
         Assert.AreEqual("1", cli.Last.Launch.Environment[ClaudeCodeLauncher.DisableExtendedContextVariable]);
 
-        // A size the model does not have changes nothing.
+        // Another size changes nothing.
         await ExecuteAsync(executor, request with { SessionId = "other", ContextSize = 500_000 });
         CollectionAssert.IsSubsetOf(new[] { "--model", "opus" }, cli.Last.Launch.Arguments.ToArray());
         Assert.IsFalse(cli.Last.Launch.Environment.ContainsKey(ClaudeCodeLauncher.DisableExtendedContextVariable));

@@ -2103,6 +2103,7 @@ public sealed partial class AgentSessionTests
                 (request, _, _) =>
                 {
                     Assert.AreEqual(2_000L, request.ModelInfo!.GetContextSize());
+                    Assert.AreEqual(2_000L, request.ContextSize, "a provider that runs its own agent is told the size too");
                     return Task.FromResult(new AgentTurnResponse
                     {
                         AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("First answer.")]),

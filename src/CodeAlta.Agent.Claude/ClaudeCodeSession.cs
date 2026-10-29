@@ -502,25 +502,17 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                      (request.ReasoningEffort is not { } requested || modelInfo.SupportedReasoningEfforts?.Contains(requested) != true)
             ? null
             : ClaudeCodeLauncher.ToEffort(request.ReasoningEffort);
-        // The size of context chosen for the session: 1M runs the [1m] form of the model, which a model of 1M by default
-        // ignores, and 200K turns 1M off for the CLI. Without a choice the CLI runs the model as it does by default.
-        var model = ClaudeCodeLauncher.ToModelOption(request.ModelId);
-        var contextSize = request.ContextSize is { } chosen && request.ModelInfo?.ContextSizes?.Contains(chosen) == true ? chosen : (long?)null;
-        if (contextSize == ClaudeCodeModelCatalog.ExtendedContextSize && model is not null && !model.EndsWith("[1m]", StringComparison.OrdinalIgnoreCase))
-        {
-            model += "[1m]";
-        }
-
         var key = new ClaudeCodeLaunchKey(
             string.IsNullOrWhiteSpace(request.WorkingDirectory) ? null : request.WorkingDirectory,
-            model,
+            ClaudeCodeLauncher.ToModelOption(request.ModelId),
             effort,
             request.Environment is { IsEmpty: false } environment ? environment : null,
             request.DisabledTools?.Contains(ShellCommandTool) == true,
             ClaudeCodeLaunchKey.WebToolsOf(request.DisabledTools),
             // A process started in another sandbox, or out of one, is another process: it resumes the conversation.
             request.ProcessHost?.Key,
-            contextSize == ClaudeCodeModelCatalog.StandardContextSize);
+            // Without a size the CLI runs the model as it does by default.
+            request.ContextSize);
         var permissionMode = ClaudeCodeLauncher.PermissionMode(NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode), key.WithoutShell);
         lock (_gate)
         {

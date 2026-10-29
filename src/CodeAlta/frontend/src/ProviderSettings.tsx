@@ -32,6 +32,7 @@ import type { MessageKey } from "./localization";
 import { ProviderSandboxField, type SandboxScopeApi } from "./sandbox/SandboxScopeControls";
 import { ProviderCodeModeField, type CodeModeScopeApi } from "./CodeModeScopeControls";
 import { ContextSizeSelect } from "./sessionSettings/SessionOptionsFields";
+import { defaultModelId } from "./newSessionDefaults";
 
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 const newProvider = "\u0000new";
@@ -52,28 +53,26 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
 }
 
 // The size of context of the sessions of a provider: one of the sizes of its default model, read from the provider once
-// it is saved. Shown where that model has several sizes, or a size is saved.
+// it is saved and ready (a read would start one that is not). Shown where that model has several sizes, or a size is saved.
 function ProviderContextSize({ epoch, providerId, model, value, disabled, readModels, onChange }: {
-  epoch: string; providerId: string | null; model: string | null; value: string; disabled: boolean;
-  readModels: typeof modelCatalog.models; onChange: (value: string) => void;
+  epoch: string; providerId: string | null; model: string | null; value: number | null; disabled: boolean;
+  readModels: typeof modelCatalog.models; onChange: (value: number | null) => void;
 }) {
   const { t } = useShellLanguage();
   const [models, setModels] = useState<readonly ModelCatalogModel[] | null>(null);
   useEffect(() => {
-    setModels(null);
     if (!providerId) return;
     const controller = new AbortController();
     void readModels({ expectedEpoch: epoch, providerId }, { signal: controller.signal, timeoutMilliseconds: 15_000 })
       .then(reply => { if (!controller.signal.aborted && reply.status === "ok") setModels(reply.models); }).catch(() => { /* Only the saved size is shown. */ });
     return () => controller.abort();
   }, [epoch, providerId, readModels]);
-  // A provider without a default model starts its sessions with the first model it lists.
-  const found = model ? models?.find(item => item.id === model) : models?.[0];
+  const defaultModel = models ? defaultModelId(models, model) : null;
+  const found = models?.find(item => item.id === defaultModel);
   const sizes = found?.contextSizes ?? [];
   if (!sizes.length && !value) return null;
   return <FormGroup label={t("Context size")} labelFor="provider-context-size" helperText={t("Default size for this provider's sessions, when their model offers it.")}>
-    <ContextSizeSelect id="provider-context-size" value={value ? Number(value) : null} context={{ contextSizes: sizes, contextSize: found?.inputTokens }} disabled={disabled}
-      onChange={next => onChange(next ? String(next) : "")} />
+    <ContextSizeSelect id="provider-context-size" value={value} context={{ contextSizes: sizes, contextSize: found?.inputTokens }} disabled={disabled} onChange={onChange} />
   </FormGroup>;
 }
 
@@ -409,7 +408,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
                 <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
               </HTMLSelect></FormGroup>
-            {!formPlugin && <ProviderContextSize key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch} providerId={modelProvider}
+            {!formPlugin && <ProviderContextSize key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch}
+              providerId={modelProvider && availability.get(modelProvider.toLowerCase())?.availability === "Ready" ? modelProvider : null}
               model={form.model.trim() || fallback("model")} value={form.contextSize} disabled={busy} readModels={readModels} onChange={contextSize => edit({ contextSize })} />}
             {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}
             {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">

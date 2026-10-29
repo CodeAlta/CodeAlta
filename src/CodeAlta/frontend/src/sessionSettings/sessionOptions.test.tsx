@@ -19,14 +19,15 @@ test("the options are on by default, and a session records only what differs fro
   assert.deepEqual(storedSessionOptions({ subSessions: false }), { subSessions: false });
 });
 
-test("a size of context is an option the session records, and counts as changed", () => {
-  assert.equal(changedSessionOptions({ subSessions: true, contextSize: 1_000_000 }), 1);
-  assert.equal(changedSessionOptions({ subSessions: false, contextSize: 1_000_000 }), 2);
+test("a size of context is an option the session records, and counts as changed where its model has it", () => {
+  const model = { contextSizes: [200_000, 1_000_000] };
+  assert.equal(changedSessionOptions({ subSessions: true, contextSize: 1_000_000 }, model), 1);
+  assert.equal(changedSessionOptions({ subSessions: false, contextSize: 1_000_000 }, model), 2);
   assert.deepEqual(storedSessionOptions({ subSessions: true, contextSize: 1_000_000 }), { subSessions: true, contextSize: 1_000_000 });
   // A size the model of the session does not have is kept, and not counted: nothing under More options shows it.
-  assert.equal(changedSessionOptions({ subSessions: true, contextSize: 1_000_000 }, { contextSizes: [200_000, 1_000_000] }), 1);
   assert.equal(changedSessionOptions({ subSessions: true, contextSize: 872_000 }, { contextSizes: null }), 0);
   assert.equal(changedSessionOptions({ subSessions: true, contextSize: 872_000 }, null), 0, "a model that is not known yet");
+  assert.equal(changedSessionOptions({ subSessions: true, contextSize: 872_000 }), 0, "a form without a model");
   assert.equal(storedSessionOptions({ subSessions: true, contextSize: null }), null);
 });
 

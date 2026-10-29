@@ -61,13 +61,24 @@ internal sealed record SessionOptionsChoice(bool SubSessions,
     public static SessionOptionsChoice Of(CodeAlta.Agent.AgentSessionOptions? options)
     {
         var of = CodeAlta.Agent.AgentSessionOptions.Of(options);
-        return new(of.SubSessions, of.ContextSize is > 0 and <= int.MaxValue ? (int)of.ContextSize : null);
+        return new(of.SubSessions, ContextSizeContract.Of(of.ContextSize));
     }
 
     /// <summary>What a choice records: null for the defaults.</summary>
     public static CodeAlta.Agent.AgentSessionOptions? Record(SessionOptionsChoice? choice)
         => choice is null ? null : CodeAlta.Agent.AgentSessionOptions.Stored(new CodeAlta.Agent.AgentSessionOptions
             { SubSessions = choice.SubSessions, ContextSize = choice.ContextSize is > 0 ? choice.ContextSize : null });
+}
+
+/// <summary>A size of context as the page reads it: a number of tokens, null for none or for one it cannot hold.</summary>
+internal static class ContextSizeContract
+{
+    /// <summary>A size of context for the page.</summary>
+    public static int? Of(long? size) => size is > 0 and <= int.MaxValue ? (int)size : null;
+
+    /// <summary>The sizes of context of a model for the page; null for none.</summary>
+    public static IReadOnlyList<int>? Of(IReadOnlyList<long>? sizes)
+        => sizes is { Count: > 0 } ? [.. sizes.Where(static size => size is > 0 and <= int.MaxValue).Select(static size => (int)size)] : null;
 }
 
 /// <summary>Asks for the options of a session.</summary>

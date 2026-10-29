@@ -126,6 +126,10 @@ public sealed class SessionOptionsRuntimeTests
             await SendAsync(host, sessionId, "First.");
             Assert.AreEqual(400_000L, provider.ContextSizes[^1], "the size of the provider");
 
+            Assert.AreEqual("ok", (await host.Commands.SetSessionOptionsAsync(sessionId, new AgentSessionOptions { ContextSize = 123_456 })).Status);
+            await SendAsync(host, sessionId, "Another model's size.");
+            Assert.AreEqual(400_000L, provider.ContextSizes[^1], "a size the model does not have leaves the one of the provider");
+
             Assert.AreEqual("ok", (await host.Commands.SetSessionOptionsAsync(sessionId, new AgentSessionOptions { ContextSize = 100_000 })).Status);
             await SendAsync(host, sessionId, "Second.");
             Assert.AreEqual(100_000L, provider.ContextSizes[^1], "the size of the session, from its next prompt");
