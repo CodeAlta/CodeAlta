@@ -118,74 +118,32 @@ public sealed class ChatGptPlanHostedToolsLiveProbeTests
     }
 
     [TestMethod]
-    public async Task Live_TheSubscriptionTakesTheHostedImageGenerationTool()
+    public async Task Live_TheSubscriptionRefusesTheHostedImageGenerationTool()
     {
-        // ChatGptPlanRequestNormalizer refuses image_generation without a probe of its own: this is that probe. The tool
-        // is sent as Codex sent it to its backend until it moved to the images endpoint (see the next probe): at the
-        // top level beside the namespace of the local tools. The events are written with their long strings (the base64
-        // of the image) cut, to show the shape of the item.
+        // ChatGptPlanRequestNormalizer refuses image_generation: the endpoint does (live probe of 2026-10-29, gpt-6.1-sol).
+        // The tool is sent as Codex sent it to its backend, at the top level beside the namespace of the local tools.
         var body = JsonNode.Parse(ChatGptPlanRequestNormalizer.Normalize(BinaryData.FromString(Request("""{"type":"web_search"}""")), isHttp: true).ToString())!.AsObject();
         body["tools"]![1] = new JsonObject { ["type"] = "image_generation", ["output_format"] = "png" };
         body["input"] = new JsonArray { new JsonObject { ["role"] = "user", ["content"] = "Generate a small, simple image of a red circle on a white background, then answer with the single word: done" } };
         var result = await PostAsync(BinaryData.FromString(body.ToJsonString()));
         if (result is null) return;
 
-        foreach (var line in result.Value.Text.Split('\n'))
-        {
-            if (!line.StartsWith("data: ", StringComparison.Ordinal)) continue;
-            try
-            {
-                var data = JsonNode.Parse(line[6..])!;
-                Strip(data);
-                TestContext.WriteLine(data.ToJsonString());
-            }
-            catch (JsonException)
-            {
-                TestContext.WriteLine(line[..Math.Min(300, line.Length)]);
-            }
-        }
-
-        Assert.AreEqual(200, result.Value.Status, result.Value.Text);
-        Assert.IsFalse(result.Value.Failed, result.Value.Text[..Math.Min(2000, result.Value.Text.Length)]);
-        StringAssert.Contains(result.Value.Text, "\"image_generation_call\"", "the model generated the image it was asked for");
-
-        static void Strip(JsonNode? node)
-        {
-            switch (node)
-            {
-                case JsonObject obj:
-                    foreach (var key in obj.Select(static pair => pair.Key).ToArray())
-                    {
-                        if (obj[key] is JsonValue value && value.TryGetValue<string>(out var text) && text.Length > 200)
-                        {
-                            obj[key] = $"<{text.Length} chars>";
-                        }
-                        else
-                        {
-                            Strip(obj[key]);
-                        }
-                    }
-
-                    break;
-                case JsonArray array:
-                    foreach (var item in array) Strip(item);
-                    break;
-            }
-        }
+        Assert.AreEqual(400, result.Value.Status, "the subscription takes image_generation now: ChatGptPlanRequestNormalizer can let it through, and the executor read image_generation_call");
+        StringAssert.Contains(result.Value.Text, "subscription_sharing_unsupported_capability");
     }
 
     [TestMethod]
-    public async Task Live_TheSubscriptionTakesTheImagesApi_AsCodexCallsIt()
+    public async Task Live_TheSubscriptionRefusesTheImagesApi_AsCodexCallsIt()
     {
         // Codex no longer sends the hosted tool: its own image tool posts this to the images endpoint of its provider
-        // (codex-rs/ext/image-generation/src/tool.rs). Here, the endpoint of a ChatGPT token-sharing sign-in.
+        // (codex-rs/ext/image-generation/src/tool.rs). The credential of a ChatGPT token-sharing sign-in is refused there
+        // (live probe of 2026-10-29).
         var body = """{"prompt":"A small red circle on a white background.","background":"opaque","model":"gpt-image-2","quality":"auto","size":"auto"}""";
         var result = await PostAsync(BinaryData.FromString(body), "images/generations");
         if (result is null) return;
 
-        Assert.AreEqual(200, result.Value.Status, result.Value.Text[..Math.Min(2000, result.Value.Text.Length)]);
-        using var document = JsonDocument.Parse(result.Value.Text);
-        Assert.IsTrue(document.RootElement.GetProperty("data")[0].GetProperty("b64_json").GetString()!.Length > 0, "the endpoint gave the image");
+        Assert.AreEqual(401, result.Value.Status, "the subscription takes the images endpoint now: the provider can have an image tool that calls it");
+        StringAssert.Contains(result.Value.Text, "rejected_by_hardened_oauth_boundary");
     }
 
     private static string Request(string? hostedTool)

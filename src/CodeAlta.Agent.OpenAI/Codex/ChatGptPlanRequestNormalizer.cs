@@ -28,9 +28,12 @@ internal static class ChatGptPlanRequestNormalizer
                 if (property.Name == "tools" && property.Value.GetArrayLength() > 0)
                 {
                     // The local tools go in one namespace, which takes only functions and custom tools. Web search is
-                    // the one hosted tool the endpoint is known to take, beside it; it refuses tool search and
-                    // programmatic tool calling whatever the model (live probes of 2026-10-17). The others are refused
-                    // here without a probe: ChatGptPlanHostedToolsLiveProbeTests has the one of image generation.
+                    // the one hosted tool the endpoint takes, beside it; it refuses tool search and programmatic tool
+                    // calling whatever the model (live probes of 2026-10-17), and image generation: "User subscription
+                    // sharing currently supports only 'web_search' and developer-defined 'function' and 'custom' tools"
+                    // (400 subscription_sharing_unsupported_capability, live probe of 2026-10-29). Its images endpoint,
+                    // which Codex calls, refuses the credential too (401 rejected_by_hardened_oauth_boundary): the
+                    // subscription generates no image. ChatGptPlanHostedToolsLiveProbeTests says when that changes.
                     var local = new List<JsonElement>();
                     var hosted = new List<JsonElement>();
                     foreach (var tool in property.Value.EnumerateArray())
