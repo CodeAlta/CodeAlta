@@ -1165,7 +1165,8 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
   font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; }
 /* Keep the section's 6px padding plus the switch's former 8px top margin below More options. */
 .composer-selection-more-body { padding: 14px 6px 0; }
-.composer-selection-more-body > .bp6-form-group { margin: 0 0 4px; }
+.composer-selection-more-body > .bp6-form-group { margin: 0 0 12px; }
+.composer-selection-more-body > .bp6-form-group:last-child { margin-bottom: 4px; }
 .composer-selection-option .bp6-control { margin: 0 0 2px; }
 .composer-selection-option .composer-selection-label { text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--text); }
 .composer-send-group.bp6-button-group { flex: 0 0 auto; }

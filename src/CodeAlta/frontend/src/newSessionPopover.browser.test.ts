@@ -201,9 +201,10 @@ test("a new session is created from a form beside the row of its project or of t
       const body = context.parentElement, subSessions = body.querySelector('.composer-selection-option');
       return body.firstElementChild === context && context.nextElementSibling === subSessions
         && parseFloat(getComputedStyle(body).paddingTop) === 14
-        && parseFloat(getComputedStyle(context).marginBottom) === 4
+        && parseFloat(getComputedStyle(context).marginBottom) === 12
+        && parseFloat(getComputedStyle(subSessions).marginBottom) === 4
         && parseFloat(getComputedStyle(subSessions.querySelector('.bp6-control')).marginTop) === 0;
-    })()`), true, "the section spacer stays above Context size, not above Sub-sessions");
+    })()`), true, "the section spacer stays above Context size, with space before Sub-sessions");
     await select("#composer-context-create", "922000");
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(chip)}).textContent.includes('922K')`), false, "no duplicate context in the chip");
     assert.equal(await shown(form), true, "the form stayed open through every choice");

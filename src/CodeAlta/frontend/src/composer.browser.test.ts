@@ -214,9 +214,10 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
         return body.classList.contains('composer-selection-more-body')
           && body.firstElementChild === context && context.nextElementSibling === subSessions
           && parseFloat(getComputedStyle(body).paddingTop) === 14
-          && parseFloat(getComputedStyle(context).marginBottom) === 4
+          && parseFloat(getComputedStyle(context).marginBottom) === 12
+          && parseFloat(getComputedStyle(subSessions).marginBottom) === 4
           && parseFloat(getComputedStyle(subSessions.querySelector('.bp6-control')).marginTop) === 0;
-      })()`), true, "context follows the More options spacer and immediately precedes sub-sessions");
+      })()`), true, "context follows the More options spacer, with space before sub-sessions");
       assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.value)`), ["", "272000", "922000"]);
       assert.deepEqual(await evaluate(`[...${select}.options].map(option => option.textContent)`), ["Default (272K)", "272K", "922K"]);
       await choose("922000");
