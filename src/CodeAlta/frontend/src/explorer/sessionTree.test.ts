@@ -103,6 +103,10 @@ test("the sub-agents of a session listed in other projects follow its own as lin
   assert.deepEqual(lines(linked, limits({ collapsedIds: ["b", "a1"] })), ["a@0", "-a1@1", "link x2@1<a", "link x1@1<a", "-b@0"]);
   // The links count with the sub-agents of their parent.
   assert.deepEqual(lines(linked, limits({ subCount: 2 })), ["a@0", "a1@1", "link z@2<a1", "link x2@1<a", "more a@1 1", "b@0", "link y@1<b"]);
+  // Filtered, a session links to the children found only, and has no twist for those it does not link.
+  const found = linked.map(item => item.session.id === "a" ? { ...item, linked: [all[4]] } : item.session.id === "b" ? { ...item, linked: [] } : item);
+  assert.deepEqual(lines(found, limits()), ["a@0", "a1@1", "link z@2<a1", "link x2@1<a", "b@0"]);
+  assert.equal(sessionList(found, limits()).entries.some(entry => entry.kind === "session" && entry.row.session.id === "b" && entry.parent), false);
   // An archived child is not linked, nor is one whose parent is not listed here.
   const archived = [...all.slice(0, 3), { ...away("gone", "a", 9), archived: true }, away("orphan", "missing", 9)];
   assert.deepEqual(sessionHierarchy(archived.filter(value => value.projectId === "p1"), archived, "p1").map(item => item.childrenElsewhere), [undefined, undefined, undefined]);

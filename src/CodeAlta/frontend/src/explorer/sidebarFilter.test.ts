@@ -29,11 +29,14 @@ test("the filter keeps the sessions found and the sessions they are under, in th
   assert.deepEqual(filterSessionRows(rows, []).map(value => value.session.id), ["a", "a1", "a2", "b", "c"]);
 });
 
-test("a session kept by the filter links only to the children listed elsewhere that it finds", () => {
+test("a session kept by the filter links only to the children listed elsewhere that it finds, and still counts them all", () => {
   const away = [session("x", "p2", "Shader port", "a"), session("y", "p2", "Docs", "a")];
   const rows = [{ ...row(session("a", "p1", "Shader plan")), childrenElsewhere: away }, { ...row(session("b", "p1", "Shader cache")), childrenElsewhere: [away[1]] }];
-  assert.deepEqual(filterSessionRows(rows, ["shader"]).map(value => [value.session.id, value.childrenElsewhere?.map(item => item.id)]), [["a", ["x"]], ["b", undefined]]);
-  assert.deepEqual(filterSessionRows(rows, []).map(value => value.childrenElsewhere?.length), [2, 1]);
+  const found = filterSessionRows(rows, ["shader"]);
+  assert.deepEqual(found.map(value => [value.session.id, value.linked?.map(item => item.id)]), [["a", ["x"]], ["b", []]]);
+  // The number beside a session is that of all its children, as the filter leaves that of its own sub-agents.
+  assert.deepEqual(found.map(value => value.childrenElsewhere?.length), [2, 1]);
+  assert.deepEqual(filterSessionRows(rows, []).map(value => [value.childrenElsewhere?.length, value.linked]), [[2, undefined], [1, undefined]]);
 });
 
 test("the projects shown are those whose name, a session or a Claude Code session is found; the Claude Code ones by their group", () => {

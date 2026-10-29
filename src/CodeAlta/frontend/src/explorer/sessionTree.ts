@@ -100,7 +100,7 @@ export function sessionList(rows: readonly SessionHierarchyRow[], limits: Sessio
     const level = levels[Math.min(row.depth, levels.length - 1)];
     if (level.seen++ >= level.limit && !lineage.has(index)) { level.hidden++; skip = row.depth; return; }
     const id = row.session.id;
-    const links = row.childrenElsewhere ?? [];
+    const links = row.linked ?? row.childrenElsewhere ?? [];
     const parent = (rows[index + 1]?.depth ?? 0) > row.depth || links.length > 0;
     const collapsed = parent && limits.collapsed(id);
     entries.push({ kind: "session", row, parent, collapsed });

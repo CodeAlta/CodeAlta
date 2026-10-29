@@ -5,7 +5,9 @@ export type SessionHierarchyRow = { session: WorkspaceSession; depth: number; di
   /** Its parent, listed in another project, among the chats or in another space: the row is at the top of its list. */
   parentElsewhere?: WorkspaceSession;
   /** The sessions it started that are listed in another project or among the chats, newest first: links to them are shown under it. */
-  childrenElsewhere?: readonly WorkspaceSession[] };
+  childrenElsewhere?: readonly WorkspaceSession[];
+  /** Those of `childrenElsewhere` it links to, when not all of them: the ones the filter of the sidebar finds. */
+  linked?: readonly WorkspaceSession[] };
 
 // Keep the server's bounded order for ties. Resolve only an exact persisted scope; a missing
 // header or a missing/truncated parent can never manufacture a same-scope relationship.

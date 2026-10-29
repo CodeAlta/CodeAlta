@@ -34,7 +34,7 @@ export function SessionLinkRow({ entry }: { entry: Extract<SessionListEntry, { k
   const scope = family.scopeName(session);
   const label = t("Open {title}, listed in {scope}", { title: plainTitle(session.title), scope });
   return <div className="session-row session-link-row" data-link-id={session.id} data-parent-id={parentId}>
-    <button type="button" aria-pressed={false} title={label} aria-label={label} data-full-text={plainTitle(session.fullTitle || session.title)}
+    <button type="button" title={label} aria-label={label} data-full-text={plainTitle(session.fullTitle || session.title)}
       style={{ paddingLeft: sessionRowIndent(depth) }} onClick={() => family.open(session)}>
       <span className="session-icon" data-file-tone="teal"><AppIcon name="openExternal" size={12} /></span>
       <span className="session-title">{plainTitle(session.title)}</span>
@@ -114,7 +114,11 @@ export function markSessionFamily(container: Element, sessions: readonly Workspa
   return id;
 }
 
-/** The handlers that mark the family of the session row under the pointer, in the element that holds the Explorer. */
+/**
+ * The handlers that mark the family of the session row under the pointer, in the element that holds the Explorer.
+ * `sessions` are those the Explorer lists (the shown space), not the whole catalog: a session of another space, as an
+ * archived one, is listed nowhere here and must mark no project.
+ */
 export function sessionFamilyHover(sessions: () => readonly WorkspaceSession[]) {
   let shown: Element | null = null;
   return {

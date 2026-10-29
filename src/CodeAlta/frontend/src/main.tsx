@@ -5202,7 +5202,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           </div>)}
           </>;
           return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}
-            {...sessionFamilyHover(() => catalog.current?.sessions ?? snapshot?.sessions ?? [])}><SessionFamilyContext.Provider value={sessionFamily}>
+            {...sessionFamilyHover(() => currentSnapshot.current?.sessions ?? [])}><SessionFamilyContext.Provider value={sessionFamily}>
           <LabelDragGhost view={railDrag.view} />
           {!snapshot && railHead}
           {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={id => showScopeDraft(id)} onKeep={id => showScopeDraft(id, true)} children={sessions}

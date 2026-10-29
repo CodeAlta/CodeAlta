@@ -46,7 +46,7 @@ In CodeAlta Desktop:
 
 ## Child sessions
 
-A child session can be in another project, in the chats, or in another space than its parent: an agent of a chat can start sessions in projects. Such a child is listed at the top of its own project, and the sidebar links it to its parent. CodeAlta keeps who started each session, also after a restart.
+A child session can be in another project, in the chats, or in another space than its parent: an agent of a chat can start sessions in projects. Such a child is listed at the top of its own project, and the Explorer of CodeAlta Desktop links it to its parent. CodeAlta keeps who started each session, also after a restart.
 
 - Under its parent, a link with an arrow stands for the child, with its marks; its tooltip names its project. Click it to open the child. Links fold and count like the other sub-agents.
 - The number of sub-agents beside the parent counts these children too, with an arrow.
