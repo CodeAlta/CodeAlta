@@ -101,8 +101,10 @@
     <NeoRpcSchemaOutput>$(NeoRpcIntermediateOutputPath)/neoastra.schema.json</NeoRpcSchemaOutput>
   </PropertyGroup>
   <Target Name="CodeAltaBuildFrontendOnce" BeforeTargets="NeoAstraComputeFrontendFingerprint" Condition="'$(RuntimeIdentifier)' != ''">
-    <!-- MSBuild runs a target once for a project and its properties: the builds that ask for it wait for the first one. -->
-    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="NeoAstraPrepareFrontend" RemoveProperties="RuntimeIdentifier" />
+    <!-- MSBuild runs a target once for a project and its properties: the builds that ask for it wait for the first one.
+         A publish with ReadyToRun gives a build without a runtime the current one: that build would come back here. -->
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="NeoAstraPrepareFrontend" RemoveProperties="RuntimeIdentifier"
+             Properties="UseCurrentRuntimeIdentifier=false;UseDefaultPublishRuntimeIdentifier=false" />
   </Target>
   <Target Name="CodeAltaExcludeNativeSymbols" AfterTargets="ComputeResolvedFilesToPublishList">
     <!-- SkiaSharp and HarfBuzzSharp ship the symbols of their Windows libraries: 100 MB the application never reads. -->
