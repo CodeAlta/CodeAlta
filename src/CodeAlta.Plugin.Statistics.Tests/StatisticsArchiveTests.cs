@@ -258,6 +258,52 @@ public sealed class StatisticsArchiveTests
     }
 
     [TestMethod]
+    public async Task Startup_DoesNotReadTheSavedFactsOfSessionsAlreadyEffective()
+    {
+        // Every start deserialized and checked the saved facts of every deleted session to find nothing to import: a second
+        // of processor on a profile with 34 MB of saved sessions.
+        await using var harness = await StoreHarness.CreateAsync(archives: true);
+        var batch = SyntheticFacts.Batch(new Random(212), SessionId, SyntheticFacts.SpringStart, 96, 10);
+        await harness.Store.ApplyAsync(new ApplyRequest { SessionId = SessionId, Batch = batch, Cursor = JournalCursor.Start });
+        await harness.Store.MarkDeletedAsync([SessionId]);
+        await harness.Store.ResetAsync();
+        var before = await harness.DumpAsync();
+
+        await harness.ReopenAsync();
+        Assert.AreEqual(0, harness.Store.ArchivePayloadsRead);
+        await using var engine = new StatisticsEngine(harness.Store, new FileSystemSessionJournalCatalog(new AgentRuntimePathLayout(harness.Root)));
+        await engine.InitializeAsync();
+
+        Assert.AreEqual(0, harness.Store.ArchivePayloadsRead);
+        Assert.AreEqual(before, await harness.DumpAsync());
+        Assert.AreEqual(1, engine.Status.SavedSessions);
+    }
+
+    [TestMethod]
+    public async Task Startup_RecordsTheRowCountsOfASavedSessionMarkedBeforeThem_Once()
+    {
+        // A mark written before the row counts were kept: its saved facts are read once to check its rows, then never again.
+        await using var harness = await StoreHarness.CreateAsync(archives: true);
+        var batch = SyntheticFacts.Batch(new Random(212), SessionId, SyntheticFacts.SpringStart, 96, 10);
+        await harness.Store.ApplyAsync(new ApplyRequest { SessionId = SessionId, Batch = batch, Cursor = JournalCursor.Start });
+        await harness.Store.MarkDeletedAsync([SessionId]);
+        await harness.Store.ResetAsync();
+        var counts = await harness.Store.ReadAsync(sql => sql.Scalar($"SELECT row_counts FROM {harness.Store.Table("archive")} WHERE session_id=@p0", SessionId) as string);
+        Assert.IsFalse(string.IsNullOrEmpty(counts));
+        await harness.Store.WriteAsync(sql => sql.Execute($"UPDATE {harness.Store.Table("archive")} SET row_counts=NULL"));
+        var before = await harness.DumpAsync("archive");
+
+        await harness.ReopenAsync();
+        Assert.AreEqual(1, harness.Store.ArchivePayloadsRead);
+        Assert.AreEqual(before, await harness.DumpAsync("archive"));
+        Assert.AreEqual(counts, await harness.Store.ReadAsync(sql => sql.Scalar($"SELECT row_counts FROM {harness.Store.Table("archive")} WHERE session_id=@p0", SessionId) as string));
+
+        await harness.ReopenAsync();
+        Assert.AreEqual(0, harness.Store.ArchivePayloadsRead);
+        Assert.AreEqual(before, await harness.DumpAsync("archive"));
+    }
+
+    [TestMethod]
     [DataRow("run")]
     [DataRow("usage_q")]
     [DataRow("session")]

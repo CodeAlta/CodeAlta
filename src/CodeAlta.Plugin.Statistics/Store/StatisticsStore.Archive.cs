@@ -1,3 +1,4 @@
+using System.Globalization;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Plugin.Statistics.Facts;
@@ -8,8 +9,13 @@ internal sealed partial class StatisticsStore
 {
     private readonly StatisticsArchiveStore? _archives;
 
+    private int _archivePayloadsRead;
+
     internal bool HasArchive => _archives is not null;
     internal int SavedSessions { get; private set; }
+
+    // How many saved payloads this store deserialized: a start with nothing to import reads none.
+    internal int ArchivePayloadsRead => Volatile.Read(ref _archivePayloadsRead);
 
     // Version 2 of the saved statistics adds the runs of scripts (Code Mode): their facts and rows, the calls scripts make, the
     // exec calls of a run and the run of the script that started a session. A copy saved at version 1 stays readable as it was.
@@ -164,9 +170,9 @@ internal sealed partial class StatisticsStore
         }
     }
 
-    private async ValueTask<List<(StatisticsArchiveEntry Entry, StatisticsArchivePayload Payload)>> ReadArchivesAsync(CancellationToken token, string? sessionId = null)
+    private async ValueTask<List<SavedArchive>> ReadArchivesAsync(CancellationToken token, string? sessionId = null)
     {
-        var result = new List<(StatisticsArchiveEntry, StatisticsArchivePayload)>();
+        var result = new List<SavedArchive>();
         if (_archives is not null)
         {
             var entries = await _archives.ReadAsync(token).ConfigureAwait(false);
@@ -174,9 +180,7 @@ internal sealed partial class StatisticsStore
             foreach (var entry in entries)
             {
                 if (sessionId is not null && !string.Equals(entry.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)) continue;
-                var payload = StatisticsArchivePayload.Deserialize(entry.Payload);
-                ValidatePayload(payload, entry.SessionId, entry.Source);
-                result.Add((entry, payload));
+                result.Add(new SavedArchive(entry, this));
             }
         }
 
@@ -186,7 +190,7 @@ internal sealed partial class StatisticsStore
     // With a session, only that session's saved copy is considered.
     internal async ValueTask RestoreArchivesAsync(CancellationToken token, IReadOnlySet<string>? present = null, string? sessionId = null)
     {
-        List<(StatisticsArchiveEntry Entry, StatisticsArchivePayload Payload)>? archives = null;
+        List<SavedArchive>? archives = null;
         if (present is not null && _archives is not null && sessionId is null)
         {
             // A returning journal can supersede an archive, then disappear again. Preserve those newer facts first.
@@ -200,11 +204,13 @@ internal sealed partial class StatisticsStore
         {
             var journals = sql.Query($"SELECT session_id, deleted FROM {Table("journal")}", static reader => (Id: reader.GetString(0), Deleted: reader.GetInt64(1) != 0))
                 .ToDictionary(static row => row.Id, static row => row.Deleted, StringComparer.Ordinal);
-            var marks = sql.Query($"SELECT session_id, generation, effective FROM {Table("archive")}", static reader => (Id: reader.GetString(0), Generation: reader.GetString(1), Effective: reader.GetInt64(2) != 0))
+            var marks = sql.Query($"SELECT session_id, generation, effective, row_counts FROM {Table("archive")}",
+                    static reader => (Id: reader.GetString(0), Generation: reader.GetString(1), Effective: reader.GetInt64(2) != 0, RowCounts: reader.IsDBNull(3) ? null : reader.GetString(3)))
                 .ToDictionary(static row => row.Id, StringComparer.Ordinal);
             Dictionary<string, Dictionary<string, long>>? counts = null;
-            foreach (var (entry, payload) in archives)
+            foreach (var archive in archives)
             {
+                var entry = archive.Entry;
                 var journalExists = journals.TryGetValue(entry.SessionId, out var deleted);
                 var currentGeneration = marks.TryGetValue(entry.SessionId, out var mark) && mark.Generation == entry.Generation;
                 // A journal that came back replaced these saved facts with what it holds; they return when it is gone again.
@@ -212,9 +218,20 @@ internal sealed partial class StatisticsStore
                 // Already the projection: importing it again deletes and inserts the same rows and adds the roll-ups up again, for
                 // every saved session at every start. Only an import or a reread of the journal (which ends the effective mark)
                 // changes these rows, so rows that are still all there are this generation's.
+                // The row counts kept with the mark spare reading the saved copy of every session at every start.
                 var effective = journalExists && currentGeneration && mark.Effective;
-                if (effective && deleted && HoldsRows(entry.SessionId, payload, counts ??= CountArchivedRows(sql))) continue;
-                ImportArchive(sql, entry, payload, unchanged: effective);
+                if (effective && deleted)
+                {
+                    var rows = mark.RowCounts ?? RowCounts(archive.Payload);
+                    if (HoldsRows(entry.SessionId, rows, counts ??= CountArchivedRows(sql)))
+                    {
+                        // A mark written before the counts were kept gets them: the next start reads nothing.
+                        if (mark.RowCounts is null) sql.Execute($"UPDATE {Table("archive")} SET row_counts=@p1 WHERE session_id=@p0", entry.SessionId, rows);
+                        continue;
+                    }
+                }
+
+                ImportArchive(sql, entry, archive.Payload, unchanged: effective);
             }
         }, token).ConfigureAwait(false);
     }
@@ -235,8 +252,24 @@ internal sealed partial class StatisticsStore
     }
 
     // Project names are shared and renamed after the save: they are not evidence of the session's rows.
-    private static bool HoldsRows(string sessionId, StatisticsArchivePayload payload, Dictionary<string, Dictionary<string, long>> counts)
-        => payload.Tables.All(table => table.Name == "project" || (counts.TryGetValue(table.Name, out var rows) ? rows.GetValueOrDefault(sessionId) : -1) == table.Rows.Length);
+    private static string RowCounts(StatisticsArchivePayload payload)
+        => string.Join(';', payload.Tables.Where(table => table.Name != "project").Select(table => string.Create(CultureInfo.InvariantCulture, $"{table.Name}={table.Rows.Length}")));
+
+    // Whether the projection holds as many rows of the session as its saved copy, table by table (see RowCounts).
+    private static bool HoldsRows(string sessionId, string rowCounts, Dictionary<string, Dictionary<string, long>> counts)
+    {
+        foreach (var part in rowCounts.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = part.LastIndexOf('=');
+            if (separator <= 0 || !long.TryParse(part.AsSpan(separator + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var expected)
+                || (counts.TryGetValue(part[..separator], out var rows) ? rows.GetValueOrDefault(sessionId) : -1) != expected)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private void ImportArchive(SqlSession sql, StatisticsArchiveEntry entry, StatisticsArchivePayload payload, bool unchanged = false)
     {
@@ -268,8 +301,8 @@ internal sealed partial class StatisticsStore
     }
 
     private void ProtectArchive(SqlSession sql, StatisticsArchiveEntry entry, StatisticsArchivePayload payload, bool effective)
-        => sql.Execute($"INSERT OR REPLACE INTO {Table("archive")} (session_id,generation,facts_version,full_source,recorded_metrics,effective,source_seen) VALUES (@p0,@p1,@p2,@p3,@p4,@p5,0)",
-            entry.SessionId, entry.Generation, (long)payload.FactsVersion, payload.FullSourceVerified ? 1L : 0L, string.Join('\n', payload.RecordedMetrics), effective ? 1L : 0L);
+        => sql.Execute($"INSERT OR REPLACE INTO {Table("archive")} (session_id,generation,facts_version,full_source,recorded_metrics,effective,source_seen,row_counts) VALUES (@p0,@p1,@p2,@p3,@p4,@p5,0,@p6)",
+            entry.SessionId, entry.Generation, (long)payload.FactsVersion, payload.FullSourceVerified ? 1L : 0L, string.Join('\n', payload.RecordedMetrics), effective ? 1L : 0L, RowCounts(payload));
 
     internal ValueTask<bool> IsArchivedProjectionAsync(string sessionId, CancellationToken token)
         => ReadAsync(sql => sql.ScalarLong($"SELECT COUNT(*) FROM {Table("archive")} WHERE session_id=@p0 AND effective=1", sessionId) != 0, token);
@@ -278,11 +311,11 @@ internal sealed partial class StatisticsStore
         => ReadAsync(sql => sql.ScalarLong($"SELECT COUNT(*) FROM {Table("archive")} WHERE session_id=@p0", sessionId) != 0, token);
 
     // Returns whether a session was saved: the archives read before are then out of date.
-    private async ValueTask<bool> PreserveDeletedAsync(CancellationToken token, bool existingOnly = false, IReadOnlyList<(StatisticsArchiveEntry Entry, StatisticsArchivePayload Payload)>? read = null)
+    private async ValueTask<bool> PreserveDeletedAsync(CancellationToken token, bool existingOnly = false, IReadOnlyList<SavedArchive>? read = null)
     {
         var changed = false;
         var rows = await ListJournalsAsync(token).ConfigureAwait(false);
-        var archives = (read ?? await ReadArchivesAsync(token).ConfigureAwait(false)).ToDictionary(pair => pair.Entry.SessionId, StringComparer.OrdinalIgnoreCase);
+        var archives = (read ?? await ReadArchivesAsync(token).ConfigureAwait(false)).ToDictionary(archive => archive.Entry.SessionId, StringComparer.OrdinalIgnoreCase);
         // Saving a session below leaves the effective marks of the others as they are.
         var effective = await ReadAsync(sql => sql.Query($"SELECT session_id FROM {Table("archive")} WHERE effective=1", static reader => reader.GetString(0)).ToHashSet(StringComparer.Ordinal), token).ConfigureAwait(false);
         foreach (var row in rows.Values.Where(row => row.Deleted))
@@ -320,5 +353,30 @@ internal sealed partial class StatisticsStore
         }
 
         return changed;
+    }
+
+    // A saved session read from the archive. Its payload is deserialized and checked on first use: a start that finds every
+    // saved session already in the projection reads none of them.
+    private sealed class SavedArchive(StatisticsArchiveEntry entry, StatisticsStore store)
+    {
+        private StatisticsArchivePayload? _payload;
+
+        internal StatisticsArchiveEntry Entry { get; } = entry;
+
+        internal StatisticsArchivePayload Payload
+        {
+            get
+            {
+                if (_payload is null)
+                {
+                    Interlocked.Increment(ref store._archivePayloadsRead);
+                    var payload = StatisticsArchivePayload.Deserialize(Entry.Payload);
+                    ValidatePayload(payload, Entry.SessionId, Entry.Source);
+                    _payload = payload;
+                }
+
+                return _payload;
+            }
+        }
     }
 }

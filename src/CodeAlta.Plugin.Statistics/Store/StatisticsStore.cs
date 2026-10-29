@@ -24,7 +24,7 @@ namespace CodeAlta.Plugin.Statistics.Store;
 internal sealed partial class StatisticsStore
 {
     /// <summary>The version of the tables, kept by the host for the plugin.</summary>
-    public const int SchemaVersion = 6;
+    public const int SchemaVersion = 7;
 
     /// <summary>The version of the roll-ups: when it changes, they are added up again from the facts.</summary>
     public const int RollupVersion = 1;
@@ -158,6 +158,15 @@ internal sealed partial class StatisticsStore
                     + "start_ms INTEGER NOT NULL, end_ms INTEGER, duration_ms INTEGER, resumes_run_id TEXT, provider TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL, steps INTEGER NOT NULL, "
                     + "steps_failed INTEGER NOT NULL, sessions INTEGER NOT NULL, wait_ms INTEGER NOT NULL, PRIMARY KEY (session_id, run_id)) WITHOUT ROWID;"
                     + $"CREATE INDEX IF NOT EXISTS {Table("script_run")}_by_start ON {Table("script_run")} (start_ms);");
+            }
+
+            if (from < 7)
+            {
+                // The row counts of a saved session, kept with its mark: a start checks that its rows are all there without reading its
+                // saved copy. A mark written before has none, and gets them at the next start that finds its rows.
+                using var sql = new SqlSession(connection);
+                if (sql.ScalarLong($"SELECT COUNT(*) FROM pragma_table_info('{Table("archive")}') WHERE name = 'row_counts'") == 0)
+                    sql.Execute($"ALTER TABLE {Table("archive")} ADD COLUMN row_counts TEXT");
             }
 
             return ValueTask.CompletedTask;
@@ -391,10 +400,12 @@ internal sealed partial class StatisticsStore
     /// <returns>A task representing the write.</returns>
     public async ValueTask ResetAsync(CancellationToken cancellationToken = default)
     {
-        // Validate the irreplaceable archive BEFORE clearing anything. Migration is idempotent and never issues deletion receipts.
-        await ReadArchivesAsync(cancellationToken).ConfigureAwait(false);
+        // Validate the irreplaceable archive BEFORE clearing anything: every saved copy is read and checked (Payload).
+        // Migration is idempotent and never issues deletion receipts.
+        foreach (var archive in await ReadArchivesAsync(cancellationToken).ConfigureAwait(false)) _ = archive.Payload;
         await PreserveDeletedAsync(cancellationToken).ConfigureAwait(false);
         var archives = await ReadArchivesAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var archive in archives) _ = archive.Payload;
         await WriteAsync(
             sql =>
             {
@@ -408,9 +419,9 @@ internal sealed partial class StatisticsStore
                     sql.Execute($"DELETE FROM {table}");
                 }
 
-                foreach (var (entry, payload) in archives)
+                foreach (var archive in archives)
                 {
-                    ImportArchive(sql, entry, payload);
+                    ImportArchive(sql, archive.Entry, archive.Payload);
                 }
 
                 SetMeta(sql, new Dictionary<string, string?> { [RollupVersionKey] = RollupVersion.ToString(CultureInfo.InvariantCulture), [RollupTimeZoneKey] = Days.TimeZone.Id });
