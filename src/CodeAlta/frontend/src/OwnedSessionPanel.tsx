@@ -807,6 +807,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const lifetime = scope.current?.signal;
     if (!lifetime || lifetime.aborted || request.signal?.aborted || !canAdmit() || !capability.canMutate()) return false;
     const signal = request.signal ? AbortSignal.any([lifetime, request.signal]) : lifetime;
+    // A queued prompt is the queue's, not this composer's: it outlives the pane (a closed tab, another space shown), and
+    // whichever pane of the session is mounted sends it. Only the one who asked can take it back before it leaves.
+    const queued = request.signal ?? queue.signal;
     const value = request.text ?? "";
     let result: boolean | null = null;
     const received = (reply: SubmissionResult) => {
@@ -832,7 +835,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       if (chosen && (!activeChoices || !validSelection(activeChoices, chosen))) return false;
       // Enqueue has always meant a deferred Send, including when this saved session is unattached.
       // Keep the requested next-send selection and await the row's original downstream receipt.
-      return await queue.admit(epoch, sessionId, value, signal, chosen);
+      return await queue.admit(epoch, sessionId, value, queued, chosen);
     } else {
       const chosen = selections.current(epoch, sessionId) ?? selected;
       if (chosen && (!activeChoices || !validSelection(activeChoices, chosen))) return false;
@@ -847,10 +850,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         received(reply);
       });
       // Preserve ordinary Send's busy-race behavior, but still await actual downstream admission of
-      // the deferred Send. Close/unmount after the refusal conclusively prevents the new attempt.
-      if (becameBusy && !signal.aborted && canAdmit() && capability.canMutate()) {
+      // the deferred Send. A Close by the one who asked, after the refusal, conclusively prevents the new attempt.
+      if (becameBusy && !queued.aborted && canAdmit() && capability.canMutate()) {
         submissions.acknowledgeOutgoing([outgoingKey(command)]);
-        return await queue.admit(epoch, sessionId, value, signal, chosen);
+        return await queue.admit(epoch, sessionId, value, queued, chosen);
       }
     }
     return result;

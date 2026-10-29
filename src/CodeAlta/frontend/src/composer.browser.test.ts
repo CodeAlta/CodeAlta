@@ -25,8 +25,9 @@ const scenarios = [
   { name: "composer switches a session whose provider was removed to the default provider", mac: false, permission: false, outside: false, removed: true, options: false },
   { name: "composer sets the options of the model of the session", mac: false, permission: false, outside: false, removed: false, options: true },
   { name: "composer compacts only an attached idle session, says why not otherwise, and shows a failed compaction", mac: false, permission: false, outside: false, removed: false, options: false, compaction: true },
+  { name: "a prompt the shell queued in a busy session is sent after its pane left and came back", mac: false, permission: false, outside: false, removed: false, options: false, remount: true },
 ];
-for (const { name, mac, permission, outside, removed, options, compaction = false } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
+for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -145,6 +146,31 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       assert.equal(await wait("fixture.sendCalls.length===1"), true);
       assert.equal(await evaluate("fixture.sendCalls[0].selection?.providerKey"), "fixture-provider");
       assert.deepEqual(await evaluate("window.fixtureRemoved.switched"), ["fixture-provider"]);
+      assert.deepEqual(exceptions, []);
+      return;
+    }
+
+    if (remount) {
+      // A work item started in this session while it works: its prompt waits above the composer, and the start
+      // waits for the session to take it.
+      await evaluate("fixture.startRun()");
+      assert.equal(await wait(running), true);
+      await evaluate("window.asked=fixture.ask('enqueue','Carry out the task.'),true");
+      assert.deepEqual(JSON.parse(await evaluate("JSON.stringify(window.asked)")), { handled: true, result: true });
+      assert.deepEqual(await rows(), ["Queue:waiting:1:Carry out the task."]);
+      // The window shows another space: the pane of the session leaves. The prompt stays queued, and the start is not refused.
+      await evaluate("fixture.unmount()");
+      assert.equal(await wait("!document.querySelector('#session-prompt')"), true);
+      await evaluate("new Promise(resolve=>setTimeout(()=>resolve(true),200))");
+      assert.deepEqual(await rows(), ["Queue:waiting:1:Carry out the task."]);
+      assert.equal(await evaluate("window.asked.outcome===undefined"), true, "a pane that leaves does not refuse the prompt it queued");
+      // The pane is back: the turn ends and the prompt is sent, which is the session taking it.
+      await evaluate("fixture.mount()");
+      assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${running}`), true);
+      await evaluate("fixture.finishRun()");
+      assert.equal(await wait("fixture.sendCalls.length===1 && window.asked.outcome===true"), true);
+      assert.deepEqual(await sends(), ["Carry out the task."]);
+      assert.equal(await wait("fixture.rows().length===0"), true);
       assert.deepEqual(exceptions, []);
       return;
     }
