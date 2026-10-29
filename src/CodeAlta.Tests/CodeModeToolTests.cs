@@ -437,6 +437,106 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task ARunThatEndsDuringTheTurnThatStartedIt_IsLeftToAWaitOfThatTurn_AndNeverAPrompt()
+    {
+        using var root = TestTempDirectory.Create();
+        var delivered = new List<string>();
+        string? turn = "turn-1";
+        await using var runs = new CodeModeRunRegistry((_, prompt, _) => { lock (delivered) delivered.Add(prompt); return Task.CompletedTask; })
+        {
+            ActiveTurnOf = (_, _) => Task.FromResult<string?>(turn),
+        };
+        var invoker = new FakeTools { Gate = new TaskCompletionSource() };
+        var (exec, wait) = Create(root.Path, runs);
+        await InvokeAsync(exec, """
+            // @exec: {"yield_ms": 50}
+            return (await tools.read_file({ path: "a.txt" })).content;
+            """, invoker);
+        var runId = runs.List("session-1").Single().Id;
+
+        // The run ends a moment after exec went on, before the wait of the same turn: nobody waits for it yet.
+        await EndAsync(runs, runId, invoker);
+        Assert.IsEmpty(delivered, "the turn that started the run still runs: its wait takes the result");
+        var waited = await InvokeAsync(wait, $$"""{"run":"{{runId}}"}""");
+        StringAssert.Contains(Text(waited), "hello");
+
+        turn = null;
+        await runs.TurnEndedAsync("session-1");
+        Assert.IsEmpty(delivered, "a result that wait took is not delivered");
+    }
+
+    [TestMethod]
+    public async Task ARunThatEndsDuringTheTurnThatStartedIt_IsAPromptOnceThatTurnEndsWithoutTakingIt()
+    {
+        using var root = TestTempDirectory.Create();
+        var delivered = new List<string>();
+        string? turn = "turn-1";
+        await using var runs = new CodeModeRunRegistry((_, prompt, _) => { lock (delivered) delivered.Add(prompt); return Task.CompletedTask; })
+        {
+            ActiveTurnOf = (_, _) => Task.FromResult<string?>(turn),
+        };
+        var invoker = new FakeTools { Gate = new TaskCompletionSource() };
+        var (exec, _) = Create(root.Path, runs);
+        await InvokeAsync(exec, """
+            // @exec: {"yield_ms": 50}
+            return (await tools.read_file({ path: "a.txt" })).content;
+            """, invoker);
+        var runId = runs.List("session-1").Single().Id;
+
+        await EndAsync(runs, runId, invoker);
+        Assert.IsEmpty(delivered);
+        await runs.TurnEndedAsync("session-1");
+        Assert.IsEmpty(delivered, "the turn still runs: its end comes later");
+
+        turn = null;
+        await runs.TurnEndedAsync("session-1");
+        StringAssert.Contains(delivered.Single(), "hello", "the result comes back as a prompt once the turn ended");
+        await runs.TurnEndedAsync("session-1");
+        Assert.HasCount(1, delivered, "and only once");
+    }
+
+    [TestMethod]
+    public async Task ARunThatEndsAfterTheTurnThatStartedIt_IsAPromptAtOnce()
+    {
+        using var root = TestTempDirectory.Create();
+        var delivered = new List<string>();
+        string? turn = "turn-1";
+        await using var runs = new CodeModeRunRegistry((_, prompt, _) => { lock (delivered) delivered.Add(prompt); return Task.CompletedTask; })
+        {
+            ActiveTurnOf = (_, _) => Task.FromResult<string?>(turn),
+        };
+        var invoker = new FakeTools { Gate = new TaskCompletionSource() };
+        var (exec, _) = Create(root.Path, runs);
+        await InvokeAsync(exec, """
+            // @exec: {"yield_ms": 50}
+            return (await tools.read_file({ path: "a.txt" })).content;
+            """, invoker);
+        var runId = runs.List("session-1").Single().Id;
+
+        // The turn ended, and another one of the user runs: the result reaches the session as it does today.
+        turn = "turn-2";
+        await EndAsync(runs, runId, invoker);
+        StringAssert.Contains(delivered.Single(), "hello");
+    }
+
+    // Lets a run that waits at its gate end, and waits until the registry has handled its end.
+    private static async Task EndAsync(CodeModeRunRegistry runs, string runId, FakeTools invoker)
+    {
+        var ended = new TaskCompletionSource();
+        void OnEnded(string id) { if (id == runId) ended.TrySetResult(); }
+        runs.RunEnded += OnEnded;
+        try
+        {
+            invoker.Gate!.SetResult();
+            await ended.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        }
+        finally
+        {
+            runs.RunEnded -= OnEnded;
+        }
+    }
+
+    [TestMethod]
     public async Task AShortWait_LastsAtLeastTheFloor_SoThatTheEndOfTheRunIsItsResult()
     {
         using var root = TestTempDirectory.Create();

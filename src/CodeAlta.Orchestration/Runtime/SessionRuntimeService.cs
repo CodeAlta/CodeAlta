@@ -2691,6 +2691,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 var activeRunId = await ClearCapturedRunAsync(capturedEntry).ConfigureAwait(false);
                 if (original is OperationCanceledException)
                     PublishRunFinishedEvent(session.SessionId, activeRunId, SessionLifecycleEventKind.RunAborted, "Runtime run cancelled.", DateTimeOffset.UtcNow);
+                // A turn that ends here may publish no idle event: the results of scripts held for it go now.
+                if (ScriptRuns is { } scripts) await scripts.TurnEndedAsync(session.SessionId).ConfigureAwait(false);
             }
             catch (Exception cleanupFailure) { escaping = new AggregateException(escaping, cleanupFailure); }
             var prerequisite = new LiveEventObservationPrerequisite(
@@ -4696,7 +4698,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     });
                 }
                 else if (actorChoresCompleted && IsQueueDrainTrigger(@event))
+                {
                     effects.Add(() => TryDrainNextQueuedPromptAsync(sessionId));
+                    // A script that ended during the turn, and that no wait took, comes back now as a prompt.
+                    if (ScriptRuns is { } scripts) effects.Add(() => scripts.TurnEndedAsync(sessionId));
+                }
                 publication.IndependentWork = new LiveEventIndependentWork(effects);
                 return publication.IndependentWork.RunAsync();
             }, (failure, dependencies) =>

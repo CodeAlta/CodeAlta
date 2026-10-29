@@ -52,6 +52,16 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     public event Action<string>? RunEnded;
 
     /// <summary>
+    /// Gets or sets what reads the turn a session runs now (the id of its run), or null when it runs none: a run that goes
+    /// on in the background notes the turn of its <c>exec</c>, and its result is left to a <c>wait</c> of that turn while
+    /// it runs. Null for a host without turns: a result is then given as a prompt as soon as the run ends.
+    /// </summary>
+    public Func<string, CancellationToken, Task<string?>>? ActiveTurnOf { get; set; }
+
+    // The runs that ended during the turn that started them, nobody waiting: their result goes once that turn ended.
+    private readonly ConcurrentDictionary<string, CodeModeRunHandle> _heldForTurn = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Gets or sets what writes the records of a run in the journal of its session (<see cref="AgentWorkflowEvent"/>): the
     /// session, the record. Null writes none. The records of a run are written in their order, before its result is given.
     /// </summary>
@@ -682,11 +692,64 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         return run.TryCollect() ? (true, await run.Completion.ConfigureAwait(false)) : (true, null);
     }
 
-    // A run that ended in the background: its result goes to its session, unless a wait takes it. The session is held until
-    // then: what waits for it to settle sees the result arrive before it settles.
+    /// <summary>
+    /// Lets a run go on in the background after its <c>exec</c>, noting the turn that runs it (<see cref="ActiveTurnOf"/>):
+    /// a result that comes during that turn is left to its <c>wait</c>, and comes back as a prompt only once it ended.
+    /// </summary>
+    /// <param name="run">The run.</param>
+    /// <returns>A task that completes when the run is in the background.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="run"/> is null.</exception>
+    public async Task BackgroundAsync(CodeModeRunHandle run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        run.StartedInTurn = await ReadTurnAsync(run.SessionId).ConfigureAwait(false);
+        run.Background();
+    }
+
+    /// <inheritdoc />
+    public async Task TurnEndedAsync(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        foreach (var run in _heldForTurn.Values.Where(run => string.Equals(run.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)).ToArray())
+        {
+            // Another turn may have started since: the result goes to it, the turn that started the run being over.
+            if (await InStartingTurnAsync(run).ConfigureAwait(false) || !_heldForTurn.TryRemove(run.Id, out _)) continue;
+            try
+            {
+                await DeliverAsync(run, await run.Completion.ConfigureAwait(false)).ConfigureAwait(false);
+            }
+            finally
+            {
+                run.Hold?.Dispose();
+            }
+        }
+    }
+
+    private async Task<string?> ReadTurnAsync(string sessionId)
+    {
+        if (ActiveTurnOf is not { } read) return null;
+        try
+        {
+            return await read(sessionId, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    // Whether the turn of the exec of a run still runs: a wait of that turn can still take the result.
+    private async Task<bool> InStartingTurnAsync(CodeModeRunHandle run)
+        => run.StartedInTurn is { } turn && string.Equals(await ReadTurnAsync(run.SessionId).ConfigureAwait(false), turn, StringComparison.Ordinal);
+
+    // A run that ended in the background: its result goes to its session, unless a wait takes it. While the turn that
+    // started it runs, it is left to a wait of that turn, and goes once that turn ended (TurnEndedAsync): a prompt in the
+    // middle of that turn would reach the agent as a message, and the timeline as a card, for a result its wait takes. The
+    // session is held until then: what waits for it to settle sees the result arrive before it settles.
     private async Task OnEndedAsync(CodeModeRunHandle run, CodeModeRunResult result)
     {
         ForgetLater(run);
+        var held = false;
         try
         {
             // CodeAlta closes: a run it stops is not over but interrupted. Its end is left to the next start, which marks
@@ -712,12 +775,22 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             await run.JournalWritten.ConfigureAwait(false);
             if (run.Backgrounded && run.Waiters == 0 && !run.Silenced)
             {
-                await DeliverAsync(run, result).ConfigureAwait(false);
+                if (await InStartingTurnAsync(run).ConfigureAwait(false) && !Volatile.Read(ref _disposed))
+                {
+                    _heldForTurn[run.Id] = run;
+                    held = true;
+                    // The turn may have ended meanwhile, its end told before the run was held.
+                    if (!await InStartingTurnAsync(run).ConfigureAwait(false)) await TurnEndedAsync(run.SessionId).ConfigureAwait(false);
+                }
+                else
+                {
+                    await DeliverAsync(run, result).ConfigureAwait(false);
+                }
             }
         }
         finally
         {
-            run.Hold?.Dispose();
+            if (!held) run.Hold?.Dispose();
             RunEnded?.Invoke(run.Id);
         }
     }
@@ -775,6 +848,11 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         }
 
         await Task.WhenAll(runs.Select(static run => run.Completion.ContinueWith(static _ => { }, TaskScheduler.Default))).ConfigureAwait(false);
+        // A result held for a turn has nowhere to go any more.
+        foreach (var run in _heldForTurn.Values)
+        {
+            if (_heldForTurn.TryRemove(run.Id, out _)) run.Hold?.Dispose();
+        }
     }
 }
 
@@ -941,6 +1019,9 @@ public sealed class CodeModeRunHandle : ICodeModeRunObserver
 
     // The hold of the session of the run, released once its result is given.
     internal IDisposable? Hold { get; set; }
+
+    // The turn that ran the exec of the run when it went on in the background, or null when none was known.
+    internal string? StartedInTurn { get; set; }
 
     // What keeps the run for a resume, or null.
     internal CodeModeRunStore.Writer? Writer { get; set; }

@@ -106,6 +106,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
             (sessionId, prompt, images, token) => runtimeService.DeliverHostPromptAsync(sessionId, prompt, AgentPromptProvenance.Workflow, images, token),
             runtimeService.TryHoldForScript);
         runtimeService.ScriptRuns = CodeModeRuns;
+        // A script that ends during the turn that started it is left to a wait of that turn.
+        CodeModeRuns.ActiveTurnOf = runtimeService.ReadActiveTurnAsync;
         CodeModeRuns.Journal = (sessionId, record) => runtimeService.AppendScriptRecordAsync(sessionId, record);
         // A long result is kept whole with the attachments of its session (~/.alta/sessions), where a long output of a command is,
         // and goes with it; the sandbox of the session reads it there.

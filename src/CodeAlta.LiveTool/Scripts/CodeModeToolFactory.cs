@@ -422,7 +422,7 @@ public static class CodeModeToolFactory
 
             if (!run.Completion.IsCompleted)
             {
-                run.Background();
+                await options.Runs.BackgroundAsync(run).ConfigureAwait(false);
             }
         }
 

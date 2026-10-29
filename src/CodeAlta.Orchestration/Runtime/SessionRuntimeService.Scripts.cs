@@ -27,6 +27,14 @@ public interface ISessionScriptRuns
     bool StopRun(string sessionId, string runId, string? by);
 
     /// <summary>
+    /// Tells that a turn of a session ended: the results of the scripts that ended during the turn that started them, and
+    /// that no wait took, come back to the session as prompts.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>A task that completes when the results are given.</returns>
+    Task TurnEndedAsync(string sessionId);
+
+    /// <summary>
     /// Gets the mode of Code Mode a session has now, on a provider and a model: <c>off</c>, <c>on</c> (it has <c>exec</c>)
     /// or <c>only</c> (<c>exec</c> takes over its tools).
     /// </summary>
@@ -62,6 +70,20 @@ public sealed partial class SessionRuntimeService
         }
 
         await AppendSessionEventAsync(session, record with { ProviderId = new ModelProviderId(session.ResolvedProviderKey) }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads the turn a session runs now, for the scripts of Code Mode: the id of its run in progress, or null when it runs
+    /// none (<see cref="Scripts.CodeModeRunRegistry.ActiveTurnOf"/>).
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The id of the run, or null.</returns>
+    public Task<string?> ReadActiveTurnAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        cancellationToken.ThrowIfCancellationRequested();
+        return ReadActiveRunIdAsync(sessionId);
     }
 
     /// <summary>
