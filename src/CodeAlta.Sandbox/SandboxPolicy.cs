@@ -23,6 +23,13 @@ public sealed record SandboxSessionFolders
     public string? Scratchpad { get; init; }
 
     /// <summary>
+    /// Gets more folders the session reads and never writes: the folder of its own tool output, where CodeAlta keeps the
+    /// whole of an output too long for a result (of <c>exec</c>, of a command run outside the sandbox) and names it to
+    /// the agent. A folder is granted when it exists as the sandbox starts, with what is saved in it later.
+    /// </summary>
+    public IReadOnlyList<string> Readable { get; init; } = [];
+
+    /// <summary>
     /// Gets the name of a home folder of its own, kept between sessions and profiles: the one of an agent that signs in
     /// there once and that no other process of a sandbox reaches; null for the home folder of the profile.
     /// </summary>

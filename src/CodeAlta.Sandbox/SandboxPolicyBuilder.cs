@@ -95,6 +95,8 @@ public static class SandboxPolicyBuilder
         readOnly.AddRange(host.ToolFolders.Select(Full));
         readOnly.AddRange(host.ProgramFolders.Select(Full));
         readOnly.AddRange(profile.Read.Select(path => Expand(path, home)));
+        // The session's own tool output, in the folder of CodeAlta: a grant inside a folder of secrets reaches that folder alone.
+        readOnly.AddRange(folders.Readable.Select(Full));
         var userGitConfig = Path.Combine(home, ".gitconfig");
         if (File.Exists(userGitConfig)) readOnly.Add(userGitConfig);
         var userPackages = Path.Combine(home, ".nuget", "packages");

@@ -82,7 +82,8 @@ public sealed partial class SessionRuntimeService
         if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated)
             return (null, null, "The session is not attached: its sandbox starts with its next turn.");
         var sessionFolder = entry.WorktreeDirectory ?? entry.WorkingDirectory;
-        var start = SandboxStartOf(sessionId, entry.ProviderKey, profile, sessionFolder, entry.ProjectRoots, entry.ProcessEnvironment, commandGuard: false);
+        var start = await SandboxStartOfAsync(sessionId, entry.ProviderKey, profile, sessionFolder, entry.ProjectRoots, entry.ProcessEnvironment, commandGuard: false,
+            cancellationToken).ConfigureAwait(false);
         SessionSandboxWorkers.Lease lease;
         try
         {
@@ -177,6 +178,18 @@ public sealed partial class SessionRuntimeService
         }
     }
 
+    /// <summary>
+    /// Gets the folder of a session's tool output, in the folder of its attachments, beside its journal: where the whole of
+    /// a long output of a command or a long result of <c>exec</c> is kept, and goes with the session. Its sandbox reads it.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The folder, which may not exist yet; null for a session without journal.</returns>
+    internal async ValueTask<string?> GetToolOutputDirectoryAsync(string sessionId, CancellationToken cancellationToken)
+        => await _sessionViewCatalog.JournalStore.CreateSessionStore().GetAttachmentDirectoryAsync(sessionId, cancellationToken).ConfigureAwait(false) is { } folder
+            ? Path.Combine(folder, AgentBuiltInToolOptions.ToolOutputFolderName)
+            : null;
+
     // The router of the built-in tools of a session, which reads its sandbox at each call.
     internal IAgentBuiltInToolRouter CreateSandboxToolRouter(string sessionId, string providerId, IReadOnlyList<string> projectRoots)
         => new SandboxToolRouter(this, sessionId, providerId, projectRoots);
@@ -188,8 +201,8 @@ public sealed partial class SessionRuntimeService
     private static string SandboxProblem(SessionSandbox sandbox)
         => $"This session is sandboxed (profile '{sandbox.Choice.Profile}'), and its sandbox cannot run: {sandbox.Problem}";
 
-    private SessionSandboxStart SandboxStartOf(string sessionId, string providerId, ResolvedSandboxProfile profile, string workingDirectory,
-        IReadOnlyList<string> projectRoots, AgentProcessEnvironment? environment, bool commandGuard)
+    private async Task<SessionSandboxStart> SandboxStartOfAsync(string sessionId, string providerId, ResolvedSandboxProfile profile, string workingDirectory,
+        IReadOnlyList<string> projectRoots, AgentProcessEnvironment? environment, bool commandGuard, CancellationToken cancellationToken)
     {
         // A sandboxed session writes a scratchpad of its own: the shared one would let it leave instructions for others.
         string? scratchpad = string.IsNullOrWhiteSpace(ScratchpadRoot) ? null : Path.Combine(ScratchpadRoot, "sandbox", sessionId);
@@ -201,8 +214,26 @@ public sealed partial class SessionRuntimeService
             WorkingDirectory = Path.GetFullPath(workingDirectory),
             Repositories = [.. projectRoots.Where(static root => !string.IsNullOrWhiteSpace(root)).Select(Path.GetFullPath)],
             Scratchpad = scratchpad,
+            Readable = await ToolOutputGrantAsync(sessionId, cancellationToken).ConfigureAwait(false),
         };
         return new SessionSandboxStart(sessionId, providerId, profile, folders, environment?.Variables ?? [], commandGuard);
+    }
+
+    // The agent is told to read the whole of a long output in the tool output of its session, which CodeAlta writes
+    // outside the sandbox (exec, a command run outside it): the sandbox reads that folder, of this session alone. It is
+    // made now, since a sandbox grants a folder that exists as it starts.
+    private async Task<IReadOnlyList<string>> ToolOutputGrantAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await GetToolOutputDirectoryAsync(sessionId, cancellationToken).ConfigureAwait(false) is { } folder
+                ? [Directory.CreateDirectory(folder).FullName]
+                : [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return [];
+        }
     }
 
     // A session that goes away leaves no worker behind; none is created for a runtime that never sandboxed anything.
@@ -242,7 +273,8 @@ public sealed partial class SessionRuntimeService
         {
             ArgumentNullException.ThrowIfNull(launch);
             var folder = launch.WorkingDirectory ?? projectRoots.FirstOrDefault(static root => !string.IsNullOrWhiteSpace(root)) ?? Environment.CurrentDirectory;
-            var start = runtime.SandboxStartOf(sessionId, providerId, profile, folder, projectRoots, environment: null, commandGuard: false);
+            var start = await runtime.SandboxStartOfAsync(sessionId, providerId, profile, folder, projectRoots, environment: null, commandGuard: false, cancellationToken)
+                .ConfigureAwait(false);
             try
             {
                 return await runtime.SandboxWorkers.StartAgentProcessAsync(start, launch, cancellationToken).ConfigureAwait(false);
@@ -329,7 +361,8 @@ public sealed partial class SessionRuntimeService
             try
             {
                 var refusedBefore = runtime.SandboxWorkers.RecentRefusals(sessionId);
-                using var lease = await runtime.SandboxWorkers.AcquireAsync(StartOf(profile, options), cancellationToken).ConfigureAwait(false);
+                using var lease = await runtime.SandboxWorkers.AcquireAsync(await StartOfAsync(profile, options, cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
                 var result = await lease.Client.InvokeAsync(invocation, new SandboxToolHost(options.OnPermissionRequest,
                     options.CommandGuard is { } guard ? (command, folder, token) => guard(command, folder, token) : null), cancellationToken).ConfigureAwait(false);
                 // What blocked a command, when it can be told, stops the agent from trying it again the same way.
@@ -372,8 +405,10 @@ public sealed partial class SessionRuntimeService
             var decision = await options.OnPermissionRequest(request, cancellationToken).ConfigureAwait(false);
             if (decision.Kind is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.AllowForSession))
                 return Refused(tool, "the user did not allow it to run outside the sandbox.");
-            // Allowed once, for this command: the shell of the host does not ask it again.
-            var allowed = Copy(options, null, static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)));
+            // Allowed once, for this command: the shell of the host does not ask it again. The whole of a long output goes
+            // where the sandbox of the session reads it, not in the temporary folder of CodeAlta.
+            var allowed = Copy(options, null, static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                token => runtime.GetToolOutputDirectoryAsync(sessionId, token));
             var host = AgentBuiltInToolFactory.CreateDefaultTools(allowed).Single(static candidate => candidate.Spec.Name == ShellCommand);
             var result = await host.Handler(inside, cancellationToken).ConfigureAwait(false);
             // After the output, which starts with its exit code as the timelines read it.
@@ -386,14 +421,15 @@ public sealed partial class SessionRuntimeService
             if (!sandbox.IsSandboxed) return await tool.Handler(invocation, cancellationToken).ConfigureAwait(false);
             if (sandbox.Profile is not { } profile) return Refused(tool, SandboxProblem(sandbox));
             if (profile.Network == SandboxNetwork.Off) return Refused(tool, $"the sandbox of this session (profile '{profile.Name}') has no network.");
-            var policy = runtime.SandboxWorkers.PolicyOf(StartOf(profile, options));
+            var policy = runtime.SandboxWorkers.PolicyOf(await StartOfAsync(profile, options, cancellationToken).ConfigureAwait(false));
             using var http = SandboxHttp.Create(policy, runtime.SandboxWorkers.ReservedPorts);
-            var sandboxed = AgentBuiltInToolFactory.CreateDefaultTools(Copy(options, http, null)).Single(static candidate => candidate.Spec.Name == WebGet);
+            var sandboxed = AgentBuiltInToolFactory.CreateDefaultTools(Copy(options, http, null, null)).Single(static candidate => candidate.Spec.Name == WebGet);
             return await sandboxed.Handler(invocation, cancellationToken).ConfigureAwait(false);
         }
 
-        private SessionSandboxStart StartOf(ResolvedSandboxProfile profile, AgentBuiltInToolOptions options)
-            => runtime.SandboxStartOf(sessionId, providerId, profile, options.WorkingDirectory ?? Environment.CurrentDirectory, projectRoots, options.Environment, options.CommandGuard is not null);
+        private Task<SessionSandboxStart> StartOfAsync(ResolvedSandboxProfile profile, AgentBuiltInToolOptions options, CancellationToken cancellationToken)
+            => runtime.SandboxStartOfAsync(sessionId, providerId, profile, options.WorkingDirectory ?? Environment.CurrentDirectory, projectRoots, options.Environment,
+                options.CommandGuard is not null, cancellationToken);
 
         private static AgentToolResult Refused(AgentToolDefinition tool, string reason) => new(false, [], $"{tool.Spec.Name} did not run: {reason}");
 
@@ -410,8 +446,10 @@ public sealed partial class SessionRuntimeService
                 ? Path.GetFullPath(Path.Combine(options.WorkingDirectory ?? Environment.CurrentDirectory, workdir.GetString()!))
                 : options.WorkingDirectory;
 
-        // The options of the tools of the session, with another client for the web or another answer to their permissions.
-        private static AgentBuiltInToolOptions Copy(AgentBuiltInToolOptions options, HttpClient? http, AgentPermissionRequestHandler? permissions) => new()
+        // The options of the tools of the session, with another client for the web, another answer to their permissions or
+        // another folder for their long outputs.
+        private static AgentBuiltInToolOptions Copy(AgentBuiltInToolOptions options, HttpClient? http, AgentPermissionRequestHandler? permissions,
+            Func<CancellationToken, ValueTask<string?>>? toolOutput) => new()
         {
             ProviderId = options.ProviderId,
             SessionId = options.SessionId,
@@ -430,6 +468,7 @@ public sealed partial class SessionRuntimeService
             MaxGrepMatches = options.MaxGrepMatches,
             MaxWebGetBytes = options.MaxWebGetBytes,
             WebGetTimeout = options.WebGetTimeout,
+            ResolveToolOutputDirectoryAsync = toolOutput ?? options.ResolveToolOutputDirectoryAsync,
         };
     }
 }

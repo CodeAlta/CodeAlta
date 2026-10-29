@@ -131,6 +131,34 @@ public sealed class SandboxPolicyBuilderTests
     }
 
     [TestMethod]
+    public void TheToolOutputOfTheSession_IsReadOnly_AndNothingElseOfTheFolderOfCodeAlta()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var alta = temp.Folder("home/.alta");
+        var own = temp.Folder("home/.alta/sessions/2026/10/29/s1.attachments/tool-output");
+        var other = temp.Folder("home/.alta/sessions/2026/10/29/s2.attachments/tool-output");
+
+        var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve("strict", []), new SandboxSessionFolders { WorkingDirectory = project, Readable = [own] },
+            new SandboxHost { DataRoot = temp.Folder("data"), HomeDirectory = temp.Folder("home"), Environment = new Dictionary<string, string>() }, [], "s1");
+
+        CollectionAssert.Contains(policy.ReadOnly.ToList(), own, "the agent reads the whole of an output it is told to read");
+        Assert.IsFalse(policy.ReadWrite.Any(path => SandboxPolicyBuilder.IsInside(path, own)), "it does not write there");
+        var granted = policy.ReadWrite.Concat(policy.ReadOnly).ToList();
+        Assert.IsFalse(granted.Any(path => SandboxPolicyBuilder.IsInside(path, other)), "nor reads the output of another session");
+        Assert.IsFalse(granted.Any(path => SandboxPolicyBuilder.IsInside(path, Path.GetDirectoryName(own)!)), "nor the other files of its own");
+        Assert.IsFalse(granted.Any(path => SandboxPolicyBuilder.IsInside(path, alta)), "nor the folder of CodeAlta");
+        CollectionAssert.DoesNotContain(policy.Denied.ToList(), alta, "a grant inside a folder of secrets does not deny it");
+
+        // A profile that reads the home folder denies the folder of CodeAlta, and the session still reads its own output there.
+        var wide = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve("wide", [new SandboxProfile { Name = "wide", Read = ["~"] }]),
+            new SandboxSessionFolders { WorkingDirectory = project, Readable = [own] },
+            new SandboxHost { DataRoot = temp.Folder("data"), HomeDirectory = temp.Folder("home"), Environment = new Dictionary<string, string>() }, [], "s1");
+        CollectionAssert.Contains(wide.Denied.ToList(), alta);
+        CollectionAssert.Contains(wide.ReadOnly.ToList(), own);
+    }
+
+    [TestMethod]
     public void AProcessWithAHomeOfItsOwn_KeepsItBetweenProfiles_AndNotInTheHomeOfAProfile()
     {
         using var temp = new TempTree();
