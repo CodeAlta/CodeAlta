@@ -13,11 +13,26 @@ namespace CodeAlta.NativeEngines;
 public sealed record PinnedFile(string Name, long Size, string? Sha256, string? GitSha1 = null);
 
 /// <summary>A download that ends with a reason the user is told.</summary>
-/// <param name="code"><c>network</c>, <c>not_found</c>, <c>checksum</c>, <c>busy_elsewhere</c> or <c>disk</c>.</param>
-public sealed class PinnedDownloadException(string code) : Exception(code)
+public sealed class PinnedDownloadException : Exception
 {
+    /// <summary>Initializes a new instance of the <see cref="PinnedDownloadException"/> class.</summary>
+    /// <param name="code"><c>network</c>, <c>not_found</c>, <c>checksum</c>, <c>busy_elsewhere</c> or <c>disk</c>.</param>
+    public PinnedDownloadException(string code)
+        : this(code, null)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="PinnedDownloadException"/> class.</summary>
+    /// <param name="code"><c>network</c>, <c>not_found</c>, <c>checksum</c>, <c>busy_elsewhere</c> or <c>disk</c>.</param>
+    /// <param name="innerException">The failure that gave the reason, kept for the log, or <see langword="null"/>.</param>
+    public PinnedDownloadException(string code, Exception? innerException)
+        : base(code, innerException)
+    {
+        Code = code;
+    }
+
     /// <summary>Gets the reason.</summary>
-    public string Code { get; } = code;
+    public string Code { get; }
 }
 
 /// <summary>What a download reports while it runs.</summary>
@@ -98,7 +113,7 @@ public sealed class PinnedDownloader : IDisposable
         Directory.CreateDirectory(partial);
         FileStream guard;
         try { guard = new(Path.Combine(partial, ".lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose); }
-        catch (IOException) { throw new PinnedDownloadException("busy_elsewhere"); }
+        catch (IOException exception) { throw new PinnedDownloadException("busy_elsewhere", exception); }
         await using (guard.ConfigureAwait(false))
         {
             // A folder under its name without its marker is what a removal left: it is not an installation.
@@ -174,13 +189,13 @@ public sealed class PinnedDownloader : IDisposable
                         stall.CancelAfter(StallTimeout);
                         int read;
                         try { read = await input.ReadAsync(buffer, stall.Token).ConfigureAwait(false); }
-                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new PinnedDownloadException("network"); }
-                        catch (IOException) { throw new PinnedDownloadException("network"); }
+                        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested) { throw new PinnedDownloadException("network", exception); }
+                        catch (IOException exception) { throw new PinnedDownloadException("network", exception); }
                         if (read == 0) break;
                         written += read;
                         if (written > file.Size) throw new PinnedDownloadException("checksum");
                         try { await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false); }
-                        catch (IOException) { throw new PinnedDownloadException("disk"); }
+                        catch (IOException exception) { throw new PinnedDownloadException("disk", exception); }
                         progress.Received(read);
                     }
                 }
@@ -235,6 +250,6 @@ public sealed class PinnedDownloader : IDisposable
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(StallTimeout);
         try { return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new PinnedDownloadException("network"); }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested) { throw new PinnedDownloadException("network", exception); }
     }
 }

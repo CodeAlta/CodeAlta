@@ -80,6 +80,33 @@ public sealed class CodexAppServerInstallerTests
     }
 
     [TestMethod]
+    public async Task Install_SaysWhichStepFailedOnWhichFile_AndWhy()
+    {
+        using var temp = TestTempDirectory.Create();
+        // Bytes whose hash is pinned but that are no gzip: the download and its check pass, the unpacking fails.
+        var archive = Encoding.UTF8.GetBytes("not a gzip archive");
+        var root = Path.Combine(temp.Path, "cache");
+        using var installer = new CodexAppServerInstaller(root, new PackageHandler(archive), Package(archive));
+
+        var exception = await Assert.ThrowsExactlyAsync<CodexInstallException>(() => installer.EnsureInstalledAsync(null, CancellationToken.None));
+
+        Assert.AreEqual("disk", exception.Code);
+        var path = Path.Combine(root, CodexPinnedRelease.Version, Target + ".partial", Package(archive).FileName);
+        StringAssert.Contains(exception.Message, $"could not be unpacked from {path}.");
+        StringAssert.Contains(exception.Message, "(InvalidDataException 0x");
+        Assert.IsInstanceOfType<InvalidDataException>(exception.InnerException);
+    }
+
+    [TestMethod]
+    public void DescribeCause_NamesTheTypeAndTheHResult_EvenWithoutAMessage()
+    {
+        // A failure of the system can come with no message: its type and its HRESULT still say what it was.
+        Assert.AreEqual("IOException 0x80070020", CodexAppServerInstaller.DescribeCause(new IOException(" ", unchecked((int)0x80070020))));
+        Assert.AreEqual("UnauthorizedAccessException 0x80070005: Access to the path is denied.",
+            CodexAppServerInstaller.DescribeCause(new UnauthorizedAccessException("Access to the path is denied.")));
+    }
+
+    [TestMethod]
     public async Task TwoInstancesOfCodeAlta_DownloadThePackageOnce()
     {
         using var temp = TestTempDirectory.Create();

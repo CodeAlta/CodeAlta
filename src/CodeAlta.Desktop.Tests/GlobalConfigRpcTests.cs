@@ -149,6 +149,74 @@ type = "fake-agent"
         Assert.AreEqual("completed", events[^1].Kind);
     }
 
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task InstallPluginProvider_ShowsTheMessage_AndLogsTheWholeFailure()
+    {
+        // The dialog shows the message of the catalog; the log keeps what it does not show: the causes and the stack.
+        await using var fixture = new Fixture();
+        await using var endpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints();
+        var types = new CodeAlta.Hosting.PluginModelProviderTypes(endpoints);
+        types.Attach(static () => [new CodeAlta.Plugins.Abstractions.PluginModelProviderContribution
+        {
+            ProviderType = "fake-agent", DisplayName = "Fake agent", CreateRuntime = static _ => throw new NotSupportedException("Not created in this test."), Catalog = new FailingCatalog(),
+        }]);
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch) { PluginProviderTypes = types };
+        var events = new List<GlobalConfigPluginInstallEvent>();
+
+        var capture = new DesktopLogCapture();
+        var config = new XenoAtom.Logging.LogManagerConfig();
+        config.RootLogger.MinimumLevel = XenoAtom.Logging.LogLevel.Debug;
+        config.RootLogger.Writers.Add(new DesktopCaptureLogWriter(capture));
+        XenoAtom.Logging.LogManager.Initialize(config);
+        try
+        {
+            await foreach (var item in service.InstallAsync(new(Epoch, "fake-agent", "fake"), CancellationToken.None)) events.Add(item);
+        }
+        finally
+        {
+            // The loggers keep the levels of the last configuration once the log ends: the tests that run after this
+            // one, without a log, must find them off.
+            config.RootLogger.MinimumLevel = XenoAtom.Logging.LogLevel.None;
+            config.ApplyChanges();
+            XenoAtom.Logging.LogManager.Shutdown();
+        }
+
+        Assert.AreEqual("install_failed", events.Single().Status);
+        Assert.AreEqual(FailingCatalog.Message, events.Single().Message);
+        var row = capture.Snapshot().Rows.Single(static row => row.Text.Contains("Fake agent could not be added", StringComparison.Ordinal));
+        Assert.AreEqual("Error", row.Level);
+        StringAssert.Contains(row.Text, "the entry 'fake' of Fake catalog");
+        StringAssert.Contains(row.Text, "System.IO.IOException: locked by another process", "the cause the dialog does not show");
+        StringAssert.Contains(row.Text, nameof(FailingCatalog), "where it was thrown");
+        Assert.IsFalse(File.Exists(fixture.ConfigPath), "a failed install writes no provider");
+    }
+
+    // A catalog whose installation fails on the disk.
+    private sealed class FailingCatalog : CodeAlta.Plugins.Abstractions.IPluginProviderCatalog
+    {
+        public const string Message = "Fake could not be unpacked (IOException 0x80070020: locked by another process)";
+
+        public string Title => "Fake catalog";
+
+        public Task<CodeAlta.Plugins.Abstractions.PluginProviderCatalogSnapshot> ListAsync(bool refresh, CancellationToken cancellationToken)
+            => throw new NotSupportedException("Not listed in this test.");
+
+        public async Task<CodeAlta.Plugins.Abstractions.PluginProviderInstallResult> InstallAsync(string entryId,
+            IProgress<CodeAlta.Plugins.Abstractions.PluginProviderInstallProgress> progress, CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            throw new InvalidOperationException(Message, new IOException("locked by another process"));
+        }
+
+        public Task<string?> GetUpdateAsync(CodeAlta.Plugins.Abstractions.PluginProviderSettings settings, CancellationToken cancellationToken)
+            => Task.FromResult<string?>(null);
+
+        public Task<IReadOnlyDictionary<string, object?>> UpdateAsync(CodeAlta.Plugins.Abstractions.PluginProviderSettings settings,
+            IProgress<CodeAlta.Plugins.Abstractions.PluginProviderInstallProgress> progress, CancellationToken cancellationToken)
+            => throw new NotSupportedException("Not updated in this test.");
+    }
+
     // A sign-in that shows a device code, then ends, or fails.
     private sealed class PromptingAccount : CodeAlta.Plugins.Abstractions.IPluginProviderAccount
     {

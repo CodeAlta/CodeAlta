@@ -106,10 +106,11 @@ public sealed class CodexAppServerInstaller : IDisposable
             var waited = System.Diagnostics.Stopwatch.StartNew();
             while (FindInstalled(target) is null)
             {
+                var attempt = new Attempt(progress, package, target);
                 try
                 {
                     progress?.Report(new CodexInstallProgress($"Downloading Codex {CodexPinnedRelease.Version}…", 0, package.Size));
-                    await InstallAsync(package, target, progress, cancellationToken).ConfigureAwait(false);
+                    await InstallAsync(package, target, attempt, cancellationToken).ConfigureAwait(false);
                 }
                 catch (PinnedDownloadException exception) when (exception.Code == "busy_elsewhere" && waited.Elapsed < BusyTimeout)
                 {
@@ -119,16 +120,16 @@ public sealed class CodexAppServerInstaller : IDisposable
                 }
                 catch (PinnedDownloadException exception)
                 {
-                    throw new CodexInstallException(exception.Code, Describe(exception.Code), exception);
+                    throw new CodexInstallException(exception.Code, Describe(exception.Code, attempt, exception.InnerException), exception);
                 }
                 catch (Exception exception) when (exception is HttpRequestException or IOException or UnauthorizedAccessException or InvalidDataException)
                 {
                     var code = exception is HttpRequestException ? "network" : "disk";
-                    throw new CodexInstallException(code, $"{Describe(code)} ({exception.Message})", exception);
+                    throw new CodexInstallException(code, Describe(code, attempt, exception), exception);
                 }
             }
 
-            return FindInstalled(target) ?? throw new CodexInstallException("disk", Describe("disk"));
+            return FindInstalled(target) ?? throw new CodexInstallException("disk", $"Codex {CodexPinnedRelease.Version} is not complete in {target}.");
         }
         finally
         {
@@ -165,15 +166,15 @@ public sealed class CodexAppServerInstaller : IDisposable
         return new CodexAppServerInstallation(executable, pathDirectory is not null && Directory.Exists(pathDirectory) ? pathDirectory : null, manifest.Version);
     }
 
-    private Task InstallAsync(CodexAppServerPackage package, string target, IProgress<CodexInstallProgress>? progress, CancellationToken cancellationToken)
+    private Task InstallAsync(CodexAppServerPackage package, string target, Attempt attempt, CancellationToken cancellationToken)
         => _downloads.InstallFolderAsync(
             target,
             CodexPinnedRelease.MarkerFileName,
             [(new PinnedFile(package.FileName, package.Size, package.Sha256), CodexPinnedRelease.AddressOf(package))],
             async (partial, token) =>
             {
-                progress?.Report(new CodexInstallProgress($"Unpacking Codex {CodexPinnedRelease.Version}…", package.Size, package.Size));
                 var archive = Path.Combine(partial, package.FileName);
+                attempt.Unpacking(archive);
                 await ExtractAsync(archive, partial, token).ConfigureAwait(false);
                 File.Delete(archive);
                 var manifest = ReadManifest(Path.Combine(partial, CodexPinnedRelease.PackageManifestFileName))
@@ -184,9 +185,11 @@ public sealed class CodexAppServerInstaller : IDisposable
                     // The hash matched, so this is what the release holds: a pin that names another version is wrong.
                     throw new PinnedDownloadException("package");
                 }
+
+                attempt.Installing();
             },
             Marker(package),
-            new Progress(progress, package.Size),
+            attempt,
             cancellationToken);
 
     /// <summary>Unpacks a <c>.tar.gz</c> package into a folder, keeping the executable bits of its files.</summary>
@@ -229,15 +232,30 @@ public sealed class CodexAppServerInstaller : IDisposable
         }
     }
 
-    private static string Describe(string code) => code switch
+    // The reason of a failed attempt, then its cause: a failure of the disk says which step failed on which file.
+    private static string Describe(string code, Attempt attempt, Exception? cause)
     {
-        "network" => $"Codex {CodexPinnedRelease.Version} could not be downloaded from GitHub: check the connection.",
-        "not_found" => $"The package of Codex {CodexPinnedRelease.Version} was not found on GitHub.",
-        "checksum" => $"The package of Codex {CodexPinnedRelease.Version} does not match its pinned SHA-256: it was not used.",
-        "busy_elsewhere" => $"Another CodeAlta is still downloading Codex {CodexPinnedRelease.Version}.",
-        "package" => $"The package of Codex {CodexPinnedRelease.Version} is not the one CodeAlta pins.",
-        _ => $"Codex {CodexPinnedRelease.Version} could not be written to {"the cache of CodeAlta"}.",
-    };
+        var reason = code switch
+        {
+            "network" => $"Codex {CodexPinnedRelease.Version} could not be downloaded from GitHub: check the connection.",
+            "not_found" => $"The package of Codex {CodexPinnedRelease.Version} was not found on GitHub.",
+            "checksum" => $"The package of Codex {CodexPinnedRelease.Version} does not match its pinned SHA-256: it was not used.",
+            "busy_elsewhere" => $"Another CodeAlta is still downloading Codex {CodexPinnedRelease.Version}.",
+            "package" => $"The package of Codex {CodexPinnedRelease.Version} is not the one CodeAlta pins.",
+            _ => attempt.Failure,
+        };
+        return cause is null ? reason : $"{reason} ({DescribeCause(cause)})";
+    }
+
+    /// <summary>
+    /// Describes an exception for the user: its type and its HRESULT, which say what failed even when the system gives
+    /// no message, then its message.
+    /// </summary>
+    internal static string DescribeCause(Exception exception)
+    {
+        var kind = $"{exception.GetType().Name} 0x{exception.HResult:X8}";
+        return string.IsNullOrWhiteSpace(exception.Message) ? kind : $"{kind}: {exception.Message.Trim()}";
+    }
 
     private static byte[] Marker(CodexAppServerPackage package)
     {
@@ -274,16 +292,34 @@ public sealed class CodexAppServerInstaller : IDisposable
         }
     }
 
-    private sealed class Progress(IProgress<CodexInstallProgress>? progress, long total) : IPinnedDownloadProgress
+    // One attempt to install the package: it reports its progress, and knows its step to say what a failure of the
+    // disk stopped.
+    private sealed class Attempt(IProgress<CodexInstallProgress>? progress, CodexAppServerPackage package, string target) : IPinnedDownloadProgress
     {
+        private readonly string _partial = target + ".partial";
         private long _received;
+        private string? _failure;
+
+        public string Failure => _failure ?? $"Codex {CodexPinnedRelease.Version} could not be written to {_partial}.";
 
         public void Received(long bytes)
         {
             var received = Interlocked.Add(ref _received, bytes);
-            progress?.Report(new CodexInstallProgress($"Downloading Codex {CodexPinnedRelease.Version}…", received, total));
+            progress?.Report(new CodexInstallProgress($"Downloading Codex {CodexPinnedRelease.Version}…", received, package.Size));
         }
 
-        public void Checking(PinnedFile file) => progress?.Report(new CodexInstallProgress($"Checking Codex {CodexPinnedRelease.Version}…", total, total));
+        public void Checking(PinnedFile file)
+        {
+            _failure = $"Codex {CodexPinnedRelease.Version} could not be checked in {_partial}.";
+            progress?.Report(new CodexInstallProgress($"Checking Codex {CodexPinnedRelease.Version}…", package.Size, package.Size));
+        }
+
+        public void Unpacking(string archive)
+        {
+            _failure = $"Codex {CodexPinnedRelease.Version} could not be unpacked from {archive}.";
+            progress?.Report(new CodexInstallProgress($"Unpacking Codex {CodexPinnedRelease.Version}…", package.Size, package.Size));
+        }
+
+        public void Installing() => _failure = $"Codex {CodexPinnedRelease.Version} was unpacked, but could not be moved to {target}.";
     }
 }

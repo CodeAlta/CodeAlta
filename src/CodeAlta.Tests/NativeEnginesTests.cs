@@ -70,6 +70,7 @@ public sealed class NativeEnginesTests
         var error = await Assert.ThrowsAsync<PinnedDownloadException>(() => fixture.Downloads.InstallFolderAsync(fixture.Target, "marker.json", [], null, [], new Progress(), default));
 
         Assert.AreEqual("busy_elsewhere", error.Code);
+        Assert.IsInstanceOfType<IOException>(error.InnerException, "the failure behind the reason is kept for the log");
     }
 
     [TestMethod]

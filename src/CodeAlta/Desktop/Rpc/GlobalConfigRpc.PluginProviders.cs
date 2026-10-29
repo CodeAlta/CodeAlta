@@ -336,6 +336,8 @@ internal sealed partial class GlobalConfigService
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
+                // The dialog shows the message; the log keeps the whole failure, its causes and where it was thrown.
+                LogManager.GetLogger("CodeAlta.Desktop").Error(exception, $"{contribution.DisplayName} could not be added from the entry '{request.EntryId}' of {catalog.Title}.");
                 events.Writer.TryWrite(Failed("install_failed") with { Message = Bound(exception.Message) });
             }
             finally
@@ -398,6 +400,7 @@ internal sealed partial class GlobalConfigService
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
+                LogManager.GetLogger("CodeAlta.Desktop").Error(exception, $"The provider {found.Settings.ProviderKey} could not be updated from {catalog.Title}.");
                 events.Writer.TryWrite(Failed("install_failed") with { Message = Bound(exception.Message) });
             }
             finally
