@@ -1,5 +1,6 @@
 using System.Reflection;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Telemetry;
 
 namespace CodeAlta.Agent.Claude;
 
@@ -223,6 +224,9 @@ internal static class ClaudeCodeLauncher
         {
             environment[name] = null;
         }
+
+        // The traces of CodeAlta cover the runs of the CLI: it does not report them a second time.
+        OpenTelemetryEnvironment.HideFromAgent(environment);
 
         if (withoutApiKey)
         {

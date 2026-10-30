@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using CodeAlta.Acp;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Telemetry;
 
 namespace CodeAlta.Plugin.Acp;
 
@@ -81,7 +82,8 @@ internal sealed class AcpProcessConnectionFactory : IAcpConnectionFactory
                     Arguments = request.Arguments,
                     WorkingDirectory = request.WorkingDirectory,
                     EnvironmentVariables = request.Environment,
-                    RemovedEnvironmentVariables = RemovedVariables,
+                    // The traces of CodeAlta cover the runs of the agent: it does not report them a second time.
+                    RemovedEnvironmentVariables = [.. RemovedVariables, .. OpenTelemetryEnvironment.VariablesHiddenFromAgents()],
                 },
                 ClientInfo = AcpClientInfo.Implementation,
                 ClientCapabilities = AcpClientInfo.CreateCapabilities(),
@@ -112,6 +114,7 @@ internal sealed class AcpProcessConnectionFactory : IAcpConnectionFactory
             environment[name] = null;
         }
 
+        OpenTelemetryEnvironment.HideFromAgent(environment);
         var launch = new AgentProcessLaunch(request.FileName, request.Arguments, request.WorkingDirectory, environment)
         {
             ReadOnlyFolders = request.Needs.ReadOnlyFolders,
