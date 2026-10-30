@@ -1,6 +1,6 @@
 ---
 title: "LaTeX math, chemistry and footnotes in Markdown, with an equation editor in the prompt (#272)"
-status: in-progress
+status: done
 created: 2026-10-30
 summary: CodeAlta Desktop renders LaTeX math (KaTeX, with mhchem for chemistry) and footnotes wherever it renders Markdown. The prompt previews the formula under the caret and opens a MathLive equation editor with Alt+=, and the code editor highlights .tex and .bib files. KaTeX and MathLive load only when math is used.
 ---
@@ -206,20 +206,29 @@ The entry chunk grows only by:
   - Tests:
     - in `commandRegistry.test.ts`, `Alt+=` resolves in the prompt, and `Ctrl+Alt+=` on macOS;
     - a browser test that opens the editor, sets a formula, inserts it, then edits it.
-- [ ] 9. **User guide.**
+- [x] 9. **User guide.**
   - `site/docs/workspace/prompt.md`: math, chemistry and footnotes in the timeline, plus a short **Equations** section covering the preview, the editor and `Alt+=`.
   - `site/docs/workspace/code.md`: math and footnotes on the Markdown page, and LaTeX and BibTeX highlighting.
   - `readme.md`: the features.
   - One picture of the equation editor over a session with math, following `doc/site-screenshots.md`.
 
+### Added during the work, at the user's request
+
+- [x] MathLive takes the colors of the theme through its custom properties, and follows a change of theme at once.
+- [x] `PluginHtml.Equation(latex)` and the `Equation` component of the `codealta` module, so that canvases and dialogs draw equations; the plugin guide and skill say so.
+- [x] Chemistry written without dollars (`\ce{…}`, `\pu{…}`) is a formula: models write it so.
+- [x] A **Source** button on every drawn diagram and displayed equation shows its code in its place, in every view of Markdown.
+- [x] The Markdown and LaTeX files of the code editor preview their formulas and open the equation editor with `Alt+=`, through a hook the prompt shares.
+- [x] One line of the instructions of desktop sessions (`DesktopUiPlugin.MarkdownGuidance`) says what the window renders. Tuned on Haiku with nine questions that ask for no format: formulas came in LaTeX in four of five answers instead of one, a handshake as a `mermaid` diagram; a coding answer gained no math. Big-O stays bold text, and footnotes and alerts are still rare.
+
 ## How it is verified
 
-- [ ] In `src/CodeAlta/frontend`, `node node_modules/typescript/bin/tsc --noEmit` and `npm test` pass, including the new tests.
-- [ ] `dotnet build -c <Configuration>` then `dotnet test -c <Configuration> --no-build` pass, with the configuration `AGENTS.md` prescribes, and `lunet build` passes in `site/`.
-- [ ] **Lightweight.**
+- [x] In `src/CodeAlta/frontend`, `node node_modules/typescript/bin/tsc --noEmit` and `npm test` pass, including the new tests (2,426 tests).
+- [x] `dotnet build -c <Configuration>` then `dotnet test -c <Configuration> --no-build` pass, with the configuration `AGENTS.md` prescribes, and `lunet build` passes in `site/`.
+- [x] **Lightweight.**
   - After the build, `rg -l "KaTeX parse error" src/CodeAlta/frontend/dist/assets` lists one lazy chunk and not the entry chunk; so does `rg -l "math-field" src/CodeAlta/frontend/dist/assets`.
-  - In the developer instance, a session without math loads neither chunk (`performance.getEntriesByType("resource")`).
-- [ ] **Developer instance**, in both themes and in a 900×650 window:
+  - Not checked: a session without math loading neither chunk in the developer instance (the chunks are separate, as the build shows).
+- [x] **Developer instance**, in both themes and in a 900×650 window (a `.tex` and a `.bib` file were not opened there: their grammars are compiled by Monaco's compiler and their extensions tested):
   - a message with inline and display math, `\ce`, a footnote and a bad formula;
   - a wide equation scrolls sideways;
   - a copied selection gives LaTeX;
