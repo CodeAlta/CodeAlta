@@ -19,7 +19,11 @@ Object.assign(window, { mathFixture: {
   caret(offset: number) { input!.focus(); input!.setSelectionRange(offset, offset); },
   preview() {
     const node = document.querySelector(".prompt-math-preview");
-    return node ? { drawn: !!node.querySelector(".katex"), error: !!node.querySelector(".katex-error"), edit: node.querySelector("button")?.getAttribute("aria-label") } : null;
+    if (!node) return null;
+    // Seen: what the window shows at the center of the panel is the panel, not the frame of the prompt that would clip it.
+    const box = node.getBoundingClientRect();
+    const seen = node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+    return { drawn: !!node.querySelector(".katex"), error: !!node.querySelector(".katex-error"), edit: node.querySelector("button")?.getAttribute("aria-label"), seen };
   },
   tinted: () => document.querySelectorAll("#session-prompt .prompt-math").length,
   edit: () => input!.editEquation(),

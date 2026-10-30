@@ -103,7 +103,9 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       lineDecorationsWidth: 0, lineNumbersMinChars: 0, scrollBeyondLastLine: false, wordWrap: "on",
       overviewRulerLanes: 0, renderLineHighlight: "none", stickyScroll: { enabled: false },
       padding: { top: 12, bottom: 12 }, scrollbar: { alwaysConsumeMouseWheel: false },
-      quickSuggestions: false, suggestOnTriggerCharacters: false, tabFocusMode: true, links: false, occurrencesHighlight: "off", matchBrackets: "never" });
+      quickSuggestions: false, suggestOnTriggerCharacters: false, tabFocusMode: true, links: false, occurrencesHighlight: "off", matchBrackets: "never",
+      // The preview of a formula is drawn above the editor, which its frame clips: it is fixed to the window instead.
+      fixedOverflowWidgets: true });
     editor.current = instance;
     const unfollowTheme = followShellTheme(), unfollowFont = followPageFont(instance, "prompt");
     // Formulas are previewed as they are written; Alt+= (Word's key for an equation) opens the equation editor, here and

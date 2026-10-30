@@ -77,6 +77,7 @@ test("the prompt previews the formula at the caret, and the equation editor writ
     await evaluate("mathFixture.caret(8)");
     assert.equal(await wait("mathFixture.preview()?.drawn"), true);
     assert.equal(await evaluate("mathFixture.preview().edit"), "Edit equation (Alt+=)");
+    assert.equal(await evaluate("mathFixture.preview().seen"), true, "the frame of the prompt does not clip the preview above it");
     assert.equal(await wait("mathFixture.tinted() > 0"), true);
     await evaluate("mathFixture.caret(1)");
     assert.equal(await wait("mathFixture.preview() === null"), true);
