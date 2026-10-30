@@ -36,7 +36,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
   const directory = await mkdtemp(join(tmpdir(), "codealta-mobile-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   const bundle = await build({ entryPoints: [fileURLToPath(new URL("./main.ts", import.meta.url))], bundle: true, format: "esm", platform: "browser",
-    write: false, outdir: join(directory, "out"), external: ["pele/lazy"], define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent" });
+    write: false, outdir: join(directory, "out"), external: ["pele/lazy"], loader: { ".woff2": "file", ".woff": "file", ".ttf": "file" }, define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent" });
   const script = bundle.outputFiles.find(file => file.path.endsWith(".js"))!.text, style = bundle.outputFiles.find(file => file.path.endsWith(".css"))!.text;
   const server = await startFixtureServer(await pageFiles(script, style));
   const minute = 60_000;
