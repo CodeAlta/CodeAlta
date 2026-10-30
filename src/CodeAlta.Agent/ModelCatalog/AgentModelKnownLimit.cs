@@ -4,7 +4,7 @@ namespace CodeAlta.Agent.ModelCatalog;
 /// A limit a provider knows better than models.dev for a family of its models: the size of the context a session
 /// should use, which can be smaller than the one the model accepts (a price that rises past it), and the share of it
 /// at which a session compacts. A provider gives its table to <see cref="AgentModelMetadataEnricher"/>, which applies
-/// it over models.dev and under the overrides of the user.
+/// it over models.dev and under the overrides of the user, to a model whose provider reports no input limit of its own.
 /// </summary>
 /// <param name="ModelIdPrefix">
 /// The start of the identifiers of the models, matched without case up to a <c>-</c> or a <c>.</c>:

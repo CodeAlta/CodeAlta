@@ -1679,6 +1679,38 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         CollectionAssert.AreEqual(new long[] { 272_000, 1_000_000 }, cached.ContextSizes!.ToArray());
     }
 
+    // A gpt-6 model whose context_window is above the 272,000 CodeAlta knows for the family keeps Codex's own size: the
+    // default size of a session is the first of the sizes it offers.
+    [TestMethod]
+    public async Task ModelDiscovery_TheContextWindowOfCodex_WinsOverTheKnownLimitOfTheFamily()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"models":[{"slug":"gpt-6.1-sol","display_name":"GPT-6.1 Sol","supported_in_api":true,"visibility":"list","context_window":500000,"max_context_window":872000}]}"""),
+        };
+        await using var catalog = new ModelsDevCatalogService(OpenAIKnownModelLimitsTests.CreateDatabase(), new ModelsDevCatalogServiceOptions());
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            StateRootPath = temp.Path,
+            ModelCatalog = catalog,
+            CodexSubscriptionHttpClient = new HttpClient(new RecordingHttpMessageHandler(response)),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { ModelDiscovery = "codex_endpoint" },
+        };
+
+        var sol = (await OpenAIProviderSdkFactory.ListModelsAsync(provider, CreateProviderDescriptor(), CancellationToken.None)
+            .ConfigureAwait(false)).Single();
+
+        CollectionAssert.AreEqual(new long[] { 500_000, 872_000 }, sol.ContextSizes!.ToArray());
+        Assert.AreEqual(500_000L, sol.GetContextSize(), "a size the list offers");
+        var budget = AgentTokenBudgetResolver.Resolve(sol, AgentCompactionSettings.Default);
+        Assert.AreEqual(500_000L, budget.InputContextLimit);
+        Assert.AreEqual(450_000L, AgentTokenBudgetResolver.ResolveCompactionThreshold(500_000, sol, AgentCompactionSettings.Default));
+    }
+
     // The context_window of Codex's catalog is the input Codex sends at most (it compacts at 90% of it), for every model
     // of the endpoint: it wins over the 922,000 input tokens models.dev gives GPT-5.6 and GPT-5.5.
     [TestMethod]

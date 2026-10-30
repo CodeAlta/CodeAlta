@@ -77,8 +77,10 @@ internal static class AgentModelMetadataEnricher
             }
         }
 
-        // What the provider knows better than models.dev, under what the user set.
-        if (AgentModelKnownLimit.Find(knownLimits, model.Id) is { } knownLimit)
+        // What the provider knows better than models.dev, under what the user set. A limit the provider reports for the
+        // model itself (the context_window of Codex's catalog) is known better still: the table does not lower it.
+        if (model.Capabilities?.ContainsKey("inputTokenLimit") != true &&
+            AgentModelKnownLimit.Find(knownLimits, model.Id) is { } knownLimit)
         {
             capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
             ApplyKnownLimit(capabilities, knownLimit);

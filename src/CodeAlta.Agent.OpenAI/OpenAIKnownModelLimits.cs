@@ -16,8 +16,9 @@ internal static class OpenAIKnownModelLimits
 
     /// <summary>
     /// The table, first match wins. GPT-6: models.dev gives 922,000 input tokens, but past 272,000 the input costs
-    /// twice as much and the output 1.5 times; Codex's catalog gives these models a <c>context_window</c> of 272,000
-    /// (its <c>max_context_window</c> is 872,000) and Codex compacts at 90% of it.
+    /// twice as much and the output 1.5 times; Codex compacts at 90% of the <c>context_window</c> of its catalog. The
+    /// table is for a model whose provider gives no limit (the Models API of OpenAI): the <c>context_window</c> of
+    /// Codex's catalog, 272,000 or more for a newer model, is kept.
     /// </summary>
     public static IReadOnlyList<AgentModelKnownLimit> Table { get; } =
     [
