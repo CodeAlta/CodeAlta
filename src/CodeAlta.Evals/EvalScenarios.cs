@@ -95,7 +95,19 @@ internal static class EvalScenarios
             new("Commit everything with a short message.", Committed),
         ]),
 
-        new("long-context", "a wide reading turn (about 100k tokens), then a mix", "switches at most once",
+        new("race-condition", "a question, a concurrency bug of an async cache with hidden cases, commit", "goes up once, at the second turn",
+        [
+            new("What does `createCache` in src/cache.js return? Answer in one sentence.",
+                outcome => new[] { "get", "invalidate" }.All(name => (outcome.FinalMessage ?? string.Empty).Contains(name, StringComparison.Ordinal)) ? null : "the answer misses get or invalidate"),
+            new("""
+                Users report two problems with the cache of src/cache.js: after `invalidate(key)`, it can serve an old value again (test/cache.test.js fails on it), and a load that failed keeps failing until it expires instead of being tried again.
+                Find the causes and fix them in src/cache.js, with regression tests, and keep `npm test` passing.
+                """,
+                outcome => FirstFailure(NodeTests(outcome), Hidden(outcome))),
+            new("Commit all the changes, with a short message.", Committed),
+        ]),
+
+        new("long-context","a wide reading turn (about 100k tokens), then a mix", "switches at most once",
         [
             new("""
                 Read every design note under docs/, and write docs/index.md with one line per note: its file name and a summary of a few words.
