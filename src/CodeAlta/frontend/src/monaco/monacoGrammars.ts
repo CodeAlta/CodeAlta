@@ -87,5 +87,57 @@ const diff: OwnGrammar = {
   } },
 };
 
+// LaTeX: commands, environments and the structure of a document, `%` comments, and math, whose commands keep their color
+// in the color of a string.
+const latex: OwnGrammar = {
+  extensions: [".tex", ".sty", ".cls", ".ltx", ".dtx"], aliases: ["LaTeX", "latex", "tex"],
+  configuration: { comments: { lineComment: "%" }, brackets: [["{", "}"], ["[", "]"], ["(", ")"]],
+    autoClosingPairs: [{ open: "{", close: "}" }, { open: "[", close: "]" }, { open: "(", close: ")" }],
+    surroundingPairs: [{ open: "{", close: "}" }, { open: "[", close: "]" }, { open: "(", close: ")" }, { open: "$", close: "$" }] },
+  tokens: { defaultToken: "", tokenPostfix: ".latex", tokenizer: {
+    root: [
+      [/%.*$/, "comment"],
+      [/(\\(?:begin|end))(\s*)(\{)([^}]*)(\})/, ["keyword", "", "@brackets", "type.identifier", "@brackets"]],
+      [/\\(?:documentclass|usepackage|RequirePackage|input|include|includeonly|part|chapter|section|subsection|subsubsection|paragraph|subparagraph|title|author|date|maketitle|tableofcontents|item|caption|label|ref|eqref|pageref|cite|citep|citet|bibliography|bibliographystyle|addbibresource|printbibliography|newcommand|renewcommand|providecommand|newenvironment|renewenvironment|def|let|DeclareMathOperator)(?![a-zA-Z@])\*?/, "keyword"],
+      [/\\\[/, "string", "@displayMath"],
+      [/\\\(/, "string", "@inlineMath"],
+      [/\$\$/, "string", "@dollarDisplay"],
+      [/\$/, "string", "@dollarInline"],
+      [/\\[a-zA-Z@]+\*?/, "tag"],
+      [/\\./, "string.escape"],
+      [/[{}[\]()]/, "@brackets"],
+      [/[&~]/, "delimiter"],
+      [/\d+(?:\.\d+)?(?:pt|em|ex|cm|mm|in|bp|pc|sp|mu)?/, "number"],
+    ],
+    displayMath: [[/\\\]/, "string", "@pop"], { include: "@math" }],
+    inlineMath: [[/\\\)/, "string", "@pop"], { include: "@math" }],
+    dollarDisplay: [[/\$\$/, "string", "@pop"], { include: "@math" }],
+    dollarInline: [[/\$/, "string", "@pop"], { include: "@math" }],
+    math: [[/%.*$/, "comment"], [/\\[a-zA-Z@]+/, "tag"], [/\\./, "string.escape"], [/[{}[\]()]/, "@brackets"], [/[^\\$%{}[\]()]+/, "string"]],
+  } },
+};
+
+// BibTeX: the type and key of an entry, its fields, and their values in braces (nested) or quotes.
+const bibtex: OwnGrammar = {
+  extensions: [".bib"], aliases: ["BibTeX", "bibtex"],
+  configuration: { comments: { lineComment: "%" }, brackets: [["{", "}"], ["(", ")"]],
+    autoClosingPairs: [{ open: "{", close: "}" }, { open: "(", close: ")" }, { open: '"', close: '"', notIn: ["string"] }] },
+  tokens: { defaultToken: "", tokenPostfix: ".bibtex", tokenizer: {
+    root: [
+      [/%.*$/, "comment"],
+      [/(@[a-zA-Z]+)(\s*)([{(])(\s*)([^,\s{}()]+)/, ["keyword", "", "@brackets", "", "type.identifier"]],
+      [/@[a-zA-Z]+/, "keyword"],
+      [/[a-zA-Z][\w:.-]*(?=\s*=)/, "key"],
+      [/(=)(\s*)(\{)/, ["delimiter", "", { token: "string", next: "@braced" }]],
+      [/"/, "string", "@quoted"],
+      [/\d+/, "number"],
+      [/[{}()]/, "@brackets"],
+      [/[=,#]/, "delimiter"],
+    ],
+    braced: [[/[^{}]+/, "string"], [/\{/, "string", "@braced"], [/\}/, "string", "@pop"]],
+    quoted: [[/[^"{}\\]+/, "string"], [/\\./, "string.escape"], [/\{[^}]*\}/, "string"], [/"/, "string", "@pop"]],
+  } },
+};
+
 /** The grammars the app defines itself, by language id. */
-export const ownGrammars = { json, toml, makefile, diff } as const;
+export const ownGrammars = { json, toml, makefile, diff, latex, bibtex } as const;

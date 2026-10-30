@@ -138,6 +138,37 @@ Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
       blocks: sourceBlocks(content).map(({ element, start, end }) => `${element.tagName}${element.className ? `.${element.className}` : ""} ${start}-${end}`) };
   },
   texts(selector: string) { return Array.from(document.querySelectorAll(`.markdown-content ${selector}`)).map(e => e.textContent); },
+  // Formulas: the source first, then KaTeX's drawing once it is loaded.
+  math() {
+    const content = document.querySelector(".markdown-content")!;
+    return { sources: Array.from(content.querySelectorAll(".markdown-math-source, pre > code.language-math"), e => e.textContent),
+      inline: content.querySelectorAll("span.markdown-math > .katex").length,
+      display: content.querySelectorAll(".markdown-math-block > .markdown-math-display > .katex-display").length,
+      chemistry: Array.from(content.querySelectorAll("span.markdown-math"))[1]?.querySelector(".katex-html")?.textContent?.replace(/​/g, "") ?? "",
+      errors: Array.from(content.querySelectorAll(".katex-error"), e => e.getAttribute("title")?.startsWith("ParseError") ?? false),
+      tex: Array.from(content.querySelectorAll('annotation[encoding="application/x-tex"]'), e => e.textContent),
+      buttons: Array.from(content.querySelectorAll(".markdown-math-block button.markdown-math-copy"), e => e.getAttribute("aria-label")),
+      authored: Array.from(content.querySelectorAll("[data-math], [data-math-display]")).length,
+      paragraphs: Array.from(content.querySelectorAll("p"), e => e.textContent) };
+  },
+  // Footnotes: the references, the notes and their ways back; a click moves between them.
+  footnotes() {
+    const content = document.querySelector(".markdown-content")!;
+    return { references: Array.from(content.querySelectorAll("sup.markdown-footnote > button.markdown-footnote-ref"), e => [e.textContent, e.getAttribute("title"), e.getAttribute("aria-label")]),
+      notes: Array.from(content.querySelectorAll(".markdown-footnotes[role=note] li.markdown-footnote-note"), e => e.textContent?.trim()),
+      back: content.querySelectorAll("li.markdown-footnote-note button.markdown-footnote-back").length,
+      authored: content.querySelectorAll("sup:not(.markdown-footnote), [data-footnote]:not(.markdown-footnote-ref):not(.markdown-footnote-back):not(.markdown-footnote):not(.markdown-footnote-note):not(.markdown-footnotes)").length };
+  },
+  followFootnote(selector: string) {
+    document.querySelector<HTMLButtonElement>(`.markdown-content ${selector}`)!.click();
+    const active = document.activeElement;
+    return { focused: `${active?.className}:${active?.getAttribute("data-footnote")}`, lit: Array.from(document.querySelectorAll(".markdown-content [data-flash]"), e => e.className) };
+  },
+  copyEquation(kind: "latex" | "mathml") {
+    const before = state.copies.length;
+    document.querySelector<HTMLButtonElement>(`.markdown-content button.markdown-math-copy[data-copy=${kind}]`)!.click();
+    return new Promise(resolve => setTimeout(() => resolve(state.copies.slice(before)), 50));
+  },
   run(index: number) { render(cases[index].source); return (cases[index].selectors?.split(",") ?? []).every(s => document.querySelector(`.markdown-content ${s}`)); },
   linkRect() { const a = document.querySelector<HTMLAnchorElement>(".markdown-content a[href]")!; a.focus(); return a.getBoundingClientRect().toJSON(); },
   codeCheck() {

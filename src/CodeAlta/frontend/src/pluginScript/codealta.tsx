@@ -143,6 +143,11 @@ export function Diagram({ source }: { source: string }) {
   return <MarkdownContent source={fence(source, "mermaid")} timelineCodeBlocks />;
 }
 
+/** An equation from its LaTeX (`\frac{a}{b}`, `\ce{H2O}` for chemistry), displayed as in the messages; KaTeX loads with the first one. */
+export function Equation({ source }: { source: string }) {
+  return <MarkdownContent source={fence(source, "math")} timelineCodeBlocks />;
+}
+
 /** A link that opens a file in the code editor, at a line when it has one. Its text is its children, or the path. */
 export function FileLink({ path, line, children }: { path: string; line?: number; children?: ReactNode }) {
   const alta = useAlta();

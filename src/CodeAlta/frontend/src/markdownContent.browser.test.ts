@@ -241,11 +241,12 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     const diagram = await evaluate<SourceLinesRender>("markdownFixture.renderSourceLines('Text\\n\\n```mermaid\\ngraph TD; A-->B\\n```')");
     assert.deepEqual(diagram.blocks, ["P 1-1", "PRE 3-5"]);
     let drawn: string[] = [];
-    for (let i = 0; i < 600 && !drawn.includes("DIV.markdown-diagram 3-5"); i++) {
+    for (let i = 0; i < 600 && !drawn.includes("DIV.markdown-rendered 3-5"); i++) {
       await new Promise(resolve => setTimeout(resolve, 100));
       drawn = await evaluate<string[]>("Array.from(document.querySelectorAll('.markdown-content [data-source-lines]'), e => `${e.tagName}${e.className ? `.${e.className}` : ''} ${e.getAttribute('data-source-lines')}`)");
     }
-    assert.deepEqual(drawn, ["P 1-1", "DIV.markdown-diagram 3-5"]);
+    // The drawing and its hidden source are one block: the lines are on it, not on either.
+    assert.deepEqual(drawn, ["P 1-1", "DIV.markdown-rendered 3-5"]);
     // Same shared component used by Notes/live rendering, without timeline region opt-in.
     await evaluate("markdownFixture.render(markdownFixture.cases[0].source, false)"); await check();
     assert.equal(await evaluate("!!document.querySelector('.markdown-content details summary')"), true);
@@ -255,6 +256,43 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       assert.ok(fallback.html.startsWith("<pre>&lt;img")); assert.doesNotMatch(fallback.html, /private .* detail/);
       await check();
     }
+    // Formulas show their source until KaTeX is loaded, then its drawing, with the LaTeX of each in its MathML. A formula
+    // that cannot be read shows its source with KaTeX's message; one written in HTML is text. KaTeX asks for nothing.
+    type MathState = { sources: string[]; inline: number; display: number; chemistry: string; errors: boolean[]; tex: string[]; buttons: string[]; authored: number; paragraphs: string[] };
+    const formulas = "Energy $E=mc^2$ and water $\\ce{H2O}$.\n\n$$\n\\int_0^1 x\\,dx = \\tfrac12\n$$\n\nBad $\\frac{a}{$ here, <span data-math=\"spoof\">x^2</span> and $5 or $10.\n\n```math\na^2+b^2\n```";
+    await evaluate(`markdownFixture.render(${JSON.stringify(formulas)}, false)`);
+    // This bundle holds KaTeX: it is ready at the first render after the one that asked for it.
+    let math = await evaluate<MathState>("markdownFixture.math()");
+    for (let i = 0; i < 100 && math.display < 2; i++) { await new Promise(resolve => setTimeout(resolve, 50)); math = await evaluate<MathState>("markdownFixture.math()"); }
+    assert.equal(math.inline, 2, "the bad formula is an error, not a drawing");
+    assert.equal(math.display, 2, "the display block and the math fence");
+    assert.match(math.chemistry, /^H\w?2O$/, "mhchem draws the formula of water (with a phantom that aligns its subscript)");
+    assert.deepEqual(math.errors, [true]);
+    assert.deepEqual(math.tex, ["E=mc^2", "\\ce{H2O}", "\\int_0^1 x\\,dx = \\tfrac12", "a^2+b^2"]);
+    assert.deepEqual(math.buttons, ["Copy LaTeX", "Copy MathML", "Copy LaTeX", "Copy MathML"]);
+    assert.equal(math.authored, 0);
+    assert.ok(math.paragraphs.some(text => text.includes("x^2 and $5 or $10.")), "HTML and prices stay text");
+    assert.deepEqual(await evaluate("markdownFixture.copyEquation('latex')"), ["$$\n\\int_0^1 x\\,dx = \\tfrac12\n$$"]);
+    const mathml = await evaluate<string[]>("markdownFixture.copyEquation('mathml')");
+    assert.match(mathml[0], /^<math xmlns="http:\/\/www\.w3\.org\/1998\/Math\/MathML" display="block">/);
+    // Source shows the LaTeX of a displayed equation in its place, with the copy button of code; Preview the drawing again.
+    const equationView = `(() => { const block = document.querySelector('.markdown-content .markdown-math-block'); const pre = block.querySelector(':scope > pre');
+      return [block.querySelector('.markdown-math-display').hidden, pre.hidden, pre.querySelector('code').textContent, !!pre.querySelector('button.markdown-copy'),
+        block.querySelector('button.markdown-source-toggle').textContent]; })()`;
+    assert.deepEqual(await evaluate(equationView), [false, true, "\\int_0^1 x\\,dx = \\tfrac12", true, "Source"]);
+    await evaluate("document.querySelector('.markdown-content .markdown-math-block button.markdown-source-toggle').click()");
+    assert.deepEqual(await evaluate(equationView), [true, false, "\\int_0^1 x\\,dx = \\tfrac12", true, "Preview"]);
+    await evaluate("document.querySelector('.markdown-content .markdown-math-block button.markdown-source-toggle').click()");
+    assert.deepEqual((await evaluate<unknown[]>(equationView)).slice(0, 2), [false, true]);
+    // Footnotes: numbered buttons whose title is their note, the notes at the end with a way back; written in HTML, a
+    // reference is a plain `sup` and its attribute is removed.
+    const notes = "Claim[^src] and an inline^[quick note], again[^src].\n\n<sup data-footnote=\"ref-1\">9</sup>\n\n[^src]: The *source*.";
+    await evaluate(`markdownFixture.render(${JSON.stringify(notes)}, false)`);
+    assert.deepEqual(await evaluate("markdownFixture.footnotes()"), {
+      references: [["1", "The source.", "Footnote 1"], ["2", "quick note", "Footnote 2"], ["1", "The source.", "Footnote 1"]],
+      notes: ["The source. ↩︎", "quick note ↩︎"], back: 2, authored: 1 });
+    assert.deepEqual(await evaluate("markdownFixture.followFootnote('button.markdown-footnote-ref')"), { focused: "markdown-footnote-back:1", lit: ["markdown-footnote-note"] });
+    assert.deepEqual(await evaluate("markdownFixture.followFootnote('button.markdown-footnote-back')"), { focused: "markdown-footnote-ref:1", lit: ["markdown-footnote", "markdown-footnote-note"] });
     assert.deepEqual(attempts, [page, script]);
     assert.ok(baseDiagnostics.length > 0, "explicitly retain base-uri enforcement evidence");
     console.log(`Markdown production boundary: ${cases.length} cases, 2 fulfilled assets, 0 unexpected requests; ${baseDiagnostics.length} allowed base-uri diagnostics, ${inertParseDiagnostics.length} inert-parse handler diagnostics; 600ms deferred windows. HTTPS is not app://codealta.`);

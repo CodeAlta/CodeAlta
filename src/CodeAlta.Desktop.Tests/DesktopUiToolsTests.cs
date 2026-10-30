@@ -158,6 +158,10 @@ public sealed class DesktopUiToolsTests
         StringAssert.Contains(first.Instructions, DesktopUiPlugin.Guidance(active: false));
         // The windows of the desktop, the same line for every session.
         StringAssert.Contains(first.Instructions, DesktopUiPlugin.WindowsGuidance);
+        // What the window renders in answers, in one line, so that models write formulas and notes it can draw.
+        StringAssert.Contains(first.Instructions, DesktopUiPlugin.MarkdownGuidance);
+        StringAssert.Contains(first.Instructions, "write every formula, even a short one, in it (`$O(n \\log n)$` inline, `$$…$$` on lines of their own");
+        StringAssert.Contains(first.Instructions, "cite sources with footnotes (`[^1]`)");
         Assert.IsFalse(sessions.IsActive(session.SessionId));
 
         // It asks with an alta command: the tools join the running turn, and it uses one in its next step.

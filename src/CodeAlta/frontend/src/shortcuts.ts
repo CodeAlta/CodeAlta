@@ -2,7 +2,7 @@ export type ShortcutAction =
   | "focusProjects" | "focusPrompt" | "focusSearch" | "browseSessions"
   | "nextProject" | "previousProject" | "nextSession" | "previousSession"
   | "nextTab" | "previousTab" | "closeTab" | "reopenTab"
-  | "toggleNotes" | "escape" | "expandPrompt" | "renameProject" | "sessionInfo" | "reminders"
+  | "toggleNotes" | "escape" | "expandPrompt" | "insertEquation" | "renameProject" | "sessionInfo" | "reminders"
   | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "compact";
 
 export type ShortcutKey = Readonly<{ key: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean;

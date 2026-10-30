@@ -165,6 +165,17 @@ test("zoom takes the keys of a browser, with or without Shift for the plus key",
   assert.equal(resolveCommandKey(ctrl("=", { altKey: true }), false, "none").command, null);
 });
 
+test("the equation editor opens with Word's key from the prompt, Ctrl+Alt+= on macOS, and is found by what it writes", () => {
+  const key = (modifiers: { ctrlKey?: boolean; altKey?: boolean }, mac = false) => resolveCommandKey({ key: "=", ...modifiers }, false, "prompt", mac).command;
+  assert.equal(key({ altKey: true }), "insertEquation");
+  assert.equal(key({ altKey: true }, true), null, "Option+= types ≠ on macOS");
+  assert.equal(key({ ctrlKey: true, altKey: true }, true), "insertEquation");
+  const label = (command: { label: string }) => command.label;
+  const description = (command: { description: string }) => command.description;
+  for (const query of ["/equation", "math", "latex", "formula"])
+    assert.equal(searchCommands(query, label, description)[0]?.name, "equation", query);
+});
+
 test("the attach commands have their gestures in the prompt and their slash names", () => {
   const key = (key: string, modifiers: { ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean } = {}, mac = false) =>
     resolveCommandKey({ key, ...modifiers }, false, "prompt", mac).command;

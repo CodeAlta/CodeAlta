@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { diagramAppearance, diagrams } from "./diagrams";
 import { translate } from "./localization";
-import { createMarkdownRenderer, localImageClass } from "./markdownBoundary";
+import { createMarkdownRenderer, equationCopy, followFootnote, localImageClass, markdownPending, toggleRenderedSource } from "./markdownBoundary";
+import { loadMath } from "./math";
 import type { MarkdownImage, MarkdownImages } from "./markdownImages";
 import { markdownHrefKind, markdownLinkActivation, type MarkdownLinkScope } from "./markdownLinks";
 import { appearanceKey, subscribeAppearance } from "./shellColors";
@@ -48,23 +49,28 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   const { locale } = useShellLanguage();
   const render = useMemo(() => createMarkdownRenderer(window, { note: translate(locale, "Note"), tip: translate(locale, "Tip"),
     important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution"), copy: translate(locale, "Copy"),
-    notDrawn: translate(locale, "Not drawn as a diagram:") }), [locale]);
+    notDrawn: translate(locale, "Not drawn as a diagram:"), copyLatex: translate(locale, "Copy LaTeX"), copyMathMl: translate(locale, "Copy MathML"),
+    footnotes: translate(locale, "Footnotes"), footnote: translate(locale, "Footnote"), backToReference: translate(locale, "Back to reference"),
+    source: translate(locale, "Source"), preview: translate(locale, "Preview"), showSource: translate(locale, "Show the source or the drawing") }), [locale]);
   // Diagrams are drawn on the side, in the window's font, then found by the next render; they take the colors of the theme from the stylesheet.
   const appearance = useSyncExternalStore(subscribeAppearance, appearanceKey);
   const [drawn, setDrawn] = useState(0);
   const rendered = useMemo(() => {
-    const undrawn: string[] = [];
-    return { html: render(source, timelineCodeBlocks, undrawn, { document: asDocument, sourceLines }), undrawn };
+    const pending = markdownPending();
+    return { html: render(source, timelineCodeBlocks, pending, { document: asDocument, sourceLines }), pending };
   }, [render, source, timelineCodeBlocks, asDocument, sourceLines, appearance, drawn]);
   const html = rendered.html;
   useEffect(() => {
-    if (!rendered.undrawn.length) return;
+    const { diagrams: undrawn, math } = rendered.pending;
+    if (!undrawn.length && !math) return;
     let current = true;
+    // Formulas wait only for KaTeX, which loads once for the whole window.
+    if (math) void loadMath().then(() => { if (current) setDrawn(value => value + 1); }, () => { /* Not loaded: the formulas stay as written. */ });
     // Text still being written changes before this fires, so only settled text is drawn.
-    const timer = setTimeout(() => {
+    const timer = undrawn.length ? setTimeout(() => {
       const look = diagramAppearance();
-      void Promise.all(rendered.undrawn.map(text => diagrams.draw(text, look))).then(() => { if (current) setDrawn(value => value + 1); });
-    }, 200);
+      void Promise.all(undrawn.map(text => diagrams.draw(text, look))).then(() => { if (current) setDrawn(value => value + 1); });
+    }, 200) : undefined;
     return () => { current = false; clearTimeout(timer); };
   }, [rendered]);
   // React compares this prop by identity. Equivalent persisted refreshes must not
@@ -152,11 +158,13 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     openLink?.(address);
   }
   // The button of a code block copies the text of that block, as it is written, and says so for a moment.
+  // The buttons of a displayed equation copy its LaTeX or its MathML.
   function copyCode(event: { target: EventTarget }) {
-    const button = (event.target as Element).closest<HTMLElement>("button.markdown-copy");
-    const code = button?.parentElement?.querySelector(":scope > code");
-    if (!button || !code) return;
-    void navigator.clipboard?.writeText((code.textContent ?? "").replace(/\n$/, "")).then(() => {
+    const equation = (event.target as Element).closest<HTMLElement>("button.markdown-math-copy");
+    const button = equation ?? (event.target as Element).closest<HTMLElement>("button.markdown-copy");
+    const code = equation ? equationCopy(equation) : button?.parentElement?.querySelector(":scope > code")?.textContent?.replace(/\n$/, "");
+    if (!button || code === null || code === undefined) return;
+    void navigator.clipboard?.writeText(code).then(() => {
       button.setAttribute("data-copied", "true");
       window.setTimeout(() => button.removeAttribute("data-copied"), 1400);
     }, () => { /* The clipboard is unavailable: nothing was copied and nothing changes. */ });
@@ -164,6 +172,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   return <><div className="markdown-content" ref={content} onClick={event => {
     const handled = event.defaultPrevented;
     activateLink(event);
+    if (!handled && event.target instanceof Element && (followFootnote(event.target) || toggleRenderedSource(event.target))) return;
     if (!handled) copyCode(event); // Our navigation suppression must not swallow Copy inside an anchor.
   }} onAuxClick={activateLink}
     onKeyDown={event => {

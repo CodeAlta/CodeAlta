@@ -2,7 +2,7 @@
 // stable while React, Blueprint and FlexLayout follow the application's versions. The charts load ECharts when the first one is drawn.
 export { altaInterfaceVersion as interfaceVersion } from "../pluginScript/versions";
 export { useAlta } from "../pluginScript/PluginScript";
-export { Code, Diagram, FileLink, Markdown, SessionLink, html, useRpc, useStream, useTheme, useVisible,
+export { Code, Diagram, Equation, FileLink, Markdown, SessionLink, html, useRpc, useStream, useTheme, useVisible,
   type RpcResult, type StreamResult } from "../pluginScript/codealta";
 export { Icon } from "../pluginScript/icons";
 export { BrandIcon, brandIconNames, isBrandIcon } from "../BrandIcon";

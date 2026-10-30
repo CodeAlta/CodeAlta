@@ -10,7 +10,7 @@ Named runtime exports only; no default export. `interfaceVersion` is **1**, also
 | Use | Exports |
 | --- | --- |
 | Elements and hooks | `html`, `useAlta`, `useVisible`, `useTheme`, `useRpc`, `useStream` |
-| Content and links | `Markdown`, `Code`, `Diagram`, `FileLink`, `SessionLink` |
+| Content and links | `Markdown`, `Code`, `Diagram`, `Equation`, `FileLink`, `SessionLink` |
 | Icons | `Icon`, `BrandIcon`, `brandIconNames`, `isBrandIcon` |
 | Charts | `Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, `WeekdayHourHeatmap` |
 | Distribution data/options | `histogram`, `histogramOption`, `boxStats`, `boxPlotOption`, `quantile` |
@@ -92,6 +92,7 @@ Required props are in **bold**. Optional callbacks are functions, not strings.
 | `Markdown` | **`source: string`** |
 | `Code` | **`code: string`**, `language?: string` (e.g. `json`, `csharp`, `diff`). It does not take `source` or children as the code. |
 | `Diagram` | **`source: string`** (Mermaid) |
+| `Equation` | **`source: string`** (LaTeX, without delimiters; `\ce{…}` for chemistry). `Markdown` draws `$…$` and `$$…$$` formulas and footnotes too. |
 | `FileLink` | **`path: string`**, `line?: number`, `children?` (label). Relative paths use the canvas project. |
 | `SessionLink` | **`sessionId: string`**, `children?` |
 | `StatTile` | **`label: string`, `value: string`** (already formatted); `current?: number`, `compared?: number \| null`, `goodWhen?: "up" \| "down" \| "neutral"`, `comparedLabel?: string`, `trend?: (number \| null)[]`, `note?: string` (a short line under the number) |

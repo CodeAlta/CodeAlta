@@ -20,6 +20,7 @@ A fragment is plain HTML that CodeAlta Desktop inserts in its window. CodeAlta s
 | `PluginHtml.Markdown(text)` | Markdown rendered as in the timeline |
 | `PluginHtml.Code(code, "csharp")` | Source code with the colors of its language |
 | `PluginHtml.Diagram(text)` | A [Mermaid](https://mermaid.js.org/) diagram |
+| `PluginHtml.Equation(latex)` | An equation, drawn from its LaTeX (chemistry with `\ce{…}`) |
 
 Nothing in a fragment runs: scripts, styles, event handlers, images and forms are removed (a plugin that wants JavaScript gives it beside the fragment, see [Scripts](#scripts)). A link only opens an `http` or `https` page in the browser. A fragment asks the window to act with attributes, and the plugin answers in C#:
 
@@ -57,7 +58,7 @@ Allowed elements are text and structure (`p`, `div`, `span`, headings, lists, `t
 
 ## Markdown, code and diagrams
 
-A fragment cannot load a library: it uses the window's Markdown, code highlighting, diagrams and charts (`PluginHtml.Chart(optionJson, label)` draws a chart from a JSON description, in the window's colors):
+A fragment cannot load a library: it uses the window's Markdown, code highlighting, diagrams, [equations](../workspace/prompt.md#equations) and charts (`PluginHtml.Chart(optionJson, label)` draws a chart from a JSON description, in the window's colors). Markdown draws `$…$` formulas and footnotes too, as in the timeline:
 
 ```csharp
 var html = $"""
@@ -108,7 +109,7 @@ or `export async function mount(root, alta)`, which fills the element holding th
 
 **Libraries.** A script imports `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react`, `lucide-react` and `@xyflow/react` (React Flow, for graphs of nodes and links) and gets the very ones the window runs: menus and popovers open above the tabs, and the theme, color scheme and zoom apply. When CodeAlta moves one to a new major version, a script that used what changed needs an update; `alta.versions` gives the versions. Use `PopoverNext` for popovers. The HTML above and the `codealta` module stay stable across releases.
 
-**The `codealta` module** gives `html` (JSX as a template), `Markdown`, `Code`, `Diagram`, `Icon`, `BrandIcon`, `FileLink`, `SessionLink`, the window's charts (`Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, histograms, box plots), and the hooks `useAlta`, `useVisible` and `useTheme`.
+**The `codealta` module** gives `html` (JSX as a template), `Markdown`, `Code`, `Diagram`, `Equation`, `Icon`, `BrandIcon`, `FileLink`, `SessionLink`, the window's charts (`Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, histograms, box plots), and the hooks `useAlta`, `useVisible` and `useTheme`.
 
 **The `alta` object:**
 

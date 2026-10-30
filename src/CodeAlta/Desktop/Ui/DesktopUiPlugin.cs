@@ -214,7 +214,14 @@ internal sealed class DesktopUiPlugin : PluginBase
             order: 60);
         // The same for every session, so that the prompt cache holds: what is in the windows is asked with the command.
         yield return Prompt.Static(PluginPromptChannel.Developer, WindowsGuidance, title: "Windows", kind: PluginPromptPartKind.ToolGuidance, order: 61);
+        // Models write what they believe is rendered: without it, formulas come as Unicode or code and notes as text.
+        yield return Prompt.Static(PluginPromptChannel.Developer, MarkdownGuidance, title: "Markdown", kind: PluginPromptPartKind.Guidance, order: 62);
     }
+
+    /// <summary>What the instructions of a session say of the Markdown the window renders in answers, in one line.</summary>
+    internal const string MarkdownGuidance = "Markdown: CodeAlta Desktop renders LaTeX, so write every formula, even a short one, in it (`$O(n \\log n)$` inline, `$$…$$` on lines of their own, " +
+        "`\\ce{…}` for chemistry), never in Unicode or code; cite sources with footnotes (`[^1]`); draw flows and exchanges as `mermaid` diagrams, not ASCII art; " +
+        "use alerts (`> [!WARNING]`) for what can go wrong, task lists and tables where they help.";
 
     /// <summary>What the instructions of a session say about the windows of CodeAlta Desktop.</summary>
     internal const string WindowsGuidance = "Windows: `alta window list --tabs` shows the windows of CodeAlta Desktop (the main one and the ones that hold tabs moved out of it), their tabs and the monitors; " +

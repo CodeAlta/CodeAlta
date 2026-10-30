@@ -158,6 +158,16 @@ public static partial class PluginHtml
         return Markdown(Fence(mermaid, "mermaid"));
     }
 
+    /// <summary>Creates a displayed equation from its LaTeX (<c>\frac{a}{b}</c>, or <c>\ce{H2O}</c> for chemistry), drawn by the application.</summary>
+    /// <param name="latex">The LaTeX of the equation, without delimiters, as after a <c>math</c> fence.</param>
+    /// <returns>The block markup. LaTeX that cannot be read is shown as it is, with the reason under the pointer.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="latex"/> is null, empty or whitespace.</exception>
+    public static string Equation(string latex)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(latex);
+        return Markdown(Fence(latex, "math"));
+    }
+
     /// <summary>Creates a chart, drawn by the application with the colors of the window and of its color scheme.</summary>
     /// <param name="optionJson">
     /// The option of the chart as JSON: an ECharts option made of data only (series, axes, a legend). A function, a link, a toolbox or a

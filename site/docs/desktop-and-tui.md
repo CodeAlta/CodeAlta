@@ -56,6 +56,7 @@ Both apps run the same agents: the same providers, tools, agent prompts, skills,
     <tr><th scope="row">Git changes: changed files, commits, diffs, branches</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Terminals, which agents can use too</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Tool call details</th><td>{{ alta_yes }} <small>Live terminal, highlighted files and diffs</small></td><td>{{ alta_yes }} <small>Live text output</small></td></tr>
+    <tr><th scope="row"><a href="{{site.basepath}}/docs/workspace/prompt/#equations">Math</a>: LaTeX formulas, chemistry and footnotes in messages, an equation editor in the prompt</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Shown as written</small></td></tr>
     <tr><th scope="row">Images pasted in a prompt or read by an agent</th><td>{{ alta_yes }} <small>Thumbnails and previews</small></td><td>{{ alta_part }} <small>In terminals that show images</small></td></tr>
     <tr><th scope="row">Statistics: the numbers of all your sessions as dashboards, with the <a href="{{site.basepath}}/docs/plugins/statistics/">Statistics plugin</a></th><td>{{ alta_yes }} <small>A page in a tab</small></td><td>{{ alta_part }} <small>The card of each turn</small></td></tr>
     <tr><th scope="row">The sessions on a phone, through Tailscale, with the <a href="{{site.basepath}}/docs/plugins/mobile/">Mobile plugin</a></th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>

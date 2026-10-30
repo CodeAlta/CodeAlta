@@ -1,10 +1,13 @@
 import { useImperativeHandle, useLayoutEffect, useRef, type ClipboardEventHandler, type KeyboardEventHandler, type Ref } from "react";
 import "monaco-editor/languages/definitions/markdown/register.js";
 import { promptEditorMinimum } from "./composerHeight";
+import { equationKey, equationKeybinding, useEquationEditing } from "./equationEditing";
 import { followPageFont, followShellTheme, monaco, pageFontFamily } from "./monaco/monacoEnvironment";
+import { attachPromptMath } from "./promptMath";
+import { useShellLanguage } from "./shellLanguage";
 import { spokenInsertion } from "./speech/spokenText";
 
-
+export { equationKey } from "./equationEditing";
 export type PromptInput = Pick<HTMLTextAreaElement, "value" | "disabled" | "selectionStart" | "selectionEnd"
   | "isConnected" | "focus" | "contains" | "closest" | "setSelectionRange" | "addEventListener" | "removeEventListener"> & {
   /**
@@ -14,6 +17,8 @@ export type PromptInput = Pick<HTMLTextAreaElement, "value" | "disabled" | "sele
   insertAtCaret: (text: string) => boolean;
   /** Shows a text greyed at the caret that is no part of the prompt, of its draft or of undo; an empty text removes it. */
   setInterimText: (text: string) => void;
+  /** Opens the equation editor on the formula at the caret, or on the selection, to write it back as LaTeX. */
+  editEquation: () => void;
 };
 
 export function PromptEditor({ ref, value, onChange, disabled = false, expanded = false, id, label, placeholder,
@@ -26,9 +31,12 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
   /** Something is shown in its place: the editor is hidden, its text and its size kept. */
   covered?: boolean;
 }) {
+  const { t } = useShellLanguage();
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor>(null);
   const latest = useRef({ value, onChange, disabled }); latest.current = { value, onChange, disabled };
+  // The formula at the caret (or the one given), or the selection, in the equation editor.
+  const equations = useEquationEditing(editor, () => !latest.current.disabled);
   // What a dictation is hearing: a decoration at the caret, which the text of the model never holds.
   const interim = useRef<{ text: string; shown: monaco.editor.IEditorDecorationsCollection | null }>({ text: "", shown: null });
   // The character before the caret, a line break at the start of a line, nothing at the start of the prompt.
@@ -57,9 +65,16 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       lineDecorationsWidth: 0, lineNumbersMinChars: 0, scrollBeyondLastLine: false, wordWrap: "on",
       overviewRulerLanes: 0, renderLineHighlight: "none", stickyScroll: { enabled: false },
       padding: { top: 12, bottom: 12 }, scrollbar: { alwaysConsumeMouseWheel: false },
-      quickSuggestions: false, suggestOnTriggerCharacters: false, tabFocusMode: true, links: false, occurrencesHighlight: "off", matchBrackets: "never" });
+      quickSuggestions: false, suggestOnTriggerCharacters: false, tabFocusMode: true, links: false, occurrencesHighlight: "off", matchBrackets: "never",
+      // The preview of a formula is drawn above the editor, which its frame clips: it is fixed to the window instead.
+      fixedOverflowWidgets: true });
     editor.current = instance;
     const unfollowTheme = followShellTheme(), unfollowFont = followPageFont(instance, "prompt");
+    // Formulas are previewed as they are written; Alt+= (Word's key for an equation) opens the equation editor, here and
+    // in the large editor, where the shortcuts of the window are off.
+    const detachMath = attachPromptMath(instance, { editLabel: `${t("Edit equation")} (${equationKey})`, onEdit: equations.open });
+    // An action, not a command: the command of a standalone editor is the page's, and would answer the key in another editor.
+    const equationAction = instance.addAction({ id: "codealta.insertEquation", label: t("Insert equation"), keybindings: [equationKeybinding()], run: () => equations.open() });
 
     const size = () => { if (!expanded) node.style.height = `${Math.max(promptEditorMinimum, Math.min(248, instance.getContentHeight()))}px`; };
     const resized = instance.onDidContentSizeChange(size); size();
@@ -78,7 +93,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       // What is being said follows the caret.
       if (interim.current.text) showInterim();
     });
-    return () => { unfollowTheme(); unfollowFont(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
+    return () => { detachMath(); equationAction.dispose(); unfollowTheme(); unfollowFont(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
       interim.current = { text: "", shown: null }; node.removeAttribute("data-interim"); };
   }, [expanded]);
   useImperativeHandle(ref, () => ({
@@ -112,6 +127,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       return done;
     },
     setInterimText: text => { interim.current.text = text; showInterim(); },
+    editEquation: () => equations.open(),
   }), []);
   useLayoutEffect(() => {
     const instance = editor.current;
@@ -122,10 +138,12 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       instance.executeEdits("draft", [{ range: model.getFullModelRange(), text: value }]);
     }
   }, [value, disabled, label]);
-  return <div id={id} ref={host} className={`prompt-editor${expanded ? " expanded" : ""}${covered ? " covered" : ""}`}
+  return <><div id={id} ref={host} className={`prompt-editor${expanded ? " expanded" : ""}${covered ? " covered" : ""}`}
     tabIndex={-1} onFocus={event => { if (event.target === event.currentTarget) editor.current?.focus(); }}
     onKeyDownCapture={onKeyDown} onPasteCapture={event => { onPaste?.(event); if (event.defaultPrevented) event.stopPropagation(); }} onCompositionStart={onCompositionStart}
     aria-label={label} data-placeholder={!value ? placeholder : undefined} data-suggested={!value && placeholder && suggested ? "" : undefined}
     // The placeholder is drawn by a style: a suggested prompt is also said to who does not see it.
-    aria-description={!value && placeholder && suggested ? placeholder : undefined}><div className="prompt-editor-surface" /></div>;
+    aria-description={!value && placeholder && suggested ? placeholder : undefined}><div className="prompt-editor-surface" /></div>
+    {equations.window}
+  </>;
 }

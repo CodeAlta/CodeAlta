@@ -1,6 +1,9 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Classes } from "@blueprintjs/core";
+import { equationKey, equationKeybinding, useEquationEditing } from "../equationEditing";
 import { followPageFont, followShellTheme, monaco, pageFontFamily } from "../monaco/monacoEnvironment";
+import { attachPromptMath } from "../promptMath";
+import { useShellLanguage } from "../shellLanguage";
 import { ensureMonacoLanguage } from "../monaco/monacoLanguages";
 import { fileLanguage, type EditorLanguage } from "../monaco/fileLanguage";
 
@@ -29,6 +32,9 @@ type Entry = { model: monaco.editor.ITextModel; generation: number; saved: numbe
   view: monaco.editor.ICodeEditorViewState | null; changed: monaco.IDisposable };
 
 const registered = (language: string) => monaco.languages.getLanguages().some(known => known.id === language);
+
+// The languages whose documents hold formulas: their formulas are previewed, and the equation editor writes them.
+const mathLanguages: ReadonlySet<string> = new Set(["markdown", "latex"]);
 
 // Replaces what a model holds by what the disk holds now, touching only the part that differs: the caret and the
 // scroll position stay where they are, and one undo brings the previous text back.
@@ -77,6 +83,9 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
   const shown = useRef<number | null>(null);
   const caret = useRef(() => { });
   const latest = useRef({ onDirty, onCursor, onInfo, onEditor }); latest.current = { onDirty, onCursor, onInfo, onEditor };
+  const { t } = useShellLanguage();
+  // The formula at the caret of a Markdown or LaTeX document, in the equation editor, as in the prompt.
+  const equations = useEquationEditing(editor, () => !editor.current?.getOption(monaco.editor.EditorOption.readOnly));
 
   useLayoutEffect(() => {
     const node = host.current!;
@@ -90,6 +99,10 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
       find: { addExtraSpaceOnTop: false, seedSearchStringFromSelection: "selection" }, scrollbar: { useShadows: false } });
     editor.current = instance;
     const unfollowTheme = followShellTheme(), unfollowFont = followPageFont(instance, "code");
+    const detachMath = attachPromptMath(instance, { editLabel: `${t("Edit equation")} (${equationKey})`, onEdit: equations.open,
+      enabled: model => mathLanguages.has(model.getLanguageId()) });
+    const equationAction = instance.addAction({ id: "codealta.insertEquation", label: t("Insert equation"), keybindings: [equationKeybinding()],
+      precondition: "editorLangId == markdown || editorLangId == latex", run: () => equations.open() });
     const describe = () => {
       const model = instance.getModel();
       if (!model) { latest.current.onInfo(null); return; }
@@ -104,6 +117,7 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
     };
     caret.current = place;
     const disposables = [
+      { dispose: detachMath }, equationAction,
       instance.onDidChangeCursorSelection(place),
       instance.onDidChangeModel(describe), instance.onDidChangeModelOptions(describe), instance.onDidChangeModelLanguage(describe),
     ];
@@ -202,5 +216,6 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
     editor.current?.updateOptions({ readOnly, ariaLabel: label, wordWrap: wrap ? "on" : "off", minimap: { enabled: minimap, renderCharacters: false, maxColumn: 100 }, glyphMargin: comments });
   }, [readOnly, label, wrap, minimap, comments]);
 
-  return <div ref={host} className={`code-editor editor-surface ${Classes.MONOSPACE_TEXT}`} data-editor-keys data-hidden={hidden} aria-hidden={hidden} />;
+  return <><div ref={host} className={`code-editor editor-surface ${Classes.MONOSPACE_TEXT}`} data-editor-keys data-hidden={hidden} aria-hidden={hidden} />
+    {equations.window}</>;
 }

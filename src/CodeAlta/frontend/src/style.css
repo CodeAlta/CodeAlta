@@ -2364,6 +2364,84 @@ svg.pele {
 .markdown-content pre > .markdown-copy[data-copied]::after { opacity: 1; background: var(--green, #3dcc91);
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E"); }
+/* Formulas drawn by KaTeX take the color of the text in both themes, a little larger than it as in LaTeX. A displayed
+   equation wider than the message scrolls sideways; its buttons, shown under the pointer, copy its LaTeX and its MathML.
+   Before KaTeX is loaded, a formula shows its source. */
+.markdown-content .katex { font-size: 1.1em; }
+.markdown-content .katex-error { color: var(--red) !important; }
+.markdown-math-source { color: var(--muted); font-family: var(--code-font); font-size: .92em; }
+.markdown-math-source-block { display: block; margin: 10px 0; white-space: pre-wrap; }
+/* A drawn block (a diagram, a displayed equation) has its buttons in a corner, under the pointer: Source shows its code
+   in its place, with the copy button of code, and Preview the drawing again. */
+.markdown-rendered { position: relative; margin: 10px 0; }
+.markdown-rendered > .markdown-diagram { margin: 0; }
+.markdown-math-display { overflow-x: auto; overflow-y: hidden; padding: 1px 0; }
+.markdown-math-display > .katex-display { margin: .5em 0; }
+.markdown-block-tools { position: absolute; top: -8px; right: 0; z-index: 1; display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+.markdown-rendered[data-source] > .markdown-block-tools { position: static; justify-content: flex-end; margin-bottom: 4px; opacity: 1; }
+.markdown-rendered > pre { margin: 0; }
+.markdown-rendered:hover > .markdown-block-tools, .markdown-block-tools:focus-within { opacity: 1; }
+/* As specific as the buttons of the session around the timeline, and after them. */
+.markdown-content .markdown-block-tools > button:not(.bp6-button) { padding: 3px 6px; border: 0; border-radius: 5px; color: var(--muted); background: var(--panel-2); font: 10px/1.4 var(--bp-typography-family-default); letter-spacing: .04em; cursor: pointer; user-select: none; }
+.markdown-content .markdown-block-tools > button:not(.bp6-button):hover, .markdown-content .markdown-block-tools > button:not(.bp6-button):focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 12%, var(--panel-2)); }
+.markdown-content .markdown-block-tools > button:not(.bp6-button):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.markdown-content .markdown-block-tools > button.markdown-math-copy[data-copied] { color: var(--green, #3dcc91); }
+/* Footnotes: a number that moves to its note (its title is the note), and the notes at the end of the text, smaller,
+   each with a way back. Where a move arrives is lit for a moment. */
+.markdown-footnote { line-height: 0; }
+.markdown-footnote-ref, .markdown-footnote-back { padding: 0 2px; border: 0; border-radius: 3px; color: var(--accent); background: none; font: inherit; cursor: pointer; }
+.markdown-footnote-ref:hover, .markdown-footnote-back:hover { text-decoration: underline; }
+.markdown-footnote-ref:focus-visible, .markdown-footnote-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.markdown-footnotes { margin-top: 14px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: .92em; }
+.markdown-footnotes ol { margin: 0; padding-left: 22px; }
+.markdown-footnotes p { margin: 2px 0; }
+.markdown-footnote-note[data-flash], .markdown-footnote[data-flash] { border-radius: 3px; background: color-mix(in srgb, var(--accent) 18%, transparent); }
+/* Formulas in the prompt are tinted as they are written; the one under the caret is drawn above it, with a button that
+   opens it in the equation editor. */
+.prompt-math { color: var(--accent) !important; }
+.prompt-math-preview { display: flex; align-items: center; gap: 6px; width: max-content; max-width: min(560px, 80vw); max-height: 220px; overflow: auto; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel); box-shadow: 0 4px 14px rgba(0, 0, 0, .22); }
+.prompt-math-preview-formula { flex: 1; min-width: 0; padding: 2px 0; overflow-x: auto; overflow-y: hidden; }
+.prompt-math-preview-formula .katex { font-size: 1.15em; }
+.prompt-math-preview-formula .katex-display { margin: 0; }
+.prompt-math-preview-formula .katex-error { color: var(--red) !important; font-size: 12px; }
+/* As specific as the buttons of the composer, around it in the page, and after them. */
+.prompt-math-preview button.prompt-math-preview-edit { flex: none; width: 22px; height: 22px; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 4px; color: var(--muted); background: none;
+  box-shadow: none; font-size: 13px; line-height: 22px; cursor: pointer; }
+.prompt-math-preview button.prompt-math-preview-edit:hover, .prompt-math-preview button.prompt-math-preview-edit:focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
+/* The equation editor: MathLive's field, the LaTeX it writes, and the actions. */
+.equation-editor { display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; height: 100%; padding: 12px; }
+.equation-editor-field { display: flex; flex: 1; align-items: center; justify-content: center; min-height: 96px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.equation-editor-field math-field { width: 100%; min-height: 72px; padding: 8px 12px; border: 0; outline: none; color: var(--text); background: transparent; font-size: 26px; }
+/* MathLive takes the colors of the theme through its custom properties: the field, its tooltips and its virtual keyboard,
+   which opens in this window. They follow a change of theme at once. */
+.equation-editor-dialog {
+  --primary-color: var(--accent); --caret-color: var(--accent); --selection-color: var(--text);
+  --selection-background-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  --contains-highlight-background-color: color-mix(in srgb, var(--accent) 12%, transparent);
+  --placeholder-color: var(--accent); --box-placeholder-color: var(--accent); --smart-fence-color: var(--muted); --latex-color: var(--accent);
+  --tooltip-background-color: var(--panel); --tooltip-color: var(--text); --tooltip-border: 1px solid var(--line); --tooltip-box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
+  --keyboard-background: var(--panel-2); --keyboard-border: var(--line); --keyboard-accent-color: var(--accent); --keyboard-horizontal-rule: 1px solid var(--line);
+  --keyboard-toolbar-text: var(--muted); --keyboard-toolbar-text-active: var(--accent); --keyboard-toolbar-background: transparent;
+  --keyboard-toolbar-background-hover: color-mix(in srgb, var(--text) 10%, transparent);
+  --keyboard-toolbar-background-selected: color-mix(in srgb, var(--accent) 16%, transparent);
+  --keycap-background: var(--panel); --keycap-text: var(--text); --keycap-text-hover: var(--text); --keycap-text-active: var(--text); --keycap-text-pressed: var(--text);
+  --keycap-background-hover: color-mix(in srgb, var(--text) 8%, var(--panel));
+  --keycap-background-active: color-mix(in srgb, var(--accent) 24%, var(--panel)); --keycap-background-pressed: color-mix(in srgb, var(--accent) 24%, var(--panel));
+  --keycap-border: var(--line); --keycap-border-bottom: color-mix(in srgb, var(--text) 22%, var(--panel));
+  --keycap-secondary-background: color-mix(in srgb, var(--text) 10%, var(--panel-2)); --keycap-secondary-text: var(--text);
+  --keycap-secondary-background-hover: color-mix(in srgb, var(--text) 16%, var(--panel-2));
+  --keycap-secondary-border: var(--line); --keycap-secondary-border-bottom: color-mix(in srgb, var(--text) 28%, var(--panel-2));
+  --keycap-primary-background: var(--accent); --keycap-primary-text: #fff; --keycap-primary-background-hover: color-mix(in srgb, var(--accent) 85%, #000);
+  --keycap-shift-color: var(--accent); --keycap-shift-text: var(--accent);
+  --variant-panel-background: var(--panel); --variant-keycap-text: var(--text); --variant-keycap-text-active: var(--text);
+  --variant-keycap-background-active: color-mix(in srgb, var(--accent) 24%, var(--panel));
+}
+.equation-editor-source { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+.equation-editor-source textarea { min-height: 54px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--panel); font: 12px/1.5 var(--code-font); resize: vertical; }
+.equation-editor-actions { display: flex; align-items: center; gap: 8px; }
+.equation-editor-hint { flex: 1; color: var(--muted); font-size: 12px; text-align: right; }
+.equation-editor-failed { color: var(--red); }
 
 /* Rename popover: the name of a project or a session, edited beside its row in the Explorer. */
 .rename-anchor { position: absolute; inset: 0; pointer-events: none; }

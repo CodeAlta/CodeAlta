@@ -78,12 +78,22 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
       await evaluate("previewFixture.clear()");
       await evaluate(`previewFixture.render(${JSON.stringify(text)}, ${sourceLines})`);
       const label = `sourceLines: ${sourceLines}${text.includes("\r") ? ", CRLF" : ""}`;
-      assert.equal(await wait(`${content}?.querySelectorAll('.markdown-diagram > svg').length===2`, 60_000), true, `${label}: ${JSON.stringify(await shown())}`);
-      assert.deepEqual(await shown(), ["TABLE.markdown-front-matter", "H1", "P", "DIV.markdown-diagram svg", "DIV.markdown-diagram svg", "P"], label);
-      assert.equal(await evaluate(`${content}.querySelector('pre[data-language="mermaid"]')`), null, label);
+      assert.equal(await wait(`${content}?.querySelectorAll('.markdown-rendered > .markdown-diagram > svg').length===2`, 60_000), true, `${label}: ${JSON.stringify(await shown())}`);
+      assert.deepEqual(await shown(), ["TABLE.markdown-front-matter", "H1", "P", "DIV.markdown-rendered", "DIV.markdown-rendered", "P"], label);
+      // Each diagram keeps its source beside it, hidden until its Source button shows it.
+      assert.equal(await evaluate(`${content}.querySelectorAll('.markdown-rendered > pre[data-language="mermaid"][hidden]').length`), 2, label);
       if (sourceLines)
-        assert.deepEqual(await evaluate(`[...${content}.querySelectorAll('.markdown-diagram')].map(e=>e.getAttribute('data-source-lines'))`), ["10-13", "15-21"]);
+        assert.deepEqual(await evaluate(`[...${content}.querySelectorAll('.markdown-rendered')].map(e=>e.getAttribute('data-source-lines'))`), ["10-13", "15-21"]);
     }
+
+    // Source shows the code of a diagram in its place, and Preview the drawing again.
+    const toggle = `${content}.querySelector('.markdown-rendered button.markdown-source-toggle')`;
+    const view = () => evaluate<unknown>(`(() => { const block = ${content}.querySelector('.markdown-rendered'); return [block.querySelector('.markdown-diagram').hidden, block.querySelector('pre').hidden, ${toggle}.textContent, ${toggle}.getAttribute('aria-pressed')]; })()`);
+    assert.deepEqual(await view(), [false, true, "Source", "false"]);
+    await evaluate(`${toggle}.click()`);
+    assert.deepEqual(await view(), [true, false, "Preview", "true"]);
+    await evaluate(`${toggle}.click()`);
+    assert.deepEqual(await view(), [false, true, "Source", "false"]);
 
     // A `;` ends a statement of a sequence diagram: the rest of the line is no statement, and Mermaid refuses the text.
     // The block stays code, labelled `mermaid`, with a note that says why; written `#59;`, the same text is drawn.
@@ -93,7 +103,7 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
     assert.equal(await wait(`${content}?.querySelectorAll('.markdown-diagram > svg').length===1`, 60_000), true, JSON.stringify(await shown()));
     await new Promise(resolve => setTimeout(resolve, 500));
     assert.equal(await wait(`${content}?.querySelector('.markdown-diagram-refused')`), true, JSON.stringify(await shown()));
-    assert.deepEqual(await shown(), ["PRE", "P.markdown-diagram-refused", "DIV.markdown-diagram svg"]);
+    assert.deepEqual(await shown(), ["PRE", "P.markdown-diagram-refused", "DIV.markdown-rendered"]);
     assert.equal(await evaluate(`${content}.querySelector('pre').getAttribute('data-language')`), "mermaid");
     assert.match(await evaluate<string>(`${content}.querySelector('.markdown-diagram-refused').textContent`), /^Not drawn as a diagram: Parse error on line \d+$/);
   } finally {

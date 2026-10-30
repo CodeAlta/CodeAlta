@@ -21,6 +21,8 @@ const loaders: Readonly<Record<Exclude<EditorLanguage, "plaintext" | "ini" | "ma
   toml: async () => registerOwn("toml"),
   makefile: async () => registerOwn("makefile"),
   diff: async () => registerOwn("diff"),
+  latex: async () => registerOwn("latex"),
+  bibtex: async () => registerOwn("bibtex"),
   abap: () => import("monaco-editor/languages/definitions/abap/register.js"),
   apex: () => import("monaco-editor/languages/definitions/apex/register.js"),
   azcli: () => import("monaco-editor/languages/definitions/azcli/register.js"),

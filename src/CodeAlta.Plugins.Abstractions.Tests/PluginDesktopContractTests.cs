@@ -31,6 +31,9 @@ public sealed class PluginDesktopContractTests
         Assert.AreEqual("<div class=\"alta-markdown\">```\n\n```</div>", PluginHtml.Code(null));
         Assert.AreEqual("<div class=\"alta-markdown\">`````md\n````\ninner\n````\n`````</div>", PluginHtml.Code("````\ninner\n````", "md"));
         Assert.AreEqual("<div class=\"alta-markdown\">```mermaid\ngraph TD; A--&gt;B\n```</div>", PluginHtml.Diagram("graph TD; A-->B\n"));
+        // An equation is a math fence: the window draws it with KaTeX.
+        Assert.AreEqual("<div class=\"alta-markdown\">```math\n\\frac{a}{b} &lt; c\n```</div>", PluginHtml.Equation("\\frac{a}{b} < c"));
+        Assert.ThrowsExactly<ArgumentException>(() => PluginHtml.Equation(" "));
 
         foreach (var language in new[] { "", " ", "c#", "a b", "x\ny", "x\n", new string('a', 33) })
             Assert.ThrowsExactly<ArgumentException>(() => PluginHtml.Code("x", language), language);
