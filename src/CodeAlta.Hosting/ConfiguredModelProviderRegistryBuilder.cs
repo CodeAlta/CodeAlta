@@ -827,6 +827,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex),
             DefaultModelId = NormalizeText(definition.Model),
             DefaultReasoningEffort = ParseReasoningEffort(definition.ReasoningEffort),
+            DefaultContextSize = definition.ContextSize is > 0 ? definition.ContextSize : null,
             IsDefault = true,
             IsEnabled = definition.Enabled != false,
             ModelOrder = ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider),

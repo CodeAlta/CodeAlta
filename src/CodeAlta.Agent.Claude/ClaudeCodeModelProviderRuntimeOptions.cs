@@ -113,6 +113,12 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     public AgentReasoningEffort? DefaultReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets or initializes the default size of context of the sessions of the provider, in input tokens: used by a model
+    /// that has that size (200K or 1M) in a session that chose none.
+    /// </summary>
+    public long? DefaultContextSize { get; init; }
+
+    /// <summary>
     /// Gets or initializes a value indicating whether the provider is the default one.
     /// </summary>
     public bool IsDefault { get; init; }

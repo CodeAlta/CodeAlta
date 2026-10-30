@@ -55,6 +55,7 @@ public sealed class ConfiguredProviderRegistrationTests
         definition.Model = " fallback-model ";
         definition.SingleModelId = " selected-model ";
         definition.ReasoningEffort = " XHIGH ";
+        definition.ContextSize = 400_000;
         definition.SortModels = true;
 
         Assert.IsTrue(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(
@@ -66,6 +67,7 @@ public sealed class ConfiguredProviderRegistrationTests
         Assert.AreEqual(new Uri("https://provider.invalid/v1"), descriptor.BaseUri);
         Assert.AreEqual("selected-model", descriptor.DefaultModelId);
         Assert.AreEqual(AgentReasoningEffort.XHigh, descriptor.DefaultReasoningEffort);
+        Assert.AreEqual(400_000L, descriptor.DefaultContextSize);
         Assert.IsTrue(descriptor.IsEnabled);
         Assert.IsTrue(descriptor.IsDefault);
         Assert.AreEqual(ModelOrder.Name, descriptor.ModelOrder);
@@ -86,6 +88,7 @@ public sealed class ConfiguredProviderRegistrationTests
             DisplayName = " Claude Code ",
             Model = " sonnet ",
             ReasoningEffort = "high",
+            ContextSize = 200_000,
             Command = " /opt/claude/claude ",
             Arguments = ["--add-dir", "/data"],
             PermissionMode = "acceptEdits",
@@ -100,6 +103,8 @@ public sealed class ConfiguredProviderRegistrationTests
         Assert.IsNull(descriptor.BaseUri);
         Assert.AreEqual("sonnet", descriptor.DefaultModelId);
         Assert.AreEqual(AgentReasoningEffort.High, descriptor.DefaultReasoningEffort);
+        // The size Settings › Providers gives its sessions: 200K or 1M for a model of 1M tokens.
+        Assert.AreEqual(200_000L, descriptor.DefaultContextSize);
         Assert.IsTrue(descriptor.IsEnabled);
         Assert.IsNotNull(factory); // Never invoked: creating the runtime starts no process either.
         Assert.IsFalse(Directory.Exists(stateRoot));
