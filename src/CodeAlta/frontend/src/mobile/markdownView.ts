@@ -1,5 +1,6 @@
 import { diagramAppearance, diagrams } from "../diagrams";
-import { createMarkdownRenderer } from "../markdownBoundary";
+import { createMarkdownRenderer, equationCopy, markdownPending } from "../markdownBoundary";
+import { loadMath } from "../math";
 import { el, iconSvg } from "./dom";
 
 /** What the page asks of the server for a diagram page: `POST /api/diagrams`. */
@@ -82,13 +83,17 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
   const render = createMarkdownRenderer(window, undefined, look);
   const pages = createDiagramPages(options.upload);
 
-  /** Renders a text into an element; `redraw` is called once a diagram of it is drawn. Says whether it has a diagram (drawn again when the theme changes). */
+  /**
+   * Renders a text into an element; `redraw` is called once a diagram of it is drawn, or once KaTeX is loaded for its
+   * formulas. Says whether it has a diagram (drawn again when the theme changes).
+   */
   function fill(container: HTMLElement, text: string, redraw: () => void): boolean {
-    const undrawn: string[] = [];
-    container.innerHTML = render(text, true, undrawn);
+    const pending = markdownPending();
+    container.innerHTML = render(text, true, pending);
     for (const figure of Array.from(container.querySelectorAll<HTMLElement>(".markdown-diagram"))) dressDiagram(figure);
-    const appearance = look();
+    const appearance = look(), undrawn = pending.diagrams;
     if (undrawn.length) void Promise.all(undrawn.map(source => diagrams.draw(source, appearance))).then(() => { if (container.isConnected) redraw(); });
+    if (pending.math) void loadMath().then(() => { if (container.isConnected) redraw(); }, () => { /* Not loaded: the formulas stay as written. */ });
     return undrawn.length > 0 || !!container.querySelector(".markdown-diagram, pre[data-language='mermaid']");
   }
 
@@ -178,10 +183,9 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
       }
       const figure = target?.closest<HTMLElement>(".markdown-diagram");
       if (figure) { const svg = figure.querySelector("svg")?.outerHTML; if (svg) zoom(svg); return; }
-      const copy = target?.closest<HTMLButtonElement>("button.markdown-copy");
+      const copy = target?.closest<HTMLButtonElement>("button.markdown-copy, button.markdown-math-copy");
       if (copy) {
-        const pre = copy.parentElement;
-        const code = pre?.querySelector("code")?.textContent ?? "";
+        const code = copy.classList.contains("markdown-math-copy") ? equationCopy(copy) ?? "" : copy.parentElement?.querySelector("code")?.textContent ?? "";
         void window.navigator.clipboard?.writeText(code).then(() => {
           copy.dataset.copied = "";
           window.setTimeout(() => { delete copy.dataset.copied; }, 1500);

@@ -316,6 +316,8 @@ import "@blueprintjs/core/lib/css/blueprint.css";
 import "flexlayout-react/style/light.css";
 import "@xterm/xterm/css/xterm.css";
 import "@xyflow/react/dist/style.css";
+// KaTeX's styles: its fonts are fetched only when a formula is drawn, and its code (`loadMath`) when a text holds one.
+import "katex/dist/katex.min.css";
 import "./reactFlow.css";
 import "./style.css";
 import "./timelineEmphasis/timelineEmphasis.css";

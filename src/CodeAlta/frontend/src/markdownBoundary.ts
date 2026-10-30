@@ -1,8 +1,10 @@
 import createDOMPurify from "dompurify";
 import { highlightCode } from "./codeHighlight";
 import { diagramAppearance, diagrams, type DiagramAppearance } from "./diagrams";
+import { loadedMath } from "./math";
 import { createMarkdownParser, frontMatterEntries, frontMatterLineCount, splitFrontMatter } from "./markdown";
 import { markdownHrefKind } from "./markdownLinks";
+import { displayMathAttribute, mathAttribute } from "./markdownMath";
 import { sourceLinesAttribute } from "./markdownSourceLines";
 
 /** The alerts of GitHub: a quote whose first line is `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]`. */
@@ -12,9 +14,37 @@ export type AlertKind = typeof alertKinds[number];
 export type MarkdownLabels = Readonly<Record<AlertKind, string> & {
   /** What the button of a code block says it does. */ copy?: string;
   /** What the note under a `mermaid` block that could not be drawn says before its reason. */ notDrawn?: string;
+  /** What the buttons of a displayed equation say they do. */ copyLatex?: string; copyMathMl?: string;
 }>;
 const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy",
-  notDrawn: "Not drawn as a diagram:" };
+  notDrawn: "Not drawn as a diagram:", copyLatex: "Copy LaTeX", copyMathMl: "Copy MathML" };
+
+/**
+ * What a render could not draw yet: the texts of the `mermaid` blocks to draw, and whether its formulas wait for the
+ * math library (`loadMath`). The owner draws or loads them, then renders again.
+ */
+export type MarkdownPending = { diagrams: string[]; math: boolean };
+
+/** A new, empty {@link MarkdownPending}. */
+export const markdownPending = (): MarkdownPending => ({ diagrams: [], math: false });
+
+/**
+ * What a button of a displayed equation copies: its LaTeX between `$$` lines, or its MathML (which Word pastes as an
+ * equation); null when the element is no such button or the equation is not drawn.
+ */
+export function equationCopy(button: Element): string | null {
+  const block = button.closest(".markdown-math-block");
+  const kind = button.closest("button.markdown-math-copy")?.getAttribute("data-copy");
+  if (!block || !kind) return null;
+  if (kind === "mathml") return block.querySelector(".katex-mathml math")?.outerHTML ?? null;
+  const tex = block.querySelector('annotation[encoding="application/x-tex"]')?.textContent;
+  return tex ? `$$\n${tex.trim()}\n$$` : null;
+}
+
+// A text whose formulas define macros is drawn whole each time: a formula depends on the ones before it.
+const definesMacros = /\\(?:newcommand|renewcommand|providecommand|def|gdef|edef|xdef|let|DeclareMathOperator)(?![a-zA-Z])/;
+// The formulas a renderer keeps drawn, so that a message being written draws only its new one.
+const formulaCapacity = 512;
 
 /** The image of the renderer in a link to a picture of the disk, without a source until the window draws it. */
 export const localImageClass = "markdown-local-image";
@@ -39,7 +69,12 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
   // a value that no text knows. An `<a>` written in HTML opens a page of the web, and nothing else.
   const fileLinkMark = view.crypto?.randomUUID?.() ?? `${Math.random()}${Math.random()}`;
   const fileLinks = new WeakSet<Node>();
-  const parsers = { message: createMarkdownParser({ fileLinkMark }), document: createMarkdownParser({ breaks: false, fileLinkMark }) };
+  // The placeholders of the parser (formulas) carry a mark of their own, which no text knows either.
+  const placeholderMark = view.crypto?.randomUUID?.() ?? `${Math.random()}${Math.random()}`;
+  const parsers = { message: createMarkdownParser({ fileLinkMark, placeholderMark }),
+    document: createMarkdownParser({ breaks: false, fileLinkMark, placeholderMark }) };
+  // The formulas drawn by this renderer, most recently used last.
+  const drawnFormulas = new Map<string, string>();
   // The lines of a block are the parser's when they carry the mark of the render being sanitized, which no text knows:
   // they are kept without it. Any other `data-source-lines`, written in HTML, is removed.
   const randomMark = () => view.crypto?.randomUUID?.() ?? `${Math.random()}${Math.random()}`;
@@ -70,10 +105,14 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
     if (lines !== null) data.attrValue = lines;
     const image = name === fileImageAttribute && tag === "a" && fileLinks.has(node) && value === fileLinkMark;
     if (image) data.attrValue = "";
+    // A formula of the parser keeps its attribute, without the mark: one written in HTML is text.
+    const formula = (name === mathAttribute || name === displayMathAttribute) && (tag === "span" || tag === "div") && value === placeholderMark;
+    if (formula) data.attrValue = "";
     data.keepAttr = name === "title"
       || link
       || lines !== null
       || image
+      || formula
       || name === "class" && tag === "code" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(value)
       || name === "open" && tag === "details"
       || name === "scope" && tag === "th" && /^(col|row|colgroup|rowgroup)$/.test(value)
@@ -85,7 +124,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
   });
   // Fenced blocks are dressed after sanitization, from their text alone: the sanitizer keeps accepting no
   // authored class, style or SVG. A `mermaid` block that has been drawn becomes its diagram; one that has
-  // not is reported in `undrawn` and stays a code block. Any other known language is highlighted.
+  // not is reported in `undrawn` and stays a code block. A `math` block is drawn by `dressMath`. Any other known language is highlighted.
   function dressFences(fragment: DocumentFragment, undrawn: string[] | undefined) {
     for (const code of Array.from(fragment.querySelectorAll<HTMLElement>("pre > code[class^='language-']"))) {
       const pre = code.parentElement!;
@@ -121,6 +160,70 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       if (highlighted !== null) code.innerHTML = highlighted;
       // The block names its language in a corner (drawn by the stylesheet, so never selected or copied).
       pre.setAttribute("data-language", language.toLowerCase());
+    }
+  }
+  // The formulas of the parser, and the `math` fenced blocks, are drawn with KaTeX once it is loaded; before, they show
+  // their source and the render says it waits for it (`pending.math`). A displayed equation has buttons that copy its
+  // LaTeX and its MathML: elements of the renderer, like the copy button of a code block.
+  function dressMath(fragment: DocumentFragment, pending: MarkdownPending | undefined) {
+    const placeholders = Array.from(fragment.querySelectorAll<HTMLElement>(`[${mathAttribute}], [${displayMathAttribute}], pre > code.language-math`));
+    if (!placeholders.length) return;
+    const library = loadedMath();
+    const formulas = placeholders.map(element => ({ element, display: !element.hasAttribute(mathAttribute),
+      block: element.tagName !== "SPAN", tex: element.tagName === "CODE" ? (element.textContent ?? "").replace(/\n$/, "") : element.textContent ?? "" }));
+    if (!library) {
+      if (pending) pending.math = true;
+      for (const { element, display, block, tex } of formulas) {
+        if (element.tagName === "CODE") continue; // A `math` block stays a code block until it is drawn.
+        element.removeAttribute(mathAttribute); element.removeAttribute(displayMathAttribute);
+        element.className = block ? "markdown-math-source markdown-math-source-block" : "markdown-math-source";
+        element.textContent = display ? `$$${tex}$$` : `$${tex}$`;
+      }
+      return;
+    }
+    const drawing = library.formulas();
+    const fresh = formulas.some(({ tex }) => definesMacros.test(tex));
+    const draw = (tex: string, display: boolean) => {
+      if (fresh) return drawing.render(tex, display);
+      const key = `${display ? "d" : "i"}${tex}`;
+      let html = drawnFormulas.get(key);
+      if (html === undefined) html = drawing.render(tex, display);
+      else drawnFormulas.delete(key);
+      drawnFormulas.set(key, html);
+      while (drawnFormulas.size > formulaCapacity) drawnFormulas.delete(drawnFormulas.keys().next().value!);
+      return html;
+    };
+    for (const { element, display, block, tex } of formulas) {
+      const html = draw(tex, display);
+      if (!block) {
+        const formula = view.document.createElement("span");
+        formula.className = display ? "markdown-math markdown-math-display" : "markdown-math";
+        formula.innerHTML = html;
+        element.replaceWith(formula);
+        continue;
+      }
+      const figure = view.document.createElement("div");
+      figure.className = "markdown-math-block";
+      const host = element.tagName === "CODE" ? element.parentElement! : element;
+      const lines = host.getAttribute(sourceLinesAttribute);
+      if (lines !== null) figure.setAttribute(sourceLinesAttribute, lines);
+      const tools = view.document.createElement("span");
+      tools.className = "markdown-math-tools";
+      for (const [kind, label, text] of [["latex", labels.copyLatex ?? englishLabels.copyLatex!, "LaTeX"], ["mathml", labels.copyMathMl ?? englishLabels.copyMathMl!, "MathML"]]) {
+        const button = view.document.createElement("button");
+        button.type = "button";
+        button.className = "markdown-math-copy";
+        button.setAttribute("data-copy", kind);
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.textContent = text;
+        tools.append(button);
+      }
+      const formula = view.document.createElement("div");
+      formula.className = "markdown-math-display";
+      formula.innerHTML = html;
+      figure.append(tools, formula);
+      host.replaceWith(figure);
     }
   }
   // The front matter of a document is shown as what it is, a few named values: a table of its entries, built
@@ -246,7 +349,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       pre.prepend(button);
     }
   }
-  return (source: string, timelineCodeBlocks: boolean, undrawn?: string[], options: MarkdownRenderOptions = {}) => {
+  return (source: string, timelineCodeBlocks: boolean, pending?: MarkdownPending, options: MarkdownRenderOptions = {}) => {
     try {
       const { frontMatter, body } = splitFrontMatter(source);
       // The body of a document keeps the lines it has in the whole text, after its front matter.
@@ -259,7 +362,8 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       try {
         fragment = purifier.sanitize(html, {
           ALLOWED_TAGS: tags,
-          ALLOWED_ATTR: ["href", "title", "class", "open", "scope", "align", "colspan", "rowspan", "start", "value", "reversed", sourceLinesAttribute, fileImageAttribute],
+          ALLOWED_ATTR: ["href", "title", "class", "open", "scope", "align", "colspan", "rowspan", "start", "value", "reversed", sourceLinesAttribute, fileImageAttribute,
+            mathAttribute, displayMathAttribute],
           ALLOW_ARIA_ATTR: false, ALLOW_DATA_ATTR: false, RETURN_DOM_FRAGMENT: true,
         });
       } finally { sourceLinesMark = null; }
@@ -270,7 +374,8 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         fragment.prepend(block);
       }
       dressFileImages(fragment);
-      dressFences(fragment, undrawn);
+      dressFences(fragment, pending?.diagrams);
+      dressMath(fragment, pending);
       dressTasks(fragment);
       dressAlerts(fragment);
       // Authored pre/code and fenced code share a harmless region, never app controls.

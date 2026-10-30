@@ -255,6 +255,25 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       assert.ok(fallback.html.startsWith("<pre>&lt;img")); assert.doesNotMatch(fallback.html, /private .* detail/);
       await check();
     }
+    // Formulas show their source until KaTeX is loaded, then its drawing, with the LaTeX of each in its MathML. A formula
+    // that cannot be read shows its source with KaTeX's message; one written in HTML is text. KaTeX asks for nothing.
+    type MathState = { sources: string[]; inline: number; display: number; chemistry: string; errors: boolean[]; tex: string[]; buttons: string[]; authored: number; paragraphs: string[] };
+    const formulas = "Energy $E=mc^2$ and water $\\ce{H2O}$.\n\n$$\n\\int_0^1 x\\,dx = \\tfrac12\n$$\n\nBad $\\frac{a}{$ here, <span data-math=\"spoof\">x^2</span> and $5 or $10.\n\n```math\na^2+b^2\n```";
+    await evaluate(`markdownFixture.render(${JSON.stringify(formulas)}, false)`);
+    // This bundle holds KaTeX: it is ready at the first render after the one that asked for it.
+    let math = await evaluate<MathState>("markdownFixture.math()");
+    for (let i = 0; i < 100 && math.display < 2; i++) { await new Promise(resolve => setTimeout(resolve, 50)); math = await evaluate<MathState>("markdownFixture.math()"); }
+    assert.equal(math.inline, 2, "the bad formula is an error, not a drawing");
+    assert.equal(math.display, 2, "the display block and the math fence");
+    assert.match(math.chemistry, /^H\w?2O$/, "mhchem draws the formula of water (with a phantom that aligns its subscript)");
+    assert.deepEqual(math.errors, [true]);
+    assert.deepEqual(math.tex, ["E=mc^2", "\\ce{H2O}", "\\int_0^1 x\\,dx = \\tfrac12", "a^2+b^2"]);
+    assert.deepEqual(math.buttons, ["Copy LaTeX", "Copy MathML", "Copy LaTeX", "Copy MathML"]);
+    assert.equal(math.authored, 0);
+    assert.ok(math.paragraphs.some(text => text.includes("x^2 and $5 or $10.")), "HTML and prices stay text");
+    assert.deepEqual(await evaluate("markdownFixture.copyEquation('latex')"), ["$$\n\\int_0^1 x\\,dx = \\tfrac12\n$$"]);
+    const mathml = await evaluate<string[]>("markdownFixture.copyEquation('mathml')");
+    assert.match(mathml[0], /^<math xmlns="http:\/\/www\.w3\.org\/1998\/Math\/MathML" display="block">/);
     assert.deepEqual(attempts, [page, script]);
     assert.ok(baseDiagnostics.length > 0, "explicitly retain base-uri enforcement evidence");
     console.log(`Markdown production boundary: ${cases.length} cases, 2 fulfilled assets, 0 unexpected requests; ${baseDiagnostics.length} allowed base-uri diagnostics, ${inertParseDiagnostics.length} inert-parse handler diagnostics; 600ms deferred windows. HTTPS is not app://codealta.`);

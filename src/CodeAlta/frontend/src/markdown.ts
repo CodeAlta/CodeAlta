@@ -1,5 +1,6 @@
 import MarkdownIt from "markdown-it";
 import { fileMarkdownHref } from "./markdownLinks";
+import { markdownMath } from "./markdownMath";
 import { sourceLinesAttribute } from "./markdownSourceLines";
 
 /**
@@ -17,9 +18,12 @@ export type MarkdownSourceLines = Readonly<{ mark: string; firstLine: number }>;
  */
 export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
   /** Written on each link of the Markdown that names a file, as `data-file-link`: what tells it from an `<a>` that the text wrote in HTML. */
-  fileLinkMark?: string }> = {}) {
+  fileLinkMark?: string;
+  /** Written on the placeholders of the formulas (see `markdownMath`): what tells them from HTML that the text wrote. */
+  placeholderMark?: string }> = {}) {
   const md = new MarkdownIt("commonmark", { html: true, breaks: options.breaks ?? true, linkify: true, typographer: false })
     .enable(["table", "strikethrough", "linkify"]);
+  markdownMath(md, options.placeholderMark ?? "");
   md.linkify.set({ fuzzyLink: false, fuzzyEmail: false, fuzzyIP: false });
   // A `file:` address is a link too, written as a link or alone in the text: markdown-it refuses the scheme, and
   // the boundary decides what a link may name.
@@ -39,8 +43,8 @@ export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
   md.renderer.rules.fence = (tokens, index) => code(tokens[index].content, tokens[index].info, tokens[index].attrGet(sourceLinesAttribute));
   md.renderer.rules.code_block = (tokens, index) => code(tokens[index].content, "", tokens[index].attrGet(sourceLinesAttribute));
   // Asked for, each block says which lines of the document it comes from: a paragraph, a heading, an item of a list, a
-  // row of a table, a code block, a quote, a rule. A block of HTML says nothing: its elements are the text's own.
-  const sourceBlock = /^(?:paragraph_open|heading_open|list_item_open|tr_open|blockquote_open|hr|fence|code_block)$/;
+  // row of a table, a code block, a quote, a rule, a display formula. A block of HTML says nothing: its elements are the text's own.
+  const sourceBlock = /^(?:paragraph_open|heading_open|list_item_open|tr_open|blockquote_open|hr|fence|code_block|math_block)$/;
   md.core.ruler.push("source_lines", state => {
     const sourceLines = (state.env as { sourceLines?: MarkdownSourceLines } | undefined)?.sourceLines;
     if (!sourceLines) return;
