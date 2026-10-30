@@ -6,6 +6,7 @@ import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import type { TimelineItem } from "./timeline";
 import { FileChangeInspection } from "./FileChangeInspection";
 import { parseJobResult } from "./jobResult";
+import { AutomationOriginContext } from "./automations/AutomationOrigin";
 
 const record: TimelineItem = { key: "42", eventType: "sessionUpdate", category: "status", icon: "usage",
   title: "Idle", subtitle: null, timestamp: "2026-09-27T10:00:00Z", markdown: "Context: 48%\n\nInput tokens: 94449",
@@ -43,6 +44,15 @@ test("background-job results are compact clickable cards, not inline command and
   assert.match(html, /Verify the build/);
   assert.match(html, /succeeded \(exit code 0\) after 10 min 45 s/);
   assert.doesNotMatch(html, /private output body|<pre|markdown-content|long-message-toggle/);
+});
+
+test("the prompt an automation sent names that automation on its card, and no other prompt does", () => {
+  const origin = { name: "Nightly review", summary: "Issue · #12 Crash", onOpen: () => assert.fail("rendering must not act") };
+  const prompt = (provenance: string | undefined) => renderToStaticMarkup(<AutomationOriginContext.Provider value={origin}>
+    <TimelineMessage item={{ ...record, category: "user", title: "Automation", icon: "automation", markdown: null, summary: null, provenance }} /></AutomationOriginContext.Provider>);
+  assert.match(prompt("automation"), /<strong>Automation<\/strong>[\s\S]*class="automation-origin"><button[^>]*>Nightly review<\/button> · Issue · #12 Crash/);
+  assert.doesNotMatch(prompt("reminder"), /automation-origin/);
+  assert.doesNotMatch(prompt(undefined), /automation-origin/);
 });
 
 test("status rows are compact and details are dialog actions, not permanent disclosures", () => {

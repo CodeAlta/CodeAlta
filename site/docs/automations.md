@@ -102,11 +102,11 @@ triggers = [
 ## Follow the runs
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-automation-session.webp" alt="A session started by an automation, with a bolt in the sidebar and a line at the top that names the automation" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-automation-session.webp" alt="A session started by an automation, with a bolt in the sidebar and the name of the automation on the card of the prompt it sent" loading="lazy">
   <figcaption class="small text-secondary mt-2">A session started by an automation.</figcaption>
 </figure>
 
-- A session started by an automation has a bolt in the sidebar. The line at its top names the automation and opens it.
+- A session started by an automation has a bolt in the sidebar. Its first card, **Automation**, is the prompt the automation sent: it names the automation, which you open with a click, and what started the run.
 - In the **Automations** tab, select an automation to see its runs. Click a run to open its session.
 - The switch of an automation turns its triggers off. The **Running** switch at the top turns off the triggers of all of them. **Run now** always works.
 

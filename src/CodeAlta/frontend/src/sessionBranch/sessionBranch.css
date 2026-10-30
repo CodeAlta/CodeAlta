@@ -52,8 +52,11 @@
 }
 
 /* The source of a fork above its timeline, and its mark on the row of the session. */
-.session-origin.session-lineage { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
-.session-origin.session-lineage > svg { color: var(--accent); }
+.session-lineage { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel)); font-size: 12px; color: var(--muted); }
+.session-lineage > svg { flex: none; color: var(--accent); }
+.session-lineage strong { color: var(--text); font-weight: 600; }
+.session-lineage > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-lineage .session-lineage-source { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
 .session-lineage .session-lineage-source:hover { text-decoration: underline; }
 .session-lineage .session-lineage-source:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }

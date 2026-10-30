@@ -53,16 +53,16 @@ export function SessionOriginLine({ parent, depth }: { parent: WorkspaceSession 
   if (!family || !parent) return null;
   const scope = family.scopeName(parent);
   const title = plainTitle(parent.title);
-  const content = <><AppIcon name="arrowUp" size={11} /><span className="session-origin-scope">{scope}</span><span aria-hidden="true">›</span>
-    <span className="session-origin-title">{title}</span></>;
+  const content = <><AppIcon name="arrowUp" size={11} /><span className="session-parent-line-scope">{scope}</span><span aria-hidden="true">›</span>
+    <span className="session-parent-line-title">{title}</span></>;
   const style = { paddingLeft: sessionRowIndent(depth) + 19 };
   // An archived parent is not listed: it is named, and opens nothing.
   if (parent.archived) {
     const label = t("Started by {title}, archived, in {scope}", { title, scope });
-    return <span className="session-origin" data-archived="" title={label} style={style}>{content}</span>;
+    return <span className="session-parent-line" data-archived="" title={label} style={style}>{content}</span>;
   }
   const label = t("Started by {title}, in {scope}", { title, scope });
-  return <button type="button" className="session-origin" title={label} aria-label={label} style={style}
+  return <button type="button" className="session-parent-line" title={label} aria-label={label} style={style}
     onClick={event => { event.stopPropagation(); family.open(parent); }}>{content}</button>;
 }
 

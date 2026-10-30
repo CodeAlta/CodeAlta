@@ -28,7 +28,8 @@ import { promptProblem, promptTokens } from "./systemPrompt";
 import { usePromptChange } from "./systemPromptReader";
 import { TimelineClaudeCli } from "./claudeCli/timelineCard";
 import { TimelineResumeCard } from "./resumeCard/TimelineResumeCard";
-import { promptProvenanceTitle } from "./promptProvenance";
+import { promptProvenanceIds, promptProvenanceTitle } from "./promptProvenance";
+import { AutomationOriginContext, AutomationOriginLabel } from "./automations/AutomationOrigin";
 import type { MessageKey } from "./localization";
 import { ScriptCalls } from "./scriptCard/ScriptCalls";
 import { ScriptRunView } from "./scriptCard/ScriptRunView";
@@ -106,6 +107,9 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   // The links of the text of a message are followed while the row is the one that is shown: a relative path
   // starts from the folder its session works in.
   const openLink = useContext(MessageLinksContext);
+  // The prompt an automation sent names that automation and what started the run.
+  const sessionAutomation = useContext(AutomationOriginContext);
+  const automation = item.category === "user" && item.provenance === promptProvenanceIds.automation ? sessionAutomation : null;
   const linkScope = useContext(MarkdownLinkScopeContext);
   const messageLink = openLink ? (address: string) => { if (canInspect?.() ?? true) openLink(address, linkScope); } : null;
   const state = job?.phase ?? (item.category === "tool" ? toolState(item.toolPhase) : null);
@@ -270,7 +274,8 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
             ? <ActivitySpinner size={10} className="tool-state-spinner" /> : !job && !prompt && <span className="tool-state-dot" aria-hidden="true">●</span>} <strong>{title}</strong></button>
           : item.category !== "reasoning" && <strong>{title}</strong>}{prompt ? promptFacts && <small>{promptFacts}</small>
           : !toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.notSent ? t(notSentSubtitle) : item.madeElsewhere ? t(externalOriginSubtitles[item.madeElsewhere]) : item.subtitle}</small>}
-          {item.delegated && item.sourceSessionId && <SessionReference sessionId={item.sourceSessionId} />}</span>
+          {item.delegated && item.sourceSessionId && <SessionReference sessionId={item.sourceSessionId} />}
+          {automation && <AutomationOriginLabel {...automation} />}</span>
         {compact && item.html ? <div className="timeline-inline-preview timeline-plugin-html"><PluginHtml html={item.html} pluginKey={item.pluginKey} script={{ path: item.script ?? null, problem: item.scriptProblem ?? null, whenShown: true }} /></div>
           : compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
           : item.summary ? excerpt : <MarkdownContent source={excerpt} onOpenLink={null} />}</div>}

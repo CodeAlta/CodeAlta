@@ -36,7 +36,7 @@ export function SessionLineageBanner({ lineage, title, onOpen }: {
   const { t } = useShellLanguage();
   const name = onOpen ? <button type="button" className="session-lineage-source" title={t("Open the session {title}", { title })} onClick={onOpen}>{title}</button>
     : <strong title={t("This session no longer exists.")}>{title}</strong>;
-  return <p className="session-origin session-lineage" data-kind={lineage.kind}>
+  return <p className="session-lineage" data-kind={lineage.kind}>
     <AppIcon name={lineage.kind === "rewind" ? "rewind" : "branch"} size={14} />
     <span>{withSlot(t(lineage.kind === "rewind" ? "Kept from a rewind of {title}" : "Forked from {title}", { title: "\u0000" }), name)}
       {" · "}{lineageDetail(t, lineage)}</span>

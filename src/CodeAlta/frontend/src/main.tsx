@@ -174,7 +174,7 @@ import { createTerminalWorkspace } from "./terminal/terminalWorkspace";
 import { TerminalPanel } from "./terminal/TerminalPanel";
 import { createAutomationsHub } from "./automations/automationsHub";
 import { AutomationsPanel } from "./automations/AutomationsPanel";
-import { SessionOrigin } from "./automations/SessionOrigin";
+import { AutomationOriginContext, type AutomationOrigin } from "./automations/AutomationOrigin";
 import { sessionOrigin } from "./automations/automations";
 import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
 import { RunTab } from "./workflows/RunTab";
@@ -5468,9 +5468,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={listing} selectedProjectId={tab.projectId}
-                origin={row.automationId ? (() => {
+                automation={row.automationId ? (() => {
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
-                  return <SessionOrigin name={origin.name} summary={origin.summary} onOpen={owned ? () => openAutomations(origin.id) : undefined} />;
+                  return { name: origin.name, summary: origin.summary, onOpen: owned && origin.id ? () => openAutomations(origin.id) : undefined };
                 })() : undefined}
                 workCards={owned && workState.settings.notify ? <WorkItemCards hub={workHub} items={sessionCards(work, row.id)} preferredStart={workState.settings.start} busy={workBusy}
                   onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
@@ -6025,7 +6025,7 @@ function promptBackComposer(sessionId: string): PromptBackComposer {
 // The run of a session whose prompt was last given back to its composer: a prompt is given back once, whatever reads the window again.
 const unsentPromptKey = (sessionId: string) => `codealta.desktop.unsentPrompt.${sessionId}`;
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, automation, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
   canAdmit: () => boolean;
   /**
    * The process that holds the session when another one does (the command line, another instance), with the length of
@@ -6057,8 +6057,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   remoteControlRequest?: RemoteControlOpenRequest | null;
   /** A draft prompt to send once this session's composer holds it. */
   autoSend?: { text: string; images?: number; consume: () => void } | null;
-  /** What started the session when it was not the user, shown above its timeline. */
-  origin?: ReactNode;
+  /** The automation that started the session, named on the card of the prompt it sent. */
+  automation?: AutomationOrigin;
   /** The work items the session proposes, shown over the top right corner of its timeline. */
   workCards?: ReactNode;
   /** Active reminders of this session as last reported by the host; null while unknown. */
@@ -6227,6 +6227,13 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   [pluginEpoch, session.id, selectedProjectId]);
   // A command of a card of this timeline runs for this session, whatever pane has the keyboard.
   const timelinePane = useMemo(() => ({ sessionId: session.id, projectId: selectedProjectId }), [session.id, selectedProjectId]);
+  // The automation the card of its prompt names: a value that changes only with what it says, so that a render of the
+  // window does not render every message of the timeline again; the way to the automation is the latest one.
+  const openAutomation = useRef(automation?.onOpen); openAutomation.current = automation?.onOpen;
+  const automationName = automation?.name, automationSummary = automation?.summary ?? null, automationOpens = !!automation?.onOpen;
+  const automationOrigin = useMemo<AutomationOrigin | null>(() => automationName === undefined ? null
+    : { name: automationName, summary: automationSummary, onOpen: automationOpens ? () => openAutomation.current?.() : undefined },
+  [automationName, automationSummary, automationOpens]);
   // Reading is not sending: the images of an archived project's session are shown too.
   const readImages = useMemo(() => pluginEpoch === null ? undefined : timelineImages.reader(pluginEpoch, session.id, rewinds),
     [timelineImages, pluginEpoch, session.id, rewinds]);
@@ -6335,7 +6342,6 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     {demoMode
       ? <DemoConversation session={session} />
       : <>
-        {origin}
         {lineage}
         <div className="session-timeline-area" data-ask={askMode}>
         <div className="ask-file-slot" ref={setAskFileSlot} hidden={askMode !== "file"} />
@@ -6346,13 +6352,13 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><McpAppsContext.Provider value={mcpAppsHost}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onUnsentPrompt={onUnsentPrompt} onSettled={onHistorySettled}
+        <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><McpAppsContext.Provider value={mcpAppsHost}><AutomationOriginContext.Provider value={automationOrigin}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onUnsentPrompt={onUnsentPrompt} onSettled={onHistorySettled}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} olderRequest={timeline.olderRequestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}
-          live={(heldElsewhere ? elsewhereView : null) ?? (ownedSession ? live?.snapshot?.session ?? null : null) ?? elsewhereView} running={running ?? undefined} /></McpAppsContext.Provider></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
+          live={(heldElsewhere ? elsewhereView : null) ?? (ownedSession ? live?.snapshot?.session ?? null : null) ?? elsewhereView} running={running ?? undefined} /></AutomationOriginContext.Provider></McpAppsContext.Provider></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />

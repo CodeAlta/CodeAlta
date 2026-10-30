@@ -73,15 +73,15 @@ body.session-row-dragging, body.session-row-dragging * { cursor: grabbing !impor
 .sub-agent-elsewhere { margin-inline-start: 1px; }
 
 /* The session that started a session listed in another scope, on a line of its own under its row. */
-.ide-shell .session-origin { flex: 1 0 100%; display: flex; align-items: center; gap: 4px; min-width: 0; margin: -5px 0 3px; padding-block: 0; padding-right: 8px;
+.ide-shell .session-parent-line { flex: 1 0 100%; display: flex; align-items: center; gap: 4px; min-width: 0; margin: -5px 0 3px; padding-block: 0; padding-right: 8px;
   border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; line-height: 16px; text-align: left; }
-.ide-shell .session-origin > svg { flex: none; color: var(--agent-accent); }
-.ide-shell .session-origin > span { flex: none; white-space: nowrap; }
-.ide-shell .session-origin > .session-origin-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ide-shell .session-origin-scope { color: var(--agent-accent); font-weight: 600; }
-.ide-shell button.session-origin { cursor: pointer; }
-.ide-shell button.session-origin:hover > .session-origin-title { color: var(--text); text-decoration: underline; }
-.ide-shell .session-origin[data-archived] { font-style: italic; }
+.ide-shell .session-parent-line > svg { flex: none; color: var(--agent-accent); }
+.ide-shell .session-parent-line > span { flex: none; white-space: nowrap; }
+.ide-shell .session-parent-line > .session-parent-line-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ide-shell .session-parent-line-scope { color: var(--agent-accent); font-weight: 600; }
+.ide-shell button.session-parent-line { cursor: pointer; }
+.ide-shell button.session-parent-line:hover > .session-parent-line-title { color: var(--text); text-decoration: underline; }
+.ide-shell .session-parent-line[data-archived] { font-style: italic; }
 
 /* The family of the session under the pointer: its parent, its children and its other rows, wherever they are listed. A closed
    project that lists one of them has a dot. */

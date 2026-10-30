@@ -8,7 +8,7 @@ import { ShellLanguageContext } from "../shellLanguage";
 import { AutomationsPanel } from "./AutomationsPanel";
 import { denseTimeline } from "./automations";
 import type { AutomationsHub, AutomationsState } from "./automationsHub";
-import { SessionOrigin } from "./SessionOrigin";
+import { AutomationOriginLabel } from "./AutomationOrigin";
 
 const never = () => assert.fail("rendering must not act");
 const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): AutomationTriggerItem =>
@@ -145,18 +145,18 @@ test("what could not be read as an automation is listed with its file", () => {
   assert.match(html, /<code>…<\/code><span>The configuration file could not be read\.<\/span>/);
 });
 
-test("the line of a session started by an automation names it and leads back to it, in every language", () => {
+test("the card of the prompt of an automation names it and leads back to it, in every language", () => {
   for (const locale of locales) {
-    const line = (name: string | null, summary: string | null, open = true) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
-      createElement(SessionOrigin, { name, summary, onOpen: open ? never : undefined })));
-    const known = line("Nightly <review>", "Issue · #12 Crash");
-    assert.ok(known.includes(`${translate(locale, "Started by the automation")} <strong>Nightly &lt;review&gt;</strong> · Issue · #12 Crash`), known);
-    assert.ok(known.includes(translate(locale, "Open the automation")), locale);
-    assert.ok(!line("Nightly", null).includes(" · "), "Without the run, the automation alone is named.");
-    // An automation that was deleted: the tab of the automations is all there is to open.
-    const gone = line(null, null);
-    assert.ok(gone.includes(translate(locale, "Started by an automation that no longer exists")) && !gone.includes(translate(locale, "Open the automation")), gone);
-    // A window that owns no host shows the line without a way to the tab.
-    assert.doesNotMatch(line("Nightly", null, false), /<button/);
+    const label = (name: string | null, summary: string | null, open = true) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+      createElement(AutomationOriginLabel, { name, summary, onOpen: open ? never : undefined })));
+    const known = label("Nightly <review>", "Issue · #12 Crash");
+    assert.ok(known.includes(`title="${translate(locale, "Open the automation")}">Nightly &lt;review&gt;</button> · Issue · #12 Crash`), known);
+    assert.ok(!label("Nightly", null).includes(" · "), "Without the run, the automation alone is named.");
+    // An automation that was deleted is said to be gone, and opens nothing.
+    const gone = label(null, "Manual");
+    assert.ok(gone.includes(translate(locale, "This automation no longer exists")) && !gone.includes("<button") && !gone.includes("Manual"), gone);
+    // A window that owns no host names the automation without a way to it.
+    assert.match(label("Nightly", null, false), /<strong>Nightly<\/strong>/);
+    assert.doesNotMatch(label("Nightly", null, false), /<button/);
   }
 });
