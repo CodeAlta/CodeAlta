@@ -2404,9 +2404,31 @@ svg.pele {
 /* The equation editor: MathLive's field, the LaTeX it writes, and the actions. */
 .equation-editor { display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; height: 100%; padding: 12px; }
 .equation-editor-field { display: flex; flex: 1; align-items: center; justify-content: center; min-height: 96px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
-.equation-editor-field math-field { width: 100%; min-height: 72px; padding: 8px 12px; border: 0; outline: none; color: var(--text); background: transparent; font-size: 26px;
-  --caret-color: var(--accent); --selection-background-color: color-mix(in srgb, var(--accent) 30%, transparent); --selection-color: var(--text);
-  --contains-highlight-background-color: color-mix(in srgb, var(--accent) 12%, transparent); --placeholder-color: var(--accent); }
+.equation-editor-field math-field { width: 100%; min-height: 72px; padding: 8px 12px; border: 0; outline: none; color: var(--text); background: transparent; font-size: 26px; }
+/* MathLive takes the colors of the theme through its custom properties: the field, its tooltips and its virtual keyboard,
+   which opens in this window. They follow a change of theme at once. */
+.equation-editor-dialog {
+  --primary-color: var(--accent); --caret-color: var(--accent); --selection-color: var(--text);
+  --selection-background-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  --contains-highlight-background-color: color-mix(in srgb, var(--accent) 12%, transparent);
+  --placeholder-color: var(--accent); --box-placeholder-color: var(--accent); --smart-fence-color: var(--muted); --latex-color: var(--accent);
+  --tooltip-background-color: var(--panel); --tooltip-color: var(--text); --tooltip-border: 1px solid var(--line); --tooltip-box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
+  --keyboard-background: var(--panel-2); --keyboard-border: var(--line); --keyboard-accent-color: var(--accent); --keyboard-horizontal-rule: 1px solid var(--line);
+  --keyboard-toolbar-text: var(--muted); --keyboard-toolbar-text-active: var(--accent); --keyboard-toolbar-background: transparent;
+  --keyboard-toolbar-background-hover: color-mix(in srgb, var(--text) 10%, transparent);
+  --keyboard-toolbar-background-selected: color-mix(in srgb, var(--accent) 16%, transparent);
+  --keycap-background: var(--panel); --keycap-text: var(--text); --keycap-text-hover: var(--text); --keycap-text-active: var(--text); --keycap-text-pressed: var(--text);
+  --keycap-background-hover: color-mix(in srgb, var(--text) 8%, var(--panel));
+  --keycap-background-active: color-mix(in srgb, var(--accent) 24%, var(--panel)); --keycap-background-pressed: color-mix(in srgb, var(--accent) 24%, var(--panel));
+  --keycap-border: var(--line); --keycap-border-bottom: color-mix(in srgb, var(--text) 22%, var(--panel));
+  --keycap-secondary-background: color-mix(in srgb, var(--text) 10%, var(--panel-2)); --keycap-secondary-text: var(--text);
+  --keycap-secondary-background-hover: color-mix(in srgb, var(--text) 16%, var(--panel-2));
+  --keycap-secondary-border: var(--line); --keycap-secondary-border-bottom: color-mix(in srgb, var(--text) 28%, var(--panel-2));
+  --keycap-primary-background: var(--accent); --keycap-primary-text: #fff; --keycap-primary-background-hover: color-mix(in srgb, var(--accent) 85%, #000);
+  --keycap-shift-color: var(--accent); --keycap-shift-text: var(--accent);
+  --variant-panel-background: var(--panel); --variant-keycap-text: var(--text); --variant-keycap-text-active: var(--text);
+  --variant-keycap-background-active: color-mix(in srgb, var(--accent) 24%, var(--panel));
+}
 .equation-editor-source { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
 .equation-editor-source textarea { min-height: 54px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--panel); font: 12px/1.5 var(--code-font); resize: vertical; }
 .equation-editor-actions { display: flex; align-items: center; gap: 8px; }

@@ -39,7 +39,11 @@ export default function EquationEditor({ draft, editing, onInsert, onClose }: {
       field.current = element;
       // The rest of the page is inert under the modal window: its virtual keyboard opens in it.
       const dialog = container.closest("dialog");
-      if (dialog) window.mathVirtualKeyboard.container = dialog;
+      if (dialog) {
+        window.mathVirtualKeyboard.container = dialog;
+        // MathLive takes the theme of the window from its ancestors, not from the system's.
+        dialog.setAttribute("theme", document.documentElement.dataset.theme === "light" ? "light" : "dark");
+      }
       setState("ready");
       element.focus();
     }, () => { if (current) setState("failed"); });
