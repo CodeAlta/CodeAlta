@@ -71,6 +71,7 @@ By default, standard output holds the final answer only, so `altacli run "..." >
 | `_codealta/session` | First line: the session, its folder, provider and its type (`anthropic`, `codex`, `claude-code`...), model, storage, the parts of the agent prompt left out (`disabledFeatures`), and its options (`options.subSessions`, false with `--no-sub-sessions`). |
 | `session/update` | Messages, thinking, tool calls and their results, plans and token use, as in ACP. The lines of a delegated agent carry its own `sessionId`. |
 | `_codealta/session_started`, `_codealta/compaction`, `_codealta/retry`, `_codealta/fallback`, `_codealta/error` | What ACP has no update for: a delegated agent starts, a compaction, a retry, a [fallback](model-tiers.md) to another model, an error (`events_dropped` when updates were lost: the whole answer is in the result). |
+| `_codealta/operation` | One request to a model: the model and effort, the input tokens with those read from and written to the prompt cache, the output and thinking tokens, and the cost when the provider gives one. They add up to the tokens of the result. |
 | `_codealta/result` | Last line: the status, exit code, final answer, tokens, cost, and duration. Tokens and cost the provider does not give are null, never 0; a cost it does not give is estimated in US dollars from the public price of the model, at its base rate, and marked `"_meta": {"codealta": {"estimated": true}}`. |
 
 | Exit code | The run |
