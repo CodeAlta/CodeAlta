@@ -145,8 +145,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     /// <summary>
     /// Allows the microphone, for this request only, to a document of the application while speech to prompt is
     /// turned on, and the list of the installed fonts, which Settings → Appearance → Fonts offers for the code
-    /// font, to a document of the application; denies every other permission. Nothing is kept in the profile of
-    /// the view, so turning the feature off is enough to close the microphone.
+    /// font, to a document of the application, and the reading of the clipboard, which the Paste of the editors'
+    /// context menu needs (Ctrl+V needs none), to a document of the application; denies every other permission.
+    /// Nothing is kept in the profile of the view, so turning the feature off is enough to close the microphone.
     /// </summary>
     /// <param name="request">The permission the view asks for.</param>
     /// <param name="microphoneAllowed">Whether speech to prompt is turned on.</param>
@@ -159,6 +160,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         {
             NeoPermissionKind.Microphone => microphoneAllowed,
             NeoPermissionKind.LocalFonts => true,
+            NeoPermissionKind.ClipboardRead => true,
             _ => false,
         };
         return own && allowed ? NeoPermissionDecision.AllowOnce : NeoPermissionDecision.DenyOnce;
