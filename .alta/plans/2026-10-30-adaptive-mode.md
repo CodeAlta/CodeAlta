@@ -187,7 +187,7 @@ Prompt v3 did not move a session either: no switch up or down in 54 runs on Code
 | Default on `quick` | 23/30 | $0.06 | ~3% | 3.4 |
 | Prompt v3 on `quick` + review by Sol (8 coding scenarios) | | ~15–20% | | 3.4 |
 
-**Anthropic API, the five newest scenarios** (`anthropic-hard`, 2 runs per cell): Opus 5.5 10/10 for $1.43, quality 3.9; Haiku 5.5 9/10 for $0.07 (5%), quality 3.9; Haiku + escalation 9/10 for $0.11 (8%), quality 3.8. Reasoning effort, measured on Codex for each model (`tmp/evals/effort/`), changed neither success nor cost beyond the noise: it belongs to the definition of a tier, not to switching, which also re-reads the conversation when only the effort changes.
+**Anthropic API, the five newest scenarios** (`anthropic-hard`, `anthropic-split`, 2 runs per cell): Opus 5.5 10/10 for $1.43, quality 3.9; Sonnet 5.5 10/10 for $0.45 (32%), quality 3.8; `split` (code on Sonnet, the rest on Haiku) 10/10 for $0.25 (18%), quality 3.5; Haiku 5.5 9/10 for $0.07 (5%), quality 3.9 (its miss: a time zone of `date-bug`); Haiku + escalation 9/10 for $0.11 (8%), quality 3.8. With 2 runs per scenario the judge varies by about half a point: on Anthropic, Sonnet for code bought no quality the judge could see, only one edge case. Reasoning effort, measured on Codex for each model (`tmp/evals/effort/`), changed neither success nor cost beyond the noise: it belongs to the definition of a tier, not to switching, which also re-reads the conversation when only the effort changes.
 
 What the numbers say:
 

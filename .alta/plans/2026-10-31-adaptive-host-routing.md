@@ -76,7 +76,7 @@ When this is done, the model list of the composer offers **Adaptive** beside the
 | --- | --- | --- |
 | Who chooses the model | The host | No agent prompt moved a session reliably in the trial |
 | What decides the tier | The kind of the turn: code or not | It separated the tiers on success and quality; difficulty, as judged by a model, did not |
-| Code tier by default | `standard` | Keeps quality at Sol's level on Codex for ~15% of its cost; a family whose cheap model writes good code can set `quick` |
+| Code tier by default | `standard` | Keeps quality at Sol's level on Codex for ~15% of its cost; on the Anthropic API Haiku's code was judged as good as Sonnet's and Opus's (one edge case missed), so a user of that family can set `quick` for about a fifth of the cost |
 | Escalation | On visible trouble only, one step | Cheap insurance; the misses that matter pass their own tests |
 | Reviews, acceptance tests by `complex` | Not in this plan | 3–5 times the cost for no more success in the trial |
 
