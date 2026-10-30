@@ -118,8 +118,8 @@ Type `@` in the prompt to search the files and folders of the project. An accept
 
 CodeAlta Desktop shows LaTeX math in messages and documents: `$…$` or `\(…\)` in a line of text, `$$…$$`, `\[…\]` or a `math` code block on lines of their own, and the `equation` and `align` environments. Chemistry is written `\ce{2H2 + O2 -> 2H2O}`. A price such as `$5 and $10` stays text. A formula that cannot be read shows its LaTeX in red, with the reason under the pointer.
 
-- **Copy**: a selection that holds formulas copies their LaTeX. A displayed equation has **LaTeX** and **MathML** buttons under the pointer; MathML pastes into Word as an equation.
-- **In the prompt**: formulas are colored as you type, and the one that holds the caret is drawn above it. Its **✎** button opens it in the equation editor.
+- **Copy and source**: a selection that holds formulas copies their LaTeX. A displayed equation has **LaTeX** and **MathML** buttons under the pointer (MathML pastes into Word as an equation), and **Source**, which shows its LaTeX in its place; a diagram has **Source** too.
+- **In the prompt** and in the Markdown files of the [code editor](code.md#code-editor): formulas are colored as you type, and the one that holds the caret is drawn above it. Its **✎** button opens it in the equation editor.
 - **Equation editor**: `Alt+=` (`Ctrl+Alt+=` on macOS), `/equation` or **Insert equation** in the **⋯** menu. Type the formula as it looks (`/` makes a fraction, `^` a superscript, `sqrt` a root, `alpha` a Greek letter) or open its keyboard of symbols; its LaTeX is kept below it, and can be edited there. Choose **Inline** or **Display**, then **Insert** (`Ctrl+Enter`). With the caret in a formula, the editor opens on it and **Replace** writes it back.
 
 Footnotes are written `[^1]` with their note `[^1]: The source.`, or `^[a note]` in the text: the number goes to the note, and **↩** back.
