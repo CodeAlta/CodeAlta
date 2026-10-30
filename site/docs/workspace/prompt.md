@@ -122,6 +122,11 @@ CodeAlta Desktop shows LaTeX math in messages and documents: `$…$` or `\(…\)
 - **In the prompt** and in the Markdown files of the [code editor](code.md#code-editor): formulas are colored as you type, and the one that holds the caret is drawn above it. Its **✎** button opens it in the equation editor.
 - **Equation editor**: `Alt+=` (`Ctrl+Alt+=` on macOS), `/equation` or **Insert equation** in the **⋯** menu. Type the formula as it looks (`/` makes a fraction, `^` a superscript, `sqrt` a root, `alpha` a Greek letter) or open its keyboard of symbols; its LaTeX is kept below it, and can be edited there. Choose **Inline** or **Display**, then **Insert** (`Ctrl+Enter`). With the caret in a formula, the editor opens on it and **Replace** writes it back.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-equation-editor.webp" alt="The Edit equation window of CodeAlta Desktop over a session: the formula drawn in its field, its LaTeX below, Inline or Display, and Replace; in the prompt below, the formula is colored and drawn above the caret with its edit button" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The equation editor opened with <code>Alt+=</code> on a formula of the prompt, which is drawn above the caret as it is written.</figcaption>
+</figure>
+
 Footnotes are written `[^1]` with their note `[^1]: The source.`, or `^[a note]` in the text: the number goes to the note, and **↩** back.
 
 CodeAlta TUI shows formulas and footnotes as written.
