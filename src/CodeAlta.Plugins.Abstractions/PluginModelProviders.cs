@@ -107,8 +107,7 @@ public sealed class PluginProviderSettings
     /// Gets the size of context, in input tokens, of a session whose model has it and that chose none (<c>context_size</c>),
     /// or <see langword="null" /> for the size of its model.
     /// </summary>
-    public long? DefaultContextSize
-        => Values.TryGetValue("context_size", out var value) && value is long size && size > 0 ? size : null;
+    public long? DefaultContextSize => GetInt64("context_size") is > 0 and var size ? size : null;
 
     /// <summary>Returns a text value, trimmed, or <see langword="null" /> when it is absent, empty or not a text.</summary>
     /// <param name="key">The key.</param>
@@ -119,6 +118,11 @@ public sealed class PluginProviderSettings
     /// <param name="key">The key.</param>
     public bool? GetBoolean(string key)
         => Values.TryGetValue(key, out var value) && value is bool flag ? flag : null;
+
+    /// <summary>Returns an integer value, or <see langword="null" /> when it is absent or not an integer.</summary>
+    /// <param name="key">The key.</param>
+    public long? GetInt64(string key)
+        => Values.TryGetValue(key, out var value) && value is long number ? number : null;
 
     /// <summary>Returns a list of texts, or an empty list when it is absent; the items that are not texts are left out.</summary>
     /// <param name="key">The key.</param>

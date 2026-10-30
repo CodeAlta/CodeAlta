@@ -22,8 +22,8 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
     // The capability of a model that the endpoint says takes adaptive thinking and its effort, whatever its name.
     private const string AdaptiveThinkingCapabilityKey = "anthropicAdaptiveThinking";
 
-    /// <summary>The standard context window of the Claude models, which a session of a model that accepts more can keep to.</summary>
-    internal const long StandardContextSize = 200_000;
+    // The standard context window of the Claude models, which a session of a model that accepts more can keep to.
+    private const long StandardContextSize = 200_000;
 
     // The wait of a rate limit of the API whose retry-after is not known: its limits are per minute.
     private const int UnknownRateLimitRetryAfterSeconds = 30;
@@ -513,28 +513,14 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         AnthropicProviderOptions provider,
         ModelProviderRuntimeDescriptor providerDescriptor,
         IReadOnlyList<AgentModelInfo> models)
-    {
-        var enriched = AgentModelMetadataEnricher.EnrichModels(
+        => AgentModelMetadataEnricher.EnrichModels(
             models,
             provider.ModelCatalog,
             provider.ModelsDevProviderId,
             provider.ModelOverrides,
             provider.ModelsIncludeRegex,
-            contextPriceTiers: true);
-        return IsClaudeApi(provider.BaseUri ?? providerDescriptor.BaseUri)
-            ? [.. enriched.Select(WithStandardContextSize)]
-            : enriched;
-    }
-
-    private static AgentModelInfo WithStandardContextSize(AgentModelInfo model)
-    {
-        if (model.GetContextSize() is not { } size || size <= StandardContextSize || model.ContextSizes?.Contains(StandardContextSize) == true)
-        {
-            return model;
-        }
-
-        return model with { ContextSizes = [.. new SortedSet<long>(model.ContextSizes ?? [size]) { StandardContextSize }] };
-    }
+            contextPriceTiers: true,
+            contextSizes: IsClaudeApi(provider.BaseUri ?? providerDescriptor.BaseUri) ? [StandardContextSize] : null);
 
     private static AnthropicClient CreateSdkClient(
         AnthropicProviderOptions provider,
