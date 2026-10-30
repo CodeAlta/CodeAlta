@@ -1,5 +1,23 @@
 // The HTTP API of the Mobile plugin's server (src/CodeAlta.Plugin.Mobile), as the phone page reads it. Same origin as the page.
 
+/** A command CodeAlta runs for a session, independently of its agent's turn. */
+export type BackgroundJob = Readonly<{
+  id: string;
+  state: "running" | "succeeded" | "failed" | "timed_out" | "cancelled";
+  title?: string | null;
+  command: string;
+  folder: string;
+  startedAt: string;
+  endedAt?: string | null;
+  exitCode?: number | null;
+}>;
+
+/** Running jobs and the jobs that ended in the last ten minutes. */
+export type JobPage = Readonly<{ jobs: readonly BackgroundJob[]; error: string | null }>;
+
+/** A bounded tail of a job's output, read while it runs or after it ends. */
+export type JobOutput = Readonly<{ job: BackgroundJob; text: string; truncated: boolean; error: string | null }>;
+
 /** What a session is doing: working, running tools, thinking, or nothing. */
 export type LiveState = "idle" | "running" | "tools" | "thinking";
 

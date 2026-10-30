@@ -19,7 +19,7 @@ namespace CodeAlta.Plugin.Mobile;
 /// permission modes of the providers from <c>provider list --detailed</c>, and what the composer of a session offers from
 /// <c>session choices</c>. A session the phone does not see (<see cref="MobileSessions.FindAsync"/>) is refused as unknown.
 /// </summary>
-internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions, string? attachmentsDirectory = null, TimeProvider? clock = null, TimeSpan? promptPatience = null)
+internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions sessions, string? attachmentsDirectory = null, TimeProvider? clock = null, TimeSpan? promptPatience = null)
 {
     /// <summary>The longest prompt the phone sends.</summary>
     internal const int MaximumPrompt = 100_000;
