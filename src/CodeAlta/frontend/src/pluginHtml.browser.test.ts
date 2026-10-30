@@ -31,6 +31,12 @@ const fragment = `
         build[Build] --> test[Test]
       \`\`\`
 
+      \`\`\`math
+      \\frac{a}{b}
+      \`\`\`
+
+      Energy $E=mc^2$.
+
       &lt;script&gt;window.pluginFixture.state.executed++&lt;/script&gt;
       &lt;img src="x" onerror="window.pluginFixture.state.executed++"&gt;
       <script>window.pluginFixture.state.executed++</script>
@@ -83,6 +89,8 @@ test("a plugin fragment shows its Markdown with the renderer of the window: a ta
     assert.ok(await evaluate<number>(`${block}.querySelectorAll('pre[data-language="csharp"] code span[class^="hljs-"]').length`) >= 2, "The code has the colors of its language.");
     assert.equal(await wait(`${block}.querySelector('.markdown-diagram svg')`, 60_000), true, "The mermaid block becomes its diagram.");
     assert.equal(await evaluate(`${block}.querySelector('.markdown-diagram svg').textContent.includes('Build')`), true);
+    // Equations (`PluginHtml.Equation`, a math fence) and formulas of the text are drawn by KaTeX, as in the timeline.
+    assert.equal(await wait(`${block}.querySelector('.markdown-math-block .katex-display') && ${block}.querySelector('span.markdown-math .katex')`), true, "The equation and the formula are drawn.");
     // Nothing a plugin writes runs, in its markup or in its Markdown, and nothing of it is loaded.
     assert.equal(await evaluate("pluginFixture.state.executed"), 0);
     assert.deepEqual(await evaluate(`[...document.querySelectorAll('.plugin-html script, .plugin-html img, .plugin-html [onerror]')].map(element=>element.outerHTML)`), []);
