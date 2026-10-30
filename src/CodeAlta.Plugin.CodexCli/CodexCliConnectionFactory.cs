@@ -1,5 +1,6 @@
 using System.Reflection;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Telemetry;
 using CodeAlta.CodexAppServer;
 using CodeAlta.CodexAppServer.Protocol;
 using XenoAtom.Logging;
@@ -56,6 +57,8 @@ internal sealed class CodexCliProcessConnectionFactory(Logger? logger) : ICodexC
             environment[name] = null;
         }
 
+        // The traces of CodeAlta cover the runs of the app-server: it does not report them a second time.
+        OpenTelemetryEnvironment.HideFromAgent(environment);
         foreach (var (name, value) in request.Environment)
         {
             environment[name] = value;
