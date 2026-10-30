@@ -1,0 +1,37 @@
+// Test-owned mount of the production prompt editor alone: its formulas, their preview, and the equation editor.
+import { createElement, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { PromptEditor, type PromptInput } from "./PromptEditor";
+
+const state = { value: "Area $\\pi r^2$ here" };
+let input: PromptInput | null = null;
+function Fixture() {
+  const [value, setValue] = useState(state.value);
+  state.value = value;
+  return createElement(PromptEditor, { ref: (instance: PromptInput | null) => { input = instance; }, value, onChange: setValue, label: "Message", id: "session-prompt" });
+}
+createRoot(document.getElementById("app")!).render(createElement(Fixture));
+
+type Field = HTMLElement & { value: string };
+Object.assign(window, { mathFixture: {
+  state,
+  ready: () => !!input && !!document.querySelector("#session-prompt .monaco-editor"),
+  caret(offset: number) { input!.focus(); input!.setSelectionRange(offset, offset); },
+  preview() {
+    const node = document.querySelector(".prompt-math-preview");
+    return node ? { drawn: !!node.querySelector(".katex"), error: !!node.querySelector(".katex-error"), edit: node.querySelector("button")?.getAttribute("aria-label") } : null;
+  },
+  tinted: () => document.querySelectorAll("#session-prompt .prompt-math").length,
+  edit: () => input!.editEquation(),
+  clickEdit: () => document.querySelector<HTMLButtonElement>(".prompt-math-preview-edit")!.click(),
+  editor() {
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.equation-editor-dialog");
+    const field = dialog?.querySelector<Field>("math-field");
+    return dialog && { open: dialog.open, title: dialog.querySelector("#equation-editor-title")?.textContent, field: field?.value ?? null,
+      source: dialog.querySelector("textarea")?.value, keyboard: (window as unknown as { mathVirtualKeyboard?: { container: Element | null } }).mathVirtualKeyboard?.container === dialog,
+      action: Array.from(dialog.querySelectorAll(".equation-editor-actions button")).map(button => button.textContent).at(-1) };
+  },
+  write(tex: string) { const field = document.querySelector<Field>("dialog.equation-editor-dialog math-field")!; field.value = tex; field.dispatchEvent(new Event("input", { bubbles: true })); },
+  display() { Array.from(document.querySelectorAll<HTMLButtonElement>("dialog.equation-editor-dialog .bp6-segmented-control button")).find(button => button.textContent === "Display")!.click(); },
+  insert() { Array.from(document.querySelectorAll<HTMLButtonElement>("dialog.equation-editor-dialog .equation-editor-actions button")).at(-1)!.click(); },
+} });

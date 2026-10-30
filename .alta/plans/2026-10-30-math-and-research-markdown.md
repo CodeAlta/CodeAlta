@@ -126,6 +126,8 @@ The command `insertEquation` joins `commandRegistry.ts`, under the slash name `/
 
 `PromptInput` gains `replaceText(start, end, text)`: the replacement is one undo step, and the caret ends after the text.
 
+> **Deviation:** the prompt editor hosts the equation window itself, so PromptInput gains `editEquation()` (what the `⋯` item calls) instead of `replaceText`; the editor writes the equation back as one undo step. `Alt+=` is also a Monaco keybinding of the prompt editor, so it works in the large `F6` editor, where the shortcuts of the window are off.
+
 ### LaTeX and BibTeX sources
 
 - **Two grammars of the app in `monaco/monacoGrammars.ts`:**
@@ -192,11 +194,11 @@ The entry chunk grows only by:
   - Grammars in `monacoGrammars.ts`, loaders in `monacoLanguages.ts`, extensions and names in `fileLanguage.ts`.
   - `latex` (with the alias `tex`) in `codeHighlight.ts`.
   - New cases in `fileLanguage.test.ts` and `codeHighlight.test.ts`.
-- [ ] 7. **Prompt preview.**
+- [x] 7. **Prompt preview.**
   - `promptMath.ts` (the tint, the preview widget, the ✎ button), attached in `PromptEditor.tsx`.
   - `replaceText` on `PromptInput`.
   - A browser test: the preview appears when the caret is in `$\frac{a}{b}$` and disappears when it leaves.
-- [ ] 8. **Equation editor.**
+- [x] 8. **Equation editor.**
   - `EquationEditor.tsx`, imported lazily.
   - The `insertEquation` command in `commandRegistry.ts` and `main.tsx`.
   - The `⋯` menu item in the composers that have **Expand prompt editor**: `OwnedSessionPanel.tsx` and `ReadOnlyComposer.tsx`.

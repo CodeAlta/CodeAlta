@@ -9,7 +9,7 @@ export type CommandId =
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
   | "attachFiles" | "attachFolder" | "attachIssues"
-  | "expandPrompt" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind"
+  | "expandPrompt" | "insertEquation" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
   | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession" | "reviewChanges"
@@ -81,6 +81,9 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "attachFolder", name: "attach_folder", label: "Attach Folder", description: "Add a folder to the prompt.", category: "Prompt", keys: ["Ctrl+Alt+F"], search: "attachment directory add_folder" },
   { id: "attachIssues", name: "attach_issues", label: "Attach Issues", description: "Add issues of the project to the prompt.", category: "Prompt", keys: ["Ctrl+Alt+I"], search: "attachment github gitlab azure devops work items add_issues" },
   { id: "expandPrompt", name: "full_prompt", label: "Full Prompt", description: "Edit the prompt in a large window.", category: "Prompt", keys: ["F6"] },
+  // Word's key for an equation; Option+= types ≠ on macOS, where Ctrl+Alt+= takes its place.
+  { id: "insertEquation", name: "equation", label: "Insert equation", description: "Write an equation visually and insert its LaTeX in the prompt.", category: "Prompt",
+    keys: ["Alt+="], macKeys: ["Ctrl+Alt+="], search: "math maths formula latex katex mathlive tex equation editor symbol" },
   { id: "dictate", name: "dictate", label: "Dictate", description: "Dictate the prompt with the microphone, or stop the dictation.", category: "Prompt", keys: ["F9"], search: "speech voice microphone speak talk transcribe stt" },
   { id: "nextPrompt", name: "next_prompt", label: "Next Prompt", description: "Switch to the next agent prompt.", category: "Prompt", keys: ["Ctrl+T"], search: "agent prompt cycle switch next_agent_prompt" },
   { id: "send", name: "send", label: "Send", description: "Send the current prompt.", category: "Prompt", hints: ["Enter"] },

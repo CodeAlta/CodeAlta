@@ -40,7 +40,7 @@ import { entryRemoteControl, remoteControlView, sameRemoteControl, type RemoteCo
 import { entryPromptSuggestion, shownPromptSuggestion, takesPromptSuggestion } from "./promptSuggestion";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
-import type { PromptInput } from "./PromptEditor";
+import { equationKey, type PromptInput } from "./PromptEditor";
 import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHistory";
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
@@ -1528,6 +1528,9 @@ ${value}` : value);
         title={composerBusy ? t("Available once the session is idle.") : undefined} onClick={archive.run}>{t(archive.asks ? "Archive…" : "Archive")}</Button>}
       <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} disabled={!!pending || invalidEpoch}
         aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} endIcon={<kbd>F6</kbd>}>{t("Expand prompt editor")}</Button>
+      <Button id={active ? "insert-equation" : `insert-equation-${sessionId}`} variant="minimal" icon={<AppIcon name="sigma" size={16} />} disabled={!!pending || invalidEpoch || expanded}
+        aria-label={t("Insert equation")} title={t("Write an equation and insert it in the prompt (Alt+=)")} onClick={() => promptInput.current?.editEquation()}
+        endIcon={<kbd>{equationKey}</kbd>}>{t("Insert equation")}</Button>
       {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}
         disabled={invalidEpoch || !!pending || loadingChoices} aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={loadModelChoices}>{t("Refresh composer choices")}</Button>}
       <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} onState={setProviderState} providers={activeChoices?.spaceProviders ?? null} />

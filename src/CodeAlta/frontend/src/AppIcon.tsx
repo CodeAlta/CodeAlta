@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import {
+  Sigma,
   House,
   Orbit,
   Tag,
@@ -222,6 +223,7 @@ const icons = {
   edit: Pencil,
   ellipsis: Ellipsis,
   expand: Maximize2,
+  sigma: Sigma,
   file: FileDiff,
   folder: Folder,
   home: House,

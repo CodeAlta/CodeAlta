@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createMarkdownParser } from "./markdown";
-import { mathSpanAt, mathSpans } from "./markdownMath";
+import { equationText, mathSpanAt, mathSpans } from "./markdownMath";
 
 const r = String.raw;
 const parse = createMarkdownParser({ placeholderMark: "M" });
@@ -86,4 +86,16 @@ test("a formula being written in the prompt is found when it looks like TeX", ()
   const block = "$$\n\\sum_i";
   assert.equal(mathSpanAt(block, block.length)?.closed, false);
   assert.equal(mathSpans(block).length, 0, "only the prompt looks at unclosed formulas");
+});
+
+test("an equation is written back with the delimiters of its formula, and a displayed one on lines of its own", () => {
+  const inline = mathSpanAt("a \\(x\\) b", 4);
+  assert.equal(equationText({ tex: " y^2 ", display: false }, inline, " ", " "), "\\(y^2\\)");
+  assert.equal(equationText({ tex: "y", display: false }, null, "", ""), "$y$");
+  assert.equal(equationText({ tex: "y", display: true }, inline, " ", " "), "\n$$\ny\n$$\n", "a formula that becomes displayed leaves its line");
+  const block = mathSpanAt("\\[\nx\n\\]", 3);
+  assert.equal(equationText({ tex: "z", display: true }, block, "", ""), "\\[\nz\n\\]");
+  assert.equal(equationText({ tex: "z", display: true }, null, "\n", "\n"), "$$\nz\n$$");
+  const environment = mathSpanAt("\\begin{align}a&=b\\end{align}", 3);
+  assert.equal(equationText({ tex: "\\begin{align}c&=d\\end{align}", display: true }, environment, "", ""), "\\begin{align}c&=d\\end{align}");
 });

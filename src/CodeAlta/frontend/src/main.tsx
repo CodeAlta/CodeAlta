@@ -3234,7 +3234,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         return ownedSession && composerCommandBlock(command, composerControlState(composerControl(command)), t) === null;
       case "fork": case "rewind": return ownedSession && currentProjectWritable();
       case "reviewChanges": return ownedSession && !!selectedSession?.projectId;
-      case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
+      case "expandPrompt": case "insertEquation": case "focusPrompt": return view === "workspace" && !fileTabs.active;
       // The composer in front attaches, when it can (an editable session or a new-session draft).
       case "attachFiles": case "attachFolder": case "attachIssues":
         return view === "workspace" && !fileTabs.active && !!activeComposerControl("section.prompt-surface")?.querySelector("input[data-attach-input]:not(:disabled)");
@@ -3525,6 +3525,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     else if (action === "compact") invokeComposerControl(compactControl());
     else if (action === "expandPrompt") {
       if (!dialog) invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#expand-session-prompt"));
+    }
+    else if (action === "insertEquation") {
+      if (!dialog) invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#insert-equation"));
     }
     else if (action === "renameProject") void beginProjectRename();
     else if (action === "escape") {

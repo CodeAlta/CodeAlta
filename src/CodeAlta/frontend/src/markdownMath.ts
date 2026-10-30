@@ -179,6 +179,25 @@ export function mathSpanAt(text: string, offset: number): MathSpan | null {
   return mathSpans(text, true).find(span => offset >= span.start && offset <= span.end) ?? null;
 }
 
+/**
+ * The text that writes an equation in a prompt in place of a formula (or of a selection, when `span` is null): with the
+ * delimiters of that formula when it keeps its kind, `$…$` or `$$…$$` otherwise. A displayed equation is on lines of its
+ * own: `before` and `after` are the characters around the place it takes.
+ */
+export function equationText(equation: Readonly<{ tex: string; display: boolean }>, span: MathSpan | null, before: string, after: string): string {
+  const tex = equation.tex.trim();
+  let text: string;
+  if (span?.open === "" && /^\\begin\{/.test(tex)) text = tex;
+  else if (equation.display) {
+    const [open, close] = span?.display && span.open === "\\[" ? ["\\[", "\\]"] : ["$$", "$$"];
+    text = `${open}\n${tex}\n${close}`;
+  } else {
+    const [open, close] = span && !span.display && span.open === "\\(" ? ["\\(", "\\)"] : ["$", "$"];
+    return `${open}${tex}${close}`;
+  }
+  return `${before && before !== "\n" ? "\n" : ""}${text}${after && after !== "\n" ? "\n" : ""}`;
+}
+
 function pushInline(state: StateInline, content: string, markup: string, display: boolean) {
   const token = state.push("math_inline", "math", 0);
   token.content = content;

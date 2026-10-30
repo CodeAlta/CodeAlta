@@ -3,7 +3,7 @@ import { Button } from "@blueprintjs/core";
 import { ActiveProviderStatus } from "./ActiveProviderStatus";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
-import type { PromptInput } from "./PromptEditor";
+import { equationKey, type PromptInput } from "./PromptEditor";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { AppIcon } from "./AppIcon";
 import { ComposerSurface } from "./ComposerSurface";
@@ -95,6 +95,9 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         aria-label={t("Session info")} title={t("Session info")}>{t("Session info")}</Button>}
       <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} aria-label={t("Expand prompt editor")}
         title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)} endIcon={<kbd>F6</kbd>}>{t("Expand prompt editor")}</Button>
+      {localDraft && <Button id={active ? "insert-equation" : `insert-equation-${sessionId}`} variant="minimal" icon={<AppIcon name="sigma" size={16} />} disabled={expanded || localDraft.busy}
+        aria-label={t("Insert equation")} title={t("Write an equation and insert it in the prompt (Alt+=)")} onClick={() => promptInput.current?.editEquation()}
+        endIcon={<kbd>{equationKey}</kbd>}>{t("Insert equation")}</Button>}
       {localDraft?.surface && <ActiveProviderStatus epoch={localDraft.surface.epoch} onOpen={localDraft.surface.onOpenProviders} />}
     </> }}
     editor={{ id: active ? "catalog-prompt" : `catalog-prompt-${sessionId}`, ref: promptInput, onPaste: refuseImagePaste, label: t("Message"), disabled: expanded,
