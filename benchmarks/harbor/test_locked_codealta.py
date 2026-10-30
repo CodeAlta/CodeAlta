@@ -182,6 +182,14 @@ class EscalationTests(unittest.TestCase):
         self.assertIn("< /tmp/codealta-run/continue.md > /logs/agent/altacli.escalation.jsonl", second)
         self.assertIn("--timeout 1110", second)
 
+    def test_a_recheck_alone_keeps_the_session_too(self) -> None:
+        agent = _agent("anthropic/claude-haiku-5-5", recheck="true")
+        command = agent._command("/app", "anthropic:claude-haiku-5-5", [])
+
+        self.assertTrue(agent._recheck)
+        self.assertNotIn("--ephemeral", command)
+        self.assertIn(f"--session-id={agent._session_id}", command)
+
     def test_without_an_escalation_the_run_stays_ephemeral(self) -> None:
         command = _agent("anthropic/claude-opus-5-5")._command("/app", "anthropic:claude-opus-5-5", [])
 

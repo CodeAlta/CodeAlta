@@ -11,8 +11,8 @@ param(
 
     [string]$BundleRoot = (Split-Path $PSScriptRoot -Parent),
 
-    # Names among codealta-opus, claude-code-opus, codealta-astra, codex-astra, and codealta-cc-opus, codealta-haiku and
-    # codealta-haiku-escalate (not in the default); under pwsh -File, one comma-separated argument
+    # Names among codealta-opus, claude-code-opus, codealta-astra, codex-astra, and codealta-cc-opus, codealta-haiku,
+    # codealta-haiku-escalate and codealta-haiku-recheck-escalate (not in the default); under pwsh -File, one comma-separated argument
     # (-Runs codealta-opus,codealta-astra).
     [string[]]$Runs = @("codealta-opus", "claude-code-opus", "codealta-astra", "codex-astra"),
 
@@ -63,6 +63,7 @@ $runDefinitions = [ordered]@{
     # The Adaptive mode (#273): the cheap model alone, and the cheap model continued on Opus when its run ends with a sign
     # of trouble the host sees (no answer, a refusal to use the tools, its last test run failing).
     "codealta-haiku" = [ordered]@{ Name = "codealta-haiku55-high"; Harness = "CodeAlta"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web") }
+    "codealta-haiku-recheck-escalate" = [ordered]@{ Name = "codealta-haiku55-high-recheck-escalate-opus55-xhigh"; Harness = "CodeAlta Adaptive"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web", "recheck=true", "escalate_to=claude-opus-5-5", "escalate_effort=xhigh") }
     "codealta-haiku-escalate" = [ordered]@{ Name = "codealta-haiku55-high-escalate-opus55-xhigh"; Harness = "CodeAlta Adaptive"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web", "escalate_to=claude-opus-5-5", "escalate_effort=xhigh") }
 }
 $requestedRuns = @($Runs | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() } | Where-Object { $_ })

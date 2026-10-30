@@ -14,6 +14,8 @@ Modelled on ``v2/tooling/locked_codex.py`` and ``locked_claude_code.py``:
     altacli estimated from public prices goes to the metadata, not to ``cost_usd``.
   * ``--ak provider_type=claude-code`` runs CodeAlta on the Claude Code CLI, installed to /opt/claude-code during setup
     (the version CodeAlta pins) and given ANTHROPIC_API_KEY; ``-m anthropic/claude-opus-5-5`` becomes its ``opus``.
+  * ``--ak recheck=true`` (#273): a run that changed the repository is resumed once, on its model, to check its change
+    against each requirement of the request and to fix what it misses.
   * ``--ak escalate_to=<model>`` (#273): when the run ends with a sign of trouble the host can see (no answer, a refusal
     to use the tools, its last test run failing), a second ``altacli run --resume`` continues the session on that model
     of the same provider, in the budget left; the session is then kept in the profile instead of an ephemeral root.
@@ -50,6 +52,11 @@ _PROFILE_DIR = "/tmp/codealta-profile"
 _LOGS = "/logs/agent"
 _JSONL = f"{_LOGS}/altacli.jsonl"
 _STDERR = f"{_LOGS}/altacli.stderr"
+_RECHECK_JSONL = f"{_LOGS}/altacli.recheck.jsonl"
+_RECHECK_STDERR = f"{_LOGS}/altacli.recheck.stderr"
+_RECHECK_PROMPT = ("Before you report, check your change against each requirement of the request above, one by one, with a "
+                   "test or a run for each rule it states. Fix what is missing or wrong, keep the tests passing, and answer "
+                   "as you would have.")
 _ESCALATION_JSONL = f"{_LOGS}/altacli.escalation.jsonl"
 _ESCALATION_STDERR = f"{_LOGS}/altacli.escalation.stderr"
 # The least budget an escalation is started with: below it, the stronger model could not do anything useful.
@@ -198,6 +205,16 @@ def _combine(first: dict[str, Any] | None, second: dict[str, Any] | None) -> dic
     return combined
 
 
+# Whether the agent changed the repository since its base commit, new files included, .alta/ left out: CHANGED=1 when it did.
+_CHANGED = (
+    f"repo=$(cat {_RUN_DIR}/repo 2>/dev/null || {{ {_FIND_REPO}; }}); base=$(cat {_RUN_DIR}/base 2>/dev/null); "
+    'cd "$repo" || { echo CHANGED=0; exit 0; }; '
+    "if [ -n \"$(git -c safe.directory='*' status --porcelain -- . ':(exclude).alta' 2>/dev/null)\" ] || "
+    "{ [ -n \"$base\" ] && [ \"$(git -c safe.directory='*' rev-parse HEAD 2>/dev/null)\" != \"$base\" ]; }; "
+    "then echo CHANGED=1; else echo CHANGED=0; fi"
+)
+
+
 def _flag(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -292,6 +309,8 @@ class LockedCodeAlta(BaseInstalledAgent):
       escalate_to       a model of the same provider (claude-opus-5-5, gpt-6.1-sol) that continues the session when the
                         run ends with a sign of trouble the host sees; none by default
       escalate_effort   the reasoning effort of that model
+      recheck           true to resume a run that changed the repository once, on its model, to check its change
+                        against each requirement of the request (before an escalation)
     """
 
     def __init__(
@@ -312,6 +331,7 @@ class LockedCodeAlta(BaseInstalledAgent):
         extra_args: str | None = None,
         escalate_to: str | None = None,
         escalate_effort: str | None = None,
+        recheck: bool | str = False,
         **kwargs: Any,
     ):
         super().__init__(*args, **kwargs)
@@ -336,7 +356,8 @@ class LockedCodeAlta(BaseInstalledAgent):
         self._escalate_effort = str(escalate_effort).strip().lower() if escalate_effort else None
         if self._escalate_effort is not None and self._escalate_effort not in _EFFORTS:
             raise ValueError(f"escalate_effort must be one of {', '.join(_EFFORTS)}; got {escalate_effort!r}")
-        self._session_id = str(uuid.uuid4()) if self._escalate_to else None
+        self._recheck = _flag(recheck)
+        self._session_id = str(uuid.uuid4()) if self._escalate_to or self._recheck else None
         self._result: dict[str, Any] | None = None
 
     @staticmethod
@@ -544,9 +565,13 @@ class LockedCodeAlta(BaseInstalledAgent):
             result = await environment.exec(command=command, env=env, timeout_sec=self._budget_sec)
             exit_code = self._exit_code(result.stdout)
             await self._read_result(environment, context, exit_code)
+            last_jsonl = _JSONL
+            if self._recheck and exit_code == 0:
+                exit_code, last_jsonl = await self._recheck_run(environment, context, repo, model_ref, settings, env, exit_code,
+                                                                self._budget_sec - int(time.monotonic() - started))
             if self._escalate_to and exit_code in (0, 1):
                 exit_code = await self._escalate(environment, context, repo, model_ref, settings, env, exit_code,
-                                                 self._budget_sec - int(time.monotonic() - started))
+                                                 self._budget_sec - int(time.monotonic() - started), last_jsonl)
             # A run that ends by its budget or by a failure is still graded: its patch is captured below. A run that
             # never started (usage, provider not ready, session in use) or failed on the provider is reported to
             # Harbor, which classifies it (rate limit, authentication...) for its retry policy.
@@ -563,10 +588,42 @@ class LockedCodeAlta(BaseInstalledAgent):
             except Exception as e:  # never mask the trial outcome
                 self.logger.warning(f"patch capture failed: {e}")
 
+    async def _recheck_run(self, environment: BaseEnvironment, context: AgentContext, repo: str, model_ref: str,
+                           settings: list[str], env: dict[str, str], exit_code: int | None,
+                           budget_left: int) -> tuple[int | None, str]:
+        """Resumes a run that changed the repository once, on its model, to check its change; the exit code and the JSONL of what ran last."""
+        r = await environment.exec(command=_CHANGED, user="root", timeout_sec=120)
+        changed = "CHANGED=1" in (r.stdout or "")
+        metadata: dict[str, Any] = dict(context.metadata or {})
+        if not changed or budget_left < _ESCALATION_MIN_SEC:
+            metadata["codealta_recheck"] = {"rechecked": False, "changed": changed, "budget_left_sec": budget_left}
+            context.metadata = metadata
+            return exit_code, _JSONL
+        with tempfile.TemporaryDirectory(prefix="codealta-recheck-") as tmp:
+            local = Path(tmp) / "recheck.md"
+            local.write_text(_RECHECK_PROMPT, encoding="utf-8")
+            await environment.upload_file(local, f"{_RUN_DIR}/recheck.md")
+        await environment.exec(command=f"chmod a+r {_RUN_DIR}/recheck.md", user="root", timeout_sec=60)
+        first = self._result
+        command = self._command(repo, model_ref, settings, budget_sec=budget_left, resume=True,
+                                prompt_file=f"{_RUN_DIR}/recheck.md", jsonl=_RECHECK_JSONL, stderr=_RECHECK_STDERR)
+        self.logger.info(f"altacli recheck: {command}")
+        result = await environment.exec(command=command, env=env, timeout_sec=budget_left)
+        second_exit = self._exit_code(result.stdout)
+        r = await environment.exec(command=f"tail -n 1 {_RECHECK_JSONL} 2>/dev/null; true", timeout_sec=120)
+        lines = [line for line in (r.stdout or "").splitlines() if line.strip()]
+        second = self._parse(lines[-1], "_codealta/result") if lines else None
+        self._fill(context, None, _combine(first, second), second_exit)
+        metadata = dict(context.metadata or {})
+        metadata["codealta_recheck"] = {"rechecked": True, "exit_code": second_exit, "status": (second or {}).get("status")}
+        context.metadata = metadata
+        return second_exit, _RECHECK_JSONL
+
     async def _escalate(self, environment: BaseEnvironment, context: AgentContext, repo: str, model_ref: str,
-                        settings: list[str], env: dict[str, str], exit_code: int | None, budget_left: int) -> int | None:
+                        settings: list[str], env: dict[str, str], exit_code: int | None, budget_left: int,
+                        jsonl: str = _JSONL) -> int | None:
         """Continues the session on the stronger model when the run ends with a sign of trouble; the exit code of what ran last."""
-        r = await environment.exec(command=f"cat {_JSONL} 2>/dev/null; true", timeout_sec=120)
+        r = await environment.exec(command=f"cat {jsonl} 2>/dev/null; true", timeout_sec=120)
         trouble = _trouble((r.stdout or "").splitlines())
         metadata: dict[str, Any] = dict(context.metadata or {})
         if trouble is None or budget_left < _ESCALATION_MIN_SEC:
