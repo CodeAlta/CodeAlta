@@ -11,8 +11,9 @@ param(
 
     [string]$BundleRoot = (Split-Path $PSScriptRoot -Parent),
 
-    # Names among codealta-opus, claude-code-opus, codealta-astra, codex-astra and codealta-cc-opus (not in the default);
-    # under pwsh -File, one comma-separated argument (-Runs codealta-opus,codealta-astra).
+    # Names among codealta-opus, claude-code-opus, codealta-astra, codex-astra, and codealta-cc-opus, codealta-haiku and
+    # codealta-haiku-escalate (not in the default); under pwsh -File, one comma-separated argument
+    # (-Runs codealta-opus,codealta-astra).
     [string[]]$Runs = @("codealta-opus", "claude-code-opus", "codealta-astra", "codex-astra"),
 
     # More altacli run arguments for the CodeAlta jobs, as one string (the adapter's extra_args), for example
@@ -59,6 +60,10 @@ $runDefinitions = [ordered]@{
     "codealta-astra" = [ordered]@{ Name = "codealta-astra-xhigh"; Harness = "CodeAlta"; Agent = "locked_codealta:LockedCodeAlta"; Model = "openai/gpt-6-astra"; Host = "api.openai.com"; Kwargs = @("reasoning_effort=xhigh", "disable_tools=web") }
     "codex-astra" = [ordered]@{ Name = "codex-astra-xhigh"; Harness = "Codex"; Agent = "locked_codex:LockedCodex"; Model = "openai/gpt-6-astra"; Host = "api.openai.com"; Kwargs = @("reasoning_effort=xhigh", "web_search=disabled") }
     "codealta-cc-opus" = [ordered]@{ Name = "codealta-cc-opus55-xhigh"; Harness = "CodeAlta on Claude Code"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-opus-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=xhigh", "disable_tools=web", "provider_type=claude-code") }
+    # The Adaptive mode (#273): the cheap model alone, and the cheap model continued on Opus when its run ends with a sign
+    # of trouble the host sees (no answer, a refusal to use the tools, its last test run failing).
+    "codealta-haiku" = [ordered]@{ Name = "codealta-haiku55-high"; Harness = "CodeAlta"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web") }
+    "codealta-haiku-escalate" = [ordered]@{ Name = "codealta-haiku55-high-escalate-opus55-xhigh"; Harness = "CodeAlta Adaptive"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web", "escalate_to=claude-opus-5-5", "escalate_effort=xhigh") }
 }
 $requestedRuns = @($Runs | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $unknownRuns = @($requestedRuns | Where-Object { -not $runDefinitions.Contains($_) })
