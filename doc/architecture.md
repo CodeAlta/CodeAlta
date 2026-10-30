@@ -11,7 +11,7 @@ These hold everywhere; the area docs explain how each area applies them.
 3. **One writer per session.** Mutable state of a session is owned by its mailbox actor; sessions run concurrently, with no process-wide lock around providers, tools or journals. Events are ordered per session and streams are bounded.
 4. **A headless core, thin frontends.** Orchestration, catalog, providers, plugins and the `alta` tool know no window. A frontend presents state and sends commands; it never holds orchestration logic. That is what lets both frontends, plugins and agents drive the same runtime.
 5. **Extensions use the public contracts.** Built-in plugins (Git, Jira, MCP, Statistics, Mobile, ACP) use the same plugin API as user plugins; an `alta` command, a tool or a provider type of a plugin goes through the same registries as the built-in ones.
-6. **Local and private.** No telemetry. Credentials stay with the provider that owns them and never reach logs or errors; logs, journals, prompts and outputs are treated as sensitive.
+6. **Local and private.** No telemetry: the runs are traced (an `ActivitySource` of `CodeAlta.Agent`, without content) only to an OpenTelemetry collector the environment of the user names, and only `CodeAlta.Hosting` exports them. Credentials stay with the provider that owns them and never reach logs or errors; logs, journals, prompts and outputs are treated as sensitive.
 7. **The prompt cache is respected.** The system prompt of a session stays byte-stable; what the agent must learn during a session reaches it as a host-context note of the next prompt.
 8. **Work is bounded.** Per-delta work never grows with the message, the journal or the number of sessions; reads after a write read what changed. Tests bound work by counts, not clocks.
 
@@ -43,7 +43,7 @@ flowchart LR
 | `CodeAlta.Orchestration` | Headless runtime: `SessionRuntimeService`, `AgentHub`, session actors, queues, skills, plugin bridges, `CodeAltaHost`. See [runtime](runtime.md). |
 | `CodeAlta.Agent` | Provider-neutral contracts and the agent runtime: sessions, events, tools, journals, compaction, provider contracts, the harness for agents that run their own loop. |
 | `CodeAlta.Agent.*` | One package per provider family (OpenAI, Anthropic, Google, Mistral, Copilot, xAI, Claude Code). See [providers](providers.md). |
-| `CodeAlta.Hosting` | Composition only: registering configured providers, their defaults, and sign-in flows the frontends share. |
+| `CodeAlta.Hosting` | Composition only: registering configured providers, their defaults, sign-in flows the frontends share, and the export of traces (OpenTelemetry). |
 | `CodeAlta.Catalog` | `~/.alta` and project `.alta`: config, projects, spaces, session views, skills, the application database. See [catalog and config](catalog-and-config.md). |
 | `CodeAlta.LiveTool` | The `alta` tool agents call: command registry and dispatcher. See [live tool](live-tool.md). |
 | `CodeAlta.Plugins`, `.Abstractions` | Plugin runtime and the public authoring API. See [plugins](plugins.md). |

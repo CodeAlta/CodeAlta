@@ -36,6 +36,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         if (options.ExitRunning) return 0; // None is running: there is nothing to exit.
         // A start from a terminal gives the prompt back: the application runs in a process of its own.
         if (DesktopTerminalStart.TryHandOver(options, Console.Error) is { } handedOver) return handedOver;
+        // The traces of the runs go to the OpenTelemetry collector the environment names, if any: the end sends the last ones.
+        using var telemetry = CodeAltaTelemetry.StartFromEnvironment("alta");
         return RunWithCapture(options, RunCore);
     }
 

@@ -10,6 +10,7 @@ using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.Runtime.Images;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.Runtime.Tools;
+using CodeAlta.Agent.Telemetry;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.Runtime;
@@ -40,6 +41,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
     private readonly string _protocolFamily;
     private readonly string _providerKey;
+    // The provider as the spans of the runs name it (gen_ai.provider.name).
+    private readonly string _telemetryProviderName;
+    // The spans of the run in progress, while something records them; read by Publish from the threads of the provider.
+    private volatile AgentRunTrace? _runTrace;
     private readonly IAgentSessionJournalStore _store;
     private readonly IModelProviderTurnExecutor _turnExecutor;
     private IReadOnlyList<AgentModelInfo> _cachedModels;
@@ -186,6 +191,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         ProviderId = providerId;
         _protocolFamily = provider.ProtocolFamily;
         _providerKey = provider.ProviderKey;
+        _telemetryProviderName = AgentTelemetry.ProviderName(provider);
         _store = store;
         _toolImages = new AgentSessionToolImages(store as IAgentSessionAttachmentStore, summary.SessionId);
         _readFileGuard = new AgentReadFileGuard(AgentBuiltInToolOptions.DefaultReadFileLines, AgentBuiltInToolOptions.MaxReadFileLines);
@@ -601,6 +607,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 return;
             }
 
+            _runTrace?.Observe(@event);
+
             foreach (var reader in _streamReaders)
             {
                 reader.Writer.TryWrite(@event);
@@ -646,6 +654,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         var admitted = false;
         CancellationTokenRegistration callerRegistration = default;
         Exception? failure = null;
+        AgentRunTrace? trace = null;
         try
         {
             await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -663,6 +672,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 admitted = true;
             }
             finally { _stateGate.Release(); }
+            trace = StartRunTrace(run.Id);
             // The forwarding callback only signals the one retained worker. It never synchronously
             // traverses provider callbacks, and its own disposal is joined before source release.
             callerRegistration = cancellationToken.UnsafeRegister(static state => ((ActiveRun)state!).SignalCancellation(), run);
@@ -672,6 +682,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         catch (Exception ex) { failure = ex; throw; }
         finally
         {
+            EndRunTrace(trace, failure);
             run.Finish = FinishRunAsync(run, admitted, options.RunLifecycle, callerRegistration, failure);
             try { await run.Finish.ConfigureAwait(false); }
             catch (Exception cleanup)
@@ -680,6 +691,36 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 throw;
             }
         }
+    }
+
+    // Starts the spans of a run when something records them (an OpenTelemetry exporter the user asked for).
+    private AgentRunTrace? StartRunTrace(AgentRunId runId)
+    {
+        if (!AgentTelemetry.Source.HasListeners())
+        {
+            return null;
+        }
+
+        var trace = AgentRunTrace.Start(new AgentRunTraceInfo(
+            SessionId,
+            _telemetryProviderName,
+            _providerKey,
+            NormalizeOptionalText(_options.Model) ?? NormalizeOptionalText(_summary.ModelId),
+            _options.ReasoningEffort?.ToString().ToLowerInvariant(),
+            NormalizeOptionalText(_options.AgentPromptId)), runId);
+        _runTrace = trace;
+        return trace;
+    }
+
+    private void EndRunTrace(AgentRunTrace? trace, Exception? failure)
+    {
+        if (trace is null)
+        {
+            return;
+        }
+
+        Interlocked.CompareExchange(ref _runTrace, null, trace);
+        trace.End(failure);
     }
 
     private async Task<AgentRunId> ExecuteRunAsync(AgentSendOptions options, AgentRunId runId, CancellationTokenSource linkedCts, ActiveRun run)
@@ -3406,6 +3447,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         try
         {
+            _runTrace?.RequestStarting();
             return await _turnExecutor.ExecuteTurnAsync(
                     request,
                     (delta, ct) => OnStreamingDeltaAsync(runId, delta, ct),
@@ -3442,6 +3484,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
             try
             {
+                _runTrace?.RequestStarting();
                 return await _turnExecutor.ExecuteTurnAsync(
                         request with
                         {

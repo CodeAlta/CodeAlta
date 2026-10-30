@@ -123,6 +123,24 @@ A run that must not go on with less than it was set up with marks what it needs 
 
 The commands an agent runs get `CODEALTA_SESSION_ID`, `CODEALTA_MODEL` and `AI_AGENT=codealta` in their environment, in the apps too.
 
+## Traces (OpenTelemetry)
+
+CodeAlta Desktop, CodeAlta TUI and `altacli` send traces of their runs to an OpenTelemetry collector when the environment names one with `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`), as a CI job often does:
+
+```sh
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+altacli run "Fix the failing test"
+```
+
+- The spans follow the OpenTelemetry conventions of generative AI: `invoke_agent CodeAlta` for each run (a prompt to its end), with the session id as `gen_ai.conversation.id`, the provider, the model and the tokens of the run; `chat <model>` for each request to the model whose usage the provider reports, with its tokens; `execute_tool <tool>` for each tool call, in error when it fails.
+- They hold names, ids, models, durations, token counts and kinds of failures, never the prompts, the answers, the arguments or the outputs of tools.
+- The other standard variables apply: `OTEL_EXPORTER_OTLP_PROTOCOL` (`grpc` by default), `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME` (else `alta`, `altatui` or `altacli`), `OTEL_RESOURCE_ATTRIBUTES`. `OTEL_SDK_DISABLED=true` turns the traces off.
+- `altacli` sends its last spans before it exits.
+- The agents CodeAlta starts (Claude Code, Codex CLI, ACP agents) do not get the `OTEL_*` variables, so that they do not report the same runs twice. The commands of the agents, the jobs and the MCP servers keep them.
+
+Without these variables, nothing is sent.
+
 ## The alta commands
 
 `altacli alta ARGS...` runs the commands of the `alta` tool, as the agents do: `altacli alta session list`, `altacli alta project list`, `altacli alta model list`. `altacli alta --help` lists those of the command line. The commands that would change the configuration files, such as `alta mcp server add` or `alta mcp server disable`, fail there: `altacli` leaves them as they are.

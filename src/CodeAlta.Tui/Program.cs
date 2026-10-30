@@ -347,6 +347,8 @@ internal partial class Program
 
     internal static int RunAdmittedStartup(string[] args, int mainThreadId, StartupOwner owner)
     {
+        // The traces of the runs go to the OpenTelemetry collector the environment names, if any: the end sends the last ones.
+        using var telemetry = CodeAltaTelemetry.StartFromEnvironment("altatui");
         try
         {
             owner.LoggingRequired = true;
