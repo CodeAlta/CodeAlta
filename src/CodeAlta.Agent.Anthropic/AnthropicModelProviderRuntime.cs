@@ -528,7 +528,7 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
 
     private static AgentModelInfo WithStandardContextSize(AgentModelInfo model)
     {
-        if (model.GetContextSize() is not { } size || size <= StandardContextSize)
+        if (model.GetContextSize() is not { } size || size <= StandardContextSize || model.ContextSizes?.Contains(StandardContextSize) == true)
         {
             return model;
         }

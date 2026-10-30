@@ -63,7 +63,7 @@ internal static class AgentModelMetadataEnricher
         var capabilities = model.Capabilities is null
             ? null
             : new Dictionary<string, object?>(model.Capabilities, StringComparer.Ordinal);
-        IEnumerable<long>? priceThresholds = null;
+        long[]? priceThresholds = null;
 
         if (catalog is not null && TryFindModelsDevModel(catalog, modelsDevProviderId, model.Id, out var foundProviderId, out var modelsDevModel))
         {
@@ -93,14 +93,15 @@ internal static class AgentModelMetadataEnricher
             }
         }
 
-        // The input the model accepts, before a known limit keeps a session to less.
-        var findSizes = model.ContextSizes is null && (knownLimits is not null || priceThresholds is not null);
-        var acceptedInput = findSizes && capabilities is not null ? ResolveInputLimit(capabilities) : null;
-
         // What the provider knows better than models.dev, under what the user set. A limit the provider reports for the
         // model itself (the context_window of Codex's catalog) is known better still: the table does not lower it.
-        if (model.Capabilities?.ContainsKey("inputTokenLimit") != true &&
-            AgentModelKnownLimit.Find(knownLimits, model.Id) is { } knownLimit)
+        var knownLimit = model.Capabilities?.ContainsKey("inputTokenLimit") != true ? AgentModelKnownLimit.Find(knownLimits, model.Id) : null;
+
+        // The input the model accepts, before a known limit keeps a session to less.
+        var findSizes = model.ContextSizes is null && (knownLimit is not null || priceThresholds is not null);
+        var acceptedInput = findSizes && capabilities is not null ? ResolveInputLimit(capabilities) : null;
+
+        if (knownLimit is not null)
         {
             capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
             ApplyKnownLimit(capabilities, knownLimit);
@@ -145,7 +146,7 @@ internal static class AgentModelMetadataEnricher
 
     // The sizes of context of a model that accepts an input and is used with another one by default: those two, and
     // each threshold of a price under the input it accepts. Null for a model that has one.
-    private static IReadOnlyList<long>? ContextSizesOf(long accepted, long? input, IEnumerable<long>? priceThresholds)
+    private static IReadOnlyList<long>? ContextSizesOf(long accepted, long? input, long[]? priceThresholds)
     {
         if (input is not { } current || current > accepted)
         {
@@ -155,7 +156,7 @@ internal static class AgentModelMetadataEnricher
         var sizes = new SortedSet<long> { current, accepted };
         foreach (var threshold in priceThresholds ?? [])
         {
-            if (threshold > 0 && threshold < accepted)
+            if (threshold < accepted)
             {
                 sizes.Add(threshold);
             }
@@ -165,14 +166,24 @@ internal static class AgentModelMetadataEnricher
     }
 
     // The sizes of prompt past which models.dev gives the model another price ({"tier":{"type":"context","size":272000}}).
-    private static IEnumerable<long> ReadContextPriceThresholds(ModelsDevModelDefinition model)
-        => (model.Cost?.Tiers ?? [])
+    // Null when it gives none.
+    private static long[]? ReadContextPriceThresholds(ModelsDevModelDefinition model)
+    {
+        if (model.Cost?.Tiers is not { Length: > 0 } tiers)
+        {
+            return null;
+        }
+
+        long[] thresholds = [.. tiers
             .Select(static tier => tier?.Tier)
             .Where(static threshold => string.Equals(threshold?.Type, ModelsDevCostThresholdDefinition.ContextType, StringComparison.OrdinalIgnoreCase))
-            .Select(static threshold => threshold!.Size ?? 0);
+            .Select(static threshold => threshold!.Size ?? 0)
+            .Where(static size => size > 0)];
+        return thresholds.Length > 0 ? thresholds : null;
+    }
 
     private static long? ResolveInputLimit(IReadOnlyDictionary<string, object?> capabilities)
-        => AgentTokenBudgetResolver.Resolve(new AgentModelInfo(string.Empty, Capabilities: capabilities), AgentCompactionSettings.Default).InputContextLimit;
+        => new AgentModelInfo(string.Empty, Capabilities: capabilities).GetContextSize();
 
     // The effort levels of models.dev ({"type":"effort","values":["none","low","medium","high","xhigh","max"]}), as a
     // session names them: XHigh is the highest of xhigh and max, sent as the one the model has; Max is an effort of its
