@@ -3,6 +3,7 @@ import { ApiError, browserStore, createApi, failureText, signedOutMessage, Signe
 import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
 import { coalesce, composerView } from "./composer";
 import { createAskPanel } from "./askPanel";
+import { createBackgroundJobs } from "./backgroundJobs";
 import { isBusy, type Live, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
 import { activityLine, el, icon, iconSvg, type IconName } from "./dom";
 import { createDrafts, newSessionDraft } from "./drafts";
@@ -536,8 +537,11 @@ export function startMobile(window: Window & typeof globalThis) {
     onResize: () => padComposer(),
   });
   const bottomBar = () => askBar.hidden ? composer : askBar;
+  const backgroundRoot = $("background-status");
+  const background = createBackgroundJobs({ window, root: backgroundRoot, api, changed: padComposer });
 
   function bindComposer(id: string | null) {
+    background.setSession(id);
     if (composerFor) drafts.set(composerFor, promptBox.value);
     composerFor = id;
     promptBox.value = id ? drafts.get(id) : "";
@@ -582,6 +586,7 @@ export function startMobile(window: Window & typeof globalThis) {
     const was = !askBar.hidden;
     const shown = askPanel.show();
     composer.hidden = shown;
+    bottomBar().prepend(backgroundRoot);
     if (detail.id && foot.parentElement !== bottomBar()) bottomBar().append(foot);
     if (shown !== was) padComposer();
   }
@@ -1217,7 +1222,7 @@ export function startMobile(window: Window & typeof globalThis) {
     askPanel.onLive(update);
     if (detail.id === update.id) { showDetailHead(); drawTimeline(); scheduleDetailRead(400); }
   }
-  function readAgain() { void readList(); if (detail.id) { void readDetail(); void askPanel.read(detail.id); } }
+  function readAgain() { void readList(); if (detail.id) { void readDetail(); void askPanel.read(detail.id); void background.refresh(); } }
   const stream = createLiveStream({
     create: () => new window.EventSource("/api/events"),
     onSession,
@@ -1246,7 +1251,7 @@ export function startMobile(window: Window & typeof globalThis) {
     button.classList.add("spin");
     if (signedOut) { button.classList.remove("spin"); return; }
     if (!$("home").hidden) sessionList.settle();
-    try { await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null]); } finally { button.classList.remove("spin"); }
+    try { await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null, background.refresh()]); } finally { button.classList.remove("spin"); }
   });
 
   // ---- Sign-in: the token of the QR link (#k=) gets the cookie; without it, the cookie or the kept token is used ----

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Ask, AskResult, Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
+import type { Ask, AskResult, BackgroundJob, Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
 
 /** The policy the plugin's server sets on the page (the contract of the phone page). */
 export const mobilePolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -22,6 +22,8 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     cookies: new Set<string>(),
     sessions: [] as Session[],
     events: new Map<string, TimelineEvent[]>(),
+    jobs: new Map<string, BackgroundJob[]>(),
+    jobOutput: new Map<string, string>(),
     /** The choices of the sessions; a session without is on the Codex ones (`fixtureChoices`). */
     choices: new Map<string, SessionChoices>(),
     options: null as Options | null,
@@ -138,6 +140,20 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     }
     if (path === "/api/projects") return send(response, 200, { projects: state.projects, default: "p1", error: null });
     if (path === "/api/options") return send(response, 200, state.options);
+    const jobPath = /^\/api\/sessions\/([^/]+)\/jobs(?:\/([^/]+)(\/stop)?)?$/.exec(path);
+    if (jobPath) {
+      const id = decodeURIComponent(jobPath[1]), jobId = jobPath[2] && decodeURIComponent(jobPath[2]);
+      if (!sessionOf(id)) return send(response, 404);
+      const jobs = state.jobs.get(id) ?? [];
+      if (!jobId) return send(response, 200, { jobs, error: null });
+      const job = jobs.find(job => job.id === jobId);
+      if (!job) return send(response, 404);
+      if (jobPath[3] && request.method === "POST") {
+        state.jobs.set(id, jobs.map(item => item.id === jobId ? { ...item, state: "cancelled", endedAt: new Date().toISOString() } : item));
+        return send(response, 200, { ok: true, error: null });
+      }
+      return send(response, 200, { job, text: state.jobOutput.get(jobId) ?? "", truncated: false, error: null });
+    }
     const found = /^\/api\/sessions\/([^/]+)(?:\/(events|prompt|abort|archive|restore|choices|ask|ask\/answer|ask\/cancel))?$/.exec(path);
     if (found) {
       const id = decodeURIComponent(found[1]), action = found[2];

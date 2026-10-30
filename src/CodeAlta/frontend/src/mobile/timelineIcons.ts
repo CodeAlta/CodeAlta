@@ -4,6 +4,7 @@ import { el } from "./dom";
 // never text of a session.
 const icons = {
   terminal: '<path d="M4 17l6-5-6-5M12 19h8"/>',
+  cog: '<path d="m9 3-1 3-3 1-2 5 2 5 3 1 1 3h6l1-3 3-1 2-5-2-5-3-1-1-3z"/><circle cx="12" cy="12" r="3"/>',
   code: '<path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M10 2h4"/>',
