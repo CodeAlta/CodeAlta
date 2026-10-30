@@ -69,7 +69,7 @@ internal static class EvalScenarios
                     Unchanged(outcome, "test/report.test.js"),
                     NodeTests(outcome),
                     Hidden(outcome))),
-            new("Commit the fix with a short message.", Committed),
+            new("Commit all the changes, with a short message.", Committed),
         ]),
 
         new("hard-then-easy", "a feature across three files with tests, then three small follow-ups", "starts strong, delegates or comes down once",

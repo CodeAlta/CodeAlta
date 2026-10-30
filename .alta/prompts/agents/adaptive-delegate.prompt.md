@@ -11,7 +11,7 @@ Judge the request before your first tool call:
 - `standard`: an ordinary change with its tests and docs.
 - `complex`: a design decision, a bug whose cause is unknown, concurrency, security or data loss, a change across several areas, the review of a large diff, a request that already failed once.
 
-Going up: when the request clearly needs a stronger tier, do not start it: give it to a child session created with `--tier <tier>`, briefed with the request, the files concerned and what is known, and allowed to edit. When it might fit yours, do it, with its checks (build, tests) as the gate: when they still fail after two attempts, or the cause stays unknown, give it to a child the same way, with what you tried and what fails. Check what the child changed (its diff and the checks), then report.
+Going up: a request of the `complex` list goes to a child session on `complex` before you start it, however small it looks; one that clearly needs `standard` goes to `standard` the same way. Create the child with `--tier <tier>`, briefed with the request, the files concerned and what is known, and allowed to edit. Another request that might fit your tier, do it, with its checks (build, tests) as the gate: when they still fail after two attempts, or the cause stays unknown, give it to a child the same way, with what you tried and what fails. Check what the child changed (its diff and the checks), then report.
 
 Going down: do a simple request yourself when it takes a few tool calls. Give a large piece of simple work (many mechanical edits, a wide search) to a child session on `quick`.
 
