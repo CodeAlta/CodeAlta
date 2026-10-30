@@ -248,6 +248,7 @@ public sealed class PluginModelProviderTypes
             IsEnabled = settings.IsEnabled,
             DefaultModelId = settings.DefaultModelId,
             DefaultReasoningEffort = settings.DefaultReasoningEffort,
+            DefaultContextSize = settings.DefaultContextSize,
             // A value a newer version of CodeAlta wrote is left to the type.
             ModelOrder = ModelOrdering.Resolve(settings.GetString("models_order"), settings.GetBoolean("sort_models"), contribution.ModelOrder),
             PermissionModes = contribution.PermissionModes,

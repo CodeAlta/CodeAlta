@@ -103,6 +103,13 @@ public sealed class PluginProviderSettings
     /// <summary>Gets the permission mode of a new session (<c>permission_mode</c>), or <see langword="null" />.</summary>
     public string? PermissionMode => GetString("permission_mode");
 
+    /// <summary>
+    /// Gets the size of context, in input tokens, of a session whose model has it and that chose none (<c>context_size</c>),
+    /// or <see langword="null" /> for the size of its model.
+    /// </summary>
+    public long? DefaultContextSize
+        => Values.TryGetValue("context_size", out var value) && value is long size && size > 0 ? size : null;
+
     /// <summary>Returns a text value, trimmed, or <see langword="null" /> when it is absent, empty or not a text.</summary>
     /// <param name="key">The key.</param>
     public string? GetString(string key)

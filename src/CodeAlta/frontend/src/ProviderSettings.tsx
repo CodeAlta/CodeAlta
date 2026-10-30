@@ -249,7 +249,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
       void settle(() => plugins.savePluginProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null, key, type: form.type,
         enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model), reasoningEffort: optional(form.reasoningEffort),
         values: pluginSettingValues(formPlugin, form.plugin), makeDefault: form.makeDefault, icon: optional(form.icon)?.toLowerCase() ?? null,
-        color: optional(form.color), permissionMode: optional(form.permissionMode), modelsOrder: optional(form.modelsOrder) }, { timeoutMilliseconds: 60000 }), key, renamed(key));
+        color: optional(form.color), permissionMode: optional(form.permissionMode), modelsOrder: optional(form.modelsOrder), contextSize: form.contextSize },
+        { timeoutMilliseconds: 60000 }), key, renamed(key));
       return;
     }
     const wire = providerEdit(form);
@@ -408,9 +409,9 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
                 <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
               </HTMLSelect></FormGroup>
-            {!formPlugin && <ProviderContextSize key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch}
+            <ProviderContextSize key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch}
               providerId={modelProvider && availability.get(modelProvider.toLowerCase())?.availability === "Ready" ? modelProvider : null}
-              model={form.model.trim() || fallback("model")} value={form.contextSize} disabled={busy} readModels={readModels} onChange={contextSize => edit({ contextSize })} />}
+              model={form.model.trim() || fallback("model")} value={form.contextSize} disabled={busy} readModels={readModels} onChange={contextSize => edit({ contextSize })} />
             {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}
             {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">
               <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></FormGroup>}
