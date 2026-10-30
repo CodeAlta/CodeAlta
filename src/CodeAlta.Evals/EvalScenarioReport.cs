@@ -228,6 +228,102 @@ internal static class EvalScenarioReport
     }
 }
 
+/// <summary>
+/// A blind judge of the quality of the work: it reads the requests of a scenario and the final diff of a run, without the
+/// model or the policy that made it, and scores what tests do not see: a fix at the cause, the design, the tests written.
+/// </summary>
+internal static class EvalQualityJudge
+{
+    public static readonly string[] Criteria = ["correctness", "cause", "design", "tests", "overall"];
+
+    public static async Task ScoreAsync(string altacli, string model, IReadOnlyList<EvalScenarioRun> runs, int parallel, TimeSpan timeout)
+    {
+        await Parallel.ForEachAsync(runs.Where(static run => run.Invalid is null && !string.IsNullOrWhiteSpace(run.FinalDiff)),
+            new ParallelOptions { MaxDegreeOfParallelism = parallel }, async (run, token) =>
+            {
+                var scenario = EvalScenarios.All.First(item => item.Id == run.Scenario);
+                var prompt = new StringBuilder($$"""
+                    You judge the quality of a change a coding agent made in a small JavaScript project, for a senior engineer who
+                    will maintain it. Tests already checked that it works; judge what they do not see. Score each criterion from 1
+                    (poor) to 5 (excellent):
+                    - correctness: right beyond the tests, on the cases the requests state and the inputs callers give;
+                    - cause: a problem fixed where it comes from, not worked around at the place it shows;
+                    - design: simple, no duplication, fits the code around it, nothing added that the requests do not need;
+                    - tests: the tests added check the behavior asked, its edge cases included;
+                    - overall: would you merge it as it is.
+                    Answer with one JSON object alone: {"correctness":n,"cause":n,"design":n,"tests":n,"overall":n,"debt":"the main debt this change adds, in one line, or none"}.
+
+                    ## The requests, in order
+
+                    """);
+                foreach (var turn in scenario.Turns) prompt.AppendLine("- " + turn.Prompt.ReplaceLineEndings(" "));
+                prompt.AppendLine().AppendLine("## The change").AppendLine("~~~diff").AppendLine(run.FinalDiff).AppendLine("~~~");
+                var start = new ProcessStartInfo(altacli) { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8, StandardInputEncoding = new UTF8Encoding(false) };
+                foreach (var argument in new[] { "run", "--ephemeral", "--quiet", "--no-mcp", "--no-plugins", "--no-skills", "-m", model, "--timeout", ((int)timeout.TotalSeconds).ToString(CultureInfo.InvariantCulture), "--disable-tools", "*", "-" })
+                {
+                    start.ArgumentList.Add(argument);
+                }
+
+                using var process = Process.Start(start)!;
+                await process.StandardInput.WriteAsync(prompt.ToString()).ConfigureAwait(false);
+                process.StandardInput.Close();
+                var errors = process.StandardError.ReadToEndAsync(token);
+                var answer = await process.StandardOutput.ReadToEndAsync(token).ConfigureAwait(false);
+                await process.WaitForExitAsync(token).ConfigureAwait(false);
+                await errors.ConfigureAwait(false);
+                var open = answer.IndexOf('{');
+                var close = answer.LastIndexOf('}');
+                if (open < 0 || close <= open) return;
+                try
+                {
+                    using var document = JsonDocument.Parse(answer[open..(close + 1)]);
+                    var scores = new Dictionary<string, int>(StringComparer.Ordinal);
+                    foreach (var criterion in Criteria)
+                    {
+                        if (document.RootElement.TryGetProperty(criterion, out var value) && value.TryGetInt32(out var score)) scores[criterion] = Math.Clamp(score, 1, 5);
+                    }
+
+                    run.Quality = scores;
+                    run.Debt = document.RootElement.TryGetProperty("debt", out var debt) && debt.ValueKind == JsonValueKind.String ? debt.GetString() : null;
+                }
+                catch (JsonException)
+                {
+                }
+            }).ConfigureAwait(false);
+    }
+
+    /// <summary>The section of the report: the average scores per scenario and configuration, and per configuration.</summary>
+    public static string Markdown(IReadOnlyList<EvalScenarioRun> runs)
+    {
+        var judged = runs.Where(static run => run.Quality is { Count: > 0 }).ToList();
+        if (judged.Count == 0) return string.Empty;
+        var builder = new StringBuilder();
+        builder.AppendLine().AppendLine("## Quality of the work (blind judge)").AppendLine();
+        builder.AppendLine("Scores from 1 to 5 of the final diff of each run, by a judge that does not know the model or the policy.").AppendLine();
+        builder.AppendLine("| Scenario | Configuration | Runs | " + string.Join(" | ", Criteria) + " |");
+        builder.AppendLine("| --- | --- | --- | " + string.Join(" | ", Criteria.Select(static _ => "---")) + " |");
+        foreach (var group in judged.GroupBy(static run => (run.Scenario, run.Configuration)).OrderBy(static group => group.Key.Scenario, StringComparer.Ordinal).ThenBy(static group => group.Key.Configuration, StringComparer.Ordinal))
+        {
+            builder.AppendLine($"| {group.Key.Scenario} | {group.Key.Configuration} | {group.Count()} | " + string.Join(" | ", Criteria.Select(criterion => Average(group, criterion))) + " |");
+        }
+
+        builder.AppendLine().AppendLine("| Configuration | Runs | " + string.Join(" | ", Criteria) + " |");
+        builder.AppendLine("| --- | --- | " + string.Join(" | ", Criteria.Select(static _ => "---")) + " |");
+        foreach (var group in judged.GroupBy(static run => run.Configuration).OrderBy(static group => group.Key, StringComparer.Ordinal))
+        {
+            builder.AppendLine($"| {group.Key} | {group.Count()} | " + string.Join(" | ", Criteria.Select(criterion => Average(group, criterion))) + " |");
+        }
+
+        return builder.ToString();
+    }
+
+    private static string Average(IEnumerable<EvalScenarioRun> runs, string criterion)
+    {
+        var values = runs.Select(run => run.Quality!.TryGetValue(criterion, out var value) ? value : (int?)null).Where(static value => value is not null).Select(static value => (double)value!.Value).ToArray();
+        return values.Length == 0 ? "–" : values.Average().ToString("0.0", CultureInfo.InvariantCulture);
+    }
+}
+
 /// <summary>A model that reads the runs of the Adaptive configurations and names each wrong choice of a model.</summary>
 internal static class EvalScenarioJudge
 {

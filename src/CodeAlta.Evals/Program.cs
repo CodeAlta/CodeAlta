@@ -33,6 +33,7 @@ internal static class Program
           --timeout SECONDS time allowed for one turn (default 900)
           --retries N       times an invalid run (provider, harness) is run again (default 2)
           --judge REF       a model that reads the Adaptive runs and names each wrong choice
+          --quality REF     a model that scores, blind, the quality of the final diff of each run
           --altacli PATH    the altacli to run (default: the build of this checkout)
           --out FOLDER      where the report goes (default: tmp/evals/<date>)
         """;
@@ -159,6 +160,13 @@ internal static class Program
         // A run kept is its last attempt; the attempts before it were invalid.
         var kept = ordered.GroupBy(static run => (run.Scenario, run.Configuration, run.Repeat)).Select(static group => group.Last()).ToList();
         var report = EvalScenarioReport.Markdown(kept, tiers, prices, ordered.Count(static run => run.Invalid is not null));
+        if (options.TryGetValue("quality", out var quality))
+        {
+            await EvalQualityJudge.ScoreAsync(altacli, quality, kept, parallel, timeout).ConfigureAwait(false);
+            await File.WriteAllTextAsync(Path.Combine(output, "runs.json"), JsonSerializer.Serialize(ordered, EvalJson.Default.ListEvalScenarioRun)).ConfigureAwait(false);
+            report += EvalQualityJudge.Markdown(kept);
+        }
+
         if (options.TryGetValue("judge", out var judge))
         {
             report += await EvalScenarioJudge.RunAsync(altacli, judge, kept, tiers, output, timeout).ConfigureAwait(false);

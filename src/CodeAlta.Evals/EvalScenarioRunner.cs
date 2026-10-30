@@ -118,6 +118,12 @@ internal sealed record EvalScenarioRun
     public string? TranscriptFolder { get; init; }
     public bool Succeeded => Invalid is null && Turns.Count > 0 && Turns.All(static turn => turn.Passed);
     public int Switches => Requests.Count(static request => request.AfterSwitch);
+    /// <summary>Everything the session changed in the project, from its first commit to its last state; null when not kept.</summary>
+    public string? FinalDiff { get; set; }
+    /// <summary>The scores of a blind judge of the final diff (correctness, cause, design, tests, overall, from 1 to 5); null when not judged.</summary>
+    public Dictionary<string, int>? Quality { get; set; }
+    /// <summary>The debt the judge of quality names in the change, in one line.</summary>
+    public string? Debt { get; set; }
 }
 
 /// <summary>
@@ -299,6 +305,8 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
                 });
             }
 
+            run.FinalDiff = FinalDiff(project);
+            await File.WriteAllTextAsync(Path.Combine(transcripts, "final.diff"), run.FinalDiff, cancellationToken).ConfigureAwait(false);
             return run;
         }
         finally
@@ -617,6 +625,15 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
         {
             File.Delete(index);
         }
+    }
+
+    // Everything the session changed, from the first commit of the fixture to the worktree, untracked files included; the
+    // agent prompts the harness copied are left out.
+    private static string FinalDiff(string project)
+    {
+        var (_, first) = EvalScenarios.Run(project, "git", ["rev-list", "--max-parents=0", "HEAD"]);
+        var (_, diff) = EvalScenarios.Run(project, "git", ["diff", first.Trim().Split('\n')[0].Trim(), Snapshot(project), "--", ".", ":(exclude).alta"]);
+        return Bound(diff.Trim(), 60_000);
     }
 
     // What a turn changed in the code, docs (Markdown) left out: empty when it changed nothing else.
