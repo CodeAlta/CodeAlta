@@ -2393,14 +2393,16 @@ svg.pele {
 /* Formulas in the prompt are tinted as they are written; the one under the caret is drawn above it, with a button that
    opens it in the equation editor. */
 .prompt-math { color: var(--accent) !important; }
-.prompt-math-preview { display: flex; align-items: flex-start; gap: 6px; max-width: min(560px, 80vw); max-height: 220px; overflow: auto; padding: 6px 8px;
+.prompt-math-preview { display: flex; align-items: center; gap: 6px; width: max-content; max-width: min(560px, 80vw); max-height: 220px; overflow: auto; padding: 6px 8px;
   border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel); box-shadow: 0 4px 14px rgba(0, 0, 0, .22); }
-.prompt-math-preview-formula { flex: 1; min-width: 0; overflow-x: auto; }
+.prompt-math-preview-formula { flex: 1; min-width: 0; padding: 2px 0; overflow-x: auto; overflow-y: hidden; }
 .prompt-math-preview-formula .katex { font-size: 1.15em; }
 .prompt-math-preview-formula .katex-display { margin: 0; }
 .prompt-math-preview-formula .katex-error { color: var(--red) !important; font-size: 12px; }
-.prompt-math-preview-edit { flex: none; padding: 0 5px; border: 0; border-radius: 4px; color: var(--muted); background: none; font-size: 13px; cursor: pointer; }
-.prompt-math-preview-edit:hover, .prompt-math-preview-edit:focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
+/* As specific as the buttons of the composer, around it in the page, and after them. */
+.prompt-math-preview button.prompt-math-preview-edit { flex: none; width: 22px; height: 22px; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 4px; color: var(--muted); background: none;
+  box-shadow: none; font-size: 13px; line-height: 22px; cursor: pointer; }
+.prompt-math-preview button.prompt-math-preview-edit:hover, .prompt-math-preview button.prompt-math-preview-edit:focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
 /* The equation editor: MathLive's field, the LaTeX it writes, and the actions. */
 .equation-editor { display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; height: 100%; padding: 12px; }
 .equation-editor-field { display: flex; flex: 1; align-items: center; justify-content: center; min-height: 96px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }

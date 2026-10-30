@@ -13,7 +13,10 @@ const mayHoldMath = /[$\\]/;
 export function attachPromptMath(editor: monaco.editor.IStandaloneCodeEditor,
   options: Readonly<{ editLabel: string; onEdit: (span: MathSpan) => void }>): () => void {
   const document = editor.getContainerDomNode().ownerDocument;
-  const node = document.createElement("div");
+  // Monaco places the node it is given (and writes its `display`): the panel is laid out inside it.
+  const host = document.createElement("div");
+  host.className = "prompt-math-preview-host";
+  const node = host.appendChild(document.createElement("div"));
   node.className = "prompt-math-preview";
   const formula = document.createElement("div");
   formula.className = "prompt-math-preview-formula";
@@ -28,7 +31,7 @@ export function attachPromptMath(editor: monaco.editor.IStandaloneCodeEditor,
   const widget: monaco.editor.IContentWidget = {
     allowEditorOverflow: true,
     getId: () => "codealta.prompt-math-preview",
-    getDomNode: () => node,
+    getDomNode: () => host,
     // Above the formula: the prompt is at the bottom of the window.
     getPosition: () => position && { position, preference: [monaco.editor.ContentWidgetPositionPreference.ABOVE, monaco.editor.ContentWidgetPositionPreference.BELOW] },
   };

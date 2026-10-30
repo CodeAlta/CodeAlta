@@ -23,7 +23,12 @@ Object.assign(window, { mathFixture: {
     // Seen: what the window shows at the center of the panel is the panel, not the frame of the prompt that would clip it.
     const box = node.getBoundingClientRect();
     const seen = node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
-    return { drawn: !!node.querySelector(".katex"), error: !!node.querySelector(".katex-error"), edit: node.querySelector("button")?.getAttribute("aria-label"), seen };
+    // Beside: the button that edits the formula is on its right, not under it.
+    const formula = node.querySelector(".prompt-math-preview-formula")!.getBoundingClientRect(), button = node.querySelector("button")!.getBoundingClientRect();
+    const cell = node.querySelector<HTMLElement>(".prompt-math-preview-formula")!;
+    // and no scroll bar stands between them (a vertical one takes width from the box).
+    const beside = button.left >= formula.right - 1 && button.top < formula.bottom && cell.offsetWidth === cell.clientWidth;
+    return { drawn: !!node.querySelector(".katex"), error: !!node.querySelector(".katex-error"), edit: node.querySelector("button")?.getAttribute("aria-label"), seen, beside };
   },
   tinted: () => document.querySelectorAll("#session-prompt .prompt-math").length,
   edit: () => input!.editEquation(),
