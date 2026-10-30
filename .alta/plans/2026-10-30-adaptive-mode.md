@@ -145,6 +145,31 @@ The results go into this plan and a comment on #273. Then one of:
 
 Host support gets a plan of its own.
 
+## Results
+
+Codex tiers: `complex` GPT-6.1 Sol (medium), `standard` GPT-6.1 Terra (medium), `quick` GPT-6 Luna (low). Anthropic API tiers: Opus 5.5 (medium), Sonnet 5.5 (medium), Haiku 5.5 (low). Costs are priced per request from the models.dev prices of CodeAlta (`tmp/evals/`), children and hand-off turns included; on Codex they are what the subscription would cost on the API.
+
+**Codex, prompt v2, 3 runs per cell** (`grid-codex-final`, `race-codex`): cost is the sum over the scenarios of the average run.
+
+| Configuration | Success, 5 scenarios | Cost | Of the baseline | With `race-condition` | Of the baseline |
+| --- | --- | --- | --- | --- | --- |
+| Default on `complex` | 15/15 | $1.15 | 100% | $1.25 | 100% |
+| Default on `standard` | 12/15: `easy-then-hard` 0/3 | $0.36 | 32% | $0.39 | 31% |
+| A, switch, on `standard` | 15/15 | $0.50 | 43% | $0.60 | 48% |
+| B, delegate, on `standard` | 15/15 | $0.53 | 47% | $0.66 | 53% |
+| C, review, on `standard` | 15/15 | $0.36 | 32% | $0.55 | 44% |
+| A on `quick` | 12/15 | $0.08 | 7% | $0.08 | 6% |
+
+**Anthropic API, prompt v2** (`grid-anthropic-r1`, `race-anthropic`): every configuration passed every scenario; per 5 scenarios, Default on `complex` $1.18, Default on `standard` $0.57 (48%), A on `standard` $0.46 (39%), B $0.58 (49%), A on `quick` $0.04 (3%); on `race-condition` the same order. No session switched. The spend of the whole work on the Anthropic API was about $4.
+
+What the numbers say:
+
+- **The cheap tiers do most of the work well.** Luna and Haiku passed almost everything, multi-file features and 100k tokens of reading included. The savings come from the tier a request runs on, much more than from the switches.
+- **One kind of failure separates the tiers:** a bug whose cause is in a shared helper. Terra fixed it at the caller in 3 runs of 3 and passed its own tests, where Sol fixed the helper; the hidden tests caught it. Luna did the same once in 3.
+- **Prompt v1** (go up when a request "clearly needs it") never switched: the current model judged that it could do the request. **Prompt v2** sends a request of the `complex` list up before starting: Terra followed it and passed `easy-then-hard`, but also sent up the concurrency bug it could fix alone, for 4 times its cost; Sonnet and Haiku did not follow it at all, and did not need to.
+- **Delegation (B) costs more than a switch (A)**: the child reads the code again, and the parent checks its work.
+- **The judge** (Sol, `grid-codex-final/report.md`) found mostly tiers too strong: lookups, commits, specified features and wide reading done on `standard` or kept on `complex` after the hard part; and one missed escalation, the caller workaround. Its rules: route each request afresh with `quick` as the default, go up on evidence (failed checks, competing hypotheses, an invariant the checks do not cover), fix a shared helper at the helper, come back down for mechanical follow-ups, delegate only large independent work, try a tool before saying it is unavailable. Prompt v3 is made of them.
+
 ## Steps
 
 ### Milestone 0: prompt and spike
@@ -156,10 +181,10 @@ Host support gets a plan of its own.
 
 ### Milestone 1: measure
 
-- [ ] 5. `CodeAlta.Evals`: scenarios with turns (`EvalScenario`), `--prompts` with the agent prompt ids, a tier per configuration and the tiers given through `-c`; the prompts copied from `.alta/prompts/agents/` into each fixture.
-- [ ] 6. The measures per leg from the JSONL: the model and usage updates of each request, cache read and write, the role of the leg, the hand-off turns; the child sessions counted with their run (check whether `_codealta/result` includes them, else add their usage updates); every request priced from one models.dev snapshot; invalid runs marked and run again; the section of the report, and the judge prompt for wrong choices.
-- [ ] 7. The five scenarios with their fixtures and their checks, tests the session does not see included; `--list` shows them.
-- [ ] 8. Run the grid on Claude Code. The user runs it later on another machine with more providers: nothing of this machine (a path, a provider key) is written in the harness or its scenarios, only in the options of a run.
+- [x] 5. `CodeAlta.Evals`: scenarios with turns (`EvalScenario`), `--prompts` with the agent prompt ids, a tier per configuration and the tiers given through `-c`; the prompts copied from `.alta/prompts/agents/` into each fixture.
+- [x] 6. The measures per leg from the JSONL: the model and usage updates of each request, cache read and write, the role of the leg, the hand-off turns; the child sessions counted with their run (check whether `_codealta/result` includes them, else add their usage updates); every request priced from one models.dev snapshot; invalid runs marked and run again; the section of the report, and the judge prompt for wrong choices.
+- [x] 7. The five scenarios with their fixtures and their checks, tests the session does not see included; `--list` shows them. *A sixth, `race-condition`, was added when every tier passed the five on the Anthropic API.*
+- [x] 8. Run the grid on Claude Code. *Run on Codex (3 runs per cell) and on the Anthropic API (1 run per cell, 3 for `race-condition`), the providers the user gave.* The user runs it later on another machine with more providers: nothing of this machine (a path, a provider key) is written in the harness or its scenarios, only in the options of a run.
 - [ ] 9. Tune the prompt for general rules from what the judge found, against the frozen baseline of Default; run the whole grid again with the final candidate.
 - [ ] 10. Use the final prompt for a few days on CodeAlta's own work, and note each choice the timeline shows to be wrong.
 
