@@ -230,6 +230,15 @@ footer { display: flex; align-items: center; justify-content: center; gap: .4rem
 .markdown-diagram { margin: .625rem 0; padding: .75rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); overflow: auto; text-align: center; cursor: zoom-in; -webkit-overflow-scrolling: touch; }
 .markdown-diagram:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .markdown-diagram > svg { max-width: 100%; height: auto; }
+svg.pele {
+  --pele-bg: var(--panel-2); --pele-fg: var(--text); --pele-muted: var(--muted); --pele-line: var(--muted);
+  --pele-surface: color-mix(in srgb, var(--accent) 16%, var(--panel-2)); --pele-surface-alt: color-mix(in srgb, var(--text) 5%, var(--panel-2));
+  --pele-border: color-mix(in srgb, var(--accent) 70%, var(--panel-2)); --pele-accent: var(--accent); --pele-critical: var(--red);
+  --pele-series-1: color-mix(in srgb, var(--accent) 85%, var(--panel-2)); --pele-series-2: color-mix(in srgb, var(--user-accent) 85%, var(--panel-2));
+  --pele-series-3: color-mix(in srgb, var(--green) 85%, var(--panel-2)); --pele-series-4: color-mix(in srgb, var(--yellow) 85%, var(--panel-2));
+  --pele-series-5: color-mix(in srgb, var(--red) 85%, var(--panel-2)); --pele-series-6: color-mix(in srgb, var(--muted) 85%, var(--panel-2));
+  --pele-series-7: color-mix(in srgb, var(--accent) 50%, var(--panel-2)); --pele-series-8: color-mix(in srgb, var(--green) 50%, var(--panel-2));
+}
 .diagram-open { position: absolute; top: 4px; right: 4px; display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 .75rem; border: 1px solid var(--line); border-radius: 999px;
   background: var(--panel); color: var(--text); font-size: .75rem; text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,.18); cursor: pointer; }
 .diagram-open svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

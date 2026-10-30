@@ -1,22 +1,22 @@
-import { appearanceKey, mixColors, shellColor } from "./shellColors";
+import createDOMPurify, { type DOMPurify } from "dompurify";
 
-/** How diagrams are drawn for the window's current theme and color scheme. */
-export type DiagramAppearance = Readonly<{ key: string; variables: Readonly<Record<string, string | boolean>> }>;
+/** How diagrams are drawn: what makes the same text draw differently, named by `key`. */
+export type DiagramAppearance = Readonly<{ key: string; fontFamily?: string; maxWidth?: number }>;
 
 /** A longer text is left as a code block. */
 export const maximumDiagramLength = 20_000;
 
-/** A text that Mermaid refused, with the first line of what it said: shown under the block, which stays code. */
+/** A text that the renderer refused, with the first line of what it said: shown under the block, which stays code. */
 export type DiagramRefusal = Readonly<{ refused: string }>;
 
-// What a refusal shows: its first line, short. Mermaid's parse errors go on with the line and an arrow under it.
+// What a refusal shows: its first line, short. A parse error goes on with the line and an arrow under it.
 const maximumRefusalLength = 160;
 
 /** The first line of what refused a text, for the reader; never empty. */
 export function refusalOf(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? "");
   const line = message.split(/\r?\n/).map(value => value.trim()).find(value => value.length > 0)?.replace(/:$/, "") ?? "";
-  if (!line) return "Mermaid could not read it";
+  if (!line) return "Not a diagram that can be read";
   return line.length > maximumRefusalLength ? `${line.slice(0, maximumRefusalLength - 1)}…` : line;
 }
 
@@ -41,7 +41,7 @@ export function createDiagramCache(draw: (text: string, appearance: DiagramAppea
       const value = found(text, appearance);
       return typeof value === "object" && value !== null ? null : value;
     },
-    /** Why Mermaid refused a text that it was asked to draw; null when it did not, or did not say. */
+    /** Why the renderer refused a text that it was asked to draw; null when it did not, or did not say. */
     refusal(text: string, appearance: DiagramAppearance): string | null {
       const value = found(text, appearance);
       return typeof value === "object" && value !== null ? value.refused : null;
@@ -64,67 +64,38 @@ export function createDiagramCache(draw: (text: string, appearance: DiagramAppea
   };
 }
 
-let appearance: DiagramAppearance | undefined;
+/** The size of the text of a diagram, in pixels. */
+const diagramFontSize = 14;
 
-/** The diagram colors of the window as it looks now, taken from the shell's own colors. */
-export function diagramAppearance(): DiagramAppearance {
-  const key = appearanceKey();
-  if (appearance?.key === key) return appearance;
-  const root = document.documentElement;
-  const dark = root.dataset.theme !== "light";
-  const probe = root.appendChild(document.createElement("span"));
-  const color = (property: string, fallback: string) => shellColor(probe, property) ?? fallback;
-  const surface = color("--panel-2", dark ? "#2f343c" : "#f6f7f9");
-  const text = color("--text", dark ? "#f6f7f9" : "#1c2127");
-  const muted = color("--muted", dark ? "#abb3bf" : "#5f6b7c");
-  const accent = color("--accent", dark ? "#4c90f0" : "#2d72d2");
-  const user = color("--user-accent", dark ? "#9d3f9d" : "#7c327c");
-  const green = color("--green", dark ? "#32a467" : "#238551");
-  const yellow = color("--yellow", dark ? "#f0b726" : "#c87619");
-  const red = color("--red", dark ? "#e76a6e" : "#cd4246");
-  probe.remove();
-  // Charts take the shell's own hues, strong first, then the same hues softened.
-  const hues = [accent, user, green, yellow, red, muted];
-  const slices = Object.fromEntries([...hues.map(hue => mixColors(surface, hue, 0.8)), ...hues.map(hue => mixColors(surface, hue, 0.45))]
-    .map((value, index) => [`pie${index + 1}`, value]));
-  const node = mixColors(surface, accent, dark ? 0.22 : 0.12);
-  appearance = {
-    key,
-    variables: {
-      darkMode: dark, background: surface, fontFamily: getComputedStyle(root).fontFamily, fontSize: "13px",
-      primaryColor: node, primaryTextColor: text, primaryBorderColor: mixColors(surface, accent, 0.7),
-      secondaryColor: mixColors(surface, user, dark ? 0.24 : 0.12), secondaryTextColor: text, secondaryBorderColor: mixColors(surface, user, 0.6),
-      tertiaryColor: mixColors(surface, green, dark ? 0.2 : 0.1), tertiaryTextColor: text, tertiaryBorderColor: mixColors(surface, green, 0.6),
-      lineColor: muted, textColor: text, mainBkg: node, nodeBorder: mixColors(surface, accent, 0.7),
-      clusterBkg: mixColors(surface, text, 0.04), clusterBorder: mixColors(surface, text, 0.3), titleColor: text,
-      edgeLabelBackground: surface, noteBkgColor: mixColors(surface, yellow, dark ? 0.25 : 0.3), noteTextColor: text,
-      noteBorderColor: mixColors(surface, yellow, 0.6),
-      ...slices, pieStrokeColor: surface, pieStrokeWidth: "2px", pieOuterStrokeColor: mixColors(surface, text, 0.3), pieOuterStrokeWidth: "1px",
-      pieTitleTextColor: text, pieSectionTextColor: dark ? "#ffffff" : "#111418", pieLegendTextColor: text,
-    },
-  };
-  return appearance;
+/**
+ * How the window draws diagrams now: in its font, and no wider than `maxWidth` pixels when it is given (a wider
+ * flowchart is laid out top to bottom). The colors are not part of it: a diagram takes them from the `--pele-*`
+ * custom properties of the stylesheet, and follows the theme without being drawn again.
+ */
+export function diagramAppearance(maxWidth?: number): DiagramAppearance {
+  const fontFamily = getComputedStyle(document.documentElement).fontFamily;
+  const width = maxWidth !== undefined && maxWidth > 0 ? Math.floor(maxWidth) : undefined;
+  return { key: `${fontFamily}|${width ?? ""}`, fontFamily, maxWidth: width };
 }
 
-let library: Promise<typeof import("mermaid")> | undefined;
-let queue: Promise<unknown> = Promise.resolve();
+let library: Promise<typeof import("pele/lazy")> | undefined;
 let sequence = 0;
 
-// Mermaid keeps one configuration: draw one diagram at a time, each under its own appearance. Its strict
-// security level encodes markup in labels, disables click handlers and sanitizes the SVG it returns.
-function drawWithMermaid(text: string, look: DiagramAppearance): Promise<string | DiagramRefusal | null> {
-  const work = queue.then(async (): Promise<string | DiagramRefusal | null> => {
-    const { default: mermaid } = await (library ??= import("mermaid"));
-    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true,
-      theme: "base", themeVariables: look.variables, fontFamily: String(look.variables.fontFamily) });
-    // A text that does not parse is said with the first line of Mermaid's error, as the reader would fix it.
-    try { await mermaid.parse(text); }
-    catch (error) { return { refused: refusalOf(error) }; }
-    return (await mermaid.render(`codealta-diagram-${++sequence}`, text)).svg;
-  });
-  queue = work.catch(() => null);
-  return work;
+// Pele loads the code of a kind of diagram the first time one is drawn. It escapes the text of the labels and
+// ignores click callbacks; links and images are off, so a diagram makes no request. The SVG it returns is
+// sanitized again (SVG only, no script, no handler) before the window shows it.
+async function drawWithPele(text: string, look: DiagramAppearance): Promise<string | DiagramRefusal | null> {
+  const { renderAsync } = await (library ??= import("pele/lazy"));
+  let svg: string;
+  // A text that does not parse is said with the first line of the error, as the reader would fix it.
+  try {
+    svg = (await renderAsync(text, { fontFamily: look.fontFamily, fontSize: diagramFontSize, maxWidth: look.maxWidth,
+      idPrefix: `codealta-diagram-${++sequence}-`, links: false, images: false, limit: maximumDiagramLength })).svg;
+  } catch (error) { return { refused: refusalOf(error) }; }
+  return (purifier ??= createDOMPurify(window)).sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } });
 }
 
+let purifier: DOMPurify | undefined;
+
 /** The diagrams of the window. */
-export const diagrams = createDiagramCache(drawWithMermaid);
+export const diagrams = createDiagramCache(drawWithPele);

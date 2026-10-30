@@ -49,7 +49,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   const render = useMemo(() => createMarkdownRenderer(window, { note: translate(locale, "Note"), tip: translate(locale, "Tip"),
     important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution"), copy: translate(locale, "Copy"),
     notDrawn: translate(locale, "Not drawn as a diagram:") }), [locale]);
-  // Diagrams are drawn on the side, for the window's theme and color scheme, then found by the next render.
+  // Diagrams are drawn on the side, in the window's font, then found by the next render; they take the colors of the theme from the stylesheet.
   const appearance = useSyncExternalStore(subscribeAppearance, appearanceKey);
   const [drawn, setDrawn] = useState(0);
   const rendered = useMemo(() => {

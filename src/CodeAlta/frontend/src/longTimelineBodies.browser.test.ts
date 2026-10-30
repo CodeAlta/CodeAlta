@@ -18,7 +18,7 @@ test("production long diagnostic bodies preserve literal preview, full Copy, not
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./longTimelineBodies.mount.tsx", import.meta.url))], outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
     await writeFile(join(root, "style.css"), readFileSync(new URL("./style.css", import.meta.url)));
-    await writeFile(join(root, "fixture.html"), '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
+    await writeFile(join(root, "fixture.html"), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     const profile = join(root, "profile");
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(profile, browser);

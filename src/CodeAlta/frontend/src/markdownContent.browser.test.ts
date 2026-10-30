@@ -20,7 +20,8 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     const bundle = await build({ entryPoints: [fileURLToPath(new URL("./markdownContent.mount.tsx", import.meta.url))],
       bundle: true, platform: "browser", format: "iife", write: false });
     const origin = "https://markdown-production.invalid", page = origin + "/index.html", script = origin + "/fixture.js";
-    const assets = new Map([[page, '<!doctype html><html><head><link rel="icon" href="data:,"></head><body><div id="app"></div><script src="/fixture.js"></script></body></html>'], [script, bundle.outputFiles[0].text]]);
+    // The page is in UTF-8, as the window's own: the bundle is a classic script, which is read in the encoding of the page.
+    const assets = new Map([[page, '<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="data:,"></head><body><div id="app"></div><script src="/fixture.js"></script></body></html>'], [script, bundle.outputFiles[0].text]]);
     browser = spawn(edge!, [...browserBaseArgs,
       "--host-resolver-rules=MAP * ~NOTFOUND", `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(directory, "profile"), browser);

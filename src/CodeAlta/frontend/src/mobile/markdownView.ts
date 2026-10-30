@@ -1,37 +1,57 @@
-import { diagramAppearance, diagrams, type DiagramAppearance } from "../diagrams";
+import { diagramAppearance, diagrams } from "../diagrams";
 import { createMarkdownRenderer } from "../markdownBoundary";
 import { el, iconSvg } from "./dom";
 
 /** What the page asks of the server for a diagram page: `POST /api/diagrams`. */
 export type DiagramUpload = (body: Readonly<{ svg: string; background?: string; text?: string; dark?: boolean }>) => Promise<{ url?: string }>;
 
+/** The colors of a drawn diagram as the page shows them: the `--pele-*` custom properties, resolved. */
+export type DiagramColors = Readonly<{ dark: boolean; variables: Readonly<Record<string, string>> }>;
+
+// The custom properties that color a diagram (see the `svg.pele` rule of the stylesheet).
+const diagramProperties = ["--pele-bg", "--pele-fg", "--pele-muted", "--pele-line", "--pele-surface", "--pele-surface-alt", "--pele-border",
+  "--pele-accent", "--pele-critical", ...Array.from({ length: 8 }, (_, index) => `--pele-series-${index + 1}`)];
+
+/** The colors a drawn diagram has in the page: what its own page needs, where the stylesheet of the page is not. */
+export function diagramColors(drawing: Element): DiagramColors {
+  const style = drawing.ownerDocument.defaultView!.getComputedStyle(drawing);
+  const variables = Object.fromEntries(diagramProperties.map(name => [name, style.getPropertyValue(name).trim()]).filter(([, value]) => value));
+  return { dark: drawing.ownerDocument.documentElement.dataset.theme !== "light", variables };
+}
+
 /**
- * The SVG of a diagram as its own page shows it: Mermaid's `max-width` style becomes a width the page reads
- * (`data-w` and `--w`), so the diagram can be shown at its size and zoomed.
+ * The SVG of a diagram as its own page shows it: its width becomes a value the page reads (`data-w` and `--w`), so the
+ * diagram can be shown at its size and zoomed, and it carries its colors.
  */
-export function diagramPageSvg(svg: string): string {
-  const width = parseFloat(/max-width:\s*([\d.]+)px/u.exec(svg)?.[1] ?? "") || 0;
-  if (!width) return svg;
-  return svg.replace(/<svg\b/u, `<svg data-w="${width}" style="--w:${width}px"`).replace(/(<svg[^>]*?)\sstyle="max-width:[^"]*"/u, "$1");
+export function diagramPageSvg(svg: string, variables: Readonly<Record<string, string>> = {}): string {
+  const root = /^<svg\b[^>]*>/u.exec(svg)?.[0];
+  if (!root) return svg;
+  const width = parseFloat(/\swidth="([\d.]+)"/u.exec(root)?.[1] ?? "") || 0;
+  const declarations = (width ? `--w:${width}px;` : "") + Object.entries(variables)
+    .map(([name, value]) => `${name}:${value.replace(/[&"<>]/gu, "")};`).join("");
+  if (!declarations) return svg;
+  const dressed = / style="/u.test(root) ? root.replace(/ style="/u, ` style="${declarations}`) : root.replace(/\s*(\/?>)$/u, ` style="${declarations}"$1`);
+  return (width ? dressed.replace(/^<svg\b/u, `<svg data-w="${width}"`) : dressed) + svg.slice(root.length);
 }
 
 /**
  * The pages of drawn diagrams, made on the server the first time a diagram is opened (never when it is drawn), once per
- * drawing and theme. A page that could not be made is asked for again at the next open.
+ * drawing and colors. A page that could not be made is asked for again at the next open.
  */
 export function createDiagramPages(upload: DiagramUpload, capacity = 48) {
   const made = new Map<string, Promise<string | null>>();
   const ready = new Map<string, string>();
+  const identity = (svg: string, colors: DiagramColors) => `${JSON.stringify(colors)}\n${svg}`;
   return {
     /** The address of a page already made, or undefined. */
-    known: (svg: string, look: DiagramAppearance) => ready.get(`${look.key}\n${svg}`),
+    known: (svg: string, colors: DiagramColors) => ready.get(identity(svg, colors)),
     /** Makes the page of a diagram (once), and gives its address, or null when it could not be made. */
-    open(svg: string, look: DiagramAppearance, base: string): Promise<string | null> {
-      const key = `${look.key}\n${svg}`;
+    open(svg: string, colors: DiagramColors, base: string): Promise<string | null> {
+      const key = identity(svg, colors);
       let page = made.get(key);
       if (!page) {
-        const variables = look.variables;
-        page = upload({ svg: diagramPageSvg(svg), background: String(variables.background ?? ""), text: String(variables.textColor ?? ""), dark: !!variables.darkMode })
+        const { variables } = colors;
+        page = upload({ svg: diagramPageSvg(svg, variables), background: variables["--pele-bg"] ?? "", text: variables["--pele-fg"] ?? "", dark: colors.dark })
           .then(answer => answer.url ? new URL(answer.url, base).href : null)
           .catch(() => null)
           .then(url => { if (url) ready.set(key, url); else made.delete(key); return url; });
@@ -50,13 +70,16 @@ export function linkTarget(href: string | null): "web" | "none" {
 
 /**
  * The messages of the timeline, rendered as the desktop renders them (`createMarkdownRenderer`: markdown-it,
- * DOMPurify, highlighted code, Mermaid diagrams drawn on the side), with what a phone adds: a tap on a diagram shows
+ * DOMPurify, highlighted code, diagrams drawn on the side), with what a phone adds: a tap on a diagram shows
  * it full screen, "Open" shows it in a tab of its own (not in the installed app, where full screen is the way), and
  * the copy button of a code block copies it.
  */
 export function createMarkdownView(options: Readonly<{ window: Window & typeof globalThis; upload: DiagramUpload; installed: () => boolean; note: (text: string) => void }>) {
   const { window } = options, document = window.document;
-  const render = createMarkdownRenderer(window);
+  // A diagram is laid out for the width it has in a message: the screen's, less the margins of the message and of the
+  // diagram. A flowchart wider than that is laid out top to bottom.
+  const look = () => diagramAppearance(window.innerWidth - 64);
+  const render = createMarkdownRenderer(window, undefined, look);
   const pages = createDiagramPages(options.upload);
 
   /** Renders a text into an element; `redraw` is called once a diagram of it is drawn. Says whether it has a diagram (drawn again when the theme changes). */
@@ -64,8 +87,8 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
     const undrawn: string[] = [];
     container.innerHTML = render(text, true, undrawn);
     for (const figure of Array.from(container.querySelectorAll<HTMLElement>(".markdown-diagram"))) dressDiagram(figure);
-    const look = diagramAppearance();
-    if (undrawn.length) void Promise.all(undrawn.map(source => diagrams.draw(source, look))).then(() => { if (container.isConnected) redraw(); });
+    const appearance = look();
+    if (undrawn.length) void Promise.all(undrawn.map(source => diagrams.draw(source, appearance))).then(() => { if (container.isConnected) redraw(); });
     return undrawn.length > 0 || !!container.querySelector(".markdown-diagram, pre[data-language='mermaid']");
   }
 
@@ -88,13 +111,13 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
   }
 
   // A tab opened in the tap itself (a browser lets no page open one after an await), then sent to the page once made.
-  async function openDiagram(link: HTMLAnchorElement, svg: string) {
-    const look = diagramAppearance();
-    const known = pages.known(svg, look);
+  async function openDiagram(link: HTMLAnchorElement, drawing: SVGElement) {
+    const svg = drawing.outerHTML, colors = diagramColors(drawing);
+    const known = pages.known(svg, colors);
     if (known) { link.href = known; return; }
     const tab = window.open("about:blank", "_blank");
     if (tab) tab.opener = null;
-    const url = await pages.open(svg, look, window.location.href);
+    const url = await pages.open(svg, colors, window.location.href);
     if (!url) { tab?.close(); options.note("The diagram could not be opened."); return; }
     link.href = url;
     if (tab) tab.location.replace(url);
@@ -115,8 +138,9 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
     stage.innerHTML = svg;
     const drawing = stage.querySelector("svg");
     if (drawing) {
-      const width = parseFloat(drawing.style.maxWidth) || drawing.viewBox?.baseVal?.width || 0;
-      drawing.removeAttribute("style");
+      // Its style also holds its colors: only its size changes.
+      const width = drawing.width?.baseVal?.value || drawing.viewBox?.baseVal?.width || 0;
+      drawing.style.maxWidth = "none";
       if (width) drawing.style.width = `${Math.max(width, window.innerWidth - 24)}px`;
     }
     const back = el(document, "button", "diagram-zoom-back");
@@ -148,8 +172,8 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
       if (open) {
         if (open.getAttribute("href")) return; // A page already made: the link opens it.
         event.preventDefault();
-        const svg = open.parentElement?.querySelector(".markdown-diagram svg")?.outerHTML;
-        if (svg) void openDiagram(open, svg);
+        const drawing = open.parentElement?.querySelector<SVGElement>(".markdown-diagram svg");
+        if (drawing) void openDiagram(open, drawing);
         return;
       }
       const figure = target?.closest<HTMLElement>(".markdown-diagram");

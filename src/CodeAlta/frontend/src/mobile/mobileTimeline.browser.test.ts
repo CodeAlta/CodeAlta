@@ -56,7 +56,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
   const directory = await mkdtemp(join(tmpdir(), "codealta-mobile-timeline-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   const bundle = await build({ entryPoints: [fileURLToPath(new URL("./main.ts", import.meta.url))], bundle: true, format: "esm", platform: "browser",
-    write: false, outdir: join(directory, "out"), external: ["mermaid"], define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent" });
+    write: false, outdir: join(directory, "out"), external: ["pele/lazy"], define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent" });
   const script = bundle.outputFiles.find(file => file.path.endsWith(".js"))!.text, style = bundle.outputFiles.find(file => file.path.endsWith(".css"))!.text;
   const server = await startFixtureServer(await pageFiles(script, style));
   let seq = 0;

@@ -76,7 +76,7 @@ Pictures open as pictures, and an SVG file as a drawing. A Markdown file can be 
   <figcaption class="small text-secondary mt-2">An SVG file shown as a drawing. The buttons at the right of the tabs switch to its text.</figcaption>
 </figure>
 
-The Markdown page shows the front matter as a table, task lists as check boxes, GitHub alerts in color, highlighted code and `mermaid` diagrams. A `mermaid` block Mermaid cannot read stays code, with the reason under it (in a sequence diagram, `;` ends a statement; write `#59;` for one in a message).
+The Markdown page shows the front matter as a table, task lists as check boxes, GitHub alerts in color, highlighted code and `mermaid` diagrams. A `mermaid` block that cannot be read stays code, with the reason under it (in a sequence diagram, `;` ends a statement; write `#59;` for one in a message).
 
 `Ctrl+F` (`Cmd+F` on macOS) finds a text in the page, as in the [Documentation tab](readme.md#documentation-tab), in plans and files you [review](../reviews.md) and in Work items.
 

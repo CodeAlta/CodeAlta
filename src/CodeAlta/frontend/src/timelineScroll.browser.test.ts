@@ -21,7 +21,7 @@ test("mounted timeline follows the final page across later layout growth", { ski
     await build({ entryPoints: [fileURLToPath(new URL("./timelineScroll.mount.ts", import.meta.url))],
       outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
     const page = join(root, "fixture.html");
-    await writeFile(page, '<!doctype html><html><body><div id="app"></div><script src="fixture.js"></script></body></html>');
+    await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     const profile = join(root, "profile");
     browser = spawn(edge!, [...browserBaseArgs,
       `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });

@@ -2,15 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createDiagramPages, diagramPageSvg, linkTarget } from "./markdownView";
 
-const look = { key: "dark|", variables: { background: "#2f343c", textColor: "#f6f7f9", darkMode: true } };
+const look = { dark: true, variables: { "--pele-bg": "#2f343c", "--pele-fg": "#f6f7f9" } };
 
-test("a diagram page gets the width Mermaid gave the drawing as a value it reads", () => {
-  const svg = '<svg id="d" style="max-width: 312.5px;" viewBox="0 0 312.5 80"><g/></svg>';
-  assert.equal(diagramPageSvg(svg), '<svg data-w="312.5" style="--w:312.5px" id="d" viewBox="0 0 312.5 80"><g/></svg>');
+test("a diagram page gets the width of the drawing as a value it reads, and the colors it had in the page", () => {
+  const svg = '<svg class="pele" viewBox="0 0 312.5 80" width="312.5" height="80" style="max-width:100%;--_bg:var(--pele-bg,#fff)"><g width="9"/></svg>';
+  assert.equal(diagramPageSvg(svg, look.variables), '<svg data-w="312.5" class="pele" viewBox="0 0 312.5 80" width="312.5" height="80" '
+    + 'style="--w:312.5px;--pele-bg:#2f343c;--pele-fg:#f6f7f9;max-width:100%;--_bg:var(--pele-bg,#fff)"><g width="9"/></svg>');
   assert.equal(diagramPageSvg("<svg><g/></svg>"), "<svg><g/></svg>");
+  // A value never leaves its attribute.
+  assert.equal(diagramPageSvg("<svg><g/></svg>", { "--pele-bg": 'red"><script>' }), '<svg style="--pele-bg:redscript;"><g/></svg>');
 });
 
-test("a diagram page is made on the server the first time it is opened, once per drawing and theme", async () => {
+test("a diagram page is made on the server the first time it is opened, once per drawing and colors", async () => {
   const uploads: unknown[] = [];
   const pages = createDiagramPages(async body => { uploads.push(body); return { url: `/d/${uploads.length}` }; });
   assert.equal(pages.known("<svg/>", look), undefined, "nothing is made before it is opened");
@@ -18,10 +21,10 @@ test("a diagram page is made on the server the first time it is opened, once per
   const [first, second] = await Promise.all([pages.open("<svg/>", look, "https://pc.ts.net/"), pages.open("<svg/>", look, "https://pc.ts.net/")]);
   assert.equal(first, "https://pc.ts.net/d/1");
   assert.equal(second, first);
-  assert.deepEqual(uploads, [{ svg: "<svg/>", background: "#2f343c", text: "#f6f7f9", dark: true }]);
+  assert.deepEqual(uploads, [{ svg: '<svg style="--pele-bg:#2f343c;--pele-fg:#f6f7f9;"/>', background: "#2f343c", text: "#f6f7f9", dark: true }]);
   assert.equal(pages.known("<svg/>", look), first);
-  await pages.open("<svg/>", { ...look, key: "light|" }, "https://pc.ts.net/");
-  assert.equal(uploads.length, 2, "another theme is another page");
+  await pages.open("<svg/>", { dark: false, variables: { "--pele-bg": "#edeff2" } }, "https://pc.ts.net/");
+  assert.equal(uploads.length, 2, "other colors are another page");
 });
 
 test("a page that could not be made is asked for again at the next open", async () => {

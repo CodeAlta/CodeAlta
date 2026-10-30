@@ -1,6 +1,6 @@
 import createDOMPurify from "dompurify";
 import { highlightCode } from "./codeHighlight";
-import { diagramAppearance, diagrams } from "./diagrams";
+import { diagramAppearance, diagrams, type DiagramAppearance } from "./diagrams";
 import { createMarkdownParser, frontMatterEntries, frontMatterLineCount, splitFrontMatter } from "./markdown";
 import { markdownHrefKind } from "./markdownLinks";
 import { sourceLinesAttribute } from "./markdownSourceLines";
@@ -11,7 +11,7 @@ export type AlertKind = typeof alertKinds[number];
 /** The titles of the alerts, in the language of the window. */
 export type MarkdownLabels = Readonly<Record<AlertKind, string> & {
   /** What the button of a code block says it does. */ copy?: string;
-  /** What the note under a `mermaid` block that Mermaid refused says before its reason. */ notDrawn?: string;
+  /** What the note under a `mermaid` block that could not be drawn says before its reason. */ notDrawn?: string;
 }>;
 const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy",
   notDrawn: "Not drawn as a diagram:" };
@@ -29,8 +29,12 @@ const fileImageAttribute = "data-file-image";
  */
 export type MarkdownRenderOptions = Readonly<{ document?: boolean; sourceLines?: boolean }>;
 
-/** Instance-owned browser boundary; parser output must never bypass this sanitizer. */
-export function createMarkdownRenderer(view: Window & typeof globalThis, labels: MarkdownLabels = englishLabels) {
+/**
+ * Instance-owned browser boundary; parser output must never bypass this sanitizer. Its diagrams are those drawn
+ * for `appearance`: the window's, or one no wider than a phone.
+ */
+export function createMarkdownRenderer(view: Window & typeof globalThis, labels: MarkdownLabels = englishLabels,
+  appearance: () => DiagramAppearance = () => diagramAppearance()) {
   // A link to a file is one that the Markdown of the text wrote (`[name](path)`): the parsers mark theirs with
   // a value that no text knows. An `<a>` written in HTML opens a page of the web, and nothing else.
   const fileLinkMark = view.crypto?.randomUUID?.() ?? `${Math.random()}${Math.random()}`;
@@ -89,7 +93,8 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       const language = code.className.slice("language-".length);
       const text = code.textContent ?? "";
       if (language === "mermaid") {
-        const svg = diagrams.get(text, diagramAppearance());
+        const look = appearance();
+        const svg = diagrams.get(text, look);
         if (typeof svg === "string") {
           const figure = view.document.createElement("div");
           figure.className = "markdown-diagram";
@@ -101,8 +106,8 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         } else {
           if (svg === undefined) undrawn?.push(text);
           pre.setAttribute("data-language", "mermaid");
-          // A block that Mermaid refused says why under it, or it reads as a diagram that failed to show.
-          const refused = svg === null ? diagrams.refusal(text, diagramAppearance()) : null;
+          // A block that could not be drawn says why under it, or it reads as a diagram that failed to show.
+          const refused = svg === null ? diagrams.refusal(text, look) : null;
           if (refused !== null) {
             const note = view.document.createElement("p");
             note.className = "markdown-diagram-refused";

@@ -30,7 +30,7 @@ test("what is typed goes to the editor that has the keyboard, also after a focus
         });
       } }] });
     const page = join(root, "fixture.html");
-    await writeFile(page, '<!doctype html><html><body><div id="app"></div><script src="fixture.js"></script></body></html>');
+    await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, "--allow-file-access-from-files",
       `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);

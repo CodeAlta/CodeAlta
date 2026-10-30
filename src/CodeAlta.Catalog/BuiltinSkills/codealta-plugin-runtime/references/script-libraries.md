@@ -205,7 +205,7 @@ These are **not import-map entries**. Use the helper, not `import ... from "echa
 | `echarts` | 6.1.0 | `Chart`, distribution helpers; registered features below | [Option API](https://echarts.apache.org/en/option.html) · [GitHub](https://github.com/apache/echarts) |
 | `markdown-it` | 15.0.2 | `Markdown` | [API / GitHub](https://github.com/markdown-it/markdown-it) |
 | `highlight.js` | 11.12.0 | `Code`, Markdown code fences | [Languages / GitHub](https://github.com/highlightjs/highlight.js) |
-| `mermaid` | 11.17.2 | `Diagram`, Mermaid fences | [Syntax](https://mermaid.js.org/intro/) · [GitHub](https://github.com/mermaid-js/mermaid) |
+| `pele` | 1.12.0 | `Diagram`, Mermaid fences | [Syntax](https://mermaid.js.org/intro/) · [Pele](https://pele.run) · [GitHub](https://github.com/obsidianmd/pele) |
 | `dompurify` | 3.4.14 | `alta.html(text)` with CodeAlta's fragment policy | [API / GitHub](https://github.com/cure53/DOMPurify) |
 | `@lobehub/icons-static-svg` | 1.95.1 | Curated `BrandIcon` assets, not the whole collection | [GitHub](https://github.com/lobehub/lobe-icons) |
 | `simple-icons` | 16.34.0 | Curated `BrandIcon` assets, not the whole collection | [Catalog](https://simpleicons.org) · [GitHub](https://github.com/simple-icons/simple-icons) |

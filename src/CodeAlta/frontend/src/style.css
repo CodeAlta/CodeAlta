@@ -2336,7 +2336,18 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .hljs-strong { font-weight: 600; }
 .markdown-diagram { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); overflow: auto; text-align: center; }
 .markdown-diagram > svg { max-width: 100%; height: auto; }
-/* Under a `mermaid` block that Mermaid refused: why it stays code. */
+/* Diagrams take the shell's own colors, and follow the theme without being drawn again. Charts take its hues, strong
+   first, then softened. */
+svg.pele {
+  --pele-bg: var(--panel-2); --pele-fg: var(--text); --pele-muted: var(--muted); --pele-line: var(--muted);
+  --pele-surface: color-mix(in srgb, var(--accent) 16%, var(--panel-2)); --pele-surface-alt: color-mix(in srgb, var(--text) 5%, var(--panel-2));
+  --pele-border: color-mix(in srgb, var(--accent) 70%, var(--panel-2)); --pele-accent: var(--accent); --pele-critical: var(--red);
+  --pele-series-1: color-mix(in srgb, var(--accent) 85%, var(--panel-2)); --pele-series-2: color-mix(in srgb, var(--user-accent) 85%, var(--panel-2));
+  --pele-series-3: color-mix(in srgb, var(--green) 85%, var(--panel-2)); --pele-series-4: color-mix(in srgb, var(--yellow) 85%, var(--panel-2));
+  --pele-series-5: color-mix(in srgb, var(--red) 85%, var(--panel-2)); --pele-series-6: color-mix(in srgb, var(--muted) 85%, var(--panel-2));
+  --pele-series-7: color-mix(in srgb, var(--accent) 50%, var(--panel-2)); --pele-series-8: color-mix(in srgb, var(--green) 50%, var(--panel-2));
+}
+/* Under a `mermaid` block that could not be drawn: why it stays code. */
 .markdown-diagram-refused { margin: -4px 0 10px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .markdown-content pre[data-language]::before { content: attr(data-language); float: right; margin: -7px -5px 4px 12px; color: var(--muted); font: 10px/1.4 var(--bp-typography-family-default); letter-spacing: .04em; user-select: none; }
 /* The button of a code block copies its text. It stays in the corner while the block scrolls, and names the

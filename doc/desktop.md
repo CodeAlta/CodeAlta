@@ -188,7 +188,7 @@ holds its stream back instead of letting it pile up.
 ## The page
 
 `src/CodeAlta/frontend` is a Vite build of React 19 with Blueprint 6 (components and theme), FlexLayout (the dock of
-tabs and splits), Monaco (prompt, code and diff editors), xterm.js (terminals), markdown-it with DOMPurify, Mermaid,
+tabs and splits), Monaco (prompt, code and diff editors), xterm.js (terminals), markdown-it with DOMPurify, pele (Mermaid diagrams, colored by CSS variables),
 ECharts, and React Flow with dagre for the graphs of Code Mode runs (lazy chunks). It is served from `frontend/dist` on `app://codealta` and runs under `StrictMode`, so
 effects are idempotent. `npm run demo` runs the page in a browser against `demo-api.ts`, a fake of the services.
 
@@ -303,8 +303,8 @@ The page is trusted; what it shows often is not. Each boundary has one owner:
   boundary relies on.
 - **Markdown.** The parser (`markdown.ts`) returns HTML that is explicitly unsanitized; its only consumer is the
   instance-owned boundary of `MarkdownContent` (`markdownBoundary.ts`, DOMPurify), with an explicit list of tags and
-  attributes. After sanitization the renderer may add only what it computes from text (highlighted code, Mermaid SVG
-  at its `strict` level, front matter tables, task boxes, alerts, the copy button); no authored or unsanitized markup
+  attributes. After sanitization the renderer may add only what it computes from text (highlighted code, the SVG
+  of pele for a `mermaid` block, with links and images off and sanitized again, front matter tables, task boxes, alerts, the copy button); no authored or unsanitized markup
   is concatenated afterwards. Renderer-owned attributes that must survive (`data-source-lines`, file links) carry a
   random mark of the render, so authored HTML cannot claim them. Rendering never navigates: a web link opens in the
   system browser only on a trusted user gesture, through `markdownLinks.open`, which validates the address again on
