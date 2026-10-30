@@ -11,7 +11,7 @@ test("known languages and their usual short names are highlighted", () => {
     ["python", "def f(): return 1"], ["rust", "fn main() {}"], ["go", "func main() {}"], ["json", "{\"a\": 1}"], ["jsonc", "{\"a\": 1}"],
     ["yaml", "a: 1"], ["toml", "a = 1"], ["html", "<p>x</p>"], ["csproj", "<Project />"], ["sql", "select 1"], ["bash", "echo 1"],
     ["sh", "echo 1"], ["powershell", "Get-Item ."], ["ps1", "Get-Item ."], ["dockerfile", "FROM scratch"], ["diff", "+a\n-b"],
-    ["fsharp", "let a = 1"], ["cpp", "int main() {}"], ["java", "class A {}"]] as const)
+    ["fsharp", "let a = 1"], ["cpp", "int main() {}"], ["java", "class A {}"], ["latex", "\\section{Intro} $x^2$"], ["tex", "\\begin{equation} a \\end{equation}"]] as const)
     assert.match(highlightCode(text, language) ?? "", /<span class="hljs-/, language);
 });
 

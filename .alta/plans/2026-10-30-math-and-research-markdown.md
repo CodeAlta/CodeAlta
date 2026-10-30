@@ -182,13 +182,13 @@ The entry chunk grows only by:
     - a bad formula;
     - a `data-math` written in HTML left as text;
     - both copy buttons writing LaTeX and MathML, with the clipboard stubbed.
-- [ ] 5. **Footnotes.**
+- [x] 5. **Footnotes.**
   - The plugin and its marked renderer rules in `markdown.ts`.
   - `dressFootnotes` in the boundary.
   - Scrolling and highlighting in `MarkdownContent.tsx` and `markdownView.ts`.
   - Styles and translated labels.
   - Tests: references and notes, navigation, inline notes, and footnote markup written in HTML left alone.
-- [ ] 6. **LaTeX and BibTeX.**
+- [x] 6. **LaTeX and BibTeX.**
   - Grammars in `monacoGrammars.ts`, loaders in `monacoLanguages.ts`, extensions and names in `fileLanguage.ts`.
   - `latex` (with the alias `tex`) in `codeHighlight.ts`.
   - New cases in `fileLanguage.test.ts` and `codeHighlight.test.ts`.

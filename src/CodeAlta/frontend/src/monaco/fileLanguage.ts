@@ -1,6 +1,6 @@
 /** Monaco language ids the source editor can highlight; anything else is edited as plain text. */
 export const editorLanguages = [
-  "plaintext", "ini", "markdown", "json", "toml", "makefile", "diff", "abap", "apex", "azcli", "bat", "bicep", "cameligo", "clojure", "coffee",
+  "plaintext", "ini", "markdown", "json", "toml", "makefile", "diff", "latex", "bibtex", "abap", "apex", "azcli", "bat", "bicep", "cameligo", "clojure", "coffee",
   "cpp", "csharp", "csp", "css", "cypher", "dart", "dockerfile", "ecl", "elixir", "flow9", "freemarker2", "fsharp", "go", "graphql", "handlebars",
   "hcl", "html", "java", "javascript", "julia", "kotlin", "less", "lexon", "liquid", "lua", "m3", "mdx", "mips", "msdax", "mysql", "objective-c",
   "pascal", "pascaligo", "perl", "pgsql", "php", "pla", "postiats", "powerquery", "powershell", "protobuf", "pug", "python", "qsharp", "r", "razor",
@@ -32,6 +32,7 @@ const byExtension: Readonly<Record<string, EditorLanguage>> = {
   cshtml: "razor", razor: "razor", graphql: "graphql", gql: "graphql", proto: "protobuf", tf: "hcl", hcl: "hcl", bicep: "bicep",
   tsp: "typespec", rq: "sparql", cypher: "cypher", dax: "msdax", pq: "powerquery", pqm: "powerquery", abap: "abap", apex: "apex",
   mk: "makefile", mak: "makefile", diff: "diff", patch: "diff",
+  tex: "latex", sty: "latex", cls: "latex", ltx: "latex", dtx: "latex", bib: "bibtex",
 };
 const byName: Readonly<Record<string, EditorLanguage>> = {
   dockerfile: "dockerfile", containerfile: "dockerfile", makefile: "makefile", gnumakefile: "makefile",
@@ -44,6 +45,7 @@ const usualExtension: Readonly<Partial<Record<EditorLanguage, string>>> = {
   plaintext: "txt", markdown: "md", json: "json", typescript: "ts", javascript: "js", csharp: "cs", fsharp: "fs", xml: "xml", html: "html", yaml: "yml",
   python: "py", cpp: "cpp", shell: "sh", powershell: "ps1", bat: "cmd", ini: "ini", clojure: "clj", scheme: "scm", pascal: "pas", systemverilog: "sv",
   razor: "cshtml", graphql: "graphql", hcl: "tf", makefile: "mk", diff: "diff", kotlin: "kt", handlebars: "hbs", pug: "pug", elixir: "ex", perl: "pl", "objective-c": "m",
+  latex: "tex", bibtex: "bib",
 };
 
 const languageNames: Readonly<Partial<Record<EditorLanguage, string>>> = {
@@ -52,6 +54,7 @@ const languageNames: Readonly<Partial<Record<EditorLanguage, string>>> = {
   php: "PHP", toml: "TOML", ini: "INI", dockerfile: "Dockerfile", makefile: "Makefile", "objective-c": "Objective-C", vb: "Visual Basic", graphql: "GraphQL",
   protobuf: "Protocol Buffers", hcl: "HCL (Terraform)", mdx: "MDX", qsharp: "Q#", restructuredtext: "reStructuredText", typespec: "TypeSpec", wgsl: "WGSL", r: "R",
   systemverilog: "SystemVerilog", coffee: "CoffeeScript", freemarker2: "FreeMarker", azcli: "Azure CLI", msdax: "DAX", powerquery: "Power Query", st: "Structured Text",
+  latex: "LaTeX", bibtex: "BibTeX",
 };
 
 /** The name a language is shown with where one is chosen. */

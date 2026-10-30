@@ -7,6 +7,7 @@ import elixir from "highlight.js/lib/languages/elixir";
 import fsharp from "highlight.js/lib/languages/fsharp";
 import haskell from "highlight.js/lib/languages/haskell";
 import http from "highlight.js/lib/languages/http";
+import latex from "highlight.js/lib/languages/latex";
 import nginx from "highlight.js/lib/languages/nginx";
 import powershell from "highlight.js/lib/languages/powershell";
 import properties from "highlight.js/lib/languages/properties";
@@ -15,8 +16,9 @@ import scala from "highlight.js/lib/languages/scala";
 
 // highlight.js's common set (C#, C/C++, JavaScript, TypeScript, Python, Go, Rust, Java, Kotlin, Swift, JSON,
 // YAML, XML/HTML, CSS, SQL, shell, diff, Markdown, ...) plus the languages below.
-for (const [name, language] of Object.entries({ cmake, dart, dockerfile, dos, elixir, fsharp, haskell, http, nginx,
+for (const [name, language] of Object.entries({ cmake, dart, dockerfile, dos, elixir, fsharp, haskell, http, latex, nginx,
   powershell, properties, protobuf, scala })) hljs.registerLanguage(name, language);
+hljs.registerAliases(["tex"], { languageName: "latex" });
 hljs.registerAliases(["jsonc", "json5"], { languageName: "json" });
 hljs.registerAliases(["vue", "svelte", "razor", "cshtml", "xaml", "csproj", "props", "targets"], { languageName: "xml" });
 hljs.registerAliases(["zsh", "fish"], { languageName: "bash" });

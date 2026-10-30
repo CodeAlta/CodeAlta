@@ -8,7 +8,8 @@ test("the extension chooses the editor language, ignoring case and folders", () 
     [".alta/config.toml", "toml"], ["settings.ini", "ini"], ["ci/build.yml", "yaml"], ["tool.py", "python"], ["lib.rs", "rust"], ["main.go", "go"], ["native/x.h", "cpp"],
     ["run.sh", "shell"], ["build.ps1", "powershell"], ["run.cmd", "bat"], ["schema.sql", "sql"], ["site.scss", "scss"], ["page.html", "html"],
     ["Views/Index.cshtml", "razor"], ["main.tf", "hcl"], ["src\\win\\path.kt", "kotlin"], ["lib/app.ex", "elixir"], ["core.clj", "clojure"],
-    ["token.sol", "solidity"], ["fix.patch", "diff"], ["rules.mk", "makefile"], ["App.vue", "html"], ["docs/index.rst", "restructuredtext"]] as const)
+    ["token.sol", "solidity"], ["fix.patch", "diff"], ["rules.mk", "makefile"], ["App.vue", "html"], ["docs/index.rst", "restructuredtext"],
+    ["paper/main.tex", "latex"], ["style.STY", "latex"], ["thesis.cls", "latex"], ["refs.bib", "bibtex"]] as const)
     assert.equal(fileLanguage(path), language, path);
 });
 
@@ -45,6 +46,7 @@ test("a new file of a language is saved with the usual extension of that languag
 });
 
 test("a language has a name where it is chosen", () => {
-  assert.deepEqual((["csharp", "cpp", "plaintext", "typescript", "rust", "objective-c"] as const).map(languageName), ["C#", "C/C++", "Plain Text", "TypeScript", "Rust", "Objective-C"]);
+  assert.deepEqual((["csharp", "cpp", "plaintext", "typescript", "rust", "objective-c", "latex", "bibtex"] as const).map(languageName),
+    ["C#", "C/C++", "Plain Text", "TypeScript", "Rust", "Objective-C", "LaTeX", "BibTeX"]);
   assert.ok(editorLanguages.every(language => languageName(language).length > 0));
 });
