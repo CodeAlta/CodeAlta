@@ -357,6 +357,23 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await click("#back");
     await click("#new");
     await waitFor(`document.getElementById('new-project').value === 'p1'`, "the last selected project");
+    // A list kept to other projects starts the session in the first one checked.
+    await click("#back");
+    await click("#filter");
+    await waitFor(shown("#sheet"), "the project sheet");
+    await evaluate(`${row("p2")}.click()`);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await waitFor(`!(${shown("#sheet")}) && !document.querySelector('.row[data-id="s1"]')`, "the sessions of site only");
+    await click("#new");
+    await waitFor(`document.getElementById('new-project').value === 'p2'`, "the project the list keeps to");
+    await click("#back");
+    await click("#filter");
+    await waitFor(shown("#sheet"), "the project sheet");
+    await evaluate("document.querySelector('#sheet-list li:first-child button').click()");
+    await waitFor(`!(${shown("#sheet")}) && document.querySelector('.row[data-id="s1"]')`, "every project again");
+    await click("#new");
+    await waitFor(`document.getElementById('new-project').value === 'p1'`, "the last selected project again");
 
     await waitFor(`document.getElementById('new-model-name').textContent === "Standard · GPT-6.1 · medium"`, "the default tier");
     const bar = await evaluate<{ chip: number; more: number; attach: number; start: number; height: number }>(`(() => { const r = e => document.getElementById(e).getBoundingClientRect();
