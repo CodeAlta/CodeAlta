@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { diagramAppearance, diagrams } from "./diagrams";
 import { translate } from "./localization";
-import { createMarkdownRenderer, equationCopy, followFootnote, localImageClass, markdownPending } from "./markdownBoundary";
+import { createMarkdownRenderer, equationCopy, followFootnote, localImageClass, markdownPending, toggleRenderedSource } from "./markdownBoundary";
 import { loadMath } from "./math";
 import type { MarkdownImage, MarkdownImages } from "./markdownImages";
 import { markdownHrefKind, markdownLinkActivation, type MarkdownLinkScope } from "./markdownLinks";
@@ -50,7 +50,8 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   const render = useMemo(() => createMarkdownRenderer(window, { note: translate(locale, "Note"), tip: translate(locale, "Tip"),
     important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution"), copy: translate(locale, "Copy"),
     notDrawn: translate(locale, "Not drawn as a diagram:"), copyLatex: translate(locale, "Copy LaTeX"), copyMathMl: translate(locale, "Copy MathML"),
-    footnotes: translate(locale, "Footnotes"), footnote: translate(locale, "Footnote"), backToReference: translate(locale, "Back to reference") }), [locale]);
+    footnotes: translate(locale, "Footnotes"), footnote: translate(locale, "Footnote"), backToReference: translate(locale, "Back to reference"),
+    source: translate(locale, "Source"), preview: translate(locale, "Preview"), showSource: translate(locale, "Show the source or the drawing") }), [locale]);
   // Diagrams are drawn on the side, in the window's font, then found by the next render; they take the colors of the theme from the stylesheet.
   const appearance = useSyncExternalStore(subscribeAppearance, appearanceKey);
   const [drawn, setDrawn] = useState(0);
@@ -171,7 +172,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   return <><div className="markdown-content" ref={content} onClick={event => {
     const handled = event.defaultPrevented;
     activateLink(event);
-    if (!handled && event.target instanceof Element && followFootnote(event.target)) return;
+    if (!handled && event.target instanceof Element && (followFootnote(event.target) || toggleRenderedSource(event.target))) return;
     if (!handled) copyCode(event); // Our navigation suppression must not swallow Copy inside an anchor.
   }} onAuxClick={activateLink}
     onKeyDown={event => {

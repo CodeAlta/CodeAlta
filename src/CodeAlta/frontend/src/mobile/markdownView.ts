@@ -1,5 +1,5 @@
 import { diagramAppearance, diagrams } from "../diagrams";
-import { createMarkdownRenderer, equationCopy, followFootnote, markdownPending } from "../markdownBoundary";
+import { createMarkdownRenderer, equationCopy, followFootnote, markdownPending, toggleRenderedSource } from "../markdownBoundary";
 import { loadMath } from "../math";
 import { el, iconSvg } from "./dom";
 
@@ -181,7 +181,7 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
         if (drawing) void openDiagram(open, drawing);
         return;
       }
-      if (target && followFootnote(target)) return;
+      if (target && (followFootnote(target) || toggleRenderedSource(target))) return;
       const figure = target?.closest<HTMLElement>(".markdown-diagram");
       if (figure) { const svg = figure.querySelector("svg")?.outerHTML; if (svg) zoom(svg); return; }
       const copy = target?.closest<HTMLButtonElement>("button.markdown-copy, button.markdown-math-copy");

@@ -248,11 +248,12 @@ svg.pele {
 .markdown-content .katex-error { color: var(--red) !important; }
 .markdown-math-source { color: var(--muted); font-family: var(--code-font); font-size: .92em; }
 .markdown-math-source-block { display: block; margin: .625rem 0; white-space: pre-wrap; }
-.markdown-math-block { margin: .625rem 0; }
+.markdown-rendered { margin: .625rem 0; }
+.markdown-rendered > .markdown-diagram, .markdown-rendered > pre { margin: 0; }
 .markdown-math-display { overflow-x: auto; overflow-y: hidden; padding: 1px 0; -webkit-overflow-scrolling: touch; }
 .markdown-math-display > .katex-display { margin: .4em 0; }
-.markdown-math-tools { display: flex; justify-content: flex-end; gap: .375rem; }
-.markdown-math-copy { min-height: 2rem; padding: 0 .625rem; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--panel); font: .6875rem/1 var(--font); }
+.markdown-block-tools { display: flex; justify-content: flex-end; gap: .375rem; margin-bottom: .25rem; }
+.markdown-block-tools > button { min-height: 2rem; padding: 0 .625rem; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--panel); font: .6875rem/1 var(--font); }
 .markdown-math-copy[data-copied] { color: var(--green); }
 /* Footnotes: a tap on a number goes to its note, and ↩ back. */
 .markdown-footnote { line-height: 0; }

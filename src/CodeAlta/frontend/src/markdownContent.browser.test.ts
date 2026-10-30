@@ -241,11 +241,12 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     const diagram = await evaluate<SourceLinesRender>("markdownFixture.renderSourceLines('Text\\n\\n```mermaid\\ngraph TD; A-->B\\n```')");
     assert.deepEqual(diagram.blocks, ["P 1-1", "PRE 3-5"]);
     let drawn: string[] = [];
-    for (let i = 0; i < 600 && !drawn.includes("DIV.markdown-diagram 3-5"); i++) {
+    for (let i = 0; i < 600 && !drawn.includes("DIV.markdown-rendered 3-5"); i++) {
       await new Promise(resolve => setTimeout(resolve, 100));
       drawn = await evaluate<string[]>("Array.from(document.querySelectorAll('.markdown-content [data-source-lines]'), e => `${e.tagName}${e.className ? `.${e.className}` : ''} ${e.getAttribute('data-source-lines')}`)");
     }
-    assert.deepEqual(drawn, ["P 1-1", "DIV.markdown-diagram 3-5"]);
+    // The drawing and its hidden source are one block: the lines are on it, not on either.
+    assert.deepEqual(drawn, ["P 1-1", "DIV.markdown-rendered 3-5"]);
     // Same shared component used by Notes/live rendering, without timeline region opt-in.
     await evaluate("markdownFixture.render(markdownFixture.cases[0].source, false)"); await check();
     assert.equal(await evaluate("!!document.querySelector('.markdown-content details summary')"), true);
@@ -274,6 +275,15 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     assert.deepEqual(await evaluate("markdownFixture.copyEquation('latex')"), ["$$\n\\int_0^1 x\\,dx = \\tfrac12\n$$"]);
     const mathml = await evaluate<string[]>("markdownFixture.copyEquation('mathml')");
     assert.match(mathml[0], /^<math xmlns="http:\/\/www\.w3\.org\/1998\/Math\/MathML" display="block">/);
+    // Source shows the LaTeX of a displayed equation in its place, with the copy button of code; Preview the drawing again.
+    const equationView = `(() => { const block = document.querySelector('.markdown-content .markdown-math-block'); const pre = block.querySelector(':scope > pre');
+      return [block.querySelector('.markdown-math-display').hidden, pre.hidden, pre.querySelector('code').textContent, !!pre.querySelector('button.markdown-copy'),
+        block.querySelector('button.markdown-source-toggle').textContent]; })()`;
+    assert.deepEqual(await evaluate(equationView), [false, true, "\\int_0^1 x\\,dx = \\tfrac12", true, "Source"]);
+    await evaluate("document.querySelector('.markdown-content .markdown-math-block button.markdown-source-toggle').click()");
+    assert.deepEqual(await evaluate(equationView), [true, false, "\\int_0^1 x\\,dx = \\tfrac12", true, "Preview"]);
+    await evaluate("document.querySelector('.markdown-content .markdown-math-block button.markdown-source-toggle').click()");
+    assert.deepEqual((await evaluate<unknown[]>(equationView)).slice(0, 2), [false, true]);
     // Footnotes: numbered buttons whose title is their note, the notes at the end with a way back; written in HTML, a
     // reference is a plain `sup` and its attribute is removed.
     const notes = "Claim[^src] and an inline^[quick note], again[^src].\n\n<sup data-footnote=\"ref-1\">9</sup>\n\n[^src]: The *source*.";

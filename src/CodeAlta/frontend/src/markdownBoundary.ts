@@ -17,10 +17,31 @@ export type MarkdownLabels = Readonly<Record<AlertKind, string> & {
   /** What the buttons of a displayed equation say they do. */ copyLatex?: string; copyMathMl?: string;
   /** The name of the notes at the end of a text, and what a reference and the way back from a note say before their number. */
   footnotes?: string; footnote?: string; backToReference?: string;
+  /** What the button of a drawn block (a diagram, an equation) says: its source, or its drawing again, and what it does. */
+  source?: string; preview?: string; showSource?: string;
 }>;
 const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy",
   notDrawn: "Not drawn as a diagram:", copyLatex: "Copy LaTeX", copyMathMl: "Copy MathML",
-  footnotes: "Footnotes", footnote: "Footnote", backToReference: "Back to reference" };
+  footnotes: "Footnotes", footnote: "Footnote", backToReference: "Back to reference",
+  source: "Source", preview: "Preview", showSource: "Show the source or the drawing" };
+
+/**
+ * Shows the source of a drawn block (a diagram, a displayed equation) in place of its drawing, or the drawing again,
+ * when the element is in its Source button; false otherwise.
+ */
+export function toggleRenderedSource(target: Element): boolean {
+  const button = target.closest<HTMLElement>("button.markdown-source-toggle");
+  const block = button?.parentElement?.parentElement;
+  if (!button || !block?.classList.contains("markdown-rendered")) return false;
+  const showing = !block.hasAttribute("data-source");
+  block.toggleAttribute("data-source", showing);
+  for (const child of Array.from(block.children) as HTMLElement[]) {
+    if (!child.classList.contains("markdown-block-tools")) child.hidden = child.tagName === "PRE" ? !showing : showing;
+  }
+  button.setAttribute("aria-pressed", String(showing));
+  button.textContent = button.getAttribute(showing ? "data-preview-label" : "data-source-label");
+  return true;
+}
 
 /**
  * Moves from a reference to its note, or from a note back to its reference, in the same text, and shows where it
@@ -168,10 +189,10 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
           const figure = view.document.createElement("div");
           figure.className = "markdown-diagram";
           figure.innerHTML = svg;
-          // The diagram comes from the lines of its block.
-          const lines = pre.getAttribute(sourceLinesAttribute);
-          if (lines !== null) figure.setAttribute(sourceLinesAttribute, lines);
-          pre.replaceWith(figure);
+          pre.setAttribute("data-language", "mermaid");
+          const block = renderedBlock(figure, pre);
+          pre.replaceWith(block);
+          block.append(pre);
         } else {
           if (svg === undefined) undrawn?.push(text);
           pre.setAttribute("data-language", "mermaid");
@@ -232,13 +253,22 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         element.replaceWith(formula);
         continue;
       }
-      const figure = view.document.createElement("div");
-      figure.className = "markdown-math-block";
       const host = element.tagName === "CODE" ? element.parentElement! : element;
+      // Its source, highlighted, which the Source button shows in its place.
+      const source = view.document.createElement("pre"), code = view.document.createElement("code");
+      code.className = "language-latex";
+      const highlighted = highlightCode(tex, "latex");
+      if (highlighted !== null) code.innerHTML = highlighted; else code.textContent = tex;
+      source.setAttribute("data-language", "latex");
+      source.append(code);
       const lines = host.getAttribute(sourceLinesAttribute);
-      if (lines !== null) figure.setAttribute(sourceLinesAttribute, lines);
-      const tools = view.document.createElement("span");
-      tools.className = "markdown-math-tools";
+      if (lines !== null) source.setAttribute(sourceLinesAttribute, lines);
+      const formula = view.document.createElement("div");
+      formula.className = "markdown-math-display";
+      formula.innerHTML = html;
+      const figure = renderedBlock(formula, source);
+      figure.classList.add("markdown-math-block");
+      const tools = figure.querySelector(":scope > .markdown-block-tools")!;
       for (const [kind, label, text] of [["latex", labels.copyLatex ?? englishLabels.copyLatex!, "LaTeX"], ["mathml", labels.copyMathMl ?? englishLabels.copyMathMl!, "MathML"]]) {
         const button = view.document.createElement("button");
         button.type = "button";
@@ -249,12 +279,31 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         button.textContent = text;
         tools.append(button);
       }
-      const formula = view.document.createElement("div");
-      formula.className = "markdown-math-display";
-      formula.innerHTML = html;
-      figure.append(tools, formula);
       host.replaceWith(figure);
+      figure.append(source);
     }
+  }
+  // A block the renderer draws (a diagram, a displayed equation) keeps its source beside the drawing, hidden: a button
+  // of the renderer shows one or the other (`toggleRenderedSource`). The block carries the lines of its source.
+  function renderedBlock(drawing: HTMLElement, source: HTMLElement): HTMLElement {
+    const block = view.document.createElement("div");
+    block.className = "markdown-rendered";
+    const lines = source.getAttribute(sourceLinesAttribute);
+    if (lines !== null) { block.setAttribute(sourceLinesAttribute, lines); source.removeAttribute(sourceLinesAttribute); }
+    const tools = view.document.createElement("span");
+    tools.className = "markdown-block-tools";
+    const toggle = view.document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "markdown-source-toggle";
+    toggle.setAttribute("aria-pressed", "false");
+    toggle.setAttribute("data-source-label", labels.source ?? englishLabels.source!);
+    toggle.setAttribute("data-preview-label", labels.preview ?? englishLabels.preview!);
+    toggle.title = labels.showSource ?? englishLabels.showSource!;
+    toggle.textContent = labels.source ?? englishLabels.source!;
+    tools.append(toggle);
+    source.hidden = true;
+    block.append(tools, drawing);
+    return block;
   }
   // A footnote reference becomes a button with its number, whose title is the text of its note; the notes end the text,
   // each with a button back to its reference. Elements of the renderer, from the marked placeholders of the parser.

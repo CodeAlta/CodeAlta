@@ -2285,6 +2285,7 @@ export const messages = dictionary({
   "Footnotes": ["Notas al pie", "Notes de bas de page", "Fußnoten", "脚注", "脚注"],
   "Footnote": ["Nota al pie", "Note de bas de page", "Fußnote", "脚注", "脚注"],
   "Back to reference": ["Volver a la referencia", "Retour à l’appel de note", "Zurück zum Verweis", "参照箇所に戻る", "返回引用处"],
+  "Show the source or the drawing": ["Mostrar el código fuente o el dibujo", "Afficher la source ou le rendu", "Quelltext oder Darstellung anzeigen", "ソースまたは描画を表示", "显示源代码或渲染结果"],
   "Equation": ["Ecuación", "Équation", "Gleichung", "数式", "公式"],
   "Insert equation": ["Insertar ecuación", "Insérer une équation", "Gleichung einfügen", "数式を挿入", "插入公式"],
   "Edit equation": ["Editar ecuación", "Modifier l’équation", "Gleichung bearbeiten", "数式を編集", "编辑公式"],
