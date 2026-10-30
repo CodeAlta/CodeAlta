@@ -2380,6 +2380,16 @@ svg.pele {
 .markdown-math-copy:hover, .markdown-math-copy:focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 12%, var(--panel-2)); }
 .markdown-math-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .markdown-math-copy[data-copied] { color: var(--green, #3dcc91); }
+/* Footnotes: a number that moves to its note (its title is the note), and the notes at the end of the text, smaller,
+   each with a way back. Where a move arrives is lit for a moment. */
+.markdown-footnote { line-height: 0; }
+.markdown-footnote-ref, .markdown-footnote-back { padding: 0 2px; border: 0; border-radius: 3px; color: var(--accent); background: none; font: inherit; cursor: pointer; }
+.markdown-footnote-ref:hover, .markdown-footnote-back:hover { text-decoration: underline; }
+.markdown-footnote-ref:focus-visible, .markdown-footnote-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.markdown-footnotes { margin-top: 14px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: .92em; }
+.markdown-footnotes ol { margin: 0; padding-left: 22px; }
+.markdown-footnotes p { margin: 2px 0; }
+.markdown-footnote-note[data-flash], .markdown-footnote[data-flash] { border-radius: 3px; background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
 /* Rename popover: the name of a project or a session, edited beside its row in the Explorer. */
 .rename-anchor { position: absolute; inset: 0; pointer-events: none; }

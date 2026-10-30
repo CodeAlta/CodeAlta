@@ -82,11 +82,19 @@ test("a picture of the disk is a link to its file marked as a picture, never an 
   assert.doesNotMatch(createMarkdownParser()("![Chart](charts/run.png)"), /<a |data-file/);
 });
 
-test("deliberate policy differences: escaped image alt, tasks left to the boundary, no fuzzy links or grid/footnote plugins", () => {
-  const html = createMarkdownParser()('![alt <b>](https://example.invalid/a)\n\n- [x] task\n\nwww.example.invalid x@y.invalid\n\n[^note]\n\n[^note]: text');
+test("deliberate policy differences: escaped image alt, tasks left to the boundary, no fuzzy links or grid plugin", () => {
+  const html = createMarkdownParser()('![alt <b>](https://example.invalid/a)\n\n- [x] task\n\nwww.example.invalid x@y.invalid\n\n| a |\n|---|\n| b | c |');
   assert.match(html, /alt &lt;b&gt;/); assert.match(html, /\[x\] task/);
-  assert.doesNotMatch(html, /<img|<input|href="(?:https?:|mailto:)|class="footnote/);
-  assert.match(html, /<a href="text">\^note<\/a>/); // Ordinary reference link, not a footnote extension: a link to a file named "text".
+  assert.doesNotMatch(html, /<img|<input|href="(?:https?:|mailto:)/);
+});
+
+test("footnotes are marked placeholders, numbered in the order of their references, with no id and no link", () => {
+  const html = createMarkdownParser({ placeholderMark: "M" })("Claim[^src] and an inline^[quick note], again[^src].\n\n[^src]: The <b>source</b>.");
+  assert.match(html, /Claim<sup data-footnote="M:ref-1">1<\/sup> and an inline<sup data-footnote="M:ref-2">2<\/sup>, again<sup data-footnote="M:ref-1">1<\/sup>\./);
+  assert.match(html, /<div data-footnote="M:notes"><ol>\n<li data-footnote="M:note-1"><p>The <b>source<\/b>\.<\/p>\n<\/li>\n<li data-footnote="M:note-2"><p>quick note<\/p>\n<\/li>\n<\/ol><\/div>/);
+  assert.doesNotMatch(html, /\bid=|href=|class=/);
+  // A reference without a note is text, as before.
+  assert.match(createMarkdownParser()("[^none]"), /\[\^none\]/);
 });
 
 test("a link to a file is a link, and the parser marks the ones it wrote", () => {

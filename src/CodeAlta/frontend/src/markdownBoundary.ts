@@ -2,7 +2,7 @@ import createDOMPurify from "dompurify";
 import { highlightCode } from "./codeHighlight";
 import { diagramAppearance, diagrams, type DiagramAppearance } from "./diagrams";
 import { loadedMath } from "./math";
-import { createMarkdownParser, frontMatterEntries, frontMatterLineCount, splitFrontMatter } from "./markdown";
+import { createMarkdownParser, footnoteAttribute, frontMatterEntries, frontMatterLineCount, splitFrontMatter } from "./markdown";
 import { markdownHrefKind } from "./markdownLinks";
 import { displayMathAttribute, mathAttribute } from "./markdownMath";
 import { sourceLinesAttribute } from "./markdownSourceLines";
@@ -15,9 +15,33 @@ export type MarkdownLabels = Readonly<Record<AlertKind, string> & {
   /** What the button of a code block says it does. */ copy?: string;
   /** What the note under a `mermaid` block that could not be drawn says before its reason. */ notDrawn?: string;
   /** What the buttons of a displayed equation say they do. */ copyLatex?: string; copyMathMl?: string;
+  /** The name of the notes at the end of a text, and what a reference and the way back from a note say before their number. */
+  footnotes?: string; footnote?: string; backToReference?: string;
 }>;
 const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy",
-  notDrawn: "Not drawn as a diagram:", copyLatex: "Copy LaTeX", copyMathMl: "Copy MathML" };
+  notDrawn: "Not drawn as a diagram:", copyLatex: "Copy LaTeX", copyMathMl: "Copy MathML",
+  footnotes: "Footnotes", footnote: "Footnote", backToReference: "Back to reference" };
+
+/**
+ * Moves from a reference to its note, or from a note back to its reference, in the same text, and shows where it
+ * arrived for a moment. False when the element is in no footnote button.
+ */
+export function followFootnote(target: Element): boolean {
+  const button = target.closest("button.markdown-footnote-ref, button.markdown-footnote-back");
+  const content = button?.closest(".markdown-content");
+  const number = button?.getAttribute(footnoteAttribute);
+  if (!button || !content || !number || !/^\d{1,4}$/.test(number)) return false;
+  const toNote = button.classList.contains("markdown-footnote-ref");
+  const destination = toNote ? content.querySelector<HTMLElement>(`li[${footnoteAttribute}="note-${number}"]`)
+    : content.querySelector<HTMLElement>(`button.markdown-footnote-ref[${footnoteAttribute}="${number}"]`);
+  if (!destination) return true;
+  destination.scrollIntoView({ block: "nearest" });
+  const shown = toNote ? destination : destination.parentElement ?? destination;
+  shown.setAttribute("data-flash", "");
+  shown.ownerDocument.defaultView?.setTimeout(() => shown.removeAttribute("data-flash"), 1200);
+  (toNote ? destination.querySelector<HTMLElement>("button.markdown-footnote-back") : destination)?.focus({ preventScroll: true });
+  return true;
+}
 
 /**
  * What a render could not draw yet: the texts of the `mermaid` blocks to draw, and whether its formulas wait for the
@@ -108,11 +132,17 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
     // A formula of the parser keeps its attribute, without the mark: one written in HTML is text.
     const formula = (name === mathAttribute || name === displayMathAttribute) && (tag === "span" || tag === "div") && value === placeholderMark;
     if (formula) data.attrValue = "";
+    // A footnote of the parser keeps what it is (`ref-N`, `notes`, `note-N`), without the mark.
+    const footnote = name === footnoteAttribute && value.startsWith(`${placeholderMark}:`) ? value.slice(placeholderMark.length + 1) : null;
+    const ownFootnote = footnote !== null && (tag === "sup" && /^ref-\d{1,4}$/.test(footnote) || tag === "div" && footnote === "notes"
+      || tag === "li" && /^note-\d{1,4}$/.test(footnote));
+    if (ownFootnote) data.attrValue = footnote!;
     data.keepAttr = name === "title"
       || link
       || lines !== null
       || image
       || formula
+      || ownFootnote
       || name === "class" && tag === "code" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(value)
       || name === "open" && tag === "details"
       || name === "scope" && tag === "th" && /^(col|row|colgroup|rowgroup)$/.test(value)
@@ -224,6 +254,42 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       formula.innerHTML = html;
       figure.append(tools, formula);
       host.replaceWith(figure);
+    }
+  }
+  // A footnote reference becomes a button with its number, whose title is the text of its note; the notes end the text,
+  // each with a button back to its reference. Elements of the renderer, from the marked placeholders of the parser.
+  function dressFootnotes(fragment: DocumentFragment) {
+    const button = (className: string, number: string, label: string, text: string) => {
+      const element = view.document.createElement("button");
+      element.type = "button";
+      element.className = className;
+      element.setAttribute(footnoteAttribute, number);
+      element.setAttribute("aria-label", label);
+      element.textContent = text;
+      return element;
+    };
+    const notes = new Map<string, string>();
+    for (const note of Array.from(fragment.querySelectorAll<HTMLElement>(`li[${footnoteAttribute}^="note-"]`))) {
+      const number = note.getAttribute(footnoteAttribute)!.slice("note-".length);
+      const text = (note.textContent ?? "").replace(/\s+/g, " ").trim();
+      notes.set(number, text.length > 300 ? `${text.slice(0, 299)}…` : text);
+      note.className = "markdown-footnote-note";
+      // In the last paragraph of the note, where the text ends.
+      const host = note.lastElementChild?.tagName === "P" ? note.lastElementChild : note;
+      host.append(" ", button("markdown-footnote-back", number, `${labels.backToReference ?? englishLabels.backToReference!} ${number}`, "↩︎"));
+    }
+    for (const list of Array.from(fragment.querySelectorAll<HTMLElement>(`div[${footnoteAttribute}="notes"]`))) {
+      list.className = "markdown-footnotes";
+      list.setAttribute("role", "note");
+      list.setAttribute("aria-label", labels.footnotes ?? englishLabels.footnotes!);
+    }
+    for (const reference of Array.from(fragment.querySelectorAll<HTMLElement>(`sup[${footnoteAttribute}^="ref-"]`))) {
+      const number = reference.getAttribute(footnoteAttribute)!.slice("ref-".length);
+      const control = button("markdown-footnote-ref", number, `${labels.footnote ?? englishLabels.footnote!} ${number}`, number);
+      const note = notes.get(number);
+      if (note) control.title = note;
+      reference.className = "markdown-footnote";
+      reference.replaceChildren(control);
     }
   }
   // The front matter of a document is shown as what it is, a few named values: a table of its entries, built
@@ -363,7 +429,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         fragment = purifier.sanitize(html, {
           ALLOWED_TAGS: tags,
           ALLOWED_ATTR: ["href", "title", "class", "open", "scope", "align", "colspan", "rowspan", "start", "value", "reversed", sourceLinesAttribute, fileImageAttribute,
-            mathAttribute, displayMathAttribute],
+            mathAttribute, displayMathAttribute, footnoteAttribute],
           ALLOW_ARIA_ATTR: false, ALLOW_DATA_ATTR: false, RETURN_DOM_FRAGMENT: true,
         });
       } finally { sourceLinesMark = null; }
@@ -375,6 +441,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       }
       dressFileImages(fragment);
       dressFences(fragment, pending?.diagrams);
+      dressFootnotes(fragment);
       dressMath(fragment, pending);
       dressTasks(fragment);
       dressAlerts(fragment);

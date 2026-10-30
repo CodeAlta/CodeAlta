@@ -254,6 +254,12 @@ svg.pele {
 .markdown-math-tools { display: flex; justify-content: flex-end; gap: .375rem; }
 .markdown-math-copy { min-height: 2rem; padding: 0 .625rem; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--panel); font: .6875rem/1 var(--font); }
 .markdown-math-copy[data-copied] { color: var(--green); }
+/* Footnotes: a tap on a number goes to its note, and ↩ back. */
+.markdown-footnote { line-height: 0; }
+.markdown-footnote-ref, .markdown-footnote-back { min-width: 1.5rem; padding: 0 .25rem; border: 0; color: var(--accent); background: none; font: inherit; }
+.markdown-footnotes { margin-top: .75rem; padding-top: .375rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9em; }
+.markdown-footnotes ol { margin: 0; padding-left: 1.25rem; }
+.markdown-footnote-note[data-flash], .markdown-footnote[data-flash] { border-radius: 3px; background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .diagram-zoom { position: fixed; inset: 0; z-index: 50; background: var(--panel-2); display: flex; flex-direction: column; }
 .diagram-zoom-back { position: absolute; top: calc(8px + env(safe-area-inset-top)); left: calc(8px + var(--safe-left)); z-index: 1; display: inline-flex; align-items: center; gap: 4px; height: 44px; padding: 0 8px 0 4px;
   border: 0; border-radius: 10px; background: var(--panel); color: var(--text); cursor: pointer; }

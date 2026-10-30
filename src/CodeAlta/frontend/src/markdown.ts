@@ -1,4 +1,5 @@
 import MarkdownIt from "markdown-it";
+import footnote from "markdown-it-footnote";
 import { fileMarkdownHref } from "./markdownLinks";
 import { markdownMath } from "./markdownMath";
 import { sourceLinesAttribute } from "./markdownSourceLines";
@@ -10,6 +11,13 @@ import { sourceLinesAttribute } from "./markdownSourceLines";
 export type MarkdownSourceLines = Readonly<{ mark: string; firstLine: number }>;
 
 /**
+ * The attribute of the footnotes of the parser: `<mark>:ref-N` on the reference to note N, `<mark>:notes` on the list of
+ * the notes, `<mark>:note-N` on note N. The boundary keeps it without the mark (a value like `ref:1` would read as an
+ * address to the sanitizer, which removes it).
+ */
+export const footnoteAttribute = "data-footnote";
+
+/**
  * Creates an instance-owned, browser-independent parser. Output is UNSANITIZED HTML:
  * only the MarkdownContent boundary may turn it into DOM, never inject it directly.
  *
@@ -19,11 +27,23 @@ export type MarkdownSourceLines = Readonly<{ mark: string; firstLine: number }>;
 export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
   /** Written on each link of the Markdown that names a file, as `data-file-link`: what tells it from an `<a>` that the text wrote in HTML. */
   fileLinkMark?: string;
-  /** Written on the placeholders of the formulas (see `markdownMath`): what tells them from HTML that the text wrote. */
+  /** Written on the placeholders of the formulas and the footnotes: what tells them from HTML that the text wrote. */
   placeholderMark?: string }> = {}) {
   const md = new MarkdownIt("commonmark", { html: true, breaks: options.breaks ?? true, linkify: true, typographer: false })
     .enable(["table", "strikethrough", "linkify"]);
-  markdownMath(md, options.placeholderMark ?? "");
+  const placeholderMark = options.placeholderMark ?? "";
+  markdownMath(md, placeholderMark);
+  // Footnotes are placeholders too, numbered as the plugin numbers them: a reference, the list of the notes and each
+  // note, with no id and no link. The boundary makes buttons of them that move between a reference and its note.
+  md.use(footnote);
+  const footnoteMark = (value: string) => ` ${footnoteAttribute}="${md.utils.escapeHtml(`${placeholderMark}:${value}`)}"`;
+  const footnoteNumber = (token: { meta: Record<string, unknown> | null }) => Number(token.meta?.id ?? 0) + 1;
+  md.renderer.rules.footnote_ref = (tokens, index) => `<sup${footnoteMark(`ref-${footnoteNumber(tokens[index])}`)}>${footnoteNumber(tokens[index])}</sup>`;
+  md.renderer.rules.footnote_block_open = () => `<div${footnoteMark("notes")}><ol>\n`;
+  md.renderer.rules.footnote_block_close = () => "</ol></div>\n";
+  md.renderer.rules.footnote_open = (tokens, index) => `<li${footnoteMark(`note-${footnoteNumber(tokens[index])}`)}>`;
+  md.renderer.rules.footnote_close = () => "</li>\n";
+  md.renderer.rules.footnote_anchor = () => "";
   md.linkify.set({ fuzzyLink: false, fuzzyEmail: false, fuzzyIP: false });
   // A `file:` address is a link too, written as a link or alone in the text: markdown-it refuses the scheme, and
   // the boundary decides what a link may name.

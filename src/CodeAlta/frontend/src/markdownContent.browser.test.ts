@@ -274,6 +274,15 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     assert.deepEqual(await evaluate("markdownFixture.copyEquation('latex')"), ["$$\n\\int_0^1 x\\,dx = \\tfrac12\n$$"]);
     const mathml = await evaluate<string[]>("markdownFixture.copyEquation('mathml')");
     assert.match(mathml[0], /^<math xmlns="http:\/\/www\.w3\.org\/1998\/Math\/MathML" display="block">/);
+    // Footnotes: numbered buttons whose title is their note, the notes at the end with a way back; written in HTML, a
+    // reference is a plain `sup` and its attribute is removed.
+    const notes = "Claim[^src] and an inline^[quick note], again[^src].\n\n<sup data-footnote=\"ref-1\">9</sup>\n\n[^src]: The *source*.";
+    await evaluate(`markdownFixture.render(${JSON.stringify(notes)}, false)`);
+    assert.deepEqual(await evaluate("markdownFixture.footnotes()"), {
+      references: [["1", "The source.", "Footnote 1"], ["2", "quick note", "Footnote 2"], ["1", "The source.", "Footnote 1"]],
+      notes: ["The source. ↩︎", "quick note ↩︎"], back: 2, authored: 1 });
+    assert.deepEqual(await evaluate("markdownFixture.followFootnote('button.markdown-footnote-ref')"), { focused: "markdown-footnote-back:1", lit: ["markdown-footnote-note"] });
+    assert.deepEqual(await evaluate("markdownFixture.followFootnote('button.markdown-footnote-back')"), { focused: "markdown-footnote-ref:1", lit: ["markdown-footnote", "markdown-footnote-note"] });
     assert.deepEqual(attempts, [page, script]);
     assert.ok(baseDiagnostics.length > 0, "explicitly retain base-uri enforcement evidence");
     console.log(`Markdown production boundary: ${cases.length} cases, 2 fulfilled assets, 0 unexpected requests; ${baseDiagnostics.length} allowed base-uri diagnostics, ${inertParseDiagnostics.length} inert-parse handler diagnostics; 600ms deferred windows. HTTPS is not app://codealta.`);
