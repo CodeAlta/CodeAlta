@@ -14,6 +14,9 @@ Modelled on ``v2/tooling/locked_codex.py`` and ``locked_claude_code.py``:
     altacli estimated from public prices goes to the metadata, not to ``cost_usd``.
   * ``--ak provider_type=claude-code`` runs CodeAlta on the Claude Code CLI, installed to /opt/claude-code during setup
     (the version CodeAlta pins) and given ANTHROPIC_API_KEY; ``-m anthropic/claude-opus-5-5`` becomes its ``opus``.
+  * ``--ak escalate_to=<model>`` (#273): when the run ends with a sign of trouble the host can see (no answer, a refusal
+    to use the tools, its last test run failing), a second ``altacli run --resume`` continues the session on that model
+    of the same provider, in the budget left; the session is then kept in the profile instead of an ephemeral root.
 
 Usage (see README.md)::
 
@@ -24,8 +27,11 @@ Usage (see README.md)::
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import tempfile
+import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -44,6 +50,10 @@ _PROFILE_DIR = "/tmp/codealta-profile"
 _LOGS = "/logs/agent"
 _JSONL = f"{_LOGS}/altacli.jsonl"
 _STDERR = f"{_LOGS}/altacli.stderr"
+_ESCALATION_JSONL = f"{_LOGS}/altacli.escalation.jsonl"
+_ESCALATION_STDERR = f"{_LOGS}/altacli.escalation.stderr"
+# The least budget an escalation is started with: below it, the stronger model could not do anything useful.
+_ESCALATION_MIN_SEC = 300
 _DEFAULT_BUDGET_SEC = 3000  # [agent] timeout_sec of every SWE-bench Pro v2 task: 50 minutes
 
 # Harbor provider (the part of -m before "/") -> CodeAlta provider type, API key variables (first found wins) and the
@@ -108,6 +118,84 @@ _CAPTURE = (
     "git -c safe.directory='*' reset -q 2>/dev/null; "
     "wc -c < /logs/agent/model.patch; true"
 )
+
+
+# A command that runs tests, in the title of a tool call; its output starts with `exit_code: <n>`.
+_TEST_COMMAND = re.compile(
+    r"\b(npm (run )?test|yarn test|pnpm test|node --test|npx (jest|vitest|mocha)|jest|vitest|mocha|pytest|python3? -m pytest|"
+    r"tox|go test|cargo test|dotnet test|mvn( -\S+)* test|gradle test|make test|phpunit|rspec|bundle exec rspec)\b")
+_EXIT_CODE = re.compile(r"^exit_code: (-?\d+)", re.MULTILINE)
+_REFUSAL = re.compile(r"\b(cannot|can't|can not|unable to|do not have|don't have|no access)\b", re.IGNORECASE)
+
+
+def _trouble(lines: list[str]) -> str | None:
+    """A sign of trouble the host sees in the JSONL of a run, without knowing the task: None when the run looks done.
+
+    The run ended without an answer, its answer says the tools cannot be used though it called none, or the last test
+    command of its session failed.
+    """
+    root: str | None = None
+    result: dict[str, Any] | None = None
+    tool_calls = 0
+    tests: set[str] = set()
+    last_test_exit: int | None = None
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or not isinstance(record.get("params"), dict):
+            continue
+        method, params = record.get("method"), record["params"]
+        if method == "_codealta/session":
+            root = params.get("sessionId")
+        elif method == "_codealta/result":
+            result = params
+        elif method == "session/update" and params.get("sessionId") == root and isinstance(params.get("update"), dict):
+            update = params["update"]
+            call = update.get("toolCallId")
+            if update.get("sessionUpdate") == "tool_call":
+                tool_calls += 1
+                if call and _TEST_COMMAND.search(str(update.get("title") or "")):
+                    tests.add(call)
+            if call in tests and isinstance(update.get("content"), list):
+                for item in update["content"]:
+                    text = (item.get("content") or {}).get("text") if isinstance(item, dict) else None
+                    match = _EXIT_CODE.search(text) if isinstance(text, str) else None
+                    if match:
+                        last_test_exit = int(match.group(1))
+    if result is None:
+        return None  # killed or crashed: nothing to continue from
+    if result.get("status") == "timeout":
+        return None  # the budget is spent
+    answer = result.get("finalMessage") or ""
+    if result.get("status") != "completed" or not answer.strip():
+        return "the turn ended without an answer."
+    if tool_calls == 0 and _REFUSAL.search(answer):
+        return "the answer says the tools cannot be used, but they can: use them."
+    if last_test_exit not in (None, 0):
+        return f"the last test run failed (exit code {last_test_exit})."
+    return None
+
+
+def _combine(first: dict[str, Any] | None, second: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The result of a run and of its escalation as one: the status of the last, the usage and the cost of both."""
+    if first is None or second is None:
+        return second or first
+    combined = dict(second)
+    usage: dict[str, Any] = {}
+    for key in ("inputTokens", "outputTokens", "totalTokens", "cachedReadTokens", "cachedWriteTokens", "thoughtTokens"):
+        values = [part[key] for part in ((first.get("usage") or {}), (second.get("usage") or {})) if isinstance(part.get(key), int)]
+        if values:
+            usage[key] = sum(values)
+    combined["usage"] = usage or None
+    costs = [c for c in (first.get("cost"), second.get("cost")) if isinstance(c, dict) and isinstance(c.get("amount"), (int, float))]
+    if costs:
+        cost = dict(costs[-1])
+        cost["amount"] = sum(c["amount"] for c in costs)
+        combined["cost"] = cost
+    combined["durationMs"] = sum(d for d in (first.get("durationMs"), second.get("durationMs")) if isinstance(d, int)) or None
+    return combined
 
 
 def _flag(value: Any) -> bool:
@@ -201,6 +289,9 @@ class LockedCodeAlta(BaseInstalledAgent):
       disable_tools     the --disable-tools patterns (default: web)
       plugins           true to start the plugins and MCP servers (default: false)
       extra_args        more altacli run arguments, shell-quoted (for example "-c chat.some_setting=value")
+      escalate_to       a model of the same provider (claude-opus-5-5, gpt-6.1-sol) that continues the session when the
+                        run ends with a sign of trouble the host sees; none by default
+      escalate_effort   the reasoning effort of that model
     """
 
     def __init__(
@@ -219,6 +310,8 @@ class LockedCodeAlta(BaseInstalledAgent):
         disable_tools: str | None = "web",
         plugins: bool | str = False,
         extra_args: str | None = None,
+        escalate_to: str | None = None,
+        escalate_effort: str | None = None,
         **kwargs: Any,
     ):
         super().__init__(*args, **kwargs)
@@ -239,6 +332,11 @@ class LockedCodeAlta(BaseInstalledAgent):
         self._disable_tools = disable_tools
         self._plugins = _flag(plugins)
         self._extra_args = shlex.split(extra_args) if extra_args else []
+        self._escalate_to = str(escalate_to).strip() if escalate_to else None
+        self._escalate_effort = str(escalate_effort).strip().lower() if escalate_effort else None
+        if self._escalate_effort is not None and self._escalate_effort not in _EFFORTS:
+            raise ValueError(f"escalate_effort must be one of {', '.join(_EFFORTS)}; got {escalate_effort!r}")
+        self._session_id = str(uuid.uuid4()) if self._escalate_to else None
         self._result: dict[str, Any] | None = None
 
     @staticmethod
@@ -386,14 +484,20 @@ class LockedCodeAlta(BaseInstalledAgent):
             settings.append(f"providers.{provider_id}.api_url={_toml_string(self._api_url)}")
         return model_ref, settings, key_name, key_value
 
-    def _command(self, repo: str, model_ref: str, settings: list[str]) -> str:
+    def _command(self, repo: str, model_ref: str, settings: list[str], budget_sec: int | None = None,
+                 resume: bool = False, prompt_file: str = f"{_RUN_DIR}/instruction.md", jsonl: str = _JSONL,
+                 stderr: str = _STDERR) -> str:
+        budget_sec = budget_sec or self._budget_sec
+        # With an escalation the session is kept in the profile, so that a second run can resume it.
+        storage = ["--profile", _PROFILE_DIR] if self._session_id else ["--ephemeral", "--profile", _PROFILE_DIR]
+        session = ([f"--resume={self._session_id}"] if resume else [f"--session-id={self._session_id}"]) if self._session_id else []
         args = [
             _ALTACLI, "run",
-            "--ephemeral", "--profile", _PROFILE_DIR, "--ignore-user-config",
-            "-C", repo, "-m", model_ref,
+            *storage, "--ignore-user-config",
+            "-C", repo, *session, "-m", model_ref,
             "--offline", "--format", "jsonl",
             # altacli ends the run itself first, with an abort in the journal and its result line; timeout is the backstop.
-            "--timeout", str(self._budget_sec - 90),
+            "--timeout", str(budget_sec - 90),
         ]
         if self._disable_tools:
             args += ["--disable-tools", self._disable_tools]
@@ -408,7 +512,7 @@ class LockedCodeAlta(BaseInstalledAgent):
         run = " ".join(shlex.quote(a) for a in args)
         return (
             f"mkdir -p {_LOGS} {_PROFILE_DIR}; cd {shlex.quote(repo)} && "
-            f"timeout -k 30 {self._budget_sec - 60} {run} < {_RUN_DIR}/instruction.md > {_JSONL} 2> {_STDERR}; "
+            f"timeout -k 30 {budget_sec - 60} {run} < {prompt_file} > {jsonl} 2> {stderr}; "
             'echo "ALTACLI_EXIT=$?"'
         )
 
@@ -436,9 +540,13 @@ class LockedCodeAlta(BaseInstalledAgent):
             env = {key_name: key_value, "DOTNET_NOLOGO": "1", "DOTNET_CLI_TELEMETRY_OPTOUT": "1"}
             if self._uses_claude_code():
                 env.update(_CLAUDE_CODE_ENV)
+            started = time.monotonic()
             result = await environment.exec(command=command, env=env, timeout_sec=self._budget_sec)
             exit_code = self._exit_code(result.stdout)
             await self._read_result(environment, context, exit_code)
+            if self._escalate_to and exit_code in (0, 1):
+                exit_code = await self._escalate(environment, context, repo, model_ref, settings, env, exit_code,
+                                                 self._budget_sec - int(time.monotonic() - started))
             # A run that ends by its budget or by a failure is still graded: its patch is captured below. A run that
             # never started (usage, provider not ready, session in use) or failed on the provider is reported to
             # Harbor, which classifies it (rate limit, authentication...) for its retry policy.
@@ -454,6 +562,40 @@ class LockedCodeAlta(BaseInstalledAgent):
                 self.logger.info(f"model.patch bytes: {(r.stdout or '').strip()}")
             except Exception as e:  # never mask the trial outcome
                 self.logger.warning(f"patch capture failed: {e}")
+
+    async def _escalate(self, environment: BaseEnvironment, context: AgentContext, repo: str, model_ref: str,
+                        settings: list[str], env: dict[str, str], exit_code: int | None, budget_left: int) -> int | None:
+        """Continues the session on the stronger model when the run ends with a sign of trouble; the exit code of what ran last."""
+        r = await environment.exec(command=f"cat {_JSONL} 2>/dev/null; true", timeout_sec=120)
+        trouble = _trouble((r.stdout or "").splitlines())
+        metadata: dict[str, Any] = dict(context.metadata or {})
+        if trouble is None or budget_left < _ESCALATION_MIN_SEC:
+            metadata["codealta_escalation"] = {"trouble": trouble, "escalated": False, "budget_left_sec": budget_left}
+            context.metadata = metadata
+            return exit_code
+        provider = model_ref.split(":", 1)[0]
+        stronger = f"{provider}:{self._escalate_to}" + (f"@{self._escalate_effort}" if self._escalate_effort else "")
+        with tempfile.TemporaryDirectory(prefix="codealta-continue-") as tmp:
+            local = Path(tmp) / "continue.md"
+            local.write_text(f"Continue with the request above: {trouble} Check what was done, then finish the request.",
+                             encoding="utf-8")
+            await environment.upload_file(local, f"{_RUN_DIR}/continue.md")
+        await environment.exec(command=f"chmod a+r {_RUN_DIR}/continue.md", user="root", timeout_sec=60)
+        first = self._result
+        command = self._command(repo, stronger, settings, budget_sec=budget_left, resume=True,
+                                prompt_file=f"{_RUN_DIR}/continue.md", jsonl=_ESCALATION_JSONL, stderr=_ESCALATION_STDERR)
+        self.logger.info(f"altacli escalation ({trouble}): {command}")
+        result = await environment.exec(command=command, env=env, timeout_sec=budget_left)
+        second_exit = self._exit_code(result.stdout)
+        r = await environment.exec(command=f"tail -n 1 {_ESCALATION_JSONL} 2>/dev/null; true", timeout_sec=120)
+        lines = [line for line in (r.stdout or "").splitlines() if line.strip()]
+        second = self._parse(lines[-1], "_codealta/result") if lines else None
+        self._fill(context, None, _combine(first, second), second_exit)
+        metadata = dict(context.metadata or {})
+        metadata["codealta_escalation"] = {"trouble": trouble, "escalated": True, "model": stronger,
+                                           "exit_code": second_exit, "result": second}
+        context.metadata = metadata
+        return second_exit
 
     @staticmethod
     def _exit_code(stdout: str | None) -> int | None:
