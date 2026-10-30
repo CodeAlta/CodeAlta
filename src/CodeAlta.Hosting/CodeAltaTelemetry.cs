@@ -16,21 +16,24 @@ namespace CodeAlta.Hosting;
 /// </summary>
 public sealed class CodeAltaTelemetry : IDisposable
 {
-    // How long the end of the application waits for the spans not yet sent: a short run (altacli in a pipeline) ends
-    // right after its last span.
-    private const int ShutdownTimeoutMilliseconds = 10_000;
-
-    private readonly TracerProvider _provider;
+    // The export, which this type holds as an IDisposable: it names no type of the OpenTelemetry SDK, so that an
+    // application that exports nothing never loads its assemblies.
+    private readonly IDisposable _export;
     private int _disposed;
 
-    private CodeAltaTelemetry(TracerProvider provider) => _provider = provider;
+    private CodeAltaTelemetry(IDisposable export) => _export = export;
 
     /// <summary>Starts the export of the traces when the environment of the process asks for it.</summary>
     /// <param name="defaultServiceName">The name of the service when the environment names none: <c>alta</c>, <c>altatui</c> or <c>altacli</c>.</param>
     /// <returns>The export, to dispose when the application ends; <see langword="null"/> when the environment asks for none.</returns>
     /// <exception cref="ArgumentException"><paramref name="defaultServiceName"/> is <see langword="null"/>, empty or white space.</exception>
     public static CodeAltaTelemetry? StartFromEnvironment(string defaultServiceName)
-        => StartFromEnvironment(defaultServiceName, Environment.GetEnvironmentVariable, configureExporter: null);
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(defaultServiceName);
+        return OpenTelemetryEnvironment.ExportsTraces(Environment.GetEnvironmentVariable)
+            ? new CodeAltaTelemetry(OtlpTraceExport.Start(defaultServiceName, Environment.GetEnvironmentVariable))
+            : null;
+    }
 
     /// <summary>Starts the export of the traces when the given environment asks for it.</summary>
     /// <param name="defaultServiceName">The name of the service when the environment names none.</param>
@@ -40,17 +43,49 @@ public sealed class CodeAltaTelemetry : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(defaultServiceName);
         ArgumentNullException.ThrowIfNull(variable);
-        if (!OpenTelemetryEnvironment.ExportsTraces(variable))
-        {
-            return null;
-        }
+        return OpenTelemetryEnvironment.ExportsTraces(variable)
+            ? new CodeAltaTelemetry(OtlpTraceExport.Start(defaultServiceName, variable, configureExporter))
+            : null;
+    }
 
+    /// <summary>Sends the spans not yet sent, within a few seconds, and ends the export.</summary>
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _export.Dispose();
+        }
+    }
+}
+
+/// <summary>The tracer provider of the OpenTelemetry SDK that exports the spans of CodeAlta over OTLP.</summary>
+internal static class OtlpTraceExport
+{
+    // How long the end of the application waits for the spans not yet sent: a short run (altacli in a pipeline) ends
+    // right after its last span.
+    private const int ShutdownTimeoutMilliseconds = 10_000;
+
+    /// <summary>Starts the export.</summary>
+    /// <param name="defaultServiceName">The name of the service when the environment names none.</param>
+    /// <param name="variable">Gives the value of a variable of the environment.</param>
+    /// <returns>What ends the export, once it sent what it holds.</returns>
+    public static IDisposable Start(string defaultServiceName, Func<string, string?> variable)
+        => Start(defaultServiceName, variable, configureExporter: null);
+
+    /// <summary>Starts the export, with the options of the exporter changed after it read the environment.</summary>
+    /// <param name="defaultServiceName">The name of the service when the environment names none.</param>
+    /// <param name="variable">Gives the value of a variable of the environment.</param>
+    /// <param name="configureExporter">Changes the options of the exporter, or <see langword="null"/>.</param>
+    /// <returns>What ends the export, once it sent what it holds.</returns>
+    public static IDisposable Start(string defaultServiceName, Func<string, string?> variable, Action<OtlpExporterOptions>? configureExporter)
+    {
         // The default resource reads OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES; the name of the application is the
         // service only when they name none, as a service added after them would replace theirs.
         var resource = ResourceBuilder.CreateDefault();
         if (!NamesService(variable))
         {
-            resource.AddService(defaultServiceName, serviceVersion: Version);
+            resource.AddService(defaultServiceName,
+                serviceVersion: typeof(OtlpTraceExport).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion?.Split('+')[0]);
         }
 
         var provider = Sdk.CreateTracerProviderBuilder()
@@ -58,23 +93,8 @@ public sealed class CodeAltaTelemetry : IDisposable
             .AddSource(AgentTelemetry.SourceName)
             .AddOtlpExporter(options => configureExporter?.Invoke(options))
             .Build();
-        return new CodeAltaTelemetry(provider);
+        return new Export(provider);
     }
-
-    /// <summary>Sends the spans not yet sent, within a few seconds, and ends the export.</summary>
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
-
-        _provider.Shutdown(ShutdownTimeoutMilliseconds);
-        _provider.Dispose();
-    }
-
-    private static string? Version
-        => typeof(CodeAltaTelemetry).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion?.Split('+')[0];
 
     private static bool NamesService(Func<string, string?> variable)
     {
@@ -93,5 +113,14 @@ public sealed class CodeAltaTelemetry : IDisposable
         }
 
         return false;
+    }
+
+    private sealed class Export(TracerProvider provider) : IDisposable
+    {
+        public void Dispose()
+        {
+            provider.Shutdown(ShutdownTimeoutMilliseconds);
+            provider.Dispose();
+        }
     }
 }
