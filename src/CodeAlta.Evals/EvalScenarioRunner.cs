@@ -13,7 +13,8 @@ namespace CodeAlta.Evals;
 /// The policies emulate what CodeAlta could do by itself, without asking the agent:
 /// <list type="bullet">
 /// <item><c>router</c> (as the tier): a call of the <c>quick</c> model, without tools, reads the request and the requests
-/// before it, and picks the tier of the turn;</item>
+/// before it, and picks the tier of the turn; <c>split</c> (as the tier) asks it only whether the request changes code:
+/// <c>standard</c> when it does, <c>quick</c> otherwise;</item>
 /// <item><c>escalate</c>: a turn that shows a sign of trouble the host can see (no answer, a refusal to use the tools, its
 /// last test run failing) is continued on the next tier, at most up to <c>complex</c>;</item>
 /// <item><c>review</c>: a turn that changed code on a tier below <c>complex</c> has its diff read by the <c>complex</c> model,
@@ -36,7 +37,7 @@ internal sealed record EvalConfiguration(string PromptId, string Tier, IReadOnly
 
     public string Name => $"{PromptId}@{Tier}" + string.Concat(Policies.Order(StringComparer.Ordinal).Select(static policy => "+" + policy));
 
-    public bool Routed => Tier == "router";
+    public bool Routed => Tier is "router" or "split";
 
     /// <summary>Whether the host chooses the model of each turn.</summary>
     public bool HostDriven => Routed || Policies.Count > 0;
@@ -156,7 +157,9 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
                 string? tier = configuration.HostDriven ? configuration.Tier : null;
                 if (configuration.Routed)
                 {
-                    var (routed, routing) = await RouteAsync(asked, turn.Prompt, Path.Combine(transcripts, $"turn{number}.router.jsonl"), cancellationToken).ConfigureAwait(false);
+                    var (routed, routing) = configuration.Tier == "split"
+                        ? await SplitAsync(turn.Prompt, Path.Combine(transcripts, $"turn{number}.router.jsonl"), cancellationToken).ConfigureAwait(false)
+                        : await RouteAsync(asked, turn.Prompt, Path.Combine(transcripts, $"turn{number}.router.jsonl"), cancellationToken).ConfigureAwait(false);
                     tier = routed;
                     AddHelperRequests(run, routing, number, "router");
                 }
@@ -568,6 +571,22 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
             || line.Contains("expected", StringComparison.OrdinalIgnoreCase) || line.Contains("actual", StringComparison.OrdinalIgnoreCase)
             || line.Contains("Error", StringComparison.Ordinal)).Take(40);
         return Bound(string.Join('\n', kept), 6000);
+    }
+
+    // The split router: the quick model, without tools, says only whether the request asks to change code.
+    private async Task<(string Tier, TurnReading Reading)> SplitAsync(string request, string transcript, CancellationToken cancellationToken)
+    {
+        var prompt = $"""
+            A user sends the request below to a coding agent. Does it ask to write or change code (source, tests, scripts,
+            configuration that runs)? A question, a lookup, a change of docs or comments only, or a commit is not. Answer
+            with one word: code or other.
+
+            ## Request
+            {request}
+            """;
+        var reading = await RunTurnAsync(prompt, HelperArguments(tierModels["quick"]), Path.GetTempPath(), transcript, cancellationToken).ConfigureAwait(false);
+        var answer = (reading.FinalMessage ?? string.Empty).Trim().ToLowerInvariant();
+        return (answer.StartsWith("other", StringComparison.Ordinal) ? "quick" : "standard", reading);
     }
 
     // The reviewer: a stronger model, without tools, reads the request and the diff of the turn.
