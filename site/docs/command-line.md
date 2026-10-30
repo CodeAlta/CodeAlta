@@ -144,7 +144,7 @@ Without these variables, nothing is sent.
 
 ## The alta commands
 
-`altacli alta ARGS...` runs the commands of the `alta` tool, as the agents do: `altacli alta session list`, `altacli alta project list`, `altacli alta model list`. `altacli alta --help` lists those of the command line. The commands that would change the configuration files, such as `alta mcp server add` or `alta mcp server disable`, fail there: `altacli` leaves them as they are.
+`altacli alta ARGS...` runs the commands of the `alta` tool, as the agents do: `altacli alta session list`, `altacli alta project list`, `altacli alta model list`. `altacli alta --help` lists those of the command line. They see the sessions of the storage they are given, such as `--isolated`: those of the folder of the command (`-C`, else the current folder) and of your projects are listed, and any session is found by its id, as `altacli run --resume` finds it. The commands that would change the configuration files, such as `alta mcp server add` or `alta mcp server disable`, fail there: `altacli` leaves them as they are.
 
 ## Editors (ACP)
 
