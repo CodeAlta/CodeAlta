@@ -22,6 +22,9 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
     // The capability of a model that the endpoint says takes adaptive thinking and its effort, whatever its name.
     private const string AdaptiveThinkingCapabilityKey = "anthropicAdaptiveThinking";
 
+    /// <summary>The standard context window of the Claude models, which a session of a model that accepts more can keep to.</summary>
+    internal const long StandardContextSize = 200_000;
+
     // The wait of a rate limit of the API whose retry-after is not known: its limits are per minute.
     private const int UnknownRateLimitRetryAfterSeconds = 30;
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Anthropic");
@@ -458,12 +461,7 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         if (provider.ModelListAsync is not null)
         {
             models = await provider.ModelListAsync(cancellationToken).ConfigureAwait(false);
-            return AgentModelMetadataEnricher.EnrichModels(
-                models,
-                provider.ModelCatalog,
-                provider.ModelsDevProviderId,
-                provider.ModelOverrides,
-                provider.ModelsIncludeRegex);
+            return EnrichModels(provider, providerDescriptor, models);
         }
 
         if (!string.IsNullOrWhiteSpace(provider.SingleModelId))
@@ -472,12 +470,7 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             [
                 CreateSingleModelInfo(provider.SingleModelId, providerDescriptor),
             ];
-            return AgentModelMetadataEnricher.EnrichModels(
-                models,
-                provider.ModelCatalog,
-                provider.ModelsDevProviderId,
-                provider.ModelOverrides,
-                provider.ModelsIncludeRegex);
+            return EnrichModels(provider, providerDescriptor, models);
         }
 
         var client = CreateSdkClient(provider, providerDescriptor);
@@ -509,12 +502,38 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             }
         }
 
-        return AgentModelMetadataEnricher.EnrichModels(
+        return EnrichModels(provider, providerDescriptor, models);
+    }
+
+    // What models.dev and the user say of the models, and the sizes of context a session can use them with: each price
+    // models.dev gives a model past a size of prompt and, on the Claude API, the standard window of a model that accepts
+    // more, as Claude Code offers it (ClaudeCodeModelCatalog). A smaller size is the input a session keeps to: it
+    // compacts before it, and the requests do not change.
+    internal static IReadOnlyList<AgentModelInfo> EnrichModels(
+        AnthropicProviderOptions provider,
+        ModelProviderRuntimeDescriptor providerDescriptor,
+        IReadOnlyList<AgentModelInfo> models)
+    {
+        var enriched = AgentModelMetadataEnricher.EnrichModels(
             models,
             provider.ModelCatalog,
             provider.ModelsDevProviderId,
             provider.ModelOverrides,
-            provider.ModelsIncludeRegex);
+            provider.ModelsIncludeRegex,
+            contextPriceTiers: true);
+        return IsClaudeApi(provider.BaseUri ?? providerDescriptor.BaseUri)
+            ? [.. enriched.Select(WithStandardContextSize)]
+            : enriched;
+    }
+
+    private static AgentModelInfo WithStandardContextSize(AgentModelInfo model)
+    {
+        if (model.GetContextSize() is not { } size || size <= StandardContextSize)
+        {
+            return model;
+        }
+
+        return model with { ContextSizes = [.. new SortedSet<long>(model.ContextSizes ?? [size]) { StandardContextSize }] };
     }
 
     private static AnthropicClient CreateSdkClient(
