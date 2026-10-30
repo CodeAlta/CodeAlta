@@ -200,3 +200,6 @@ export function choiceRequest(choice: Choice): { tier: string } | { provider: st
 
 /** The remembered choices of every project, under one key of the storage. */
 export const preferencesKey = "codealta.mobile.newSessionPreferences.v1";
+
+/** The project a new session was last started in or chosen for, under one key of the storage. */
+export const lastProjectKey = "codealta.mobile.lastProject.v1";
