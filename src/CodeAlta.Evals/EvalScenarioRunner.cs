@@ -17,13 +17,17 @@ namespace CodeAlta.Evals;
 /// <item><c>escalate</c>: a turn that shows a sign of trouble the host can see (no answer, a refusal to use the tools, its
 /// last test run failing) is continued on the next tier, at most up to <c>complex</c>;</item>
 /// <item><c>review</c>: a turn that changed code on a tier below <c>complex</c> has its diff read by the <c>complex</c> model,
-/// without tools; what it finds is sent to the session as the next prompt, once.</item>
+/// without tools; what it finds is sent to the session as the next prompt, once. <c>review-standard</c> has the
+/// <c>standard</c> model read it, for a turn on <c>quick</c>.</item>
 /// </list>
 /// With a policy, each user turn starts on its tier again (<c>-m</c>): the host, not the agent, chooses the model.
 /// </remarks>
 internal sealed record EvalConfiguration(string PromptId, string Tier, IReadOnlySet<string> Policies)
 {
-    public static readonly IReadOnlySet<string> KnownPolicies = new HashSet<string>(StringComparer.Ordinal) { "escalate", "review" };
+    public static readonly IReadOnlySet<string> KnownPolicies = new HashSet<string>(StringComparer.Ordinal) { "escalate", "review", "review-standard" };
+
+    /// <summary>The tier of the reviewer: complex for <c>review</c>, standard for <c>review-standard</c>; null without a review.</summary>
+    public string? ReviewTier => Policies.Contains("review") ? "complex" : Policies.Contains("review-standard") ? "standard" : null;
 
     public string Name => $"{PromptId}@{Tier}" + string.Concat(Policies.Order(StringComparer.Ordinal).Select(static policy => "+" + policy));
 
@@ -38,7 +42,7 @@ internal sealed record EvalConfiguration(string PromptId, string Tier, IReadOnly
         var at = parts[0].LastIndexOf('@');
         if (at <= 0 || at == parts[0].Length - 1) throw new ArgumentException($"A configuration is <prompt-id>@<tier>[+policy...], such as adaptive@standard: '{value}'.", nameof(value));
         var policies = parts.Skip(1).ToHashSet(StringComparer.Ordinal);
-        if (policies.FirstOrDefault(policy => !KnownPolicies.Contains(policy)) is { } unknown) throw new ArgumentException($"Unknown policy '{unknown}': escalate, review.", nameof(value));
+        if (policies.FirstOrDefault(policy => !KnownPolicies.Contains(policy)) is { } unknown) throw new ArgumentException($"Unknown policy '{unknown}': escalate, review, review-standard.", nameof(value));
         return new EvalConfiguration(parts[0][..at], parts[0][(at + 1)..], policies);
     }
 }
@@ -145,7 +149,7 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
                 }
 
                 asked.Add(turn.Prompt);
-                (string Tree, Dictionary<string, string> Untracked)? before = configuration.Policies.Contains("review") ? Snapshot(project) : null;
+                (string Tree, Dictionary<string, string> Untracked)? before = configuration.ReviewTier is not null ? Snapshot(project) : null;
                 var reading = await RunTurnAsync(turn.Prompt, Arguments(configuration, sessionId, index == 0, project, tier is null ? null : tierModels[tier]), project,
                     Path.Combine(transcripts, $"turn{number}.jsonl"), cancellationToken).ConfigureAwait(false);
                 if (InvalidReason(reading) is { } invalid)
@@ -181,9 +185,10 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
 
                 // Review: the complex model reads the change of the turn; what it finds is sent to the session once.
                 string? review = null;
-                if (before is not null && tier is not null && tier != "complex" && Diff(project, before.Value) is { Length: > 0 } diff)
+                if (before is not null && tier is not null && configuration.ReviewTier is { } reviewTier
+                    && Array.IndexOf(TierOrder, tier) < Array.IndexOf(TierOrder, reviewTier) && Diff(project, before.Value) is { Length: > 0 } diff)
                 {
-                    var (findings, reviewing) = await ReviewAsync(turn.Prompt, diff, Path.Combine(transcripts, $"turn{number}.review.jsonl"), cancellationToken).ConfigureAwait(false);
+                    var (findings, reviewing) = await ReviewAsync(turn.Prompt, diff, tierModels[reviewTier], Path.Combine(transcripts, $"turn{number}.review.jsonl"), cancellationToken).ConfigureAwait(false);
                     AddHelperRequests(run, reviewing, number, "review");
                     review = findings ?? string.Empty;
                     if (findings is not null)
@@ -441,8 +446,8 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
         return (tier, reading);
     }
 
-    // The reviewer: the complex model, without tools, reads the request and the diff of the turn.
-    private async Task<(string? Findings, TurnReading Reading)> ReviewAsync(string request, string diff, string transcript, CancellationToken cancellationToken)
+    // The reviewer: a stronger model, without tools, reads the request and the diff of the turn.
+    private async Task<(string? Findings, TurnReading Reading)> ReviewAsync(string request, string diff, string model, string transcript, CancellationToken cancellationToken)
     {
         var prompt = $"""
             You review a change a coding agent made for a request. Report only what makes the change fail the request or
@@ -459,7 +464,7 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
             {Bound(diff, 60_000)}
             ```
             """;
-        var reading = await RunTurnAsync(prompt, HelperArguments(tierModels["complex"]), Path.GetTempPath(), transcript, cancellationToken).ConfigureAwait(false);
+        var reading = await RunTurnAsync(prompt, HelperArguments(model), Path.GetTempPath(), transcript, cancellationToken).ConfigureAwait(false);
         var answer = (reading.FinalMessage ?? string.Empty).Trim();
         return (answer.Length == 0 || answer.Trim('.', '*', '`').Equals("OK", StringComparison.OrdinalIgnoreCase) ? null : answer, reading);
     }

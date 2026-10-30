@@ -146,6 +146,39 @@ internal static class EvalScenarios
             new("Commit all the changes, with a short message.", Committed),
         ]),
 
+        new("csv-import", "a CSV parser with quoting and exact error positions, then two small follow-ups", "goes up for the parser when its checks fail, comes down after",
+        [
+            new("""
+                Add a CSV reader to the shop: a module src/csv.js exporting `parseCsv(text, options)` and `class CsvError extends Error` with `line` and `column` properties.
+                - Records end at a line break (`\n` or `\r\n`); a line break at the end of the text ends the last record, and empty lines outside quotes are skipped. Fields are separated by commas and kept exactly as written, spaces included; a comma at the end of a record is followed by an empty field.
+                - A field that starts with a double quote is quoted: it ends at the next lone double quote, a doubled quote (`""`) inside it is one quote, and it may hold commas and line breaks.
+                - `parseCsv(text)` returns the records as arrays of strings; an empty text gives `[]`. With `{ header: true }`, the first record names the fields and the others are returned as objects.
+                - An invalid text throws a `CsvError` with the line and the column (both from 1, every line break counted, also those inside quotes) of its cause: a double quote inside a field that is not quoted, the character that follows the closing quote of a field when it is neither a comma nor the end of the record, the opening quote of a quoted field that never ends; and line of the start of a record whose number of fields differs from the first record, column 1. With a header, a name given twice is an error at line 1 and the column where its second field starts.
+                Add tests in test/csv.test.js, and keep `npm test` passing.
+                """,
+                outcome => FirstFailure(
+                    File.Exists(Path.Combine(outcome.ProjectFolder, "test", "csv.test.js")) ? null : "no test/csv.test.js",
+                    NodeTests(outcome),
+                    Hidden(outcome))),
+            new("Add src/csv.js to the list of modules in README.md.",
+                outcome => Read(outcome, "README.md").Contains("csv.js", StringComparison.Ordinal) ? null : "README.md does not list csv.js"),
+            new("Commit all the changes, with a short message.", Committed),
+        ]),
+
+        new("date-bug", "a question, a doc line, a calendar bug whose cause is in a shared helper, commit", "goes up for the bug when its checks fail",
+        [
+            new("Which modules of src import src/dates.js? Answer with their file names, one per line.",
+                outcome => (outcome.FinalMessage ?? string.Empty).Contains("schedule.js", StringComparison.Ordinal) ? null : "the answer misses schedule.js"),
+            new("Add src/schedule.js to the list of modules in README.md, with a few words on what it does.",
+                outcome => Read(outcome, "README.md").Contains("schedule.js", StringComparison.Ordinal) ? null : "README.md does not list schedule.js"),
+            new("`npm test` fails in test/schedule.test.js. Find the cause and fix it in the source, not in the tests.",
+                outcome => FirstFailure(
+                    Unchanged(outcome, "test/schedule.test.js"),
+                    NodeTests(outcome),
+                    Hidden(outcome))),
+            new("Commit all the changes, with a short message.", Committed),
+        ]),
+
         new("long-context", "a wide reading turn (about 100k tokens), then a mix", "switches at most once",
         [
             new("""

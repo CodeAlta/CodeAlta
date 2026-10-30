@@ -233,7 +233,9 @@ internal static class EvalScenarioJudge
 {
     public static async Task<string> RunAsync(string altacli, string model, IReadOnlyList<EvalScenarioRun> runs, IReadOnlyList<string> tiers, string output, TimeSpan timeout)
     {
-        var chosen = runs.Where(static run => run.Invalid is null && run.Configuration.StartsWith("adaptive", StringComparison.Ordinal)).ToList();
+        // The runs that choose models: the Adaptive prompts, and the policies of the host.
+        var chosen = runs.Where(static run => run.Invalid is null && (run.Configuration.StartsWith("adaptive", StringComparison.Ordinal)
+            || run.Configuration.Contains('+', StringComparison.Ordinal) || run.Configuration.EndsWith("@router", StringComparison.Ordinal))).ToList();
         if (chosen.Count == 0) return "\n## Judge\n\nNo Adaptive run to read.\n";
         var prompt = new StringBuilder($"""
             You review runs of an AI coding agent in an "Adaptive" mode: before each request it should choose the cheapest model
