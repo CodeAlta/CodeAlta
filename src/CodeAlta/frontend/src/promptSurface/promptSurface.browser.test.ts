@@ -160,6 +160,20 @@ test("the prompt surface keeps one row above and one below the editor at every w
     assert.equal(await wait(`!!${archive} && !${archive}.disabled`), true);
     await evaluate(`${archive}.click()`);
     assert.equal(await evaluate("fixture.archives()"), 1);
+    // The MCP chip opens the servers and tools of the session: what it has first, then every server; Escape closes it.
+    await evaluate("document.querySelector('.composer-plugin-status-item').click()");
+    assert.equal(await wait("!!document.querySelector('dialog.mcp-session-dialog[open] .mcp-session-tool')"), true, "the MCP window opens");
+    const mcpWindow = () => evaluate(`(()=>{const dialog=document.querySelector('dialog.mcp-session-dialog[open]');return dialog?{
+      servers:[...dialog.querySelectorAll('.mcp-session-server')].map(server=>server.getAttribute('aria-label')+':'+server.dataset.state),
+      tools:[...dialog.querySelectorAll('.mcp-session-tool-name code')].map(code=>code.textContent),
+      stats:[...dialog.querySelectorAll('.mcp-session-stat strong')].map(stat=>stat.textContent)}:null})()`);
+    assert.deepEqual(await mcpWindow(), { servers: ["docs:active"], tools: ["fetch", "search"], stats: ["1/2", "2/3", "1"] });
+    await picture("mcp-window");
+    await evaluate("[...document.querySelectorAll('dialog.mcp-session-dialog .bp6-segmented-control button')].find(button=>button.textContent==='All servers').click()");
+    assert.equal(await wait("document.querySelectorAll('dialog.mcp-session-dialog .mcp-session-server').length===2"), true, "every server is shown");
+    assert.deepEqual((await mcpWindow())?.servers, ["docs:active", "web:available"]);
+    await evaluate("document.querySelector('dialog.mcp-session-dialog').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+    assert.equal(await wait("!document.querySelector('dialog.mcp-session-dialog')"), true, "Escape closes the MCP window");
     await evaluate("fixture.subAgents(3, 1)");
 
     const widths = [[1600, "wide"], [1200, "wide"], [900, "medium"], [600, "narrow"], [420, "tiny"]] as const;

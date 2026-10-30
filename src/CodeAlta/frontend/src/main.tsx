@@ -6007,7 +6007,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
         onOpenSettings={openPullRequestSettings ?? undefined} onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} /> : undefined} /> : undefined,
   status: epoch ? <>{regions && <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="inline" />}
     {sessionId && !archived && <ReviewComposerStatus epoch={epoch} projectId={id ?? null} checkout={shown} sessionId={sessionId} running={running} />}
-    <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /></> : undefined,
+    <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} readMcp={composerStatus.readMcp} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="footer" /> : undefined });
   }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running]);
 }

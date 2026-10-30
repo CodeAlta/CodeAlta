@@ -63,6 +63,14 @@ const project = { id: "project-1", name: "CodeAlta", path: "C:\\Users\\alexa\\.a
 const readGit = async () => ({ status: "ok", projectId: project.id, branch: "alta/mellow-chisel-pz93", detached: false, insertions: 94, deletions: 32, changedFiles: 7 });
 const readStatus = async ({ projectId }: { projectId: string | null }) => ({ status: "ok", projectId,
   items: [{ pluginId: "mcp", name: "mcp-status", label: "MCP", text: "1/1 · tools not loaded", tone: "warning", settingsPage: "mcp" }] });
+// The servers and tools the MCP chip shows: the session uses docs, and could activate web.
+const mcpTool = (name: string, description: string, active: boolean) => ({ name, alias: `mcp__docs__${name}`, title: null, description,
+  arguments: [{ name: "query", description: "What to look for" }], enabled: true, active });
+const readMcp = async ({ projectId }: { projectId: string | null }) => ({ status: "ok", projectId, enabled: true, omitted: 0, servers: [
+  { key: "docs", transport: "stdio", source: ".alta/mcp.json", scope: "project", enabled: true, required: false, activated: true, inUse: true, activeToolCount: 2,
+    listedAt: "2026-10-30T09:00:00Z", omittedTools: 0, tools: [mcpTool("fetch", "Fetches a page", true), mcpTool("search", "Searches the documentation", true)] },
+  { key: "web", transport: "http", source: "mcp.json", scope: "global", enabled: true, required: false, activated: false, inUse: false, activeToolCount: null,
+    listedAt: null, omittedTools: 0, tools: [mcpTool("get", "Downloads a page", false)] }] });
 
 // What a new worktree can start from and where it goes.
 const placeApi = {
@@ -102,7 +110,7 @@ function Pane({ sessionId }: { sessionId: string }) {
       : <WorkspaceChip epoch={epoch} project={project} sessionId={sessionId} read={readGit} branches={false}
         worktree={{ path: project.path, name: "mellow-chisel-pz93", missing: false }} onShowChanges={() => { changesShown++; }} onOpenEditor={() => { editorsOpened++; }}
         onOpenTerminal={() => { }} />,
-    status: <ComposerStatus epoch={epoch} projectId={project.id} sessionId={sessionId} read={readStatus} />,
+    status: <ComposerStatus epoch={epoch} projectId={project.id} sessionId={sessionId} read={readStatus} readMcp={readMcp} />,
     subAgents: state.subAgents.length ? <SubAgentsChip sessions={state.subAgents} /> : undefined };
   // The composer at the bottom of its pane, as in the window.
   return <div className="session-workspace" style={{ flex: "1 1 0", minWidth: 0, alignSelf: "stretch", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>

@@ -94,6 +94,45 @@ public sealed class ComposerStatusRpcTests
         Assert.IsNull(newSessionProject);
     }
 
+    [TestMethod]
+    public async Task ReadMcp_ListsTheServersOfTheSpaceWithTheirListedTools()
+    {
+        Assert.AreEqual("unavailable", (await new ComposerStatusService().ReadMcpAsync(new(Epoch, null), default)).Status);
+        using var fixture = await Fixture.CreateAsync();
+        Assert.AreEqual("stale_epoch", (await fixture.Service.ReadMcpAsync(new("other", null), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Service.ReadMcpAsync(new(Epoch, null, "bad\nid"), default)).Status);
+        File.WriteAllText(fixture.GlobalJson, """{"mcpServers":{"docs":{"command":"npx"},"search":{"command":"uvx"}}}""");
+        File.WriteAllText(fixture.GlobalPolicy, "[plugins.mcp.servers.search]\nenabled = false\n");
+        var definition = new CodeAlta.Plugin.Mcp.McpConfigCache().Discover(fixture.Project.ProjectPath, new CodeAlta.Plugin.Mcp.McpHome(fixture.Home, null))
+            .EffectiveServers.Single(static server => server.Definition.Key == "docs").Definition;
+        new CodeAlta.Plugin.Mcp.McpToolListCache(CodeAlta.Plugin.Mcp.McpToolListCache.FolderOf(fixture.Home)).Write(definition,
+        [
+            new CodeAlta.Plugin.Mcp.McpRuntimeTool
+            {
+                Server = "docs", Name = "lookup", Alias = "mcp__docs__lookup", Description = "Looks up a page",
+                InputSchema = System.Text.Json.JsonDocument.Parse("""{"type":"object","properties":{"id":{"description":"The page"}}}""").RootElement.Clone(),
+            },
+        ]);
+
+        var response = await fixture.Service.ReadMcpAsync(new(Epoch, fixture.Project.Id, "session-a"), default);
+
+        Assert.AreEqual("ok", response.Status);
+        Assert.IsTrue(response.Enabled);
+        CollectionAssert.AreEqual(new[] { "docs:True", "search:False" }, response.Servers.Select(static server => $"{server.Key}:{server.Enabled}").ToArray());
+        var docs = response.Servers[0];
+        Assert.AreEqual("stdio", docs.Transport);
+        Assert.AreEqual("global", docs.Scope);
+        Assert.IsFalse(docs.InUse);
+        var tool = docs.Tools.Single();
+        Assert.AreEqual(new ComposerMcpArgument("id", "The page"), tool.Arguments.Single());
+        Assert.AreEqual(("lookup", "Looks up a page", true, false), (tool.Name, tool.Description, tool.Enabled, tool.Active));
+        Assert.AreEqual(0, response.Servers[1].Tools.Length);
+
+        File.WriteAllText(fixture.GlobalPolicy, "[plugins.mcp]\nenabled = false\n");
+        var disabled = await fixture.Service.ReadMcpAsync(new(Epoch, null), default);
+        Assert.AreEqual(("ok", false, 0), (disabled.Status, disabled.Enabled, disabled.Servers.Length));
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly string _root;

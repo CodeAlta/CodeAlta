@@ -330,9 +330,21 @@ Some servers publish [skills](../workspace/settings.md#skills-management) beside
 
 CodeAlta TUI does not load server skills, and skills of servers run by the Claude Code CLI are not shown.
 
+## Servers and tools of a session
+
+In CodeAlta Desktop, click the MCP status above the prompt (`MCP 3/3 · active tools 12`) to see what the session has:
+
+- A summary: the servers the session uses, its active tools, the servers it could activate and those turned off.
+- Each server, with its state (**In use**, **Available**, **Turned off**), its transport and the file that defines it. **All tools** marks a server activated as a whole.
+- Its tools, with their descriptions: a green dot for a tool the session has, an empty one for a tool it can activate. Click a tool for its arguments and the name agents call it by.
+- **In this session** keeps what the session has, **All servers** shows every tool; the search box finds a server or a tool by its name or description.
+- **MCP settings** opens the [MCP Servers page](#mcp-servers-page).
+
+Nothing connects to a server: the tools are the ones CodeAlta listed last, when a session activated the server or **Test** ran in Settings. A server never listed says so.
+
 ## MCP Servers page
 
-Open it with `/mcp`, the command **MCP Servers**, or the MCP status of the prompt. In CodeAlta Desktop it is **Settings > MCP Servers** (`Ctrl+G Ctrl+Y`):
+Open it with `/mcp`, the command **MCP Servers**, or the **MCP settings** button of the [servers and tools of a session](#servers-and-tools-of-a-session); in CodeAlta TUI also with the MCP status of the prompt. In CodeAlta Desktop it is **Settings > MCP Servers** (`Ctrl+G Ctrl+Y`):
 
 - Add, edit, enable and remove global or project servers; authorize or sign out of remote servers.
 - The files the servers come from, each with a button to open it in the code editor.

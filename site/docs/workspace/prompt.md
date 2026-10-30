@@ -27,7 +27,7 @@ In CodeAlta Desktop, the line above the editor shows:
 
 - **The status**: **Prompt ready**, or **Thinking · 4m 13s**, and the count of background tasks (click it to see or stop them). **N provider errors** opens the settings of failing providers.
 - **The Workspace chip**: the project, the worktree (in turquoise) or branch, and the lines changed since the last commit (click them for the [changes](code.md#changes)), with buttons for the [code editor](code.md#code-editor) and a [terminal](code.md#terminals). Before a session starts, it chooses **Project folder** or **New worktree** and its base branch.
-- **The MCP servers**: their status; click it for their [settings](../plugins/mcp.md).
+- **The MCP servers**: their status; click it to see the [servers and tools of the session](../plugins/mcp.md#servers-and-tools-of-a-session).
 
 Click the project or the branch for the **Workspace** popover: switch the branch, copy the path or open it in your [external editor](code.md#external-editor) or file manager, **View changes**, **Pull request** (asks the session for one), **Open editor** and **Open terminal**.
 

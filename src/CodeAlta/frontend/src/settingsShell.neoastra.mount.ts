@@ -338,7 +338,7 @@ export const projectFiles = { read: unavailable, write: unavailable };
 export const projectGit = { status: unavailable };
 export const promptImages = { read: unavailable };
 export const toolCalls = { read: unavailable, readJob: unavailable, observe: unavailable };
-export const composerStatus = { read: unavailable };
+export const composerStatus = { read: unavailable, readMcp: unavailable };
 export const sessionUserInput = {
   list: (request: { expectedHostEpoch: string; sessionId: string }) => new Promise(resolve => inputReads.push({ request, resolve })),
   resolve: (request: InputRequest) => new Promise((resolve, reject) => inputAnswers.push({ request, resolve, reject })),

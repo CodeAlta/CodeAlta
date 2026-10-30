@@ -288,7 +288,7 @@ export const applicationLogs = Object.freeze({
   levels: async () => ({ status: "unavailable", level: "info", features: [], levels: [], editable: false }),
   saveLevels: async () => ({ status: "unavailable", level: "info", features: [], levels: [], editable: false }),
 });
-export const composerStatus = Object.freeze({ read: unavailable });
+export const composerStatus = Object.freeze({ read: unavailable, readMcp: unavailable });
 export const pluginUi = Object.freeze({ contributions: unavailable, buttons: async () => ({ status: "unavailable", place: null, buttons: [] }), regions: unavailable, invokeCommand: unavailable, searchPicker: unavailable, watch: unavailable, respond: unavailable, dialogAction: unavailable });
 // The canvases are tabs of plugins, which a browser without the host does not run.
 export const canvases = Object.freeze({ list: async () => ({ status: "unavailable", canvases: [] }), open: unavailable, visible: unavailable, close: unavailable, closeSpace: unavailable,

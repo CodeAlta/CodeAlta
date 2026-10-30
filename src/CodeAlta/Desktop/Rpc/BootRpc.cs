@@ -568,6 +568,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(PromptImageResponse))]
 [JsonSerializable(typeof(ComposerStatusRequest))]
 [JsonSerializable(typeof(ComposerStatusResponse))]
+[JsonSerializable(typeof(ComposerMcpResponse))]
 [JsonSerializable(typeof(UserInputListRequest))]
 [JsonSerializable(typeof(UserInputPage))]
 [JsonSerializable(typeof(UserInputResolveRequest))]
