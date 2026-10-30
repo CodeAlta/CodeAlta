@@ -49,7 +49,7 @@ The **Files** pane (`Ctrl+B` shows or hides it) lists the project without what `
 | Show the files / search in files | `Ctrl+Shift+E` / `Ctrl+Shift+F` |
 | Wrap lines | `Alt+Z` |
 
-A new file (`Ctrl+N`, or **+** beside the tabs) is **Untitled-1**, plain text, kept in the editor only. `Ctrl+S` asks for its path in the project and creates missing folders. Choose its language with `Ctrl+K` `M`, or click the language in the status bar; this works for any open file.
+A new file (`Ctrl+N`, or **+** beside the tabs) is **Untitled-1**, plain text, kept in the editor only. `Ctrl+S` asks for its path in the project and creates missing folders. Choose its language with `Ctrl+K` `M`, or click the language in the status bar; this works for any open file. LaTeX files (`.tex`, `.sty`, `.cls`) and BibTeX files (`.bib`) are highlighted too.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-editor-new-file.webp" alt="A new untitled file in the code editor with the dialog that selects its language" loading="lazy">
@@ -76,7 +76,7 @@ Pictures open as pictures, and an SVG file as a drawing. A picture is copied to 
   <figcaption class="small text-secondary mt-2">An SVG file shown as a drawing. The buttons at the right of the tabs switch to its text.</figcaption>
 </figure>
 
-The Markdown page shows the front matter as a table, task lists as check boxes, GitHub alerts in color, highlighted code and `mermaid` diagrams. A `mermaid` block that cannot be read stays code, with the reason under it (in a sequence diagram, `;` ends a statement; write `#59;` for one in a message).
+The Markdown page shows the front matter as a table, task lists as check boxes, GitHub alerts in color, highlighted code, `mermaid` diagrams, and [LaTeX formulas and footnotes](prompt.md#equations). A `mermaid` block that cannot be read stays code, with the reason under it (in a sequence diagram, `;` ends a statement; write `#59;` for one in a message).
 
 `Ctrl+F` (`Cmd+F` on macOS) finds a text in the page, as in the [Documentation tab](readme.md#documentation-tab), in plans and files you [review](../reviews.md) and in Work items.
 

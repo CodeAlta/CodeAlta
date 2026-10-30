@@ -46,6 +46,7 @@ CodeAlta Desktop brings together:
 - **Several windows**: [move or drag tabs](https://codealta.github.io/docs/workspace/#windows) into windows of their own, name and color them, and find them on their monitor at the next start (the terminal UI has one screen).
 - **Fork & rewind**: branch a session from any turn and keep the original, or roll it back to an earlier prompt.
 - **Attach files**: [add files, images, folders and issues to a prompt](https://codealta.github.io/docs/getting-started/#attach-files) from a menu, a drop or a paste; PDFs go to the models that read them, and other documents (Word, Excel, PowerPoint…) are converted to Markdown for any model.
+- **[Math & research](https://codealta.github.io/docs/workspace/prompt/#equations)**: LaTeX formulas, chemistry and footnotes in messages and documents, a live preview of the formula you type and an equation editor in the prompt (`Alt+=`), and LaTeX and BibTeX files highlighted.
 - **Speech to prompt**: [dictate a prompt](https://codealta.github.io/docs/speech/) with a speech model that runs on your computer, downloaded the first time you use the microphone.
 - **Search your work**: `Ctrl+P` and [`alta search`](https://codealta.github.io/docs/search/) find the prompts and answers of your sessions, your plans, the guide, the skills and the tools from a local index; turn on search by meaning to find them by what they are about, with a model that runs on your computer.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.

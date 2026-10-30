@@ -18,6 +18,7 @@ The prompt is where you write to a session; the timeline above it shows what the
 | `F8` | Stop the running turn |
 | `F6` | Open the larger prompt editor; `Esc` or `Ctrl+Enter` closes it and keeps the draft |
 | `F10` | Clear the queue |
+| `Alt+=` (`Ctrl+Alt+=` on macOS) | Write or edit an [equation](#equations) (CodeAlta Desktop) |
 
 Queued prompts can be edited, repeated, sent at once to steer, or deleted. When a provider cannot steer a running turn, the prompt waits for the next turn. See [Busy sessions and queues](../sessions/readme.md#busy-sessions-and-queues).
 
@@ -41,7 +42,7 @@ Click the project or the branch for the **Workspace** popover: switch the branch
 - **The Agent chip**, on the left: the agent prompt, the provider and model, the reasoning effort, a shield for the [permission mode](#permission-modes), and an eye when [review before commit](../reviews.md#review-before-commit) is on. Click it to change them (see [Agent and model](#agent-and-model)).
 - On the right: the sub-agents at work (click for the list), the context ring with the tokens used and the window size (click for [context usage](#context-usage)), the prompt cache timer, the **⋯** menu, Stop, the [microphone](../speech.md) and Send.
 
-The **⋯** menu holds **Session info** (a report of the session for troubleshooting or handoff), **Reminders**, [Remote Control](#remote-control), **Compact the conversation**, **Archive**, **Expand prompt editor**, **N active providers** and, while the session works, **Steer the running turn** and **Enqueue for the next turn**. A number or a dot on **⋯** says something inside needs you.
+The **⋯** menu holds **Session info** (a report of the session for troubleshooting or handoff), **Reminders**, [Remote Control](#remote-control), **Compact the conversation**, **Archive**, **Expand prompt editor**, **Insert equation**, **N active providers** and, while the session works, **Steer the running turn** and **Enqueue for the next turn**. A number or a dot on **⋯** says something inside needs you.
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
   <img src="{{site.basepath}}/img/alta-desktop-more-menu.webp" alt="The ⋯ menu of the prompt: Session info, Reminders, Remote Control, Compact the conversation, Archive, Expand prompt editor and the providers" loading="lazy">
@@ -113,6 +114,18 @@ Type `@` in the prompt to search the files and folders of the project. An accept
 > [!NOTE]
 > Attach only what the task needs: focused context is easier to review and compacts less often.
 
+## Equations
+
+CodeAlta Desktop shows LaTeX math in messages and documents: `$…$` or `\(…\)` in a line of text, `$$…$$`, `\[…\]` or a `math` code block on lines of their own, and the `equation` and `align` environments. Chemistry is written `\ce{2H2 + O2 -> 2H2O}`. A price such as `$5 and $10` stays text. A formula that cannot be read shows its LaTeX in red, with the reason under the pointer.
+
+- **Copy**: a selection that holds formulas copies their LaTeX. A displayed equation has **LaTeX** and **MathML** buttons under the pointer; MathML pastes into Word as an equation.
+- **In the prompt**: formulas are colored as you type, and the one that holds the caret is drawn above it. Its **✎** button opens it in the equation editor.
+- **Equation editor**: `Alt+=` (`Ctrl+Alt+=` on macOS), `/equation` or **Insert equation** in the **⋯** menu. Type the formula as it looks (`/` makes a fraction, `^` a superscript, `sqrt` a root, `alpha` a Greek letter) or open its keyboard of symbols; its LaTeX is kept below it, and can be edited there. Choose **Inline** or **Display**, then **Insert** (`Ctrl+Enter`). With the caret in a formula, the editor opens on it and **Replace** writes it back.
+
+Footnotes are written `[^1]` with their note `[^1]: The source.`, or `^[a note]` in the text: the number goes to the note, and **↩** back.
+
+CodeAlta TUI shows formulas and footnotes as written.
+
 ## Remote Control
 
 A Claude Code session can be followed and driven from claude.ai or the Claude app on your phone. Turn it on with **Remote Control** in the **⋯** menu of the prompt or in the menu of the session. Its icon is green when on and red when failed. Its popover has the link of the session, a QR code for your phone, and **Turn off**.
@@ -132,7 +145,7 @@ Remote Control needs Claude Code signed in with your claude.ai account, not an A
 
 The timeline shows:
 
-- messages in Markdown; in CodeAlta Desktop a code block has a copy button and a `mermaid` block is drawn as a diagram (or stays code, with the reason, when it cannot be read). A picture on disk that a message shows (`![chart](out/chart.png)`, a PNG, JPEG, GIF, WebP or BMP file) is drawn in the message: click it to open it in a window with **Copy image**, its path with **Copy path**, and a button that shows the file in its folder. `Ctrl`+click (`Cmd`+click on macOS) opens the file in the code editor;
+- messages in Markdown; in CodeAlta Desktop a code block has a copy button, a `mermaid` block is drawn as a diagram (or stays code, with the reason, when it cannot be read), and [formulas and footnotes](#equations) are drawn. A picture on disk that a message shows (`![chart](out/chart.png)`, a PNG, JPEG, GIF, WebP or BMP file) is drawn in the message: click it to open it in a window with **Copy image**, its path with **Copy path**, and a button that shows the file in its folder. `Ctrl`+click (`Cmd`+click on macOS) opens the file in the code editor;
 - reasoning and status messages;
 - [tool calls](#tool-calls) as compact tiles;
 - the modified-files card, with the lines added and removed per file and their diffs;
