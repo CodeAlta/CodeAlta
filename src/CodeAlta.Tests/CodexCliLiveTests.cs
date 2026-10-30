@@ -29,6 +29,27 @@ public sealed class CodexCliLiveTests
         Assert.IsNotEmpty(probe.Models);
         Assert.IsTrue(probe.Models.All(static model => model.SupportedReasoningEfforts is { Count: > 0 }));
         StringAssert.Contains(probe.StatusMessage, "Signed in to ChatGPT");
+        // The models_cache.json Codex wrote while it listed them gives their sizes of context.
+        Assert.IsTrue(probe.Models.All(static model => model.GetContextSize() is > 0), string.Join(", ", probe.Models.Select(static model => $"{model.Id}={model.GetContextSize()}")));
+        Assert.IsTrue(probe.Models.Any(static model => model.ContextSizes is { Count: 2 }));
+    }
+
+    [TestMethod]
+    public async Task TheLargestSizeOfContext_IsTheWindowCodexRunsTheThreadWith()
+    {
+        await using var fixture = LiveFixture.Create(turns: true);
+        var probe = await fixture.Runtime.ProbeAsync();
+        var model = probe.Models.First(static model => model.ContextSizes is { Count: 2 });
+        fixture.Model = model.Id;
+        fixture.ContextSize = model.ContextSizes![^1];
+
+        await fixture.RunAsync("Answer with one word: ready.");
+
+        // Codex reports the part of the window the model can use (95% of 872,000 is 828,400 for gpt-6.1-sol): above the
+        // default size, within the one asked.
+        var window = fixture.LastUsage?.Window?.TokenLimit;
+        Console.WriteLine($"{model.Id}: sizes {string.Join(", ", model.ContextSizes)}; window {window}");
+        Assert.IsTrue(window > model.ContextSizes[0] && window <= model.ContextSizes[^1], $"window {window}");
     }
 
     [TestMethod]
@@ -209,6 +230,12 @@ public sealed class CodexCliLiveTests
 
         public Action<AgentMessagePart.ToolCall>? OnToolCall { get; set; }
 
+        public string? Model { get; set; }
+
+        public long? ContextSize { get; set; }
+
+        public AgentSessionUsage? LastUsage { get; private set; }
+
         public AgentSessionState State { get; private set; } = new() { SessionId = "live-1", UpdatedAt = DateTimeOffset.UtcNow };
 
         public Task<List<AgentConversationMessage>> RunAsync(string prompt, CancellationToken cancellationToken = default) => RunAsync([User(prompt)], cancellationToken);
@@ -227,6 +254,7 @@ public sealed class CodexCliLiveTests
             {
                 var response = await Executor.ExecuteTurnAsync(CreateRequest(conversation), static (_, _) => ValueTask.CompletedTask, timeout.Token);
                 conversation.Add(response.AssistantMessage);
+                LastUsage = response.Usage ?? LastUsage;
                 if (response.ProviderState is { } providerState)
                 {
                     State = State with { ProviderState = providerState };
@@ -259,6 +287,8 @@ public sealed class CodexCliLiveTests
                 WorkingDirectory = WorkingDirectory,
                 DeveloperInstructions = DeveloperInstructions,
                 PermissionMode = Mode,
+                ModelId = Model,
+                ContextSize = ContextSize,
                 ReasoningEffort = AgentReasoningEffort.Low,
                 Conversation = [.. conversation],
                 Tools = Tools,

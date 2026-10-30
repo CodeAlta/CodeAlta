@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -147,8 +148,9 @@ internal sealed partial class CodexCliSession
             }
         }
 
-        // A process in another sandbox, or out of one, is another process.
-        var launchKey = string.Join('\u001f', [workingDirectory, request.ProcessHost?.Key ?? "-",
+        // A process in another sandbox, or out of one, is another process. So is another size of context: Codex takes it
+        // when a thread opens, and the new process resumes the thread with it.
+        var launchKey = string.Join('\u001f', [workingDirectory, request.ProcessHost?.Key ?? "-", request.ContextSize?.ToString(CultureInfo.InvariantCulture) ?? "-",
             .. environment.OrderBy(static pair => pair.Key, StringComparer.Ordinal).Select(static pair => $"{pair.Key}={pair.Value}")]);
         if (_connection is { } running && !running.Client.IsClosed && string.Equals(running.LaunchKey, launchKey, StringComparison.Ordinal) && running.ThreadId.Length > 0)
         {
@@ -252,7 +254,7 @@ internal sealed partial class CodexCliSession
     private async Task OpenThreadAsync(AgentTurnRequest request, Connection connection, CancellationToken cancellationToken)
     {
         var instructions = CreateInstructions(request);
-        var config = CreateThreadConfig(connection, WebSearchOf(request));
+        var config = CreateThreadConfig(connection, WebSearchOf(request), request.ContextSize);
         var approval = ApprovalPolicyOf(_permissionMode);
         var model = string.IsNullOrWhiteSpace(request.ModelId) ? null : request.ModelId;
         try
@@ -359,8 +361,9 @@ internal sealed partial class CodexCliSession
         _pendingPreamble = HarnessHistory.CreatePreviousConversation(HarnessHistory.WithoutTrailingUserMessages(conversation));
     }
 
-    // The configuration of a thread, over the config.toml of the home.
-    private Dictionary<string, JsonElement> CreateThreadConfig(Connection connection, bool webSearch)
+    // The configuration of a thread, over the config.toml of the home. A size of context is its model_context_window,
+    // which Codex keeps to the max_context_window of the model and compacts at 90% of.
+    private Dictionary<string, JsonElement> CreateThreadConfig(Connection connection, bool webSearch, long? contextSize)
     {
         var endpoint = connection.Endpoint!;
         var buffer = new ArrayBufferWriter<byte>();
@@ -385,6 +388,11 @@ internal sealed partial class CodexCliSession
             writer.WriteEndObject();
             writer.WriteEndObject();
             writer.WriteString("web_search", webSearch ? "live" : "disabled");
+            if (contextSize is { } size)
+            {
+                writer.WriteNumber("model_context_window", size);
+            }
+
             // Codex marks a folder trusted when a thread runs it with full access; trusted, it would also load the
             // .codex/config.toml and the AGENTS.md of the project, which CodeAlta gives in its own instructions.
             writer.WriteStartObject("projects");

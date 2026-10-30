@@ -489,6 +489,64 @@ public sealed class CodexCliTurnExecutorTests
         StringAssert.Contains(probe.StatusMessage, "Signed in to ChatGPT (Business)");
     }
 
+    // model/list gives no size of context: Codex keeps them in the models_cache.json of its home, which it writes when it
+    // lists the models. A model whose max_context_window is above its context_window can run with either.
+    [TestMethod]
+    public async Task Probe_GivesEachModelTheSizesOfContextCodexKeepsForIt()
+    {
+        var server = new CodexAppServerFake { ModelsCache = ModelsCache(CodexPinnedReleaseVersion) };
+        await using var fixture = new Fixture(server);
+
+        var probe = await fixture.Runtime.ProbeAsync();
+
+        var test = probe.Models.Single(static model => model.Id == "gpt-test");
+        CollectionAssert.AreEqual(new long[] { 500_000, 872_000 }, test.ContextSizes!.ToArray());
+        Assert.AreEqual(500_000L, test.GetContextSize(), "the size Codex runs it with by default");
+        Assert.AreEqual(872_000L, test.WithContextSize(872_000).GetContextSize());
+        var mini = probe.Models.Single(static model => model.Id == "gpt-mini");
+        Assert.IsNull(mini.ContextSizes, "a model without max_context_window has one size");
+        Assert.AreEqual(272_000L, mini.GetContextSize());
+    }
+
+    [TestMethod]
+    public async Task Probe_LeavesTheSizesOfContextUnknown_WithoutACacheOfItsVersion()
+    {
+        foreach (var cache in new[] { ModelsCache("0.1.0"), "{ not json", null })
+        {
+            var server = new CodexAppServerFake { ModelsCache = cache };
+            await using var fixture = new Fixture(server);
+
+            var probe = await fixture.Runtime.ProbeAsync();
+
+            Assert.AreEqual(ModelProviderAvailability.Ready, probe.Availability, probe.StatusMessage);
+            Assert.IsTrue(probe.Models.All(static model => model.ContextSizes is null), cache ?? "no cache");
+        }
+    }
+
+    // The size of a session is the model_context_window of its thread, which Codex keeps to max_context_window and
+    // compacts at 90% of. Another size starts the process again, which resumes the thread with it.
+    [TestMethod]
+    public async Task TheSizeOfContextOfTheSession_IsTheContextWindowOfItsThread()
+    {
+        var server = new CodexAppServerFake();
+        await using var fixture = new Fixture(server) { ContextSize = 872_000 };
+
+        var conversation = await fixture.RunAsync([User("one")]);
+        Assert.AreEqual(872_000L, server.RequestsOf("thread/start").Single()!["config"]!["model_context_window"]!.GetValue<long>());
+
+        conversation.Add(User("two"));
+        conversation = await fixture.RunAsync(conversation);
+        Assert.HasCount(1, server.Connections, "the same size keeps the process");
+
+        fixture.ContextSize = null;
+        conversation.Add(User("three"));
+        await fixture.RunAsync(conversation);
+        Assert.HasCount(2, server.Connections);
+        var resume = server.RequestsOf("thread/resume").Single()!;
+        Assert.AreEqual("thread-1", resume["threadId"]!.GetValue<string>());
+        Assert.IsFalse(resume["config"]!.AsObject().ContainsKey("model_context_window"), "the size Codex gives the model");
+    }
+
     [TestMethod]
     public async Task Probe_OfAProviderNotSignedIn_SaysSo()
     {
@@ -551,6 +609,22 @@ public sealed class CodexCliTurnExecutorTests
         Assert.IsTrue(problems.Any(static problem => problem.Contains("CODEX_HOME", StringComparison.Ordinal)));
         CollectionAssert.AreEqual(new[] { "HTTPS_PROXY" }, CodexCliSettings.Read(settings).Environment.Keys.ToArray());
     }
+
+    private static readonly string CodexPinnedReleaseVersion = CodeAlta.CodexAppServer.CodexPinnedRelease.Version;
+
+    // The models_cache.json of Codex, as its version writes it: the models of the account with their sizes of context.
+    private static string ModelsCache(string clientVersion)
+        => $$"""
+            {
+              "fetched_at": "2026-10-30T06:55:20.513370Z",
+              "etag": "W/\"d5d4\"",
+              "client_version": "{{clientVersion}}",
+              "models": [
+                { "slug": "gpt-test", "visibility": "list", "context_window": 500000, "max_context_window": 872000 },
+                { "slug": "gpt-mini", "visibility": "list", "context_window": 272000 }
+              ]
+            }
+            """;
 
     private static AgentConversationMessage User(string text) => new(AgentConversationRole.User, [new AgentMessagePart.Text(text)]);
 
@@ -625,6 +699,8 @@ public sealed class CodexCliTurnExecutorTests
 
         public IAgentProcessHost? ProcessHost { get; init; }
 
+        public long? ContextSize { get; set; }
+
         public async Task<List<AgentConversationMessage>> RunAsync(IReadOnlyList<AgentConversationMessage> start, CancellationToken cancellationToken = default)
         {
             var conversation = new List<AgentConversationMessage>(start);
@@ -688,6 +764,7 @@ public sealed class CodexCliTurnExecutorTests
                 Tools = Tools,
                 State = State,
                 ProcessHost = ProcessHost,
+                ContextSize = ContextSize,
             };
 
         public async ValueTask DisposeAsync()

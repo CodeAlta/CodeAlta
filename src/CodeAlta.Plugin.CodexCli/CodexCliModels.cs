@@ -10,14 +10,72 @@ namespace CodeAlta.Plugin.CodexCli;
 /// <summary>The models of Codex as CodeAlta lists them, and the efforts both name.</summary>
 internal static class CodexCliModels
 {
-    /// <summary>Presents the models <c>model/list</c> gives: the hidden ones are left out, the default one first.</summary>
-    public static IReadOnlyList<AgentModelInfo> Present(IReadOnlyList<Model> models, IPluginModelCatalog? catalog)
+    /// <summary>The file of its home in which Codex keeps the models of the account, as it last fetched them.</summary>
+    public const string ModelsCacheFileName = "models_cache.json";
+
+    /// <summary>
+    /// Presents the models <c>model/list</c> gives: the hidden ones are left out, the default one first. A model of
+    /// <paramref name="windows"/> takes the sizes of context Codex gives it.
+    /// </summary>
+    public static IReadOnlyList<AgentModelInfo> Present(IReadOnlyList<Model> models, IPluginModelCatalog? catalog,
+        IReadOnlyDictionary<string, CodexCliContextWindow>? windows = null)
     {
         ArgumentNullException.ThrowIfNull(models);
-        return [.. models.Where(static model => !model.Hidden).OrderByDescending(static model => model.IsDefault).Select(model => Present(model, catalog))];
+        return [.. models.Where(static model => !model.Hidden).OrderByDescending(static model => model.IsDefault)
+            .Select(model => Present(model, catalog, windows is not null && windows.TryGetValue(model.Id, out var window) ? window : null))];
     }
 
-    private static AgentModelInfo Present(Model model, IPluginModelCatalog? catalog)
+    /// <summary>
+    /// Reads the sizes of context of the models from the <c>models_cache.json</c> of a home: <c>model/list</c> does not
+    /// give them. Only a cache that the running version of Codex wrote is read, as its format is Codex's own; empty
+    /// when there is none or it cannot be read.
+    /// </summary>
+    /// <param name="home">The <c>CODEX_HOME</c> of the provider.</param>
+    /// <param name="version">The version of the running app-server, or null when it is not known.</param>
+    public static IReadOnlyDictionary<string, CodexCliContextWindow> ReadContextWindows(string home, string? version)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(home);
+        var windows = new Dictionary<string, CodexCliContextWindow>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return windows;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(Path.Combine(home, ModelsCacheFileName));
+            using var document = JsonDocument.Parse(stream);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("client_version", out var written) || written.ValueKind != JsonValueKind.String ||
+                !string.Equals(written.GetString(), version, StringComparison.Ordinal) ||
+                !root.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array)
+            {
+                return windows;
+            }
+
+            foreach (var model in models.EnumerateArray())
+            {
+                if (model.ValueKind == JsonValueKind.Object &&
+                    model.TryGetProperty("slug", out var slug) && slug.ValueKind == JsonValueKind.String && slug.GetString() is { Length: > 0 } id &&
+                    Tokens(model, "context_window") is { } window)
+                {
+                    windows[id] = new CodexCliContextWindow(window, Tokens(model, "max_context_window"));
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            windows.Clear();
+        }
+
+        return windows;
+
+        static long? Tokens(JsonElement model, string name)
+            => model.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var tokens) && tokens > 0 ? tokens : null;
+    }
+
+    private static AgentModelInfo Present(Model model, IPluginModelCatalog? catalog, CodexCliContextWindow? window)
     {
         var efforts = model.SupportedReasoningEfforts.Select(option => ToEffort(option.ReasoningEffort.Value)).OfType<AgentReasoningEffort>().Distinct().ToArray();
         var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -29,6 +87,14 @@ internal static class CodexCliModels
             capabilities["inputModalities"] = modalities.Select(static modality => JsonSerializer.Serialize(modality, CodexProtocolJsonContext.Default.InputModality).Trim('"')).ToArray();
         }
 
+        // The context_window of Codex is the input it sends at most, under the larger one models.dev gives the model.
+        if (window is not null)
+        {
+            capabilities["contextWindow"] = window.Window;
+            capabilities["inputTokenLimit"] = window.Window;
+            capabilities["maxInputTokens"] = window.Window;
+        }
+
         var info = new AgentModelInfo(
             model.Id,
             string.IsNullOrWhiteSpace(model.DisplayName) ? model.Id : model.DisplayName,
@@ -36,7 +102,11 @@ internal static class CodexCliModels
             Provider: "openai",
             DefaultReasoningEffort: ToEffort(model.DefaultReasoningEffort.Value),
             SupportedReasoningEfforts: efforts.Length == 0 ? null : efforts,
-            Capabilities: capabilities);
+            Capabilities: capabilities)
+        {
+            // A thread's model_context_window raises the context of a model up to its max_context_window.
+            ContextSizes = window is { Max: { } max } && max > window.Window ? [window.Window, max] : null,
+        };
         return catalog?.Describe(info, catalogModelId: null, catalogProviderId: "openai") ?? info;
     }
 
@@ -66,6 +136,11 @@ internal static class CodexCliModels
         _ => null,
     };
 }
+
+/// <summary>The sizes of context Codex gives a model, in input tokens.</summary>
+/// <param name="Window">The <c>context_window</c>: the size Codex runs the model with by default.</param>
+/// <param name="Max">The <c>max_context_window</c>: the largest a thread can ask for, or null when it is not given.</param>
+internal sealed record CodexCliContextWindow(long Window, long? Max);
 
 /// <summary>The failures of Codex, as a session classifies them.</summary>
 internal static class CodexCliFailures

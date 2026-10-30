@@ -24,6 +24,9 @@ internal sealed class CodexAppServerFake : ICodexCliConnectionFactory
 
     public List<string> Models { get; set; } = ["gpt-test", "gpt-mini"];
 
+    /// <summary>Gets or sets the <c>models_cache.json</c> that <c>model/list</c> writes in the home, as Codex does; null for none.</summary>
+    public string? ModelsCache { get; set; }
+
     /// <summary>Gets or sets the error <c>thread/start</c> answers with, or null to start threads.</summary>
     public string? ThreadStartError { get; set; }
 
@@ -200,6 +203,12 @@ internal sealed class CodexFakeConnection
             case "account/rateLimits/read":
                 return new JsonObject { ["rateLimits"] = new JsonObject { ["primary"] = new JsonObject { ["usedPercent"] = 12 } } };
             case "model/list":
+                if (_server.ModelsCache is { } cache)
+                {
+                    Directory.CreateDirectory(Request.Home);
+                    await File.WriteAllTextAsync(Path.Combine(Request.Home, "models_cache.json"), cache);
+                }
+
                 return new JsonObject
                 {
                     ["data"] = new JsonArray([.. _server.Models.Select((model, index) => (JsonNode)new JsonObject

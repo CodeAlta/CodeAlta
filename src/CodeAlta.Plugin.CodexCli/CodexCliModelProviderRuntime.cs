@@ -170,7 +170,8 @@ internal static class CodexCliInspector
             timeout.CancelAfter(options.RequestTimeout);
             var account = await client.AccountReadAsync(new GetAccountParams { RefreshToken = false }, timeout.Token).ConfigureAwait(false);
             var models = await ListAllModelsAsync(client, timeout.Token).ConfigureAwait(false);
-            var presented = CodexCliModels.Present(models, options.ModelCatalog);
+            // Codex wrote the sizes of context of the models in its home while it listed them.
+            var presented = CodexCliModels.Present(models, options.ModelCatalog, CodexCliModels.ReadContextWindows(options.Home, version));
             var defaultModel = models.FirstOrDefault(static model => model.IsDefault)?.Id;
             var pinned = command.IsPinned || string.Equals(version, CodexPinnedRelease.Version, StringComparison.Ordinal)
                 ? string.Empty
