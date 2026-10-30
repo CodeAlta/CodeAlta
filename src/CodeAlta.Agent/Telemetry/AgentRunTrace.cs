@@ -1,4 +1,7 @@
+using System.Buffers;
 using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
 using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent.Telemetry;
@@ -10,13 +13,18 @@ namespace CodeAlta.Agent.Telemetry;
 /// <param name="Model">The model requested, when the session names one.</param>
 /// <param name="ReasoningLevel">The reasoning effort requested, when the session names one.</param>
 /// <param name="AgentPromptId">The agent prompt of the session, when it has one.</param>
+/// <param name="CaptureContent">
+/// Whether the spans record the content of the run: its prompts and its answer, the arguments and the results of its tool
+/// calls (<see cref="OpenTelemetryEnvironment.CapturesMessageContent"/>).
+/// </param>
 internal sealed record AgentRunTraceInfo(
     string SessionId,
     string ProviderName,
     string ProviderKey,
     string? Model,
     string? ReasoningLevel,
-    string? AgentPromptId);
+    string? AgentPromptId,
+    bool CaptureContent = false);
 
 /// <summary>
 /// The spans of one run of a session, made from the normalized events of the run, the same for every provider: the
@@ -28,6 +36,11 @@ internal sealed record AgentRunTraceInfo(
 /// lock orders them. The spans never become <see cref="Activity.Current"/>, so that they are not the parent of what the
 /// thread that reports an event does next. A request starts when the run asks its provider for an answer, or when the
 /// last tool call before it ended: a provider that runs its own loop (an agent CLI) reports several requests in one.
+/// The content is recorded only when <see cref="AgentRunTraceInfo.CaptureContent"/> asks for it: on the span of the run,
+/// its prompts (<c>gen_ai.input.messages</c>) and its last answer (<c>gen_ai.output.messages</c>); on the span of a tool
+/// call, its arguments and its result, when the provider reports them. Each text is cut at <see cref="MaxContentLength"/>
+/// characters, so that a collector does not refuse the span. The requests record no content: the whole conversation of
+/// each one would be large, and an agent that runs its own loop does not report it.
 /// </remarks>
 internal sealed class AgentRunTrace
 {
@@ -36,6 +49,8 @@ internal sealed class AgentRunTrace
     private readonly AgentRunId _runId;
     private readonly Activity _run;
     private readonly Dictionary<string, Activity> _tools = new(StringComparer.Ordinal);
+    private readonly List<string> _prompts = [];
+    private string? _answer;
     private DateTimeOffset _requestStart;
     private long _inputTokens, _outputTokens, _cacheReadTokens, _cacheWriteTokens, _reasoningTokens;
     private bool _usageReported, _ended;
@@ -47,6 +62,9 @@ internal sealed class AgentRunTrace
         _run = run;
         _requestStart = start;
     }
+
+    /// <summary>The length at which a text of the content is cut, in characters.</summary>
+    internal const int MaxContentLength = 32 * 1024;
 
     /// <summary>Starts the span of a run, when something listens to the spans of CodeAlta.</summary>
     /// <param name="info">The session.</param>
@@ -91,7 +109,7 @@ internal sealed class AgentRunTrace
     public void Observe(AgentEvent @event)
     {
         // The deltas, most of the events of a run, are left at once.
-        if (@event is not (AgentActivityEvent or AgentSessionUpdateEvent) || @event.RunId != _runId)
+        if (@event is not (AgentActivityEvent or AgentSessionUpdateEvent or AgentContentCompletedEvent) || @event.RunId != _runId)
         {
             return;
         }
@@ -114,6 +132,12 @@ internal sealed class AgentRunTrace
                     break;
                 case AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.UsageUpdated, Usage.LastOperation: { } operation } usage:
                     RecordRequest(operation, usage.Timestamp);
+                    break;
+                case AgentContentCompletedEvent { Kind: AgentContentKind.User } prompt when _info.CaptureContent:
+                    _prompts.Add(prompt.Content);
+                    break;
+                case AgentContentCompletedEvent { Kind: AgentContentKind.Assistant } answer when _info.CaptureContent:
+                    _answer = answer.Content;
                     break;
             }
         }
@@ -144,6 +168,12 @@ internal sealed class AgentRunTrace
                 SetUsage(_run, _inputTokens, _outputTokens, _cacheReadTokens, _cacheWriteTokens, _reasoningTokens);
             }
 
+            if (_info.CaptureContent)
+            {
+                if (_prompts.Count > 0) _run.SetTag("gen_ai.input.messages", Messages("user", _prompts));
+                if (_answer is not null) _run.SetTag("gen_ai.output.messages", Messages("assistant", [_answer]));
+            }
+
             if (failure is not null)
             {
                 Fail(_run, ErrorType(failure));
@@ -171,6 +201,11 @@ internal sealed class AgentRunTrace
             new("gen_ai.agent.name", AgentTelemetry.AgentName),
             new("gen_ai.conversation.id", _info.SessionId),
         ];
+        if (_info.CaptureContent && Property(activity.Details, "arguments", "input") is { } arguments)
+        {
+            tags.Add(new("gen_ai.tool.call.arguments", arguments));
+        }
+
         if (StartSpan($"execute_tool {name}", parent, tags, activity.Timestamp) is { } tool)
         {
             _tools[activity.ActivityId] = tool;
@@ -184,7 +219,12 @@ internal sealed class AgentRunTrace
             return;
         }
 
-        // The message of a failure is not recorded: it is made of the arguments and the output of the tool.
+        if (_info.CaptureContent && (Property(activity.Details, "result", "output") ?? Cut(activity.Message)) is { } result)
+        {
+            tool.SetTag("gen_ai.tool.call.result", result);
+        }
+
+        // The message of a failure is not in the status: it is made of the arguments and the output of the tool.
         if (activity.Phase is AgentActivityPhase.Failed)
         {
             Fail(tool, "tool_error");
@@ -271,6 +311,48 @@ internal sealed class AgentRunTrace
         => AgentFailureClassifier.Classify(failure) is { Kind: not AgentFailureKind.Other } classified
             ? classified.Kind.ToString()
             : failure.GetType().FullName ?? failure.GetType().Name;
+
+    // The messages of one role, in the JSON of the conventions: [{"role":"user","parts":[{"type":"text","content":"..."}]}].
+    private static string Messages(string role, IReadOnlyList<string> texts)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartArray();
+            foreach (var text in texts)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("role", role);
+                writer.WriteStartArray("parts");
+                writer.WriteStartObject();
+                writer.WriteString("type", "text");
+                writer.WriteString("content", Cut(text));
+                writer.WriteEndObject();
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+        }
+
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
+
+    // The first of two properties of the details of a tool call, as the text of its JSON (a string as its value).
+    private static string? Property(JsonElement? details, string name, string otherName)
+    {
+        if (details is not { ValueKind: JsonValueKind.Object } value
+            || !(value.TryGetProperty(name, out var property) || value.TryGetProperty(otherName, out property))
+            || property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return Cut(property.ValueKind == JsonValueKind.String ? property.GetString() : property.GetRawText());
+    }
+
+    private static string? Cut(string? text)
+        => text is null || text.Length <= MaxContentLength ? text : string.Concat(text.AsSpan(0, MaxContentLength), "…");
 
     private static void AddOptional(List<KeyValuePair<string, object?>> tags, string name, string? value)
     {

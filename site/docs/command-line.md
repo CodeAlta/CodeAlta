@@ -134,7 +134,7 @@ altacli run "Fix the failing test"
 ```
 
 - The spans follow the OpenTelemetry conventions of generative AI: `invoke_agent CodeAlta` for each run (a prompt to its end), with the session id as `gen_ai.conversation.id`, the provider, the model and the tokens of the run; `chat <model>` for each request to the model whose usage the provider reports, with its tokens; `execute_tool <tool>` for each tool call, in error when it fails.
-- They hold names, ids, models, durations, token counts and kinds of failures, never the prompts, the answers, the arguments or the outputs of tools.
+- They hold names, ids, models, durations, token counts and kinds of failures. They hold the content only when `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` (or `span_only`) asks for it: the prompts and the last answer of each run, the arguments and the result of each tool call, each cut at 32 KB. Turn it on only for a collector that may keep them.
 - The other standard variables apply: `OTEL_EXPORTER_OTLP_PROTOCOL` (`grpc` by default), `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME` (else `alta`, `altatui` or `altacli`), `OTEL_RESOURCE_ATTRIBUTES`. `OTEL_SDK_DISABLED=true` turns the traces off.
 - `altacli` sends its last spans before it exits.
 - The agents CodeAlta starts (Claude Code, Codex CLI, ACP agents) do not get the `OTEL_*` variables, so that they do not report the same runs twice. The commands of the agents, the jobs and the MCP servers keep them.

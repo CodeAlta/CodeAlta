@@ -77,6 +77,59 @@ public sealed partial class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_TracesTheContentOfItsRun_WhenTheEnvironmentAsksForIt()
+    {
+        using var temp = TestTempDirectory.Create();
+        var sessionId = "session-telemetry-content-" + Guid.NewGuid().ToString("N");
+        using var spans = new SpanRecorder(sessionId);
+
+        await RunTracedSessionAsync(temp.Path, sessionId,
+            name => name == OpenTelemetryEnvironment.CaptureMessageContentVariable ? "true" : null);
+
+        var run = spans.Single("invoke_agent");
+        using (var input = JsonDocument.Parse((string)run.GetTagItem("gen_ai.input.messages")!))
+        {
+            var message = input.RootElement.EnumerateArray().Single();
+            Assert.AreEqual("user", message.GetProperty("role").GetString());
+            var part = message.GetProperty("parts").EnumerateArray().Single();
+            Assert.AreEqual("text", part.GetProperty("type").GetString());
+            Assert.AreEqual("Read the secret file.", part.GetProperty("content").GetString());
+        }
+
+        using (var output = JsonDocument.Parse((string)run.GetTagItem("gen_ai.output.messages")!))
+        {
+            var message = output.RootElement.EnumerateArray().Single();
+            Assert.AreEqual("assistant", message.GetProperty("role").GetString());
+            Assert.AreEqual("The secret answer.", message.GetProperty("parts")[0].GetProperty("content").GetString());
+        }
+
+        var tools = spans.All("execute_tool");
+        var inspect = tools.Single(static tool => (string?)tool.GetTagItem("gen_ai.tool.name") == "inspect");
+        var broken = tools.Single(static tool => (string?)tool.GetTagItem("gen_ai.tool.name") == "broken");
+        Assert.AreEqual("""{"path":"secret.txt"}""", inspect.GetTagItem("gen_ai.tool.call.arguments"));
+        StringAssert.Contains((string)inspect.GetTagItem("gen_ai.tool.call.result")!, "secret content");
+        StringAssert.Contains((string)broken.GetTagItem("gen_ai.tool.call.result")!, "secret failure");
+        Assert.IsNull(broken.StatusDescription, "the status still holds the kind of the failure alone");
+        foreach (var request in spans.All("chat"))
+        {
+            Assert.IsNull(request.GetTagItem("gen_ai.input.messages"), "a request records no conversation");
+        }
+    }
+
+    [TestMethod]
+    [DataRow("true", true)]
+    [DataRow(" TRUE ", true)]
+    [DataRow("span_only", true)]
+    [DataRow("SPAN_AND_EVENT", true)]
+    [DataRow("event_only", false)]
+    [DataRow("no_content", false)]
+    [DataRow("false", false)]
+    [DataRow(null, false)]
+    public void OpenTelemetryEnvironment_CapturesTheContent_OnlyOnTheSpansAskedFor(string? value, bool captured)
+        => Assert.AreEqual(captured, OpenTelemetryEnvironment.CapturesMessageContent(
+            name => name == OpenTelemetryEnvironment.CaptureMessageContentVariable ? value : null));
+
+    [TestMethod]
     public async Task AgentSession_TracesTheFailureOfARun()
     {
         using var temp = TestTempDirectory.Create();
@@ -131,7 +184,7 @@ public sealed partial class AgentSessionTests
     }
 
     // A run of two requests: the first calls a tool that works and one that fails, the second answers.
-    private static async Task RunTracedSessionAsync(string root, string sessionId)
+    private static async Task RunTracedSessionAsync(string root, string sessionId, Func<string, string?>? variable = null)
     {
         var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(root, "machine", "agents")));
         var provider = CreateProvider();
@@ -174,7 +227,11 @@ public sealed partial class AgentSessionTests
                     AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("The secret answer.")]),
                     Usage = Usage(50, 10, 0, 0),
                 })),
-            options);
+            options)
+        {
+            // The content is recorded only when asked; nothing of the environment of the process changes the test.
+            TelemetryVariable = variable ?? (static _ => null),
+        };
 
         await session.SendAsync(new() { Input = AgentInput.Text("Read the secret file.") });
     }

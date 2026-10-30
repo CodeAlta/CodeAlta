@@ -132,6 +132,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// through all original tool invocations and session cleanup; this session never disposes it.</remarks>
     internal HttpClient? BuiltInToolHttpClient { get; init; }
 
+    /// <summary>Gets what reads the variables of the environment that configure the spans of the runs (those of the process by default).</summary>
+    internal Func<string, string?> TelemetryVariable { get; init; } = Environment.GetEnvironmentVariable;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentSession"/> class.
     /// </summary>
@@ -707,7 +710,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             _providerKey,
             NormalizeOptionalText(_options.Model) ?? NormalizeOptionalText(_summary.ModelId),
             _options.ReasoningEffort?.ToString().ToLowerInvariant(),
-            NormalizeOptionalText(_options.AgentPromptId)), runId);
+            NormalizeOptionalText(_options.AgentPromptId),
+            OpenTelemetryEnvironment.CapturesMessageContent(TelemetryVariable)), runId);
         _runTrace = trace;
         return trace;
     }
