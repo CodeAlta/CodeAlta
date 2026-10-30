@@ -190,19 +190,39 @@ internal sealed class EvalScenarioRunner(string altacli, string scenariosFolder,
         using var process = Process.Start(start) ?? throw new InvalidOperationException($"{altacli} did not start.");
         await process.StandardInput.WriteAsync(prompt).ConfigureAwait(false);
         process.StandardInput.Close();
-        var errors = process.StandardError.ReadToEndAsync(cancellationToken);
+        // A process the run started and left behind (a test that never ends) can keep the output of altacli open after it
+        // exited: the reads stop a few seconds after the exit, whatever is still open.
+        using var output = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var exited = process.WaitForExitAsync(cancellationToken);
+        _ = exited.ContinueWith(_ => output.CancelAfter(TimeSpan.FromSeconds(10)), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+        var errors = process.StandardError.ReadToEndAsync(output.Token);
         var reading = new TurnReading();
-        await using (var writer = new StreamWriter(transcript, false, new UTF8Encoding(false)))
+        await using (var writer = new StreamWriter(transcript, false, new UTF8Encoding(false)) { AutoFlush = true })
         {
-            while (await process.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+            try
             {
-                await writer.WriteLineAsync(line).ConfigureAwait(false);
-                reading.Read(line);
+                while (await process.StandardOutput.ReadLineAsync(output.Token).ConfigureAwait(false) is { } line)
+                {
+                    await writer.WriteLineAsync(line).ConfigureAwait(false);
+                    reading.Read(line);
+                }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
             }
         }
 
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        var stderr = await errors.ConfigureAwait(false);
+        await exited.ConfigureAwait(false);
+        string stderr;
+        try
+        {
+            stderr = await errors.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            stderr = string.Empty;
+        }
+
         if (stderr.Length > 0) await File.WriteAllTextAsync(Path.ChangeExtension(transcript, ".stderr.txt"), stderr, cancellationToken).ConfigureAwait(false);
         reading.ExitCode = process.ExitCode;
         if (reading.DurationMs == 0) reading.DurationMs = clock.ElapsedMilliseconds;
