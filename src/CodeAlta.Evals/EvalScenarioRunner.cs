@@ -18,16 +18,21 @@ namespace CodeAlta.Evals;
 /// last test run failing) is continued on the next tier, at most up to <c>complex</c>;</item>
 /// <item><c>review</c>: a turn that changed code on a tier below <c>complex</c> has its diff read by the <c>complex</c> model,
 /// without tools; what it finds is sent to the session as the next prompt, once. <c>review-standard</c> has the
-/// <c>standard</c> model read it, for a turn on <c>quick</c>.</item>
+/// <c>standard</c> model read it, for a turn on <c>quick</c>, and <c>review-quick</c> the <c>quick</c> model itself, in a fresh context.</item>
+/// <item><c>acceptance</c>: before a turn, the <c>complex</c> model writes tests from the request alone (none for a question,
+/// docs, a commit or a bug report without a specification); after the turn, the host runs them outside the project, where
+/// the agent does not see them, and sends their failures to the session, then, with <c>escalate</c>, to the next tier.</item>
+/// <item><c>recheck</c>: a turn that changed code is asked once, on its tier, to check its change against each requirement
+/// of the request and to fix what it misses.</item>
 /// </list>
 /// With a policy, each user turn starts on its tier again (<c>-m</c>): the host, not the agent, chooses the model.
 /// </remarks>
 internal sealed record EvalConfiguration(string PromptId, string Tier, IReadOnlySet<string> Policies)
 {
-    public static readonly IReadOnlySet<string> KnownPolicies = new HashSet<string>(StringComparer.Ordinal) { "escalate", "review", "review-standard" };
+    public static readonly IReadOnlySet<string> KnownPolicies = new HashSet<string>(StringComparer.Ordinal) { "escalate", "review", "review-standard", "review-quick", "acceptance", "recheck" };
 
-    /// <summary>The tier of the reviewer: complex for <c>review</c>, standard for <c>review-standard</c>; null without a review.</summary>
-    public string? ReviewTier => Policies.Contains("review") ? "complex" : Policies.Contains("review-standard") ? "standard" : null;
+    /// <summary>The tier of the reviewer: complex for <c>review</c>, standard for <c>review-standard</c>, quick for <c>review-quick</c>; null without a review.</summary>
+    public string? ReviewTier => Policies.Contains("review") ? "complex" : Policies.Contains("review-standard") ? "standard" : Policies.Contains("review-quick") ? "quick" : null;
 
     public string Name => $"{PromptId}@{Tier}" + string.Concat(Policies.Order(StringComparer.Ordinal).Select(static policy => "+" + policy));
 
@@ -42,7 +47,7 @@ internal sealed record EvalConfiguration(string PromptId, string Tier, IReadOnly
         var at = parts[0].LastIndexOf('@');
         if (at <= 0 || at == parts[0].Length - 1) throw new ArgumentException($"A configuration is <prompt-id>@<tier>[+policy...], such as adaptive@standard: '{value}'.", nameof(value));
         var policies = parts.Skip(1).ToHashSet(StringComparer.Ordinal);
-        if (policies.FirstOrDefault(policy => !KnownPolicies.Contains(policy)) is { } unknown) throw new ArgumentException($"Unknown policy '{unknown}': escalate, review, review-standard.", nameof(value));
+        if (policies.FirstOrDefault(policy => !KnownPolicies.Contains(policy)) is { } unknown) throw new ArgumentException($"Unknown policy '{unknown}': {string.Join(", ", KnownPolicies)}.", nameof(value));
         return new EvalConfiguration(parts[0][..at], parts[0][(at + 1)..], policies);
     }
 }
@@ -94,6 +99,8 @@ internal sealed record EvalTurnResult
     public List<string> Escalations { get; init; } = [];
     /// <summary>What the reviewer found in the change of the turn; null when it was not reviewed, empty when it found nothing.</summary>
     public string? Review { get; init; }
+    /// <summary>The acceptance tests of the turn: null without them, else none, pass, fixed (after the host sent their failures) or fail.</summary>
+    public string? Acceptance { get; init; }
 }
 
 /// <summary>A run of a scenario in a configuration: its turns and every request of every leg.</summary>
@@ -126,7 +133,7 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
     public async Task<EvalScenarioRun> RunAsync(EvalScenario scenario, EvalConfiguration configuration, int repeat, int attempt, string outputFolder, CancellationToken cancellationToken)
     {
         var project = Path.Combine(Path.GetTempPath(), "codealta-evals", $"{scenario.Id}-{Guid.NewGuid():N}"[..40]);
-        var transcripts = Path.Combine(outputFolder, "transcripts", $"{scenario.Id}.{configuration.Name.Replace('@', '.').Replace('+', '.')}.{repeat}" + (attempt > 1 ? $".try{attempt}" : string.Empty));
+        var transcripts = Path.Combine(Path.GetFullPath(outputFolder), "transcripts", $"{scenario.Id}.{configuration.Name.Replace('@', '.').Replace('+', '.')}.{repeat}" + (attempt > 1 ? $".try{attempt}" : string.Empty));
         Directory.CreateDirectory(transcripts);
         var run = new EvalScenarioRun { Scenario = scenario.Id, Configuration = configuration.Name, Repeat = repeat, Attempt = attempt, TranscriptFolder = transcripts };
         try
@@ -149,7 +156,15 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
                 }
 
                 asked.Add(turn.Prompt);
-                (string Tree, Dictionary<string, string> Untracked)? before = configuration.ReviewTier is not null ? Snapshot(project) : null;
+                string? acceptance = null;
+                if (configuration.Policies.Contains("acceptance"))
+                {
+                    var (tests, writing) = await WriteAcceptanceAsync(turn.Prompt, Path.Combine(transcripts, $"turn{number}.acceptance-writer.jsonl"), cancellationToken).ConfigureAwait(false);
+                    AddHelperRequests(run, writing, number, "acceptance");
+                    acceptance = tests;
+                }
+
+                var before = configuration.ReviewTier is not null || configuration.Policies.Contains("recheck") ? Snapshot(project) : null;
                 var reading = await RunTurnAsync(turn.Prompt, Arguments(configuration, sessionId, index == 0, project, tier is null ? null : tierModels[tier]), project,
                     Path.Combine(transcripts, $"turn{number}.jsonl"), cancellationToken).ConfigureAwait(false);
                 if (InvalidReason(reading) is { } invalid)
@@ -183,10 +198,76 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
                     lastModel = AddRequests(run, reading, number, lastModel, "escalation");
                 }
 
-                // Review: the complex model reads the change of the turn; what it finds is sent to the session once.
+                // Acceptance: the tests written from the request run on the work; their failures go to the session, once on its
+                // tier, then, with escalate, on the next one.
+                string? accepted = configuration.Policies.Contains("acceptance") ? "none" : null;
+                if (acceptance is not null && tier is not null)
+                {
+                    var file = Path.Combine(transcripts, $"turn{number}.acceptance.test.mjs");
+                    await File.WriteAllTextAsync(file, acceptance, cancellationToken).ConfigureAwait(false);
+                    accepted = "pass";
+                    for (var round = 0; round < 2; round++)
+                    {
+                        var (code, output) = EvalScenarios.Run(project, "node", ["--test", file], ("PROJECT_URL", new Uri(Path.TrimEndingDirectorySeparator(project) + Path.DirectorySeparatorChar).AbsoluteUri));
+                        await File.WriteAllTextAsync(Path.Combine(transcripts, $"turn{number}.acceptance{round + 1}.txt"), output, cancellationToken).ConfigureAwait(false);
+                        if (code == 0)
+                        {
+                            accepted = round == 0 ? "pass" : "fixed";
+                            break;
+                        }
+
+                        accepted = "fail";
+                        if (round == 1 && !(configuration.Policies.Contains("escalate") && Next(tier) is not null)) break;
+                        var role = "fix";
+                        if (round == 1)
+                        {
+                            escalations.Add($"{tier}→{Next(tier)}: acceptance tests fail");
+                            tier = Next(tier)!;
+                            role = "escalation";
+                        }
+
+                        reading = await RunTurnAsync($"The host ran acceptance tests written from your request, which you cannot see, and they fail:\n\n{Failures(output)}\n\nIf a test contradicts the request, keep what the request says; otherwise fix the code, keep `npm test` passing, and answer as you would have.",
+                            Arguments(configuration, sessionId, first: false, project, tierModels[tier]), project, Path.Combine(transcripts, $"turn{number}.acceptance{round + 1}.jsonl"), cancellationToken).ConfigureAwait(false);
+                        if (InvalidReason(reading) is { } failed)
+                        {
+                            run.Invalid = $"turn {number}, acceptance: {failed}";
+                            return run;
+                        }
+
+                        duration += reading.DurationMs;
+                        cost = Add(cost, reading.Cost);
+                        toolCalls += reading.ToolCalls;
+                        lastModel = AddRequests(run, reading, number, lastModel, role);
+                    }
+
+                    if (accepted == "fail" && EvalScenarios.Run(project, "node", ["--test", file], ("PROJECT_URL", new Uri(Path.TrimEndingDirectorySeparator(project) + Path.DirectorySeparatorChar).AbsoluteUri)).ExitCode == 0)
+                    {
+                        accepted = "fixed";
+                    }
+                }
+
+                // Recheck: the session checks its change against the request once more, on its tier.
+                if (configuration.Policies.Contains("recheck") && before is not null && tier is not null && Diff(project, before) is { Length: > 0 })
+                {
+                    reading = await RunTurnAsync("Before you report, check your change against each requirement of the request above, one by one, with a test or a run for each rule it states. Fix what is missing or wrong, keep `npm test` passing, and answer as you would have.",
+                        Arguments(configuration, sessionId, first: false, project, tierModels[tier]), project, Path.Combine(transcripts, $"turn{number}.recheck.jsonl"), cancellationToken).ConfigureAwait(false);
+                    if (InvalidReason(reading) is { } failed)
+                    {
+                        run.Invalid = $"turn {number}, recheck: {failed}";
+                        return run;
+                    }
+
+                    duration += reading.DurationMs;
+                    cost = Add(cost, reading.Cost);
+                    toolCalls += reading.ToolCalls;
+                    lastModel = AddRequests(run, reading, number, lastModel, "fix");
+                }
+
+                // Review: a stronger model (or the same, in a fresh context) reads the change of the turn; what it finds is sent once.
                 string? review = null;
                 if (before is not null && tier is not null && configuration.ReviewTier is { } reviewTier
-                    && Array.IndexOf(TierOrder, tier) < Array.IndexOf(TierOrder, reviewTier) && Diff(project, before.Value) is { Length: > 0 } diff)
+                    && (Array.IndexOf(TierOrder, tier) < Array.IndexOf(TierOrder, reviewTier) || (reviewTier == "quick" && tier == "quick"))
+                    && Diff(project, before) is { Length: > 0 } diff)
                 {
                     var (findings, reviewing) = await ReviewAsync(turn.Prompt, diff, tierModels[reviewTier], Path.Combine(transcripts, $"turn{number}.review.jsonl"), cancellationToken).ConfigureAwait(false);
                     AddHelperRequests(run, reviewing, number, "review");
@@ -214,7 +295,7 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
                     Turn = number, Status = reading.Status ?? "none", FailureKind = reading.FailureKind, FailureMessage = reading.FailureMessage, FinalMessage = reading.FinalMessage,
                     StartModel = reading.HeaderModel, Passed = check is null, CheckFailure = check, DurationMs = duration, ProviderCost = cost,
                     ToolCalls = toolCalls, Children = reading.Children.Count, Tier = configuration.HostDriven ? (escalations.Count > 0 ? escalations[0].Split('→')[0] : tier) : null,
-                    Escalations = escalations, Review = review,
+                    Escalations = escalations, Review = review, Acceptance = accepted,
                 });
             }
 
@@ -293,6 +374,7 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
         var start = new ProcessStartInfo(altacli)
         {
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8, WorkingDirectory = project,
+            StandardInputEncoding = new UTF8Encoding(false),
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         var clock = Stopwatch.StartNew();
@@ -446,6 +528,40 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
         return (tier, reading);
     }
 
+    // The writer of acceptance tests: the complex model reads the request alone and writes tests of what it states, or NONE.
+    private async Task<(string? Tests, TurnReading Reading)> WriteAcceptanceAsync(string request, string transcript, CancellationToken cancellationToken)
+    {
+        var prompt = $"""
+            A coding agent will do the request below in a JavaScript project (ESM, `npm test` runs `node --test`). Before it
+            starts, write acceptance tests of the request from the request alone. If the request asks for code whose behavior it
+            states (a module, its functions, their rules), write one test file, node:test and node:assert/strict, that checks
+            what the request states, and only that, with expected values you are certain of from the request. Import each
+            module of the project as `await import(new URL("src/name.js", process.env.PROJECT_URL))`. If the request is of
+            another kind (a question, docs, a commit, a bug report that states no behavior), answer NONE. Answer with the file
+            alone, in a js code block, or NONE.
+
+            ## Request
+            {request}
+            """;
+        var reading = await RunTurnAsync(prompt, HelperArguments(tierModels["complex"]), Path.GetTempPath(), transcript, cancellationToken).ConfigureAwait(false);
+        var answer = reading.FinalMessage ?? string.Empty;
+        var start = answer.IndexOf("```", StringComparison.Ordinal);
+        if (start < 0) return (null, reading);
+        var body = answer.IndexOf('\n', start);
+        var end = answer.IndexOf("```", body + 1, StringComparison.Ordinal);
+        return (body < 0 || end < 0 ? null : answer[(body + 1)..end], reading);
+    }
+
+    // The lines of a test run that say what failed.
+    private static string Failures(string output)
+    {
+        var lines = output.ReplaceLineEndings("\n").Split('\n');
+        var kept = lines.Where(static line => line.Contains("not ok", StringComparison.Ordinal) || line.Contains("✖", StringComparison.Ordinal)
+            || line.Contains("expected", StringComparison.OrdinalIgnoreCase) || line.Contains("actual", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("Error", StringComparison.Ordinal)).Take(40);
+        return Bound(string.Join('\n', kept), 6000);
+    }
+
     // The reviewer: a stronger model, without tools, reads the request and the diff of the turn.
     private async Task<(string? Findings, TurnReading Reading)> ReviewAsync(string request, string diff, string model, string transcript, CancellationToken cancellationToken)
     {
@@ -453,7 +569,8 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
             You review a change a coding agent made for a request. Report only what makes the change fail the request or
             break the code that uses it: a requirement or a case the request states that is not met, a bug on the inputs the
             request or the callers give, a cause worked around at one caller instead of fixed where it is. Do not report style,
-            inputs the request does not name, or hardening beyond it. If nothing like that is wrong, answer exactly OK.
+            inputs the request does not name, or hardening beyond it. If nothing like that is wrong, or you cannot judge from
+            what you are given, answer exactly OK.
             Otherwise list the problems, most important first, each in one or two sentences with the file and what to do.
 
             ## Request
@@ -485,42 +602,29 @@ internal sealed partial class EvalScenarioRunner(string altacli, string scenario
         yield return "-";
     }
 
-    // The state of the project before a turn: its tracked files as a commit object, and its untracked files with their content.
-    private static (string Tree, Dictionary<string, string> Untracked) Snapshot(string project)
+    // The whole worktree of the project, untracked files included, as a tree object written with an index of its own: the
+    // index and the commits of the project stay as they are, and a commit the turn makes is no change of its own.
+    private static string Snapshot(string project)
     {
-        var (_, stash) = EvalScenarios.Run(project, "git", ["stash", "create"]);
-        var (_, head) = EvalScenarios.Run(project, "git", ["rev-parse", "HEAD"]);
-        var tree = stash.Trim().Length > 0 ? stash.Trim() : head.Trim();
-        return (tree, Untracked(project));
+        var index = Path.Combine(Path.GetTempPath(), "codealta-evals-index-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            EvalScenarios.Run(project, "git", ["add", "-A"], ("GIT_INDEX_FILE", index));
+            var (_, tree) = EvalScenarios.Run(project, "git", ["write-tree"], ("GIT_INDEX_FILE", index));
+            return tree.Trim();
+        }
+        finally
+        {
+            File.Delete(index);
+        }
     }
 
-    // What a turn changed in the code: the diff of the tracked files since the snapshot, and the untracked files it added or
-    // changed. Empty when it changed only docs (Markdown) or nothing.
-    private static string Diff(string project, (string Tree, Dictionary<string, string> Untracked) before)
+    // What a turn changed in the code, docs (Markdown) left out: empty when it changed nothing else.
+    private static string Diff(string project, string before)
     {
-        var (_, tracked) = EvalScenarios.Run(project, "git", ["diff", before.Tree, "--", ".", ":(exclude)*.md"]);
-        var text = new StringBuilder(tracked);
-        foreach (var (path, content) in Untracked(project))
-        {
-            if (path.EndsWith(".md", StringComparison.OrdinalIgnoreCase) || (before.Untracked.TryGetValue(path, out var old) && old == content)) continue;
-            text.AppendLine(CultureInfo.InvariantCulture, $"--- /dev/null\n+++ b/{path}");
-            foreach (var line in content.ReplaceLineEndings("\n").Split('\n')) text.Append('+').AppendLine(line);
-        }
-
-        return text.ToString().Trim();
-    }
-
-    private static Dictionary<string, string> Untracked(string project)
-    {
-        var (_, list) = EvalScenarios.Run(project, "git", ["ls-files", "--others", "--exclude-standard"]);
-        var files = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var path in list.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            var full = Path.Combine(project, path.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(full) && new FileInfo(full).Length < 200_000) files[path] = File.ReadAllText(full);
-        }
-
-        return files;
+        var after = Snapshot(project);
+        var (_, diff) = EvalScenarios.Run(project, "git", ["diff", before, after, "--", ".", ":(exclude)*.md"]);
+        return diff.Trim();
     }
 
     private static string Bound(string text, int length) => text.Length <= length ? text : text[..length] + "\n[cut]";

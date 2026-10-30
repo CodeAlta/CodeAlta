@@ -180,7 +180,7 @@ internal static class EvalScenarioReport
     }
 
     // The legs the host adds around the turns of the agent: its router, its reviewer, and the turns it sends after them.
-    private static bool HostLeg(string role) => role is "router" or "review" or "escalation" or "fix";
+    private static bool HostLeg(string role) => role is "router" or "review" or "acceptance" or "escalation" or "fix";
 
     /// <summary>The priced cost of a run: every request of every leg.</summary>
     public static decimal? Cost(EvalScenarioRun run) => Sum(run.Requests.Select(static request => request.Price));
@@ -304,7 +304,7 @@ internal static class EvalScenarioJudge
 
         if (current is not null) parts.Add($"{current} ×{count}");
         var text = string.Join(" → ", parts);
-        foreach (var child in requests.Where(static request => request.Role is "child" or "router" or "review").GroupBy(static request => (request.SessionId, request.Model, request.Role)))
+        foreach (var child in requests.Where(static request => request.Role is "child" or "router" or "review" or "acceptance").GroupBy(static request => (request.SessionId, request.Model, request.Role)))
         {
             text += $", {child.Key.Role} {child.Key.Model} ×{child.Count()}";
         }

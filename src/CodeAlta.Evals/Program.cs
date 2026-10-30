@@ -116,7 +116,8 @@ internal static class Program
         var parallel = int.Parse(options.GetValueOrDefault("parallel") ?? "2", CultureInfo.InvariantCulture);
         var retries = int.Parse(options.GetValueOrDefault("retries") ?? "2", CultureInfo.InvariantCulture);
         var timeout = TimeSpan.FromSeconds(int.Parse(options.GetValueOrDefault("timeout") ?? "900", CultureInfo.InvariantCulture));
-        var output = options.GetValueOrDefault("out") ?? Path.Combine(repository, "tmp", "evals", DateTime.Now.ToString("yyyy-MM-dd-HHmm", CultureInfo.InvariantCulture) + "-adaptive");
+        // Absolute: the files of a run are given to programs that run in the folder of its project.
+        var output = Path.GetFullPath(options.GetValueOrDefault("out") ?? Path.Combine(repository, "tmp", "evals", DateTime.Now.ToString("yyyy-MM-dd-HHmm", CultureInfo.InvariantCulture) + "-adaptive"));
         Directory.CreateDirectory(output);
         var scenariosFolder = Path.Combine(AppContext.BaseDirectory, "Scenarios");
         var promptsFolder = Path.Combine(repository, ".alta", "prompts", "agents");
