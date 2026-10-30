@@ -45,6 +45,8 @@ test("the wire edit sends blank fields as null and keeps an untouched secret", (
   assert.equal(cleared.apiKey, null);
   assert.equal(cleared.clearApiKey, true);
   assert.equal(usesAccountSignIn("codex"), true);
+  assert.equal(usesAccountSignIn("mistral-vibe"), true);
+  assert.equal(usesAccountSignIn("mistral"), false);
   assert.equal(usesAccountSignIn("openai-chat"), false);
 });
 

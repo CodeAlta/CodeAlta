@@ -11,7 +11,7 @@ internal static class SandboxedProviders
 {
     private static readonly FrozenSet<string> CodeAltaDrivenTypes = new[]
     {
-        "openai-chat", "openai-responses", "azure-openai", "codex", "copilot", "xai", "anthropic", "google-genai", "vertex-ai", "mistral", "llama-cpp",
+        "openai-chat", "openai-responses", "azure-openai", "codex", "copilot", "xai", "anthropic", "google-genai", "vertex-ai", "mistral", "mistral-vibe", "llama-cpp",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets whether a provider type runs the tools of CodeAlta, which a sandbox holds.</summary>

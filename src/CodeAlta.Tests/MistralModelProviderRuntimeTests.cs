@@ -85,6 +85,48 @@ public sealed class MistralModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task MistralTurnExecutor_SendsAToolResultOfSeveralItemsAsTextChunks()
+    {
+        using var handler = new CapturingMistralHandler(CreateTextStream());
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://mistral.test/") };
+        var executor = MistralModelProviderRuntime.CreateTurnExecutor(new MistralProviderOptions
+        {
+            ProviderKey = "mistral",
+            ApiKey = "test-key",
+            HttpClient = httpClient,
+        });
+        var arguments = JsonDocument.Parse("""{"path":"map.png"}""").RootElement.Clone();
+
+        // A result with an image: the image goes to a user message, the result keeps its text and a line that names it.
+        await executor.ExecuteTurnAsync(
+            CreateTurnRequest(
+                conversation:
+                [
+                    new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Look at the map")]),
+                    new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.ToolCall("call_1", "view_image", arguments)]),
+                    new AgentConversationMessage(
+                        AgentConversationRole.Tool,
+                        [new AgentMessagePart.ToolResult(
+                            "call_1",
+                            new AgentToolResult(true,
+                            [
+                                new AgentToolResultItem.Text("Read map.png"),
+                                new AgentToolResultItem.Image("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "image/png", "map.png"),
+                            ]))]),
+                ],
+                tools: []),
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var document = JsonDocument.Parse(handler.LastRequestBody!);
+        var tool = document.RootElement.GetProperty("messages").EnumerateArray().Single(static message => message.GetProperty("role").GetString() == "tool");
+        var content = tool.GetProperty("content");
+        Assert.AreEqual(JsonValueKind.Array, content.ValueKind, content.GetRawText());
+        Assert.IsTrue(content.EnumerateArray().All(static chunk => chunk.GetProperty("type").GetString() == "text"));
+        Assert.AreEqual("Read map.png", content[0].GetProperty("text").GetString());
+        StringAssert.Contains(content[1].GetProperty("text").GetString(), "map.png");
+    }
+
+    [TestMethod]
     public async Task MistralTurnExecutor_DoesNotSerializeUnsupportedReasoningEffortWhenModelInfoLimitsEfforts()
     {
         using var handler = new CapturingMistralHandler(CreateTextStream());
@@ -201,6 +243,40 @@ public sealed class MistralModelProviderRuntimeTests
 
         var toolCall = response.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single();
         Assert.AreEqual("call_2", toolCall.CallId);
+        Assert.AreEqual("lookup_weather", toolCall.Name);
+        Assert.AreEqual("Paris", toolCall.Arguments.GetProperty("city").GetString());
+    }
+
+    [TestMethod]
+    public async Task MistralTurnExecutor_KeepsTheNameOfAToolCallThatLaterChunksSendEmpty()
+    {
+        // As GLM and DeepSeek stream on Mistral: the chunks after the first one carry an empty name.
+        using var handler = new CapturingMistralHandler("""
+            data: {"id":"cmpl-glm","created":1,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-a5f8","type":"function","function":{"name":"lookup_weather","arguments":""},"index":0}],"content":""},"finish_reason":null}]}
+
+            data: {"id":"cmpl-glm","created":1,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"tool_calls":[{"id":"","type":"function","function":{"name":"","arguments":"{\"city\": \"Paris\"}"},"index":0}],"content":""},"finish_reason":null}]}
+
+            data: {"id":"cmpl-glm","created":1,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"content":""},"finish_reason":"tool_calls"}]}
+
+            data: [DONE]
+
+            """);
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://mistral.test/") };
+        var executor = MistralModelProviderRuntime.CreateTurnExecutor(new MistralProviderOptions
+        {
+            ProviderKey = "mistral",
+            ApiKey = "test-key",
+            HttpClient = httpClient,
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(
+                conversation: [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Use the tool")])],
+                tools: []),
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var toolCall = response.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single();
+        Assert.AreEqual("chatcmpl-tool-a5f8", toolCall.CallId);
         Assert.AreEqual("lookup_weather", toolCall.Name);
         Assert.AreEqual("Paris", toolCall.Arguments.GetProperty("city").GetString());
     }

@@ -1,0 +1,18 @@
+data: {"id":"54df70ff1f5a41da83c4b507c6b0363e","object":"chat.completion.chunk","created":1793306430,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"54df70ff1f5a41da83c4b507c6b0363e","object":"chat.completion.chunk","created":1793306430,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"role":"assistant","index":0,"content":""},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"54df70ff1f5a41da83c4b507c6b0363e","object":"chat.completion.chunk","created":1793306430,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":"17"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"54df70ff1f5a41da83c4b507c6b0363e","object":"chat.completion.chunk","created":1793306430,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":"*"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"54df70ff1f5a41da83c4b507c6b0363e","object":"chat.completion.chunk","created":1793306430,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"index":0,"content":[{"type":"thinking","thinking":[{"type":"text","text":"23 = 391"}],"closed":true}]},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"54df70ff1f5a41da83c4b507c6b0363e","object":"chat.completion.chunk","created":1793306430,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"index":0,"content":"39"},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"54df70ff1f5a41da83c4b507c6b0363e","object":"chat.completion.chunk","created":1793306430,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"index":0,"content":"1"},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"54df70ff1f5a41da83c4b507c6b0363e","object":"chat.completion.chunk","created":1793306430,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"index":0,"content":""},"finish_reason":"stop","logprobs":null,"response_error":{"format_error":null,"content_validation":["valid_think_chunk","valid_text_chunk"],"tool_calls_validation":[],"extra_tags":[]}}],"usage":{"prompt_tokens":24,"total_tokens":35,"completion_tokens":11,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":7}}}
+
+data: [DONE]
+

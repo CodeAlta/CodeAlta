@@ -41,7 +41,7 @@ test("every lent library has an entry file, a distinct file in the build output,
     assert.ok(read(`../../${library.entry}`).length > 0, library.entry);
   }
 
-  for (const name of ["react", "react/jsx-runtime", "react-dom", "react-dom/client", "@blueprintjs/core", "@blueprintjs/table", "flexlayout-react", "lucide-react", "codealta"]) {
+  for (const name of ["react", "react/jsx-runtime", "react-dom", "react-dom/client", "@blueprintjs/core", "@blueprintjs/table", "flexlayout-react", "lucide-react", "@xyflow/react", "codealta"]) {
     assert.ok(name in map, `${name} is lent`);
   }
 });

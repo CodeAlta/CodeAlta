@@ -1,0 +1,51 @@
+event: response.created
+data: {"response":{"id":"resp_1dd4ae9ee33c4f1d98ce0d5a821446af","created_at":1793306421.0,"error":null,"incomplete_details":null,"instructions":null,"metadata":{},"model":"deepseek-v4-1-flash-1017","object":"response","output":[],"parallel_tool_calls":true,"temperature":null,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]},"strict":null,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Weather of a city","output_schema":null}],"top_p":null,"background":false,"completed_at":null,"conversation":null,"max_output_tokens":null,"max_tool_calls":null,"moderation":null,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_options":null,"prompt_cache_retention":null,"reasoning":{"context":null,"effort":"high","generate_summary":null,"mode":null,"summary":null},"safety_identifier":null,"service_tier":null,"status":"in_progress","text":{"format":{"type":"text"},"verbosity":null},"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"store":false},"sequence_number":0,"type":"response.created"}
+
+event: response.in_progress
+data: {"response":{"id":"resp_1dd4ae9ee33c4f1d98ce0d5a821446af","created_at":1793306421.0,"error":null,"incomplete_details":null,"instructions":null,"metadata":{},"model":"deepseek-v4-1-flash-1017","object":"response","output":[],"parallel_tool_calls":true,"temperature":null,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]},"strict":null,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Weather of a city","output_schema":null}],"top_p":null,"background":false,"completed_at":null,"conversation":null,"max_output_tokens":null,"max_tool_calls":null,"moderation":null,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_options":null,"prompt_cache_retention":null,"reasoning":{"context":null,"effort":"high","generate_summary":null,"mode":null,"summary":null},"safety_identifier":null,"service_tier":null,"status":"in_progress","text":{"format":{"type":"text"},"verbosity":null},"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"store":false},"sequence_number":1,"type":"response.in_progress"}
+
+event: response.output_item.added
+data: {"item":{"id":"msg_061bc65d93c94a3a93d451296d9e100a","content":[],"role":"assistant","status":"in_progress","type":"message","phase":null},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+event: response.content_part.added
+data: {"content_index":0,"item_id":"msg_061bc65d93c94a3a93d451296d9e100a","output_index":0,"part":{"annotations":[],"text":"","type":"output_text","logprobs":null},"sequence_number":3,"type":"response.content_part.added"}
+
+event: response.output_text.delta
+data: {"content_index":0,"delta":"I","item_id":"msg_061bc65d93c94a3a93d451296d9e100a","logprobs":[],"output_index":0,"sequence_number":4,"type":"response.output_text.delta"}
+
+event: response.output_text.delta
+data: {"content_index":0,"delta":"'ll check the weather in","item_id":"msg_061bc65d93c94a3a93d451296d9e100a","logprobs":[],"output_index":0,"sequence_number":5,"type":"response.output_text.delta"}
+
+event: response.output_text.delta
+data: {"content_index":0,"delta":" Paris for you.\n\n","item_id":"msg_061bc65d93c94a3a93d451296d9e100a","logprobs":[],"output_index":0,"sequence_number":6,"type":"response.output_text.delta"}
+
+event: response.output_item.added
+data: {"item":{"arguments":"","call_id":"chatcmpl-tool-8372706f47b0c89e","name":"get_weather","type":"function_call","id":"fc_20fd3bab4006490a946a3ed622f9c475","status":"in_progress"},"output_index":1,"sequence_number":7,"type":"response.output_item.added"}
+
+event: response.function_call_arguments.delta
+data: {"delta":"{\"city\": \"","item_id":"fc_20fd3bab4006490a946a3ed622f9c475","output_index":1,"sequence_number":8,"type":"response.function_call_arguments.delta"}
+
+event: response.function_call_arguments.delta
+data: {"delta":"Paris","item_id":"fc_20fd3bab4006490a946a3ed622f9c475","output_index":1,"sequence_number":9,"type":"response.function_call_arguments.delta"}
+
+event: response.function_call_arguments.delta
+data: {"delta":"\"}","item_id":"fc_20fd3bab4006490a946a3ed622f9c475","output_index":1,"sequence_number":10,"type":"response.function_call_arguments.delta"}
+
+event: response.output_text.done
+data: {"content_index":0,"item_id":"msg_061bc65d93c94a3a93d451296d9e100a","logprobs":[],"output_index":0,"sequence_number":11,"text":"I'll check the weather in Paris for you.\n\n","type":"response.output_text.done"}
+
+event: response.content_part.done
+data: {"content_index":0,"item_id":"msg_061bc65d93c94a3a93d451296d9e100a","output_index":0,"part":{"annotations":[],"text":"I'll check the weather in Paris for you.\n\n","type":"output_text","logprobs":null},"sequence_number":12,"type":"response.content_part.done"}
+
+event: response.output_item.done
+data: {"item":{"id":"msg_061bc65d93c94a3a93d451296d9e100a","content":[{"annotations":[],"text":"I'll check the weather in Paris for you.\n\n","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null},"output_index":0,"sequence_number":13,"type":"response.output_item.done"}
+
+event: response.function_call_arguments.done
+data: {"arguments":"{\"city\": \"Paris\"}","item_id":"fc_20fd3bab4006490a946a3ed622f9c475","name":"get_weather","output_index":1,"sequence_number":14,"type":"response.function_call_arguments.done"}
+
+event: response.output_item.done
+data: {"item":{"arguments":"{\"city\": \"Paris\"}","call_id":"chatcmpl-tool-8372706f47b0c89e","name":"get_weather","type":"function_call","id":"fc_20fd3bab4006490a946a3ed622f9c475","status":"completed"},"output_index":1,"sequence_number":15,"type":"response.output_item.done"}
+
+event: response.completed
+data: {"response":{"id":"resp_1dd4ae9ee33c4f1d98ce0d5a821446af","created_at":1793306421.0,"error":null,"incomplete_details":null,"instructions":null,"metadata":{},"model":"deepseek-v4-1-flash-1017","object":"response","output":[{"id":"msg_061bc65d93c94a3a93d451296d9e100a","content":[{"annotations":[],"text":"I'll check the weather in Paris for you.\n\n","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null},{"arguments":"{\"city\": \"Paris\"}","call_id":"chatcmpl-tool-8372706f47b0c89e","name":"get_weather","type":"function_call","id":"fc_20fd3bab4006490a946a3ed622f9c475","status":"completed"}],"parallel_tool_calls":true,"temperature":null,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]},"strict":null,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Weather of a city","output_schema":null}],"top_p":null,"background":false,"completed_at":1793306421.0,"conversation":null,"max_output_tokens":null,"max_tool_calls":null,"moderation":null,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_options":null,"prompt_cache_retention":null,"reasoning":{"context":null,"effort":"high","generate_summary":null,"mode":null,"summary":null},"safety_identifier":null,"service_tier":null,"status":"completed","text":{"format":{"type":"text"},"verbosity":null},"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":298,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":256},"output_tokens":49,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":347},"user":null,"store":false},"sequence_number":16,"type":"response.completed"}
+

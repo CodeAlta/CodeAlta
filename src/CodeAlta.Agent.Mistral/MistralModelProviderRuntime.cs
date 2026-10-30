@@ -65,21 +65,22 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
     {
         var providerKey = provider.ProviderKey.Trim();
         var displayName = string.IsNullOrWhiteSpace(provider.DisplayName) ? providerKey : provider.DisplayName.Trim();
+        var responses = provider.Api == MistralApi.Responses;
         var runtimeDescriptor = new ModelProviderRuntimeDescriptor
         {
-            ProtocolFamily = "mistral-chat",
+            ProtocolFamily = responses ? MistralResponsesTurnExecutor.ProtocolFamily : "mistral-chat",
             ProviderKey = providerKey,
             DisplayName = displayName,
-            TransportKind = AgentTransportKind.MistralChat,
+            TransportKind = responses ? AgentTransportKind.OpenAIResponses : AgentTransportKind.MistralChat,
             BaseUri = provider.BaseUri,
             IsDefault = provider.IsDefault,
-            Profile = provider.Profile ?? new AgentProviderProfile
+            Profile = provider.Profile ?? (responses ? MistralResponsesTurnExecutor.DefaultProfile : new AgentProviderProfile
             {
                 SupportsDeveloperRole = true,
                 SupportsStore = false,
                 StreamsUsage = true,
                 MaxTokensFieldName = "max_tokens",
-            },
+            }),
             Compaction = provider.Compaction ?? AgentCompactionSettings.Default,
         };
         var descriptor = new ModelProviderDescriptor(new ModelProviderId(providerKey), displayName, "mistral")
@@ -96,6 +97,11 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
 
     internal static IModelProviderTurnExecutor CreateTurnExecutor(MistralProviderOptions provider)
     {
+        if (provider.Api == MistralApi.Responses)
+        {
+            return new MistralResponsesTurnExecutor(provider);
+        }
+
         return new ChatClientTurnExecutor(
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
@@ -144,7 +150,7 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
         return AgentFailureClassifier.Classify(exception);
     }
 
-    private static ValueTask<IChatClient> CreateChatClientAsync(
+    private static async ValueTask<IChatClient> CreateChatClientAsync(
         MistralProviderOptions provider,
         ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken)
@@ -152,13 +158,13 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
         cancellationToken.ThrowIfCancellationRequested();
         if (provider.ChatClientFactory is not null)
         {
-            return ValueTask.FromResult(provider.ChatClientFactory());
+            return provider.ChatClientFactory();
         }
 
-        return ValueTask.FromResult<IChatClient>(new MistralChatClient(provider));
+        return new MistralChatClient(provider, await provider.ResolveApiKeyAsync(cancellationToken).ConfigureAwait(false));
     }
 
-    private static async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
+    internal static async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
         MistralProviderOptions provider,
         ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken)
@@ -191,12 +197,12 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
 
         models = await ListRemoteModelsAsync(provider, providerDescriptor, cancellationToken).ConfigureAwait(false);
 
-        return AgentModelMetadataEnricher.EnrichModels(
+        return CompleteReasoningEfforts(AgentModelMetadataEnricher.EnrichModels(
             models,
             provider.ModelCatalog,
             provider.ModelsDevProviderId,
             provider.ModelOverrides,
-            provider.ModelsIncludeRegex);
+            provider.ModelsIncludeRegex));
     }
 
     private static async Task<IReadOnlyList<AgentModelInfo>> ListRemoteModelsAsync(
@@ -204,15 +210,18 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
         ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken)
     {
+        var apiKey = await provider.ResolveApiKeyAsync(cancellationToken).ConfigureAwait(false);
         var httpClient = provider.HttpClient ?? new HttpClient();
         var disposeHttpClient = provider.HttpClient is null;
         try
         {
-            using var response = await SendModelsRequestWithRetriesAsync(httpClient, provider, cancellationToken).ConfigureAwait(false);
+            using var response = await SendModelsRequestWithRetriesAsync(httpClient, provider, apiKey, cancellationToken).ConfigureAwait(false);
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-            return ParseModelsResponse(document.RootElement, providerDescriptor);
+            return provider.UsesVibeModelCatalog
+                ? ParseVibeModelCatalog(document.RootElement, providerDescriptor)
+                : ParseModelsResponse(document.RootElement, providerDescriptor);
         }
         finally
         {
@@ -226,19 +235,21 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
     private static Uri CreateModelsUri(MistralProviderOptions provider)
     {
         var baseUri = provider.BaseUri ?? provider.HttpClient?.BaseAddress ?? new Uri(MistralDefaults.DefaultBaseUrl);
-        return new Uri($"{baseUri.AbsoluteUri.TrimEnd('/')}{MistralDefaults.ModelsPath}", UriKind.Absolute);
+        var path = provider.UsesVibeModelCatalog ? MistralDefaults.VibeModelCatalogPath : MistralDefaults.ModelsPath;
+        return new Uri($"{baseUri.AbsoluteUri.TrimEnd('/')}{path}", UriKind.Absolute);
     }
 
     private static async Task<HttpResponseMessage> SendModelsRequestWithRetriesAsync(
         HttpClient httpClient,
         MistralProviderOptions provider,
+        string? apiKey,
         CancellationToken cancellationToken)
     {
         var maxAttempts = MistralChatClient.GetMaxRetryAttempts(provider);
         for (var attempt = 0; ; attempt++)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, CreateModelsUri(provider));
-            ConfigureRequestHeaders(request, provider);
+            ConfigureRequestHeaders(request, provider, apiKey);
             HttpResponseMessage? response = null;
             try
             {
@@ -275,11 +286,11 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
         }
     }
 
-    private static void ConfigureRequestHeaders(HttpRequestMessage request, MistralProviderOptions provider)
+    private static void ConfigureRequestHeaders(HttpRequestMessage request, MistralProviderOptions provider, string? apiKey)
     {
-        if (!string.IsNullOrWhiteSpace(provider.ApiKey))
+        if (!string.IsNullOrWhiteSpace(apiKey))
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", provider.ApiKey);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         }
 
         if (provider.ExtraHeaders is { Count: > 0 } extraHeaders)
@@ -326,6 +337,58 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
         return results;
     }
 
+    // The models Mistral Vibe offers, with the reasoning efforts each takes. Vibe calls only models that chat and call
+    // tools; the others are left out.
+    private static IReadOnlyList<AgentModelInfo> ParseVibeModelCatalog(
+        JsonElement root,
+        ModelProviderRuntimeDescriptor providerDescriptor)
+    {
+        if (!root.TryGetProperty("models", out var models) || models.ValueKind is not JsonValueKind.Array)
+        {
+            throw new JsonException("The model catalog of Mistral Vibe must have an array of models.");
+        }
+
+        var results = new List<AgentModelInfo>();
+        var seenModelIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in models.EnumerateArray())
+        {
+            if (item.ValueKind is not JsonValueKind.Object ||
+                !TryGetString(item, "id", out var id) ||
+                string.IsNullOrWhiteSpace(id) ||
+                !seenModelIds.Add(id.Trim()) ||
+                !TryGetProperty(item, out var flags, "capabilities") ||
+                flags.ValueKind is not JsonValueKind.Object ||
+                TryGetScalar(flags, "completion_chat") is not true ||
+                TryGetScalar(flags, "function_calling") is not true)
+            {
+                continue;
+            }
+
+            var modelId = id.Trim();
+            IReadOnlyList<AgentReasoningEffort> efforts = TryGetProperty(item, out var parameters, "parameters") &&
+                parameters.ValueKind is JsonValueKind.Object &&
+                parameters.TryGetProperty("reasoning", out var reasoning)
+                    ? ParseReasoningEffortArray(reasoning)
+                    : [];
+            var label = TryGetTrimmedString(item, "label");
+            results.Add(new AgentModelInfo(
+                modelId,
+                DisplayName: label ?? modelId,
+                Description: TryGetTrimmedString(item, "description"),
+                Provider: providerDescriptor.ProviderKey,
+                DefaultReasoningEffort: ResolveMistralDefaultReasoningEffort(efforts),
+                SupportedReasoningEfforts: efforts,
+                Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["capabilities"] = CreateCapabilities(flags),
+                    ["maxContextLength"] = TryGetScalar(item, "max_context_length"),
+                    ["ownedBy"] = TryGetTrimmedString(item, "publisher"),
+                }));
+        }
+
+        return results;
+    }
+
     private static AgentModelInfo ToAgentModelInfo(
         ModelProviderRuntimeDescriptor provider,
         JsonElement model,
@@ -343,7 +406,9 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
         };
 
         var supportsReasoning = TryGetCapabilityBoolean(model, "reasoning");
-        var supportedReasoningEfforts = TryGetSupportedReasoningEfforts(model, supportsReasoning);
+        // A model that reasons and is not known has no efforts here: models.dev gives them, else the default ones
+        // (CompleteReasoningEfforts).
+        var supportedReasoningEfforts = TryGetSupportedReasoningEfforts(model, modelId, supportsReasoning);
         var name = TryGetTrimmedString(model, "name");
         return new AgentModelInfo(
             modelId,
@@ -377,40 +442,24 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
         return values;
     }
 
-    private static IReadOnlyList<AgentReasoningEffort> CreateMistralReasoningEfforts()
-        =>
-        [
-            // Mistral's request enum is broader, but the model catalog exposes only a reasoning boolean.
-            // Keep the advertised set conservative; mistral-small-latest currently rejects low/medium/xhigh.
-            AgentReasoningEffort.None,
-            AgentReasoningEffort.High,
-        ];
-
     private static bool SupportsMistralReasoningEffort(
         AgentTurnRequest request,
         AgentReasoningEffort reasoningEffort)
         => reasoningEffort is AgentReasoningEffort.High;
 
+    // Microsoft.Extensions.AI names no minimal and no max, and leaves out none: the value of Mistral goes as it is, for
+    // an effort the model takes. None too, so that a model that reasons by default does not.
     private static void ConfigureMistralChatOptions(AgentTurnRequest request, ChatOptions options)
     {
-        if (request.ReasoningEffort is not AgentReasoningEffort.Minimal ||
-            !SupportsRequestedMistralReasoningEffort(request, AgentReasoningEffort.Minimal))
+        if (MistralReasoningEfforts.Resolve(request) is not { } effort)
         {
             return;
         }
 
-        // Microsoft.Extensions.AI has no Minimal value. Use the Mistral schema value directly when supported.
         options.Reasoning = null;
         options.AdditionalProperties ??= [];
-        options.AdditionalProperties["reasoning_effort"] = "minimal";
+        options.AdditionalProperties["reasoning_effort"] = effort;
     }
-
-    private static bool SupportsRequestedMistralReasoningEffort(
-        AgentTurnRequest request,
-        AgentReasoningEffort reasoningEffort)
-        => request.ModelInfo?.SupportedReasoningEfforts is { } supportedReasoningEfforts
-            ? supportedReasoningEfforts.Contains(reasoningEffort)
-            : SupportsMistralReasoningEffort(request, reasoningEffort);
 
     private static AgentReasoningEffort? ResolveMistralDefaultReasoningEffort(
         IReadOnlyList<AgentReasoningEffort>? supportedReasoningEfforts)
@@ -438,6 +487,7 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
 
     private static IReadOnlyList<AgentReasoningEffort>? TryGetSupportedReasoningEfforts(
         JsonElement model,
+        string modelId,
         bool? supportsReasoning)
     {
         if (TryGetReasoningEffortArray(model, out var values))
@@ -445,11 +495,57 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
             return values;
         }
 
-        return supportsReasoning is null
-            ? null
-            : supportsReasoning.Value
-                ? CreateMistralReasoningEfforts()
-                : [];
+        return supportsReasoning switch
+        {
+            null => null,
+            false => [],
+            true => MistralReasoningEfforts.Find(modelId, TryGetAliases(model)),
+        };
+    }
+
+    private static IEnumerable<string> TryGetAliases(JsonElement model)
+    {
+        if (!model.TryGetProperty("aliases", out var aliases) || aliases.ValueKind is not JsonValueKind.Array)
+        {
+            yield break;
+        }
+
+        foreach (var alias in aliases.EnumerateArray())
+        {
+            if (alias.ValueKind is JsonValueKind.String && alias.GetString() is { Length: > 0 } value)
+            {
+                yield return value;
+            }
+        }
+    }
+
+    // A model that reasons and has no efforts yet, neither from the endpoint nor from models.dev, gets the default ones;
+    // its default effort follows the efforts it has.
+    internal static IReadOnlyList<AgentModelInfo> CompleteReasoningEfforts(IReadOnlyList<AgentModelInfo> models)
+    {
+        var completed = new AgentModelInfo[models.Count];
+        for (var index = 0; index < models.Count; index++)
+        {
+            var model = models[index];
+            var efforts = model.SupportedReasoningEfforts;
+            if (efforts is null &&
+                model.Capabilities?.TryGetValue("capabilities", out var listed) == true &&
+                listed is IReadOnlyDictionary<string, object?> flags &&
+                flags.TryGetValue("reasoning", out var reasons) && reasons is true)
+            {
+                efforts = MistralReasoningEfforts.Default;
+            }
+
+            completed[index] = efforts == model.SupportedReasoningEfforts && model.DefaultReasoningEffort is not null
+                ? model
+                : model with
+                {
+                    SupportedReasoningEfforts = efforts,
+                    DefaultReasoningEffort = model.DefaultReasoningEffort ?? ResolveMistralDefaultReasoningEffort(efforts),
+                };
+        }
+
+        return completed;
     }
 
     private static bool TryGetReasoningEffortArray(

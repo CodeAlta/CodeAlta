@@ -116,6 +116,11 @@ The source of each script is kept in the scratchpad of the session, and its resu
 
 What a script returns is for the agent: data it works from, such as source code or JSON. What is for you, the script shows with `present(markdown)`: a long script you wait on shows its progress and its findings as they come, and a report at its end. The agent is told what was presented, so it does not repeat it. A quick script presents nothing: the agent's answer tells you what it found.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-workflow-present.webp" alt="A session asked to compare the providers of CodeAlta from its guide: the card of its script run with two steps, read and compare, and under them what the script presented, a line naming the pages it read and a report with a table of seven providers, how each signs in and what it is best for" loading="lazy">
+  <figcaption class="small text-secondary mt-2">What a script presented, under the steps of its run: the agent's own answer stays one sentence.</figcaption>
+</figure>
+
 - What a script presented is Markdown on the card of its run (its block in the timeline), in the **Workflow** message of a script that ended in the background, and under **Presented** in the tab of its run. It stays there after CodeAlta starts again. A link to a file opens it in CodeAlta, a picture too (`![chart](chart.png)`).
 - The value the script returned is folded under **Result**, as plain text, the way the output of a tool is. A script you run from the [Workflows tab](#the-workflows-tab) or an [automation](../automations.md) is read by no agent: its value is shown as Markdown.
 - `image(path, { title })` attaches a picture file to the result (PNG, JPEG, GIF or WebP, 8 at most): you see it as a thumbnail, and the agent sees the picture too. A file that is missing or not a picture is named in the result instead.

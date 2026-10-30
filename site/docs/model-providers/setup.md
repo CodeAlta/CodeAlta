@@ -6,7 +6,7 @@ title: Set Up a Provider
 
 Each section below sets up one provider. The general steps, the test and the default provider are on the [overview](readme.md#open-the-providers); every setting of the file is in [Configuration file](configuration.md).
 
-Subscriptions need no API key: **Claude Code** for a Claude plan, **Codex** for a ChatGPT plan, **Copilot** for GitHub Copilot, **xAI Grok** for SuperGrok. Their credentials stay in CodeAlta's own state, apart from API keys.
+Subscriptions need no API key: **Claude Code** for a Claude plan, **Codex** for a ChatGPT plan, **Copilot** for GitHub Copilot, **xAI Grok** for SuperGrok, **Mistral Vibe** for Mistral Pro. Their credentials stay in CodeAlta's own state, apart from API keys.
 
 For an API-key provider, put the key in an environment variable and name it with `api_key_env`:
 
@@ -314,7 +314,27 @@ type = "mistral"
 api_key_env = "CODEALTA_MISTRAL_API_KEY"
 model = "mistral-small-latest"
 models_dev_provider_id = "mistral"
+# api = "responses"   # the Responses API of Mistral (preview) instead of Chat Completions
 ```
+
+- **The API** is Chat Completions. Set `api = "responses"` for the [Responses API](https://docs.mistral.ai/studio/conversations/responses) of Mistral, which is in preview. It keeps nothing between requests: CodeAlta sends the whole conversation each time, as it does for Chat Completions.
+- **Reasoning**: each model offers the efforts Mistral takes for it. Most take **None** and **High**; Mistral Large 4 takes **Low**, **Medium** and **High**, and reasons when no effort is chosen; GLM 5.3 takes **Low**, **High** and **Max**.
+
+## Mistral Vibe
+
+The `mistral-vibe` provider signs in to Mistral Vibe, with a Mistral Pro subscription or higher, instead of an API key:
+
+```toml
+[providers.mistral-vibe]
+enabled = true
+display_name = "Mistral Vibe"
+type = "mistral-vibe"
+model = "mistral-medium-latest"
+```
+
+In CodeAlta Desktop, open its form in **Settings > Providers** and choose **Sign in with the browser**. The page of Mistral opens: sign in, choose the workspace, and come back. The sign-in creates an API key in that workspace, as the Vibe CLI does; CodeAlta keeps it in its own state, and **Sign out** removes it from there. The key itself stays in the workspace until you revoke it in the console of Mistral.
+
+The models are the ones Mistral Vibe offers, GLM 5.3 among them. The CodeAlta TUI uses a provider signed in from CodeAlta Desktop, but cannot sign in itself. `api = "responses"` works here too.
 
 ## Alibaba Cloud
 

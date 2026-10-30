@@ -14,5 +14,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.OpenAI\CodeAlta.Agent.OpenAI.csproj" />
   </ItemGroup>
 </Project>

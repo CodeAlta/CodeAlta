@@ -56,7 +56,7 @@ const words: readonly (readonly [RegExp, BrandIconName])[] = [
 
 // The adapter types that belong to one brand. `openai-chat` is the protocol of many: it names none.
 const types: Readonly<Record<string, BrandIconName>> = {
-  codex: "codex", "codex-cli": "codex", copilot: "githubcopilot", "claude-code": "claudecode", xai: "xai", mistral: "mistral",
+  codex: "codex", "codex-cli": "codex", copilot: "githubcopilot", "claude-code": "claudecode", xai: "xai", mistral: "mistral", "mistral-vibe": "mistral",
   "google-genai": "gemini", "vertex-ai": "vertexai", "azure-openai": "azure", "openai-responses": "openai", anthropic: "anthropic",
 };
 

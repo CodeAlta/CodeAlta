@@ -20,15 +20,22 @@ internal sealed class MistralChatClient : IChatClient
     private static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(30);
 
     private readonly MistralProviderOptions _provider;
+    private readonly string? _apiKey;
     private readonly HttpClient _httpClient;
     private readonly bool _disposeHttpClient;
     private ChatClientMetadata? _metadata;
 
     public MistralChatClient(MistralProviderOptions provider)
+        : this(provider, provider?.ApiKey)
+    {
+    }
+
+    public MistralChatClient(MistralProviderOptions provider, string? apiKey)
     {
         ArgumentNullException.ThrowIfNull(provider);
 
         _provider = provider;
+        _apiKey = apiKey;
         _httpClient = provider.HttpClient ?? new HttpClient();
         _disposeHttpClient = provider.HttpClient is null;
     }
@@ -101,9 +108,9 @@ internal sealed class MistralChatClient : IChatClient
     private HttpRequestMessage CreateRequest(IEnumerable<ChatMessage> messages, ChatOptions? options)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, CreateChatUri());
-        if (!string.IsNullOrWhiteSpace(_provider.ApiKey))
+        if (!string.IsNullOrWhiteSpace(_apiKey))
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _provider.ApiKey);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         }
 
         if (_provider.ExtraHeaders is { Count: > 0 } extraHeaders)
@@ -634,7 +641,31 @@ internal sealed class MistralChatClient : IChatClient
         var functionResult = message.Contents.OfType<FunctionResultContent>().FirstOrDefault();
         writer.WriteStartObject();
         writer.WriteString("role", "tool");
-        writer.WriteString("content", ToResultString(functionResult));
+        // A result of several items is a list of contents: their text, in text chunks. Its images go in the user
+        // message that follows the tool results, where the model sees them.
+        if (functionResult?.Result is IEnumerable<AIContent> contents && contents.Any(static content => content is TextContent or UriContent))
+        {
+            writer.WriteStartArray("content");
+            foreach (var content in contents)
+            {
+                switch (content)
+                {
+                    case TextContent text:
+                        WriteTextChunk(writer, text.Text);
+                        break;
+                    case UriContent uri:
+                        WriteTextChunk(writer, uri.Uri.ToString());
+                        break;
+                }
+            }
+
+            writer.WriteEndArray();
+        }
+        else
+        {
+            writer.WriteString("content", ToResultString(functionResult));
+        }
+
         if (!string.IsNullOrWhiteSpace(functionResult?.CallId))
         {
             writer.WriteString("tool_call_id", functionResult.CallId);
@@ -902,10 +933,12 @@ internal sealed class MistralChatClient : IChatClient
                 toolCallBuilders.Add(index, builder);
             }
 
-            builder.Id = GetString(toolCall, "id") ?? builder.Id;
+            // The chunks after the first one of a call may name it with an empty string (GLM and DeepSeek on Mistral):
+            // only a value replaces what an earlier chunk gave.
+            builder.Id = GetNonEmptyString(toolCall, "id") ?? builder.Id;
             if (toolCall.TryGetProperty("function", out var function) && function.ValueKind == JsonValueKind.Object)
             {
-                builder.Name = GetString(function, "name") ?? builder.Name;
+                builder.Name = GetNonEmptyString(function, "name") ?? builder.Name;
                 if (TryExtractText(function, "arguments", out var arguments))
                 {
                     builder.Arguments.Append(arguments);
@@ -1235,6 +1268,9 @@ internal sealed class MistralChatClient : IChatClient
         => element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
             ? property.GetString()
             : null;
+
+    private static string? GetNonEmptyString(JsonElement element, string propertyName)
+        => GetString(element, propertyName) is { Length: > 0 } value ? value : null;
 
     private static int? GetInt32(JsonElement element, string propertyName)
         => element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var value)

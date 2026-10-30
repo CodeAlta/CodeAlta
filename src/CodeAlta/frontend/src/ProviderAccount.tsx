@@ -22,7 +22,7 @@ export function Copyable({ value, label, code = false }: { value: string; label:
 }
 
 /**
- * Account sign-in of a provider that authenticates with its own account (Codex, Copilot, xAI): the stored
+ * Account sign-in of a provider that authenticates with its own account (Codex, Copilot, xAI, Mistral Vibe): the stored
  * sign-in state, a button per sign-in method, and sign-out. While a sign-in runs, the page shows the address
  * the host opened in the browser and, for a device flow, the code to enter there.
  */

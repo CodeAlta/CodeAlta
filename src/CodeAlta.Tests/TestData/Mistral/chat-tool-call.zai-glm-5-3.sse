@@ -1,0 +1,12 @@
+data: {"id":"a055863d868846c9a26e23dbaca3cc7a","object":"chat.completion.chunk","created":1793306418,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"a055863d868846c9a26e23dbaca3cc7a","object":"chat.completion.chunk","created":1793306418,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"role":"assistant","index":0,"content":""},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"a055863d868846c9a26e23dbaca3cc7a","object":"chat.completion.chunk","created":1793306418,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-90e081ede9e5b2e0","type":"function","function":{"name":"get_weather","arguments":""},"index":0}],"index":0,"content":""},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"a055863d868846c9a26e23dbaca3cc7a","object":"chat.completion.chunk","created":1793306418,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"tool_calls":[{"type":"function","function":{"name":"","arguments":"{\"city\": \"Paris\"}"},"index":0}],"index":0,"content":""},"finish_reason":null,"logprobs":null}]}
+
+data: {"id":"a055863d868846c9a26e23dbaca3cc7a","object":"chat.completion.chunk","created":1793306418,"model":"zai-glm-5-3","choices":[{"index":0,"delta":{"index":0,"content":""},"finish_reason":"tool_calls","logprobs":null,"response_error":{"format_error":null,"content_validation":[],"tool_calls_validation":["valid_tool_call"],"extra_tags":[]}}],"usage":{"prompt_tokens":164,"total_tokens":176,"completion_tokens":12,"prompt_tokens_details":{"cached_tokens":64},"completion_tokens_details":{"reasoning_tokens":0}}}
+
+data: [DONE]
+

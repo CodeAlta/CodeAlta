@@ -84,6 +84,13 @@ type = "mistral"
 model = "mistral-small-latest"
 api_key_env = "CODEALTA_MISTRAL_API_KEY"
 
+[providers.mistral-vibe]
+enabled = false
+display_name = "Mistral Vibe"
+type = "mistral-vibe"
+model = "mistral-medium-latest"
+reasoning_effort = "high"
+
 [providers.openai]
 enabled = false
 display_name = "OpenAI"

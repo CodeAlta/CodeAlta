@@ -106,7 +106,7 @@ export default function Board() {
 
 or `export async function mount(root, alta)`, which fills the element holding the HTML and may return a cleanup function.
 
-**Libraries.** A script imports `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react` and `lucide-react` and gets the very ones the window runs: menus and popovers open above the tabs, and the theme, color scheme and zoom apply. When CodeAlta moves one to a new major version, a script that used what changed needs an update; `alta.versions` gives the versions. Use `PopoverNext` for popovers. The HTML above and the `codealta` module stay stable across releases.
+**Libraries.** A script imports `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react`, `lucide-react` and `@xyflow/react` (React Flow, for graphs of nodes and links) and gets the very ones the window runs: menus and popovers open above the tabs, and the theme, color scheme and zoom apply. When CodeAlta moves one to a new major version, a script that used what changed needs an update; `alta.versions` gives the versions. Use `PopoverNext` for popovers. The HTML above and the `codealta` module stay stable across releases.
 
 **The `codealta` module** gives `html` (JSX as a template), `Markdown`, `Code`, `Diagram`, `Icon`, `BrandIcon`, `FileLink`, `SessionLink`, the window's charts (`Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, histograms, box plots), and the hooks `useAlta`, `useVisible` and `useTheme`.
 
@@ -162,6 +162,13 @@ The `canvas-board` sample keeps its board in the plugin: the script reads it wit
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-canvas-board.webp" alt="CodeAlta Desktop with a session at the left, where an agent opened and read the board with alta canvas, and at the right the Board tab of the canvas-board sample: cards in the columns To do, Doing and Done" loading="lazy">
   <figcaption class="small text-secondary mt-2">The board of the <code>canvas-board</code> sample beside the session whose agent opened and read it.</figcaption>
+</figure>
+
+The `canvas-flow` sample draws a release pipeline with React Flow (`@xyflow/react`): custom nodes in the colors of the window, links that move into a running step, a minimap and panels of Blueprint cards. Its steps and links live in the plugin: a drag, a new link or **Done** is a call, and `alta flow status --step website --status done` moves a step on from a terminal or an agent.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-canvas-flow.webp" alt="The Pipeline tab of the canvas-flow sample in CodeAlta Desktop: a release pipeline drawn with React Flow, from Commit through the .NET and frontend builds and tests and the website to the NuGet packages and the GitHub release, each step a card with its icon and status, the running .NET tests step selected in a panel with Start, Done and Fail, and a minimap" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The pipeline of the <code>canvas-flow</code> sample, drawn with React Flow in the colors of the window.</figcaption>
 </figure>
 
 ## Status items

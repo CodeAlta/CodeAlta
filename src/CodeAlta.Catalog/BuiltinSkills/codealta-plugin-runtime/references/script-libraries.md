@@ -4,7 +4,7 @@ Read this index to choose a library; follow its versioned declarations only for 
 
 ## Imports, versions and upstream references
 
-Versions below describe this CodeAlta build. In a running script, `alta.versions` is authoritative: package-name keys for the six libraries, plus numeric `interface` for `codealta`. React subpaths share their parent package's version; they have no separate version key. Upstream websites can describe newer releases: use the **pinned declarations** for exact signatures, including deprecated aliases.
+Versions below describe this CodeAlta build. In a running script, `alta.versions` is authoritative: package-name keys for the seven libraries, plus numeric `interface` for `codealta`. React subpaths share their parent package's version; they have no separate version key. Upstream websites can describe newer releases: use the **pinned declarations** for exact signatures, including deprecated aliases.
 
 | Import | Version | Surface | API / repository / pinned declarations |
 | --- | --- | --- | --- |
@@ -16,9 +16,10 @@ Versions below describe this CodeAlta build. In a running script, `alta.versions
 | `@blueprintjs/table` | 6.3.0 | All root named runtime exports | [API](https://blueprintjs.com/docs/#table) · same repository · [types](https://unpkg.com/@blueprintjs/table@6.3.0/lib/esm/index.d.ts) |
 | `flexlayout-react` | 0.11.0 | All root named runtime exports | [Guide / GitHub](https://github.com/caplin/FlexLayout#usage) · [types](https://unpkg.com/flexlayout-react@0.11.0/types/index.d.ts) |
 | `lucide-react` | 0.511.0 | All root named runtime exports | [API](https://lucide.dev/guide/packages/lucide-react) · [GitHub](https://github.com/lucide-icons/lucide) · [types / every icon name](https://unpkg.com/lucide-react@0.511.0/dist/lucide-react.d.ts) |
+| `@xyflow/react` | 12.12.0 | All root named runtime exports (React Flow) | [API](https://reactflow.dev/api-reference) · [GitHub](https://github.com/xyflow/xyflow) · [types](https://unpkg.com/@xyflow/react@12.12.0/dist/esm/index.d.ts) |
 | `codealta` | 1 | CodeAlta interface, not an npm package | [Exports and contracts](script-api.md) · [GitHub](https://github.com/CodeAlta/CodeAlta) |
 
-**Import rules.** Use named imports except for the three defaults explicitly listed above. Only the listed subpaths resolve: no `react-dom/server`, `react/jsx-dev-runtime`, Blueprint deep imports, `@blueprintjs/icons`, `@blueprintjs/select`, `@blueprintjs/datetime`, or `lucide-react/dynamic`. CSS imports, Node modules, CDN imports and `eval` are not an authoring path. Blueprint/Table/FlexLayout styles already belong to the window; do not import their CSS, bundle React or replace the host's Blueprint providers. Own modules may use relative `.js` imports inside the plugin package. If compiling JSX yourself, emit JavaScript and keep the host libraries external; target `react/jsx-runtime`, not its development counterpart.
+**Import rules.** Use named imports except for the three defaults explicitly listed above. Only the listed subpaths resolve: no `react-dom/server`, `react/jsx-dev-runtime`, Blueprint deep imports, `@blueprintjs/icons`, `@blueprintjs/select`, `@blueprintjs/datetime`, or `lucide-react/dynamic`. CSS imports, Node modules, CDN imports and `eval` are not an authoring path. Blueprint/Table/FlexLayout/React Flow styles already belong to the window; do not import their CSS, bundle React or replace the host's Blueprint providers. Own modules may use relative `.js` imports inside the plugin package. If compiling JSX yourself, emit JavaScript and keep the host libraries external; target `react/jsx-runtime`, not its development counterpart.
 
 The following inventories are **runtime values**, not TypeScript-only names such as `ButtonProps`, `IconName` or `IJsonModel`. Being exported does not grant access to the application's state or make every upstream feature work in a desktop WebView (for example, server rendering or a FlexLayout browser-window popout).
 
@@ -138,6 +139,49 @@ A plugin may own a dock **inside its canvas**, not read or modify CodeAlta's doc
 | Constants and menus | `BULK_CLOSE_ACTIONS`, `CLASSES`, `DefaultMax`, `DefaultMin`, `FlexLayoutVersion`, `I18nLabel`, `I18nLabelDefaults`, `ICloseType`, `NODE_CONTEXT_ACTIONS`, `PopupMenu`, `defaultKeyMap`, `getNodeContextActions`, `getNodeContextMenuItem`, `getNodeContextMenuItems`, `getTabGroupMenuItems`, `showGroupMenu`, `showOverflowMenu`, `showPopupMenu` |
 | Icons | `AddIcon`, `AsterickIcon`, `CloseIcon`, `EdgeIcon`, `GripIcon`, `MaximizeIcon`, `MenuIcon`, `OverflowIcon`, `PinIcon`, `PopoutFloatIcon`, `PopoutIcon`, `RestoreIcon`, `SettingsIcon` |
 <!-- /exports -->
+
+## React Flow
+
+`@xyflow/react` draws a graph of nodes and edges that pans, zooms and drags: a pipeline, a dependency map, an architecture. Its stylesheet is the window's, and the window gives it its colors in both themes (edges, default nodes, handles, selection, `Controls`, `MiniMap`, `Background`): do not import `@xyflow/react/dist/style.css` and do not set `colorMode`. Give the container an explicit height. Define `nodeTypes` and `edgeTypes` outside the component (a new object at each render remounts every node). Hold `nodes` and `edges` with `useNodesState`/`useEdgesState` and keep what must last (positions, links) in the plugin through `alta.rpc`, from `onNodeDragStop` and `onConnect`. A custom node is a component of `{ id, data, selected }` with `Handle`s of `type="target"`/`"source"` and a `Position`. Alias `Position`, `Panel` or `Controls` if they collide with another import.
+
+<!-- exports: @xyflow/react -->
+| Use | Named exports |
+| --- | --- |
+| Flow and parts | `ReactFlow`, `ReactFlowProvider`, `Background`, `Controls`, `ControlButton`, `MiniMap`, `MiniMapNode`, `Panel`, `ViewportPortal` |
+| Nodes | `Handle`, `NodeResizer`, `NodeResizeControl`, `NodeToolbar` |
+| Edges | `BaseEdge`, `BezierEdge`, `SimpleBezierEdge`, `SmoothStepEdge`, `StepEdge`, `StraightEdge`, `EdgeLabelRenderer`, `EdgeText`, `EdgeToolbar` |
+| Hooks | `useConnection`, `useEdges`, `useEdgesState`, `useHandleConnections`, `useInternalNode`, `useKeyPress`, `useNodeConnections`, `useNodeId`, `useNodes`, `useNodesData`, `useNodesInitialized`, `useNodesState`, `useOnSelectionChange`, `useOnViewportChange`, `useReactFlow`, `useStore`, `useStoreApi`, `useUpdateNodeInternals`, `useViewport`, `experimental_useOnEdgesChangeMiddleware`, `experimental_useOnNodesChangeMiddleware` |
+| Changes and geometry | `addEdge`, `applyEdgeChanges`, `applyNodeChanges`, `reconnectEdge`, `getBezierEdgeCenter`, `getBezierPath`, `getConnectedEdges`, `getEdgeCenter`, `getIncomers`, `getNodesBounds`, `getOutgoers`, `getSimpleBezierPath`, `getSmoothStepPath`, `getStraightPath`, `getViewportForBounds`, `isEdge`, `isNode` |
+| Constants | `BackgroundVariant`, `ConnectionLineType`, `ConnectionMode`, `MarkerType`, `PanOnScrollMode`, `Position`, `ResizeControlVariant`, `SelectionMode` |
+<!-- /exports -->
+
+```js
+import { Background, Controls, Handle, MarkerType, Position, ReactFlow, useEdgesState, useNodesState } from "@xyflow/react";
+import { html, useTheme } from "codealta";
+
+function Step({ data }) {
+    const theme = useTheme();
+    return html`<div style=${{ padding: "8px 12px", border: `1px solid ${theme.grid}`, borderRadius: 10, background: theme.surface, color: theme.text }}>
+        <${Handle} type="target" position=${Position.Left} />${data.label}<${Handle} type="source" position=${Position.Right} />
+    </div>`;
+}
+const nodeTypes = { step: Step };
+
+export default function Pipeline() {
+    const [nodes, , onNodesChange] = useNodesState([
+        { id: "build", type: "step", position: { x: 0, y: 0 }, data: { label: "Build" } },
+        { id: "test", type: "step", position: { x: 200, y: 0 }, data: { label: "Test" } },
+    ]);
+    const [edges, , onEdgesChange] = useEdgesState([{ id: "b-t", source: "build", target: "test", animated: true, markerEnd: { type: MarkerType.ArrowClosed } }]);
+    return html`<div style=${{ height: 360 }}>
+        <${ReactFlow} nodes=${nodes} edges=${edges} nodeTypes=${nodeTypes} onNodesChange=${onNodesChange} onEdgesChange=${onEdgesChange} fitView>
+            <${Background} /><${Controls} showInteractive=${false} />
+        <//>
+    </div>`;
+}
+```
+
+`samples/canvas-flow` is a complete graph whose nodes and links live in the plugin.
 
 ## Lucide
 

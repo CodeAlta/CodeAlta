@@ -316,6 +316,7 @@ import "@blueprintjs/core/lib/css/blueprint.css";
 import "flexlayout-react/style/light.css";
 import "@xterm/xterm/css/xterm.css";
 import "@xyflow/react/dist/style.css";
+import "./reactFlow.css";
 import "./style.css";
 import "./timelineEmphasis/timelineEmphasis.css";
 import "./timelineActivity/timelineActivity.css";

@@ -282,7 +282,7 @@ export default function Board() {                    // a React component, drawn
 // or: export async function mount(root, alta) { ...fill root...; return () => { /* cleanup */ }; }
 ```
 
-- **Libraries.** The application lends **its own** `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react` and `lucide-react`, the very instances it runs (React 19, Blueprint 6, FlexLayout 0.11), so import them by their names and ship nothing. There is no build step: write plain JavaScript, with `html` of `codealta` instead of JSX (or `React.createElement`). Use `PopoverNext`, not `Popover`. A script depends on these versions (`alta.versions`); the HTML vocabulary and `codealta` are what stays stable.
+- **Libraries.** The application lends **its own** `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react`, `lucide-react` and `@xyflow/react` (React Flow), the very instances it runs (React 19, Blueprint 6, FlexLayout 0.11, React Flow 12), so import them by their names and ship nothing. There is no build step: write plain JavaScript, with `html` of `codealta` instead of JSX (or `React.createElement`). Use `PopoverNext`, not `Popover`. A script depends on these versions (`alta.versions`); the HTML vocabulary and `codealta` are what stays stable.
 - **`codealta`** gives `html`, `useAlta`, `useVisible`, `useTheme`, `Markdown`, `Code`, `Diagram`, `Icon`, `BrandIcon`, `FileLink`, `SessionLink` and the charts (`Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, `WeekdayHourHeatmap`, `histogram`…).
 - **`alta`** (the argument of `mount`, and `useAlta()`): `alta.context` (project, session, key, the `input` the canvas was opened with), `alta.visible` (pause timers and reads while it is false), `alta.closed` (an `AbortSignal`: end what the script started), `alta.host` (`openFile`, `openDiff`, `openSession`, `openCanvas`, `openDocumentation`, `openLink`, `notify`, `runCommand`, `setTitle`, `setStatus`, `setBadge`), `alta.theme` (the colors as values), `alta.html(text)` (a string cleaned as fragments are: the only way to put a string in `innerHTML`), `alta.versions`. `alta.rpc` (the script of a canvas calls the C# of its own plugin, below).
 - Effects run twice in development (strict mode): write them so they can run again. A reload of the plugin, or an edit of a module, is a new address; the tab mounts the new module and the old one is released by `alta.closed`.
@@ -309,7 +309,7 @@ const stop = await alta.rpc.subscribe("board.changed", change => refresh());
 - A hidden tab pauses its streams; `useRpc` reads again when the tab is shown or the connection is made again; a call is never replayed by the window.
 - Only the script of a canvas has `alta.rpc`; dialogs, prompt content and cards get `rpc_unavailable`.
 
-`samples/canvas-board` is a complete React canvas (Blueprint tabs and menu, a chart, Markdown, a file link, `alta.host`) whose module is a file of the package and whose board lives in the plugin (a call, a stream, an event, errors, `alta board add --title ...`); `samples/canvas-checklist` is a canvas without script. Look at the result in the window as described in "Look at the window".
+`samples/canvas-board` is a complete React canvas (Blueprint tabs and menu, a chart, Markdown, a file link, `alta.host`) whose module is a file of the package and whose board lives in the plugin (a call, a stream, an event, errors, `alta board add --title ...`); `samples/canvas-flow` draws a graph with React Flow: custom nodes, links drawn and removed, positions kept in the plugin; `samples/canvas-checklist` is a canvas without script. Look at the result in the window as described in "Look at the window".
 
 ## Status items and content around the prompt
 
@@ -614,6 +614,7 @@ Each folder under `samples/` is a complete plugin that the tests of CodeAlta bui
 | `saved-data` | Data kept between runs with `Services.State` |
 | `canvas-checklist` | A tab that the plugin provides: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent; buttons in the title bar and in the menu of a project |
 | `canvas-board` | A tab drawn by a script of the package folder: a React component with Blueprint tabs and menus, a chart, Markdown, links and `alta.host` |
+| `canvas-flow` | A graph drawn with React Flow (`@xyflow/react`): custom nodes in the colors of the window, links drawn and removed, a minimap and panels, the graph kept in the plugin |
 | `landing-card` | A card pinned on the landing page: a fragment, a status, two commands and a canvas |
 | `report-dialog` | A dialog with Markdown, a Mermaid diagram and highlighted code |
 | `agent-tool` | A tool the model calls |

@@ -14,6 +14,8 @@ public sealed class ConfiguredProviderLoginTests
     [DataRow("codex", "browser")]
     [DataRow("copilot", "device")]
     [DataRow("xai", "browser,device")]
+    [DataRow("mistral-vibe", "browser")]
+    [DataRow("mistral", "")]
     [DataRow("openai-chat", "")]
     [DataRow("anthropic", "")]
     [DataRow("Codex", "")]
@@ -53,6 +55,8 @@ public sealed class ConfiguredProviderLoginTests
     [DataRow("codex", "Browser")]
     [DataRow("copilot", "browser")]
     [DataRow("xai", "")]
+    [DataRow("mistral-vibe", "device")]
+    [DataRow("mistral", "browser")]
     public async Task Login_RejectsAnUnsupportedTypeOrMode(string? providerType, string mode)
     {
         var failure = await Assert.ThrowsExactlyAsync<ArgumentException>(() => ConfiguredProviderLogin.LoginAsync(Definition(providerType), "root", mode,
@@ -77,6 +81,7 @@ public sealed class ConfiguredProviderLoginTests
     [DataRow("codex")]
     [DataRow("copilot")]
     [DataRow("xai")]
+    [DataRow("mistral-vibe")]
     public async Task StatusAndSignOut_OfAnEmptyStateRootAreSignedOut(string providerType)
     {
         var root = Path.Combine(Path.GetTempPath(), "CodeAlta-provider-login-" + Guid.NewGuid().ToString("N"));

@@ -23,6 +23,7 @@ public sealed class PluginRuntimeSampleTests
         "todo",
         "canvas-checklist",
         "canvas-board",
+        "canvas-flow",
         "landing-card",
     ];
 

@@ -837,7 +837,7 @@ internal sealed partial class GlobalConfigService
 
     private const int MaximumProviders = 64;
     private static readonly ImmutableArray<string> ProviderTypes =
-        ["openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "vertex-ai", "mistral", "codex", "copilot", "xai", "claude-code", "llama-cpp"];
+        ["openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "vertex-ai", "mistral", "mistral-vibe", "codex", "copilot", "xai", "claude-code", "llama-cpp"];
     private static readonly ImmutableArray<string> ReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
     /// <summary>

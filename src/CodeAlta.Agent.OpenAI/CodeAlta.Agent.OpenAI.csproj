@@ -12,6 +12,7 @@
     <InternalsVisibleTo Include="altatui" />
     <InternalsVisibleTo Include="CodeAlta.Hosting" />
     <InternalsVisibleTo Include="CodeAlta.Agent.Copilot" />
+    <InternalsVisibleTo Include="CodeAlta.Agent.Mistral" />
     <InternalsVisibleTo Include="CodeAlta.Agent.Xai" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
   </ItemGroup>

@@ -67,6 +67,40 @@ public sealed class ConfiguredProviderRegistrationTests
     }
 
     [TestMethod]
+    [DataRow("mistral", null, AgentTransportKind.MistralChat)]
+    [DataRow("mistral", "responses", AgentTransportKind.OpenAIResponses)]
+    [DataRow("mistral-vibe", null, AgentTransportKind.MistralChat)]
+    [DataRow("mistral-vibe", "responses", AgentTransportKind.OpenAIResponses)]
+    public async Task MistralRegistration_UsesTheApiOfTheFile(string type, string? api, AgentTransportKind expected)
+    {
+        using var temp = TestTempDirectory.Create();
+        Assert.IsTrue(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(
+            new CodeAltaProviderDocument { ProviderKey = "m", ProviderType = type, ApiKey = type == "mistral" ? "key" : null, Api = api },
+            temp.Path, null, out var descriptor, out var createRuntime));
+        await using var runtime = createRuntime();
+        var agentRuntime = Assert.IsInstanceOfType<IAgentModelProviderRuntime>(runtime);
+
+        Assert.AreEqual(("m", type), (descriptor.ProviderId.Value, descriptor.ProviderType));
+        Assert.AreEqual(expected, agentRuntime.RuntimeDescriptor.TransportKind);
+    }
+
+    [TestMethod]
+    public async Task MistralVibeRegistration_SignedOut_IsRegistered_AndSaysToSignIn()
+    {
+        using var temp = TestTempDirectory.Create();
+        Assert.IsTrue(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(
+            new CodeAltaProviderDocument { ProviderKey = "vibe", ProviderType = "mistral-vibe" },
+            temp.Path, null, out _, out var createRuntime));
+        await using var runtime = createRuntime();
+        var agentRuntime = Assert.IsInstanceOfType<IAgentModelProviderRuntime>(runtime);
+
+        // No key is stored: the list of the models asks for the sign-in before any request.
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => agentRuntime.ModelCatalog!.ListModelsAsync(agentRuntime.RuntimeDescriptor, CancellationToken.None));
+        StringAssert.Contains(failure.Message, "not signed in");
+    }
+
+    [TestMethod]
     [DataRow(null, OpenAICodexWebSearchMode.Cached)]
     [DataRow("live", OpenAICodexWebSearchMode.Live)]
     [DataRow("disabled", OpenAICodexWebSearchMode.Disabled)]

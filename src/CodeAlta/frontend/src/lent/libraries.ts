@@ -22,6 +22,7 @@ export const lentLibraries: readonly LentLibrary[] = [
   { name: "@blueprintjs/table", entry: "src/lent/blueprint-table.ts", file: "lib/blueprintjs-table.js" },
   { name: "flexlayout-react", entry: "src/lent/flexlayout.ts", file: "lib/flexlayout-react.js" },
   { name: "lucide-react", entry: "src/lent/lucide.ts", file: "lib/lucide-react.js" },
+  { name: "@xyflow/react", entry: "src/lent/xyflow.ts", file: "lib/xyflow-react.js" },
   { name: "codealta", entry: "src/lent/codealta.ts", file: "lib/codealta.js" },
 ];
 
