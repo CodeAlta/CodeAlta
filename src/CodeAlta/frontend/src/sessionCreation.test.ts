@@ -56,10 +56,14 @@ test("exact selected project and global requests produce switchable persisted ca
   // A session created without sub-sessions says so with its creation.
   const leafResult = await create(epoch, project, null, capability, null, null, null, "request-3", null, null, { subSessions: false });
   assert.equal(leafResult.kind, "created");
+  // So does a session created with a size of context.
+  const sizedResult = await create(epoch, project, null, capability, null, null, null, "request-4", null, null, { subSessions: true, contextSize: 872_000 });
+  assert.equal(sizedResult.kind, "created");
   assert.deepEqual(calls, [
     { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1", permissionMode: null, preparedWorktreeId: null, options: null },
     { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2", permissionMode: null, preparedWorktreeId: null, options: null },
     { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-3", permissionMode: null, preparedWorktreeId: null, options: { subSessions: false } },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-4", permissionMode: null, preparedWorktreeId: null, options: { subSessions: true, contextSize: 872_000 } },
   ]);
   if (projectResult.kind !== "created" || globalResult.kind !== "created") throw new Error("Expected created results");
   const snapshot: WorkspaceSnapshot = { ...empty,
