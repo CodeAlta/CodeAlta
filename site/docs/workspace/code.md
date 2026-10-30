@@ -69,7 +69,7 @@ The **Search** pane (`Ctrl+Shift+F`) searches the text of the project. It can ma
 
 ## Previews
 
-Pictures open as pictures, and an SVG file as a drawing. A Markdown file can be shown as a page; the buttons at the right of the tabs switch between the preview and the text.
+Pictures open as pictures, and an SVG file as a drawing. A picture is copied to the clipboard with its context menu, the copy button beside the zoom, or `Ctrl+C`. A Markdown file can be shown as a page; the buttons at the right of the tabs switch between the preview and the text.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-editor-preview.webp" alt="CodeAlta Desktop code editor showing an SVG file as a drawing, with zoom controls" loading="lazy">

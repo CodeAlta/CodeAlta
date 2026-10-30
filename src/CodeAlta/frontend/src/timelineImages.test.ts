@@ -58,9 +58,12 @@ test("a PNG is copied as it is and another image type is drawn again as PNG", as
   assert.deepEqual(redrawn, []);
   assert.equal(await (await timelineImagePng("data:image/jpeg;base64,AAAA", redraw)).text(), "drawn");
   assert.deepEqual(redrawn, ["data:image/jpeg;base64,AAAA"]);
+  // An icon of the project editor has a type with a dash.
+  assert.equal(await (await timelineImagePng("data:image/x-icon;base64,AAAA", redraw)).text(), "drawn");
+  assert.deepEqual(redrawn, ["data:image/jpeg;base64,AAAA", "data:image/x-icon;base64,AAAA"]);
   for (const bad of ["", "https://example.com/a.png", "data:text/html;base64,AAAA", "data:image/png,raw", "data:image/png;base64,AA\"A"])
     await assert.rejects(timelineImagePng(bad, redraw));
-  assert.equal(redrawn.length, 1);
+  assert.equal(redrawn.length, 2);
 });
 
 test("copying an image writes its PNG and says whether the clipboard took it", async () => {

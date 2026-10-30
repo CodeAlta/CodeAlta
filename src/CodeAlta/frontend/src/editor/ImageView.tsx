@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
+import { SessionTabMenu } from "../SessionTabMenu";
 import { useShellLanguage } from "../shellLanguage";
+import { imageMenuHandlers, useImageCopy, type ImageMenu } from "../TimelineImageStrip";
 
 const steps = [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16] as const;
 /** The next zoom step above or below a zoom, within the steps the view offers. */
@@ -17,7 +19,8 @@ export function fitImageZoom(width: number, height: number, viewWidth: number, v
 
 /**
  * A picture on a checkered background: fitted to the pane until it is zoomed, with its real size one click away.
- * Ctrl and the wheel zoom too. A drawing (SVG) fills the pane, whatever size it says it has.
+ * Ctrl and the wheel zoom too. A drawing (SVG) fills the pane, whatever size it says it has. A picture (not a
+ * drawing) is copied as PNG by its context menu, the button of its tools or Ctrl+C.
  */
 export function ImageView({ url, label, vector = false, onSize }: {
   url: string; label: string;
@@ -31,6 +34,10 @@ export function ImageView({ url, label, vector = false, onSize }: {
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [zoom, setZoom] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
+  const [copied, copy] = useImageCopy();
+  const [menu, setMenu] = useState<ImageMenu | null>(null);
+  const copyable = !vector && !failed;
+  const copyLabel = copied === "copied" ? t("Image copied") : copied === "failed" ? t("Copy failed") : t("Copy image");
   const report = useRef(onSize); report.current = onSize;
   useEffect(() => { setSize(null); setFailed(false); }, [url]);
   const fitted = () => size && view.current ? fitImageZoom(size.width, size.height, view.current.clientWidth - 32, view.current.clientHeight - 32, vector) : 1;
@@ -48,8 +55,15 @@ export function ImageView({ url, label, vector = false, onSize }: {
     return () => node.removeEventListener("wheel", wheel);
   });
   const shownZoom = zoom ?? fitted();
+  const menuHandlers = copyable ? imageMenuHandlers(setMenu) : null;
   return <div className="editor-image" data-fit={zoom === null} data-vector={vector}>
-    <div ref={view} className="editor-image-view" tabIndex={0} aria-label={label}>
+    <div ref={view} className="editor-image-view" tabIndex={0} aria-label={label} onContextMenu={menuHandlers?.onContextMenu}
+      onKeyDown={event => {
+        menuHandlers?.onKeyDown(event);
+        if (copyable && (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "c" && !event.repeat) {
+          event.preventDefault(); copy(url);
+        }
+      }}>
       {failed ? <p className="editor-image-failed"><AppIcon name="imageOff" size={28} />{t("This picture cannot be drawn.")}</p>
         : <img src={url} alt={label} draggable={false} data-pixels={!vector && shownZoom >= 3}
           style={zoom === null || !size ? undefined : { width: Math.max(1, Math.round(size.width * zoom)), height: Math.max(1, Math.round(size.height * zoom)) }}
@@ -60,10 +74,16 @@ export function ImageView({ url, label, vector = false, onSize }: {
           onError={() => { setFailed(true); report.current?.(null); }} />}
     </div>
     {!failed && <div className="editor-image-tools" role="toolbar" aria-label={t("Zoom")}>
+      {copyable && <Button variant="minimal" size="small" className={`editor-image-copy copy-${copied}`} aria-label={copyLabel} title={copyLabel}
+        icon={<AppIcon name={copied === "copied" ? "checked" : copied === "failed" ? "error" : "copy"} size={14} />} onClick={() => copy(url)} />}
       <Button variant="minimal" size="small" icon={<AppIcon name="zoomOut" size={14} />} aria-label={t("Zoom out")} title={t("Zoom out")} disabled={!size || shownZoom <= steps[0]} onClick={() => step(-1)} />
       <Button variant="minimal" size="small" className="editor-image-zoom" title={t("Actual size")} disabled={!size} onClick={() => setZoom(1)}>{Math.round(shownZoom * 100)}%</Button>
       <Button variant="minimal" size="small" icon={<AppIcon name="zoomIn" size={14} />} aria-label={t("Zoom in")} title={t("Zoom in")} disabled={!size || shownZoom >= steps[steps.length - 1]} onClick={() => step(1)} />
       <Button variant="minimal" size="small" icon={<AppIcon name="fit" size={14} />} aria-label={t("Fit to the pane")} title={t("Fit to the pane")} active={zoom === null} onClick={() => setZoom(null)} />
     </div>}
+    <span className="sr-only" aria-live="polite">{copied === "idle" ? "" : copyLabel}</span>
+    {menu && copyable && <SessionTabMenu anchor={menu.anchor} at={menu.at} container={menu.anchor.closest("dialog") ?? document.body} title={t("Image options")}
+      current={() => true} onClose={() => queueMicrotask(() => setMenu(value => value === menu ? null : value))}
+      items={[{ key: "copy", label: t("Copy image"), icon: "copy", onSelect: () => copy(url) }]} />}
   </div>;
 }

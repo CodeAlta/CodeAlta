@@ -14,11 +14,13 @@ import { modalDialogOpen } from "./modalDialogs";
 const viewerMinimum: WindowSize = { width: 360, height: 240 };
 const unavailable: TimelineImageState = { status: "failed" };
 
-type CopyState = "idle" | "copied" | "failed";
-type ImageMenu = { anchor: HTMLElement; at?: { x: number; y: number } };
+/** Whether an image was just copied to the clipboard, or could not be. */
+export type CopyState = "idle" | "copied" | "failed";
+/** Where the context menu of an image opens: under its anchor, or at the point of a right-click. */
+export type ImageMenu = { anchor: HTMLElement; at?: { x: number; y: number } };
 
 /** Copies an image to the clipboard and says for a moment whether it was copied. */
-function useImageCopy(): [CopyState, (url: string) => void] {
+export function useImageCopy(): [CopyState, (url: string) => void] {
   const [state, setState] = useState<CopyState>("idle");
   const reset = useRef<number | undefined>(undefined);
   const sequence = useRef(0);
@@ -36,8 +38,8 @@ function useImageCopy(): [CopyState, (url: string) => void] {
   return [state, copy];
 }
 
-// The context menu opens on a right-click, the context menu key or Shift+F10.
-function imageMenuHandlers(open: (menu: ImageMenu) => void) {
+/** The handlers that open the context menu of an image: a right-click, the context menu key or Shift+F10. */
+export function imageMenuHandlers(open: (menu: ImageMenu) => void) {
   return {
     onContextMenu: (event: MouseEvent<HTMLElement>) => { event.preventDefault(); open({ anchor: event.currentTarget, at: { x: event.clientX, y: event.clientY } }); },
     onKeyDown: (event: KeyboardEvent<HTMLElement>) => {

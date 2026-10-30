@@ -188,7 +188,7 @@ export type ImageClipboardWriter = (png: Promise<Blob>) => Promise<void>;
  * the one image type the clipboard of the page accepts.
  */
 export async function timelineImagePng(url: string, redraw: (url: string) => Promise<Blob> = redrawAsPng): Promise<Blob> {
-  const match = /^data:(image\/[a-z]+);base64,([A-Za-z0-9+/=]+)$/.exec(url);
+  const match = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(url);
   if (!match) throw new Error("Not an image of the timeline.");
   if (match[1] !== "image/png") return redraw(url);
   return new Blob([Uint8Array.from(atob(match[2]), value => value.charCodeAt(0))], { type: "image/png" });

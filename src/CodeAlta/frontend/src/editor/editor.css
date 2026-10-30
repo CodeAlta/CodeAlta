@@ -137,6 +137,8 @@
 .editor-image-failed { display: grid; justify-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 12.5px; }
 .editor-image-tools { position: absolute; right: 14px; bottom: 12px; display: inline-flex; align-items: center; gap: 1px; padding: 2px; border: 1px solid var(--line); border-radius: 7px;
   background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 4px 14px rgb(0 0 0 / .22); }
+.editor-image-copy.copy-copied .app-icon, .editor-image-copy.copy-copied svg { color: var(--green); }
+.editor-image-copy.copy-failed .app-icon, .editor-image-copy.copy-failed svg { color: var(--red); }
 .editor-image-zoom.bp6-button { min-width: 50px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 
 /* The status bar */
