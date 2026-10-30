@@ -76,7 +76,13 @@ Pictures open as pictures, and an SVG file as a drawing. A picture is copied to 
   <figcaption class="small text-secondary mt-2">An SVG file shown as a drawing. The buttons at the right of the tabs switch to its text.</figcaption>
 </figure>
 
-The Markdown page shows the front matter as a table, task lists as check boxes, GitHub alerts in color, highlighted code, `mermaid` diagrams, and [LaTeX formulas and footnotes](prompt.md#equations). A diagram or a displayed equation has a **Source** button under the pointer that shows its code, and **Preview** the drawing again. A `mermaid` block that cannot be read stays code, with the reason under it (in a sequence diagram, `;` ends a statement; write `#59;` for one in a message).
+The Markdown page shows the front matter as a table, task lists as check boxes, GitHub alerts in color, highlighted code, `mermaid` diagrams, and [LaTeX formulas and footnotes](prompt.md#equations). A diagram or a displayed equation has a **Source** button under the pointer that shows its code, and **Preview** the drawing again.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-math-preview.webp" alt="The Markdown page of a file in the code editor of CodeAlta Desktop: formulas, Maxwell's equations, a chemical equation, a matrix equation shown as its LaTeX with Preview, LaTeX and MathML buttons, a formula that cannot be read in red, and two footnotes" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A Markdown file with formulas and footnotes; one equation shows its LaTeX, and <strong>Preview</strong> draws it again.</figcaption>
+</figure>
+ A `mermaid` block that cannot be read stays code, with the reason under it (in a sequence diagram, `;` ends a statement; write `#59;` for one in a message).
 
 `Ctrl+F` (`Cmd+F` on macOS) finds a text in the page, as in the [Documentation tab](readme.md#documentation-tab), in plans and files you [review](../reviews.md) and in Work items.
 
