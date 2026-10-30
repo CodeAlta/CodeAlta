@@ -53,11 +53,36 @@ public sealed class AnthropicContextSizeTests
         Assert.IsNull(models.Single(static model => model.Id == "claude-haiku-5-5").ContextSizes, "the prices of Anthropic are not the gateway's");
     }
 
-    private static IReadOnlyList<AgentModelInfo> Enrich(AnthropicProviderOptions provider)
+    // The input of a model the API lists without one is the rest of its window: an output_token_limit the user sets, as
+    // a request that asks for too many tokens tells them to, moves the input the model accepts and the sizes with it.
+    [TestMethod]
+    public async Task AnOverrideOfTheOutputLimit_MovesTheSizesOfAModelWithoutAnInputLimit()
+    {
+        await using var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions());
+        var models = Enrich(
+            new AnthropicProviderOptions
+            {
+                ProviderKey = "anthropic",
+                ApiKey = "test-key",
+                ModelCatalog = catalog,
+                ModelsDevProviderId = "anthropic",
+                ModelOverrides = new Dictionary<string, AgentModelOverride>(StringComparer.Ordinal)
+                {
+                    ["claude-opus-5-5"] = new() { OutputTokenLimit = 300_000 },
+                },
+            },
+            [new AgentModelInfo("claude-opus-5-5", Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal) { ["maxTokens"] = 128_000L })]);
+
+        var opus = models.Single();
+        Assert.AreEqual(700_000L, opus.GetContextSize(), "the window of the model less the output the user asks for");
+        CollectionAssert.AreEqual(new long[] { 200_000, 700_000 }, opus.ContextSizes!.ToArray(), "no size above that input");
+    }
+
+    private static IReadOnlyList<AgentModelInfo> Enrich(AnthropicProviderOptions provider, IReadOnlyList<AgentModelInfo>? models = null)
         => AnthropicModelProviderRuntime.EnrichModels(
             provider,
             new ModelProviderRuntimeDescriptor { ProtocolFamily = "anthropic-messages", ProviderKey = provider.ProviderKey, DisplayName = provider.ProviderKey, TransportKind = AgentTransportKind.AnthropicMessages, BaseUri = provider.BaseUri },
-            [Listed("claude-opus-5-5", 1_000_000), Listed("claude-haiku-5-5", 1_000_000), Listed("claude-sonnet-4-5", 200_000)]);
+            models ?? [Listed("claude-opus-5-5", 1_000_000), Listed("claude-haiku-5-5", 1_000_000), Listed("claude-sonnet-4-5", 200_000)]);
 
     // A model as the Models API lists it.
     private static AgentModelInfo Listed(string id, long maxInputTokens)

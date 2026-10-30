@@ -101,9 +101,11 @@ internal static class AgentModelMetadataEnricher
         // model itself (the context_window of Codex's catalog) is known better still: the table does not lower it.
         var knownLimit = model.Capabilities?.ContainsKey("inputTokenLimit") != true ? AgentModelKnownLimit.Find(knownLimits, model.Id) : null;
 
-        // The input the model accepts, before a known limit keeps a session to less.
-        var acceptedInput = model.ContextSizes is null && capabilities is not null && (knownLimit is not null || thresholds is not null)
-            ? AgentTokenBudgetResolver.ResolveInputContextLimit(capabilities)
+        // The capabilities of the model without the known limit that keeps a session to less: what the user sets applies
+        // to them too, so that the input the model accepts and the one a session keeps to are read the same way (an
+        // override of the output limit moves both, for a model whose input is the rest of its window).
+        var accepted = model.ContextSizes is null && capabilities is not null && (knownLimit is not null || thresholds is not null)
+            ? new Dictionary<string, object?>(capabilities, StringComparer.Ordinal)
             : null;
 
         if (knownLimit is not null)
@@ -117,6 +119,11 @@ internal static class AgentModelMetadataEnricher
         {
             capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
             ApplyOverride(capabilities, modelOverride);
+            if (accepted is not null)
+            {
+                ApplyOverride(accepted, modelOverride);
+            }
+
             limitsOverridden = modelOverride.InputTokenLimit is not null || modelOverride.ContextWindowTokens is not null;
 
             if (!string.IsNullOrWhiteSpace(modelOverride.DisplayName))
@@ -143,17 +150,20 @@ internal static class AgentModelMetadataEnricher
             Description = description,
             SupportedReasoningEfforts = efforts,
             Capabilities = capabilities ?? model.Capabilities,
-            ContextSizes = !limitsOverridden && acceptedInput is { } accepted
-                ? ContextSizesOf(accepted, AgentTokenBudgetResolver.ResolveInputContextLimit(capabilities), thresholds)
+            ContextSizes = !limitsOverridden && accepted is not null
+                ? ContextSizesOf(
+                    AgentTokenBudgetResolver.ResolveInputContextLimit(accepted),
+                    AgentTokenBudgetResolver.ResolveInputContextLimit(capabilities),
+                    thresholds)
                 : model.ContextSizes,
         };
     }
 
     // The sizes of context of a model that accepts an input and is used with another one by default: those two, and
     // each threshold under the input it accepts. Null for a model that has one.
-    private static IReadOnlyList<long>? ContextSizesOf(long accepted, long? input, IReadOnlyList<long>? thresholds)
+    private static IReadOnlyList<long>? ContextSizesOf(long? acceptedInput, long? input, IReadOnlyList<long>? thresholds)
     {
-        if (input is not { } current || current > accepted)
+        if (acceptedInput is not { } accepted || input is not { } current || current > accepted)
         {
             return null;
         }
