@@ -1,6 +1,6 @@
 ---
 title: Try an Adaptive mode that fits the model to each request (#273)
-status: approved
+status: in-progress
 created: 2026-10-30
 summary: Write an Adaptive agent prompt that inherits Default and moves its session between the user's model tiers (up when a request needs it or its checks keep failing), measure it against Default on multi-turn scenarios with every leg and the cache counted, and decide from the numbers whether it ships as is or needs a router in CodeAlta.
 ---
@@ -33,6 +33,7 @@ A turn is many requests: the planning turn that wrote this plan made 22 of them,
 - **A small step down pays back slowly.** Opus → Sonnet costs $0.23 more than staying, and saves about $0.02 per request (input and 1k tokens of output): about a dozen requests to pay back.
 - **Every step up pays a full write**: $0.50 for Opus at 100k, $2.50 at 500k. Going back and forth pays it again: the reasoning of the other model is replayed as text, so the old cache is unlikely to match.
 - **Claude Code pays the most.** A change of model or of effort starts a new process that resumes the conversation, and it may use the 1-hour cache, which writes at 2× the input price instead of 1.25×. Codex keeps its thread and takes the model with each turn.
+- **A change of effort alone is a switch too** (measured, see the spike below): on the Anthropic API only the system prompt and the tools stay cached, on Codex only a shared prefix of 4k tokens.
 
 Billing changes what "cost" means. It is per token on the APIs and on Copilot (credits since 2026-06-01). On Claude and ChatGPT subscriptions it is a usage window, which a cheaper model stretches a lot: ChatGPT Plus gives 5–45 messages per 5 hours on GPT-6 Astra, 350–3,000 on GPT-6 Luna.
 
@@ -148,10 +149,10 @@ Host support gets a plan of its own.
 
 ### Milestone 0: prompt and spike
 
-- [ ] 1. Start from `main` on a branch of its own, such as `feature/adaptive-mode`.
-- [ ] 2. Write `.alta/prompts/agents/adaptive.prompt.md` (variant A), `adaptive-delegate.prompt.md` (variant B: `inherit: [default]`, the delegation rules only) and `adaptive-review.prompt.md` (variant C: `inherit: [adaptive]` and the review section).
-- [ ] 3. Run the spike (section 2) on Claude Code; write its measures in the evidence of this plan, and correct the table above where they differ.
-- [ ] 4. Adjust the prompts to the spike.
+- [x] 1. Start from `main` on a branch of its own, such as `feature/adaptive-mode`.
+- [x] 2. Write `.alta/prompts/agents/adaptive.prompt.md` (variant A), `adaptive-delegate.prompt.md` (variant B: `inherit: [default]`, the delegation rules only) and `adaptive-review.prompt.md` (variant C: `inherit: [adaptive]` and the review section).
+- [x] 3. Run the spike (section 2) on Claude Code; write its measures in the evidence of this plan, and correct the table above where they differ. *Run on the Anthropic API and Codex instead, the providers the user gave for this work (Claude Code is not used).*
+- [x] 4. Adjust the prompts to the spike.
 
 ### Milestone 1: measure
 
@@ -224,6 +225,22 @@ Host support gets a plan of its own.
 - `altacli run` waits for queued prompts before it exits, and takes `--prompt-id`, `--tier`, `--resume`, `--session-id` and `-c`. With `--format jsonl` it ends with `_codealta/result`: usage with cache read and write, and a cost estimated from the public price when the provider gives none (`_meta.codealta.estimated`).
 - `alta model resolve --tier <tier>` gives the provider, the model and the effort a tier gives now.
 - `PluginBeforeAgentRunResult.ModelHint` (`src/CodeAlta.Plugins.Abstractions/PluginPrompting.cs:633`) is declared and never read.
+
+**Spike** (2026-10-30, `tmp/spike/`, a conversation of about 18k tokens: 14k of system prompt and tools, then a file read; `altacli run --isolated`, a turn per run with `--resume` and `-m`)
+
+| Step | Anthropic API: read / written | Codex: read of the input |
+| --- | --- | --- |
+| Same model, next turn | 14.4k / 3.4k, then 17.8k / 0.4k | 13.4k of 14.7k |
+| Model switch (Haiku 5.5 → Sonnet 5.5, Luna → Terra) | 0 / 18.2k: all written again | 4.1k of 20.3k |
+| Effort only (low → medium) | 14.4k / 4.2k: system and tools kept, the conversation written again | 4.1k of 20.5k |
+| Back to the first model | 14.4k / 4.1k: its old cache of the conversation not used | 13.4k of 20.5k: partly used |
+
+- The turn of the switch cost $0.049 on Sonnet against $0.0008 for a turn of Haiku: the write is the cost of a switch, and it grows with the conversation.
+- Codex reports no cache write (`cachedWriteTokens` null): its requests are priced with the uncached input at the input price.
+- A hand-off works without host support: on `quick` (Luna), the agent ran `alta session current`, `alta session model`, `alta model resolve --tier complex` and `alta session send <self> --model gpt-6.1-sol --reasoning medium --queue-if-busy`, and ended its turn; the queued turn ran on Sol in the same `altacli run`, which waited for it, and the next `--resume` kept Sol. The hand-off leg was 5 requests of Luna, and the first request of Sol read 4k of 15.6k from the cache.
+- Told of a failing test whose cause is hidden, Luna on `quick` did not hand off: it judged that the request might fit, found the cause (a memoization key that joined objects) and fixed it in 9 requests, its tests as the gate.
+- `alta session send --model` keeps the tier the session records (`OwnedSessionSelection` carries none): after a hand-off from `quick`, a fallback would follow `quick`. Harmless in the evaluation (no fallback), a host-support candidate otherwise.
+- Two `altacli` runs at once on one state root failed to start: the log was archived at the start of each run (fixed: they append to it). `altacli alta --isolated session list` does not see the sessions `altacli run --isolated` wrote (a follow-up task).
 
 **Outside** (fetched 2026-10-30)
 
