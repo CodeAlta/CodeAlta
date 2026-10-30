@@ -1015,7 +1015,7 @@ export function startMobile(window: Window & typeof globalThis) {
       ? `The ${tierLabel(tier.tier)} tier is not ready: ${tier.error || "it has no model"}.` : "");
   }
 
-  async function openCreate(fresh: boolean) {
+  async function openCreate(activeProject: string | null = null) {
     newNote.textContent = options ? "" : "Loading…";
     try {
       const [projectList, read] = await Promise.all([readProjects(), options ? Promise.resolve(options) : api.options()]);
@@ -1023,9 +1023,8 @@ export function startMobile(window: Window & typeof globalThis) {
         models: read.models ?? [], prompts: read.prompts ?? [], tiers: read.tiers ?? [], defaultTier: read.defaultTier ?? null, defaults: read.defaults ?? null,
         permissionModes: read.permissionModes ?? {}, error: read.error ?? null,
       };
-      const keep = !fresh && projectList.projects.some(p => p.id === newProject.value) ? newProject.value : null;
-      // A list kept to projects starts the session in the first one checked.
-      const selected = keep ?? (fresh ? projectList.default : sessions.filter[0] ?? projectList.default);
+      const available = (id: string | null) => id && projectList.projects.some(p => p.id === id) ? id : null;
+      const selected = available(activeProject) ?? available(store.get("codealta.mobile.lastProject.v1")) ?? projectList.default;
       newProject.replaceChildren(...projectList.projects.map(p => option(p.id, p.name, p.id === selected)));
       newAgent.replaceChildren(...options.prompts.map(p => option(p.id, p.name, p.id === options!.defaults?.prompt)));
       if (!newText.value) newText.value = drafts.get(newSessionDraft);
@@ -1036,7 +1035,7 @@ export function startMobile(window: Window & typeof globalThis) {
       if (!(error instanceof SignedOutError)) newNote.textContent = `Could not read the choices: ${failureText(error, host)}`;
     }
   }
-  newProject.addEventListener("change", initForm);
+  newProject.addEventListener("change", () => { store.set("codealta.mobile.lastProject.v1", newProject.value); initForm(); });
   newText.addEventListener("input", () => drafts.set(newSessionDraft, newText.value));
   $("new-form").addEventListener("submit", async event => {
     event.preventDefault();
@@ -1056,6 +1055,7 @@ export function startMobile(window: Window & typeof globalThis) {
       newText.value = "";
       files.take(newSessionFiles);
       drafts.clear(newSessionDraft);
+      store.set("codealta.mobile.lastProject.v1", newProject.value);
       newNote.textContent = "";
       // A prompt that did not go is shown on the page of its session, back in its composer.
       if (created.sendError) {
@@ -1083,7 +1083,7 @@ export function startMobile(window: Window & typeof globalThis) {
     newWorktree.checked = false;
     modelSheet.close();
     newMoreSheet.close();
-    void openCreate(true);
+    void openCreate();
   });
 
   // ---- Swipe a card for its action, Gmail-style: the drag is the action ----
@@ -1193,7 +1193,7 @@ export function startMobile(window: Window & typeof globalThis) {
     if (id) bottomBar().append(foot);
     else if (creating) $("create-bar").append(foot);
     else if (foot.parentElement !== document.body) document.body.insertBefore(foot, toastElement);
-    if (creating) void openCreate(false);
+    if (creating) void openCreate(detail.id ? sessions.view(detail.id)?.projectId ?? null : null);
     if (id && id !== detail.id) openDetail(id);
     if (!id && detail.id) closeDetail();
     // Back on the list, the cards are in their latest order at once.

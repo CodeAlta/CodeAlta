@@ -348,7 +348,16 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
 
     // A new session: the default tier of the settings; a prompt that did not go is back in the composer of its session.
     // The screen is the project, the prompt, and one line of chips beside Start.
+    // The viewed session takes precedence over the last project; from the list, the last selection is used.
+    await evaluate("location.hash = '#/session/s2'");
+    await waitFor(`document.querySelector('#detail-title').textContent === "Write the docs"`, "the docs session");
     await click("#new");
+    await waitFor(`document.getElementById('new-project').value === 'p2'`, "the viewed session's project");
+    await evaluate(`(() => { const select = document.getElementById('new-project'); select.value = 'p1'; select.dispatchEvent(new Event('change')); })()`);
+    await click("#back");
+    await click("#new");
+    await waitFor(`document.getElementById('new-project').value === 'p1'`, "the last selected project");
+
     await waitFor(`document.getElementById('new-model-name').textContent === "Standard · GPT-6.1 · medium"`, "the default tier");
     const bar = await evaluate<{ chip: number; more: number; attach: number; start: number; height: number }>(`(() => { const r = e => document.getElementById(e).getBoundingClientRect();
       return { chip: r("new-model").top, more: r("new-more").top, attach: r("new-attach").top, start: r("new-start").top, height: r("create-bar").height }; })()`);
