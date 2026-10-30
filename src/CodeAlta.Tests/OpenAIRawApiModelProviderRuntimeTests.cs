@@ -728,12 +728,15 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public void RawApiProviderDefaultsCatalog_AppliesZaiReasoningReplayField()
+    [DataRow("custom-glm", "https://open.bigmodel.cn/api/paas/v4")]
+    [DataRow("zai", "https://api.z.ai/api/coding/paas/v4")]
+    [DataRow("custom-glm", "https://api.z.ai/api/paas/v4")]
+    public void RawApiProviderDefaultsCatalog_AppliesZaiOpenAIChatCompatibilityProfile(string providerKey, string apiUrl)
     {
         var profile = RawApiProviderDefaultsCatalog.ApplyProfileDefaults(
             AgentTransportKind.OpenAIChatCompletions,
-            "custom-glm",
-            new Uri("https://open.bigmodel.cn/api/paas/v4"),
+            providerKey,
+            new Uri(apiUrl),
             new AgentProviderProfile
             {
                 SupportsDeveloperRole = true,
@@ -743,6 +746,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             });
 
         Assert.AreEqual("reasoning_content", profile.ReasoningInputFieldName);
+        // GLM-5.3-Flash and GLM-5.3-FlashX reject a developer message with error 1214 "Incorrect role information" (#275).
+        Assert.IsFalse(profile.SupportsDeveloperRole);
     }
 
     [TestMethod]

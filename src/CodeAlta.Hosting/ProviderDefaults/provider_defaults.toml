@@ -54,6 +54,7 @@ provider_keys = ["zai", "z-ai", "zai-coding-cn", "zhipu", "zhipuai", "bigmodel"]
 host_suffixes = ["api.z.ai", "open.bigmodel.cn"]
 
 [rules.profile]
+supports_developer_role = false
 reasoning_input_field_name = "reasoning_content"
 
 [[rules]]
