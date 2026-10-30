@@ -26,7 +26,9 @@ internal static class AgentModelMetadataEnricher
         string? modelsDevProviderId,
         IReadOnlyDictionary<string, AgentModelOverride>? overrides,
         string? modelsIncludeRegex = null,
-        IReadOnlyList<AgentModelKnownLimit>? knownLimits = null)
+        IReadOnlyList<AgentModelKnownLimit>? knownLimits = null,
+        bool contextPriceTiers = false,
+        IReadOnlyList<long>? contextSizes = null)
     {
         var filteredModels = AgentModelCatalogFilter.ApplyIncludeRegex(models, modelsIncludeRegex);
         if (filteredModels.Count == 0)
@@ -35,16 +37,25 @@ internal static class AgentModelMetadataEnricher
         }
 
         return filteredModels
-            .Select(model => EnrichModel(model, catalog, modelsDevProviderId, overrides, knownLimits))
+            .Select(model => EnrichModel(model, catalog, modelsDevProviderId, overrides, knownLimits, contextPriceTiers, contextSizes))
             .ToArray();
     }
 
+    /// <summary>
+    /// Adds what models.dev, the known limits of the provider and the overrides of the user say of a model. A model
+    /// whose input the known limit lowers can be used with either input (<see cref="AgentModelInfo.ContextSizes"/>);
+    /// with <paramref name="contextPriceTiers"/>, so can a model at the threshold of each price that models.dev gives it
+    /// past a size of prompt on the provider (<c>cost.tiers</c>), and at each of <paramref name="contextSizes"/> under the
+    /// input it accepts. A provider's own sizes, or an override of the limits of the model, leave none to add.
+    /// </summary>
     public static AgentModelInfo EnrichModel(
         AgentModelInfo model,
         ModelsDevCatalogService? catalog,
         string? modelsDevProviderId,
         IReadOnlyDictionary<string, AgentModelOverride>? overrides,
-        IReadOnlyList<AgentModelKnownLimit>? knownLimits = null)
+        IReadOnlyList<AgentModelKnownLimit>? knownLimits = null,
+        bool contextPriceTiers = false,
+        IReadOnlyList<long>? contextSizes = null)
     {
         ArgumentNullException.ThrowIfNull(model);
 
@@ -54,12 +65,21 @@ internal static class AgentModelMetadataEnricher
         var capabilities = model.Capabilities is null
             ? null
             : new Dictionary<string, object?>(model.Capabilities, StringComparer.Ordinal);
+        // The sizes under the input of the model that a session can keep to.
+        IReadOnlyList<long>? thresholds = contextSizes is { Count: > 0 } ? contextSizes : null;
 
         if (catalog is not null && TryFindModelsDevModel(catalog, modelsDevProviderId, model.Id, out var foundProviderId, out var modelsDevModel))
         {
             capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
             ApplyModelsDevMetadata(capabilities, foundProviderId, modelsDevModel);
             ApplyModelsDevPrice(capabilities, catalog, foundProviderId, modelsDevModel, model.Id);
+
+            // The prices of the provider itself, not those of the vendor of a model it resells.
+            if (contextPriceTiers && string.Equals(foundProviderId, modelsDevProviderId, StringComparison.OrdinalIgnoreCase) &&
+                ReadContextPriceThresholds(modelsDevModel) is { } prices)
+            {
+                thresholds = thresholds is null ? prices : [.. thresholds, .. prices];
+            }
 
             // A provider that lists no effort of the model (the Models API of OpenAI, a compatible endpoint) is offered
             // the efforts models.dev gives it. The list is not said to be complete: it comes from a catalog. A provider
@@ -79,17 +99,32 @@ internal static class AgentModelMetadataEnricher
 
         // What the provider knows better than models.dev, under what the user set. A limit the provider reports for the
         // model itself (the context_window of Codex's catalog) is known better still: the table does not lower it.
-        if (model.Capabilities?.ContainsKey("inputTokenLimit") != true &&
-            AgentModelKnownLimit.Find(knownLimits, model.Id) is { } knownLimit)
+        var knownLimit = model.Capabilities?.ContainsKey("inputTokenLimit") != true ? AgentModelKnownLimit.Find(knownLimits, model.Id) : null;
+
+        // The capabilities of the model without the known limit that keeps a session to less: what the user sets applies
+        // to them too, so that the input the model accepts and the one a session keeps to are read the same way (an
+        // override of the output limit moves both, for a model whose input is the rest of its window).
+        var accepted = model.ContextSizes is null && capabilities is not null && (knownLimit is not null || thresholds is not null)
+            ? new Dictionary<string, object?>(capabilities, StringComparer.Ordinal)
+            : null;
+
+        if (knownLimit is not null)
         {
             capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
             ApplyKnownLimit(capabilities, knownLimit);
         }
 
+        var limitsOverridden = false;
         if (TryGetOverride(overrides, model, out var modelOverride) && modelOverride is not null)
         {
             capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
             ApplyOverride(capabilities, modelOverride);
+            if (accepted is not null)
+            {
+                ApplyOverride(accepted, modelOverride);
+            }
+
+            limitsOverridden = modelOverride.InputTokenLimit is not null || modelOverride.ContextWindowTokens is not null;
 
             if (!string.IsNullOrWhiteSpace(modelOverride.DisplayName))
             {
@@ -115,7 +150,51 @@ internal static class AgentModelMetadataEnricher
             Description = description,
             SupportedReasoningEfforts = efforts,
             Capabilities = capabilities ?? model.Capabilities,
+            ContextSizes = !limitsOverridden && accepted is not null
+                ? ContextSizesOf(
+                    AgentTokenBudgetResolver.ResolveInputContextLimit(accepted),
+                    AgentTokenBudgetResolver.ResolveInputContextLimit(capabilities),
+                    thresholds)
+                : model.ContextSizes,
         };
+    }
+
+    // The sizes of context of a model that accepts an input and is used with another one by default: those two, and
+    // each threshold under the input it accepts. Null for a model that has one.
+    private static IReadOnlyList<long>? ContextSizesOf(long? acceptedInput, long? input, IReadOnlyList<long>? thresholds)
+    {
+        if (acceptedInput is not { } accepted || input is not { } current || current > accepted)
+        {
+            return null;
+        }
+
+        var sizes = new SortedSet<long> { current, accepted };
+        foreach (var threshold in thresholds ?? [])
+        {
+            if (threshold > 0 && threshold < accepted)
+            {
+                sizes.Add(threshold);
+            }
+        }
+
+        return sizes.Count > 1 ? [.. sizes] : null;
+    }
+
+    // The sizes of prompt past which models.dev gives the model another price ({"tier":{"type":"context","size":272000}}).
+    // Null when it gives none.
+    private static long[]? ReadContextPriceThresholds(ModelsDevModelDefinition model)
+    {
+        if (model.Cost?.Tiers is not { Length: > 0 } tiers)
+        {
+            return null;
+        }
+
+        long[] thresholds = [.. tiers
+            .Select(static tier => tier?.Tier)
+            .Where(static threshold => string.Equals(threshold?.Type, ModelsDevCostThresholdDefinition.ContextType, StringComparison.OrdinalIgnoreCase))
+            .Select(static threshold => threshold!.Size ?? 0)
+            .Where(static size => size > 0)];
+        return thresholds.Length > 0 ? thresholds : null;
     }
 
     // The effort levels of models.dev ({"type":"effort","values":["none","low","medium","high","xhigh","max"]}), as a

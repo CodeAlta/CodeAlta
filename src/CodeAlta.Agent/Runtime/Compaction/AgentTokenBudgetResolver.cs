@@ -36,9 +36,10 @@ internal static class AgentTokenBudgetResolver
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        var contextWindow = TryReadCapability(modelInfo, ContextWindowCapabilityKeys);
-        var inputTokenLimit = TryReadCapability(modelInfo, InputTokenCapabilityKeys);
-        var outputTokenLimit = TryReadCapability(modelInfo, OutputTokenCapabilityKeys);
+        var capabilities = modelInfo?.Capabilities;
+        var contextWindow = TryReadCapability(capabilities, ContextWindowCapabilityKeys);
+        var inputTokenLimit = TryReadCapability(capabilities, InputTokenCapabilityKeys);
+        var outputTokenLimit = TryReadCapability(capabilities, OutputTokenCapabilityKeys);
         var inputContextLimit = ResolveInputContextLimit(contextWindow, inputTokenLimit, outputTokenLimit);
 
         return new AgentTokenBudget(
@@ -119,6 +120,13 @@ internal static class AgentTokenBudgetResolver
         }
     }
 
+    /// <summary>The input-context limit that capabilities of a model give, as <see cref="Resolve"/> reads it; null when they give none.</summary>
+    internal static long? ResolveInputContextLimit(IReadOnlyDictionary<string, object?>? capabilities)
+        => ResolveInputContextLimit(
+            TryReadCapability(capabilities, ContextWindowCapabilityKeys),
+            TryReadCapability(capabilities, InputTokenCapabilityKeys),
+            TryReadCapability(capabilities, OutputTokenCapabilityKeys));
+
     internal static long? ResolveInputContextLimit(long? contextWindow, long? inputTokenLimit, long? outputTokenLimit)
     {
         if (inputTokenLimit is > 0)
@@ -139,9 +147,9 @@ internal static class AgentTokenBudgetResolver
         return contextWindow.Value;
     }
 
-    internal static long? TryReadCapability(AgentModelInfo? modelInfo, IReadOnlyList<string> keys)
+    internal static long? TryReadCapability(IReadOnlyDictionary<string, object?>? capabilities, IReadOnlyList<string> keys)
     {
-        if (modelInfo?.Capabilities is not { Count: > 0 } capabilities)
+        if (capabilities is not { Count: > 0 })
         {
             return null;
         }

@@ -510,7 +510,58 @@ public sealed class ModelsDevCostDefinition
     public decimal? OutputAudio { get; set; }
 
     /// <summary>
+    /// Gets or sets the prices that apply past a threshold, such as the price of a prompt of more than 272,000 tokens.
+    /// </summary>
+    [JsonPropertyName("tiers")]
+    public ModelsDevCostTierDefinition[]? Tiers { get; set; }
+
+    /// <summary>
     /// Gets or sets unrecognized cost properties.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+/// <summary>
+/// Represents a price of a model that applies past a threshold.
+/// </summary>
+public sealed class ModelsDevCostTierDefinition
+{
+    /// <summary>
+    /// Gets or sets the threshold past which the price applies.
+    /// </summary>
+    [JsonPropertyName("tier")]
+    public ModelsDevCostThresholdDefinition? Tier { get; set; }
+
+    /// <summary>
+    /// Gets or sets the prices and the other properties of the tier.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+/// <summary>
+/// Represents the threshold of a price tier: <c>context</c> for a prompt larger than <see cref="Size"/> tokens.
+/// </summary>
+public sealed class ModelsDevCostThresholdDefinition
+{
+    /// <summary>The type of a threshold on the size of the prompt.</summary>
+    public const string ContextType = "context";
+
+    /// <summary>
+    /// Gets or sets the type of the threshold, such as <c>context</c>.
+    /// </summary>
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    /// <summary>
+    /// Gets or sets the size past which the price applies, in tokens.
+    /// </summary>
+    [JsonPropertyName("size")]
+    public long? Size { get; set; }
+
+    /// <summary>
+    /// Gets or sets unrecognized threshold properties.
     /// </summary>
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }

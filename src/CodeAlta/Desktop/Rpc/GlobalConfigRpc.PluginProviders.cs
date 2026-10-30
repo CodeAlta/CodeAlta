@@ -20,6 +20,8 @@ internal sealed partial class GlobalConfigService
     // The settings every provider type has that order the models of a provider (see PluginModelProviderTypes).
     private const string ModelsOrderKey = "models_order";
     private const string SortModelsKey = "sort_models";
+    // The size of context every provider type has (see PluginProviderSettings.DefaultContextSize).
+    private const string ContextSizeKey = "context_size";
 
     /// <summary>Gets the provider types of the running plugins, or <see langword="null"/> for a host without plugins.</summary>
     internal PluginModelProviderTypes? PluginProviderTypes { get; init; }
@@ -119,6 +121,7 @@ internal sealed partial class GlobalConfigService
                     Color = Bound(settings.GetString("color")),
                     PermissionMode = Bound(settings.PermissionMode),
                     ModelsOrder = ConfiguredModelsOrder(settings.GetString(ModelsOrderKey), settings.GetBoolean(SortModelsKey)),
+                    ContextSize = ContextSizeContract.Of(settings.DefaultContextSize),
                     Plugin = new GlobalConfigPluginProviderValues(
                         Bound(contribution.Tag),
                         [.. contribution.Settings.Select(setting => ToValue(setting, settings))],
@@ -212,6 +215,7 @@ internal sealed partial class GlobalConfigService
             // The older sort_models gives way to the order the form names.
             Set(values, ModelsOrderKey, modelsOrder);
             values.Remove(SortModelsKey);
+            Set(values, ContextSizeKey, request.ContextSize is > 0 and var size ? (long)size : null);
             foreach (var setting in contribution.Settings.Where(static setting => !setting.ReadOnly))
             {
                 var value = request.Values?.FirstOrDefault(value => string.Equals(value.Key, setting.Key, StringComparison.Ordinal));
@@ -677,6 +681,10 @@ internal sealed record GlobalConfigSavePluginProviderRequest(string? ExpectedEpo
 
     /// <summary>The order of the models (<c>provider</c>, <c>name</c>, <c>name_version</c>); blank for the order of its type.</summary>
     public string? ModelsOrder { get; init; }
+
+    /// <summary>The size of context, in input tokens, of the sessions whose model has it (<c>context_size</c>); null for the size of their model.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ContextSize { get; init; }
 }
 
 internal sealed record GlobalConfigPluginCatalogRequest(string? ExpectedEpoch, string? Type, bool Refresh);

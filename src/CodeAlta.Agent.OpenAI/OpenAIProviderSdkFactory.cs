@@ -118,7 +118,9 @@ internal static class OpenAIProviderSdkFactory
             provider.ModelsDevProviderId,
             provider.ModelOverrides,
             provider.ModelsIncludeRegex,
-            OpenAIKnownModelLimits.For(provider));
+            OpenAIKnownModelLimits.For(provider),
+            // A session of the API can use a model at each of its prices; Codex gives the sizes its configuration takes.
+            contextPriceTiers: provider.CodexSubscription is null);
     }
 
     private static async Task<IReadOnlyList<AgentModelInfo>> ListModelsCoreAsync(

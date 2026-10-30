@@ -91,6 +91,40 @@ type = "fake-agent"
     }
 
     [TestMethod]
+    public async Task SavePluginProvider_SavesTheContextSize_AndKeepsTheOtherValues()
+    {
+        const string content = """
+[providers.codex-work]
+type = "fake-agent"
+command = "codex"
+""";
+        await using var fixture = new Fixture(content);
+        await using var endpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints();
+        var types = new CodeAlta.Hosting.PluginModelProviderTypes(endpoints);
+        types.Attach(static () => [new CodeAlta.Plugins.Abstractions.PluginModelProviderContribution
+        {
+            ProviderType = "fake-agent", DisplayName = "Fake agent", CreateRuntime = static _ => throw new NotSupportedException("Not created in this test."),
+        }]);
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch) { PluginProviderTypes = types };
+        GlobalConfigProvider Listed() => service.Providers(new(Epoch)).Providers.Single(static provider => provider.Key == "codex-work");
+        Assert.IsNull(Listed().ContextSize);
+
+        GlobalConfigSaveResponse Save(int? size) => service.SavePluginProvider(new(Epoch, service.Providers(new(Epoch)).Revision, "codex-work", "codex-work", "fake-agent", true,
+            null, null, null, null, false) { ContextSize = size });
+
+        Assert.IsTrue(Save(872_000).Status is "ok" or "apply_failed");
+        Assert.AreEqual(872_000, Listed().ContextSize);
+        var written = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(written, "context_size = 872000");
+        StringAssert.Contains(written, "command = \"codex\"", "the other values of the section are kept");
+        Assert.AreEqual(872_000L, fixture.Registry.ListProviders(includeDisabled: true).Single(static provider => provider.ProviderId.Value == "codex-work").DefaultContextSize);
+
+        Assert.IsTrue(Save(null).Status is "ok" or "apply_failed");
+        Assert.IsNull(Listed().ContextSize, "Default removes the size");
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("context_size", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task PluginProviderSignIn_PreparesTheProviderAgain_BeforeItSaysCompleted()
     {
         // The state of the provider (its account, its models) is read again once signed in: sessions and the list of

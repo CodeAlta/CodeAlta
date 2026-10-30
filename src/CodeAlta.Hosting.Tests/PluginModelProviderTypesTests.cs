@@ -22,6 +22,7 @@ type = "fake-agent"
 display_name = "Agent One"
 model = "fast"
 reasoning_effort = "high"
+context_size = 872000
 permission_mode = "acceptEdits"
 command = "agent-one"
 
@@ -61,6 +62,7 @@ type = "future-provider"
         Assert.IsTrue(descriptor.IsDefault);
         Assert.AreEqual("fast", descriptor.DefaultModelId);
         Assert.AreEqual(AgentReasoningEffort.High, descriptor.DefaultReasoningEffort);
+        Assert.AreEqual(872_000L, descriptor.DefaultContextSize, "the size of the sessions whose model has it");
         Assert.AreEqual("acceptEdits", descriptor.DefaultPermissionMode);
         Assert.AreEqual(types.Signature, types.RegisteredSignature);
         Assert.IsNull(created, "the runtime is created at its first use");
