@@ -124,6 +124,7 @@ internal static class CodeAltaConfigDocumentCopy
         ProviderType = provider.ProviderType,
         Model = provider.Model,
         ReasoningEffort = provider.ReasoningEffort,
+        ContextSize = provider.ContextSize,
         ApiKey = provider.ApiKey,
         ApiKeyEnv = provider.ApiKeyEnv,
         ApiUrl = provider.ApiUrl,

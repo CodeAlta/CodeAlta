@@ -464,6 +464,7 @@ internal sealed partial class GlobalConfigService
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
                         { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
                           ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command), ModelsOrder = ConfiguredModelsOrder(definition?.ModelsOrder, definition?.SortModels),
+                          ContextSize = ContextSizeContract.Of(definition?.ContextSize),
                           Environment = definition?.Env is { Count: > 0 } variables ? [.. variables.Take(MaximumEnvironmentVariables).Select(static pair => new GlobalConfigPluginMapEntry(Bound(pair.Key)!, Bound(pair.Value)!))] : null };
                     }).Concat(ListPluginProviders(document)).ToArray();
                 var pluginTypes = DescribePluginTypes();
@@ -582,6 +583,7 @@ internal sealed partial class GlobalConfigService
             definition.Color = color;
             definition.Model = Optional(edit.Model);
             definition.ReasoningEffort = Optional(edit.ReasoningEffort);
+            definition.ContextSize = edit.ContextSize is > 0 ? edit.ContextSize : null;
             definition.ApiUrl = Optional(edit.ApiUrl);
             definition.ApiKeyEnv = Optional(edit.ApiKeyEnv);
             // Only the CLI of Claude Code reads that variable by itself.
@@ -1179,6 +1181,10 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     /// <summary>The executable a provider that runs a CLI names (<c>command</c>), as the file writes it; null when CodeAlta finds it.</summary>
     public string? Command { get; init; }
 
+    /// <summary>The size of context, in input tokens, the file gives the sessions of the provider (<c>context_size</c>); null for the size of their model.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ContextSize { get; init; }
+
     /// <summary>
     /// The order of its models the file names: <c>models_order</c>, else the older <c>sort_models</c> read as <c>name</c> or
     /// <c>provider</c>; null for the order of its type.
@@ -1225,6 +1231,10 @@ internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool 
 
     /// <summary>The order of the models (<c>provider</c>, <c>name</c>, <c>name_version</c>); blank for the order of its type.</summary>
     public string? ModelsOrder { get; init; }
+
+    /// <summary>The size of context, in input tokens, of the sessions of the provider whose model has it; null for the size of their model.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ContextSize { get; init; }
 
     /// <summary>
     /// The variables a <c>claude-code</c> provider starts its CLI with (<c>env</c>); empty or null for none. Kept for

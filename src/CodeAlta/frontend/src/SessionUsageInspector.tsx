@@ -45,7 +45,7 @@ function UsageCard({ title, aside, children }: { title: ReactNode; aside?: React
  * back to the last persisted usage record of the loaded timeline. The totals of the whole session are read from its
  * journal when the window opens and on a refresh, once each, and stay shown until the window closes.
  */
-export function SessionUsageInspector({ target, capability, refreshKey, persisted, provider, model, subscription = providerUsage, onOpenDocumentation }: {
+export function SessionUsageInspector({ target, capability, refreshKey, persisted, provider, model, limit = null, subscription = providerUsage, onOpenDocumentation }: {
   target: UsageTarget; capability: ReturnType<typeof createMutationCapability>;
   /** Changes when a new observation is likely (run state or live revision). */
   refreshKey?: string;
@@ -53,6 +53,8 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   persisted?: string | null;
   /** Session provider and selected model, shown until an operation reports its own model. */
   provider?: string | null; model?: string | null;
+  /** The size of context the session uses, where its model has several: shown at once, before a turn reports it. */
+  limit?: string | null;
   /** Reads the usage of the subscription of the provider, for a session whose turns reported none. */
   subscription?: Pick<typeof providerUsage, "read">;
   /** Opens a page of the user guide, for the note of a usage that is only estimated. */
@@ -130,8 +132,9 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   useEffect(() => { if (!allowed) { reads.abort(); setOpen(false); setSnapshot(null); setObservation(null); setTotals(null); attachment.current = null; } }, [allowed, reads]);
   useEffect(() => { if (copied === null) return; const timer = setTimeout(() => setCopied(null), 2500); return () => clearTimeout(timer); }, [copied]);
 
-  const observed = contextUsage(observation?.window?.currentTokens, observation?.window?.tokenLimit);
-  const usage = observed ?? persistedContextUsage(persisted);
+  const observed = contextUsage(observation?.window?.currentTokens, limit ?? observation?.window?.tokenLimit);
+  const saved = persistedContextUsage(persisted);
+  const usage = observed ?? (saved && limit ? contextUsage(saved.used, limit) : saved);
   const fromHistory = !observed && !!usage;
   // The provider has reported no usage: the host estimated the context from the conversation.
   const estimated = observed ? observation?.source === "LocalEstimate" : !!usage && persistedUsageIsEstimate(persisted);

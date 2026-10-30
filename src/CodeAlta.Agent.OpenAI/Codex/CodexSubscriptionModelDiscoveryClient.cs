@@ -240,6 +240,7 @@ internal sealed class CodexSubscriptionModelDiscoveryClient
                     GetString(modelElement, "defaultTextVerbosity") ??
                     GetString(modelElement, "default_verbosity"),
                 GetInt64(modelElement, "context_window") ?? GetInt64(modelElement, "contextWindow"),
+                GetInt64(modelElement, "max_context_window") ?? GetInt64(modelElement, "maxContextWindow"),
                 GetServiceTiers(modelElement),
                 etag));
         }
@@ -374,6 +375,7 @@ internal sealed record CodexSubscriptionDiscoveredModel(
     string? DefaultReasoningEffort,
     string? DefaultTextVerbosity,
     long? ContextWindow,
+    long? MaxContextWindow,
     IReadOnlyList<string> ServiceTiers,
     string? ETag);
 

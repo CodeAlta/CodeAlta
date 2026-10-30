@@ -208,6 +208,8 @@ The context ring below the prompt measures the session against the model's input
 
 When the context reaches 95% of that limit, CodeAlta compacts the conversation: a summary takes the place of the earlier turns. Claude Code and the agents of the ACP registry compact their own context.
 
+Some models offer several context sizes: on Codex, the model's maximum; on Claude Code, 200K or 1M for a model of 1M tokens; on Copilot, the size of a model's standard price, by default, or the larger size of its long-context price. Choose one under **Context size** in the provider's settings, or for one session in **More options** of the Agent chip. The chosen size becomes the input limit.
+
 - When a model's input limit is unknown, compaction assumes 128,000 tokens.
 - After a context-overflow error, it uses the size of the last request the provider accepted, and summarizes the conversation in parts that fit in it.
 - Set the real limits in [model metadata overrides](configuration.md#model-metadata-overrides), and tune compaction in [compaction settings](configuration.md#compaction-settings). Most users keep the defaults.

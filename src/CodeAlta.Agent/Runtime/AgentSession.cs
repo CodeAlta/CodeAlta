@@ -108,6 +108,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly AgentPdfInputCache _pdfInputs = new();
     private AgentModelInfo? _resolvedModelInfo;
     private bool _resolvedModelInfoLoaded;
+    private long? _contextSize;
     private AgentSessionSummary _summary;
     private AgentSessionState _state;
     private AgentRunId? _activeRunId;
@@ -2287,6 +2288,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DeveloperInstructions = developerInstructions,
             SessionInstructions = sessionInstructions,
             ReasoningEffort = _options.ReasoningEffort,
+            ContextSize = _contextSize,
             OmitReasoningSummaries = _options.OmitReasoningSummaries,
             // A run has the mode it started with, or the one it was given since (ApplyPermissionModeNowAsync); what
             // runs outside one takes the current mode.
@@ -5546,7 +5548,17 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 _cachedModels = await modelCatalog.ListModelsAsync(Provider, cancellationToken).ConfigureAwait(false);
             }
 
-            _resolvedModelInfo = AgentModelIdentity.FindBestMatch(_cachedModels, modelId);
+            var model = AgentModelIdentity.FindBestMatch(_cachedModels, modelId);
+            // The size the session chose, else the one of its provider, where the model has it.
+            _contextSize = model?.ChooseContextSize(_options.ContextSize, _options.DefaultContextSize);
+            _resolvedModelInfo = model?.WithContextSize(_contextSize);
+            // A session whose context CodeAlta measures takes the limit of its model as resolved here: a change of its
+            // model or of its size of context leaves the one of its last usage behind until a request reports again.
+            if (_turnExecutor is not IAgentProviderCompaction && _resolvedModelInfo?.GetContextSize() is { } limit &&
+                _state.Usage is { Window: { } window } usage && window.TokenLimit != limit)
+            {
+                _state = _state with { Usage = usage with { Window = window with { TokenLimit = limit } } };
+            }
         }
         catch (OperationCanceledException)
         {

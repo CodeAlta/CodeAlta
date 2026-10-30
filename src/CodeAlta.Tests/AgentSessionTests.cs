@@ -2072,6 +2072,60 @@ public sealed partial class AgentSessionTests
         Assert.AreEqual("threshold", persistedState.LastCompactionTrigger);
     }
 
+    // The size of context a session chose among those of its model is its input limit: its usage and its compaction follow it.
+    [TestMethod]
+    public async Task AgentSession_SendAsync_UsesTheContextSizeOfTheSession()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider(AgentCompactionSettings.Default with { Ratio = 0.30 });
+        var summary = CreateSummary("session-context-size");
+        var state = CreateState("session-context-size");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var model = new AgentModelInfo("gpt-5.4", "GPT-5.4", Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["contextWindow"] = 600L,
+            ["inputTokenLimit"] = 500L,
+        })
+        { ContextSizes = [500, 2_000] };
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                [model],
+                summaryHandler: null,
+                (request, _, _) =>
+                {
+                    Assert.AreEqual(2_000L, request.ModelInfo!.GetContextSize());
+                    Assert.AreEqual(2_000L, request.ContextSize, "a provider that runs its own agent is told the size too");
+                    return Task.FromResult(new AgentTurnResponse
+                    {
+                        AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("First answer.")]),
+                        Usage = CreateUsageSnapshot(180, 20),
+                    });
+                }),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                ContextSize = 2_000,
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            });
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt") }).ConfigureAwait(false);
+
+        var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.AreEqual(2_000L, persistedState?.Usage?.TokenLimit);
+        Assert.IsNull(persistedState?.LastCompactionTrigger, "180 tokens are under 30% of 2,000");
+    }
+
     [TestMethod]
     public async Task AgentSession_SteerAsync_QueuesPendingInputIntoSameRun()
     {
@@ -4917,6 +4971,94 @@ public sealed partial class AgentSessionTests
         var checkpoint = checkpointEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.AgentCompactionCheckpoint);
         Assert.IsNotNull(checkpoint);
         Assert.IsTrue(checkpoint!.ChunkCount > 1);
+        // The count is the one of the whole compaction, not of its last chunk or of the request that merges them.
+        Assert.AreEqual(6, checkpoint.SummarizedMessageCount + checkpoint.KeptMessageCount, "every message is summarized or kept");
+        Assert.AreEqual(checkpoint.SummarizedMessageCount, outcome.MessagesRemoved);
+    }
+
+    // The usage of a compaction measures the conversation against the size of context the session has now, not the one
+    // its last usage was recorded with, before the size changed.
+    [TestMethod]
+    public async Task AgentSession_CompactAsync_RecordsItsUsageAgainstTheContextSizeOfTheSession()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider(AgentCompactionSettings.Default with { Enabled = false });
+        var summary = CreateSummary("session-compaction-context-size");
+        var state = CreateState("session-compaction-context-size") with { Usage = CreateWindowUsageSnapshot(100, 2_000, 100, 10) };
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var model = new AgentModelInfo("gpt-5.4", "GPT-5.4", Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["inputTokenLimit"] = 2_000L,
+        })
+        { ContextSizes = [500, 2_000] };
+        static Func<AgentTurnRequest, Func<AgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<AgentTurnResponse>> Answer(string text)
+            => (_, _, _) => Task.FromResult(new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(text)]),
+            });
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                [model],
+                (_, _, _) => Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(
+                        """
+                        ## Objective
+                        Continue.
+                        ## Active User Request
+                        Keep working.
+                        ## Constraints
+                        - None.
+                        ## Progress
+                        ### Done
+                        - Started.
+                        ### In Progress
+                        - Continue.
+                        ### Blocked
+                        - None recorded.
+                        ## Decisions
+                        - None.
+                        ## Next Steps
+                        - Continue.
+                        ## Critical Context
+                        - None.
+                        ## Relevant Files
+                        - None tracked.
+                        """)]),
+                    Usage = CreateUsageSnapshot(50, 10),
+                }),
+                Answer("First answer " + new string('a', 800)),
+                Answer("Second answer " + new string('b', 800)),
+                Answer("Third answer.")),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                ContextSize = 500,
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            });
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt " + new string('x', 800)) }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt " + new string('y', 800)) }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Third prompt") }).ConfigureAwait(false);
+        var outcome = await ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync().ConfigureAwait(false);
+        Assert.IsTrue(outcome?.Success);
+
+        var history = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        var summaryUsage = history.OfType<AgentSessionUpdateEvent>()
+            .Where(static update => update.Kind == AgentSessionUpdateKind.UsageUpdated && update.Message == "Compaction summary usage updated.").ToArray();
+        Assert.IsNotEmpty(summaryUsage);
+        Assert.IsTrue(summaryUsage.All(static update => update.Usage?.Window?.TokenLimit == 500), "the size of the session, not the 2,000 of its last usage");
     }
 
     [TestMethod]
