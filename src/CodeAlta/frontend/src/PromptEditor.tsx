@@ -1,25 +1,13 @@
-import { lazy, Suspense, useImperativeHandle, useLayoutEffect, useRef, useState, type ClipboardEventHandler, type KeyboardEventHandler, type Ref } from "react";
+import { useImperativeHandle, useLayoutEffect, useRef, type ClipboardEventHandler, type KeyboardEventHandler, type Ref } from "react";
 import "monaco-editor/languages/definitions/markdown/register.js";
 import { promptEditorMinimum } from "./composerHeight";
-import type { EquationDraft } from "./EquationEditor";
-import { equationText, mathSpanAt, type MathSpan } from "./markdownMath";
+import { equationKey, equationKeybinding, useEquationEditing } from "./equationEditing";
 import { followPageFont, followShellTheme, monaco, pageFontFamily } from "./monaco/monacoEnvironment";
 import { attachPromptMath } from "./promptMath";
 import { useShellLanguage } from "./shellLanguage";
 import { spokenInsertion } from "./speech/spokenText";
 
-/** The key of the equation editor: Word's, Alt+=; on macOS Option+= types ≠, and Ctrl+Alt+= takes its place. */
-export const equationKey = typeof navigator !== "undefined" && navigator.platform.startsWith("Mac") ? "Ctrl+Alt+=" : "Alt+=";
-
-// The equation editor and MathLive are loaded the first time an equation is written.
-const EquationEditor = lazy(() => import("./EquationEditor"));
-
-// Where an equation of the editor goes: the formula it edits, or the selection it replaces.
-type EquationTarget = Readonly<{ draft: EquationDraft; start: number; end: number; span: MathSpan | null }>;
-
-
-
-
+export { equationKey } from "./equationEditing";
 export type PromptInput = Pick<HTMLTextAreaElement, "value" | "disabled" | "selectionStart" | "selectionEnd"
   | "isConnected" | "focus" | "contains" | "closest" | "setSelectionRange" | "addEventListener" | "removeEventListener"> & {
   /**
@@ -47,34 +35,8 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor>(null);
   const latest = useRef({ value, onChange, disabled }); latest.current = { value, onChange, disabled };
-  const [equation, setEquation] = useState<EquationTarget | null>(null);
   // The formula at the caret (or the one given), or the selection, in the equation editor.
-  function openEquation(span?: MathSpan) {
-    const instance = editor.current, model = instance?.getModel(), selection = instance?.getSelection();
-    if (!instance || !model || !selection || latest.current.disabled) return;
-    const start = model.getOffsetAt(selection.getStartPosition()), end = model.getOffsetAt(selection.getEndPosition());
-    const found = span ?? (start === end ? mathSpanAt(model.getValue(), start) : null);
-    setEquation(found ? { draft: { tex: found.tex.trim(), display: found.display }, start: found.start, end: found.end, span: found }
-      : { draft: { tex: model.getValueInRange(selection), display: false }, start, end, span: null });
-  }
-  const openEquationLatest = useRef(openEquation); openEquationLatest.current = openEquation;
-  function closeEquation() { setEquation(null); requestAnimationFrame(() => editor.current?.focus()); }
-  function insertEquation(draft: EquationDraft) {
-    const instance = editor.current, model = instance?.getModel();
-    if (!instance || !model || !equation) { closeEquation(); return; }
-    const length = model.getValueLength();
-    const start = Math.min(equation.start, length), end = Math.min(equation.end, length);
-    const text = model.getValue();
-    const replacement = equationText(draft, equation.span, text.slice(Math.max(0, start - 1), start), text.slice(end, end + 1));
-    // One step of undo, as typing it would be; the caret ends after the equation.
-    instance.pushUndoStop();
-    instance.executeEdits("equation", [{ range: monaco.Range.fromPositions(model.getPositionAt(start), model.getPositionAt(end)), text: replacement, forceMoveMarkers: true }], inverse => {
-      const after = inverse[0].range.getEndPosition();
-      return [new monaco.Selection(after.lineNumber, after.column, after.lineNumber, after.column)];
-    });
-    instance.pushUndoStop();
-    closeEquation();
-  }
+  const equations = useEquationEditing(editor, () => !latest.current.disabled);
   // What a dictation is hearing: a decoration at the caret, which the text of the model never holds.
   const interim = useRef<{ text: string; shown: monaco.editor.IEditorDecorationsCollection | null }>({ text: "", shown: null });
   // The character before the caret, a line break at the start of a line, nothing at the start of the prompt.
@@ -110,8 +72,9 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
     const unfollowTheme = followShellTheme(), unfollowFont = followPageFont(instance, "prompt");
     // Formulas are previewed as they are written; Alt+= (Word's key for an equation) opens the equation editor, here and
     // in the large editor, where the shortcuts of the window are off.
-    const detachMath = attachPromptMath(instance, { editLabel: `${t("Edit equation")} (${equationKey})`, onEdit: span => openEquationLatest.current(span) });
-    instance.addCommand((equationKey === "Alt+=" ? 0 : monaco.KeyMod.WinCtrl) | monaco.KeyMod.Alt | monaco.KeyCode.Equal, () => openEquationLatest.current());
+    const detachMath = attachPromptMath(instance, { editLabel: `${t("Edit equation")} (${equationKey})`, onEdit: equations.open });
+    // An action, not a command: the command of a standalone editor is the page's, and would answer the key in another editor.
+    const equationAction = instance.addAction({ id: "codealta.insertEquation", label: t("Insert equation"), keybindings: [equationKeybinding()], run: () => equations.open() });
 
     const size = () => { if (!expanded) node.style.height = `${Math.max(promptEditorMinimum, Math.min(248, instance.getContentHeight()))}px`; };
     const resized = instance.onDidContentSizeChange(size); size();
@@ -130,7 +93,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       // What is being said follows the caret.
       if (interim.current.text) showInterim();
     });
-    return () => { detachMath(); unfollowTheme(); unfollowFont(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
+    return () => { detachMath(); equationAction.dispose(); unfollowTheme(); unfollowFont(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
       interim.current = { text: "", shown: null }; node.removeAttribute("data-interim"); };
   }, [expanded]);
   useImperativeHandle(ref, () => ({
@@ -164,7 +127,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       return done;
     },
     setInterimText: text => { interim.current.text = text; showInterim(); },
-    editEquation: () => openEquationLatest.current(),
+    editEquation: () => equations.open(),
   }), []);
   useLayoutEffect(() => {
     const instance = editor.current;
@@ -181,8 +144,6 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
     aria-label={label} data-placeholder={!value ? placeholder : undefined} data-suggested={!value && placeholder && suggested ? "" : undefined}
     // The placeholder is drawn by a style: a suggested prompt is also said to who does not see it.
     aria-description={!value && placeholder && suggested ? placeholder : undefined}><div className="prompt-editor-surface" /></div>
-    {equation && <Suspense fallback={null}>
-      <EquationEditor draft={equation.draft} editing={!!equation.span} onInsert={insertEquation} onClose={closeEquation} />
-    </Suspense>}
+    {equations.window}
   </>;
 }

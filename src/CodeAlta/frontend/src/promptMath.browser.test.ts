@@ -35,7 +35,7 @@ test("the prompt previews the formula at the caret, and the equation editor writ
     await writeFile(join(root, "style.css"), readFileSync(new URL("../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
       + readFileSync(new URL("./style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
-    await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="app" style="margin-top:200px"></div><script src="fixture.js"></script></body></html>');
+    await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="app" style="margin-top:200px"></div><div id="editor" style="height:240px;margin-top:40px"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, "--allow-file-access-from-files",
       `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
@@ -106,6 +106,25 @@ test("the prompt previews the formula at the caret, and the equation editor writ
     assert.equal(await wait("mathFixture.editor() === null"), true);
     // The model writes its own line breaks (CRLF on Windows), as for any line typed in the prompt.
     assert.equal((await evaluate<string>("mathFixture.state.value")).replaceAll("\r\n", "\n"), "Area $\\frac{a}{b}$ here\n$$\nx^2\n$$");
+    // The code editor: a Markdown document previews the formula at the caret and edits it with Alt+=, as the prompt does.
+    await evaluate("mathFixture.editorCaret(10)");
+    assert.equal(await wait("mathFixture.editorPreview()"), true);
+    assert.ok(await evaluate<number>("mathFixture.editorTinted()") > 0, "the formula of the document is tinted");
+    for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "=", code: "Equal", windowsVirtualKeyCode: 187, modifiers: 1 });
+    assert.equal(await wait("mathFixture.editor()?.field === 'E=mc^2'"), true);
+    await evaluate("mathFixture.write('\\\\frac{a}{b}')");
+    await evaluate("mathFixture.insert()");
+    assert.equal(await wait("mathFixture.editor() === null"), true);
+    assert.equal(await evaluate("mathFixture.editorText(1)"), "Energy $\\frac{a}{b}$ here");
+    // A document of another language has no formulas: no preview, no tint, and Alt+= is not the equation editor there.
+    await evaluate("mathFixture.showDocument(2)");
+    assert.equal(await wait("document.querySelector('#editor .view-lines')?.textContent.includes('price')"), true);
+    await evaluate("mathFixture.editorCaret(15)");
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.deepEqual(await evaluate("[mathFixture.editorPreview(), mathFixture.editorTinted()]"), [false, 0]);
+    for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "=", code: "Equal", windowsVirtualKeyCode: 187, modifiers: 1 });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assert.equal(await evaluate("mathFixture.editor()"), null);
     assert.deepEqual(exceptions, []);
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

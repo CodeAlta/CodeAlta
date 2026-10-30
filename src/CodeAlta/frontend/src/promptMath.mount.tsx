@@ -1,7 +1,17 @@
-// Test-owned mount of the production prompt editor alone: its formulas, their preview, and the equation editor.
-import { createElement, useState } from "react";
+// Test-owned mount of the production prompt editor alone, and of the text editor of the code editor: their formulas,
+// their preview, and the equation editor.
+import { createElement, createRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { EditorSurface, type EditorSurfaceHandle, type SurfaceDocument } from "./editor/EditorSurface";
 import { PromptEditor, type PromptInput } from "./PromptEditor";
+
+// A Markdown file and a C# file that holds a `$`: only the first one has formulas.
+const documents: SurfaceDocument[] = [{ id: 1, path: "notes.md", text: "Energy $E=mc^2$ here", generation: 1 }, { id: 2, path: "Price.cs", text: "var price = \"$x$\";", generation: 1 }];
+const surface = createRef<EditorSurfaceHandle>();
+const surfaceRoot = createRoot(document.getElementById("editor")!);
+const showDocument = (active: number) => surfaceRoot.render(createElement(EditorSurface, { documents, active, readOnly: false, wrap: true, minimap: false, label: "Editor",
+  hidden: false, handle: surface, onDirty: () => { }, onCursor: () => { }, onInfo: () => { } }));
+showDocument(1);
 
 const state = { value: "Area $\\pi r^2$ here" };
 let input: PromptInput | null = null;
@@ -15,10 +25,16 @@ createRoot(document.getElementById("app")!).render(createElement(Fixture));
 type Field = HTMLElement & { value: string };
 Object.assign(window, { mathFixture: {
   state,
-  ready: () => !!input && !!document.querySelector("#session-prompt .monaco-editor"),
+  ready: () => !!input && !!document.querySelector("#session-prompt .monaco-editor") && !!document.querySelector("#editor .monaco-editor"),
+  // The code editor: the document shown, the caret at a column of its first line, its text, and its preview.
+  showDocument,
+  editorCaret(column: number) { surface.current!.reveal(1, column); },
+  editorText: (id: number) => surface.current?.read(id)?.text ?? null,
+  editorPreview: () => !!document.querySelector("#editor .prompt-math-preview .katex"),
+  editorTinted: () => document.querySelectorAll("#editor .prompt-math").length,
   caret(offset: number) { input!.focus(); input!.setSelectionRange(offset, offset); },
   preview() {
-    const node = document.querySelector(".prompt-math-preview");
+    const node = document.querySelector("#session-prompt .prompt-math-preview");
     if (!node) return null;
     // Seen: what the window shows at the center of the panel is the panel, not the frame of the prompt that would clip it.
     const box = node.getBoundingClientRect();
@@ -32,7 +48,7 @@ Object.assign(window, { mathFixture: {
   },
   tinted: () => document.querySelectorAll("#session-prompt .prompt-math").length,
   edit: () => input!.editEquation(),
-  clickEdit: () => document.querySelector<HTMLButtonElement>(".prompt-math-preview-edit")!.click(),
+  clickEdit: () => document.querySelector<HTMLButtonElement>("#session-prompt .prompt-math-preview-edit")!.click(),
   editor() {
     const dialog = document.querySelector<HTMLDialogElement>("dialog.equation-editor-dialog");
     const field = dialog?.querySelector<Field>("math-field");

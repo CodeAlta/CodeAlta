@@ -6,12 +6,13 @@ import { monaco } from "./monaco/monacoEnvironment";
 const mayHoldMath = /[$\\]/;
 
 /**
- * Shows the formulas of a prompt as they are written: each is tinted, and the one that holds the caret is drawn by KaTeX
+ * Shows the formulas of a prompt, or of a document (`enabled` says which models hold formulas), as they are written: each is tinted, and the one that holds the caret is drawn by KaTeX
  * in a panel above it (loaded the first time the caret enters a formula), with a button that opens it in the equation
  * editor. Returns what removes it all.
  */
 export function attachPromptMath(editor: monaco.editor.IStandaloneCodeEditor,
-  options: Readonly<{ editLabel: string; onEdit: (span: MathSpan) => void }>): () => void {
+  options: Readonly<{ editLabel: string; onEdit: (span: MathSpan) => void; enabled?: (model: monaco.editor.ITextModel) => boolean }>): () => void {
+  const holdsMath = (model: monaco.editor.ITextModel) => options.enabled?.(model) ?? true;
   const document = editor.getContainerDomNode().ownerDocument;
   // Monaco places the node it is given (and writes its `display`): the panel is laid out inside it.
   const host = document.createElement("div");
@@ -42,7 +43,7 @@ export function attachPromptMath(editor: monaco.editor.IStandaloneCodeEditor,
   const draw = () => {
     if (disposed) return;
     const model = editor.getModel(), selection = editor.getSelection();
-    if (!model || !selection || !selection.isEmpty() || !editor.hasTextFocus()) { hide(); return; }
+    if (!model || !selection || !selection.isEmpty() || !editor.hasTextFocus() || !holdsMath(model)) { hide(); return; }
     const text = model.getValue();
     const span = mayHoldMath.test(text) ? mathSpanAt(text, model.getOffsetAt(selection.getPosition())) : null;
     if (!span || !span.tex.trim()) { hide(); return; }
@@ -59,7 +60,7 @@ export function attachPromptMath(editor: monaco.editor.IStandaloneCodeEditor,
     const model = editor.getModel();
     if (disposed || !model) return;
     const text = model.getValue();
-    tint.set((mayHoldMath.test(text) ? mathSpans(text) : []).map(span => ({
+    tint.set((holdsMath(model) && mayHoldMath.test(text) ? mathSpans(text) : []).map(span => ({
       range: monaco.Range.fromPositions(model.getPositionAt(span.start), model.getPositionAt(span.end)),
       options: { description: "prompt-math", inlineClassName: "prompt-math" } })));
   };
@@ -73,6 +74,7 @@ export function attachPromptMath(editor: monaco.editor.IStandaloneCodeEditor,
     editor.onDidBlurEditorText(hide),
     editor.onDidChangeModelContent(() => { draw(); clearTimeout(timer); timer = setTimeout(retint, 120); }),
     editor.onDidChangeModel(() => { hide(); retint(); }),
+    editor.onDidChangeModelLanguage(() => { hide(); retint(); }),
   ];
   retint();
   return () => {
