@@ -107,16 +107,12 @@ internal static class AgentModelMetadataEnricher
             return model;
         }
 
-        return new AgentModelInfo(
-            model.Id,
-            DisplayName: displayName,
-            Description: description,
-            Provider: model.Provider,
-            DefaultReasoningEffort: model.DefaultReasoningEffort,
-            SupportedReasoningEfforts: efforts,
-            Capabilities: capabilities ?? model.Capabilities)
+        return model with
         {
-            Options = model.Options,
+            DisplayName = displayName,
+            Description = description,
+            SupportedReasoningEfforts = efforts,
+            Capabilities = capabilities ?? model.Capabilities,
         };
     }
 

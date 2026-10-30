@@ -721,10 +721,15 @@ public sealed class ClaudeCodeProviderTests
         Assert.AreEqual(true, sonnet.Capabilities["supportsPdfInput"]);
         Assert.AreEqual(true, read[0].Capabilities!["supportsPdfInput"]);
 
+        // A model of 1M tokens runs with 200K or 1M, all of which is its context.
+        CollectionAssert.AreEqual(new long[] { 200_000, 1_000_000 }, sonnet.ContextSizes!.ToArray());
+        Assert.AreEqual(1_000_000L, sonnet.GetContextSize());
+
         // A larger context window is not the one models.dev lists for the model: its limits are left to the CLI.
         var large = models.Describe(read[1]);
         Assert.AreEqual("claude-sonnet-5-5", large.Capabilities!["modelsDevModelId"]);
         Assert.IsFalse(large.Capabilities.ContainsKey("contextWindowTokens") || large.Capabilities.ContainsKey("contextWindow"));
+        Assert.IsNull(large.ContextSizes);
 
         Assert.AreEqual("claude-opus-5-5", models.Describe(read[2]).Capabilities!["modelsDevModelId"], "A model named by its own id is looked up by it.");
         Assert.AreSame(read[3], models.Describe(read[3]), "A model models.dev does not know stays as the CLI described it.");

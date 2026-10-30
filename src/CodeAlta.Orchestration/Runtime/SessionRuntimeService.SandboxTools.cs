@@ -257,8 +257,7 @@ public sealed partial class SessionRuntimeService
     }
 
     // The type of a provider, as its descriptor says; null for a provider that is not registered.
-    internal string? ProviderTypeOf(string providerKey)
-        => _agentHub.SelectionProviders.FirstOrDefault(provider => string.Equals(provider.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase))?.ProviderType;
+    internal string? ProviderTypeOf(string providerKey) => SelectionProviderOf(providerKey)?.ProviderType;
 
     // Starts the process of an agent that runs its own tools in the sandbox of its session.
     private sealed class AgentProcessHost(SessionRuntimeService runtime, string sessionId, string providerId, ResolvedSandboxProfile profile, IReadOnlyList<string> projectRoots)

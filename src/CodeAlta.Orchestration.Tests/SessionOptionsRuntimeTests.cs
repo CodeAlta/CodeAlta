@@ -114,6 +114,35 @@ public sealed class SessionOptionsRuntimeTests
         StringAssert.Contains(provider.Instructions[^1]!, "## Sub-agents");
     }
 
+    [TestMethod]
+    public async Task TheContextSizeOfASession_WinsOverTheOneOfItsProvider_AndIsKeptAfterARestart()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider(defaultContextSize: 400_000);
+        string sessionId;
+        await using (var host = await CreateHostAsync(temp, provider))
+        {
+            sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, null)).SessionId;
+            await SendAsync(host, sessionId, "First.");
+            Assert.AreEqual(400_000L, provider.ContextSizes[^1], "the size of the provider");
+
+            Assert.AreEqual("ok", (await host.Commands.SetSessionOptionsAsync(sessionId, new AgentSessionOptions { ContextSize = 123_456 })).Status);
+            await SendAsync(host, sessionId, "Another model's size.");
+            Assert.AreEqual(400_000L, provider.ContextSizes[^1], "a size the model does not have leaves the one of the provider");
+
+            Assert.AreEqual("ok", (await host.Commands.SetSessionOptionsAsync(sessionId, new AgentSessionOptions { ContextSize = 100_000 })).Status);
+            await SendAsync(host, sessionId, "Second.");
+            Assert.AreEqual(100_000L, provider.ContextSizes[^1], "the size of the session, from its next prompt");
+        }
+
+        await using (var host = await CreateHostAsync(temp, provider))
+        {
+            Assert.AreEqual(100_000L, (await host.RuntimeService.GetSessionOptionsAsync(sessionId)).ContextSize);
+            await SendAsync(host, sessionId, "Third.");
+            Assert.AreEqual(100_000L, provider.ContextSizes[^1]);
+        }
+    }
+
     private static void AssertWithoutSubAgents(string instructions)
     {
         StringAssert.Contains(instructions, "## Working loop");
@@ -149,11 +178,18 @@ public sealed class SessionOptionsRuntimeTests
             },
             CancellationToken.None);
 
-    private sealed class RecordingProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
+    private sealed class RecordingProvider(long? defaultContextSize = null) : IAgentModelProviderRuntime, IModelProviderTurnExecutor, IModelProviderModelCatalog
     {
+        private static readonly AgentModelInfo Model = new("fake-model", DisplayName: "Fake Model",
+            Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal) { ["inputTokenLimit"] = 100_000L }) { ContextSizes = [100_000, 400_000] };
+
         public List<string?> Instructions { get; } = [];
 
-        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("fake-options"), "Fake Options") { DefaultModelId = "fake-model" };
+        /// <summary>The size of context of the model of each turn.</summary>
+        public List<long?> ContextSizes { get; } = [];
+
+        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("fake-options"), "Fake Options")
+            { DefaultModelId = "fake-model", DefaultContextSize = defaultContextSize };
 
         public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
         {
@@ -175,15 +211,19 @@ public sealed class SessionOptionsRuntimeTests
             {
                 ProviderId = Descriptor.ProviderId,
                 Availability = ModelProviderAvailability.Ready,
-                Models = [new AgentModelInfo("fake-model", DisplayName: "Fake Model")],
+                Models = [Model],
                 SelectedModelId = "fake-model",
             });
+
+        public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(ModelProviderRuntimeDescriptor provider, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AgentModelInfo>>([Model]);
 
         public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
         {
             lock (Instructions)
             {
                 Instructions.Add(request.SystemMessage + "\n" + request.DeveloperInstructions + "\n" + request.SessionInstructions);
+                ContextSizes.Add(request.ModelInfo?.GetContextSize());
             }
 
             return Task.FromResult(new AgentTurnResponse

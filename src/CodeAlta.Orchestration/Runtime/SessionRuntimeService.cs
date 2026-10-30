@@ -457,6 +457,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return null;
     }
 
+    // The descriptor of a provider, by its key; null for a provider that is not registered.
+    private ModelProviderDescriptor? SelectionProviderOf(string? providerKey)
+        => _agentHub.SelectionProviders.FirstOrDefault(provider => string.Equals(provider.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Gets application-owned pending permissions, independent of attached frontend presentations.</summary>
     public SessionPermissionService Permissions { get; }
 
@@ -2239,6 +2243,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderKey = options.ProviderKey ?? session.ResolvedProviderKey,
             Model = options.Model,
             ReasoningEffort = options.ReasoningEffort,
+            ContextSize = AgentSessionOptions.Of(session.Options).ContextSize,
+            DefaultContextSize = SelectionProviderOf(options.ProviderKey ?? session.ResolvedProviderKey)?.DefaultContextSize,
             // Nobody reads the reasoning of a headless run: its summaries are not asked for.
             OmitReasoningSummaries = Headless,
             PermissionMode = permissionMode,

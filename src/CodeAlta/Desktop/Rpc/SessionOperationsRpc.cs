@@ -208,6 +208,7 @@ internal sealed class SessionOperationsService
                                 Description = option.Description is null ? null : Bound(option.Description),
                                 Toggle = option.IsToggle ? true : null,
                             })],
+                        ContextSizes = ContextSizeContract.Of(m.ContextSizes), ContextSize = ContextSizeContract.Of(m.ContextSize),
                     }).ToArray())
             {
                 PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode)).ToArray(),
@@ -828,6 +829,12 @@ internal sealed record SessionModelChoice(string Id, string Name, IReadOnlyList<
     // absent for a model that has none.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<SessionModelOption>? Options { get; init; }
+    // The sizes of context, in input tokens, a session can choose for the model; absent for a model that has one.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<int>? ContextSizes { get; init; }
+    // The size of a session that chose none: the one of its provider when the model has it, else its own.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ContextSize { get; init; }
 }
 internal sealed record SessionModelOption(string Id, string Name, IReadOnlyList<SessionModelOptionValue> Values, string Value)
 {

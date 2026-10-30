@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CodeAlta.Desktop.Rpc;
 
 internal sealed record SessionProviderChoice(string Id, string Name);
@@ -51,14 +53,32 @@ internal sealed record SessionReviewBeforeCommitResult(string Status, string? Ep
 /// option by its value, the defaults being every option on.
 /// </summary>
 /// <param name="SubSessions">Whether the session can start sessions of its own (sub-agents).</param>
-internal sealed record SessionOptionsChoice(bool SubSessions)
+/// <param name="ContextSize">The size of context of the session, in input tokens; null for the default.</param>
+internal sealed record SessionOptionsChoice(bool SubSessions,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ContextSize = null)
 {
     /// <summary>The options of a session, or of what records none.</summary>
-    public static SessionOptionsChoice Of(CodeAlta.Agent.AgentSessionOptions? options) => new(CodeAlta.Agent.AgentSessionOptions.Of(options).SubSessions);
+    public static SessionOptionsChoice Of(CodeAlta.Agent.AgentSessionOptions? options)
+    {
+        var of = CodeAlta.Agent.AgentSessionOptions.Of(options);
+        return new(of.SubSessions, ContextSizeContract.Of(of.ContextSize));
+    }
 
-    /// <summary>What a choice records: null for the defaults, every option on.</summary>
+    /// <summary>What a choice records: null for the defaults.</summary>
     public static CodeAlta.Agent.AgentSessionOptions? Record(SessionOptionsChoice? choice)
-        => choice is null ? null : CodeAlta.Agent.AgentSessionOptions.Stored(new CodeAlta.Agent.AgentSessionOptions { SubSessions = choice.SubSessions });
+        => choice is null ? null : CodeAlta.Agent.AgentSessionOptions.Stored(new CodeAlta.Agent.AgentSessionOptions
+            { SubSessions = choice.SubSessions, ContextSize = choice.ContextSize is > 0 ? choice.ContextSize : null });
+}
+
+/// <summary>A size of context as the page reads it: a number of tokens, null for none or for one it cannot hold.</summary>
+internal static class ContextSizeContract
+{
+    /// <summary>A size of context for the page.</summary>
+    public static int? Of(long? size) => size is > 0 and <= int.MaxValue ? (int)size : null;
+
+    /// <summary>The sizes of context of a model for the page; null for none.</summary>
+    public static IReadOnlyList<int>? Of(IReadOnlyList<long>? sizes)
+        => sizes is { Count: > 0 } ? [.. sizes.Where(static size => size is > 0 and <= int.MaxValue).Select(static size => (int)size)] : null;
 }
 
 /// <summary>Asks for the options of a session.</summary>

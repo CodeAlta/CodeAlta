@@ -52,7 +52,7 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
    * request, by which its steps are read while it runs. `permissionMode` is the mode the session starts in, one its
    * provider offers; null for the one its provider is configured with. `preparedWorktreeId` names the worktree made
    * for the session while its prompt was typed; the host makes another one when it cannot take that one. `options` are
-   * the options the session is created with (sub-sessions); null for the defaults.
+   * the options the session is created with (sub-sessions, size of context); null for the defaults.
    */
   return async function create(epoch: string | undefined, target: SessionTarget, title: string | null,
     capability: Capability | undefined, providerId: string | null = null, place: SessionPlace = null, spaceId: string | null = null,
@@ -74,7 +74,7 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
     const request: WorkspaceCreateSessionRequest = Object.freeze({ expectedHostEpoch: epoch, scope: frozen.scope,
       projectId: frozen.scope === "project" ? frozen.projectId : null,
       projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId, requestId, permissionMode,
-      preparedWorktreeId, options: options ? { subSessions: options.subSessions } : null });
+      preparedWorktreeId, options: options ? { subSessions: options.subSessions, ...(options.contextSize ? { contextSize: options.contextSize } : {}) } : null });
     try {
       let response: WorkspaceCreateSessionResponse;
       try { response = await invoke(request, { timeoutMilliseconds: creationTimeoutMilliseconds }); }

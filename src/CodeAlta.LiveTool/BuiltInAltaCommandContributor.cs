@@ -6718,9 +6718,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         });
     }
 
-    // The options of a session for its record: each option by its name, whether it is at its default or not.
+    // The options of a session for its record: each option by its name, whether it is at its default or not; the size of
+    // context only where the session chose one.
     private static object SessionOptionsRecord(AgentSessionOptions? options)
-        => new { subSessions = AgentSessionOptions.Of(options).SubSessions };
+    {
+        var of = AgentSessionOptions.Of(options);
+        return new { subSessions = of.SubSessions, contextSize = of.ContextSize };
+    }
 
     // The sandbox of a session for its record; null where the host has no runtime.
     private static async Task<object?> SessionSandboxRecordAsync(AltaCommandContext context, string sessionId)

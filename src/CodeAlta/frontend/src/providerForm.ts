@@ -23,6 +23,8 @@ export type ProviderForm = Readonly<{
   environment: string;
   /** The order of the models (`provider`, `name`, `name_version`); blank for the order of its type. */
   modelsOrder: string;
+  /** The size of context, in input tokens, of the sessions whose model has it; null for the size of their model. */
+  contextSize: number | null;
   /** For a provider whose type a plugin runs: the values of the settings of its type, by key. */
   plugin: PluginFieldValues;
 }>;
@@ -34,9 +36,11 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
       reasoningEffort: provider.reasoningEffort ?? "", apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
       clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "",
       anthropicApiKey: provider.anthropicApiKey ?? "", permissionMode: provider.permissionMode ?? "",
-      configDir: provider.configDir ?? "", environment: environmentText(provider.environment), modelsOrder: provider.modelsOrder ?? "", plugin: pluginFieldValues(provider) }
+      configDir: provider.configDir ?? "", environment: environmentText(provider.environment), modelsOrder: provider.modelsOrder ?? "",
+      contextSize: provider.contextSize ?? null, plugin: pluginFieldValues(provider) }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
-      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", plugin: {} };
+      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "",
+      contextSize: null, plugin: {} };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
@@ -71,7 +75,7 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
     // So is the folder of its account.
     configDir: cli ? optional(form.configDir) : null,
     // And the variables its CLI starts with: an empty list removes them.
-    environment: cli ? environmentEntries(form.environment) : null, modelsOrder: optional(form.modelsOrder) };
+    environment: cli ? environmentEntries(form.environment) : null, modelsOrder: optional(form.modelsOrder), contextSize: form.contextSize };
 }
 
 /** The orders of the models of a provider, by their value in the configuration file. */

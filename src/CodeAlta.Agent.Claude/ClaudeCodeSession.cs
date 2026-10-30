@@ -510,7 +510,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             request.DisabledTools?.Contains(ShellCommandTool) == true,
             ClaudeCodeLaunchKey.WebToolsOf(request.DisabledTools),
             // A process started in another sandbox, or out of one, is another process: it resumes the conversation.
-            request.ProcessHost?.Key);
+            request.ProcessHost?.Key,
+            // Without a size the CLI runs the model as it does by default.
+            request.ContextSize);
         var permissionMode = ClaudeCodeLauncher.PermissionMode(NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode), key.WithoutShell);
         lock (_gate)
         {

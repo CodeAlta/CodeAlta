@@ -1164,7 +1164,7 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-selection-more-count { display: inline-block; min-width: 16px; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: var(--accent); color: var(--bg);
   font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; }
 .composer-selection-more-body { padding: 6px 6px 0; }
-.composer-selection-more-body .composer-selection-option { margin: 0 0 4px; }
+.composer-selection-more-body .bp6-form-group:last-child { margin: 0 0 4px; }
 .composer-selection-option .bp6-control { margin-bottom: 2px; }
 .composer-selection-option .composer-selection-label { text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--text); }
 .composer-send-group.bp6-button-group { flex: 0 0 auto; }

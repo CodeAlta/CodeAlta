@@ -432,7 +432,11 @@ internal static class OpenAIProviderSdkFactory
             Provider: providerDescriptor.ProviderKey,
             DefaultReasoningEffort: ParseReasoningEffort(model.DefaultReasoningEffort),
             SupportedReasoningEfforts: GetSupportedReasoningEfforts(model),
-            Capabilities: capabilities);
+            Capabilities: capabilities)
+        {
+            // Codex lets its configuration raise the context of a model up to max_context_window.
+            ContextSizes = model is { ContextWindow: { } window, MaxContextWindow: { } max } && max > window ? [window, max] : null,
+        };
     }
 
     private static IReadOnlyList<AgentReasoningEffort> GetSupportedReasoningEfforts(

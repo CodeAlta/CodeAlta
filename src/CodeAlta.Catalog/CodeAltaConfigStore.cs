@@ -3390,6 +3390,7 @@ public sealed partial class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.ProviderType) ||
                !string.IsNullOrWhiteSpace(definition.Model) ||
                !string.IsNullOrWhiteSpace(definition.ReasoningEffort) ||
+               definition.ContextSize is not null ||
                !string.IsNullOrWhiteSpace(definition.ApiKey) ||
                !string.IsNullOrWhiteSpace(definition.ApiKeyEnv) ||
                !string.IsNullOrWhiteSpace(definition.ApiUrl) ||
@@ -3501,6 +3502,7 @@ public sealed partial class CodeAltaConfigStore
             ProviderType = definition.ProviderType,
             Model = definition.Model,
             ReasoningEffort = definition.ReasoningEffort,
+            ContextSize = definition.ContextSize,
             ApiKey = definition.ApiKey,
             ApiKeyEnv = definition.ApiKeyEnv,
             ApiUrl = definition.ApiUrl,
