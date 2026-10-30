@@ -25,8 +25,9 @@ internal static class Program
           --list            list the tasks and the scenarios and exit
 
         Usage: CodeAlta.Evals --scenarios <ids|all> --tiers complex=REF,standard=REF,quick=REF [options]
-          --configs CONFIGS prompt@tier list (default: default@complex,default@standard,adaptive@standard,
-                            adaptive-delegate@standard,adaptive-review@standard)
+          --configs CONFIGS prompt@tier[+policy...] list (default: default@complex,default@standard,adaptive@standard,
+                            adaptive-delegate@standard,adaptive-review@standard); the tier router routes each turn,
+                            +escalate continues a turn in trouble on the next tier, +review has its change reviewed
           --repeat N        runs of each scenario and configuration (default 3)
           --parallel N      runs at the same time (default 2)
           --timeout SECONDS time allowed for one turn (default 900)
@@ -119,7 +120,14 @@ internal static class Program
         Directory.CreateDirectory(output);
         var scenariosFolder = Path.Combine(AppContext.BaseDirectory, "Scenarios");
         var promptsFolder = Path.Combine(repository, ".alta", "prompts", "agents");
-        var runner = new EvalScenarioRunner(altacli, scenariosFolder, promptsFolder, settings, timeout);
+        var tierModels = tiers.Select(static tier => tier.Split('=', 2)).ToDictionary(static pair => pair[0], static pair => pair[1], StringComparer.Ordinal);
+        if (configurations.Any(static config => config.HostDriven) && new[] { "quick", "standard", "complex" }.FirstOrDefault(tier => !tierModels.ContainsKey(tier)) is { } missing)
+        {
+            Console.Error.WriteLine($"The policies need every tier: --tiers has no {missing}.");
+            return 2;
+        }
+
+        var runner = new EvalScenarioRunner(altacli, scenariosFolder, promptsFolder, settings, tierModels, timeout);
         var prices = new EvalPrices(altacli);
         foreach (var target in tiers.Select(static tier => tier.Split('=', 2)[1]))
         {

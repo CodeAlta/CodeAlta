@@ -103,8 +103,8 @@ internal static class EvalScenarioReport
         builder.AppendLine();
         builder.AppendLine("Averages per run. Success: runs whose turns all passed. Hand-off: the requests of a turn before it switched. Children: delegations and reviews.");
         builder.AppendLine();
-        builder.AppendLine("| Scenario | Configuration | Success | Turns passed | Cost | Provider cost | Requests | Cache read | Cache write | Switches | Hand-off cost | Children cost | Time |");
-        builder.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+        builder.AppendLine("| Scenario | Configuration | Success | Turns passed | Cost | Provider cost | Requests | Cache read | Cache write | Switches | Hand-off cost | Children cost | Host legs cost | Escalations | Reviews flagged | Time |");
+        builder.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
         foreach (var group in valid.GroupBy(static run => (run.Scenario, run.Configuration)).OrderBy(static group => group.Key.Scenario, StringComparer.Ordinal).ThenBy(static group => Order(group.Key.Configuration), StringComparer.Ordinal))
         {
             var list = group.ToList();
@@ -113,7 +113,8 @@ internal static class EvalScenarioReport
                 + $"| {Dollars(Average(list, Cost))} | {Dollars(Average(list, static run => Sum(run.Turns.Select(static turn => turn.ProviderCost))))} | {list.Average(static run => run.Requests.Count):0} "
                 + $"| {Kilo(list.Average(static run => run.Requests.Sum(static request => request.CacheRead)))} | {Kilo(list.Average(static run => run.Requests.Sum(static request => request.CacheWrite)))} "
                 + $"| {list.Average(static run => run.Switches):0.0} | {Dollars(Average(list, static run => Cost(run, static request => request.HandOff)))} | {Dollars(Average(list, static run => Cost(run, static request => request.Role == "child")))} "
-                + $"| {list.Average(static run => run.Turns.Sum(static turn => turn.DurationMs)) / 1000:0} s |");
+                + $"| {Dollars(Average(list, static run => Cost(run, static request => HostLeg(request.Role))))} | {list.Average(static run => run.Turns.Sum(static turn => turn.Escalations.Count)):0.0} "
+                + $"| {list.Average(static run => run.Turns.Count(static turn => !string.IsNullOrEmpty(turn.Review))):0.0} | {list.Average(static run => run.Turns.Sum(static turn => turn.DurationMs)) / 1000:0} s |");
         }
 
         builder.AppendLine();
@@ -177,6 +178,9 @@ internal static class EvalScenarioReport
 
         return builder.ToString();
     }
+
+    // The legs the host adds around the turns of the agent: its router, its reviewer, and the turns it sends after them.
+    private static bool HostLeg(string role) => role is "router" or "review" or "escalation" or "fix";
 
     /// <summary>The priced cost of a run: every request of every leg.</summary>
     public static decimal? Cost(EvalScenarioRun run) => Sum(run.Requests.Select(static request => request.Price));
@@ -283,7 +287,7 @@ internal static class EvalScenarioJudge
         var parts = new List<string>();
         string? current = null;
         var count = 0;
-        foreach (var request in requests.Where(static request => request.Role == "work"))
+        foreach (var request in requests.Where(static request => request.Role is "work" or "escalation" or "fix"))
         {
             if (request.Model == current)
             {
@@ -298,9 +302,9 @@ internal static class EvalScenarioJudge
 
         if (current is not null) parts.Add($"{current} ×{count}");
         var text = string.Join(" → ", parts);
-        foreach (var child in requests.Where(static request => request.Role == "child").GroupBy(static request => (request.SessionId, request.Model)))
+        foreach (var child in requests.Where(static request => request.Role is "child" or "router" or "review").GroupBy(static request => (request.SessionId, request.Model, request.Role)))
         {
-            text += $", child {child.Key.Model} ×{child.Count()}";
+            text += $", {child.Key.Role} {child.Key.Model} ×{child.Count()}";
         }
 
         return text.Length == 0 ? "(none)" : text;

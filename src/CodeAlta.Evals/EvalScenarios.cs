@@ -107,7 +107,46 @@ internal static class EvalScenarios
             new("Commit all the changes, with a short message.", Committed),
         ]),
 
-        new("long-context","a wide reading turn (about 100k tokens), then a mix", "switches at most once",
+        new("query-parser", "a parser with precedence, phrases and exact error positions, then two small follow-ups", "goes up for the parser when its checks fail, comes down after",
+        [
+            new("""
+                Add a search query language to the shop: a module src/query.js exporting `parseQuery(text)`, `matches(query, doc)` and `class QueryError extends Error` with a `position` property.
+                - A query is made of terms. A term is a run of characters other than spaces, parentheses and double quotes, or a phrase in double quotes, where a backslash makes the next character literal (`"say \"hi\""`). A term `field:value` (or `field:"a phrase"`) looks in that field of the document only; any other term looks in every field.
+                - `AND`, `OR` and `NOT` are operators in any case (`and`, `Or`), unless quoted. Two operands side by side are an implicit `AND`. `NOT` binds tighter than `AND`, and `AND` tighter than `OR`. Parentheses group.
+                - `matches(parseQuery(text), doc)` tells whether a document (an object of strings) matches: a term or a phrase matches when a field it looks in contains it, without regard to case; a field the document does not have matches nothing.
+                - An invalid query throws a `QueryError` whose `position` is the index (from 0) of the first token that cannot come where it is. A query that ends too early (after an operator, or with a `(` that is never closed) gives the position of that operator or `(`. An unterminated quote gives the position of its opening quote; an empty query, or one of spaces only, gives 0.
+                Add tests in test/query.test.js, and keep `npm test` passing.
+                """,
+                outcome => FirstFailure(
+                    File.Exists(Path.Combine(outcome.ProjectFolder, "test", "query.test.js")) ? null : "no test/query.test.js",
+                    NodeTests(outcome),
+                    Hidden(outcome))),
+            new("Add src/query.js to the list of modules in README.md.",
+                outcome => Read(outcome, "README.md").Contains("query.js", StringComparison.Ordinal) ? null : "README.md does not list query.js"),
+            new("Commit all the changes, with a short message.", Committed),
+        ]),
+
+        new("money-allocation", "an exact allocation of money with its edge cases, then two small follow-ups", "goes up when its checks fail, comes down after",
+        [
+            new("""
+                Add a module src/allocate.js exporting `allocate(amount, ratios)`, which splits an integer amount of cents into parts proportional to the ratios:
+                - the parts are integers that add up exactly to the amount, by the largest remainder method: each part gets the floor of its exact share, and the cents left go one each to the parts of the largest remainders, a tie going to the earliest part;
+                - a negative amount is split as the opposite of the split of its absolute value;
+                - a ratio is a finite number of 0 or more, and decimal ratios count exactly as written (`[0.1, 0.2, 0.7]` of 100 is `[10, 20, 70]`); a ratio of 0 gets 0;
+                - the result is exact for every safe integer amount, `Number.MAX_SAFE_INTEGER` included;
+                - an amount that is not a safe integer, no ratio, a ratio that is negative or not a finite number, or ratios that are all 0, throw a RangeError.
+                Add tests in test/allocate.test.js, and keep `npm test` passing.
+                """,
+                outcome => FirstFailure(
+                    File.Exists(Path.Combine(outcome.ProjectFolder, "test", "allocate.test.js")) ? null : "no test/allocate.test.js",
+                    NodeTests(outcome),
+                    Hidden(outcome))),
+            new("Add src/allocate.js to the list of modules in README.md.",
+                outcome => Read(outcome, "README.md").Contains("allocate.js", StringComparison.Ordinal) ? null : "README.md does not list allocate.js"),
+            new("Commit all the changes, with a short message.", Committed),
+        ]),
+
+        new("long-context", "a wide reading turn (about 100k tokens), then a mix", "switches at most once",
         [
             new("""
                 Read every design note under docs/, and write docs/index.md with one line per note: its file name and a summary of a few words.
