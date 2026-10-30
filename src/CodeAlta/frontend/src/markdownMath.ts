@@ -54,6 +54,21 @@ function closingDollar(text: string, at: number, end: number): number {
   }
 }
 
+// Models write chemistry without the dollars that make it math: `\ce{2H2 + O2 -> 2H2O}`. A `\ce{…}` or a `\pu{…}` alone in the
+// text, its braces balanced on the same paragraph, is an inline formula. Returns where it ends, or -1.
+function bareChemistryEnd(text: string, at: number, end: number): number {
+  if (!/^\\(?:ce|pu)\{/.test(text.slice(at, at + 4)) || /[A-Za-z\\]/.test(text.charAt(at - 1))) return -1;
+  let depth = 0;
+  for (let index = at + 3; index < end; index++) {
+    const code = text.charCodeAt(index);
+    if (code === 0x5c) { index++; continue; }
+    if (code === 0x0a && text.slice(index + 1).match(/^[ \t]*\n/)) return -1;
+    if (code === 0x7b) depth++;
+    else if (code === 0x7d && --depth === 0) return index + 1;
+  }
+  return -1;
+}
+
 /** A formula in a text: where it starts and ends, delimiters included, and its TeX between them. */
 export type MathSpan = Readonly<{
   start: number; end: number; tex: string; display: boolean;
@@ -116,6 +131,12 @@ export function mathSpans(text: string, unclosed = false): MathSpan[] {
           at = stop;
           continue;
         }
+      }
+      const chemistry = bareChemistryEnd(text, at, length);
+      if (chemistry > 0) {
+        spans.push({ start: at, end: chemistry, tex: text.slice(at, chemistry), display: false, open: "", close: "", closed: true });
+        at = chemistry;
+        continue;
       }
       const environment = next === 0x62 ? /^\\begin\{([a-zA-Z]+\*?)\}/.exec(text.slice(at, at + 32)) : null;
       if (environment && displayEnvironments.has(environment[1])) {
@@ -232,9 +253,15 @@ function dollarRule(state: StateInline, silent: boolean): boolean {
   return true;
 }
 
-// `\(…\)`, read before the escapes of Markdown take the backslash.
+// `\(…\)`, and chemistry written without dollars (`\ce{…}`, `\pu{…}`), read before the escapes of Markdown take the backslash.
 function bracketRule(state: StateInline, silent: boolean): boolean {
   const { src, pos, posMax: end } = state;
+  const chemistry = src.charCodeAt(pos) === 0x5c ? bareChemistryEnd(src, pos, end) : -1;
+  if (chemistry > 0) {
+    if (!silent) pushInline(state, src.slice(pos, chemistry), "\\ce", false);
+    state.pos = chemistry;
+    return true;
+  }
   if (src.charCodeAt(pos) !== 0x5c || src.charCodeAt(pos + 1) !== 0x28) return false;
   const found = unescapedIndex(src, "\\)", pos + 2, end);
   if (found <= pos + 2) return false;

@@ -99,3 +99,11 @@ test("an equation is written back with the delimiters of its formula, and a disp
   const environment = mathSpanAt("\\begin{align}a&=b\\end{align}", 3);
   assert.equal(equationText({ tex: "\\begin{align}c&=d\\end{align}", display: true }, environment, "", ""), "\\begin{align}c&=d\\end{align}");
 });
+
+test("chemistry written without dollars is an inline formula, its braces balanced on the paragraph", () => {
+  assert.deepEqual(formulas(parse("Water: \\ce{2H2 + O2 -> 2H2O} with \\pu{-572 kJ mol-1}.")), ["i:\\ce{2H2 + O2 -&gt; 2H2O}", "i:\\pu{-572 kJ mol-1}"]);
+  assert.deepEqual(formulas(parse("Nested \\ce{[Cu(NH3)4]^{2+}} ion")), ["i:\\ce{[Cu(NH3)4]^{2+}}"]);
+  for (const text of ["Unclosed \\ce{H2O", "A word\\ce{H2O}", "`\\ce{H2O}` in code", "\\\\ce{H2O} escaped", "\\cell{x}"])
+    assert.deepEqual(formulas(parse(text)), [], text);
+  assert.deepEqual(mathSpanAt("Make \\ce{H2O} now", 8)?.tex, "\\ce{H2O}");
+});
