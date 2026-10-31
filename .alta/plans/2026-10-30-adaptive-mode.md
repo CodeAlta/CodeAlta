@@ -192,18 +192,31 @@ Prompt v3 did not move a session either: no switch up or down in 54 runs on Code
 What the numbers say:
 
 - **The agents do not adapt by themselves**, whatever the prompt: the choice of the model has to be the host's.
-- **The kind of turn decides, not its difficulty.** Questions, docs and commits pass on the cheapest tier everywhere. Code is where the tiers differ, and differently per provider: GPT-6 Luna passes most tests but writes clearly weaker code (3.4 against 4.4–4.6), Haiku 5.5 writes code judged as good as Opus 5.5 (3.9 and 3.9). Telling whether a request changes code is an easy call for the cheap model; judging its difficulty is not (the `router` sent the hidden-cause bug to Terra half the time, and the agents never judged a request too hard).
+- **The kind of turn decides, not its difficulty.** Questions, docs and commits pass on the cheapest tier everywhere. Code is where the tiers differ, and differently per provider: GPT-6 Luna passes most tests but writes clearly weaker code (3.4 against 4.4–4.6); on these small scenarios Haiku 5.5 wrote code judged as good as Opus 5.5 (3.9 and 3.9), which HARD-51 contradicted (below): small fixtures do not show the gap, real repositories do. Telling whether a request changes code is an easy call for the cheap model; judging its difficulty is not (the `router` sent the hidden-cause bug to Terra half the time, and the agents never judged a request too hard).
 - **Escalation on visible trouble is cheap insurance, not a fix:** it fired in a few percent of runs. The misses that matter pass their own tests (a workaround at the caller, an error position, a time zone) and only a stronger model or hidden tests see them.
 - **A recheck turn** on the same tier lifts a cheap model a little (Luna 3.4 → 3.5, 23 → 27 of 30) for one more cheap turn. A review or acceptance tests by `complex` cost 3–5 times more for no more success.
 - **One failure no policy caught:** the shared-helper bug of `easy-then-hard`, fixed at the caller by Terra in every run, and by Luna in some. Only Sol fixed the helper.
 
 ### SWE-bench Pro HARD-51 on the Anthropic API
 
-*Running: CodeAlta on Haiku 5.5 (`high`), then on Haiku 5.5 continued on Opus 5.5 (`xhigh`) after a sign of trouble (`benchmarks/harbor`, `escalate_to`), against the run of CodeAlta on Opus 5.5 `xhigh` (50/51, $76.30); then a blind pairwise judgment of the patches against those of Opus (`judge-patches.py`).*
+The 51 tasks under the locked protocol of the kit (`benchmarks/swe-bench-pro`), each patch graded by a replay on a clean image, against the run of CodeAlta on Opus 5.5 `xhigh` of 2026-10-28. The adapter emulates the policies: `recheck` resumes a run that changed the repository once on its model with the recheck request, `escalate_to` resumes it on Opus 5.5 `xhigh` after a sign of trouble. The quality is a blind pairwise judgment of each patch against Opus's (`judge-patches.py`, Sol through Codex, the two patches in a random order and under neutral names).
+
+| CodeAlta on HARD-51 | Resolved | Estimated cost | Of Opus | Quality: Opus / other | Tests: Opus / other | Preferred, Opus : other |
+| --- | --- | --- | --- | --- | --- | --- |
+| Opus 5.5 `xhigh` | 50/51 | $76.30 | 100% | – | – | – |
+| **Haiku 5.5 `high` + recheck + escalation** | **48/51** | **$7.09** | **9%** | **3.61 / 3.33** | **3.55 / 3.76** | **29 : 22** |
+| Haiku 5.5 `high` + escalation | 46/51 | $5.07 | 7% | 3.86 / 2.86 | 3.76 / 2.92 | 43 : 8 |
+| Haiku 5.5 `high` | 43/51 | $1.98 | 3% | 3.82 / 2.86 | 3.75 / 2.94 | 43 : 7 |
+| Sonnet 5.5 `high` | 40/51 | $9.16 | 12% | 3.96 / 2.57 | 3.88 / 1.67 | 48 : 3 |
+
+- **On real repositories the cheap model's code is weaker, until it rechecks it.** Haiku alone resolved 43 tasks, but the judge preferred Opus's patch on 43 of 51, even on most tasks both resolved: unhandled edge cases, error paths that report success, missing regression tests. One recheck turn on every task that changed code (47 of 51) took its patches to a few tenths of Opus's, with tests judged better, and 48 tasks resolved, for 9% of Opus's cost. The small scenarios had not shown the gap on Anthropic: their fixtures are too small.
+- **The escalation** fired on 5 tasks (4 runs ended without an answer, 1 with a failing last test run) and added about two tasks for $3.
+- **A higher tier is not always better:** Sonnet 5.5 at `high` was the weakest, with almost no tests.
+- Each configuration ran once; between attempts a configuration varies by a task or two.
 
 ### Recommendation
 
-Do not ship `adaptive` as a prompt: a prompt does not move a session. Build the **host support** (`.alta/plans/2026-10-31-adaptive-host-routing.md`): an Adaptive choice of the model list where CodeAlta picks the tier of each user turn by its kind, code on a code tier (`standard` by default) and the rest on `quick`, with an escalation on visible trouble and the model shown on each turn. The project prompts of this trial stay as they are, for reference, and are not made built-in.
+Do not ship `adaptive` as a prompt: a prompt does not move a session. Build the **host support** (`.alta/plans/2026-10-31-adaptive-host-routing.md`): an Adaptive choice of the model list where CodeAlta runs each user turn on the tier its kind calls for, has a turn that changed code recheck its change against the request, continues a turn that ends in visible trouble on `complex`, and shows the model of each turn. With Haiku 5.5 on code, the recheck and an escalation to Opus 5.5, that resolved 48 of 51 HARD-51 tasks for 9% of the cost of Opus, with patches judged close to Opus's. The code tier stays a setting: on Codex, Luna's code stayed weak even with a recheck, and Terra kept Sol's quality for ~15% of its cost. The project prompts of this trial stay as they are, for reference, and are not made built-in.
 
 ## Steps
 
