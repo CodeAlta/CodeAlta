@@ -35,18 +35,18 @@ Then say which patch you would rather merge. Answer with one JSON object alone:
 
 ## The issue
 
-{instruction}
+@INSTRUCTION@
 
 ## Patch X
 
 ~~~diff
-{x}
+@X@
 ~~~
 
 ## Patch Y
 
 ~~~diff
-{y}
+@Y@
 ~~~
 """
 
@@ -110,7 +110,9 @@ def main() -> int:
         swap = rng.random() < 0.5
         pa, pb = _patch(a[task][0]), _patch(b[task][0])
         x, y = (pb, pa) if swap else (pa, pb)
-        jobs.append((task, swap, _PROMPT.format(instruction=instruction[:20_000], x=x or "(empty)", y=y or "(empty)")))
+        # Markers, not str.format: the prompt holds the braces of its JSON answer.
+        prompt = _PROMPT.replace("@INSTRUCTION@", instruction[:20_000]).replace("@X@", x or "(empty)").replace("@Y@", y or "(empty)")
+        jobs.append((task, swap, prompt))
 
     rows = []
     with concurrent.futures.ThreadPoolExecutor(args.parallel) as pool:
