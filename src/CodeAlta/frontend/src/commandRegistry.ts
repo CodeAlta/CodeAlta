@@ -13,7 +13,8 @@ export type CommandId =
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
   | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession" | "reviewChanges"
-  | "openInVsCode" | "copyResumeCommand" | "runInTerminal";
+  | "openInVsCode" | "copyResumeCommand" | "runInTerminal"
+  | "newCloudSession" | "bringCloudSession" | "continueHere" | "openOnClaudeAi";
 export type CommandCategory = "General" | "Prompt" | "Session" | "Navigation" | "Inspection";
 export type CommandDefinition = Readonly<{
   id: CommandId;
@@ -59,6 +60,10 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "spaces", name: "spaces", label: "Spaces", description: "Create the spaces and choose the projects of each.", category: "General", search: "space group projects organize workspaces" },
   { id: "newSpace", name: "new_space", label: "New Space", description: "Create a space: a group of projects shown together.", category: "General", search: "space create group projects workspace" },
   { id: "newSession", name: "new_session", label: "New Session", description: "Start a new session in the selected project.", category: "General", search: "create session draft" },
+  { id: "newCloudSession", name: "new_cloud_session", label: "New Cloud Session", description: "Start a session of the selected project that Claude Code runs in the cloud.", category: "General",
+    search: "cloud remote anthropic claude code web claude.ai phone background run away sleep" },
+  { id: "bringCloudSession", name: "bring_cloud_session", label: "Bring a Cloud Session Here", description: "Continue on this computer a cloud session started on claude.ai or in the Claude app.", category: "General",
+    search: "cloud teleport claude.ai claude code web link import continue phone" },
   { id: "about", name: "about", label: "About", description: "Show the version of CodeAlta.", category: "General", keys: ["Ctrl+G Ctrl+A"] },
   { id: "exit", name: "exit", label: "Exit", description: "Close CodeAlta.", category: "General", keys: ["Ctrl+Q"], search: "quit close" },
   { id: "skills", name: "skills", label: "Skills", description: "Enable, disable and create skills.", category: "General", keys: ["Ctrl+G Ctrl+K"], search: "skill" },
@@ -105,6 +110,10 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
     search: "claude cli resume terminal shell console continue elsewhere" },
   { id: "copyResumeCommand", name: "copy_resume_command", label: "Copy resume command", description: "Copy the command that continues this session in a terminal: claude --resume.", category: "Session",
     search: "claude cli resume command clipboard terminal continue elsewhere" },
+  { id: "continueHere", name: "continue_here", label: "Continue Here", description: "Bring the cloud session of this session to this computer, with its conversation and its branch.", category: "Session",
+    search: "cloud teleport bring back local claude.ai claude code" },
+  { id: "openOnClaudeAi", name: "open_on_claude_ai", label: "Open on claude.ai", description: "Open the cloud session of this session on claude.ai.", category: "Session",
+    search: "cloud browser web link claude code" },
   { id: "closeTab", name: "close_tab", label: "Close Tab", description: "Close the current tab.", category: "Session", keys: ["Ctrl+W", "Ctrl+Shift+W"], search: "close" },
   { id: "reopenTab", name: "reopen_tab", label: "Reopen Tab", description: "Reopen the last closed tab.", category: "Session", keys: ["Ctrl+Shift+T"] },
   { id: "moveTabToNewWindow", name: "move_tab_to_window", label: "Move tab to new window", description: "Move the tab in front to a window of its own.", category: "Session",

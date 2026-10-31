@@ -20,6 +20,8 @@ export type ScopeSessionActions = {
   create: (projectId: string | null) => void;
   search: (projectId: string | null) => void;
   browse: (projectId: string | null) => void;
+  /** A session of the project that runs in the cloud, and one brought here from it; absent where the space has no Claude Code. */
+  cloud?: Readonly<{ create: (projectId: string) => void; bring: (projectId: string) => void }>;
 };
 export type ProjectRowAuthority = {
   current: () => ProjectRowContext;
@@ -119,14 +121,16 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
     document.addEventListener("pointerdown", pointer);
     return () => { review.current = null; document.removeEventListener("beforetoggle", modal, true); document.removeEventListener("pointerdown", pointer); };
   }, []);
-  function sessionAction(kind: "create" | "search" | "browse", original: Review) {
+  function sessionAction(kind: "create" | "search" | "browse" | "cloud" | "bring", original: Review) {
     const value = review.current;
     const owner = latest.current;
     if (!value || value !== original || value.details || !owner?.sessions || !current(value)
       || modalDialogOpen()
-      || !projectRowAccess(value.project, owner.current()).open || kind === "create" && !owner.sessions.canCreate(value.project.id)) return;
+      || !projectRowAccess(value.project, owner.current()).open || kind !== "search" && kind !== "browse" && !owner.sessions.canCreate(value.project.id)) return;
     dismiss();
-    owner.sessions[kind](value.project.id);
+    if (kind === "cloud") owner.sessions.cloud?.create(value.project.id);
+    else if (kind === "bring") owner.sessions.cloud?.bring(value.project.id);
+    else owner.sessions[kind](value.project.id);
   }
   // A canvas of a plugin about this project, or the page that lists them all (item null).
   function canvasAction(item: CanvasItem | null, original: Review) {
@@ -225,6 +229,10 @@ export function ProjectRowActions({ project, authority, favorite, drop, drag, ch
       items={[
         ...(authority?.sessions ? [
           { key: "create", label: t("New session…"), icon: "newSession" as const, disabled: !authority.sessions.canCreate(project.id), onSelect: () => sessionAction("create", visible) },
+          ...(authority.sessions.cloud && !project.archived ? [
+            { key: "cloud", label: t("New cloud session…"), icon: "cloud" as const, disabled: !authority.sessions.canCreate(project.id), onSelect: () => sessionAction("cloud", visible) },
+            { key: "bring", label: t("Bring a cloud session here…"), icon: "download" as const, disabled: !authority.sessions.canCreate(project.id), onSelect: () => sessionAction("bring", visible) },
+          ] : []),
           { key: "search", label: `${t("Search sessions")}…`, icon: "search" as const, onSelect: () => sessionAction("search", visible) },
           { key: "browse", label: t("Browse saved sessions"), icon: "browse" as const, onSelect: () => sessionAction("browse", visible) },
           { key: "project", divider: true as const },

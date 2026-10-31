@@ -116,7 +116,9 @@ public sealed class SessionCloudTests
 
         var command = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: true).WaitAsync(Timeout);
         Assert.AreEqual("terminal", command.Status);
-        Assert.IsTrue((await host.Commands.GetCloudSessionAsync(sessionId).WaitAsync(Timeout))!.Continuing, "Reserved: the conversation and its folder are kept.");
+        var waiting = (await host.Commands.GetCloudSessionAsync(sessionId).WaitAsync(Timeout))!;
+        Assert.IsTrue(waiting.Continuing, "Reserved: the conversation and its folder are kept.");
+        Assert.IsTrue(waiting.InTerminal, "and the card knows it waits on the terminal.");
         Assert.AreEqual(0, provider.Returns, "Nothing is run for the user: the user runs it.");
         var reserved = command.Command!.Split(' ')[^1];
 

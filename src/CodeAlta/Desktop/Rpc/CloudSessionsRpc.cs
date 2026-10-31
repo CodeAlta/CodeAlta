@@ -161,7 +161,7 @@ internal sealed class CloudSessionsService
         return details is null
             ? CloudSessionDetailsResponse.Refused("not_cloud")
             : new CloudSessionDetailsResponse("ok", details.Id, details.Url, details.Title, details.Task, details.Branch, details.StartedAt, details.Note,
-                [.. details.Sent.Select(static message => new CloudSentMessage(message.Text, message.At))], details.Continuing, details.ContinuedAt);
+                [.. details.Sent.Select(static message => new CloudSentMessage(message.Text, message.At))], details.Continuing, details.ContinuedAt, details.InTerminal);
     }
 
     /// <summary>Sends a message to the cloud session a session runs as.</summary>
@@ -184,19 +184,23 @@ internal sealed class CloudSessionsService
     public async Task<CloudContinueResponse> ContinueHereAsync(CloudContinueRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, 0, null, null, null);
-        if (string.IsNullOrWhiteSpace(request.SessionId) || request.SessionId.Length > 128) return new("invalid_request", null, 0, null, null, null);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return CloudContinueResponse.Of(refused);
+        if (string.IsNullOrWhiteSpace(request.SessionId) || request.SessionId.Length > 128) return CloudContinueResponse.Of("invalid_request");
         string? worktree = null;
         string? branch = null;
         if (request.Worktree)
         {
             var details = await _commands!.GetCloudSessionAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
-            if (details is null || details.ContinuedAt is not null) return new("not_cloud", null, 0, null, null, null);
-            var session = await FindProjectAsync(details.ProjectId, cancellationToken).ConfigureAwait(false);
-            if (session is null) return new("project_missing", null, 0, null, null, null);
-            var created = await _worktrees!.CreateAsync(session, null, null, cancellationToken).ConfigureAwait(false);
-            if (!created.Succeeded || created.Folder is null) return new("worktree_failed", created.Message, 0, null, null, null);
-            (worktree, branch) = (created.Folder, created.Branch);
+            if (details is null || details.ContinuedAt is not null) return CloudContinueResponse.Of("not_cloud");
+            // A return that is already reserved (in a terminal, asked again) keeps the folder it reserved.
+            if (!details.Continuing)
+            {
+                var session = await FindProjectAsync(details.ProjectId, cancellationToken).ConfigureAwait(false);
+                if (session is null) return CloudContinueResponse.Of("project_missing");
+                var created = await _worktrees!.CreateAsync(session, null, null, cancellationToken).ConfigureAwait(false);
+                if (!created.Succeeded || created.Folder is null) return CloudContinueResponse.Of("worktree_failed") with { Message = created.Message };
+                (worktree, branch) = (created.Folder, created.Branch);
+            }
         }
 
         var result = await _commands!.ContinueCloudSessionHereAsync(request.SessionId, worktree, request.FromTerminal).ConfigureAwait(false);
@@ -207,7 +211,8 @@ internal sealed class CloudSessionsService
             if (head is { Length: > 0 } && head != branch) await GitAsync(worktree, ["branch", "-d", branch], CancellationToken.None).ConfigureAwait(false);
         }
 
-        return new(result.Status, result.Message, result.ChangedFiles, result.Command, result.ConfigDirectory, result.Folder);
+        return new(result.Status, result.Message, result.ChangedFiles, result.Command, result.ConfigDirectory, result.Folder, OperatingSystem.IsWindows(),
+            ClaudeCodeConversationWire.Home());
     }
 
     private string? Refuse(string? expectedEpoch)
@@ -314,11 +319,14 @@ internal sealed record CloudSessionRequest(string ExpectedEpoch, string SessionI
 /// <summary>A message sent to a cloud session from CodeAlta.</summary>
 internal sealed record CloudSentMessage(string Text, DateTimeOffset At);
 
-/// <summary>What a session holds of the cloud session it runs as, or ran as.</summary>
+/// <summary>
+/// What a session holds of the cloud session it runs as, or ran as; <paramref name="InTerminal"/> when the return in
+/// progress waits on the user, in a terminal.
+/// </summary>
 internal sealed record CloudSessionDetailsResponse(string Status, string? Id, string? Url, string? Title, string? Task, string? Branch, DateTimeOffset? StartedAt,
-    string? Note, CloudSentMessage[] Sent, bool Continuing, DateTimeOffset? ContinuedAt)
+    string? Note, CloudSentMessage[] Sent, bool Continuing, DateTimeOffset? ContinuedAt, bool InTerminal)
 {
-    internal static CloudSessionDetailsResponse Refused(string status) => new(status, null, null, null, null, null, null, null, [], false, null);
+    internal static CloudSessionDetailsResponse Refused(string status) => new(status, null, null, null, null, null, null, null, [], false, null, false);
 }
 
 /// <summary>Sends a message to the cloud session of a session.</summary>
@@ -330,5 +338,12 @@ internal sealed record CloudStatusResponse(string Status, string? Message);
 /// <summary>Brings a cloud session back: into a new worktree or the folder of the session, and in a terminal or not.</summary>
 internal sealed record CloudContinueRequest(string ExpectedEpoch, string SessionId, bool Worktree, bool FromTerminal);
 
-/// <summary>How a return went; for one in a terminal, the command to type there and the account folder it runs with.</summary>
-internal sealed record CloudContinueResponse(string Status, string? Message, int ChangedFiles, string? Command, string? ConfigDirectory, string? Folder);
+/// <summary>
+/// How a return went; for one in a terminal, the command to type there and the account folder it runs with, written for
+/// the shell of the system (<paramref name="Windows"/>) with the home folder of the user (<paramref name="Home"/>).
+/// </summary>
+internal sealed record CloudContinueResponse(string Status, string? Message, int ChangedFiles, string? Command, string? ConfigDirectory, string? Folder, bool Windows,
+    string? Home)
+{
+    internal static CloudContinueResponse Of(string status) => new(status, null, 0, null, null, null, OperatingSystem.IsWindows(), null);
+}

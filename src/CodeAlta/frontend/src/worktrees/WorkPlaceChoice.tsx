@@ -3,7 +3,7 @@ import { Button, HTMLSelect, PopoverNext, SegmentedControl } from "@blueprintjs/
 import { worktrees as worktreesApi } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
-import { branchesReply, worktreesReply, type Branch, type WorkPlace } from "./worktrees";
+import { branchesReply, cloudPlace, worktreesReply, type Branch, type WorkPlace } from "./worktrees";
 
 export type WorkPlaceApi = Pick<typeof worktreesApi, "branches" | "list">;
 
@@ -12,7 +12,7 @@ export type WorkPlaceApi = Pick<typeof worktreesApi, "branches" | "list">;
  * checkout of its own on a new branch. The choice is a chip beside the folder, or a part of the Workspace chip of the
  * prompt; it opens the two places, what a worktree starts from and where it is created.
  */
-export function WorkPlaceChoice({ epoch, projectId, branch, place, onPlace, onOpenSettings, api = worktreesApi, chip = false }: {
+export function WorkPlaceChoice({ epoch, projectId, branch, place, onPlace, onOpenSettings, api = worktreesApi, chip = false, cloud = false }: {
   epoch: string; projectId: string;
   /** The branch the folder of the project is on: what a worktree starts from unless another one is chosen. Null when it is not known. */
   branch: string | null;
@@ -22,6 +22,8 @@ export function WorkPlaceChoice({ epoch, projectId, branch, place, onPlace, onOp
   api?: WorkPlaceApi;
   /** Drawn as a part of the Workspace chip of the prompt, which opens its choice below it. */
   chip?: boolean;
+  /** Whether the session can run in the cloud: the space has a Claude Code provider. */
+  cloud?: boolean;
 }) {
   const { t } = useShellLanguage();
   const id = useId();
@@ -46,10 +48,12 @@ export function WorkPlaceChoice({ epoch, projectId, branch, place, onPlace, onOp
   const content = <div className="work-place-form" role="group" aria-label={t("Where to work")}>
     <div className="work-place-row">
       <span id={`${id}-place`}>{t("Work in")}</span>
-      <SegmentedControl size="small" aria-labelledby={`${id}-place`} value={place.worktree ? "worktree" : "project"}
-        options={[{ label: t("Project folder"), value: "project" }, { label: t("New worktree"), value: "worktree" }]}
-        onValueChange={value => onPlace(value === "worktree" ? { worktree: true, base: place.base } : { worktree: false, base: null })} />
+      <SegmentedControl size="small" aria-labelledby={`${id}-place`} value={place.cloud ? "cloud" : place.worktree ? "worktree" : "project"}
+        options={[{ label: t("Project folder"), value: "project" }, { label: t("New worktree"), value: "worktree" },
+          ...(cloud || place.cloud ? [{ label: t("Cloud"), value: "cloud" }] : [])]}
+        onValueChange={value => onPlace(value === "cloud" ? cloudPlace : value === "worktree" ? { worktree: true, base: place.base } : { worktree: false, base: null })} />
     </div>
+    {place.cloud && <p className="work-place-cloud">{t("Claude Code runs the session on Anthropic's machines, from the branch as it is on GitHub. It goes on while this computer sleeps.")}</p>}
     {place.worktree && <>
       <div className="work-place-row">
         <label htmlFor={`${id}-base`}>{t("Start from")}</label>
@@ -67,12 +71,12 @@ export function WorkPlaceChoice({ epoch, projectId, branch, place, onPlace, onOp
     </>}
   </div>;
 
-  const label = place.worktree ? place.base ? t("New worktree from {branch}", { branch: place.base }) : t("New worktree") : t("Project folder");
+  const label = place.cloud ? t("Cloud") : place.worktree ? place.base ? t("New worktree from {branch}", { branch: place.base }) : t("New worktree") : t("Project folder");
   return <PopoverNext content={content} placement={chip ? "bottom-end" : "top-start"} popoverClassName="work-place-popover" isOpen={open} onInteraction={setOpen}>
     <button type="button" className={chip ? "workspace-chip-part workspace-chip-work-place" : "project-context-place"} data-worktree={place.worktree || undefined}
-      aria-haspopup="dialog" aria-expanded={open} aria-label={chip ? `${t("Where to work")}: ${label}` : t("Where to work")}
-      title={t(place.worktree ? "The next session works in a new git worktree" : "The next session works in the folder of the project")}>
-      <AppIcon name={place.worktree ? "worktree" : "folder"} size={chip ? 14 : 13} />
+      data-cloud={place.cloud || undefined} aria-haspopup="dialog" aria-expanded={open} aria-label={chip ? `${t("Where to work")}: ${label}` : t("Where to work")}
+      title={t(place.cloud ? "The next session runs in the cloud, with Claude Code" : place.worktree ? "The next session works in a new git worktree" : "The next session works in the folder of the project")}>
+      <AppIcon name={place.cloud ? "cloud" : place.worktree ? "worktree" : "folder"} size={chip ? 14 : 13} />
       <span className={chip ? "workspace-chip-name" : undefined}>{label}</span>
       <AppIcon name="chevronDown" size={chip ? 13 : 12} className={chip ? "workspace-chip-caret" : undefined} />
     </button>

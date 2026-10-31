@@ -133,6 +133,8 @@ test("a prompt made outside CodeAlta says where it was made", () => {
   assert.deepEqual([prompt("external:vscode:01a1").title, prompt("external:vscode:01a1").subtitle, prompt("external:vscode:01a1").madeElsewhere],
     ["You", "in VS Code", "vscode"]);
   assert.equal(prompt("external:terminal:01a1").subtitle, "in a terminal");
+  // A turn of a cloud session that was brought here.
+  assert.deepEqual([prompt("external:cloud:01a1").subtitle, prompt("external:cloud:01a1").madeElsewhere], ["in the cloud", "cloud"]);
   assert.equal(prompt("external:other:01a1").subtitle, "in another application");
   assert.equal(prompt("external:unknown:01a1").subtitle, "outside CodeAlta");
   // A prompt of CodeAlta, and the answer of a turn made elsewhere, say nothing of it.

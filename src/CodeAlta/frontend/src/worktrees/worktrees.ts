@@ -1,9 +1,13 @@
 import type { WorkspaceSession } from "#neoastra";
 import type { MessageKey } from "../localization";
 
-/** Where the next session of a project works: in the folder of the project, or in a new git worktree. */
-export type WorkPlace = Readonly<{ worktree: boolean; base: string | null }>;
+/**
+ * Where the next session of a project works: in the folder of the project, in a new git worktree, or in the cloud,
+ * where Claude Code runs it on Anthropic's machines.
+ */
+export type WorkPlace = Readonly<{ worktree: boolean; base: string | null; cloud?: boolean }>;
 export const projectFolder: WorkPlace = Object.freeze({ worktree: false, base: null });
+export const cloudPlace: WorkPlace = Object.freeze({ worktree: false, base: null, cloud: true });
 export const workPlacesKey = "codealta.desktop.workPlaces.v1";
 const workPlaceLimit = 256;
 
@@ -36,7 +40,8 @@ export function restoreWorkPlaces(read: () => string | null): ReadonlyMap<string
     if (!value || typeof value !== "object" || Array.isArray(value)) return places;
     for (const [id, stored] of Object.entries(value as Record<string, unknown>)) {
       if (places.size === workPlaceLimit || !text(id, 256) || !stored || typeof stored !== "object") continue;
-      const { worktree, base } = stored as { worktree?: unknown; base?: unknown };
+      const { worktree, base, cloud } = stored as { worktree?: unknown; base?: unknown; cloud?: unknown };
+      if (cloud === true) { places.set(id, cloudPlace); continue; }
       if (worktree !== true) continue; // The folder of the project is the place of a project that stores none.
       places.set(id, { worktree: true, base: typeof base === "string" && referenceName(base) ? base : null });
     }
@@ -48,7 +53,8 @@ export function restoreWorkPlaces(read: () => string | null): ReadonlyMap<string
 export function withWorkPlace(places: ReadonlyMap<string, WorkPlace>, projectId: string, place: WorkPlace): ReadonlyMap<string, WorkPlace> {
   const next = new Map(places);
   next.delete(projectId);
-  if (place.worktree) next.set(projectId, { worktree: true, base: place.base });
+  if (place.cloud) next.set(projectId, cloudPlace);
+  else if (place.worktree) next.set(projectId, { worktree: true, base: place.base });
   while (next.size > workPlaceLimit) next.delete(next.keys().next().value!);
   return next;
 }

@@ -25,7 +25,9 @@ export function ProjectContext({ epoch, project, read, refreshKey, worktree = nu
   /** The git worktree the session works in, as the session records it; null for the folder of the project. */
   worktree?: Readonly<{ path: string; name: string; missing: boolean }> | null;
   /** Before a session exists: where it will work, and how that is changed. */
-  place?: Readonly<{ value: WorkPlace; onChange: (place: WorkPlace) => void; onOpenSettings?: () => void; api?: WorkPlaceApi }>;
+  place?: Readonly<{ value: WorkPlace; onChange: (place: WorkPlace) => void; onOpenSettings?: () => void; api?: WorkPlaceApi;
+    /** Whether the session can run in the cloud. */
+    cloud?: boolean }>;
   /** The folder of the worktree is not there any more: the sessions are read again. */
   onWorktreeGone?: () => void;
   /** Opens the changes tab of the project; without it the counts are only shown. */
@@ -56,8 +58,8 @@ export function ProjectContext({ epoch, project, read, refreshKey, worktree = nu
         : <span className="project-context-worktree" data-missing={worktree.missing || undefined} title={about}>{content}</span>;
     })()}
     {/* Offered where there is a repository; a worktree that was chosen is never hidden, so that it can be changed. */}
-    {place && epoch && (view || place.value.worktree) && <WorkPlaceChoice epoch={epoch} projectId={project.id} branch={view?.branch ?? null} place={place.value}
-      onPlace={place.onChange} onOpenSettings={place.onOpenSettings} api={place.api} />}
+    {place && epoch && (view || place.value.worktree || place.value.cloud) && <WorkPlaceChoice epoch={epoch} projectId={project.id} branch={view?.branch ?? null} place={place.value}
+      onPlace={place.onChange} onOpenSettings={place.onOpenSettings} api={place.api} cloud={place.cloud} />}
     {view && (branches && epoch
       ? <BranchSwitcher epoch={epoch} projectId={project.id} worktree={folder} className="project-context-branch" title={`${branchTitle}\n${t("Switch branch")}`}
         api={branches === true ? undefined : branches} onSwitched={setSwitched}>{branch}</BranchSwitcher>

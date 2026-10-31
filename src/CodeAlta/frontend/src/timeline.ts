@@ -165,11 +165,11 @@ export type ToolCallIdentity = Readonly<{ providerId: string; runId: string | nu
 type JsonObject = Record<string, unknown>;
 
 /** Where a turn made outside CodeAlta was made, as the content identifier of its prompt names it. */
-export type ExternalOrigin = "vscode" | "terminal" | "other" | "unknown";
+export type ExternalOrigin = "vscode" | "terminal" | "cloud" | "other" | "unknown";
 
 /** The subtitle of a prompt made outside CodeAlta, by where it was made: an English key of the translations. */
 export const externalOriginSubtitles = Object.freeze({
-  vscode: "in VS Code", terminal: "in a terminal", other: "in another application", unknown: "outside CodeAlta",
+  vscode: "in VS Code", terminal: "in a terminal", cloud: "in the cloud", other: "in another application", unknown: "outside CodeAlta",
 } as const satisfies Record<ExternalOrigin, string>);
 
 /**
@@ -217,7 +217,7 @@ export function unsentPrompt(entries: HistoryResponse["entries"]): UnsentPrompt 
 
 /** Reads where a prompt was made outside CodeAlta from its content identifier (`external:<where>:<id>`), or null. */
 export function externalOrigin(contentId: string | null | undefined): ExternalOrigin | null {
-  const match = /^external:(vscode|terminal|other|unknown):/u.exec(contentId ?? "");
+  const match = /^external:(vscode|terminal|cloud|other|unknown):/u.exec(contentId ?? "");
   return match ? match[1] as ExternalOrigin : null;
 }
 

@@ -1,0 +1,97 @@
+/* The sessions Claude Code runs in the cloud: the Cloud place of a new session, its start, the card of its tab, and its mark. */
+:root { --cloud: var(--bp-palette-cerulean-4); }
+:root[data-theme="light"] { --cloud: var(--bp-palette-cerulean-2); }
+
+/* The Cloud part of the Workspace chip, in the tone of the cloud. */
+.prompt-surface button.workspace-chip-part.workspace-chip-work-place[data-cloud] { background: color-mix(in srgb, var(--cloud) 14%, transparent); }
+.prompt-surface button.workspace-chip-part.workspace-chip-work-place[data-cloud]:is(:hover, :focus-visible, [aria-expanded="true"]) { background: color-mix(in srgb, var(--cloud) 26%, transparent); }
+.workspace-chip-part.workspace-chip-work-place[data-cloud] > svg:first-child,
+button.project-context-place[data-cloud] > svg:first-child { color: var(--cloud); }
+button.project-context-place[data-cloud] { border-color: color-mix(in srgb, var(--cloud) 45%, transparent); background: color-mix(in srgb, var(--cloud) 12%, transparent); }
+.work-place-cloud { max-width: 340px; margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 17px; }
+
+/* The account chip of a new session in the cloud, in the place of the agent and model chip. */
+.cloud-account-choice .composer-selection-part:first-child svg { color: var(--cloud); }
+
+/* What the project and the account allow, under the welcome. */
+.cloud-readiness { display: grid; gap: 6px; width: min(520px, 100%); margin: 4px auto 14px; padding: 10px 14px; text-align: left;
+  border: 1px solid color-mix(in srgb, var(--cloud) 40%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--cloud) 6%, transparent); }
+.cloud-readiness > p { margin: 0; line-height: 18px; }
+.cloud-readiness ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.cloud-readiness li { display: flex; align-items: flex-start; gap: 7px; line-height: 18px; overflow-wrap: anywhere; }
+.cloud-readiness li > svg { flex: none; margin-top: 2px; color: var(--muted); }
+.cloud-readiness li[data-tone="ok"] > svg { color: var(--green); }
+.cloud-readiness li[data-tone="warning"] > svg { color: var(--yellow); }
+.cloud-readiness > .bp6-button { justify-self: start; }
+.cloud-readiness-reading { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.session-workspace[data-cloud] .welcome-subtitle { color: var(--text); }
+
+/* The start of a cloud session, in the place of the welcome. */
+.cloud-start { display: grid; gap: 10px; width: min(520px, calc(100% - 32px)); margin: 48px auto; padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--cloud) 45%, var(--line)); border-radius: 8px; background: var(--panel-2); }
+.cloud-start h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 16px; }
+.cloud-start h2 svg { color: var(--cloud); }
+.cloud-start p { margin: 0; line-height: 19px; }
+.cloud-start-step { display: flex; align-items: center; gap: 10px; }
+.cloud-start-error { color: var(--red); font-weight: 600; }
+.cloud-start-said { max-height: 160px; margin: 0; padding: 8px 10px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 4px;
+  background: var(--panel-3, rgb(0 0 0 / 8%)); font-size: 12px; }
+.cloud-start-link code { overflow-wrap: anywhere; }
+.cloud-start-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+
+/* The tab of a session in the cloud: a card in the place of its conversation, the messages sent, and its prompt. */
+.cloud-session-pane { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.cloud-session-scroll { flex: 1; padding: 20px 16px 8px; overflow: auto; }
+.cloud-session-card { display: grid; gap: 10px; max-width: 760px; margin: 0 auto 16px; padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--cloud) 45%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--cloud) 7%, var(--panel-2)); }
+.cloud-session-card header { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+.cloud-session-mark { display: inline-flex; flex: none; padding: 6px; border-radius: 50%; color: var(--cloud); background: color-mix(in srgb, var(--cloud) 16%, transparent); }
+.cloud-session-heading { flex: 1; min-width: 200px; }
+.cloud-session-heading h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; font-size: 16px; line-height: 22px; }
+.cloud-session-kind { color: var(--cloud); font-size: 12px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+.cloud-session-title { overflow-wrap: anywhere; }
+.cloud-session-meta { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.cloud-session-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.cloud-session-about { margin: 0; color: var(--muted); line-height: 19px; }
+.cloud-session-note { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--yellow); line-height: 18px; }
+.cloud-session-note svg { flex: none; margin-top: 2px; }
+.cloud-session-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.cloud-session-busy { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); }
+.cloud-session-terminal { display: grid; gap: 8px; padding: 10px 12px; border-radius: 6px; background: color-mix(in srgb, var(--cloud) 10%, transparent); }
+.cloud-session-terminal > p { display: flex; align-items: flex-start; gap: 8px; margin: 0; line-height: 19px; }
+.cloud-session-terminal > p > svg { flex: none; margin-top: 3px; color: var(--cloud); }
+.cloud-session-messages { display: grid; gap: 10px; max-width: 760px; margin: 0 auto; padding: 0; list-style: none; }
+.cloud-session-message { padding: 10px 12px; border-left: 3px solid var(--user-accent, var(--accent)); border-radius: 4px; background: var(--panel-2); }
+.cloud-session-message p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 19px; }
+.cloud-session-message-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.cloud-session-message-head strong { color: var(--text); }
+.cloud-session-message-sent { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--cloud); }
+.cloud-session-prompt { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 4px 8px; max-width: 792px; width: 100%; margin: 0 auto; padding: 8px 16px 12px; }
+.cloud-session-prompt textarea { min-height: 44px; max-height: 240px; resize: none; }
+.cloud-session-hint, .cloud-session-error { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+.cloud-session-hint { color: var(--muted); }
+.cloud-session-error { color: var(--red); }
+
+/* The phone popover of the card: the QR code of the link. */
+.cloud-phone { display: grid; gap: 8px; justify-items: center; width: 240px; padding: 12px; text-align: center; }
+.cloud-phone h6 { margin: 0; font-size: 13px; }
+.cloud-phone .detail { margin: 0; color: var(--muted); font-size: 12px; line-height: 17px; }
+.cloud-phone .remote-control-qr { width: 160px; height: 160px; }
+
+/* Continue here, and Bring a cloud session here. */
+.cloud-continue-dialog, .cloud-bring-dialog { width: min(560px, calc(100vw - 32px)); }
+.cloud-continue-dialog p, .cloud-bring-dialog p { line-height: 19px; }
+.cloud-continue-place { margin-top: 10px; }
+.cloud-continue-choice { display: grid; gap: 1px; }
+.cloud-continue-choice small { color: var(--muted); overflow-wrap: anywhere; }
+.cloud-continue-progress { display: flex; align-items: center; gap: 8px; }
+.cloud-continue-error { color: var(--red); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cloud-continue-note { color: var(--yellow); }
+.cloud-continue-command { margin: 0; padding: 8px 10px; overflow: auto; border-radius: 4px; background: var(--panel-2); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The one line above the conversation of a session that was brought back from the cloud. */
+.cloud-origin-line { display: flex; align-items: center; gap: 6px; max-width: 760px; margin: 8px auto 0; padding: 2px 12px; color: var(--muted); font-size: 12px; }
+.cloud-origin-line > svg { color: var(--cloud); }
+
+/* The mark of the row of a session in the cloud. */
+.session-cloud-mark { display: inline-flex; flex: none; align-items: center; margin-left: 4px; color: var(--cloud); }

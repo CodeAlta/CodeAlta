@@ -285,7 +285,12 @@ import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownS
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore } from "./modelTiers";
 import { AdaptiveSetupDialog } from "./AdaptiveSetup";
-import { deletedSessionWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
+import { cloudPlace, deletedSessionWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
+import { cloudOf, inCloud, providerHasCloudSessions, runCloudStart, type CloudStartState } from "./cloudSessions/cloudSessions";
+import { BringHereDialog, CloudAccountChoice, CloudReadiness, CloudStartProgress, type CloudAccount } from "./cloudSessions/CloudStart";
+import { CloudMark, CloudOriginLine, CloudSessionPane, type CloudContinueRequest, type CloudTerminalRunner } from "./cloudSessions/CloudSessionPane";
+import { cloudSessions as cloudSessionsApi, type CloudContinueResponse } from "#neoastra";
+import { typeResumeCommand } from "./claudeCodeOpen/claudeCodeOpen";
 import { createPreparedWorktrees } from "./worktrees/preparedWorktrees";
 import { WorktreePreparation } from "./worktrees/WorktreePreparation";
 import { editorFailure, removalReason, removalReply } from "./worktrees/worktreeInventory";
@@ -341,6 +346,7 @@ import "./statistics/statistics.css";
 import "./search/canvas/canvas.css";
 import "./issues/issues.css";
 import "./worktrees/worktrees.css";
+import "./cloudSessions/cloudSessions.css";
 import "./mcpHost/mcpHost.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
@@ -432,6 +438,8 @@ type SessionBranchHost = Readonly<{ requests: BranchRequests;
   rewind: (session: WorkspaceSession, projectId: string | null, beforeRunId: string, keepRemovedTurns: boolean) => Promise<RewindResult> }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
+// The account of Claude Code the last cloud session was started with: the next one starts with it.
+const cloudProviderKey = "codealta.desktop.cloudProvider.v1";
 // Every call of the page to its host waits for its answer: none is given up on a timer, and a slow one is logged.
 if (!demoMode) installLocalCallPolicy(createSlowCallWatch(reportToHost));
 const noSubscription = () => () => { };
@@ -984,6 +992,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [creatingScope, setCreatingScope] = useState<Readonly<{ projectId: string | null; handoff: boolean }> | null>(null);
   // The steps of the session that starts in the New session tab of a scope, as the host says them; a creation that
   // failed keeps them, with why, until Retry or Close.
+  // The start of a cloud session from the prompt of a project: its step, then how it ended when no session came of it.
+  const [cloudStart, setCloudStart] = useState<CloudStartState | null>(null);
   const [startSteps, setStartSteps] = useState<Readonly<{ requestId: string; projectId: string | null; fromDraft: boolean;
     steps: readonly SessionStartStep[]; error: string | null }> | null>(null);
   function newSessionTabLabel(project: { name: string } | null | undefined, starting: boolean) {
@@ -2886,11 +2896,24 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setProviderGuide(true);
     navigate("providers");
   }, [owned, status]);
-  // The next session of the selected project works where its chip says.
-  const draftPlace = selectedProject ? workPlaces.get(selectedProject.id) ?? inProjectFolder : inProjectFolder;
+  // The accounts of Claude Code of the space shown: a new session can run in the cloud with one of them.
+  const cloudAccounts = useMemo<readonly CloudAccount[]>(() => {
+    const inventory = configurationState.snapshot;
+    if (!owned || !inventory?.providerRuntimeAvailable) return [];
+    return providersInSpace(inventory.providers.slice(0, 32).filter(provider => provider.enabled && provider.id.length > 0 && provider.id.length <= 256),
+      spacesState.available ? spaceId : null, providerSpaces)
+      .filter(provider => providerHasCloudSessions(providerLogos.get(provider.id.toLowerCase())?.type))
+      .map(provider => ({ id: provider.id, name: providerName(providerLogos, provider.id) ?? provider.id }));
+  }, [owned, configurationState.snapshot, spacesState.available, spaceId, providerSpaces, providerLogos]);
+  const cloudOffered = cloudAccounts.length > 0;
+  // The next session of the selected project works where its chip says. The cloud, kept for a project whose space no
+  // longer has Claude Code, reads as the folder of the project.
+  const storedPlace = selectedProject ? workPlaces.get(selectedProject.id) ?? inProjectFolder : inProjectFolder;
+  const draftPlace = storedPlace.cloud && !cloudOffered ? inProjectFolder : storedPlace;
   const draftProjectId = selectedProject && !selectedProject.archived ? selectedProject.id : null;
+  const draftCloud = !!draftPlace.cloud && draftProjectId !== null && owned;
   const draftPlaceControl = useMemo(() => owned && draftProjectId !== null ? { value: draftPlace, onChange: (place: WorkPlace) => setWorkPlace(draftProjectId, place),
-    onOpenSettings: () => navigate("worktrees") } : undefined, [owned, draftProjectId, draftPlace]);
+    onOpenSettings: () => navigate("worktrees"), cloud: cloudOffered } : undefined, [owned, draftProjectId, draftPlace, cloudOffered]);
   const draftChrome = useComposerChrome(owned ? status?.hostEpoch ?? null : null, selectedProject, null, owned ? showProjectChanges : null, null, draftPlaceControl);
   // Explorer markers for sessions with active reminders: read when the host is ready, after every reminder
   // change made here, and on a slow interval because reminders also fire and complete on their own.
@@ -2925,6 +2948,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     configurationState.snapshot, owned && (sessionId === null || creatingVisible) && view === "workspace" && !settingsOpen
       && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability,
     spacesState.available ? spaceId : null, providerSpaces);
+  // A session that runs in the cloud runs with an account of Claude Code: the prompt moves to one, the account last
+  // used for the cloud, else the first one of the space.
+  const draftProviderKey = draftChoices.value.providerKey;
+  useEffect(() => {
+    if (!draftCloud || !draftChoices.ready || cloudAccounts.some(account => account.id === draftProviderKey)) return;
+    const last = (() => { try { return localStorage.getItem(cloudProviderKey); } catch { return null; } })();
+    const next = cloudAccounts.find(account => account.id === last) ?? cloudAccounts[0];
+    if (next) { invalidateCreation(); draftChoices.change("providerKey", next.id); }
+  }, [draftCloud, draftChoices.ready, draftProviderKey, cloudAccounts]);
   // Adaptive chosen in the draft while it is not set up: the user is offered its settings.
   const [draftAdaptiveSetup, setDraftAdaptiveSetup] = useState(false);
   // The sandbox of the new session: what its settings give (its model, its provider, its project, its space, every
@@ -3255,6 +3287,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
+      case "newCloudSession": case "bringCloudSession": return cloudOffered && !!selectedProject && !selectedProject.archived && scopeCanCreateSession(selectedProject.id);
+      case "continueHere": return ownedSession && !!selectedSession && inCloud(selectedSession) && !!mutation?.capability.canMutate();
+      case "openOnClaudeAi": return owned && !!selectedSession && !!cloudOf(selectedSession)?.url;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
       // The session of a project, as its menu moves it, under the same locks.
       case "moveSession": return ownedSession && !!selectedSession && selectedSessionAccess(selectedSession).move;
@@ -3371,6 +3406,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => promptFocusTarget(document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt"))?.focus()); break;
       case "moveSession": if (selectedSession) beginSessionMove(selectedSession); break;
+      case "newCloudSession": if (selectedProject) newCloudSession(selectedProject.id); break;
+      case "bringCloudSession": if (selectedProject) setCloudBring({ projectId: selectedProject.id, link: "" }); break;
+      case "continueHere": if (selectedSession) askCloudContinue(selectedSession); break;
+      case "openOnClaudeAi": { const url = selectedSession ? cloudOf(selectedSession)?.url : null; if (url) openCloudLink(url, selectedSession!.id); break; }
       case "openInVsCode": case "copyResumeCommand": case "runInTerminal":
         if (selectedSession) void openSessionElsewhere(openElsewhereCommandAction[command], selectedSession);
         break;
@@ -3654,6 +3693,49 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const ask = { sessionId, request: { done: () => setRemoteControlAsk(current => current === ask ? null : current) } };
     setRemoteControlAsk(ask);
   }
+  // The menu of a session or a command asks its cloud card to open Continue here: the session is shown, and its card opens it.
+  const [cloudContinueAsk, setCloudContinueAsk] = useState<{ sessionId: string; request: CloudContinueRequest } | null>(null);
+  function askCloudContinue(session: WorkspaceSession) {
+    const ask = { sessionId: session.id, request: { done: () => setCloudContinueAsk(current => current === ask ? null : current) } };
+    setCloudContinueAsk(ask);
+    revealSession(session);
+  }
+  // Bring a cloud session here: the dialog of a project, with the link it was given.
+  const [cloudBring, setCloudBring] = useState<Readonly<{ projectId: string; link: string }> | null>(null);
+  // A new session of a project that runs in the cloud, from the menu of the project or a command: its prompt is shown, with Cloud chosen.
+  function newCloudSession(id: string) {
+    if (!cloudOffered || !scopeCanCreateSession(id)) return;
+    setWorkPlace(id, cloudPlace);
+    showScopeDraft(id);
+    setProjectTree(current => expandScope(current, id));
+    focusPromptSoon();
+  }
+  // The lines of the menu of a session in the cloud, or that started there.
+  function sessionCloudEntries(session: WorkspaceSession): SessionMenuEntry[] {
+    const cloud = cloudOf(session);
+    if (!cloud || !owned) return [];
+    return [
+      ...(cloud.url ? [{ key: "open-on-claude-ai", label: t("Open on claude.ai"), icon: "openExternal" as const, onSelect: () => openCloudLink(cloud.url!, session.id) }] : []),
+      ...(!cloud.continued ? [{ key: "continue-here", label: t("Continue here…"), icon: "download" as const, disabled: !mutation?.capability.canMutate(),
+        onSelect: () => askCloudContinue(session) }] : []),
+    ];
+  }
+  function openCloudLink(url: string, sessionId: string | null) {
+    const epoch = currentHostEpoch.current;
+    if (epoch) void markdownLinks.open({ expectedHostEpoch: epoch, address: url, sessionId, projectId: null, directory: null }, { timeoutMilliseconds: 8_000 }).catch(() => { /* The link is shown to copy. */ });
+  }
+  // Continue here in a terminal: a terminal of the session, where the command Claude Code brings the session back with is typed.
+  async function runCloudReturnInTerminal(session: WorkspaceSession, reply: CloudContinueResponse): Promise<string | null> {
+    const say = (key: MessageKey) => translate(shownLocale.current, key);
+    if (!reply.command) return say("Claude Code could not bring the cloud session here.");
+    const created = await terminalWorkspace.hub.create(session.scopeKind === "project" ? session.projectId : null, session.id,
+      terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
+    if (created?.status !== "ok" || !created.terminal) return say("The terminal could not be started.");
+    showTerminal(created.terminal);
+    const refusal = typeResumeCommand(terminalWorkspace.hub, { id: created.terminal.id, profile: created.terminal.profile },
+      { resumeCommand: reply.command, configDir: reply.configDirectory, windows: reply.windows, home: reply.home });
+    return refusal ? say(refusal) : null;
+  }
   function openScopeSession(scope: string | null, session: WorkspaceSession, action: SessionAction) {
     protectNavigation([session.id], () => {
       pendingSessionAction.current = { projectId: scope, sessionId: session.id, action };
@@ -3696,6 +3778,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         title={carriedBy(work, session.id).map(item => item.title).join("\n")}><AppIcon name="task" size={12} /></span>}
       <SessionBookmarkMark hub={bookmarkHost.hub} sessionId={session.id} />
       <WorktreeBadge session={session} />
+      <CloudMark session={session} />
       {session.forkedFromSessionId && <SessionLineageMark lineage={sessionLineage(session)!} />}
       <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
     </>;
@@ -3729,7 +3812,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session)]} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionCloudEntries(session), ...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session)]} deleteAsks={confirms.sessionDelete}
       archiveAsks={session => archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0}
       spaces={spacesState.available && spacesState.spaces.length > 1}
       drag={session => sessionDragSource(session, scope)}
@@ -4512,6 +4595,62 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         onChange={next => change("reasoningEffort", next)} />} />;
   }
 
+  // Sends the prompt of a project to the cloud: Claude Code starts a cloud session from it, in a terminal of the window
+  // that is shown when it asks something, and the session is listed and opened once it exists. The prompt keeps its
+  // text until then, and after a failure.
+  async function startCloudFromDraft() {
+    const project = selectedProject;
+    const epoch = status?.hostEpoch;
+    if (!project || !epoch || cloudStart && !cloudStart.outcome || !mutation?.capability.canMutate()) return;
+    const scope = draftScope;
+    const typed = localDrafts.peek(scope) ?? localDraft;
+    const task = typed.text.trim();
+    const providerKey = draftChoices.value.providerKey;
+    const say = (key: MessageKey) => translate(shownLocale.current, key);
+    if (!task) return;
+    if (task.length > 16 * 1024) { showToast({ message: say("The prompt is too long for a cloud session: at most 16,000 characters."), intent: "warning", icon: "warning-sign", timeout: 8000 }); return; }
+    if (!providerKey || !cloudAccounts.some(account => account.id === providerKey)) {
+      showToast({ message: say("Choose an account of Claude Code for the cloud session."), intent: "warning", icon: "warning-sign", timeout: 8000 });
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    setCloudStart({ requestId, projectId: project.id, step: "starting", outcome: null });
+    try { localStorage.setItem(cloudProviderKey, providerKey); } catch { /* The first account is offered next time. */ }
+    const outcome = await runCloudStart(cloudSessionsApi, { expectedEpoch: epoch, requestId, projectId: project.id, providerKey,
+      spaceId: spacesState.available ? spaceId : null, title: null, task },
+      step => setCloudStart(current => current?.requestId === requestId && !current.outcome ? { ...current, step } : current));
+    if (!creationAlive.current) return;
+    if ((outcome.status === "created" || outcome.status === "existing") && outcome.sessionId) {
+      setCloudStart(current => current?.requestId === requestId ? null : current);
+      // The session holds the task now: the prompt starts empty again, unless it was changed meanwhile.
+      if (localDrafts.peek(scope)?.revision === typed.revision) {
+        localDrafts.edit(scope, "");
+        persistDraft((_key, value) => localStorage.setItem(`codealta.desktop.localPrompt.${JSON.stringify(project.id)}`, value),
+          () => localStorage.removeItem(`codealta.desktop.localPrompt.${JSON.stringify(project.id)}`), scope, "");
+      }
+      const fresh = await refreshProjects(creationRefresh.current.signal);
+      const row = fresh?.sessions.find(session => session.id === outcome.sessionId);
+      if (!creationAlive.current) return;
+      if (row && selectedScope.current === project.id && selectedSessionId.current === null) {
+        keptSession.current = row.id;
+        revealSessionLatest.current(row);
+      } else showToast({ message: say("The cloud session was started. It is listed with the sessions of its project."), intent: "success", icon: "tick", timeout: 8000,
+        action: row ? { text: say("Show"), onClick: () => revealSessionLatest.current(row) } : undefined });
+      return;
+    }
+    setCloudStart(current => current?.requestId === requestId ? { ...current, outcome } : current);
+  }
+  function stopCloudStart() {
+    const start = cloudStart;
+    const epoch = status?.hostEpoch;
+    if (!start || start.outcome || !epoch) return;
+    void cloudSessionsApi.cancelStart({ expectedEpoch: epoch, requestId: start.requestId }, { timeoutMilliseconds: 8000 }).catch(() => { /* The start ends by itself. */ });
+  }
+  function showTerminalById(id: string) {
+    const terminal = terminalList.find(candidate => candidate.id === id);
+    if (terminal) showTerminal(terminal);
+  }
+
   const draftSendWaits = useRef(false);
   const createLatest = useRef<(fromDraft?: boolean) => Promise<void>>(async () => { });
   createLatest.current = createSelectedSession;
@@ -4535,6 +4674,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const typed = localDrafts.peek(draftScope) ?? localDraft;
     if (fromDraft && (!draftChoices.ready || sessionId !== null || (!typed.text.trim() && !localImages.images.length)
       || localImages.images.length > 0 && (typed.text.length > imageLimits.text || typed.text !== "" && !typed.text.trim()))) return;
+    // A session that runs in the cloud is started by Claude Code from what the prompt says; the form beside the row,
+    // which has no prompt, leads to it.
+    if (draftCloud && selectedProject) {
+      if (fromDraft) void startCloudFromDraft();
+      else { setCreatingVisible(false); showScopeDraft(selectedProject.id); focusPromptSoon(); }
+      return;
+    }
     // A prompt waits while git makes the worktree its session will work in.
     const chosenPlace = selectedProject ? workPlaces.get(selectedProject.id) : undefined;
     if (fromDraft && selectedProject && chosenPlace?.worktree && preparedWorktrees.preparing(selectedProject.id, chosenPlace.base)) return;
@@ -5318,7 +5464,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               canvases: owned ? { list: () => canvasMenuItems(canvasCatalog, "Project"), open: (item, project) => openCanvas(item, { project: { id: project.id, path: project.path }, sessionId: null }),
                 all: () => openFile(canvasesTab) } : undefined,
               sessions: { canCreate: scopeCanCreateSession, create: id => scopeSessionAction(id, "create"),
-                search: id => scopeSessionAction(id, "search"), browse: id => scopeSessionAction(id, "browse") } }}
+                search: id => scopeSessionAction(id, "search"), browse: id => scopeSessionAction(id, "browse"),
+                cloud: cloudOffered ? { create: newCloudSession, bring: id => { if (scopeCanCreateSession(id)) setCloudBring({ projectId: id, link: "" }); } } : undefined } }}
             editor={owned ? { open: id => fileTabs.open.some(tab => isEditorTab(tab) && tab.projectId === id),
               unsaved: project => fileEditors.dirty(fileTabKey(editorTab(project))), show: project => openProjectEditor(project) } : undefined} />}
           {projectArchive.uncertain && <p role="alert" className="notice error-text">{t("A change of a project archive could not be confirmed. Check the project, and reload the window before archiving again.")}</p>}
@@ -5407,6 +5554,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
                   ...openElsewhereEntries(t, session, providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type, access, action => runSessionMenuAction(action, session, menu)),
+                  ...sessionCloudEntries(session),
                   ...sessionBookmarkEntries(session),
                   ...sessionLineageEntries(session),
                   ...sessionReviewEntries(session),
@@ -5425,7 +5573,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 // A session that works in a worktree leaves it, with its branch: the question says where, and can remove it.
                 const worktree = selectedProject && !selectedProject.archived ? deletedSessionWorktree(catalog.current?.sessions ?? [], session) : null;
                 return <ConfirmPopover title={t("Delete this session?")} subject={plainTitle(session.title)}
-                  detail={t("Its history is deleted and cannot be restored. The files of the project are kept.")}
+                  detail={inCloud(session) ? `${t("Its history is deleted and cannot be restored. The files of the project are kept.")} ${t("The cloud session stays on claude.ai: archive or delete it there.")}`
+                    : t("Its history is deleted and cannot be restored. The files of the project are kept.")}
                   confirmLabel={t("Delete")} intent="danger" busy={deletingBusy} error={deletingMessage || null}
                   onConfirm={remember => { if (remember) setConfirm("sessionDelete", false);
                     void deleteSessionRow(session, true, worktree && !worktree.shared && deletingWorktree ? worktree : null); }}
@@ -5492,6 +5641,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={listing} selectedProjectId={tab.projectId}
+                cloud={owned && cloudOf(row) ? { provider: providerName(providerLogos, row.providerKey) ?? row.providerKey ?? null,
+                  projectPath: listing.projects.find(project => project.id === row.projectId)?.path ?? null, onOpenLink: url => openCloudLink(url, row.id),
+                  onChanged: refreshSessionList, onTerminal: reply => runCloudReturnInTerminal(row, reply),
+                  continueRequest: cloudContinueAsk?.sessionId === row.id ? cloudContinueAsk.request : null } : null}
                 automation={row.automationId ? (() => {
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
                   return { name: origin.name, summary: origin.summary, onOpen: owned && origin.id ? () => openAutomations(origin.id) : undefined };
@@ -5618,29 +5771,43 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             ? <NonIdealState className="window-empty" icon={<AppIcon name="window" size={32} />} title={t("Move a tab here")}
               description={t("Drag a tab to this window, or choose Move to window in the menu of a tab.")} />
             : !selectedSession
-            ? <NewSessionWorkspace key={draftScope} project={selectedProject} chrome={draftChrome} worktree={!!draftPlaceControl && draftPlace.worktree}
-                starting={startSteps && startSteps.projectId === projectId ? <SessionStartProgress steps={startSteps.steps} error={startSteps.error}
+            ? <NewSessionWorkspace key={draftScope} project={selectedProject} chrome={draftChrome} worktree={!!draftPlaceControl && draftPlace.worktree} cloud={draftCloud}
+                starting={cloudStart && cloudStart.projectId === projectId ? <CloudStartProgress step={cloudStart.step} outcome={cloudStart.outcome} onStop={stopCloudStart}
+                  onShowTerminal={showTerminalById} onOpenLink={url => openCloudLink(url, null)}
+                  onBringHere={url => { const id = cloudStart.projectId; setCloudStart(null); setCloudBring({ projectId: id, link: url }); }}
+                  onClose={() => setCloudStart(null)} />
+                  : startSteps && startSteps.projectId === projectId ? <SessionStartProgress steps={startSteps.steps} error={startSteps.error}
                   onRetry={startSteps.error && !creatingBusy ? () => { const fromDraft = startSteps.fromDraft; setStartSteps(null); void createSelectedSession(fromDraft); } : undefined}
                   onClose={startSteps.error ? () => setStartSteps(null) : undefined} /> : undefined}
-                worktreeStatus={draftWorktree && preparedProject && status?.hostEpoch ? <WorktreePreparation worktree={draftWorktree}
+                worktreeStatus={draftCloud && selectedProject && status?.hostEpoch ? <CloudReadiness epoch={status.hostEpoch} projectId={selectedProject.id}
+                  providerKey={draftChoices.value.providerKey || null} provider={providerName(providerLogos, draftChoices.value.providerKey) ?? (draftChoices.value.providerKey || t("Claude Code"))}
+                  onLearnMore={() => openDocumentation("sessions/claude-code.md", "run-in-the-cloud")} />
+                  : draftWorktree && preparedProject && status?.hostEpoch ? <WorktreePreparation worktree={draftWorktree}
                   onRetry={() => preparedWorktrees.retry(status.hostEpoch!, preparedProject)} onClose={() => preparedWorktrees.dismiss(preparedProject.id)} /> : undefined}
                 preferredHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope))}
                 onHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope), height))}>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators} folder={selectedProject?.path ?? null}
-                  localImages={owned && snapshot?.configured && currentProjectWritable() ? localImages : undefined}
+                  localImages={owned && snapshot?.configured && currentProjectWritable() && !draftCloud ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
                   reason={t("Draft kept locally. Start a session to send it.")}
-                  localDraft={{ read: () => localDrafts.peek(draftScope)?.text ?? "", subscribe: localDrafts.subscribe, edit: editLocalDraft, options: creationProviderChoice(),
-                    disabled: newPromptDisabled, busy: creatingScope?.projectId === projectId, submit: () => void createSelectedSession(true),
+                  localDraft={{ read: () => localDrafts.peek(draftScope)?.text ?? "", subscribe: localDrafts.subscribe, edit: editLocalDraft,
+                    options: draftCloud ? <CloudAccountChoice accounts={cloudAccounts} value={draftChoices.value.providerKey || null} disabled={!!cloudStart && !cloudStart.outcome}
+                      onChange={id => { invalidateCreation(); draftChoices.change("providerKey", id); }}
+                      onLocal={() => { if (draftProjectId) setWorkPlace(draftProjectId, inProjectFolder);
+                        showToast({ message: t("The next session works on this computer, in the folder of the project. Choose its provider in the prompt."), intent: "none", icon: "info-sign", timeout: 6000 }); }} />
+                      : creationProviderChoice(),
+                    disabled: newPromptDisabled || draftCloud && !!cloudStart && !cloudStart.outcome, busy: creatingScope?.projectId === projectId || draftCloud && !!cloudStart && !cloudStart.outcome,
+                    submit: () => void createSelectedSession(true),
                     surface: owned && status?.hostEpoch ? { epoch: status.hostEpoch, onOpenProviders: () => navigate("providers"),
                       contextTokens: draftContextTokens } : undefined,
                     action: <>
                       {draftChoices.failed && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} disabled={creatingBusy}
                         aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={draftChoices.refresh} />}
                      <SendSplitButton enqueue={false} onEnqueueChange={() => { /* A session that has not started has nothing to wait for. */ }} enqueueDisabled optionsDisabled={newPromptDisabled}>
-                       <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={newPromptDisabled}
-                         aria-label={t("Start session")} title={draftWorktreeWaits ? t("The worktree is not ready yet") : t("Start the session and send (Enter)")}
-                         onClick={() => void createSelectedSession(true)} />
+                       <Button intent="primary" icon={<AppIcon name={draftCloud ? "cloud" : "send"} size={16} />} disabled={newPromptDisabled || draftCloud && !!cloudStart && !cloudStart.outcome}
+                         aria-label={t(draftCloud ? "Send to the cloud" : "Start session")}
+                         title={draftCloud ? t("Send to the cloud: Claude Code starts a cloud session (Enter)") : draftWorktreeWaits ? t("The worktree is not ready yet") : t("Start the session and send (Enter)")}
+                         data-cloud-send={draftCloud || undefined} onClick={() => void createSelectedSession(true)}>{draftCloud ? t("Send to the cloud") : undefined}</Button>
                      </SendSplitButton>
                      {creatingScope?.handoff && creatingScope.projectId === projectId && <Button variant="minimal" icon={<AppIcon name="stop" size={16} />} aria-label={t("Cancel transfer")}
                        onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }} />}
@@ -5810,6 +5977,21 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       onSave={() => void saveAndLeaveSpace(leavingSpace)} onDiscard={() => showSpace(leavingSpace.spaceId, leavingSpace.target, true)}
       onCancel={() => { cancelSaveFollowUp(); setLeavingSpace(null); }} />}
     {dialog === "help" && <CommandHelp onClose={closeHelp} pluginCommands={pluginContributed.commands} />}
+    {cloudBring && owned && status?.hostEpoch && (() => {
+      const project = snapshot?.projects.find(candidate => candidate.id === cloudBring.projectId && !candidate.archived);
+      if (!project) return null;
+      return <BringHereDialog epoch={status.hostEpoch} project={project} accounts={cloudAccounts} initialLink={cloudBring.link} spaceId={spacesState.available ? spaceId : null}
+        onClose={() => setCloudBring(null)}
+        onBrought={(id) => {
+          setCloudBring(null);
+          void refreshProjects(creationRefresh.current.signal).then(fresh => {
+            const row = fresh?.sessions.find(session => session.id === id);
+            if (!row || !creationAlive.current) return;
+            // A session that is still in the cloud is brought here at once: its card opens Continue here.
+            if (inCloud(row)) askCloudContinue(row); else revealSessionLatest.current(row);
+          });
+        }} />;
+    })()}
     {dialog === "worktrees" && worktreesProject && owned && status?.hostEpoch && <WorktreeManager epoch={status.hostEpoch} project={worktreesProject}
       onClose={() => setDialog(null)} onChanged={refreshSessionList}
       onShowChanges={row => { const project = worktreesProject; setDialog(null); showChanges(project, null, row.project ? null : row.folder); }} />}
@@ -6049,7 +6231,7 @@ function promptBackComposer(sessionId: string): PromptBackComposer {
 // The run of a session whose prompt was last given back to its composer: a prompt is given back once, whatever reads the window again.
 const unsentPromptKey = (sessionId: string) => `codealta.desktop.unsentPrompt.${sessionId}`;
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, automation, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, automation, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
   canAdmit: () => boolean;
   /**
    * The process that holds the session when another one does (the command line, another instance), with the length of
@@ -6079,6 +6261,13 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   onRunActivity?: (running: boolean | null, background?: number) => void;
   /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
   remoteControlRequest?: RemoteControlOpenRequest | null;
+  /**
+   * For a session that runs in the cloud or started there: the account it runs with, the folder of its project, and
+   * what the card of the session does (open its link, read the sessions again, a return in a terminal, the request of
+   * a menu to open Continue here). Null where it cannot be acted on.
+   */
+  cloud?: Readonly<{ provider: string | null; projectPath: string | null; onOpenLink: (url: string) => void; onChanged: () => void;
+    onTerminal: CloudTerminalRunner; continueRequest: CloudContinueRequest | null }> | null;
   /** A draft prompt to send once this session's composer holds it. */
   autoSend?: { text: string; images?: number; consume: () => void } | null;
   /** The automation that started the session, named on the card of the prompt it sent. */
@@ -6365,8 +6554,13 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
       onPoint={showBranchPoint} onClose={() => branch?.requests.close(branchRequest)} />}
     {demoMode
       ? <DemoConversation session={session} />
+      // A session in the cloud has no conversation here: Claude Code keeps it on Anthropic's machines until it is brought back.
+      : inCloud(session) && cloud && status?.hostEpoch
+      ? <CloudSessionPane epoch={status.hostEpoch} session={session} provider={cloud.provider} projectPath={cloud.projectPath} canMutate={!!mutation?.capability.canMutate()}
+        onOpenLink={cloud.onOpenLink} onChanged={cloud.onChanged} onTerminal={cloud.onTerminal} continueRequest={cloud.continueRequest} />
       : <>
         {lineage}
+        {cloud && <CloudOriginLine session={session} onOpenLink={cloud.onOpenLink} />}
         <div className="session-timeline-area" data-ask={askMode}>
         <div className="ask-file-slot" ref={setAskFileSlot} hidden={askMode !== "file"} />
         {/* A press in the timeline gives it the keyboard, so that the keys scroll it: the panel of the tab around

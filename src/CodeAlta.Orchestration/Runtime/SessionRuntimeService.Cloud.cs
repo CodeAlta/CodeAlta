@@ -75,8 +75,9 @@ public sealed record CloudSessionContinueResult(string Status, string? Message =
 /// <param name="Continuing">Whether it is being brought back, or a bring-back was interrupted.</param>
 /// <param name="ContinuedAt">When it was brought back; null while it runs in the cloud.</param>
 /// <param name="ProjectId">The project of the session, or null.</param>
+/// <param name="InTerminal">Whether the return in progress waits on the user, who brings it back in a terminal.</param>
 public sealed record CloudSessionDetails(string Id, string? Url, string? Title, string? Task, string? Branch, DateTimeOffset? StartedAt, string? Note,
-    IReadOnlyList<SessionCloudMessage> Sent, bool Continuing, DateTimeOffset? ContinuedAt, string? ProjectId = null);
+    IReadOnlyList<SessionCloudMessage> Sent, bool Continuing, DateTimeOffset? ContinuedAt, string? ProjectId = null, bool InTerminal = false);
 
 public sealed partial class SessionRuntimeService
 {
@@ -284,7 +285,7 @@ public sealed partial class SessionRuntimeService
         var local = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false);
         return local?.Cloud is { Id.Length: > 0 } cloud
             ? new CloudSessionDetails(cloud.Id, cloud.Url, cloud.Title, cloud.Task, cloud.Branch, cloud.StartedAt, cloud.Note, cloud.Sent ?? [],
-                cloud.Continuing is not null, cloud.ContinuedAt, session.ProjectRef)
+                cloud.Continuing is not null, cloud.ContinuedAt, session.ProjectRef, cloud.Continuing?.FromTerminal == true)
             : null;
     }
 

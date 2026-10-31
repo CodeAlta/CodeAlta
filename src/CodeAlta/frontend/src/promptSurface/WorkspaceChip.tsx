@@ -23,7 +23,9 @@ export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshK
   /** The git worktree the session works in, as the session records it; null for the folder of the project. */
   worktree?: Readonly<{ path: string; name: string; missing: boolean }> | null;
   /** Before a session exists: where it will work, and how that is changed. */
-  place?: Readonly<{ value: WorkPlace; onChange: (place: WorkPlace) => void; onOpenSettings?: () => void; api?: WorkPlaceApi }>;
+  place?: Readonly<{ value: WorkPlace; onChange: (place: WorkPlace) => void; onOpenSettings?: () => void; api?: WorkPlaceApi;
+    /** Whether the session can run in the cloud. */
+    cloud?: boolean }>;
   onWorktreeGone?: () => void;
   /** Opens the changes of the folder; without it the counts are only shown. */
   onShowChanges?: () => void;
@@ -58,8 +60,8 @@ export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshK
     : view ? { icon: "branch" as const, name: view.branch, label: view.branch, title: branchTitle! }
     : null;
   // Before a session exists, where it will work is a part of its own: a worktree needs a repository, and one that was chosen stays shown.
-  const workPlace = place && epoch && (view || place.value.worktree) && <WorkPlaceChoice chip epoch={epoch} projectId={project.id} branch={view?.branch ?? null}
-    place={place.value} onPlace={place.onChange} onOpenSettings={place.onOpenSettings} api={place.api} />;
+  const workPlace = place && epoch && (view || place.value.worktree || place.value.cloud) && <WorkPlaceChoice chip epoch={epoch} projectId={project.id} branch={view?.branch ?? null}
+    place={place.value} onPlace={place.onChange} onOpenSettings={place.onOpenSettings} api={place.api} cloud={place.cloud} />;
   const branchLabel = view && <><AppIcon name="branch" size={14} /><span>{view.branch}</span><AppIcon name="chevronDown" size={13} /></>;
   const popover = <div className="workspace-popover" role="group" aria-label={t("Workspace")}>
     <header><AppIcon name="folder" size={16} /><strong>{t("Workspace")}</strong></header>

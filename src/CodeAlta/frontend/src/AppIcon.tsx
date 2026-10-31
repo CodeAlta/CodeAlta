@@ -151,6 +151,7 @@ import {
   AppWindow,
   PictureInPicture2,
   Workflow,
+  Cloud,
 } from "lucide-react";
 
 const icons = {
@@ -278,6 +279,7 @@ const icons = {
   rewind: Undo2,
   worktree: Trees,
   remote: RadioTower,
+  cloud: Cloud,
   smartphone: Smartphone,
   themeDark: Moon,
   themeLight: Sun,
