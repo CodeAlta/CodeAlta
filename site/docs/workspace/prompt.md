@@ -152,6 +152,8 @@ A Claude Code session can be followed and driven from claude.ai or the Claude ap
 
 While it is on, a prompt sent from claude.ai runs as yours, a permission request is asked on both sides (the first answer wins), and stopping there stops the session; questions of the agent are asked in CodeAlta only. If Claude Code stops, your next prompt or **Try again** connects again.
 
+To have Claude Code run a session on Anthropic's machines rather than on this computer, see [Run in the cloud](../sessions/claude-code.md#run-in-the-cloud).
+
 Remote Control needs Claude Code signed in with your claude.ai account, not an API key. Closing CodeAlta ends it, and the session stays offline in claude.ai until you archive it there. **Settings > General > Startup and closing** can turn it back on at startup.
 
 ## Timeline

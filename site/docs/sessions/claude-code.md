@@ -9,7 +9,8 @@ A session of [Claude Code](../model-providers/setup.md#claude-code) is a convers
 - it lists the conversations started in VS Code or a terminal, and continues them;
 - it asks before it continues a conversation that another program has open;
 - it adds to a session the turns made in the other program;
-- it opens its sessions in VS Code or a terminal in one click.
+- it opens its sessions in VS Code or a terminal in one click;
+- it [runs a session in the cloud](#run-in-the-cloud), on Anthropic's machines, and [brings it back](#continue-a-cloud-session-here).
 
 For Remote Control from claude.ai or the Claude app, see [Remote Control](../workspace/prompt.md#remote-control).
 
@@ -89,6 +90,52 @@ When you open a Claude Code session in CodeAlta Desktop, and before each prompt,
 - They are not turns of CodeAlta: [Statistics](../plugins/statistics.md) do not count them or their cost.
 - They are added once the session is idle: not while it works, has queued prompts, waits for an answer, has background tasks of Claude Code or has Remote Control on, nor while the other program is in the middle of a turn.
 - If the conversation was rewound or resumed at an earlier point in the other program, the timeline says "This conversation was changed outside CodeAlta in a way it cannot follow; the model has the full conversation." Claude Code still has the whole conversation; only the timeline misses the change.
+
+## Run in the cloud
+
+Claude Code can run a session on Anthropic's machines instead of this computer. It goes on while the computer sleeps, and you follow it on claude.ai or in the Claude app. It needs Claude Code signed in with a claude.ai account (Pro, Max, Team or Enterprise), not an API key, and it counts against your Claude plan.
+
+1. Open a new session in a project that is a git repository.
+2. In the **Workspace** chip above the prompt, click **Project folder** and choose **Cloud**. **New cloud session…** in the menu of the project, or `/new_cloud_session`, does the same.
+3. Describe the task, and click **Send to the cloud**.
+
+<figure class="alta-figure my-4" style="max-width: 44rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-cloud-new.webp" alt="A new session of a project with Cloud chosen in the Workspace chip: the welcome lists the account, the branch and what stays on this computer, the account chip shows Claude Code, and the send button reads Send to the cloud" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A new session that runs in the cloud: <strong>Cloud</strong> in the <strong>Workspace</strong> chip, and what Claude Code starts from.</figcaption>
+</figure>
+
+- **Cloud** is offered when the space has a Claude Code provider. Choosing it moves the prompt to a Claude Code account: the one last used for the cloud, else the first one. The chip of the prompt then lists only the Claude Code accounts, since the cloud session picks its own model; **Another provider: work on this computer** goes back to the project folder.
+- Under the welcome, lines say what the cloud session starts from: the account, the branch, commits that are not on GitHub, and files with changes that are not committed. Those stay here, unless Claude Code uploads the folder with them.
+- Claude Code starts the cloud session in a terminal of the window. Its tab opens only when Claude Code asks something, such as whether it trusts the folder: answer there. **Stop** ends Claude Code.
+- If the start fails, the prompt keeps its text, and Claude Code's own words are shown, with **Show the terminal**.
+
+The session is listed with a cloud mark. Its tab shows a card in place of a conversation:
+
+- its title, when and from which branch it started, and its account;
+- **Open on claude.ai**, and **Phone**: a QR code of its link, for the Claude app;
+- the task and the messages you sent.
+
+<figure class="alta-figure my-4" style="max-width: 40rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-cloud-session.webp" alt="The tab of a session in the cloud: a card with In the cloud and its title, Open on claude.ai, Phone and Continue here, then the task it started with" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A session in the cloud: its card, and the task it started with.</figcaption>
+</figure>
+
+The prompt under the card sends a message to the cloud session, and Claude answers on claude.ai and in the Claude app. CodeAlta does not read the cloud session: it runs Claude Code's documented commands, and shows only what you sent until you [continue it here](#continue-a-cloud-session-here).
+
+- Deleting the session in CodeAlta leaves the cloud session on claude.ai: archive or delete it there.
+- CodeAlta TUI lists such a session, and refuses its prompts with the reason.
+
+## Continue a cloud session here
+
+**Continue here…**, in the card, in the menu of the session or with `/continue_here`, brings a cloud session to this computer. Claude Code brings back the whole conversation and checks out the branch the cloud session worked on.
+
+- **Where**: a new [worktree](../worktrees.md), or the project folder, which switches to that branch. The project folder is not offered while it has changes that are not committed.
+- The conversation then appears in the same session, each prompt marked **in the cloud**, and the card becomes one line, **Started in the cloud**. The next prompt runs on this computer.
+- The cloud session stays on claude.ai.
+- The branch comes back only when the cloud session could push it, to the repository's GitHub remote. For a repository that is not on GitHub, the conversation comes back without the changes made in the cloud.
+- If Claude Code refuses, for a session of another repository or a branch it cannot fetch, the dialog shows its words and offers **Try in a terminal**. A terminal tab then runs `claude --teleport`: answer Claude Code there and exit it, then click **Bring it into this session** in the card.
+
+**Bring a cloud session here…**, in the menu of a project or with `/bring_cloud_session`, does the same for a session started on claude.ai or in the Claude app: paste its link.
 
 ## Open in VS Code
 

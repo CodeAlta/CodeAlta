@@ -50,7 +50,7 @@ test("the readiness says the account, the branch, what is not on GitHub and what
   assert.deepEqual(readinessLines(readiness({ unpushed: 1, changed: 1 }), "x").map(line => line.key).slice(2, 4),
     ["1 commit is not on GitHub: the cloud session starts without it.", "1 file has changes that are not committed: they stay here, unless Claude Code uploads the folder with them."]);
   assert.equal(readinessLines(readiness({ unpushed: null }), "x")[2].key, "The branch {branch} is not on GitHub: the cloud session may start from another branch.");
-  assert.equal(readinessLines(readiness({ gitHub: false, unpushed: 4 }), "x")[2].key, "The repository is not on GitHub: Claude Code uploads it to start the cloud session.",
+  assert.equal(readinessLines(readiness({ gitHub: false, unpushed: 4 }), "x")[2].key, "The repository is not on GitHub: Claude Code uploads it, and the changes made in the cloud come back as the conversation only, not as a branch.",
     "without GitHub the folder is uploaded: no commit is left behind");
   const none = readinessLines(readiness({ repository: false, branch: null, account: "unknown" }), "x").map(line => line.key);
   assert.deepEqual(none, ["Claude Code checks the sign-in of {provider} when the session starts.",

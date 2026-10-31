@@ -4136,7 +4136,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const project = session.projectId ? snapshot?.projects.find(value => value.id === session.projectId && !value.archived) : undefined;
     if (project) showChanges(project, null, sessionCheckout(session), "changes");
   }
-  const sessionReviewEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && session.projectId && !session.archived
+  // A session in the cloud has made no change here to review.
+  const sessionReviewEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && session.projectId && !session.archived && !inCloud(session)
     ? [{ key: "review-changes", label: t("Review changes"), icon: "chat" as const, onSelect: () => reviewSessionChanges(session) }] : [];
   const sessionLineageEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
     const parent = session.parentSessionId ? catalog.current?.sessions.find(value => value.id === session.parentSessionId && !value.archived) : undefined;
@@ -5789,6 +5790,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators} folder={selectedProject?.path ?? null}
                   localImages={owned && snapshot?.configured && currentProjectWritable() && !draftCloud ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
+                  placeholder={draftCloud ? t("Describe the task for the cloud session…") : undefined}
                   reason={t("Draft kept locally. Start a session to send it.")}
                   localDraft={{ read: () => localDrafts.peek(draftScope)?.text ?? "", subscribe: localDrafts.subscribe, edit: editLocalDraft,
                     options: draftCloud ? <CloudAccountChoice accounts={cloudAccounts} value={draftChoices.value.providerKey || null} disabled={!!cloudStart && !cloudStart.outcome}
@@ -5981,9 +5983,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       const project = snapshot?.projects.find(candidate => candidate.id === cloudBring.projectId && !candidate.archived);
       if (!project) return null;
       return <BringHereDialog epoch={status.hostEpoch} project={project} accounts={cloudAccounts} initialLink={cloudBring.link} spaceId={spacesState.available ? spaceId : null}
+        initialAccount={(() => { try { return localStorage.getItem(cloudProviderKey); } catch { return null; } })()}
         onClose={() => setCloudBring(null)}
-        onBrought={(id) => {
+        onBrought={(id, _existing, account) => {
           setCloudBring(null);
+          try { localStorage.setItem(cloudProviderKey, account); } catch { /* The first account is offered next time. */ }
           void refreshProjects(creationRefresh.current.signal).then(fresh => {
             const row = fresh?.sessions.find(session => session.id === id);
             if (!row || !creationAlive.current) return;

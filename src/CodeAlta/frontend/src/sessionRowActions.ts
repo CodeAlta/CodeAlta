@@ -1,4 +1,5 @@
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
+import { inCloud } from "./cloudSessions/cloudSessions";
 
 export type SessionMenuTarget = { id: string; projectId: string | null; hostEpoch: string | null };
 export type SessionAction = "open" | "rename" | "fork" | "delete" | "archive" | "remote-control" | "move" | "space"
@@ -23,7 +24,10 @@ export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTa
   // session too. Copying the command that resumes it asks the host to close that process as well, which it refuses
   // while the session works, and copies all the same: the session of an owned window is enough.
   const read = open && exactScope && owned && !!hostEpoch;
-  return { open, rename: mutate, fork: mutate, delete: mutate, archive: mutate, "remote-control": mutate, move: mutate && selectedProjectId !== null, space: mutate,
+  // A session that runs in the cloud has no conversation here yet: what acts on it (a fork, Remote Control, a move of
+  // its folder) waits until it is continued here.
+  const local = mutate && !inCloud(row);
+  return { open, rename: mutate, fork: local, delete: mutate, archive: mutate, "remote-control": local, move: local && selectedProjectId !== null, space: mutate,
     "open-vs-code": mutate, "copy-resume-command": read, "run-in-terminal": mutate };
 }
 
@@ -34,7 +38,7 @@ export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTa
 export function sessionMoveAccess(row: WorkspaceSession, project: WorkspaceProject | undefined, hostEpoch: string | null,
   owned: boolean, canMutate: boolean, busy: boolean, uncertain: boolean) {
   return !!project && !project.archived && row.scopeKind === "project" && row.projectId === project.id && row.workspacePath === project.path
-    && owned && !!hostEpoch && canMutate && !busy && !uncertain;
+    && owned && !!hostEpoch && canMutate && !busy && !uncertain && !inCloud(row);
 }
 
 export function isSessionContextKey(key: string, shiftKey: boolean, composing: boolean, editing: boolean) {

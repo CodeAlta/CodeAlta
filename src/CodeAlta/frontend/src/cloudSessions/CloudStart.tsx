@@ -106,16 +106,18 @@ export function CloudAccountChoice({ accounts, value, disabled = false, onChange
  * Bring a cloud session here: one started on claude.ai or in the Claude app, from its link. It is recorded as a
  * session of the project in the cloud, then brought to this computer.
  */
-export function BringHereDialog({ epoch, project, accounts, initialLink = "", spaceId, api = cloudSessionsHost, onBrought, onClose }: {
+export function BringHereDialog({ epoch, project, accounts, initialLink = "", initialAccount = null, spaceId, api = cloudSessionsHost, onBrought, onClose }: {
   epoch: string; project: Readonly<{ id: string; name: string }>; accounts: readonly CloudAccount[]; initialLink?: string; spaceId: string | null;
+  /** The account chosen first: the one last used for the cloud, when the space still has it. */
+  initialAccount?: string | null;
   api?: Pick<CloudSessionsApi, "bringHere">;
   /** The session it was recorded as, to open it and continue it here. */
-  onBrought: (sessionId: string, existing: boolean) => void;
+  onBrought: (sessionId: string, existing: boolean, account: string) => void;
   onClose: () => void;
 }) {
   const { t } = useShellLanguage();
   const [link, setLink] = useState(initialLink);
-  const [account, setAccount] = useState(accounts[0]?.id ?? "");
+  const [account, setAccount] = useState(accounts.find(value => value.id === initialAccount)?.id ?? accounts[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const valid = pastedCloudSession(link) !== null;
@@ -123,7 +125,7 @@ export function BringHereDialog({ epoch, project, accounts, initialLink = "", sp
     if (!valid || !account || busy) return;
     setBusy(true); setError(null);
     void api.bringHere({ expectedEpoch: epoch, projectId: project.id, providerKey: account, spaceId, link: link.trim() }, { timeoutMilliseconds: 30_000 }).then(reply => {
-      if ((reply.status === "created" || reply.status === "existing") && reply.sessionId) { onBrought(reply.sessionId, reply.status === "existing"); return; }
+      if ((reply.status === "created" || reply.status === "existing") && reply.sessionId) { onBrought(reply.sessionId, reply.status === "existing", account); return; }
       const failure = reply.status === "invalid_link" ? null : startFailure(reply.status, reply.message);
       setError(failure ? [t(failure.key), failure.said].filter(Boolean).join(" ") : t("This is not the link of a cloud session of claude.ai/code."));
     }, () => setError(t("The request did not reach CodeAlta. Try again."))).finally(() => setBusy(false));

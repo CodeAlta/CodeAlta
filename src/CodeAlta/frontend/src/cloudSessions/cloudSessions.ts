@@ -68,7 +68,7 @@ export function readinessLines(readiness: CloudReadinessResponse, provider: stri
     return [...lines, usage];
   }
   if (readiness.branch) lines.push({ tone: "ok", key: "Starts from the branch {branch}", parameters: { branch: readiness.branch } });
-  if (!readiness.gitHub) lines.push({ tone: "info", key: "The repository is not on GitHub: Claude Code uploads it to start the cloud session." });
+  if (!readiness.gitHub) lines.push({ tone: "info", key: "The repository is not on GitHub: Claude Code uploads it, and the changes made in the cloud come back as the conversation only, not as a branch." });
   else if (readiness.unpushed === null && readiness.branch)
     lines.push({ tone: "warning", key: "The branch {branch} is not on GitHub: the cloud session may start from another branch.", parameters: { branch: readiness.branch } });
   else if (readiness.unpushed === 1) lines.push({ tone: "warning", key: "1 commit is not on GitHub: the cloud session starts without it." });

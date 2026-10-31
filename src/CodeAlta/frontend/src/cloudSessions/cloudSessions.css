@@ -82,7 +82,8 @@ button.project-context-place[data-cloud] { border-color: color-mix(in srgb, var(
 .cloud-continue-dialog, .cloud-bring-dialog { width: min(560px, calc(100vw - 32px)); }
 .cloud-continue-dialog p, .cloud-bring-dialog p { line-height: 19px; }
 .cloud-continue-place { margin-top: 10px; }
-.cloud-continue-choice { display: grid; gap: 1px; }
+/* Inline, beside the indicator of its radio, as Blueprint lays out the label of a control. */
+.cloud-continue-choice { display: inline-grid; gap: 1px; vertical-align: top; }
 .cloud-continue-choice small { color: var(--muted); overflow-wrap: anywhere; }
 .cloud-continue-progress { display: flex; align-items: center; gap: 8px; }
 .cloud-continue-error { color: var(--red); white-space: pre-wrap; overflow-wrap: anywhere; }

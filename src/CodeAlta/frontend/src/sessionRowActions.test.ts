@@ -24,6 +24,15 @@ test("unselected row must establish exact selection and project scope before con
   assert.equal(access(row, target, "s", "p", project, "next").open, false);
 });
 
+test("a session in the cloud is renamed, archived and deleted, but neither forked, moved nor given Remote Control until it is continued here", () => {
+  const cloud = { id: "session_01QK5u8xRwDmhdvgs5BDTzPp", url: null, title: null, continued: false, continuing: false };
+  const inCloud = access({ ...row, cloud });
+  assert.deepEqual([inCloud.rename, inCloud.archive, inCloud.delete, inCloud.space, inCloud.fork, inCloud.move, inCloud["remote-control"]],
+    [true, true, true, true, false, false, false]);
+  const back = access({ ...row, cloud: { ...cloud, continued: true } });
+  assert.deepEqual([back.fork, back.move, back["remote-control"]], [true, true, true]);
+});
+
 test("project/global headers are exact; unmatched, archived, stale, read-only and locked rows cannot mutate", () => {
   const global = { ...row, scopeKind: "global", projectId: null };
   const globalTarget = { ...target, projectId: null };

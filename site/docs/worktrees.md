@@ -21,7 +21,7 @@ You create and remove worktrees in CodeAlta Desktop. A session that works in one
 4. Write your prompt. CodeAlta starts making the worktree as soon as you type.
 5. Send it: the session starts once the worktree is ready.
 
-The form opened by **+** on the row of a project has the same choice: see [Starting and reopening work](sessions/readme.md#starting-and-reopening-work).
+The form opened by **+** on the row of a project has the same choice: see [Starting and reopening work](sessions/readme.md#starting-and-reopening-work). The third choice, **Cloud**, has Claude Code run the session on Anthropic's machines: see [Run in the cloud](sessions/claude-code.md#run-in-the-cloud).
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
   <img src="{{site.basepath}}/img/alta-desktop-worktree-new.webp" alt="The Workspace chip above the prompt of a new session, with its choice open: Project folder or New worktree, and the branch to start from" loading="lazy">

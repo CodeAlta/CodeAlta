@@ -169,6 +169,14 @@ conditions Anthropic sets for running Claude Code from another product. So:
   written elsewhere are added to the journal (`ClaudeCodeExternalTurns`, under `external:` runs that statistics do not
   count). `ClaudeCodeTranscriptReader` ports the SDK's chain rules; it skips what it does not understand and degrades
   to a notice or a new conversation with the rendering, never to a silent loss.
+- **Cloud sessions go through documented commands only.** `claude --cloud <task>` starts one, in a pseudo-terminal the
+  desktop gives (`IAgentInteractiveTerminal`), since the CLI refuses to start one without a terminal; `claude -p --cloud
+  <id>` sends a message; `claude -p /cost --teleport <id> --session-id <uuid>` brings it back, a local command that
+  makes no model call. CodeAlta never calls the cloud service, reads the CLI's credentials or uses its internal control
+  requests, so it knows only the cloud sessions it started or was given a link to. A session in the cloud has no
+  turns, only its cloud state, and the runtime refuses to attach it to its provider (`in_cloud`). Bringing it back is
+  reserved in the journal first, then the teleported transcript is read by the catch-up reader (origin `Cloud`, cut
+  at Claude Code's continuation entry) and written in one append.
 - **Fork and rewind** start the CLI on the conversation of the point (`--resume`, `--fork-session`,
   `--resume-session-at <entry>`), so its prompt cache is still read.
 - **The stream is open-ended**: unknown lines and messages are skipped, unhandled control requests answered with an
