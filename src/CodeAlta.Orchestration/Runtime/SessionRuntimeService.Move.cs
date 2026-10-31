@@ -156,6 +156,9 @@ public sealed partial class SessionRuntimeService
             || entry.BackgroundTasks.Any(static task => task.Outcome is null))) return "session_in_use";
         if ((await Permissions.ListAsync().ConfigureAwait(false)).Any(permission => permission.Handle.SessionId == sessionId)
             || (await Permissions.ListOwnedUserInputsAsync(sessionId, token).ConfigureAwait(false)).Entries.Count != 0) return "interaction_pending";
+        // A session in the cloud is brought back where it started from: it does not move before that.
+        if (_cloudWork.ContainsKey(sessionId) || await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false) is { } moving
+            && await RunsInCloudAsync(moving, token).ConfigureAwait(false)) return "session_in_use";
         return null;
     }
 

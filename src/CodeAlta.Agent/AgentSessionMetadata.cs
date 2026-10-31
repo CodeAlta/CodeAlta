@@ -102,6 +102,12 @@ public sealed record AgentSessionViewStateMetadata(
     /// record of its journal says; <see langword="null"/> when it is not known, for a state cached before it was kept.
     /// </summary>
     public int? QueuedPromptCount { get; init; }
+
+    /// <summary>
+    /// Gets what the session holds of the cloud session it runs as, or ran as (<see cref="AgentSessionCloud"/>);
+    /// <see langword="null"/> for a session that never ran in the cloud.
+    /// </summary>
+    public AgentSessionCloud? Cloud { get; init; }
 }
 
 /// <summary>

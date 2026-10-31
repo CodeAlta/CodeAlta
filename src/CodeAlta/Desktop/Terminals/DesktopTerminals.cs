@@ -16,6 +16,12 @@ namespace CodeAlta.Desktop.Terminals;
 internal sealed record TerminalRequest(string? ProjectId, string? SessionId, string Folder, string? Profile, string? Title, bool Agent, int Columns = 0, int Rows = 0,
     bool Integration = true);
 
+/// <summary>A program a terminal runs in the place of a command interpreter, as it is.</summary>
+/// <param name="FileName">The executable.</param>
+/// <param name="Arguments">Its arguments, one per element.</param>
+/// <param name="Environment">Variables set over the environment of a terminal; a <see langword="null"/> value removes one.</param>
+internal sealed record TerminalProgram(string FileName, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string?> Environment);
+
 /// <summary>What a window is told about the terminals.</summary>
 internal enum TerminalNewsKind
 {
@@ -158,6 +164,56 @@ internal sealed class DesktopTerminals
             return ("failed", null);
         }
         var terminal = new DesktopTerminal(description, program, Changed, _time);
+        lock (_gate)
+        {
+            if (_closed)
+            {
+                terminal.Dispose();
+                return ("closed", null);
+            }
+            _terminals.Add(terminal);
+        }
+        terminal.Start();
+        Tell(list: true);
+        return ("ok", terminal);
+    }
+
+    /// <summary>
+    /// Creates a terminal that runs a program as it is, in the place of a command interpreter: a program that refuses to
+    /// run without a terminal (<c>claude --cloud</c>). The terminal stays once the program ended, to be read, until it
+    /// is closed.
+    /// </summary>
+    /// <returns>As <see cref="Create(TerminalRequest)"/>.</returns>
+    public (string Status, DesktopTerminal? Terminal) Create(TerminalRequest request, TerminalProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(program);
+        lock (_gate)
+        {
+            if (_closed) return ("closed", null);
+            if (_terminals.Count >= MaximumTerminals) return ("limit", null);
+        }
+        if (!Path.IsPathFullyQualified(request.Folder) || !Directory.Exists(request.Folder)) return ("no_folder", null);
+        var id = Guid.CreateVersion7(_time.GetUtcNow()).ToString("D");
+        var profile = new TerminalProfile("program", Path.GetFileNameWithoutExtension(program.FileName), program.FileName, program.Arguments, TerminalShellKind.Other);
+        var description = new TerminalDescription(id, request.ProjectId, request.SessionId, Path.GetFullPath(request.Folder), profile, request.Title,
+            Keep: true, request.Agent, request.Columns > 0 ? request.Columns : DefaultColumns, request.Rows > 0 ? request.Rows : DefaultRows);
+        PseudoTerminal started;
+        try
+        {
+            var environment = TerminalEnvironment.Create(id, _version);
+            foreach (var (name, value) in program.Environment)
+            {
+                if (value is null) environment.Remove(name);
+                else environment[name] = value;
+            }
+            started = _start(new PseudoTerminalStart(program.FileName, program.Arguments, description.Folder, environment, description.Columns, description.Rows));
+        }
+        catch (Exception exception) when (exception is PseudoTerminalException or PlatformNotSupportedException)
+        {
+            return ("failed", null);
+        }
+        var terminal = new DesktopTerminal(description, started, Changed, _time);
         lock (_gate)
         {
             if (_closed)

@@ -107,6 +107,12 @@ public sealed record ModelProviderDescriptor
     public bool SupportsRemoteControl { get; init; }
 
     /// <summary>
+    /// Gets whether a session of this provider can run in the cloud (Claude Code's cloud sessions): started there,
+    /// sent messages there, and brought back to this computer.
+    /// </summary>
+    public bool SupportsCloudSessions { get; init; }
+
+    /// <summary>
     /// Gets whether the provider keeps the conversation of a session where other programs continue it (the transcript of
     /// Claude Code, which VS Code and the CLI in a terminal write too): the turns made there are then added to the
     /// session. The provider of a session without it is never asked for them.

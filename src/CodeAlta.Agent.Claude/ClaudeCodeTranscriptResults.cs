@@ -171,6 +171,19 @@ internal sealed record ClaudeCodeTranscriptReadResult(
 
     /// <summary>The assistant messages of all the turns read.</summary>
     public int Assistants => Turns.Sum(static turn => turn.Assistants);
+
+    /// <summary>
+    /// For a read of a conversation brought from the cloud (<see cref="ClaudeCodeTranscriptReader.ReadTeleported"/>):
+    /// whether the entry Claude Code writes where the conversation goes on on this computer was found, the turns read
+    /// being those before it.
+    /// </summary>
+    public bool ContinuationFound { get; init; }
+
+    /// <summary>
+    /// For a read of a conversation brought from the cloud: the last user or assistant entry before the continuation
+    /// entry, from which what was done on this computer afterwards is followed; null when there is none.
+    /// </summary>
+    public string? ContinuationParent { get; init; }
 }
 
 /// <summary>

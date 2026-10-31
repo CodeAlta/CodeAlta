@@ -485,6 +485,7 @@ public sealed partial class SessionRuntimeService
             AgentExternalTurnOrigin.VsCode => "vscode",
             AgentExternalTurnOrigin.Terminal => "terminal",
             AgentExternalTurnOrigin.OtherApplication => "other",
+            AgentExternalTurnOrigin.Cloud => "cloud",
             _ => "unknown",
         };
 

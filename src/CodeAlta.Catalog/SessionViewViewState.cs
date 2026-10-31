@@ -394,6 +394,13 @@ public sealed class SessionViewLocalState
     public List<SessionViewQueuedPrompt> QueuedPrompts { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets what the session holds of the cloud session it runs as (a cloud session of Claude Code), or ran as
+    /// before it was brought back to this computer; <see langword="null"/> for a session that never ran in the cloud.
+    /// </summary>
+    [JsonPropertyName("cloud")]
+    public SessionCloudState? Cloud { get; set; }
+
+    /// <summary>
     /// Tells whether the queue of the session holds a prompt that waits or is being submitted. A prompt that was
     /// submitted, failed or was canceled is a record of work that ended.
     /// </summary>
@@ -443,6 +450,93 @@ public sealed class SessionViewLocalState
         }
     }
 }
+
+/// <summary>
+/// What a session holds of the cloud session it runs as: the cloud session itself, what was sent to it from CodeAlta,
+/// and its return to this computer. While it runs in the cloud the session has no turn: the turns made there are added
+/// when it is brought back.
+/// </summary>
+public sealed class SessionCloudState
+{
+    /// <summary>The most messages sent to the cloud session a state keeps, the last ones.</summary>
+    public const int MaxSentMessages = 50;
+
+    /// <summary>Gets or sets the identifier of the cloud session (<c>session_…</c>).</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets its address on claude.ai.</summary>
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    /// <summary>Gets or sets its title, as the provider gave it.</summary>
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    /// <summary>Gets or sets what it was started to do: its first prompt.</summary>
+    [JsonPropertyName("task")]
+    public string? Task { get; set; }
+
+    /// <summary>Gets or sets the branch of the project folder when it started, or null when it was not known.</summary>
+    [JsonPropertyName("branch")]
+    public string? Branch { get; set; }
+
+    /// <summary>Gets or sets when it started.</summary>
+    [JsonPropertyName("started_at")]
+    public DateTimeOffset? StartedAt { get; set; }
+
+    /// <summary>Gets or sets what the provider said of where it started (a branch that is not on GitHub), or null.</summary>
+    [JsonPropertyName("note")]
+    public string? Note { get; set; }
+
+    /// <summary>Gets or sets the messages sent to it from CodeAlta after its task, the last <see cref="MaxSentMessages"/>.</summary>
+    [JsonPropertyName("sent")]
+    public List<SessionCloudMessage>? Sent { get; set; }
+
+    /// <summary>Gets or sets the return to this computer in progress, or null.</summary>
+    [JsonPropertyName("continuing")]
+    public SessionCloudContinuing? Continuing { get; set; }
+
+    /// <summary>Gets or sets when it was brought back to this computer; null while it runs in the cloud.</summary>
+    [JsonPropertyName("continued_at")]
+    public DateTimeOffset? ContinuedAt { get; set; }
+
+    /// <summary>Gets what the listings show of it.</summary>
+    public CodeAlta.Agent.AgentSessionCloud ToListing() => new(Id, Url, Title, ContinuedAt is not null, Continuing is not null);
+
+    /// <summary>Gets a copy of this state.</summary>
+    public SessionCloudState Copy() => new()
+    {
+        Id = Id,
+        Url = Url,
+        Title = Title,
+        Task = Task,
+        Branch = Branch,
+        StartedAt = StartedAt,
+        Note = Note,
+        Sent = Sent is null ? null : [.. Sent],
+        Continuing = Continuing,
+        ContinuedAt = ContinuedAt,
+    };
+}
+
+/// <summary>A message sent to a cloud session from CodeAlta.</summary>
+/// <param name="Text">The message.</param>
+/// <param name="At">When it was sent.</param>
+public sealed record SessionCloudMessage(
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("at")] DateTimeOffset At);
+
+/// <summary>A return of a cloud session to this computer in progress: what a restart resumes.</summary>
+/// <param name="ConversationId">The conversation of the provider it is brought into.</param>
+/// <param name="Folder">The folder it is brought into.</param>
+/// <param name="Worktree">Whether that folder is a worktree made for it.</param>
+/// <param name="FromTerminal">Whether the user brings it back in a terminal.</param>
+public sealed record SessionCloudContinuing(
+    [property: JsonPropertyName("conversation_id")] string ConversationId,
+    [property: JsonPropertyName("folder")] string Folder,
+    [property: JsonPropertyName("worktree")] bool Worktree = false,
+    [property: JsonPropertyName("from_terminal")] bool FromTerminal = false);
 
 /// <summary>
 /// Describes a durable headless prompt queue item for a session view.

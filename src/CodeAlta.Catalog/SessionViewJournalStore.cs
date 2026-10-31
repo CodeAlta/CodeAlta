@@ -709,6 +709,7 @@ public sealed partial class SessionViewJournalStore
             CreatedBy = state.CreatedBy,
             PromptProvenance = compactProvenance,
             QueuedPrompts = compactQueue,
+            Cloud = state.Cloud,
         };
     }
 
@@ -1107,6 +1108,7 @@ public sealed class SessionViewJournalForkOrigin
     UseStringEnumConverter = true)]
 [JsonSerializable(typeof(SessionViewJournalHeader))]
 [JsonSerializable(typeof(SessionViewLocalState))]
+[JsonSerializable(typeof(CodeAlta.Agent.AgentSessionCloud))]
 [JsonSerializable(typeof(SessionViewPreference))]
 [JsonSerializable(typeof(AltaActorProvenance))]
 [JsonSerializable(typeof(SessionViewQueuedPrompt))]

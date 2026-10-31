@@ -82,6 +82,7 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime,
             PermissionModes = ClaudeCodeModelProviderRuntimeOptions.PermissionModes,
             DefaultPermissionMode = string.IsNullOrWhiteSpace(options.PermissionMode) ? null : options.PermissionMode.Trim(),
             SupportsRemoteControl = true,
+            SupportsCloudSessions = true,
             SharesConversations = true,
         };
     }
@@ -150,7 +151,25 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime,
             StatusMessage = (inspection.AccountSummary is { Length: > 0 } account
                 ? $"Claude Code at {inspection.ExecutablePath} ({account})."
                 : $"Claude Code at {inspection.ExecutablePath}.") + (inspection.VersionWarning is { } warning ? " " + warning : ""),
+            Capabilities = CloudCapability(inspection.AccountSummary) is { } cloud ? [cloud] : [],
         };
+    }
+
+    /// <summary>The identifier of the capability that says whether the account of the provider can run cloud sessions.</summary>
+    public const string CloudSessionsCapability = "cloud-sessions";
+
+    // Cloud sessions run on a claude.ai plan (Pro, Max, Team, Enterprise), not on an API key or a cloud platform. The
+    // inspection names the plan, or how the CLI is signed in otherwise; nothing is said when it names nothing.
+    internal static ModelProviderCapability? CloudCapability(string? accountSummary)
+    {
+        if (string.IsNullOrWhiteSpace(accountSummary)) return null;
+        var plan = accountSummary.Trim().ToLowerInvariant();
+        var subscription = plan is "pro" or "max" or "team" or "enterprise" || plan.StartsWith("claude_", StringComparison.Ordinal)
+            || plan.Contains("max", StringComparison.Ordinal) || plan.Contains("pro", StringComparison.Ordinal);
+        return subscription
+            ? new ModelProviderCapability(CloudSessionsCapability, "Cloud sessions", true, "Sessions can run in the cloud, on the claude.ai plan of this account.")
+            : new ModelProviderCapability(CloudSessionsCapability, "Cloud sessions", false,
+                "Cloud sessions need Claude Code signed in with a claude.ai account (Pro, Max, Team or Enterprise), not an API key or a cloud platform.");
     }
 
     /// <inheritdoc />

@@ -609,6 +609,23 @@ public sealed partial class AgentHub : IAsyncDisposable
     }
 
     /// <summary>
+    /// Gets the cloud sessions of a provider that can run sessions in the cloud, with the descriptor of its runtime.
+    /// Nothing of the provider is started: the runtime the registry keeps is asked.
+    /// </summary>
+    /// <returns>Null when the provider cannot run cloud sessions or is not registered.</returns>
+    internal async Task<(IAgentProviderCloudSessions Cloud, ModelProviderRuntimeDescriptor Runtime)?> GetCloudSessionsAsync(ModelProviderId providerId,
+        CancellationToken cancellationToken)
+    {
+        if (!_modelProviderRegistry.TryGetProvider(providerId, out var descriptor) || !descriptor.SupportsCloudSessions) return null;
+        IModelProviderRuntime runtime;
+        try { runtime = await _modelProviderRegistry.GetOrCreateRuntimeAsync(providerId, cancellationToken).ConfigureAwait(false); }
+        catch (KeyNotFoundException) { return null; }
+        return runtime is IAgentModelProviderRuntime agent && agent.CreateProviderRegistration() is { TurnExecutor: IAgentProviderCloudSessions cloud } registration
+            ? (cloud, registration.Provider)
+            : null;
+    }
+
+    /// <summary>
     /// Reads the turns made outside CodeAlta on the conversation the provider of a session keeps of it, when the provider
     /// keeps such a copy that other programs continue. Nothing of the provider is started: the runtime the registry
     /// keeps is asked, and only reads.

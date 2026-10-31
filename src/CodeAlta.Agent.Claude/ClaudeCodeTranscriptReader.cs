@@ -30,6 +30,45 @@ internal static partial class ClaudeCodeTranscriptReader
         => ReadAfter(transcriptPath, null, null, cancellationToken);
 
     /// <summary>
+    /// Reads a conversation Claude Code brought from the cloud (<c>--teleport</c>): the turns made in the cloud, which
+    /// are the entries before the one it writes where the conversation goes on on this computer ("This session is being
+    /// continued from another machine…"). What follows that entry (a local command, the turns of a terminal) is left
+    /// out of the turns; the leaf and the position are those of the whole file.
+    /// </summary>
+    /// <param name="transcriptPath">The path of the <c>&lt;id&gt;.jsonl</c> file.</param>
+    /// <param name="cancellationToken">Stops the read.</param>
+    /// <returns>The turns made in the cloud, or <see cref="ClaudeCodeTranscriptReadStatus.Missing"/>.</returns>
+    /// <exception cref="ArgumentException"><paramref name="transcriptPath"/> is empty.</exception>
+    public static ClaudeCodeTranscriptReadResult ReadTeleported(string transcriptPath, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(transcriptPath);
+        var sessionId = Path.GetFileNameWithoutExtension(transcriptPath);
+        FileStream stream;
+        DateTime lastWriteTime;
+        try
+        {
+            stream = OpenShared(transcriptPath);
+            lastWriteTime = File.GetLastWriteTimeUtc(transcriptPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Missing(sessionId);
+        }
+
+        try
+        {
+            using (stream)
+            {
+                return ReadWhole(transcriptPath, stream, sessionId, null, stream.Length, lastWriteTime, HashFirstLine(stream), cancellationToken, teleported: true);
+            }
+        }
+        catch (IOException)
+        {
+            return Missing(sessionId);
+        }
+    }
+
+    /// <summary>
     /// Reads the turns written after an entry of the conversation, from where a previous read stopped when that is
     /// still valid. A read from the position gives the same result as a read of the whole file; when it cannot be
     /// sure to, it reads the whole file.
@@ -129,7 +168,8 @@ internal static partial class ClaudeCodeTranscriptReader
         long length,
         DateTime lastWriteTime,
         string firstLineHash,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool teleported = false)
     {
         var buffer = ReadRange(stream, 0, length);
         var scan = Scan(buffer, 0, cancellationToken);
@@ -138,6 +178,16 @@ internal static partial class ClaudeCodeTranscriptReader
         var (leaf, terminal) = FindLeaf(scan);
         var chain = leaf is null ? [] : WithHistoryBeforeCompactions(scan, WalkChain(scan, leaf));
         var entries = ReattachSiblings(scan, chain);
+
+        // The cut is made on the entries: the turns built from them hold no meta entry, the continuation entry included.
+        var continuationFound = false;
+        string? continuationParent = null;
+        if (teleported && entries.FindIndex(node => node.Type == "user" && node.IsMeta && IsContinuation(buffer, node)) is var cut and >= 0)
+        {
+            continuationFound = true;
+            continuationParent = entries.Take(cut).LastOrDefault(static node => node.Type is "user" or "assistant")?.Uuid;
+            entries = entries.GetRange(0, cut);
+        }
 
         var status = ClaudeCodeTranscriptReadStatus.Read;
         if (afterUuid is not null)
@@ -196,7 +246,29 @@ internal static partial class ClaudeCodeTranscriptReader
                 QuietTail(scan, leaf?.Uuid, terminal, null),
                 leaf?.MessageId,
                 lastLines),
-            FullRead: true);
+            FullRead: true)
+        {
+            ContinuationFound = continuationFound,
+            ContinuationParent = continuationParent,
+        };
+    }
+
+    // The entry Claude Code writes in a conversation it brought from another machine, where it goes on here.
+    private static bool IsContinuation(byte[] buffer, Node node)
+    {
+        using var document = TryParse(buffer, node.Start, node.Length);
+        if (document?.RootElement is not { ValueKind: JsonValueKind.Object } root || !ClaudeCodeJson.TryGetObject(root, "message", out var message) ||
+            !message.TryGetProperty("content", out var content))
+        {
+            return false;
+        }
+
+        var text = content.ValueKind == JsonValueKind.String
+            ? content.GetString()
+            : content.ValueKind == JsonValueKind.Array
+                ? string.Concat(content.EnumerateArray().Select(static block => block.ValueKind == JsonValueKind.Object ? ClaudeCodeJson.GetString(block, "text") : null))
+                : null;
+        return text is not null && text.Contains("continued from another machine", StringComparison.OrdinalIgnoreCase);
     }
 
     // Reads the lines written after the position. Returns null whenever the result could differ from the one of a read

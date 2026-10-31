@@ -895,6 +895,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         OwnedSessionCommandResult result;
         try
         {
+            // A session that runs in the cloud has no conversation here: nothing is prepared, nothing is attached.
+            if (await _runtime.IsSessionInCloudAsync(operation.SessionId).ConfigureAwait(false))
+                throw new SessionInCloudException(operation.SessionId);
             operation.PreparationInvocation.Launch(() => operation.Preparation = PrepareAsync(operation));
             if (await operation.PreparationInvocation.Outcome.ConfigureAwait(false) is { } preparationFailure) ExceptionDispatchInfo.Throw(preparationFailure);
             var prepared = await operation.Preparation!.ConfigureAwait(false);
@@ -972,6 +975,12 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             // Another process runs the session: nothing was sent.
             RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
             result = new(OwnedSessionCommandOutcome.Failed, Code: SessionRuntimeService.SessionInUseCode);
+        }
+        catch (Exception ex) when (SessionRuntimeService.FindInCloud(ex) is not null)
+        {
+            // The session runs in the cloud: nothing was sent, nothing was attached.
+            RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
+            result = new(OwnedSessionCommandOutcome.Failed, Code: SessionRuntimeService.InCloudCode);
         }
         catch (Exception ex)
         {

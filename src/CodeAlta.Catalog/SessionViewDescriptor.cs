@@ -196,6 +196,13 @@ public sealed class SessionViewDescriptor
     public CodeAlta.Agent.AgentSessionViewStateMetadata? CachedViewState { get; set; }
 
     /// <summary>
+    /// Gets or sets what the session holds of the cloud session it runs as, or ran as, as its last state says;
+    /// <see langword="null"/> for a session that never ran in the cloud. It is not part of the header of the journal.
+    /// </summary>
+    [JsonIgnore]
+    public CodeAlta.Agent.AgentSessionCloud? Cloud { get; set; }
+
+    /// <summary>
     /// Gets or sets the selected agent prompt identifier when known.
     /// </summary>
     [JsonPropertyName("agent_prompt_id")]

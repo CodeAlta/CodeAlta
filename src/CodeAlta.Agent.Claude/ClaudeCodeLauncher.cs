@@ -217,9 +217,39 @@ internal static class ClaudeCodeLauncher
 
         arguments.AddRange(options.ExtraArguments);
 
+        var environment = CreateEnvironment(options, key.Environment, withoutApiKey);
+
+        // A session of 200K: the CLI keeps a model of 1M tokens to it.
+        if (key.ContextSize == ClaudeCodeModelCatalog.StandardContextSize)
+        {
+            environment[DisableExtendedContextVariable] = "1";
+        }
+
+        // The CLI tells this side when a session is idle again, and names CodeAlta in its user agent.
+        environment["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"] = "1";
+        // A start the CLI refuses for a known reason (a conversation a background session runs, ...) ends with a result
+        // that names it, not with its error output alone.
+        environment[StartupFailureResultsVariable] = "1";
+        environment["CLAUDE_AGENT_SDK_CLIENT_APP"] = string.IsNullOrWhiteSpace(options.ClientApp) ? DefaultClientApp : options.ClientApp.Trim();
+
+        return new ClaudeCodeLaunch(executable, arguments, key.WorkingDirectory, environment);
+    }
+
+    /// <summary>
+    /// Creates the environment every process of the CLI of a provider is started with, over the inherited one: the
+    /// identity of the session, the variables of the Claude Code session CodeAlta may run in removed, the traces of
+    /// CodeAlta hidden, the API key removed when the user's login is used, the variables of the provider, and its
+    /// account folder. A <see langword="null" /> value removes an inherited variable.
+    /// </summary>
+    /// <param name="options">The options of the provider.</param>
+    /// <param name="sessionEnvironment">The environment of the session (its Git identity), or null.</param>
+    /// <param name="withoutApiKey">Whether the CLI is started without the API key of the environment.</param>
+    public static Dictionary<string, string?> CreateEnvironment(ClaudeCodeModelProviderRuntimeOptions options, AgentProcessEnvironment? sessionEnvironment, bool withoutApiKey)
+    {
+        ArgumentNullException.ThrowIfNull(options);
         var environment = new Dictionary<string, string?>(StringComparer.Ordinal);
         // The identity of the session first: what CodeAlta sets below for the CLI itself is not given away.
-        key.Environment?.ApplyTo(environment);
+        sessionEnvironment?.ApplyTo(environment);
         foreach (var name in InheritedSessionVariables)
         {
             environment[name] = null;
@@ -245,20 +275,7 @@ internal static class ClaudeCodeLauncher
             environment[ClaudeCodeProjectFolders.ConfigDirectoryVariable] = configDirectory;
         }
 
-        // A session of 200K: the CLI keeps a model of 1M tokens to it.
-        if (key.ContextSize == ClaudeCodeModelCatalog.StandardContextSize)
-        {
-            environment[DisableExtendedContextVariable] = "1";
-        }
-
-        // The CLI tells this side when a session is idle again, and names CodeAlta in its user agent.
-        environment["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"] = "1";
-        // A start the CLI refuses for a known reason (a conversation a background session runs, ...) ends with a result
-        // that names it, not with its error output alone.
-        environment[StartupFailureResultsVariable] = "1";
-        environment["CLAUDE_AGENT_SDK_CLIENT_APP"] = string.IsNullOrWhiteSpace(options.ClientApp) ? DefaultClientApp : options.ClientApp.Trim();
-
-        return new ClaudeCodeLaunch(executable, arguments, key.WorkingDirectory, environment);
+        return environment;
     }
 
     /// <summary>The variable that makes the CLI write a result naming why it refused to start.</summary>

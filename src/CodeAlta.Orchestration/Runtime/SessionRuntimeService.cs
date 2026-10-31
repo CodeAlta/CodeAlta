@@ -1177,6 +1177,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         // Only the local state says it, and none is a choice too: the mode of the provider.
         session.PermissionMode = NormalizeOptionalText(localState.PermissionMode);
+        session.Cloud = localState.Cloud is { Id.Length: > 0 } cloud ? cloud.ToListing() : null;
         session.Sandbox = NormalizeOptionalText(localState.Sandbox);
         session.Options = AgentSessionOptions.Stored(localState.Options);
         session.TitleMode = AgentSessionTitles.ParseMode(localState.TitleMode) is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null;
@@ -1221,6 +1222,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             CreatedBy = DeserializeCachedCreatedBy(localState.CreatedByJson),
         };
         ApplyPersistedSessionLocalState(session, viewState, knownPrompts);
+        session.Cloud = localState.Cloud;
         session.CachedViewState = localState;
     }
 
@@ -1940,6 +1942,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (_transitions.TryGetValue(session.SessionId, out var transition))
             return new CoordinatorPreparation(null, transition);
         _entries.TryGetValue(session.SessionId, out var existing);
+        // A session that runs in the cloud has no conversation here to attach: a prompt, a queue, a compaction or Remote
+        // Control of it is refused until it is brought back.
+        if (existing is null && await RunsInCloudAsync(session, actorCancellationToken).ConfigureAwait(false))
+            throw new SessionInCloudException(session.SessionId);
         var prompt = (useExplicitPrompt ? null : NormalizeOptionalText(existing?.PendingAgentPromptId))
             ?? preparedPrompt ?? NormalizeOptionalText(options.AgentPromptId) ?? NormalizeOptionalText(session.AgentPromptId);
         // An attachment runs in one folder. A session whose worktree is gone, or that was given one, is attached

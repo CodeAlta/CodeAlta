@@ -79,6 +79,9 @@ internal enum AgentExternalTurnOrigin
 
     /// <summary>Another application, which <see cref="AgentExternalTurn.Entrypoint"/> names.</summary>
     OtherApplication,
+
+    /// <summary>The cloud: a cloud session of the provider, brought back to this computer.</summary>
+    Cloud,
 }
 
 /// <summary>A turn made outside CodeAlta: a prompt and what followed it, or a compaction.</summary>

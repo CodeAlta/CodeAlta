@@ -191,6 +191,8 @@ public sealed partial class SessionViewJournalStore
             Archived = target.Status == SessionViewStatus.Archived,
             ParentSessionId = target.ParentSessionId,
             CreatedBy = target.CreatedBy,
+            // A session brought back from the cloud keeps where its first turns were made; one still there is not forked.
+            Cloud = sourceLocal?.Cloud is { ContinuedAt: not null } cloud ? cloud.Copy() : null,
         };
         var headerLine = CreateHeaderEvent(target).ToJson();
         await store.CommitForkAsync(point, summary, state, headerLine, [CreateStateEvent(target, local).ToJson()],

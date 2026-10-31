@@ -231,6 +231,12 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     internal Func<string, string, ClaudeCodeTranscriptPresence>? LocateTranscript { get; init; }
 
     /// <summary>
+    /// Gets or initializes what runs a command of the CLI that ends by itself (a message sent to a cloud session, a
+    /// bring-back), with its input. Tests replace it; by default the process is started (<see cref="ClaudeCodeCloud.RunAsync"/>).
+    /// </summary>
+    internal Func<ClaudeCodeLaunch, string?, TimeSpan, CancellationToken, Task<ClaudeCodeCommandResult>>? RunCommand { get; init; }
+
+    /// <summary>
     /// Gets or initializes the resolver of the executable. Tests replace it.
     /// </summary>
     internal Func<ClaudeCodeCliResolution>? ResolveCli { get; init; }

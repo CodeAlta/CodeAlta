@@ -155,6 +155,7 @@ internal static class AgentExternalTurnJournal
             AgentExternalTurnOrigin.VsCode => "vscode",
             AgentExternalTurnOrigin.Terminal => "terminal",
             AgentExternalTurnOrigin.OtherApplication => "other",
+            AgentExternalTurnOrigin.Cloud => "cloud",
             _ => "unknown",
         }}:{Guid.CreateVersion7()}";
 
@@ -164,6 +165,7 @@ internal static class AgentExternalTurnJournal
             AgentExternalTurnOrigin.VsCode => " in VS Code",
             AgentExternalTurnOrigin.Terminal => " in a terminal",
             AgentExternalTurnOrigin.OtherApplication => " in another application",
+            AgentExternalTurnOrigin.Cloud => " in the cloud",
             _ => " outside CodeAlta",
         };
 

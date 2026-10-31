@@ -21,6 +21,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderSharedConversation,
     IAgentProviderStateUpdates,
     IAgentProviderInstructionsChannel,
+    IAgentProviderCloudSessions,
     IAsyncDisposable
 {
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -184,6 +185,105 @@ internal sealed class ClaudeCodeTurnExecutor :
             return ClaudeCodeExternalTurns.Read(root, persisted, workingDirectory, TranscriptPositions, cancellationToken);
         }, cancellationToken);
     }
+
+    /// <summary>
+    /// Starts a cloud session with <c>claude --cloud "&lt;task&gt;"</c> in a terminal of the host, hidden unless the CLI
+    /// asks something (whether it trusts the folder, a sign-in), and reads what it printed.
+    /// </summary>
+    /// <inheritdoc />
+    public async Task<AgentCloudStart> StartCloudSessionAsync(AgentCloudStartRequest request, IAgentInteractiveTerminal? terminal, Action? onShown,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (terminal is null) return new AgentCloudStart("terminal_unavailable", Message: "Starting a cloud session needs a terminal: start it in CodeAlta Desktop.");
+        if (_options.ResolveExecutable().Path is not { } executable) return new AgentCloudStart("unavailable", Message: "Claude Code is not installed.");
+        var launch = ClaudeCodeCloud.StartLaunch(executable, _options, request.WorkingDirectory, request.Task);
+        AgentInteractiveOutcome outcome;
+        try
+        {
+            outcome = await terminal.RunAsync(
+                new AgentInteractiveProgram(launch.FileName, launch.Arguments, request.WorkingDirectory, launch.Environment, $"Claude Code: {request.ProjectName}"),
+                ClaudeCodeCloud.Asks, onShown, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return new AgentCloudStart("failed", Message: exception.Message);
+        }
+
+        var screen = ClaudeCodeCloud.ReadScreen(outcome.Rows);
+        // The CLI may have created the session before it was ended: what it printed decides.
+        if (screen.Created && screen.SessionId is { } id)
+        {
+            return new AgentCloudStart("created", id, ClaudeCodeCloud.UrlOf(id), screen.Title, screen.Note);
+        }
+
+        return outcome.Canceled
+            ? new AgentCloudStart("canceled", TerminalId: outcome.TerminalId)
+            : new AgentCloudStart("failed", Message: screen.Message ?? $"Claude Code did not start the cloud session (exit code {outcome.ExitCode?.ToString() ?? "none"}).",
+                TerminalId: outcome.TerminalId);
+    }
+
+    /// <summary>Sends a message to a cloud session with <c>claude -p --cloud &lt;id&gt;</c>, the message on its input.</summary>
+    /// <inheritdoc />
+    public async Task<AgentCloudSendResult> SendToCloudSessionAsync(string cloudSessionId, string message, string workingDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        if (!ClaudeCodeCloud.IsCloudSessionId(cloudSessionId)) return new AgentCloudSendResult("not_found");
+        if (message.Length > ClaudeCodeCloud.MaxMessageLength) return new AgentCloudSendResult("failed", "The message is too long for a cloud session.");
+        if (_options.ResolveExecutable().Path is not { } executable) return new AgentCloudSendResult("unavailable", "Claude Code is not installed.");
+        try
+        {
+            var result = await RunCommandAsync(ClaudeCodeCloud.SendLaunch(executable, _options, workingDirectory, cloudSessionId), message,
+                ClaudeCodeCloud.SendTimeLimit, cancellationToken).ConfigureAwait(false);
+            return ClaudeCodeCloud.ReadSend(result);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return new AgentCloudSendResult("failed", exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Brings a cloud session to this computer with <c>claude -p /cost --teleport &lt;id&gt; --session-id=&lt;uuid&gt;</c>:
+    /// the CLI checks out the branch of the session and writes its conversation as a new transcript, and <c>/cost</c> is
+    /// a local command, which calls no model.
+    /// </summary>
+    /// <inheritdoc />
+    public async Task<AgentCloudReturn> BringCloudSessionBackAsync(string cloudSessionId, string conversationId, string workingDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        if (_options.ResolveExecutable().Path is not { } executable) return new AgentCloudReturn("unavailable", "Claude Code is not installed.");
+        ClaudeCodeCommandResult result;
+        try
+        {
+            result = await RunCommandAsync(ClaudeCodeCloud.TeleportLaunch(executable, _options, workingDirectory, cloudSessionId, conversationId), null,
+                ClaudeCodeCloud.TeleportTimeLimit, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return new AgentCloudReturn("failed", exception.Message);
+        }
+
+        var (ok, _, said) = ClaudeCodeCloud.ReadTeleport(result);
+        if (!ok) return new AgentCloudReturn("failed", said);
+        var path = Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(_options.ResolveConfigRoot(), workingDirectory), conversationId + ".jsonl");
+        return File.Exists(path)
+            ? new AgentCloudReturn("ok")
+            : new AgentCloudReturn("failed", "Claude Code ended without writing the conversation of the cloud session.");
+    }
+
+    /// <inheritdoc />
+    public AgentExternalTurns ReadBroughtBackTurns(string conversationId, string workingDirectory, int users, int assistants, bool fromTerminal,
+        CancellationToken cancellationToken)
+        => ClaudeCodeExternalTurns.ReadBroughtBack(_options.ResolveConfigRoot(), conversationId, workingDirectory, users, assistants, fromTerminal, cancellationToken);
+
+    /// <inheritdoc />
+    public (string Command, string? ConfigDirectory) BringBackCommand(string cloudSessionId, string conversationId)
+        => (ClaudeCodeCloud.TeleportCommand(cloudSessionId, conversationId), _options.ResolveConfigDirectory());
+
+    private Task<ClaudeCodeCommandResult> RunCommandAsync(ClaudeCodeLaunch launch, string? input, TimeSpan timeout, CancellationToken cancellationToken)
+        => (_options.RunCommand ?? ClaudeCodeCloud.RunAsync)(launch, input, timeout, cancellationToken);
 
     /// <summary>
     /// Lists the conversations of Claude Code started in VS Code or by the CLI in a terminal, in every folder of the

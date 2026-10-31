@@ -156,6 +156,81 @@ internal static class ClaudeCodeExternalTurns
             });
     }
 
+    /// <summary>
+    /// Reads the turns of a conversation Claude Code brought from the cloud into a new transcript (<c>--teleport</c>), to
+    /// add them to the session that ran in the cloud: the turns made there, marked as made in the cloud.
+    /// </summary>
+    /// <param name="configRoot">The configuration folder of the CLI.</param>
+    /// <param name="conversationId">The conversation the teleport wrote (its <c>--session-id</c>).</param>
+    /// <param name="workingDirectory">The folder the teleport ran in, which the next turns resume in.</param>
+    /// <param name="users">The user messages the session holds already.</param>
+    /// <param name="assistants">The assistant messages the session holds already.</param>
+    /// <param name="fromTerminal">
+    /// Whether the conversation was brought back in a terminal, where turns may follow: the state then stops at the
+    /// continuation entry, so that the next catch-up adds them. Otherwise it records the end of the file, so that what
+    /// the bring-back itself wrote there (a local command) is never added.
+    /// </param>
+    /// <param name="cancellationToken">Stops the read.</param>
+    /// <returns>
+    /// The turns with <see cref="AgentExternalTurnsStatus.Read"/>; <see cref="AgentExternalTurnsStatus.Missing"/> when the
+    /// transcript is not there.
+    /// </returns>
+    /// <exception cref="ArgumentException">An argument is empty, or <paramref name="conversationId"/> is not an identifier of the CLI.</exception>
+    /// <exception cref="OperationCanceledException">The read was stopped.</exception>
+    public static AgentExternalTurns ReadBroughtBack(string configRoot, string conversationId, string workingDirectory, int users, int assistants,
+        bool fromTerminal, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        if (!ClaudeCodeConversationLinks.IsConversationId(conversationId))
+        {
+            throw new ArgumentException("A conversation of the Claude Code CLI is named by a GUID.", nameof(conversationId));
+        }
+
+        var path = Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(configRoot, workingDirectory), conversationId + TranscriptExtension);
+        var result = ClaudeCodeTranscriptReader.ReadTeleported(path, cancellationToken);
+        if (result.Status == ClaudeCodeTranscriptReadStatus.Missing)
+        {
+            return AgentExternalTurns.Missing;
+        }
+
+        var turns = new List<AgentExternalTurn>(result.Turns.Count);
+        var entries = new List<string>(result.Turns.Count);
+        foreach (var turn in result.Turns)
+        {
+            if (turn.Compaction is null && turn.Messages.Count == 0 && turn.TriggerText is null)
+            {
+                continue;
+            }
+
+            turns.Add(new AgentExternalTurn(turn.Messages, AgentExternalTurnOrigin.Cloud, turn.Entrypoint, turn.Timestamp,
+                IsCompaction: turn.Compaction is not null, turn.TriggerText));
+            entries.Add(turn.LastUuid);
+        }
+
+        // The conversation was never given the instructions of CodeAlta: its first prompt here gives them all.
+        var seed = new ClaudeCodeProviderState(conversationId, users, assistants, Imported: true);
+        return new AgentExternalTurns(
+            AgentExternalTurnsStatus.Read,
+            turns,
+            (written, writtenUsers, writtenAssistants) =>
+            {
+                ArgumentOutOfRangeException.ThrowIfNegative(written);
+                ArgumentOutOfRangeException.ThrowIfGreaterThan(written, turns.Count);
+                var counted = seed with { Users = seed.Users + writtenUsers, Assistants = seed.Assistants + writtenAssistants, Cost = result.TotalCostUsd };
+                if (written < turns.Count)
+                {
+                    return (counted with { Leaf = written == 0 ? null : entries[written - 1], Anchor = written == 0 ? null : entries[written - 1] }).ToJson();
+                }
+
+                // In a terminal the conversation may have gone on after the continuation entry: it is followed from there.
+                var end = fromTerminal && result.ContinuationFound
+                    ? counted with { Leaf = result.ContinuationParent, Anchor = result.ContinuationParent }
+                    : counted with { Leaf = result.Leaf, Anchor = result.Leaf, Position = result.Position };
+                return end.ToJson();
+            });
+    }
+
     // The state after the whole read: the counts of what was written added, the leaf and the position of the read, and
     // the cost of the conversation as the transcript last wrote it. A read without a cost (the CLI often writes none)
     // keeps the cost recorded: a CLI that resumes the conversation counts from the last cost the transcript has.
