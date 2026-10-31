@@ -573,6 +573,35 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .host-source .ico:first-child { flex: none; }
 .host-body { padding: .125rem .75rem .5rem; border-top: 1px solid var(--line); }
 .host-result { color: var(--muted); font-size: .8125rem; }
+
+/* The same background count as the desktop, above the prompt even after the agent's turn ends. */
+.background-status { display: flex; align-items: center; gap: .5rem; min-height: 36px; padding: 0 .25rem; border: 0; background: transparent;
+  color: var(--muted); font: inherit; font-size: .8125rem; cursor: pointer; }
+.background-status:active { color: var(--accent); }
+.background-mark { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; }
+.background-mark > .ico:first-child { width: 13px; height: 13px; }
+.background-mark .background-spin { position: absolute; inset: 0; width: 22px; height: 22px; opacity: .65; }
+.background-mark .ico svg { width: 100%; height: 100%; }
+.background-panel .sheet-head h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.background-list h3 { margin: .75rem 0 .25rem; color: var(--muted); font-size: .75rem; text-transform: uppercase; }
+.background-list ul { margin: 0; padding: 0; list-style: none; }
+.background-list li { display: flex; align-items: center; min-width: 0; border-bottom: 1px solid var(--line); }
+.background-panel .background-open { display: flex; flex-direction: row; flex: 1; gap: .625rem; align-items: center; min-width: 0; min-height: 56px; padding: .5rem 0;
+  border: 0; background: transparent; color: var(--text); font: inherit; text-align: start; cursor: pointer; }
+.background-open > span:not(.ico) { flex: 1; min-width: 0; }
+.background-open strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; }
+.background-open small { display: block; color: var(--muted); font-size: .75rem; }
+.background-list li:is([data-state="failed"], [data-state="timed_out"]) small { color: var(--red); }
+.background-list li[data-state="succeeded"] small { color: var(--green); }
+.background-panel .icon-btn { flex: none; width: 44px; align-items: center; justify-content: center; padding: .5rem; }
+.background-panel .sheet-head > .sheet-done:first-child { margin-left: 0; }
+.background-panel .sheet-head > h2 { flex: 1; min-width: 0; }
+.background-panel .background-output > button { display: inline-flex; width: auto; margin: 0 .5rem .5rem 0; align-items: center; }
+.background-output { min-width: 0; }
+.background-output pre { max-width: 100%; overflow: auto; padding: .625rem; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel-2); font: .8rem/1.5 var(--code-font); white-space: pre; }
+.background-output pre[aria-label] { max-height: 40dvh; min-height: 5rem; }
+.background-output p { overflow-wrap: anywhere; font-size: .8125rem; }
 /* The value a script returned: data for the agent, folded, as it is. */
 .host-value { margin: .25rem 0 0; }
 .host-value > summary { cursor: pointer; color: var(--muted); font-size: .8125rem; }

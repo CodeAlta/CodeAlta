@@ -84,6 +84,28 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
+    public async Task Jobs_AreAuthenticatedAndScopedToTheirSession()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions/a/jobs")).StatusCode);
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("session status a", FakeAlta.Status("a", "p1", "personal"));
+        var job = new JsonObject { ["type"] = "alta.job", ["id"] = "job-a", ["sessionId"] = "a", ["state"] = "running", ["command"] = "npm test" };
+        fixture.Alta.Answer("job list", job);
+        var status = (JsonObject)job.DeepClone(); status["type"] = "alta.job.status";
+        fixture.Alta.Answer("job status job-a", status)
+            .Answer("job output job-a", new JsonObject { ["type"] = "alta.job.output", ["text"] = "Running tests" });
+        var page = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/jobs"))!;
+        Assert.AreEqual("job-a", (string?)page["jobs"]![0]!["id"]);
+        var output = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/jobs/job-a"))!;
+        Assert.AreEqual("Running tests", (string?)output["text"]);
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.PostAsync("/api/sessions/a/jobs/job-a/stop", new JsonObject())).StatusCode);
+        Assert.AreEqual(1, fixture.Alta.CallsOf("job cancel job-a").Length);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/unknown/jobs/job-a")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.PostAsync("/api/sessions/unknown/jobs/job-a/stop", new JsonObject())).StatusCode);
+    }
+
+    [TestMethod]
     public async Task TheApi_AnswersWhatAltaSays()
     {
         await using var fixture = await Fixture.StartAsync();

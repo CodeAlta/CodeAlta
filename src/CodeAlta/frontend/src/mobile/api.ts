@@ -1,4 +1,4 @@
-import type { ActionResult, AskAnswerRequest, AskPage, AskResult, EventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
+import type { ActionResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
 
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
@@ -143,6 +143,9 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     },
     session: (id: string) => call<Session>("GET", session(id)),
     events: (id: string, since: number) => call<EventPage>("GET", `${session(id)}/events?since=${since}`),
+    jobs: (id: string) => call<JobPage>("GET", `${session(id)}/jobs`),
+    job: (id: string, jobId: string) => call<JobOutput>("GET", `${session(id)}/jobs/${encodeURIComponent(jobId)}`),
+    stopJob: (id: string, jobId: string) => command<ActionResult>(`${session(id)}/jobs/${encodeURIComponent(jobId)}/stop`),
     projects: () => call<ProjectList>("GET", "/api/projects"),
     options: () => call<Options>("GET", "/api/options"),
     create: async (request: NewSessionRequest) => {

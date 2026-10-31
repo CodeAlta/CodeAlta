@@ -140,6 +140,9 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapGet("/sessions/{id}/linked-images/{seq:long}/{index:int}", async (string id, long seq, int index, HttpContext context, CancellationToken ct) =>
             Image(context, await _options.Sessions.Images.LinkedAsync(id, seq, index, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/choices", async (string id, CancellationToken ct) => Json(await _options.Api.ChoicesAsync(id, ct).ConfigureAwait(false)));
+        api.MapGet("/sessions/{id}/jobs", async (string id, CancellationToken ct) => Json(await _options.Api.JobsAsync(id, ct).ConfigureAwait(false)));
+        api.MapGet("/sessions/{id}/jobs/{jobId}", async (string id, string jobId, CancellationToken ct) => Json(await _options.Api.JobAsync(id, jobId, false, ct).ConfigureAwait(false)));
+        api.MapPost("/sessions/{id}/jobs/{jobId}/stop", async (string id, string jobId, CancellationToken ct) => Json(await _options.Api.JobAsync(id, jobId, true, ct).ConfigureAwait(false)));
         api.MapGet("/projects", async (CancellationToken ct) => Json(await _options.Api.ProjectsAsync(ct).ConfigureAwait(false)));
         api.MapGet("/options", async (CancellationToken ct) => Json(await _options.Api.OptionsAsync(ct).ConfigureAwait(false)));
         api.MapPost("/sessions", (HttpRequest request, CancellationToken ct) =>
