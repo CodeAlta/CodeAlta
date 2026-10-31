@@ -1100,6 +1100,8 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-tier-model { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .composer-tier.bp6-button.bp6-active .composer-tier-name { color: var(--accent); }
 /* Adaptive beside the tiers, with its Experimental tag; muted while it is not set up. */
+.composer-tier.composer-adaptive.bp6-button { grid-column: 1 / -1; justify-content: start; }
+.composer-tier.composer-adaptive.bp6-button .bp6-button-text { justify-items: start; }
 .composer-adaptive .composer-tier-name { display: inline-flex; align-items: center; gap: 6px; }
 .composer-adaptive[data-ready="false"] .composer-tier-model { font-style: italic; }
 .adaptive-experimental.bp6-tag { min-height: 0; padding: 0 6px; font-size: 10px; font-weight: 500; letter-spacing: 0; line-height: 16px; text-transform: none; }

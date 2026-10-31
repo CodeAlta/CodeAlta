@@ -47,7 +47,7 @@ import { ProviderChooser } from "./ProviderChooser";
 import { useProviderName } from "./ProviderIcon";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerModelPicker } from "./ComposerModelPicker";
-import { adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, useTiers, type TierName } from "./modelTiers";
+import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore, useTiers, type TierName } from "./modelTiers";
 import { AdaptiveSetupDialog } from "./AdaptiveSetup";
 import { ComposerSurface, ComposerSelectionFields, ModelOptionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { showToast } from "./appToaster";
@@ -285,6 +285,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
           setChoicesNotice(`Session choices unavailable (${value.status}).`); return;
         }
         setChoices(value);
+        // A provider that lists its models now is ready: what the tiers give, read while it was not, is read again.
+        if (value.models.length) void tierStore.refresh(epoch, { sessionId });
         const verified = selections.get(epoch, sessionId, value);
         const retained = selections.current(epoch, sessionId);
         // A temporarily empty catalog must not silently replace an unsent preference.
@@ -1472,7 +1474,11 @@ ${value}` : value);
       <ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy} openRequest={selectionOpenRequest} notice={spaceProblem}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selectedProviderName, providerKey: selected?.providerKey, modelId: selected?.modelId,
-        model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
+        // A session on Adaptive names the model its next turn runs on, the one of the tier of its turns, which CodeAlta
+        // gives it again after a turn that went on a stronger model.
+        model: activeChoices?.adaptive && adaptiveChoice(tierState) ? `${t("Adaptive")} · ${adaptiveChoice(tierState)!.modelName}`
+          : (activeChoices?.adaptive ? `${t("Adaptive")} · ` : "")
+            + (selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model")),
         reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary, review: shownReview?.effective ?? null,
         sandbox: sessionSandboxSummary(shownSandbox?.reply), subSessions: shownOptions?.subSessions ?? null,
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })

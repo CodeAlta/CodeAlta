@@ -283,7 +283,7 @@ import { archivableDescendants, newRestoredNotices, sessionArchiveMessage, setSe
 import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, subSessionsAtWork, type Space, type SubSessionAtWork, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
-import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierStore } from "./modelTiers";
+import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore } from "./modelTiers";
 import { AdaptiveSetupDialog } from "./AdaptiveSetup";
 import { deletedSessionWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import { createPreparedWorktrees } from "./worktrees/preparedWorktrees";
@@ -4468,7 +4468,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     return <ComposerSelectionFields sessionId={choiceId} onOpenCatalog={page => { if (inPopover) setCreatingVisible(false); navigate(page); }}
       summary={{ agent: draftChoices.prompts.find(prompt => prompt.id === value.agentPromptId)?.name ?? t(draftChoices.loadingPrompts ? "Loading…" : "Host default"),
         provider: usedProvider ? providerName(providerLogos, usedProvider) ?? usedProvider : t("No provider"), providerKey: usedProvider || null, modelId: value.modelId || null,
-        model: value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "No model"),
+        model: (draftChoices.tier === adaptiveTier ? `${t("Adaptive")} · ` : "")
+          + (value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "No model")),
         reasoning: reasoning.effort ?? (draftChoices.loadingModels ? t("Loading…") : null),
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: draftModel!.name })
           : reasoning.note === "unused" ? `${t("Reasoning")}: ${value.reasoningEffort} · ${t("Not used")}` : null,
@@ -4498,7 +4499,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         onChooseTier={tier => { invalidateCreation(); draftChoices.chooseTier(tier); }}
         adaptive={composerAdaptiveEntry(draftChoices.tiers, t)}
         onChooseAdaptive={() => {
-          if (!adaptiveChoice(draftChoices.tiers)) { setDraftAdaptiveSetup(true); return; }
+          const tiers = draftChoices.tiers;
+          if (!tiers?.adaptive || !tiers.adaptiveReady) { setDraftAdaptiveSetup(true); return; }
+          if (!adaptiveChoice(tiers)) {
+            showToast({ message: t("No model of the {tier} tier is ready.", { tier: t(tierLabels[tiers.adaptive.code]) }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+            return;
+          }
           invalidateCreation(); draftChoices.chooseTier(adaptiveTier);
         }} />
         <AdaptiveSetupDialog isOpen={draftAdaptiveSetup} onClose={() => setDraftAdaptiveSetup(false)} /></>}

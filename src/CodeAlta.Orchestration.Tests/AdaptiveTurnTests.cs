@@ -50,7 +50,6 @@ public sealed class AdaptiveTurnTests
         Assert.AreEqual(AgentPromptProvenance.AdaptiveRecheck, recheck.Provenance);
         StringAssert.Contains(recheck.Text, "check your change against each requirement of the request");
         Assert.AreEqual("model-a", recheck.Options.Model, "The recheck runs on the model of the turn.");
-        await f.WaitForCardAsync(static card => (card.Message ?? string.Empty).Contains("checks the change against the request", StringComparison.Ordinal), "recheck");
         await f.SettleAsync();
         Assert.AreEqual(2, f.Provider.SendCount);
         Assert.IsTrue((await f.StateAsync()).Adaptive);
@@ -85,9 +84,9 @@ public sealed class AdaptiveTurnTests
         var escalation = await f.Provider.NextSendAsync();
 
         Assert.AreEqual(AgentPromptProvenance.AdaptiveEscalation, escalation.Provenance);
-        StringAssert.Contains(escalation.Text, "the last test run failed (exit code 1)");
+        StringAssert.Contains(escalation.Text, "the last test run failed.");
         Assert.AreEqual("model-c", escalation.Options.Model, "The turn continues on the model of the escalation tier.");
-        await f.WaitForCardAsync(static card => (card.Message ?? string.Empty).StartsWith("Continued on PROV-A model-c", StringComparison.Ordinal), "escalation");
+        StringAssert.Contains(escalation.Text, "CodeAlta moved this session to PROV-A model-c high");
         await f.SettleAsync();
         Assert.AreEqual("quick", (await f.StateAsync()).Tier, "Once the escalation answered, the session is back on the turn tier.");
 
@@ -97,6 +96,22 @@ public sealed class AdaptiveTurnTests
         Assert.AreEqual("model-a", next.Options.Model);
         await f.SettleAsync();
         Assert.AreEqual(3, f.Provider.SendCount);
+    }
+
+    [TestMethod]
+    public async Task ATestRunWhoseOutputSaysItFailed_IsEscalated_ThoughAPipeHidItsExitCode()
+    {
+        // As Claude Code runs it: `npm test | grep`, no exit code in the output, the summary of the runner.
+        await using var f = await Fixture.CreateAsync(Config);
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
+        f.Provider.Scripts.Enqueue(static run => run.Test("npm test 2>&1 | grep -E \"^ℹ (tests|pass|fail)\"", "ℹ tests 3\nℹ pass 2\nℹ fail 1"));
+
+        f.Send("run the tests");
+        await f.Provider.NextSendAsync();
+        var escalation = await f.Provider.NextSendAsync();
+
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveEscalation, escalation.Provenance);
+        StringAssert.Contains(escalation.Text, "the last test run failed");
     }
 
     [TestMethod]
@@ -227,6 +242,7 @@ public sealed class AdaptiveTurnTests
         Assert.AreEqual("the answer says the tools cannot be used, though it called none",
             AdaptiveTurnCoordinator.Trouble("I cannot run commands in this environment.", 0, null));
         Assert.AreEqual("the last test run failed (exit code 3)", AdaptiveTurnCoordinator.Trouble("Done.", 5, 3));
+        Assert.AreEqual("the last test run failed", AdaptiveTurnCoordinator.Trouble("Done.", 5, 1));
         // A plain "cannot" of an answer, a refusal from a turn that used its tools, and a passing last run are no trouble.
         Assert.IsNull(AdaptiveTurnCoordinator.Trouble("The value cannot be null here, so the check is right.", 0, null));
         Assert.IsNull(AdaptiveTurnCoordinator.Trouble("I do not have access to the network.", 2, null));
@@ -243,6 +259,14 @@ public sealed class AdaptiveTurnTests
         Assert.IsFalse(AdaptiveTurnCoordinator.IsCode(".alta/plans/plan.md"));
         Assert.IsFalse(AdaptiveTurnCoordinator.IsCode(".alta/tasks/x.json"));
         Assert.AreEqual(1, AdaptiveTurnCoordinator.ExitCode("exit_code: 1\nboom"));
+        // The summary of the runner tells how the tests ended, whatever the exit code of a pipe.
+        foreach (var failed in new[] { "ℹ tests 3\nℹ pass 2\nℹ fail 1", "# fail 2", "=== 1 failed, 3 passed in 0.2s ===", "  2 passing\n  1 failing",
+            "Tests:       1 failed, 3 passed, 4 total", "Failed!  - Failed:     1, Passed:    41", "--- FAIL: TestParse (0.00s)\nFAIL", "test result: FAILED. 3 passed; 1 failed" })
+            Assert.AreEqual(1, AdaptiveTurnCoordinator.TestOutcome(failed), failed);
+        foreach (var passed in new[] { "ℹ tests 3\nℹ pass 3\nℹ fail 0", "=== 4 passed in 0.1s ===", "Passed!  - Failed:     0, Passed:    42", "ok  \tgithub.com/a/b\t0.01s",
+            "test result: ok. 4 passed; 0 failed", "  4 passing" })
+            Assert.AreEqual(0, AdaptiveTurnCoordinator.TestOutcome(passed), passed);
+        Assert.IsNull(AdaptiveTurnCoordinator.TestOutcome("Compiling..."));
         Assert.IsNull(AdaptiveTurnCoordinator.ExitCode("no code"));
         Assert.IsTrue(AdaptiveTurnCoordinator.IsTestCommand("shell_command", Arguments("cd src && dotnet test -c Release")));
         Assert.IsTrue(AdaptiveTurnCoordinator.IsTestCommand("Bash", Arguments("python -m pytest tests/")));

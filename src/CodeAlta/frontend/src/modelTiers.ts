@@ -96,10 +96,12 @@ export function adaptiveChoice(state: TierState | null | undefined): ModelTierCh
  * trouble goes to; `ready` false while it is not set up, when choosing it offers to set it up.
  */
 export function composerAdaptiveEntry(state: TierState | null | undefined,
-  t: (key: "Not set up" | "Recheck" | "{model} on trouble", values?: Record<string, string>) => string)
+  t: (key: "Not set up" | "No model ready" | "Recheck" | "{model} on trouble", values?: Record<string, string>) => string)
   : Readonly<{ ready: boolean; detail: string; title: string | null }> {
+  if (!state?.adaptive || !state.adaptiveReady) return { ready: false, detail: t("Not set up"), title: null };
+  // Set up, while no model of the tier of its turns is ready yet (a provider that starts).
   const turn = adaptiveChoice(state);
-  if (!state?.adaptive || !turn) return { ready: false, detail: t("Not set up"), title: null };
+  if (!turn) return { ready: true, detail: t("No model ready"), title: null };
   const escalation = state.choices[state.adaptive.escalate];
   const parts = [turn.modelName, state.adaptive.recheck ? t("Recheck") : null,
     escalation && state.adaptive.escalate !== state.adaptive.code ? t("{model} on trouble", { model: escalation.modelName }) : null];

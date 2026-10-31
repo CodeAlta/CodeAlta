@@ -39,8 +39,15 @@ Once tiers are set:
 With **Adaptive**, CodeAlta chooses the model of each turn for you, from your tiers:
 
 - the turns you send run on the tier of the turns, **Quick** unless you choose another;
-- a turn that changed code gets one more message from CodeAlta, on the same model: check the change against each requirement of the request, with a test or a run for each rule, and fix what is missing. A card says so;
-- a turn that ends in visible trouble (no answer, an answer that says it cannot use its tools though it called none, or a last test run that failed) continues once on the escalation tier, **Complex** unless you choose another, with a **Continued on …** card. The next turn runs on the tier of the turns again.
+- a turn that changed code gets one more message from CodeAlta, on the same model: check the change against each requirement of the request, with a test or a run for each rule, and fix what is missing. The timeline shows it as **Adaptive recheck**;
+- a turn that ends in visible trouble (no answer, an answer that says it cannot use its tools though it called none, or a last test run that failed) continues once on the escalation tier, **Complex** unless you choose another. The timeline shows it as **Adaptive escalation**, with the reason and the model. The next turn runs on the tier of the turns again.
+
+The model chip below the prompt says **Adaptive** and the model of the next turn. A test run counts as failed when the summary of the test runner says so (node, Jest, Vitest, Mocha, pytest, `dotnet test`, Go, Cargo), even when the command piped its output.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-adaptive.webp" alt="The Adaptive section of Settings > Models, tagged Experimental: Set up Adaptive turned on, turns on Quick, a turn in trouble continues on Complex, the recheck ticked, and how to choose the models" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings > Models > Adaptive: the tier of the turns, the tier a turn in trouble continues on, and the recheck.</figcaption>
+</figure>
 
 Set it up in **Settings > Models**, in the **Adaptive** section under the tiers: turn on **Set up Adaptive**, then choose **Turns run on**, **A turn in trouble continues on**, and whether to **Recheck each change of code against the request**. The tiers it names need models; the section says when one has none, and how to choose the models.
 

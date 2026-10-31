@@ -267,7 +267,7 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     // These update the TUI's status/usage surfaces, not its conversation timeline.
     // The cancellation of a resume after a limit is said where its card said when the session would resume.
     if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "providerfallback", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")
-      && !cancelledResume(entry)) continue;
+      && !cancelledResume(entry) && !adaptiveCard(entry)) continue;
     if ((entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") &&
         isToolOutput(entry.kind) && entry.parentActivityId && calls.has(parentActivityKey(entry))) {
       // The text of an output is shown on the tile of its call; the images the model was given get a card.
@@ -684,6 +684,10 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       // The resume a session waited for after a limit was cancelled.
       icon = "reminder";
       title = "Automatic resume cancelled";
+    } else if (adaptiveCard(entry)) {
+      // What Adaptive did at the end of a turn: a recheck of its change, or its continuation on a stronger model.
+      icon = "model";
+      title = stringAt(parsedDetails, "adaptive") === "recheck" ? "Adaptive · Recheck" : "Adaptive · Escalation";
     } else {
       title = sessionUpdateTitle(kind);
       // A local compaction is detailed like in the terminal, in place of its raw record.
@@ -834,6 +838,12 @@ function modelPresentation(text: string | null, details: JsonObject | null) {
 // An informational update that says a resume after a limit was cancelled.
 function cancelledResume(entry: HistoryEntry): boolean {
   return entry.kind?.toLowerCase() === "info" && !!entry.details?.includes("cancelled") && stringAt(parseDetails(entry.details), "resume") === "cancelled";
+}
+
+// A card of Adaptive: what it did at the end of a turn, which its details name.
+function adaptiveCard(entry: HistoryEntry): boolean {
+  return ["info", "warning"].includes(entry.kind?.toLowerCase() ?? "") && !!entry.details?.includes("adaptive")
+    && ["recheck", "escalation"].includes(stringAt(parseDetails(entry.details), "adaptive") ?? "");
 }
 
 function sessionUpdateTitle(kind: string): string {

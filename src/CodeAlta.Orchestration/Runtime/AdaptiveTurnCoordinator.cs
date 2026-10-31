@@ -292,7 +292,8 @@ internal sealed partial class AdaptiveTurnCoordinator
     {
         if (string.IsNullOrWhiteSpace(answer)) return "the turn ended without an answer";
         if (toolCalls == 0 && RefusalPattern().IsMatch(answer)) return "the answer says the tools cannot be used, though it called none";
-        if (lastTestExit is { } code and not 0) return $"the last test run failed (exit code {code})";
+        // A failure read from the summary of the runner counts as 1: the code is said only when the command gave another.
+        if (lastTestExit is { } code and not 0) return code == 1 ? "the last test run failed" : $"the last test run failed (exit code {code})";
         return null;
     }
 
@@ -323,13 +324,11 @@ internal sealed partial class AdaptiveTurnCoordinator
     private async Task RecheckAsync(AdaptiveSessionNotice notice, string runId)
     {
         if (!await WaitForReleaseAsync(notice.SessionId).ConfigureAwait(false)) return;
-        var model = ModelName(notice.ProviderKey, notice.ModelId);
-        var admission = await AdmitAsync(new OwnedTextSendRequest($"adaptive-recheck:{notice.SessionId}:{runId}", notice.SessionId, RecheckPrompt)
+        // The prompt is the card: the timeline titles it Adaptive recheck.
+        await AdmitAsync(new OwnedTextSendRequest($"adaptive-recheck:{notice.SessionId}:{runId}", notice.SessionId, RecheckPrompt)
         {
             Provenance = AgentPromptProvenance.AdaptiveRecheck,
         }).ConfigureAwait(false);
-        if (admission.Kind == OwnedSessionCommandAdmissionKind.Accepted)
-            await WriteCardAsync(notice.SessionId, $"The turn changed code: {model} checks the change against the request.").ConfigureAwait(false);
     }
 
     private async Task EscalateAsync(AdaptiveSessionNotice notice, AdaptiveModelSettings settings, string sign, string runId)
@@ -338,7 +337,7 @@ internal sealed partial class AdaptiveTurnCoordinator
         if (choice is null)
         {
             await WriteCardAsync(notice.SessionId, $"Adaptive did not continue the turn ({sign}): no model of the {ModelTiers.NameOf(settings.Escalate)} tier is ready.",
-                AgentSessionUpdateKind.Warning).ConfigureAwait(false);
+                "escalation", AgentSessionUpdateKind.Warning).ConfigureAwait(false);
             return;
         }
 
@@ -353,20 +352,19 @@ internal sealed partial class AdaptiveTurnCoordinator
             if (switched != "ok")
             {
                 await WriteCardAsync(notice.SessionId, $"Adaptive did not continue the turn ({sign}): the switch to {choice.ProviderDisplayName} was refused ({switched}).",
-                    AgentSessionUpdateKind.Warning).ConfigureAwait(false);
+                    "escalation", AgentSessionUpdateKind.Warning).ConfigureAwait(false);
                 return;
             }
         }
 
         await _runtime.SetSessionTierAsync(notice.SessionId, settings.Escalate, _closing.Token).ConfigureAwait(false);
         var to = $"{choice.ProviderDisplayName} {choice.ModelDisplayName}{(choice.Reasoning is { } effort ? " " + CodeAltaConfigStore.FormatReasoningEffort(effort) : string.Empty)}";
-        var admission = await AdmitAsync(new OwnedTextSendRequest($"adaptive-escalation:{notice.SessionId}:{runId}", notice.SessionId, EscalationPrompt(sign, to))
+        // The prompt is the card: the timeline titles it Adaptive escalation, and it says why and on which model.
+        await AdmitAsync(new OwnedTextSendRequest($"adaptive-escalation:{notice.SessionId}:{runId}", notice.SessionId, EscalationPrompt(sign, to))
         {
             Selection = new OwnedSessionSelection(target.ProviderKey, notice.AgentPromptId ?? "default", target.ModelId, choice.Reasoning) { PermissionMode = permissionMode },
             Provenance = AgentPromptProvenance.AdaptiveEscalation,
         }).ConfigureAwait(false);
-        if (admission.Kind == OwnedSessionCommandAdmissionKind.Accepted)
-            await WriteCardAsync(notice.SessionId, $"Continued on {to}: {sign}.").ConfigureAwait(false);
     }
 
     // After an escalation, the session goes back to the turn tier: on its provider, the next turn takes the model
@@ -398,13 +396,6 @@ internal sealed partial class AdaptiveTurnCoordinator
         }
 
         return ModelTierSelection.SelectForNewSession(scope, tier, states, key => _commands.SelectionProvider?.Invoke(new ModelProviderId(key)), requestedReasoning: null);
-    }
-
-    private string ModelName(string providerKey, string? modelId)
-    {
-        var state = (_commands.Fallback.ProviderStates?.Invoke() ?? [])
-            .FirstOrDefault(state => string.Equals(state.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase));
-        return state?.Models.FirstOrDefault(model => string.Equals(model.Id, modelId, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? modelId ?? "its model";
     }
 
     internal static string EscalationPrompt(string sign, string to)
@@ -458,12 +449,23 @@ internal sealed partial class AdaptiveTurnCoordinator
         }
     }
 
-    private async Task WriteCardAsync(string sessionId, string message, AgentSessionUpdateKind kind = AgentSessionUpdateKind.Info)
+    // A warning of the timeline, when Adaptive could not continue a turn; its details name what it tried, which the
+    // timeline titles it by.
+    private async Task WriteCardAsync(string sessionId, string message, string what, AgentSessionUpdateKind kind = AgentSessionUpdateKind.Warning)
     {
         var session = await _runtime.ResolveOwnedSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
         if (session is null) return;
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("adaptive", what);
+            writer.WriteEndObject();
+        }
+
+        var details = JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
         await _runtime.AppendSessionEventAsync(session, new AgentSessionUpdateEvent(
-            new ModelProviderId(session.ResolvedProviderKey), sessionId, Time.GetUtcNow(), null, kind, message, null), CancellationToken.None).ConfigureAwait(false);
+            new ModelProviderId(session.ResolvedProviderKey), sessionId, Time.GetUtcNow(), null, kind, message, details), CancellationToken.None).ConfigureAwait(false);
     }
 
     // Runs the decision of a session on its own, which the settlement of the session waits for and the closing awaits.
@@ -581,6 +583,15 @@ internal sealed partial class AdaptiveTurnCoordinator
     [GeneratedRegex(@"^exit_code: (-?\d+)", RegexOptions.Multiline)]
     private static partial Regex ExitCodePattern();
 
+    // A summary that says tests failed: `ℹ fail 1` and `# fail 1` (node), `1 failed`, `2 failing`, `1 failure`, `Failed: 1`
+    // (dotnet test), a line `FAIL ...` (Go, Jest), `test result: FAILED` (Cargo).
+    [GeneratedRegex(@"^\s*(ℹ|#)\s*fail\s+[1-9]\d*\b|\b[1-9]\d*\s+(failed|failing|failures?)\b|\bFailed:\s*[1-9]\d*\b|^(--- )?FAIL\b|test result: FAILED", RegexOptions.Multiline)]
+    private static partial Regex TestsFailedPattern();
+
+    // A summary that says no test failed: `ℹ fail 0`, `0 failed`, `Failed: 0`, `Passed!`, `test result: ok`, `ok  ` (Go), `N passed`.
+    [GeneratedRegex(@"^\s*(ℹ|#)\s*fail\s+0\b|\b0\s+(failed|failures)\b|\bFailed:\s*0\b|\bPassed!|test result: ok\b|^ok\s+\S|\b[1-9]\d*\s+passed\b|\b[1-9]\d*\s+passing\b", RegexOptions.Multiline)]
+    private static partial Regex TestsPassedPattern();
+
     // An answer that says the tools cannot be used: only a refusal about tools, files or access, never a plain "cannot".
     [GeneratedRegex(@"\b(cannot|can't|can not|unable to|do not have|don't have|no)\b[^.\n]{0,40}\b(access|tools?|run commands?|execute|read (the )?files?|edit (the )?files?|file ?system)\b", RegexOptions.IgnoreCase)]
     private static partial Regex RefusalPattern();
@@ -592,6 +603,17 @@ internal sealed partial class AdaptiveTurnCoordinator
             && arguments.TryGetProperty("command", out var written) && written.ValueKind == JsonValueKind.String)
             command = written.GetString();
         return TestCommandPattern().IsMatch(command ?? name ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Reads how a test run ended from the summary its runner writes (node, Jest, Vitest, Mocha, pytest, dotnet test, Go,
+    /// Cargo, RSpec): 1 when tests failed, 0 when it says none did, null when the output says neither.
+    /// </summary>
+    internal static int? TestOutcome(string? output)
+    {
+        if (string.IsNullOrEmpty(output)) return null;
+        if (TestsFailedPattern().IsMatch(output)) return 1;
+        return TestsPassedPattern().IsMatch(output) ? 0 : null;
     }
 
     internal static int? ExitCode(string? output)
@@ -667,7 +689,8 @@ internal sealed partial class AdaptiveTurnCoordinator
         public void Note(AgentContentCompletedEvent output)
         {
             NoteFiles(output.Details);
-            if (output.ParentActivityId is { Length: > 0 } callId && _tests.Contains(callId) && ExitCode(output.Content) is { } code)
+            // What the test runner says of its tests wins over the exit code, which a pipe (`npm test | grep`) hides.
+            if (output.ParentActivityId is { Length: > 0 } callId && _tests.Contains(callId) && (TestOutcome(output.Content) ?? ExitCode(output.Content)) is { } code)
             {
                 LastTestExit = code;
                 _exitsSeen.Add(callId);

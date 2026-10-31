@@ -450,8 +450,9 @@ by its agent. `AdaptiveTurnCoordinator` (owned by `OwnedSessionCommandService`) 
   beside the events, which the settlement of the session waits for.
 - A user turn that changed code (a git tree of the working folder before and after, docs and `.alta` left out; the
   reported files without git) gets one recheck prompt on the same model. A turn that ends in visible trouble (no
-  answer, a refusal to use tools it did not call, a failed last test run) continues once on the escalation tier, then
-  the session returns to the turn tier. Both are host prompts with their own provenance.
+  answer, a refusal to use tools it did not call, a failed last test run, read from the summary of the runner before the
+  exit code, which a pipe hides) continues once on the escalation tier, then the session returns to the turn tier. Both
+  are host prompts with their own provenance: they are the cards of Adaptive in the timeline.
 - Choosing a model or a tier takes the session off Adaptive; a run that fails is the fallback's.
 
 ## Session retention

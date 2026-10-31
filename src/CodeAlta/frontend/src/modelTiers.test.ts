@@ -51,6 +51,9 @@ test("Adaptive is read with the tiers, ready only when the host says so, and off
   assert.equal(waiting.adaptiveReady, false);
   assert.equal(adaptiveChoice(waiting), null);
   assert.equal(composerAdaptiveEntry(waiting, t).ready, false);
+  // Set up and ready, while the provider of the tier of its turns does not answer yet: chosen, it says so.
+  const starting = readTierState(reply({ adaptive: { code: "quick", escalate: "complex", recheck: true }, adaptiveReady: true }))!;
+  assert.deepEqual(composerAdaptiveEntry(starting, t), { ready: true, detail: "No model ready", title: null });
   // A tier that is none is not Adaptive.
   assert.equal(readTierState(reply({ adaptive: { code: "cheap", escalate: "complex", recheck: true }, adaptiveReady: true }))!.adaptive, null);
 });

@@ -49,7 +49,9 @@ export function ComposerModelPicker({ id, value, models, providerKey, disabled =
     if (model.id !== value) onChange(model.id);
   }
   const content = <div className="composer-model-picker" style={{ "--model-picker-rows": rows } as CSSProperties}>
-    {(tiers && tiers.length > 0 && onChooseTier || adaptive && onChooseAdaptive) && <div className="composer-tiers" role="group" aria-label={t("Tiers")}>
+    {(tiers && tiers.length > 0 && onChooseTier || adaptive && onChooseAdaptive) && <div className="composer-tiers" role="group" aria-label={t("Tiers")}
+      // A column per tier, Adaptive on a line of its own under them.
+      style={{ gridTemplateColumns: `repeat(${Math.max(1, onChooseTier ? tiers?.length ?? 0 : 0)}, minmax(0, 1fr))` }}>
       {onChooseTier && tiers?.map(tier => <Button key={tier.tier} variant="minimal" size="small" className="composer-tier" active={tier.tier === currentTier}
         aria-pressed={tier.tier === currentTier} disabled={!tier.detail} title={tier.title ?? undefined}
         onClick={() => { setOpen(false); onChooseTier(tier.tier); }}>
