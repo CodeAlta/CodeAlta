@@ -12,7 +12,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 {
     private const string Owner = "session_cache";
     private const string TablePrefix = "session_projection_cache";
-    private const int SchemaVersion = 10;
+    private const int SchemaVersion = 11;
     private const int ProjectionVersion = 1;
 
     // The longest preview of the last answer of a session a row keeps: the answer itself is in the history of the journal.

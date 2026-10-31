@@ -113,7 +113,7 @@ public sealed class SessionStateRowTests
 
         Assert.AreEqual(session.SessionId, listed.Single().SessionId);
         await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(10, await database.GetVersionAsync("session_cache"));
+        Assert.AreEqual(11, await database.GetVersionAsync("session_cache"));
     }
 
     [TestMethod]
@@ -169,7 +169,7 @@ public sealed class SessionStateRowTests
         Assert.AreEqual(1, first.JournalStateReadCount, "The first read takes the state from the journal.");
         await using (var database = ApplicationDatabase.Create(options))
         {
-            Assert.AreEqual(10, await database.GetVersionAsync("session_cache"));
+            Assert.AreEqual(11, await database.GetVersionAsync("session_cache"));
         }
 
         AssertSameJson(expected, ReadRowState(options, session.SessionId), "The state read is written to the row.");

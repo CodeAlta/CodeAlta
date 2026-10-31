@@ -240,7 +240,7 @@ public sealed class SessionJournalSqliteCacheTests
         {
             await connection.OpenAsync().ConfigureAwait(false);
             await using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE app_meta SET version = 11 WHERE owner = 'session_cache';";
+            command.CommandText = "UPDATE app_meta SET version = 12 WHERE owner = 'session_cache';";
             Assert.AreEqual(1, await command.ExecuteNonQueryAsync().ConfigureAwait(false));
             command.CommandText = "ALTER TABLE session_projection_cache RENAME COLUMN title TO title_of_the_newer_build;";
             await command.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -252,7 +252,7 @@ public sealed class SessionJournalSqliteCacheTests
 
         Assert.AreEqual(1, sessions.Length);
         Assert.AreEqual("session-downgrade", sessions[0].SessionId);
-        Assert.AreEqual(10, await database.GetVersionAsync("session_cache").ConfigureAwait(false), "The tables are those of this build again.");
+        Assert.AreEqual(11, await database.GetVersionAsync("session_cache").ConfigureAwait(false), "The tables are those of this build again.");
         await downgraded.UpsertSessionAsync(CreateSummary("session-after-the-downgrade", updatedAt: "2026-06-18T13:05:00+00:00")).ConfigureAwait(false);
         Assert.AreEqual(2, (await downgraded.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
         Assert.AreEqual(5L, await database.ReadAsync("plugin:test", async (connection, token) =>
@@ -853,7 +853,7 @@ public sealed class SessionJournalSqliteCacheTests
             .ConfigureAwait(false);
         Assert.AreEqual(AgentSessionTitleMode.FirstPrompt, (await ListSingleAsync().ConfigureAwait(false)).ViewState!.TitleMode);
         await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(10, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        Assert.AreEqual(11, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
 
         async Task<AgentSessionMetadata> ListSingleAsync()
             => (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
@@ -884,7 +884,7 @@ public sealed class SessionJournalSqliteCacheTests
         var listed = (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
         Assert.AreEqual("strict", listed.ViewState!.Sandbox);
         await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(10, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        Assert.AreEqual(11, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
     }
 
     [TestMethod]
@@ -933,7 +933,7 @@ public sealed class SessionJournalSqliteCacheTests
 
         await AssertSpacesAsync().ConfigureAwait(false);
         await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(10, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        Assert.AreEqual(11, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
 
         async Task AssertSpacesAsync()
         {
@@ -985,7 +985,7 @@ public sealed class SessionJournalSqliteCacheTests
             new SessionViewLocalState { ProviderKey = "openai", Archived = true, ArchivedAt = archivedAt }).ConfigureAwait(false);
         Assert.AreEqual(archivedAt, (await ListSingleAsync().ConfigureAwait(false)).ViewState!.ArchivedAt);
         await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(10, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        Assert.AreEqual(11, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
 
         async Task<AgentSessionMetadata> ListSingleAsync()
             => (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
@@ -1069,7 +1069,7 @@ public sealed class SessionJournalSqliteCacheTests
         await AssertHeadersAsync().ConfigureAwait(false);
         await using (var database = ApplicationDatabase.Create(options))
         {
-            Assert.AreEqual(10, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+            Assert.AreEqual(11, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
         }
 
         using (LockJournals(temp.Path))
@@ -1148,7 +1148,7 @@ public sealed class SessionJournalSqliteCacheTests
 
         await using (var database = ApplicationDatabase.Create(options))
         {
-            Assert.AreEqual(10, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+            Assert.AreEqual(11, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
         }
 
         // The first read of the last state of the journal writes the count to its row: the next start reads no journal for it.
@@ -1166,6 +1166,48 @@ public sealed class SessionJournalSqliteCacheTests
 
         async Task<int?> ListedCountAsync()
             => (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single().ViewState?.QueuedPromptCount;
+
+        async Task ExecuteAsync(string sql)
+        {
+            await using var connection = new SqliteConnection($"Data Source={options.ApplicationDatabasePath};Pooling=False");
+            await connection.OpenAsync().ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
+    public async Task TheCloudSessionOfASession_IsListed_AndACacheOfTheVersionBefore_GainsItsColumn()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var catalog = new SessionViewCatalog(options);
+        var session = CreateSummary("session-cloud", updatedAt: "2026-10-31T21:11:00+00:00");
+        await catalog.JournalStore.CreateSessionStore().UpsertSessionAsync(session).ConfigureAwait(false);
+        await catalog.JournalStore.AppendStateAsync(CreateDescriptor(session), new SessionViewLocalState
+        {
+            ProviderKey = "claude-code",
+            Cloud = new SessionCloudState { Id = "session_01QK5u8xRwDmhdvgs5BDTzPp", Url = "https://claude.ai/code/session_01QK5u8xRwDmhdvgs5BDTzPp", Title = "Fix it", Task = "Fix it" },
+        }).ConfigureAwait(false);
+        Assert.AreEqual(("session_01QK5u8xRwDmhdvgs5BDTzPp", false), await ListedCloudAsync().ConfigureAwait(false));
+
+        // A cache of the version before the cloud sessions: no column, and that version recorded. It is migrated, and its
+        // rows are projected again with their cloud session, instead of failing every read of the list.
+        await ExecuteAsync("ALTER TABLE session_projection_cache DROP COLUMN local_cloud; UPDATE app_meta SET version = 10 WHERE owner = 'session_cache';").ConfigureAwait(false);
+        await new FileSystemAgentSessionStore(new AgentRuntimePathLayout(temp.Path))
+            .UpsertSessionAsync(session with { UpdatedAt = DateTimeOffset.Parse("2026-10-31T21:12:00+00:00") }).ConfigureAwait(false);
+        Assert.AreEqual(("session_01QK5u8xRwDmhdvgs5BDTzPp", false), await ListedCloudAsync().ConfigureAwait(false));
+        await using (var database = ApplicationDatabase.Create(options))
+        {
+            Assert.AreEqual(11, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        }
+
+        async Task<(string?, bool)> ListedCloudAsync()
+        {
+            var cloud = (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single().ViewState?.Cloud;
+            return (cloud?.Id, cloud?.Continued ?? false);
+        }
 
         async Task ExecuteAsync(string sql)
         {

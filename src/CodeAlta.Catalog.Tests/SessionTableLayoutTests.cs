@@ -79,7 +79,7 @@ public sealed class SessionTableLayoutTests
         var listed = (await store.ListSessionsAsync().ToArrayAsync()).Single();
         await using (var database = ApplicationDatabase.Create(options))
         {
-            Assert.AreEqual(10, await database.GetVersionAsync("session_cache"));
+            Assert.AreEqual(11, await database.GetVersionAsync("session_cache"));
         }
 
         AssertListTableHoldsNoState(options);
