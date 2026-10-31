@@ -62,13 +62,13 @@ public sealed class CliHelpTests
         var methods = new[]
         {
             "_codealta/session ", "session/update", "_codealta/session_started", "_codealta/compaction", "_codealta/retry", "_codealta/fallback",
-            "_codealta/error", "_codealta/result",
+            "_codealta/error", "_codealta/operation", "_codealta/result",
         };
         var positions = methods.Select(method => help.IndexOf(method, StringComparison.Ordinal)).ToArray();
         Assert.IsTrue(positions.All(static position => position >= 0) && positions.SequenceEqual(positions.Order()), string.Join(", ", positions));
         AssertExitCodes(help, CliExitCodes.Completed, CliExitCodes.Failed, CliExitCodes.InvalidUsage, CliExitCodes.Aborted, CliExitCodes.Timeout,
             CliExitCodes.SessionInUse, CliExitCodes.ProviderNotReady, CliExitCodes.InvalidOutput);
-        AssertConcise(help, maximumLines: 160, maximumCharacters: 10000);
+        AssertConcise(help, maximumLines: 161, maximumCharacters: 10000);
     }
 
     [TestMethod]

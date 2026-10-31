@@ -24,7 +24,7 @@ altacli run - < task.md
 ```
 
 - The session works in the current folder, or the folder of `-C`.
-- `-m provider:model[@reasoning]` chooses the model, `--tier complex|standard|quick` a [model tier](model-tiers.md), `--reasoning` the effort, `--prompt-id` the [agent prompt](prompts.md) (`default`, `plan`...).
+- `-m provider:model[@reasoning]` chooses the model, `--tier complex|standard|quick` a [model tier](model-tiers.md) (`--tier adaptive` puts the session on [Adaptive](model-tiers.md#adaptive-experimental)), `--reasoning` the effort, `--prompt-id` the [agent prompt](prompts.md) (`default`, `plan`...).
 - The prompt is the words given. `-` reads it from standard input; when standard input is piped and words are given too, it is added after them in a `<stdin>...</stdin>` block. `-f FILE` attaches a file or an image.
 - `--resume ID` continues a session; `--session-id ID` opens the session `ID`, or creates it with this id.
 - `--timeout DURATION` (seconds, or `hh:mm:ss`) stops the run when the time is up. The agent is told when the run ends, and its background jobs are stopped a little before then, so that their results still reach it.
@@ -71,6 +71,7 @@ By default, standard output holds the final answer only, so `altacli run "..." >
 | `_codealta/session` | First line: the session, its folder, provider and its type (`anthropic`, `codex`, `claude-code`...), model, storage, the parts of the agent prompt left out (`disabledFeatures`), and its options (`options.subSessions`, false with `--no-sub-sessions`). |
 | `session/update` | Messages, thinking, tool calls and their results, plans and token use, as in ACP. The lines of a delegated agent carry its own `sessionId`. |
 | `_codealta/session_started`, `_codealta/compaction`, `_codealta/retry`, `_codealta/fallback`, `_codealta/error` | What ACP has no update for: a delegated agent starts, a compaction, a retry, a [fallback](model-tiers.md) to another model, an error (`events_dropped` when updates were lost: the whole answer is in the result). |
+| `_codealta/operation` | One request to a model: the model and effort, the input tokens with those read from and written to the prompt cache, the output and thinking tokens, and the cost when the provider gives one. They add up to the tokens of the result. |
 | `_codealta/result` | Last line: the status, exit code, final answer, tokens, cost, and duration. Tokens and cost the provider does not give are null, never 0; a cost it does not give is estimated in US dollars from the public price of the model, at its base rate, and marked `"_meta": {"codealta": {"estimated": true}}`. |
 
 | Exit code | The run |
@@ -143,7 +144,7 @@ Without these variables, nothing is sent.
 
 ## The alta commands
 
-`altacli alta ARGS...` runs the commands of the `alta` tool, as the agents do: `altacli alta session list`, `altacli alta project list`, `altacli alta model list`. `altacli alta --help` lists those of the command line. The commands that would change the configuration files, such as `alta mcp server add` or `alta mcp server disable`, fail there: `altacli` leaves them as they are.
+`altacli alta ARGS...` runs the commands of the `alta` tool, as the agents do: `altacli alta session list`, `altacli alta project list`, `altacli alta model list`. `altacli alta --help` lists those of the command line. They see the sessions of the storage they are given, such as `--isolated`: those of the folder of the command (`-C`, else the current folder) and of your projects are listed, and any session is found by its id, as `altacli run --resume` finds it. The commands that would change the configuration files, such as `alta mcp server add` or `alta mcp server disable`, fail there: `altacli` leaves them as they are.
 
 ## Editors (ACP)
 

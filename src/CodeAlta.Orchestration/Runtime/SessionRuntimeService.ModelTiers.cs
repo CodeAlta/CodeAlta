@@ -30,6 +30,29 @@ internal sealed record RunFailureNotice(
     ModelTierScope Scope,
     bool Sandboxed = false);
 
+/// <summary>A session as CodeAlta reads it to choose the model of its next turn on Adaptive.</summary>
+/// <param name="SessionId">The session.</param>
+/// <param name="ProviderKey">The provider it runs on.</param>
+/// <param name="ModelId">The model it runs, when it names one.</param>
+/// <param name="ReasoningEffort">The reasoning effort it runs with, when it names one.</param>
+/// <param name="PermissionMode">Its permission mode, or <see langword="null"/> for the one of its provider.</param>
+/// <param name="AgentPromptId">Its agent prompt.</param>
+/// <param name="Tier">The tier it runs on, or <see langword="null"/> for a model chosen by hand.</param>
+/// <param name="Adaptive">Whether CodeAlta chooses the model of each of its turns.</param>
+/// <param name="HasQueuedPrompts">Whether prompts wait in its queue.</param>
+/// <param name="Scope">The tiers of its space, the providers available there, and Adaptive.</param>
+internal sealed record AdaptiveSessionNotice(
+    string SessionId,
+    string ProviderKey,
+    string? ModelId,
+    CodeAlta.Agent.AgentReasoningEffort? ReasoningEffort,
+    string? PermissionMode,
+    string? AgentPromptId,
+    ModelTier? Tier,
+    bool Adaptive,
+    bool HasQueuedPrompts,
+    ModelTierScope Scope);
+
 public sealed partial class SessionRuntimeService
 {
     /// <summary>
@@ -147,6 +170,43 @@ public sealed partial class SessionRuntimeService
     }
 
     /// <summary>
+    /// Reads what CodeAlta needs to choose the next model of a session on Adaptive: the provider, model and permission
+    /// mode it has now, its tier, whether it is on Adaptive, its queue and its scope.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The notice, or <see langword="null"/> for a session that is not known or is archived.</returns>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    internal async Task<AdaptiveSessionNotice?> ReadAdaptiveNoticeAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return await AdmitAsync(
+                () => GetActorForWork(sessionId).QueryAsync(async token =>
+                {
+                    var session = await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false);
+                    if (session is null) return null;
+                    var local = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false);
+                    if (local?.Archived == true) return null;
+                    _entries.TryGetValue(sessionId, out var entry);
+                    if (entry is { IsTerminated: true }) entry = null;
+                    var scope = await LoadModelTierScopeAsync(entry?.SpaceId ?? session.SpaceId, entry?.ProjectId ?? session.ProjectRef, token).ConfigureAwait(false);
+                    return new AdaptiveSessionNotice(
+                        sessionId,
+                        entry?.ProviderKey ?? local?.ProviderKey ?? session.ProviderKey ?? session.ProviderId,
+                        entry?.Model ?? local?.ModelId ?? session.ModelId,
+                        entry?.ReasoningEffort ?? local?.ReasoningEffort ?? session.ReasoningEffort,
+                        entry is null ? local?.PermissionMode ?? session.PermissionMode : entry.PermissionMode,
+                        entry?.PendingAgentPromptId ?? entry?.AgentPromptId ?? local?.AgentPromptId ?? session.AgentPromptId,
+                        ModelTiers.Parse(local?.Tier),
+                        local?.Adaptive == true,
+                        local?.HasPendingQueuedPrompts() ?? false,
+                        scope);
+                }, CancellationToken.None).AsTask(),
+                cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// What a fallback held back of a failed run: the notification of its parent and the drain of its queue. Either
     /// the session went on with another model (<see cref="Replace"/>), or they go out as they would have
     /// (<see cref="ReleaseAsync"/>).
@@ -211,7 +271,21 @@ public sealed partial class SessionRuntimeService
     /// <returns>Whether the session is known.</returns>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
     /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
-    public async Task<bool> SetSessionTierAsync(string sessionId, ModelTier? tier, CancellationToken cancellationToken = default)
+    public Task<bool> SetSessionTierAsync(string sessionId, ModelTier? tier, CancellationToken cancellationToken = default)
+        => SetSessionModelChoiceAsync(sessionId, tier, adaptive: null, cancellationToken);
+
+    /// <summary>
+    /// Records the tier of models a session runs on and whether CodeAlta chooses the model of each of its turns (Adaptive),
+    /// as <see cref="SetSessionTierAsync"/> records the tier alone.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="tier">The tier, or <see langword="null"/> for a model chosen by hand.</param>
+    /// <param name="adaptive">Whether the session is on Adaptive; <see langword="null"/> keeps what it records.</param>
+    /// <param name="cancellationToken">Stops waiting; what was started is completed.</param>
+    /// <returns>Whether the session is known.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public async Task<bool> SetSessionModelChoiceAsync(string sessionId, ModelTier? tier, bool? adaptive, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         return await AdmitAsync(async () =>
@@ -224,13 +298,34 @@ public sealed partial class SessionRuntimeService
                 {
                     // An attachment that is being made reads what is saved: it is waited for first.
                     if (_transitions.TryGetValue(sessionId, out var pending)) return ((Task?)pending, false);
-                    return (null, await WriteSessionTierAsync(sessionId, tier, token).ConfigureAwait(false));
+                    return (null, await WriteSessionTierAsync(sessionId, tier, adaptive, token).ConfigureAwait(false));
                 }, CancellationToken.None).ConfigureAwait(false);
                 if (transition is null) return known;
                 // Its failure belongs to the one that attaches.
                 await transition.ContinueWith(static _ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).ConfigureAwait(false);
             }
         }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the tier of models a session runs on and whether it is on Adaptive, as they were last chosen.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The tier (<see langword="null"/> for a model chosen by hand) and whether CodeAlta chooses the model of each turn.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public async Task<(ModelTier? Tier, bool Adaptive)> GetSessionModelChoiceAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return await AdmitAsync(
+                () => GetActorForWork(sessionId).QueryAsync(async token =>
+                {
+                    var session = await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false);
+                    if (session is null) return ((ModelTier?)null, false);
+                    var local = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false);
+                    return (ModelTiers.Parse(local?.Tier), local?.Adaptive == true);
+                }, CancellationToken.None).AsTask(),
+                cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     // Runs on the actor of the session.
@@ -241,14 +336,15 @@ public sealed partial class SessionRuntimeService
         return ModelTiers.Parse((await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false))?.Tier);
     }
 
-    // Runs on the actor of the session.
-    private async ValueTask<bool> WriteSessionTierAsync(string sessionId, ModelTier? tier, CancellationToken token)
+    // Runs on the actor of the session. A null adaptive keeps what the session records.
+    private async ValueTask<bool> WriteSessionTierAsync(string sessionId, ModelTier? tier, bool? adaptive, CancellationToken token)
     {
         var session = await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false);
         if (session is null) return false;
         var name = tier is { } chosen ? ModelTiers.NameOf(chosen) : null;
         var localState = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false);
-        if (localState is not null && string.Equals(localState.Tier, name, StringComparison.Ordinal)) return true;
+        var recorded = adaptive is false ? null : adaptive ?? localState?.Adaptive;
+        if (localState is not null && string.Equals(localState.Tier, name, StringComparison.Ordinal) && localState.Adaptive == recorded) return true;
         if (localState is null)
         {
             localState = new SessionViewLocalState();
@@ -256,6 +352,7 @@ public sealed partial class SessionRuntimeService
         }
 
         localState.Tier = name;
+        localState.Adaptive = recorded;
         await _sessionViewCatalog.JournalStore.AppendStateAsync(session, localState, token).ConfigureAwait(false);
         return true;
     }

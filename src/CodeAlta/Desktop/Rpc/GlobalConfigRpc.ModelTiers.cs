@@ -54,7 +54,56 @@ internal sealed partial class GlobalConfigService
         if (status is not null) return new(status, [], null, null);
         // The global reading is for no space: every provider counts there.
         var scope = ModelTierScope.Of(settings, space, space is null ? SpaceAssignments.Empty : assignments);
-        return new("ok", ToItems(scope), ToItem(scope.Fallback), null) { Source = scope.FromSpace ? "space" : "global", SpaceId = space?.Id };
+        return new("ok", ToItems(scope), ToItem(scope.Fallback), null)
+        {
+            Source = scope.FromSpace ? "space" : "global", SpaceId = space?.Id,
+            Adaptive = ToItem(scope.Adaptive), AdaptiveReady = scope.IsAdaptiveReady,
+        };
+    }
+
+    /// <summary>
+    /// Sets up Adaptive with its choices, or takes it out with none: the tier its turns run on, the tier a turn in trouble
+    /// continues on, and whether a turn that changed code rechecks it. The reply reads the global tiers again.
+    /// </summary>
+    [NeoRpcMethod("saveAdaptive")]
+    public async Task<GlobalConfigModelTiersResponse> SaveAdaptiveAsync(GlobalConfigSaveAdaptiveRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", [], null, null);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", [], null, null);
+        AdaptiveModelSettings? adaptive = null;
+        if (request.Adaptive is { } chosen)
+        {
+            if (CodeAlta.Catalog.ModelTiers.ModelTiers.Parse(chosen.Code) is not { } code || CodeAlta.Catalog.ModelTiers.ModelTiers.Parse(chosen.Escalate) is not { } escalate)
+                return new("invalid", [], null, "Adaptive names a tier that is not one: use complex, standard or quick.");
+            adaptive = new AdaptiveModelSettings(code, escalate, chosen.Recheck);
+        }
+
+        lock (_gate)
+        {
+            try
+            {
+                _store.SaveGlobalModelSettings(_store.LoadGlobalModelSettings() with { Adaptive = adaptive });
+            }
+            catch (InvalidDataException exception)
+            {
+                // The tiers the file writes wrong are fixed on the tiers page first.
+                return new("invalid", [], null, Bound(exception.Message));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or FormatException)
+            {
+                return new("write_failed", [], null, null);
+            }
+        }
+
+        return await ModelTiersAsync(new(request.ExpectedEpoch), cancellationToken).ConfigureAwait(false);
+    }
+
+    // Adaptive as the file sets it up, read under the gate; none when the file cannot be read, which a save then fixes.
+    private AdaptiveModelSettings? LoadAdaptive()
+    {
+        try { return _store!.LoadGlobalModelSettings().Adaptive; }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException) { return null; }
     }
 
     /// <summary>
@@ -130,7 +179,8 @@ internal sealed partial class GlobalConfigService
         {
             try
             {
-                _store.SaveGlobalModelSettings(settings);
+                // The tiers and the fallback are saved here: Adaptive stays as the file has it.
+                _store.SaveGlobalModelSettings(settings with { Adaptive = LoadAdaptive() });
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or FormatException)
             {
@@ -218,7 +268,22 @@ internal sealed partial class GlobalConfigService
 
     private static ModelFallbackSetting ToItem(ModelFallbackSettings fallback)
         => new(fallback.Enabled, fallback.OnQuota, fallback.OnUnavailable, fallback.Resume, fallback.MaxResumes);
+
+    private static AdaptiveSetting? ToItem(AdaptiveModelSettings? adaptive)
+        => adaptive is null ? null
+            : new(CodeAlta.Catalog.ModelTiers.ModelTiers.NameOf(adaptive.Code), CodeAlta.Catalog.ModelTiers.ModelTiers.NameOf(adaptive.Escalate), adaptive.Recheck);
 }
+
+/// <summary>Sets up Adaptive, or takes it out.</summary>
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="Adaptive">The choices of Adaptive, or null to take it out.</param>
+internal sealed record GlobalConfigSaveAdaptiveRequest(string ExpectedEpoch, AdaptiveSetting? Adaptive);
+
+/// <summary>How CodeAlta chooses the model of each turn of a session on Adaptive.</summary>
+/// <param name="Code">The tier its turns run on: <c>complex</c>, <c>standard</c> or <c>quick</c>.</param>
+/// <param name="Escalate">The tier a turn that ends in visible trouble continues on.</param>
+/// <param name="Recheck">Whether a turn that changed code is asked once to check its change against the request.</param>
+internal sealed record AdaptiveSetting(string Code, string Escalate, bool Recheck);
 
 /// <summary>Asks for the tiers of models.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>
@@ -259,6 +324,12 @@ internal sealed record GlobalConfigModelTiersResponse(string Status, IReadOnlyLi
 
     /// <summary>Gets the space the tiers were read for, or null.</summary>
     public string? SpaceId { get; init; }
+
+    /// <summary>Gets the choices of Adaptive, or null when it is not set up.</summary>
+    public AdaptiveSetting? Adaptive { get; init; }
+
+    /// <summary>Gets whether a session of the scope can be put on Adaptive: it is set up and the tiers it names have models.</summary>
+    public bool AdaptiveReady { get; init; }
 }
 
 /// <summary>A tier of models: its targets in order of preference, and the model it gives now.</summary>

@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The projects of the scenarios and their hidden tests, read next to the executable. -->
+    <None Update="Scenarios\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Run as a process: the tiny MCP server is what the sessions call. altacli, what is measured, is the one the solution
          builds (only its tests reference the command line application). -->
     <ProjectReference Include="..\CodeAlta.Tests.TinyMcpServer\CodeAlta.Tests.TinyMcpServer.csproj" ReferenceOutputAssembly="false" />

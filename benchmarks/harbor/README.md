@@ -49,6 +49,9 @@ The agent phase is offline: the tasks set `[agent] network_mode = "no-network"`,
 | `plugins` | `false` | `true` starts plugins and MCP servers |
 | `altacli_tarball`, `altacli_url`, `altacli_sha256` | `dist/...` | Where `altacli` comes from |
 | `extra_args` | | More `altacli run` arguments, shell-quoted |
+| `escalate_to` | | A model of the same provider that continues the session when the run ends with a sign of trouble the host sees: no answer, a refusal to use the tools, or its last test run failing. The session is then kept in the profile instead of an ephemeral root, and the second run (`altacli.escalation.jsonl`) gets the budget left; the result adds up both. |
+| `escalate_effort` | | The reasoning effort of that model |
+| `recheck` | `false` | `true` resumes a run that changed the repository once, on its model, to check its change against each requirement of the request and fix what it misses (`altacli.recheck.jsonl`), before an escalation |
 
 ## Model mapping
 

@@ -84,6 +84,7 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (request.SessionId is not null && request.ResumeSessionId is not null) return Invalid("Name either a session to resume or a session id, not both.");
         if (request.ModelRef is not null && request.Tier is not null) return Invalid("Name either a model or a tier, not both.");
+        if (request.Adaptive && (request.ModelRef is not null || request.Tier is not null)) return Invalid("Adaptive chooses the model: name no model and no tier with it.");
         foreach (var pattern in request.DisabledToolPatterns)
         {
             if (AgentToolPatterns.Validate(pattern) is { } error) return Invalid(error);
@@ -160,6 +161,8 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
                 && await _host.Commands.SetSessionOptionsAsync(sessionId, narrowed, cancellationToken).ConfigureAwait(false) is { Status: not "ok" })
                 return NotReady($"The options of session '{sessionId}' cannot be changed now.");
             if (model.Tier is { } tier) await runtime.SetSessionTierAsync(sessionId, tier, cancellationToken).ConfigureAwait(false);
+            if (request.Adaptive && await _host.Commands.SetSessionAdaptiveAsync(sessionId, cancellationToken).ConfigureAwait(false) is { Status: not "ok" } adaptive)
+                return NotReady($"Session '{sessionId}' cannot be put on Adaptive ({adaptive.Status}).");
             // The sandbox asked is the session's own choice: no setting makes the run leave it.
             if (request.Sandbox is { } sandbox && await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false) is { Status: not "ok" } refused)
                 return NotReady($"The sandbox of session '{sessionId}' cannot be chosen now ({refused.Status}).");
@@ -566,15 +569,18 @@ public sealed class HeadlessSessionDriver : IAsyncDisposable
                 return ModelChoice.Fail(Invalid(error ?? $"'{reference}' names more than one reasoning effort."));
             (providerKey, modelId, effort) = (target.ProviderKey, target.ModelId, target.PreferredReasoning);
         }
-        else if (request.Tier is not null || existing is null)
+        else if (request.Tier is not null || request.Adaptive || existing is null)
         {
-            var asked = request.Tier ?? ModelTier.Standard;
             var scope = await runtime.LoadModelTierScopeAsync(existing?.SpaceId, existing?.ProjectRef ?? project?.Id, cancellationToken).ConfigureAwait(false);
+            if (request.Adaptive && !scope.IsAdaptiveReady)
+                return ModelChoice.Fail(NotReady("Adaptive is not set up: set [models.adaptive] and give models to the tiers it names, or name a model or a tier."));
+            // A session on Adaptive starts with the model of the tier of its turns.
+            var asked = request.Adaptive ? scope.Adaptive!.Code : request.Tier ?? ModelTier.Standard;
             if (ModelTierSelection.SelectForNewSession(scope, asked, _host.ModelProviderInitializationService.CurrentStates, FindProvider, request.Reasoning) is { } choice)
             {
                 (providerKey, modelId, effort, tier) = (choice.ProviderKey, choice.ModelId, choice.Reasoning, asked);
             }
-            else if (request.Tier is not null)
+            else if (request.Tier is not null || request.Adaptive)
             {
                 var targets = scope.Tiers.Get(asked);
                 return ModelChoice.Fail(NotReady(targets.Count == 0

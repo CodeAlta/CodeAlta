@@ -26,6 +26,12 @@ public sealed record HeadlessSessionRequest
     /// <summary>Gets the tier of models to take the model from; null for <see cref="ModelRef"/> or the usual model.</summary>
     public ModelTier? Tier { get; init; }
 
+    /// <summary>
+    /// Gets whether the session is put on Adaptive (<c>[models.adaptive]</c>): it starts with the model of the tier of its
+    /// turns, and CodeAlta then chooses the model of each turn. Not with <see cref="ModelRef"/> or <see cref="Tier"/>.
+    /// </summary>
+    public bool Adaptive { get; init; }
+
     /// <summary>Gets the reasoning effort, over the one of the model reference or the tier; null for theirs.</summary>
     public AgentReasoningEffort? Reasoning { get; init; }
 

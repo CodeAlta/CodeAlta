@@ -893,6 +893,8 @@ public static partial class AgentBuiltInToolFactory
             return Failure($"shell_command failed to start: {ex.Message}");
         }
 
+        using var job = ShellProcessJob.TryJoin(process);
+
         // A child may retain the redirected pipes after the shell exits. Keep the same
         // deadline alive until both streams finish, not merely until WaitForExitAsync.
         using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -924,6 +926,13 @@ public static partial class AgentBuiltInToolFactory
         }
         catch (OperationCanceledException) when (executionCts.IsCancellationRequested)
         {
+            // A shell that still runs is ended with everything it started, also what a process that exited left behind. A
+            // shell that already exited leaves running what it launched, such as a program that keeps the pipes open.
+            if (!HasExited(process))
+            {
+                job?.Terminate();
+            }
+
             TryKill(process);
             // Killing only asks the system to end the shell: wait a bounded time for it to be gone, so the tool does not report
             // the end of a command whose shell still runs in its folder (and holds it as its working directory).
@@ -2266,6 +2275,18 @@ public static partial class AgentBuiltInToolFactory
         }
 
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
+    }
+
+    internal static bool HasExited(Process process)
+    {
+        try
+        {
+            return process.HasExited;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+        {
+            return true;
+        }
     }
 
     private static void TryKill(Process process)

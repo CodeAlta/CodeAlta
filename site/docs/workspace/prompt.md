@@ -61,7 +61,7 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
 </figure>
 
 - **Agent prompt**: built-in prompts, then yours and the project's (see [Agent Prompts](../prompts.md)). A new session starts with the agent prompt of its [space](../spaces.md), **Default** unless you changed it; a prompt you pick, such as **Plan**, is for that session only.
-- **Model**: type part of a name or id in the search box and press `Enter`. [Model tiers](../model-tiers.md) come first, with the model each gives now. **Settings > Models** sets how many models the list shows.
+- **Model**: type part of a name or id in the search box and press `Enter`. [Model tiers](../model-tiers.md) come first, with the model each gives now, then [Adaptive](../model-tiers.md#adaptive-experimental), where CodeAlta chooses the model of each turn. **Settings > Models** sets how many models the list shows.
 - **Reasoning effort**: the efforts of the model. For Claude Code, Copilot and the Anthropic API, a model that lists none has none. With other providers, an effort the model does not list is marked **Unverified**.
 - **Model options**, for a model whose provider offers some, such as **Context** and **Fast** for Cursor's models: a list or a switch under the reasoning effort. An option belongs to the model: it applies to every session of the provider that uses this model.
 - **Review before commit**: **On**, **Off**, or **Default** (the setting of **Settings > Sessions**). See [Review before commit](../reviews.md#review-before-commit).

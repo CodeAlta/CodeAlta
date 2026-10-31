@@ -41,6 +41,29 @@ public sealed class CliHostCommandsTests
     }
 
     [TestMethod]
+    public async Task Alta_FindsAndListsTheSessionsOfARun_InAFolderThatIsNoProject()
+    {
+        // altacli registers no project: the folder of a run stays outside the catalog, as the folder of a script's fixture.
+        using var root = new CliTestRoot();
+        var provider = new FakeProvider();
+        var sessionId = CliStorageTests.SessionIdOf(await root.RunAsync(provider, ["run", Plain, "--isolated", "--format", "jsonl", "hello"]));
+        var elsewhere = Path.Combine(root.Root, "elsewhere");
+        Directory.CreateDirectory(elsewhere);
+
+        // By its id, from another folder, as `run --resume` finds it.
+        var model = await root.RunAsync(provider, ["alta", Plain, "--isolated", "-C", elsewhere, "session", "model", sessionId]);
+        Assert.AreEqual(0, model.ExitCode, model.Stdout + model.Stderr);
+        StringAssert.Contains(model.Stdout, "\"alta.model.selection\"");
+        StringAssert.Contains(model.Stdout, sessionId);
+
+        // Listed for the folder of the command.
+        var list = await root.RunAsync(provider, ["alta", Plain, "--isolated", "-C", root.ProjectRoot, "session", "list", "--state", "all"]);
+        Assert.AreEqual(0, list.ExitCode, list.Stdout + list.Stderr);
+        StringAssert.Contains(list.Stdout, sessionId);
+        Assert.AreEqual(0, CliTestRoot.Files(Path.Combine(root.Profile, "projects")).Length, "No project file is written.");
+    }
+
+    [TestMethod]
     public async Task Alta_LeavesTheSpacesProjectsAndGlobalPromptsOfTheProfileAsTheyAre()
     {
         using var root = new CliTestRoot();

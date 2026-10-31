@@ -42,14 +42,22 @@ internal static class CodeAltaAcpExtensions
     /// <summary>An error of a session: <c>sessionId</c>, <c>kind</c> (the failure kind, or <c>other</c>), <c>message</c>.</summary>
     public const string ErrorMethod = "_codealta/error";
 
+    /// <summary>
+    /// One request to a model, as its provider reported it: <c>sessionId</c>, <c>model</c>, <c>reasoning</c>, <c>inputTokens</c>
+    /// (all of them, the cache included), <c>cachedReadTokens</c>, <c>cachedWriteTokens</c>, <c>outputTokens</c>,
+    /// <c>thoughtTokens</c>, <c>cost</c> and <c>costUnit</c>; what the provider does not report is null. The requests of a run
+    /// add up to the usage of its result.
+    /// </summary>
+    public const string OperationMethod = "_codealta/operation";
+
     /// <summary>Gets every method of the extensions, for a capability object.</summary>
     public static IReadOnlyList<string> Methods { get; } =
-        [SessionMethod, ResultMethod, SessionStartedMethod, CompactionMethod, RetryMethod, FallbackMethod, ErrorMethod];
+        [SessionMethod, ResultMethod, SessionStartedMethod, CompactionMethod, RetryMethod, FallbackMethod, ErrorMethod, OperationMethod];
 
     /// <summary>
     /// Gets the methods <c>altacli acp</c> sends, which it advertises in <c>agentCapabilities._meta.codealta.notifications</c>:
     /// those of the events of a run. The header and the result are the lines of JSONL only: an ACP client has the responses
     /// of <c>session/new</c> and <c>session/prompt</c> for them.
     /// </summary>
-    public static IReadOnlyList<string> AcpMethods { get; } = [SessionStartedMethod, CompactionMethod, RetryMethod, FallbackMethod, ErrorMethod];
+    public static IReadOnlyList<string> AcpMethods { get; } = [SessionStartedMethod, CompactionMethod, RetryMethod, FallbackMethod, ErrorMethod, OperationMethod];
 }

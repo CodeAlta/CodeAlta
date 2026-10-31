@@ -22,6 +22,15 @@ public sealed record ModelTierScope(ModelTierSettings Tiers, bool FromSpace, str
     /// <summary>Gets whether the fallback is the space's own.</summary>
     public bool FallbackFromSpace { get; init; }
 
+    /// <summary>
+    /// Gets how CodeAlta chooses the model of each turn of a session on Adaptive, from the global settings; it takes its
+    /// models from the tiers of this scope. <see langword="null"/> when it is not set up.
+    /// </summary>
+    public AdaptiveModelSettings? Adaptive { get; init; }
+
+    /// <summary>Gets whether a session of this scope can be put on Adaptive: it is set up and the tiers it names have models.</summary>
+    public bool IsAdaptiveReady => Adaptive?.IsReadyIn(Tiers) == true;
+
     /// <summary>Gets whether a provider is available in the space.</summary>
     /// <param name="providerKey">The key of the provider.</param>
     /// <returns><see langword="true"/> when it is.</returns>
@@ -47,8 +56,9 @@ public sealed record ModelTierScope(ModelTierSettings Tiers, bool FromSpace, str
             {
                 Fallback = sessions.Fallback ?? global.Fallback,
                 FallbackFromSpace = sessions.Fallback is not null,
+                Adaptive = global.Adaptive,
             }
-            : new ModelTierScope(global.Tiers, false, space?.Id, assignments) { Fallback = global.Fallback };
+            : new ModelTierScope(global.Tiers, false, space?.Id, assignments) { Fallback = global.Fallback, Adaptive = global.Adaptive };
     }
 
     /// <summary>

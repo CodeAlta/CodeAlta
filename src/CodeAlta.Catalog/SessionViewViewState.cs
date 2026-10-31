@@ -337,6 +337,14 @@ public sealed class SessionViewLocalState
     public string? Tier { get; set; }
 
     /// <summary>
+    /// Gets or sets whether CodeAlta chooses the model of each turn of the session (Adaptive, <c>[models.adaptive]</c>):
+    /// <see cref="Tier"/> is then the tier of its current turn. Null or false for a session on the tier or the model the
+    /// user chose.
+    /// </summary>
+    [JsonPropertyName("adaptive")]
+    public bool? Adaptive { get; set; }
+
+    /// <summary>
     /// Gets or sets the selected agent prompt identifier.
     /// </summary>
     [JsonPropertyName("agent_prompt_id")]

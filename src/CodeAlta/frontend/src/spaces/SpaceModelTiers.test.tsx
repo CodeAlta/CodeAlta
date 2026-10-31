@@ -12,7 +12,7 @@ import type { SpacesHub } from "./spacesHub";
 const never = () => assert.fail("rendering must not act");
 const space: Space = { id: "business", name: "Business", description: null, icon: null, color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] };
 const reply = (source: "global" | "space"): GlobalConfigModelTiersResponse => ({
-  status: "ok", message: null, source, spaceId: "business",
+  status: "ok", message: null, source, spaceId: "business", adaptive: null, adaptiveReady: false,
   fallback: { enabled: true, onQuota: true, onUnavailable: true, resume: false, maxResumes: 5 },
   tiers: [
     { tier: "complex", targets: [{ providerKey: "claude-code", modelId: "opus", reasoning: ["High"] }],

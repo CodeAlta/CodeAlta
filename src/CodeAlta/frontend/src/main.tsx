@@ -283,7 +283,8 @@ import { archivableDescendants, newRestoredNotices, sessionArchiveMessage, setSe
 import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, subSessionsAtWork, type Space, type SubSessionAtWork, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
-import { composerTierEntries, tierStore } from "./modelTiers";
+import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierStore } from "./modelTiers";
+import { AdaptiveSetupDialog } from "./AdaptiveSetup";
 import { deletedSessionWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import { createPreparedWorktrees } from "./worktrees/preparedWorktrees";
 import { WorktreePreparation } from "./worktrees/WorktreePreparation";
@@ -754,7 +755,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // A control outside the shell (a composer status item) asks for a Settings page by name.
   const openSettingsPage = useRef<(page: string) => void>(() => {});
   openSettingsPage.current = page => {
-    if (page === "mcp" || page === "plugins" || page === "providers" || page === "sandbox" || page === "skills" || page === "spaces" || page === "speech") { navigate(page); return; }
+    if (page === "mcp" || page === "models" || page === "plugins" || page === "providers" || page === "sandbox" || page === "skills" || page === "spaces" || page === "speech") { navigate(page); return; }
     // `spaces/<id>/<section>` opens the page of a space at one of its sections.
     const target = readSpacePageLink(page);
     if (target) { navigate("spaces"); setSpacePage(target); }
@@ -2924,6 +2925,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     configurationState.snapshot, owned && (sessionId === null || creatingVisible) && view === "workspace" && !settingsOpen
       && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability,
     spacesState.available ? spaceId : null, providerSpaces);
+  // Adaptive chosen in the draft while it is not set up: the user is offered its settings.
+  const [draftAdaptiveSetup, setDraftAdaptiveSetup] = useState(false);
   // The sandbox of the new session: what its settings give (its model, its provider, its project, its space, every
   // session), unless the draft composer gives it a choice of its own, applied once it is created, before its first prompt.
   const [draftSandbox, setDraftSandbox] = useState<string | null>(null);
@@ -4489,10 +4492,16 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         {!draftChoices.prompts.some(prompt => prompt.id === value.agentPromptId) && <option value={value.agentPromptId}>{t(draftChoices.loadingPrompts ? "Loading…" : "Host default")}</option>}
         {draftChoices.prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.name}</option>)}
       </HTMLSelect>} provider={select}
-      model={<ComposerModelPicker id={`composer-model-${choiceId}`} value={value.modelId || null} models={draftChoices.models} providerKey={usedProvider || null}
+      model={<><ComposerModelPicker id={`composer-model-${choiceId}`} value={value.modelId || null} models={draftChoices.models} providerKey={usedProvider || null}
         disabled={locked} loading={draftChoices.loadingModels} onChange={modelId => change("modelId", modelId)}
         tiers={composerTierEntries(draftChoices.tiers, t)} currentTier={draftChoices.tier}
-        onChooseTier={tier => { invalidateCreation(); draftChoices.chooseTier(tier); }} />}
+        onChooseTier={tier => { invalidateCreation(); draftChoices.chooseTier(tier); }}
+        adaptive={composerAdaptiveEntry(draftChoices.tiers, t)}
+        onChooseAdaptive={() => {
+          if (!adaptiveChoice(draftChoices.tiers)) { setDraftAdaptiveSetup(true); return; }
+          invalidateCreation(); draftChoices.chooseTier(adaptiveTier);
+        }} />
+        <AdaptiveSetupDialog isOpen={draftAdaptiveSetup} onClose={() => setDraftAdaptiveSetup(false)} /></>}
       reasoning={<ReasoningSlider value={value.reasoningEffort ?? null} efforts={efforts} complete={!!draftModel?.effortsComplete} model={draftModel?.name} disabled={locked}
         onChange={next => change("reasoningEffort", next)} />} />;
   }
@@ -4644,9 +4653,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         if (!creationAlive.current) return;
         const offered = choices && choices.status === "ok" && choices.epoch === epoch && choices.sessionId === selection.sessionId
           && choices.current && validSelection(choices, creationSelection) ? choices : undefined;
-        // A session that starts with the model of the standard tier runs on that tier, and falls back along it.
-        if (offered && creationTier) void sessionOperations.setTier({ expectedEpoch: epoch!, sessionId: selection.sessionId, tier: creationTier },
+        // A session that starts with the model of the standard tier runs on that tier, and falls back along it. One that
+        // starts on Adaptive is put on it before its first prompt, whose turn CodeAlta then follows.
+        if (offered && creationTier === adaptiveTier) await sessionOperations.setAdaptive({ expectedEpoch: epoch!, sessionId: selection.sessionId },
+          { timeoutMilliseconds: 15000 }).catch(() => { /* The session keeps the model of the tier of its turns, without Adaptive. */ });
+        else if (offered && creationTier) void sessionOperations.setTier({ expectedEpoch: epoch!, sessionId: selection.sessionId, tier: creationTier },
           { timeoutMilliseconds: 15000 }).catch(() => { /* The session keeps its model; only its fallback is not set. */ });
+        if (!creationAlive.current) return;
         // The user went elsewhere meanwhile: the session is listed, and a toast offers it. Nothing is sent.
         if (!isCurrent() || !await retention.admit(epoch!, [selection.sessionId], isCurrent, () => {}) || !isCurrent()) {
           if (currentHostEpoch.current === epoch) publishWorkspaceState({ kind: "ready", snapshot: fresh });

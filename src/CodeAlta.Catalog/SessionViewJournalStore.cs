@@ -700,6 +700,7 @@ public sealed partial class SessionViewJournalStore
             Options = state.Options,
             SandboxNoted = state.SandboxNoted,
             Tier = state.Tier,
+            Adaptive = state.Adaptive,
             AgentPromptId = state.AgentPromptId,
             Archived = state.Archived,
             ArchivedAt = state.ArchivedAt,
