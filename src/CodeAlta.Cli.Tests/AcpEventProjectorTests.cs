@@ -69,6 +69,47 @@ public sealed class AcpEventProjectorTests
     }
 
     [TestMethod]
+    public async Task EachRequest_IsAnOperation_WithTheInputSplitByTheCache()
+    {
+        var sink = new CaptureSink();
+        var projector = new AcpEventProjector(sink);
+        var now = DateTimeOffset.UtcNow;
+        var operation = new AgentOperationUsageSnapshot("claude-haiku-5-5", InputTokens: 12000, OutputTokens: 300, CacheReadTokens: 9000, CacheWriteTokens: 2500,
+            ReasoningTokens: 40, ReasoningEffort: "low");
+
+        await projector.ProjectAsync(Of(new AgentSessionUpdateEvent(Provider, Root, now, null, AgentSessionUpdateKind.UsageUpdated, null,
+            Usage: new AgentSessionUsage(Window: new AgentWindowUsageSnapshot(12300, 200000, 3), LastOperation: operation))), default);
+        // A provider that reports only the output: the counts it does not give are null, never 0.
+        await projector.ProjectAsync(Of(new AgentSessionUpdateEvent(Provider, Root, now, null, AgentSessionUpdateKind.UsageUpdated, null,
+            Usage: new AgentSessionUsage(LastOperation: new AgentOperationUsageSnapshot(OutputTokens: 5, Cost: 0.25, CostUnit: "AI credits")))), default);
+        // The end of a run repeats the last operation: it is not a request.
+        await projector.ProjectAsync(Of(new AgentSessionUpdateEvent(Provider, Root, now, null, AgentSessionUpdateKind.CompactionCompleted, null,
+            Usage: new AgentSessionUsage(LastOperation: operation))), default);
+
+        Assert.AreEqual("usage_update", sink.Updates.Single().Update.Value.GetProperty("sessionUpdate").GetString());
+        var operations = sink.Extensions.Where(static item => item.Method == CodeAltaAcpExtensions.OperationMethod).Select(static item => item.Parameters).ToArray();
+        Assert.AreEqual(2, operations.Length);
+        var first = operations[0];
+        Assert.AreEqual(Root, first.GetProperty("sessionId").GetString());
+        Assert.AreEqual("claude-haiku-5-5", first.GetProperty("model").GetString());
+        Assert.AreEqual("low", first.GetProperty("reasoning").GetString());
+        Assert.AreEqual(12000, first.GetProperty("inputTokens").GetInt64());
+        Assert.AreEqual(9000, first.GetProperty("cachedReadTokens").GetInt64());
+        Assert.AreEqual(2500, first.GetProperty("cachedWriteTokens").GetInt64());
+        Assert.AreEqual(300, first.GetProperty("outputTokens").GetInt64());
+        Assert.AreEqual(40, first.GetProperty("thoughtTokens").GetInt64());
+        Assert.AreEqual(JsonValueKind.Null, first.GetProperty("cost").ValueKind);
+        var second = operations[1];
+        Assert.AreEqual(JsonValueKind.Null, second.GetProperty("model").ValueKind);
+        Assert.AreEqual(JsonValueKind.Null, second.GetProperty("inputTokens").ValueKind);
+        Assert.AreEqual(JsonValueKind.Null, second.GetProperty("cachedReadTokens").ValueKind);
+        Assert.AreEqual(JsonValueKind.Null, second.GetProperty("cachedWriteTokens").ValueKind);
+        Assert.AreEqual(5, second.GetProperty("outputTokens").GetInt64());
+        Assert.AreEqual(0.25, second.GetProperty("cost").GetDouble());
+        Assert.AreEqual("AI credits", second.GetProperty("costUnit").GetString());
+    }
+
+    [TestMethod]
     public async Task ToolCalls_MapTheirKind_AndATaskSeenOnlyAtItsEnd_IsAnnouncedOnce()
     {
         var sink = new CaptureSink();

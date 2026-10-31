@@ -368,10 +368,17 @@ internal sealed partial class SessionFallbackCoordinator
     /// offers it, else the widest the provider offers that is not wider than it; never a wider one.
     /// </summary>
     internal string? KeepOrNarrow(RunFailureNotice notice, string targetProviderKey)
+        => KeepOrNarrow(notice.PermissionMode, notice.ProviderKey, targetProviderKey);
+
+    /// <summary>
+    /// Gets the permission mode a session in a mode on a provider takes on another provider, as
+    /// <see cref="KeepOrNarrow(RunFailureNotice, string)"/> does.
+    /// </summary>
+    internal string? KeepOrNarrow(string? permissionMode, string providerKey, string targetProviderKey)
     {
         var target = _commands.PermissionModesOf(targetProviderKey);
         if (target.Modes.Count == 0) return null;
-        var current = notice.PermissionMode ?? _commands.PermissionModesOf(notice.ProviderKey).Default ?? target.Default;
+        var current = permissionMode ?? _commands.PermissionModesOf(providerKey).Default ?? target.Default;
         if (current is not null && target.Modes.Contains(current, StringComparer.Ordinal)) return current;
         var rank = PermissionRank(current);
         return target.Modes

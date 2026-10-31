@@ -881,6 +881,74 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public async Task ShellCommandTool_Canceled_EndsWhatAnExitedChildLeftBehind()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows job objects.");
+        using var temp = TestTempDirectory.Create();
+        using var cancellation = new CancellationTokenSource();
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path))
+            .Single(static tool => tool.Spec.Name == "shell_command");
+        // A child starts a grandchild and exits at once, as the npm shim leaves node: no parent of the grandchild runs, so
+        // the tree of the shell no longer reaches it. The shell itself goes on running.
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, "intermediate.ps1"), IntermediateScript).ConfigureAwait(false);
+        const string command = "& (Get-Process -Id $PID).Path -NoProfile -File intermediate.ps1 grandchild.txt; [Console]::Out.WriteLine('intermediate-exited'); Start-Sleep -Seconds 60";
+        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}}}""");
+        var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var execution = tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone(),
+                (update, _) =>
+                {
+                    if (update.Delta.Contains("intermediate-exited", StringComparison.Ordinal)) exited.TrySetResult();
+                    return ValueTask.CompletedTask;
+                }),
+            cancellation.Token);
+        Process? grandchild = null;
+        try
+        {
+            await exited.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            grandchild = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(Path.Combine(temp.Path, "grandchild.txt")).ConfigureAwait(false), CultureInfo.InvariantCulture));
+            _ = grandchild.SafeHandle;
+            Assert.IsFalse(grandchild.HasExited, "The regression requires a grandchild that outlives its parent.");
+
+            cancellation.Cancel();
+            var result = await execution.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+
+            Assert.AreEqual("shell_command was canceled.", result.Error);
+            await grandchild.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (grandchild is not null)
+            {
+                using (grandchild)
+                {
+                    try
+                    {
+                        if (!grandchild.HasExited) grandchild.Kill(entireProcessTree: true);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                }
+            }
+        }
+    }
+
+    // Starts a grandchild that sleeps, writes its id to the file the argument names, and exits at once. The grandchild has a
+    // console of its own, so the end of the console of the shell does not end it.
+    internal const string IntermediateScript = """
+        $start = [Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $start.ArgumentList.Add('-NoProfile')
+        $start.ArgumentList.Add('-Command')
+        $start.ArgumentList.Add('Start-Sleep -Seconds 60')
+        $grandchild = [Diagnostics.Process]::Start($start)
+        [IO.File]::WriteAllText((Join-Path (Get-Location) $args[0]), "$($grandchild.Id)")
+        """;
+
+    [TestMethod]
     public async Task ShellCommandTool_TimesOutWhileShellIsStillRunning()
     {
         using var temp = TestTempDirectory.Create();

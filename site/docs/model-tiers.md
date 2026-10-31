@@ -34,6 +34,38 @@ Once tiers are set:
 - a new session starts on **Standard**, also one an agent creates without naming a model;
 - agents give a tier to the sessions they create, **Quick** for a search and **Complex** for a hard problem, with `alta session create --tier quick`. The instructions of a session list the tiers, and `alta model resolve --tier` answers which model a tier gives now.
 
+## Adaptive (experimental)
+
+With **Adaptive**, CodeAlta chooses the model of each turn for you, from your tiers:
+
+- the turns you send run on the tier of the turns, **Quick** unless you choose another;
+- a turn that changed code gets one more message from CodeAlta, on the same model: check the change against each requirement of the request, with a test or a run for each rule, and fix what is missing. The timeline shows it as **Adaptive recheck**;
+- a turn that ends in visible trouble (no answer, an answer that says it cannot use its tools though it called none, or a last test run that failed) continues once on the escalation tier, **Complex** unless you choose another. The timeline shows it as **Adaptive escalation**, with the reason and the model. The next turn runs on the tier of the turns again.
+
+The model chip below the prompt says **Adaptive** and the model of the next turn. A test run counts as failed when the summary of the test runner says so (node, Jest, Vitest, Mocha, pytest, `dotnet test`, Go, Cargo), even when the command piped its output.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-adaptive.webp" alt="The Adaptive section of Settings > Models, tagged Experimental: Set up Adaptive turned on, turns on Quick, a turn in trouble continues on Complex, the recheck ticked, and how to choose the models" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings > Models > Adaptive: the tier of the turns, the tier a turn in trouble continues on, and the recheck.</figcaption>
+</figure>
+
+Set it up in **Settings > Models**, in the **Adaptive** section under the tiers: turn on **Set up Adaptive**, then choose **Turns run on**, **A turn in trouble continues on**, and whether to **Recheck each change of code against the request**. The tiers it names need models; the section says when one has none, and how to choose the models.
+
+Then choose **Adaptive** in the model list of the **Agent** chip, after the tiers. While it is not set up, choosing it says so and offers **Open Settings**. Choosing a model or a tier yourself takes the session off Adaptive.
+
+- Whether a turn changed code is read from git: CodeAlta compares the files of the project before and after the turn, so a turn that only edits documentation or commits what was there is not rechecked. Without git, it goes by the files the tool calls say they changed, which not every provider reports.
+- Adaptive chooses the model of the turns you send. A prompt that comes from elsewhere (a reminder, a background job, another agent) runs on the model the session has.
+- The turns run on a model of the tier that the provider of the session has; an escalation can move the session to another provider, and it comes back after.
+
+Combinations tested in October 2026:
+
+| Models from | Quick (turns) | Complex (on trouble) |
+| --- | --- | --- |
+| Anthropic (API or Claude Code) | Claude Haiku 5.5 | Claude Opus 5.5 |
+| Codex | GPT-6.1 Terra | GPT-6.1 Sol |
+
+On 51 hard tasks of real repositories (SWE-bench Pro), Haiku with the recheck and escalation to Opus solved 44 to 48 of them, against 50 for Opus alone, for 6 to 9% of the cost; the patches were judged close to those of Opus. GPT-6 Luna wrote clearly weaker code than GPT-6.1 Terra in the same tests, so Terra is the model of the turns for Codex. To compare other models by their results on coding tasks and their price, see independent leaderboards such as [Artificial Analysis](https://artificialanalysis.ai/).
+
 ## Tiers of a space
 
 The tiers and the fallback of **Settings > Models** are the usual settings: those of the Default space and of every space that has none of its own.
@@ -112,6 +144,15 @@ new_sessions:
 
 A space without `tiers` takes the tiers and the fallback of `config.toml`; one with `tiers` and no `fallback` takes the fallback of `config.toml`.
 
+Adaptive is the `[models.adaptive]` table, for every space: it takes its models from the tiers of the space of each session.
+
+```toml
+[models.adaptive]
+code = "quick"       # the tier of the turns; quick by default
+escalate = "complex" # the tier a turn in trouble continues on; complex by default
+recheck = true       # recheck a turn that changed code; on by default
+```
+
 ## CodeAlta TUI
 
-CodeAlta TUI has no page for the tiers and does not offer them in its model list. Its agents still use the tiers of the file with `alta session create --tier`.
+CodeAlta TUI has no page for the tiers and does not offer them, nor Adaptive, in its model list. Its agents still use the tiers of the file with `alta session create --tier`.

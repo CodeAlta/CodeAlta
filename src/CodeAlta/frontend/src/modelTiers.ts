@@ -19,7 +19,20 @@ export type TierState = Readonly<{
   fallback: ModelFallbackSetting;
   /** Where the tiers come from: the space's own, or the global ones. */
   source: "global" | "space";
+  /** How CodeAlta chooses the model of each turn of a session on Adaptive; null while it is not set up. */
+  adaptive: AdaptiveChoice | null;
+  /** Whether a session can be put on Adaptive: it is set up and the tiers it names have models. */
+  adaptiveReady: boolean;
 }>;
+
+/** Adaptive, as Settings > Models sets it up: the tier of the turns, the tier a turn in trouble continues on, the recheck. */
+export type AdaptiveChoice = Readonly<{ code: TierName; escalate: TierName; recheck: boolean }>;
+
+/** What the evaluation of #273 found best: the quick tier with a recheck of each change of code, the complex tier on trouble. */
+export const recommendedAdaptive: AdaptiveChoice = Object.freeze({ code: "quick", escalate: "complex", recheck: true });
+
+/** The name the composer and the model list give the choice of Adaptive, beside the tiers. */
+export const adaptiveTier = "adaptive";
 
 export const maximumTierTargets = 16;
 /** How many times in a row a session resumes by itself after a limit, unless the settings say otherwise; and the most they accept. */
@@ -38,13 +51,15 @@ export const emptyTiers: TierState = Object.freeze({
   choices: Object.freeze({ complex: null, standard: null, quick: null }),
   fallback: Object.freeze({ enabled: false, onQuota: true, onUnavailable: true, resume: false, maxResumes: defaultMaxResumes }),
   source: "global",
+  adaptive: null,
+  adaptiveReady: false,
 });
 
 /** Whether the user set no tier: the composer then offers none and new sessions keep the default provider. */
 export const noTiers = (state: TierState | null | undefined) => !state || tierNames.every(tier => state.tiers[tier].length === 0);
 
 /** The tiers a reply of the host gives; null for one that is not such a reading. A tier the host did not list is empty. */
-export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers" | "fallback"> & Partial<Pick<GlobalConfigModelTiersResponse, "source">> | null | undefined): TierState | null {
+export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers" | "fallback"> & Partial<Pick<GlobalConfigModelTiersResponse, "source" | "adaptive" | "adaptiveReady">> | null | undefined): TierState | null {
   if (!reply || !Array.isArray(reply.tiers) || !reply.fallback) return null;
   const tiers: Record<TierName, TierTarget[]> = { complex: [], standard: [], quick: [] };
   const choices: Record<TierName, ModelTierChoiceItem | null> = { complex: null, standard: null, quick: null };
@@ -60,7 +75,38 @@ export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers
   }
   return { tiers, choices, fallback: { enabled: reply.fallback.enabled === true, onQuota: reply.fallback.onQuota !== false, onUnavailable: reply.fallback.onUnavailable !== false,
     resume: reply.fallback.resume === true, maxResumes: readMaxResumes(reply.fallback.maxResumes) },
-    source: reply.source === "space" ? "space" : "global" };
+    source: reply.source === "space" ? "space" : "global", ...readAdaptive(reply.adaptive, reply.adaptiveReady) };
+}
+
+// Adaptive as a reply gives it: null for a tier that is none, and never ready then.
+function readAdaptive(value: unknown, ready: unknown): Pick<TierState, "adaptive" | "adaptiveReady"> {
+  const read = value as Partial<Record<"code" | "escalate" | "recheck", unknown>> | null | undefined;
+  const code = tierNames.find(name => name === read?.code), escalate = tierNames.find(name => name === read?.escalate);
+  const adaptive = code && escalate ? { code, escalate, recheck: read?.recheck !== false } : null;
+  return { adaptive, adaptiveReady: !!adaptive && ready === true };
+}
+
+/** The model a session on Adaptive starts its turns with: the one the tier of its turns gives now; null while it cannot be chosen. */
+export function adaptiveChoice(state: TierState | null | undefined): ModelTierChoiceItem | null {
+  return state?.adaptive && state.adaptiveReady ? state.choices[state.adaptive.code] : null;
+}
+
+/**
+ * Adaptive as the list of the composer offers it, after the tiers: what it runs on, the recheck and the model a turn in
+ * trouble goes to; `ready` false while it is not set up, when choosing it offers to set it up.
+ */
+export function composerAdaptiveEntry(state: TierState | null | undefined,
+  t: (key: "Not set up" | "No model ready" | "Recheck" | "{model} on trouble", values?: Record<string, string>) => string)
+  : Readonly<{ ready: boolean; detail: string; title: string | null }> {
+  if (!state?.adaptive || !state.adaptiveReady) return { ready: false, detail: t("Not set up"), title: null };
+  // Set up, while no model of the tier of its turns is ready yet (a provider that starts).
+  const turn = adaptiveChoice(state);
+  if (!turn) return { ready: true, detail: t("No model ready"), title: null };
+  const escalation = state.choices[state.adaptive.escalate];
+  const parts = [turn.modelName, state.adaptive.recheck ? t("Recheck") : null,
+    escalation && state.adaptive.escalate !== state.adaptive.code ? t("{model} on trouble", { model: escalation.modelName }) : null];
+  const detail = parts.filter(Boolean).join(" · ");
+  return { ready: true, detail, title: `${turn.providerName} · ${detail}` };
 }
 
 /** The tiers as the host saves them. */

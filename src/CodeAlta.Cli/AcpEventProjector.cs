@@ -216,8 +216,18 @@ internal sealed class AcpEventProjector
     {
         switch (update.Kind)
         {
-            case AgentSessionUpdateKind.UsageUpdated when update.Usage is { CurrentTokens: { } used, TokenLimit: { } size } && used >= 0 && size > 0:
-                await UpdateAsync(sessionId, AcpSessionUpdates.Usage((ulong)used, (ulong)size), cancellationToken).ConfigureAwait(false);
+            case AgentSessionUpdateKind.UsageUpdated when update.Usage is { } usage:
+                if (usage is { CurrentTokens: { } used, TokenLimit: { } size } && used >= 0 && size > 0)
+                {
+                    await UpdateAsync(sessionId, AcpSessionUpdates.Usage((ulong)used, (ulong)size), cancellationToken).ConfigureAwait(false);
+                }
+
+                // Each usage record with an operation is one request, as the totals of the result count them.
+                if (usage.LastOperation is { } operation)
+                {
+                    await ExtensionAsync(OperationMethod, sessionId, writer => WriteOperation(writer, operation), cancellationToken).ConfigureAwait(false);
+                }
+
                 break;
             case AgentSessionUpdateKind.CompactionStarted or AgentSessionUpdateKind.CompactionCompleted:
                 await ExtensionAsync(CompactionMethod, sessionId, writer =>
@@ -505,6 +515,28 @@ internal sealed class AcpEventProjector
             writeFields(writer);
             writer.WriteEndObject();
         }), cancellationToken);
+
+    // One request: the input with its cached parts, split as the totals of the result split it.
+    private static void WriteOperation(Utf8JsonWriter writer, AgentOperationUsageSnapshot operation)
+    {
+        var input = AgentInputTokenUsage.From(operation);
+        WriteStringOrNull(writer, "model", operation.Model);
+        WriteStringOrNull(writer, "reasoning", operation.ReasoningEffort);
+        WriteNumberOrNull(writer, "inputTokens", input?.Total ?? operation.InputTokens);
+        WriteNumberOrNull(writer, "cachedReadTokens", (operation.CachedInputTokens ?? operation.CacheReadTokens) is null ? null : input?.CacheRead);
+        WriteNumberOrNull(writer, "cachedWriteTokens", operation.CacheWriteTokens is null ? null : input?.CacheWrite);
+        WriteNumberOrNull(writer, "outputTokens", operation.OutputTokens);
+        WriteNumberOrNull(writer, "thoughtTokens", operation.ReasoningTokens);
+        if (operation.Cost is { } cost) writer.WriteNumber("cost", cost);
+        else writer.WriteNull("cost");
+        WriteStringOrNull(writer, "costUnit", operation.CostUnit);
+    }
+
+    private static void WriteNumberOrNull(Utf8JsonWriter writer, string name, long? value)
+    {
+        if (value is { } number) writer.WriteNumber(name, number);
+        else writer.WriteNull(name);
+    }
 
     internal static void WriteStringOrNull(Utf8JsonWriter writer, string name, string? value)
     {

@@ -10,6 +10,21 @@ public sealed class CliStorageTests
     private const string Plain = "--no-plugins";
 
     [TestMethod]
+    public void TheLogFile_IsSharedByRunsAtTheSameTime()
+    {
+        // A second run on the same state root starts while the first one has the log open, which it must not archive.
+        using var root = new CliTestRoot();
+        var path = Path.Combine(root.Profile, "logs", CliLogging.FileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "an earlier run\n");
+
+        using var first = CliLogging.CreateFileWriter(path);
+        using var second = CliLogging.CreateFileWriter(path);
+
+        Assert.AreEqual(1, Directory.GetFiles(Path.GetDirectoryName(path)!).Length, "The log is not archived at the start of a run.");
+    }
+
+    [TestMethod]
     public async Task Visible_WritesTheJournalAndAMarker_AndNothingElseUnderTheProfile()
     {
         using var root = new CliTestRoot();

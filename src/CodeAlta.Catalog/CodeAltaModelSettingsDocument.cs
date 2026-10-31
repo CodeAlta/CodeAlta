@@ -12,6 +12,26 @@ public sealed class CodeAltaModelSettingsDocument
     /// <summary>Gets or sets when a session goes on with the next target of its tier after a failure.</summary>
     [JsonPropertyName("fallback")]
     public CodeAltaModelFallbackDocument? Fallback { get; set; }
+
+    /// <summary>Gets or sets how CodeAlta chooses the model of each turn of a session on Adaptive; not set up when absent.</summary>
+    [JsonPropertyName("adaptive")]
+    public CodeAltaModelAdaptiveDocument? Adaptive { get; set; }
+}
+
+/// <summary>Represents the <c>[models.adaptive]</c> table.</summary>
+public sealed class CodeAltaModelAdaptiveDocument
+{
+    /// <summary>Gets or sets the tier the turns of a session on Adaptive run on; <c>quick</c> when absent.</summary>
+    [JsonPropertyName("code")]
+    public string? Code { get; set; }
+
+    /// <summary>Gets or sets the tier a turn that ends in visible trouble continues on; <c>complex</c> when absent.</summary>
+    [JsonPropertyName("escalate")]
+    public string? Escalate { get; set; }
+
+    /// <summary>Gets or sets whether a turn that changed code is asked once to check its change against the request; true when absent.</summary>
+    [JsonPropertyName("recheck")]
+    public bool? Recheck { get; set; }
 }
 
 /// <summary>

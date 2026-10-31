@@ -8,7 +8,7 @@ import type { MessageKey } from "./localization";
 export const promptProvenanceIds = Object.freeze({
   userAnswer: "user-answer", userReview: "user-review", reminder: "reminder", backgroundJob: "background-job",
   agentSession: "agent-session", automation: "automation", modelFallback: "model-fallback", plugin: "plugin", provider: "provider",
-  workflow: "workflow",
+  workflow: "workflow", adaptiveRecheck: "adaptive-recheck", adaptiveEscalation: "adaptive-escalation",
 } as const);
 
 // The title of a known provenance, as a key of the translations.
@@ -24,6 +24,9 @@ const titles: Readonly<Record<string, MessageKey>> = Object.freeze({
   [promptProvenanceIds.provider]: "Provider",
   // The result of a script of Code Mode that ended in the background.
   [promptProvenanceIds.workflow]: "Workflow",
+  // What Adaptive sends to a session on it: the recheck of a change of code, the continuation of a turn in trouble.
+  [promptProvenanceIds.adaptiveRecheck]: "Adaptive recheck",
+  [promptProvenanceIds.adaptiveEscalation]: "Adaptive escalation",
 });
 
 const icons: Readonly<Record<string, IconName>> = Object.freeze({
@@ -37,6 +40,8 @@ const icons: Readonly<Record<string, IconName>> = Object.freeze({
   [promptProvenanceIds.plugin]: "plugin",
   [promptProvenanceIds.provider]: "terminal",
   [promptProvenanceIds.workflow]: "code",
+  [promptProvenanceIds.adaptiveRecheck]: "model",
+  [promptProvenanceIds.adaptiveEscalation]: "model",
 });
 
 /** The identifier a record names, when it is well-formed (lowercase words separated by hyphens, at most 64 characters); else null. */

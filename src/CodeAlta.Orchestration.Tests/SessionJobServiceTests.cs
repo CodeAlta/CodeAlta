@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CodeAlta.Orchestration.Jobs;
 using CodeAlta.Orchestration.Runtime;
 
@@ -372,6 +373,60 @@ public sealed class SessionJobServiceTests
         Assert.IsNotNull(waiting.ProcessId);
         waiting.Kill();
         Assert.AreNotEqual(0, await waiting.Completion.WaitAsync(TimeSpan.FromSeconds(60)));
+    }
+
+    [TestMethod]
+    public async Task TheShellOfTheHost_Killed_EndsWhatAnExitedChildLeftBehind()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows job objects.");
+        var folder = Path.Combine(Path.GetTempPath(), "codealta-job-tree-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        Process? grandchild = null;
+        try
+        {
+            // A child starts a grandchild and exits at once: no parent of the grandchild runs, and the shell goes on.
+            await File.WriteAllTextAsync(Path.Combine(folder, "intermediate.ps1"), """
+                $start = [Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
+                $start.UseShellExecute = $false
+                $start.CreateNoWindow = $true
+                $start.ArgumentList.Add('-NoProfile')
+                $start.ArgumentList.Add('-Command')
+                $start.ArgumentList.Add('Start-Sleep -Seconds 60')
+                $grandchild = [Diagnostics.Process]::Start($start)
+                [IO.File]::WriteAllText((Join-Path (Get-Location) $args[0]), "$($grandchild.Id)")
+                """);
+            using var job = ShellCommandProcess.Start("& (Get-Process -Id $PID).Path -NoProfile -File intermediate.ps1 grandchild.txt; Start-Sleep -Seconds 60", folder, static _ => { });
+            var file = Path.Combine(folder, "grandchild.txt");
+            for (var wait = 0; wait < 300 && !File.Exists(file); wait++) await Task.Delay(100);
+            grandchild = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(file), System.Globalization.CultureInfo.InvariantCulture));
+            _ = grandchild.SafeHandle;
+            Assert.IsFalse(grandchild.HasExited, "The regression requires a grandchild that outlives its parent.");
+
+            job.Kill();
+
+            await grandchild.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.AreNotEqual(0, await job.Completion.WaitAsync(TimeSpan.FromSeconds(30)));
+        }
+        finally
+        {
+            if (grandchild is not null)
+            {
+                using (grandchild)
+                {
+                    try
+                    {
+                        if (!grandchild.HasExited) grandchild.Kill(entireProcessTree: true);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                }
+            }
+
+            try { Directory.Delete(folder, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     [TestMethod]

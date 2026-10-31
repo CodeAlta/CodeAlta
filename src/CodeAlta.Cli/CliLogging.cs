@@ -29,12 +29,7 @@ internal static class CliLogging
             AsyncErrorHandler = failure => output.Error($"altacli: logging: {failure.Message}"),
         };
         config.RootLogger.MinimumLevel = LogLevel.Warn;
-        config.RootLogger.Writers.Add(new FileLogWriter(new FileLogWriterOptions(Path.Combine(directory, FileName))
-        {
-            AutoFlush = true, FileSizeLimitBytes = 10L * 1024 * 1024,
-            RollingInterval = FileRollingInterval.Daily, RetainedFileCountLimit = 10,
-            FailureMode = FileLogWriterFailureMode.Ignore,
-        }));
+        config.RootLogger.Writers.Add(CreateFileWriter(Path.Combine(directory, FileName)));
         config.RootLogger.Writers.Add(new StderrLogWriter(output, verbose ? LogLevel.Warn : LogLevel.Error));
         config.Loggers.Add("CodeAlta", LogLevel.Info);
         // A failure that ends the run is never dropped from a full queue.
@@ -46,6 +41,19 @@ internal static class CliLogging
             LogManager.GetLogger("CodeAlta.Cli").Error(args.Exception, "A task failed and nothing observed its exception.");
         return true;
     }
+
+    /// <summary>
+    /// Creates the writer of the log file. Runs of altacli on the same state root share the file: a run appends to it, and
+    /// does not archive it when it starts, which fails while another run has it open.
+    /// </summary>
+    internal static FileLogWriter CreateFileWriter(string path)
+        => new(new FileLogWriterOptions(path)
+        {
+            AutoFlush = true, FileSizeLimitBytes = 10L * 1024 * 1024,
+            RollingInterval = FileRollingInterval.Daily, RetainedFileCountLimit = 10,
+            RollOnStartup = false,
+            FailureMode = FileLogWriterFailureMode.Ignore,
+        });
 
     /// <summary>Writes the failure that ends the run to the log.</summary>
     public static void ReportFailure(Exception failure, string message)

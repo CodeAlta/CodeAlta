@@ -43,12 +43,15 @@ public sealed class ShellCommandProcess : IShellCommandProcess
     private static readonly TimeSpan OutputGrace = TimeSpan.FromSeconds(2);
 
     private readonly Process _process;
+    // The processes of the command, also those whose parent exited: null where the system has no job objects.
+    private readonly ShellProcessJob? _job;
     private readonly CancellationTokenSource _reading = new();
     private int _disposed;
 
-    private ShellCommandProcess(Process process, Action<string> onOutput)
+    private ShellCommandProcess(Process process, ShellProcessJob? job, Action<string> onOutput)
     {
         _process = process;
+        _job = job;
         try { ProcessId = process.Id; }
         catch (InvalidOperationException) { ProcessId = null; }
         var output = PumpAsync(process.StandardOutput, onOutput, _reading.Token);
@@ -105,37 +108,44 @@ public sealed class ShellCommandProcess : IShellCommandProcess
             throw new InvalidOperationException($"The shell could not be started: {exception.Message}", exception);
         }
 
+        var job = ShellProcessJob.TryJoin(process);
         try { process.StandardInput.Close(); }
         catch (Exception exception) when (exception is IOException or InvalidOperationException) { }
-        return new ShellCommandProcess(process, onOutput);
+        return new ShellCommandProcess(process, job, onOutput);
     }
 
     /// <inheritdoc />
     public void Kill()
     {
         if (Volatile.Read(ref _disposed) != 0) return;
-        try
-        {
-            if (!_process.HasExited) _process.Kill(entireProcessTree: true);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException or AggregateException)
-        {
-            // The process ended in between, or a part of its tree could not be ended: there is nothing more to do.
-        }
+        EndTree();
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        try
-        {
-            if (!_process.HasExited) _process.Kill(entireProcessTree: true);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException or AggregateException) { }
+        EndTree();
         _reading.Cancel();
+        _job?.Dispose();
         _process.Dispose();
         _reading.Dispose();
+    }
+
+    // A shell that still runs is ended with everything it started, also what a process that exited left behind; one that
+    // exited leaves running what it launched.
+    private void EndTree()
+    {
+        if (AgentBuiltInToolFactory.HasExited(_process)) return;
+        _job?.Terminate();
+        try
+        {
+            _process.Kill(entireProcessTree: true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException or AggregateException)
+        {
+            // The process ended in between, or a part of its tree could not be ended: there is nothing more to do.
+        }
     }
 
     private async Task<int> WaitAsync(Task output, Task error)

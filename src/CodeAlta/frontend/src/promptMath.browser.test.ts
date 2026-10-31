@@ -32,7 +32,9 @@ test("the prompt previews the formula at the caret, and the equation editor writ
           } }` };
         });
       } }] });
+    // KaTeX's own styles too, as main.tsx loads them: they lay out the formulas the preview draws.
     await writeFile(join(root, "style.css"), readFileSync(new URL("../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
+      + readFileSync(new URL("../node_modules/katex/dist/katex.min.css", import.meta.url), "utf8")
       + readFileSync(new URL("./style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="app" style="margin-top:200px"></div><div id="editor" style="height:240px;margin-top:40px"></div><script src="fixture.js"></script></body></html>');
@@ -107,8 +109,9 @@ test("the prompt previews the formula at the caret, and the equation editor writ
     // The model writes its own line breaks (CRLF on Windows), as for any line typed in the prompt.
     assert.equal((await evaluate<string>("mathFixture.state.value")).replaceAll("\r\n", "\n"), "Area $\\frac{a}{b}$ here\n$$\nx^2\n$$");
     // The code editor: a Markdown document previews the formula at the caret and edits it with Alt+=, as the prompt does.
-    await evaluate("mathFixture.editorCaret(10)");
-    assert.equal(await wait("mathFixture.editorPreview()"), true);
+    // The equation editor gives the focus back to the prompt as it closes, at times after the caret was placed: the caret
+    // is placed again until the code editor keeps the focus and previews.
+    assert.equal(await wait("mathFixture.editorPreview() || (mathFixture.editorCaret(10), false)"), true);
     assert.ok(await evaluate<number>("mathFixture.editorTinted()") > 0, "the formula of the document is tinted");
     for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "=", code: "Equal", windowsVirtualKeyCode: 187, modifiers: 1 });
     assert.equal(await wait("mathFixture.editor()?.field === 'E=mc^2'"), true);
@@ -116,6 +119,11 @@ test("the prompt previews the formula at the caret, and the equation editor writ
     await evaluate("mathFixture.insert()");
     assert.equal(await wait("mathFixture.editor() === null"), true);
     assert.equal(await evaluate("mathFixture.editorText(1)"), "Energy $\\frac{a}{b}$ here");
+    // Aligned rows fit their preview: no scroll bar under them.
+    await evaluate("mathFixture.showDocument(3)");
+    assert.equal(await wait("document.querySelector('#editor .view-lines')?.textContent.includes('aligned')"), true);
+    assert.equal(await wait("mathFixture.editorPreview() || (mathFixture.editorCaret(20), false)"), true);
+    assert.equal(await evaluate("mathFixture.editorPreviewFits()"), true, "the aligned rows fit their preview without a scroll bar");
     // A document of another language has no formulas: no preview, no tint, and Alt+= is not the equation editor there.
     await evaluate("mathFixture.showDocument(2)");
     assert.equal(await wait("document.querySelector('#editor .view-lines')?.textContent.includes('price')"), true);

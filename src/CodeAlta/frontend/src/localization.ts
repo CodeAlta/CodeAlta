@@ -9,6 +9,7 @@ import { sessionChildrenMessages } from "./sessionChildren/messages";
 import { sessionArchiveMessages } from "./sessionArchive/messages";
 import { speechMessages } from "./speech/messages";
 import { modelTierMessages } from "./modelTierMessages";
+import { adaptiveMessages } from "./adaptiveMessages";
 import { sandboxMessages } from "./sandbox/messages";
 import { promptProvenanceMessages } from "./promptProvenance";
 import { codeModeSettingsMessages } from "./codeModeSettingsMessages";
@@ -2808,6 +2809,7 @@ export const messages = dictionary({
   ...bookmarkMessages,
   ...speechMessages,
   ...modelTierMessages,
+  ...adaptiveMessages,
   ...sandboxMessages,
   ...promptProvenanceMessages,
   ...codeModeSettingsMessages,

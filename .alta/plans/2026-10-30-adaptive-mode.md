@@ -1,6 +1,6 @@
 ---
 title: Try an Adaptive mode that fits the model to each request (#273)
-status: approved
+status: in-progress
 created: 2026-10-30
 summary: Write an Adaptive agent prompt that inherits Default and moves its session between the user's model tiers (up when a request needs it or its checks keep failing), measure it against Default on multi-turn scenarios with every leg and the cache counted, and decide from the numbers whether it ships as is or needs a router in CodeAlta.
 ---
@@ -33,6 +33,7 @@ A turn is many requests: the planning turn that wrote this plan made 22 of them,
 - **A small step down pays back slowly.** Opus → Sonnet costs $0.23 more than staying, and saves about $0.02 per request (input and 1k tokens of output): about a dozen requests to pay back.
 - **Every step up pays a full write**: $0.50 for Opus at 100k, $2.50 at 500k. Going back and forth pays it again: the reasoning of the other model is replayed as text, so the old cache is unlikely to match.
 - **Claude Code pays the most.** A change of model or of effort starts a new process that resumes the conversation, and it may use the 1-hour cache, which writes at 2× the input price instead of 1.25×. Codex keeps its thread and takes the model with each turn.
+- **A change of effort alone is a switch too** (measured, see the spike below): on the Anthropic API only the system prompt and the tools stay cached, on Codex only a shared prefix of 4k tokens.
 
 Billing changes what "cost" means. It is per token on the APIs and on Copilot (credits since 2026-06-01). On Claude and ChatGPT subscriptions it is a usage window, which a cheaper model stretches a lot: ChatGPT Plus gives 5–45 messages per 5 hours on GPT-6 Astra, 350–3,000 on GPT-6 Luna.
 
@@ -144,35 +145,109 @@ The results go into this plan and a comment on #273. Then one of:
 
 Host support gets a plan of its own.
 
+## Results
+
+Codex tiers: `complex` GPT-6.1 Sol (medium), `standard` GPT-6.1 Terra (medium), `quick` GPT-6 Luna (low). Anthropic API tiers: Opus 5.5 (medium), Sonnet 5.5 (medium), Haiku 5.5 (low). Costs are priced per request from the models.dev prices of CodeAlta (`tmp/evals/`), children and hand-off turns included; on Codex they are what the subscription would cost on the API.
+
+**Codex, prompt v2, 3 runs per cell** (`grid-codex-final`, `race-codex`): cost is the sum over the scenarios of the average run.
+
+| Configuration | Success, 5 scenarios | Cost | Of the baseline | With `race-condition` | Of the baseline |
+| --- | --- | --- | --- | --- | --- |
+| Default on `complex` | 15/15 | $1.15 | 100% | $1.25 | 100% |
+| Default on `standard` | 12/15: `easy-then-hard` 0/3 | $0.36 | 32% | $0.39 | 31% |
+| A, switch, on `standard` | 15/15 | $0.50 | 43% | $0.60 | 48% |
+| B, delegate, on `standard` | 15/15 | $0.53 | 47% | $0.66 | 53% |
+| C, review, on `standard` | 15/15 | $0.36 | 32% | $0.55 | 44% |
+| A on `quick` | 12/15 | $0.08 | 7% | $0.08 | 6% |
+
+**Anthropic API, prompt v2** (`grid-anthropic-r1`, `race-anthropic`): every configuration passed every scenario; per 5 scenarios, Default on `complex` $1.18, Default on `standard` $0.57 (48%), A on `standard` $0.46 (39%), B $0.58 (49%), A on `quick` $0.04 (3%); on `race-condition` the same order. No session switched. The spend of the whole work on the Anthropic API was about $4.
+
+What the numbers say:
+
+- **The cheap tiers do most of the work well.** Luna and Haiku passed almost everything, multi-file features and 100k tokens of reading included. The savings come from the tier a request runs on, much more than from the switches.
+- **One kind of failure separates the tiers:** a bug whose cause is in a shared helper. Terra fixed it at the caller in 3 runs of 3 and passed its own tests, where Sol fixed the helper; the hidden tests caught it. Luna did the same once in 3.
+- **Prompt v1** (go up when a request "clearly needs it") never switched: the current model judged that it could do the request. **Prompt v2** sends a request of the `complex` list up before starting: Terra followed it and passed `easy-then-hard`, but also sent up the concurrency bug it could fix alone, for 4 times its cost; Sonnet and Haiku did not follow it at all, and did not need to.
+- **Delegation (B) costs more than a switch (A)**: the child reads the code again, and the parent checks its work.
+- **The judge** (Sol, `grid-codex-final/report.md`) found mostly tiers too strong: lookups, commits, specified features and wide reading done on `standard` or kept on `complex` after the hard part; and one missed escalation, the caller workaround. Its rules: route each request afresh with `quick` as the default, go up on evidence (failed checks, competing hypotheses, an invariant the checks do not cover), fix a shared helper at the helper, come back down for mechanical follow-ups, delegate only large independent work, try a tool before saying it is unavailable. Prompt v3 is made of them.
+
+### Prompt v3, policies of the host, and the quality of the work
+
+Prompt v3 did not move a session either: no switch up or down in 54 runs on Codex and 24 on the Anthropic API. The agents keep the tier they start on, so the evaluation got **policies of the host**, emulated around the turns (`EvalScenarioRunner`): a router per turn, an escalation on a sign of trouble the host sees (no answer, a refusal to use the tools, the last test run failing), a review of the diff by a stronger model, acceptance tests written by `complex` from the request, a recheck turn ("check your change against each requirement"), and `split`, a router that only says whether a request changes code. Five scenarios were added where a cheap tier could fail (`race-condition`, `query-parser`, `money-allocation`, `csv-import`, `date-bug`; the three that separate the tiers are `csv-import`, `query-parser` and `easy-then-hard`), and a **blind judge of quality** (Sol, through Codex) scores the final diff of each run from 1 to 5 without knowing the model or the policy: correctness beyond the tests, a fix at the cause, design, tests, overall.
+
+**Codex, the ten scenarios** (`confirm-codex`, `final-codex`, `split-codex`, `quality-codex`; 2 or 3 runs per cell; Sol from the earlier grids, about $1.80 for the ten):
+
+| Configuration | Success | Cost | Of Sol | Quality, overall |
+| --- | --- | --- | --- | --- |
+| Default on `complex` (Sol) | ~100% | ~$1.80 | 100% | 4.4 |
+| Default on `standard` (Terra) + escalation | 18/20 | $0.53 | ~30% | 4.6 |
+| **`split`: code on `standard`, the rest on `quick`** | **18/20** | **$0.27** | **~15%** | **4.6** |
+| `split` + escalation | 18/20 | $0.33 | ~18% | 4.6 |
+| Default on `quick` (Luna) + recheck + escalation | 27/30 | $0.10 | ~6% | 3.5 |
+| Default on `quick` + escalation | 25/30 | $0.08 | ~4% | 3.4 |
+| Default on `quick` | 23/30 | $0.06 | ~3% | 3.4 |
+| Prompt v3 on `quick` + review by Sol (8 coding scenarios) | | ~15–20% | | 3.4 |
+
+**Anthropic API, the five newest scenarios** (`anthropic-hard`, `anthropic-split`, 2 runs per cell): Opus 5.5 10/10 for $1.43, quality 3.9; Sonnet 5.5 10/10 for $0.45 (32%), quality 3.8; `split` (code on Sonnet, the rest on Haiku) 10/10 for $0.25 (18%), quality 3.5; Haiku 5.5 9/10 for $0.07 (5%), quality 3.9 (its miss: a time zone of `date-bug`); Haiku + escalation 9/10 for $0.11 (8%), quality 3.8. With 2 runs per scenario the judge varies by about half a point: on Anthropic, Sonnet for code bought no quality the judge could see, only one edge case. Reasoning effort, measured on Codex for each model (`tmp/evals/effort/`), changed neither success nor cost beyond the noise: it belongs to the definition of a tier, not to switching, which also re-reads the conversation when only the effort changes.
+
+What the numbers say:
+
+- **The agents do not adapt by themselves**, whatever the prompt: the choice of the model has to be the host's.
+- **The kind of turn decides, not its difficulty.** Questions, docs and commits pass on the cheapest tier everywhere. Code is where the tiers differ, and differently per provider: GPT-6 Luna passes most tests but writes clearly weaker code (3.4 against 4.4–4.6); on these small scenarios Haiku 5.5 wrote code judged as good as Opus 5.5 (3.9 and 3.9), which HARD-51 contradicted (below): small fixtures do not show the gap, real repositories do. Telling whether a request changes code is an easy call for the cheap model; judging its difficulty is not (the `router` sent the hidden-cause bug to Terra half the time, and the agents never judged a request too hard).
+- **Escalation on visible trouble is cheap insurance, not a fix:** it fired in a few percent of runs. The misses that matter pass their own tests (a workaround at the caller, an error position, a time zone) and only a stronger model or hidden tests see them.
+- **A recheck turn** on the same tier lifts a cheap model a little (Luna 3.4 → 3.5, 23 → 27 of 30) for one more cheap turn. A review or acceptance tests by `complex` cost 3–5 times more for no more success.
+- **One failure no policy caught:** the shared-helper bug of `easy-then-hard`, fixed at the caller by Terra in every run, and by Luna in some. Only Sol fixed the helper.
+
+### SWE-bench Pro HARD-51 on the Anthropic API
+
+The 51 tasks under the locked protocol of the kit (`benchmarks/swe-bench-pro`), each patch graded by a replay on a clean image, against the run of CodeAlta on Opus 5.5 `xhigh` of 2026-10-28. The adapter emulates the policies: `recheck` resumes a run that changed the repository once on its model with the recheck request, `escalate_to` resumes it on Opus 5.5 `xhigh` after a sign of trouble. The quality is a blind pairwise judgment of each patch against Opus's (`judge-patches.py`, Sol through Codex, the two patches in a random order and under neutral names).
+
+| CodeAlta on HARD-51 | Resolved | Estimated cost | Of Opus | Quality: Opus / other | Tests: Opus / other | Preferred, Opus : other |
+| --- | --- | --- | --- | --- | --- | --- |
+| Opus 5.5 `xhigh` | 50/51 | $76.30 | 100% | – | – | – |
+| **Haiku 5.5 `high` + recheck + escalation**, run 1 | **48/51** | **$7.09** | **9%** | **3.61 / 3.33** | **3.55 / 3.76** | **29 : 22** |
+| **Haiku 5.5 `high` + recheck + escalation**, run 2 | **44/51** | **$4.51** | **6%** | **3.63 / 3.41** | **3.51 / 4.02** | **30 : 21** |
+| Haiku 5.5 `high` + escalation | 46/51 | $5.07 | 7% | 3.86 / 2.86 | 3.76 / 2.92 | 43 : 8 |
+| Haiku 5.5 `high` | 43/51 | $1.98 | 3% | 3.82 / 2.86 | 3.75 / 2.94 | 43 : 7 |
+| Sonnet 5.5 `high` | 40/51 | $9.16 | 12% | 3.96 / 2.57 | 3.88 / 1.67 | 48 : 3 |
+
+- **On real repositories the cheap model's code is weaker, until it rechecks it.** Haiku alone resolved 43 tasks, but the judge preferred Opus's patch on 43 of 51, even on most tasks both resolved: unhandled edge cases, error paths that report success, missing regression tests. One recheck turn on every task that changed code (47 of 51) took its patches to a few tenths of Opus's, with tests judged better, and 48 tasks resolved, for 9% of Opus's cost. The small scenarios had not shown the gap on Anthropic: their fixtures are too small.
+- **The escalation** fired on 5 tasks (4 runs ended without an answer, 1 with a failing last test run) and added about two tasks for $3.
+- **A higher tier is not always better:** Sonnet 5.5 at `high` was the weakest, with almost no tests.
+- The best configuration ran twice: 48 then 44 tasks resolved (46 on average, 90%, against 50 for Opus), for $7.09 then $4.51, with the same quality both times; the other configurations ran once, and a configuration varies by up to four tasks between attempts.
+
+### Recommendation
+
+Do not ship `adaptive` as a prompt: a prompt does not move a session. Build the **host support** (`.alta/plans/2026-10-31-adaptive-host-routing.md`): an Adaptive choice of the model list where CodeAlta runs each user turn on the tier its kind calls for, has a turn that changed code recheck its change against the request, continues a turn that ends in visible trouble on `complex`, and shows the model of each turn. With Haiku 5.5 on code, the recheck and an escalation to Opus 5.5, that resolved 46 of 51 HARD-51 tasks on average over two runs (48 and 44) for 6–9% of the cost of Opus, with patches judged a few tenths below Opus's and tests judged better. The code tier stays a setting: on Codex, Luna's code stayed weak even with a recheck, and Terra kept Sol's quality for ~15% of its cost. The project prompts of this trial stay as they are, for reference, and are not made built-in.
+
 ## Steps
 
 ### Milestone 0: prompt and spike
 
-- [ ] 1. Start from `main` on a branch of its own, such as `feature/adaptive-mode`.
-- [ ] 2. Write `.alta/prompts/agents/adaptive.prompt.md` (variant A), `adaptive-delegate.prompt.md` (variant B: `inherit: [default]`, the delegation rules only) and `adaptive-review.prompt.md` (variant C: `inherit: [adaptive]` and the review section).
-- [ ] 3. Run the spike (section 2) on Claude Code; write its measures in the evidence of this plan, and correct the table above where they differ.
-- [ ] 4. Adjust the prompts to the spike.
+- [x] 1. Start from `main` on a branch of its own, such as `feature/adaptive-mode`.
+- [x] 2. Write `.alta/prompts/agents/adaptive.prompt.md` (variant A), `adaptive-delegate.prompt.md` (variant B: `inherit: [default]`, the delegation rules only) and `adaptive-review.prompt.md` (variant C: `inherit: [adaptive]` and the review section).
+- [x] 3. Run the spike (section 2) on Claude Code; write its measures in the evidence of this plan, and correct the table above where they differ. *Run on the Anthropic API and Codex instead, the providers the user gave for this work (Claude Code is not used).*
+- [x] 4. Adjust the prompts to the spike.
 
 ### Milestone 1: measure
 
-- [ ] 5. `CodeAlta.Evals`: scenarios with turns (`EvalScenario`), `--prompts` with the agent prompt ids, a tier per configuration and the tiers given through `-c`; the prompts copied from `.alta/prompts/agents/` into each fixture.
-- [ ] 6. The measures per leg from the JSONL: the model and usage updates of each request, cache read and write, the role of the leg, the hand-off turns; the child sessions counted with their run (check whether `_codealta/result` includes them, else add their usage updates); every request priced from one models.dev snapshot; invalid runs marked and run again; the section of the report, and the judge prompt for wrong choices.
-- [ ] 7. The five scenarios with their fixtures and their checks, tests the session does not see included; `--list` shows them.
-- [ ] 8. Run the grid on Claude Code. The user runs it later on another machine with more providers: nothing of this machine (a path, a provider key) is written in the harness or its scenarios, only in the options of a run.
-- [ ] 9. Tune the prompt for general rules from what the judge found, against the frozen baseline of Default; run the whole grid again with the final candidate.
-- [ ] 10. Use the final prompt for a few days on CodeAlta's own work, and note each choice the timeline shows to be wrong.
+- [x] 5. `CodeAlta.Evals`: scenarios with turns (`EvalScenario`), `--prompts` with the agent prompt ids, a tier per configuration and the tiers given through `-c`; the prompts copied from `.alta/prompts/agents/` into each fixture.
+- [x] 6. The measures per leg from the JSONL: the model and usage updates of each request, cache read and write, the role of the leg, the hand-off turns; the child sessions counted with their run (check whether `_codealta/result` includes them, else add their usage updates); every request priced from one models.dev snapshot; invalid runs marked and run again; the section of the report, and the judge prompt for wrong choices.
+- [x] 7. The five scenarios with their fixtures and their checks, tests the session does not see included; `--list` shows them. *A sixth, `race-condition`, was added when every tier passed the five on the Anthropic API.*
+- [x] 8. Run the grid on Claude Code. *Run on Codex (3 runs per cell) and on the Anthropic API (1 run per cell, 3 for `race-condition`), the providers the user gave.* The user runs it later on another machine with more providers: nothing of this machine (a path, a provider key) is written in the harness or its scenarios, only in the options of a run.
+- [x] 9. Tune the prompt for general rules from what the judge found, against the frozen baseline of Default; run the whole grid again with the final candidate. *Prompt v3, then policies of the host, harder scenarios and a blind judge of quality (see Results).*
+- [ ] 10. Use the final prompt for a few days on CodeAlta's own work, and note each choice the timeline shows to be wrong. *Not done: it needs the user, and the result points to host support rather than a prompt; it moves to the plan of the host support.*
 
 ### Milestone 2: decide
 
 - [ ] 11. Put the results table and the recommendation in this plan; comment the summary on #273, with the CodeAlta footer line.
-- [ ] 12. Carry out the decision: make `adaptive` a built-in (`src/CodeAlta.Orchestration/content/prompts/agents/`, `BuiltInPromptContentTests`, the modes table of `site/docs/prompts.md`, a line in `site/docs/model-tiers.md`), or write the plan of the host support, or document the manual way.
+- [x] 12. Carry out the decision: *the plan of the host support.* Carry out the decision: make `adaptive` a built-in (`src/CodeAlta.Orchestration/content/prompts/agents/`, `BuiltInPromptContentTests`, the modes table of `site/docs/prompts.md`, a line in `site/docs/model-tiers.md`), or write the plan of the host support, or document the manual way.
 
 ## How it is verified
 
-- [ ] The spike shows a hand-off that runs on the new model, its `Model · …` card, and the cache write it caused.
-- [ ] `dotnet build` passes, and `dotnet test` for the changed projects; `CodeAlta.Evals --list` lists the scenarios; one scenario run on `quick` completes.
-- [ ] The report gives, per scenario and configuration: success, cost, requests, cache writes, switches, hand-off turns.
-- [ ] On one run, the cost the report gives matches the metrics of each of its sessions added up, children and hand-off turns included.
+- [x] The spike shows a hand-off that runs on the new model, its `Model · …` card, and the cache write it caused. *Through `altacli`; the card in the window was not checked.*
+- [x] `dotnet build` passes, and `dotnet test` for the changed projects; `CodeAlta.Evals --list` lists the scenarios; one scenario run on `quick` completes.
+- [x] The report gives, per scenario and configuration: success, cost, requests, cache writes, switches, hand-off turns.
+- [x] On one run, the cost the report gives matches the metrics of each of its sessions added up, children and hand-off turns included. *Priced per request; it matches the cost `altacli` reports for a run on one model, and differs once the model changes.*
 - [ ] If `adaptive` becomes built-in: every .NET test, `npm test` and `lunet build` pass.
 
 ## Decisions
@@ -224,6 +299,22 @@ Host support gets a plan of its own.
 - `altacli run` waits for queued prompts before it exits, and takes `--prompt-id`, `--tier`, `--resume`, `--session-id` and `-c`. With `--format jsonl` it ends with `_codealta/result`: usage with cache read and write, and a cost estimated from the public price when the provider gives none (`_meta.codealta.estimated`).
 - `alta model resolve --tier <tier>` gives the provider, the model and the effort a tier gives now.
 - `PluginBeforeAgentRunResult.ModelHint` (`src/CodeAlta.Plugins.Abstractions/PluginPrompting.cs:633`) is declared and never read.
+
+**Spike** (2026-10-30, `tmp/spike/`, a conversation of about 18k tokens: 14k of system prompt and tools, then a file read; `altacli run --isolated`, a turn per run with `--resume` and `-m`)
+
+| Step | Anthropic API: read / written | Codex: read of the input |
+| --- | --- | --- |
+| Same model, next turn | 14.4k / 3.4k, then 17.8k / 0.4k | 13.4k of 14.7k |
+| Model switch (Haiku 5.5 → Sonnet 5.5, Luna → Terra) | 0 / 18.2k: all written again | 4.1k of 20.3k |
+| Effort only (low → medium) | 14.4k / 4.2k: system and tools kept, the conversation written again | 4.1k of 20.5k |
+| Back to the first model | 14.4k / 4.1k: its old cache of the conversation not used | 13.4k of 20.5k: partly used |
+
+- The turn of the switch cost $0.049 on Sonnet against $0.0008 for a turn of Haiku: the write is the cost of a switch, and it grows with the conversation.
+- Codex reports no cache write (`cachedWriteTokens` null): its requests are priced with the uncached input at the input price.
+- A hand-off works without host support: on `quick` (Luna), the agent ran `alta session current`, `alta session model`, `alta model resolve --tier complex` and `alta session send <self> --model gpt-6.1-sol --reasoning medium --queue-if-busy`, and ended its turn; the queued turn ran on Sol in the same `altacli run`, which waited for it, and the next `--resume` kept Sol. The hand-off leg was 5 requests of Luna, and the first request of Sol read 4k of 15.6k from the cache.
+- Told of a failing test whose cause is hidden, Luna on `quick` did not hand off: it judged that the request might fit, found the cause (a memoization key that joined objects) and fixed it in 9 requests, its tests as the gate.
+- `alta session send --model` keeps the tier the session records (`OwnedSessionSelection` carries none): after a hand-off from `quick`, a fallback would follow `quick`. Harmless in the evaluation (no fallback), a host-support candidate otherwise.
+- Two `altacli` runs at once on one state root failed to start: the log was archived at the start of each run (fixed: they append to it). `altacli alta --isolated session list` does not see the sessions `altacli run --isolated` wrote (a follow-up task).
 
 **Outside** (fetched 2026-10-30)
 

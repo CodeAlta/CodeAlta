@@ -331,9 +331,11 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
         timeout = null;
         schema = null;
         ModelTier? tier = null;
-        if (options.Tier is not null && (tier = ModelTiers.Parse(options.Tier)) is null)
+        // Adaptive is named as a tier: CodeAlta then chooses the model of each turn ([models.adaptive]).
+        var adaptive = string.Equals(options.Tier?.Trim(), "adaptive", StringComparison.OrdinalIgnoreCase);
+        if (options.Tier is not null && !adaptive && (tier = ModelTiers.Parse(options.Tier)) is null)
         {
-            error = $"'{options.Tier}' is not a tier: use complex, standard or quick.";
+            error = $"'{options.Tier}' is not a tier: use complex, standard, quick or adaptive.";
             return false;
         }
 
@@ -391,6 +393,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
             ProjectFolder = folder,
             ModelRef = options.Model,
             Tier = tier,
+            Adaptive = adaptive,
             Reasoning = reasoning,
             AgentPromptId = options.PromptId,
             Title = options.Title,

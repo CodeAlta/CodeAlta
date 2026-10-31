@@ -144,6 +144,9 @@ enabled = true
 - `ModelTierScope` is what a session uses: the tiers of its space when the space sets its own (`new_sessions.tiers`,
   with its own `new_sessions.fallback`), else the global ones, filtered to providers of the space.
 - The tier of a session is part of its local state, not configuration.
+- `[models.adaptive]` (`code`, `escalate`, `recheck`; `AdaptiveModelSettings`) sets Adaptive up, for every space: it names
+  tiers, and takes their models in the scope of each session. A session can be put on it only once the tiers it names
+  have targets (`ModelTierScope.IsAdaptiveReady`) ([runtime](runtime.md#adaptive-turns)).
 
 ## Projects
 

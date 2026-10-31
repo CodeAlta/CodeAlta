@@ -22,6 +22,7 @@ internal sealed class CliHostCommands(CliStreams streams, CliOutput output, CliE
             : null;
         return await WithHostAsync(options, async (host, folder) =>
         {
+            await KnowSessionFoldersAsync(host, folder, options.Arguments).ConfigureAwait(false);
             var result = await host.Alta.InvokeAsync(options.Arguments, stdin, AltaCallerIdentity.Cli, folder, cancellationToken: processToken).ConfigureAwait(false);
             if (result.Stdout.Length > 0) output.WriteText(result.Stdout);
             if (result.Stderr.Length > 0) output.Error(result.Stderr.TrimEnd());
@@ -142,6 +143,26 @@ internal sealed class CliHostCommands(CliStreams streams, CliOutput output, CliE
             }
 
             return code;
+        }
+    }
+
+    // altacli registers no project, so the folders of its runs are often no project of the catalog, and the sessions of
+    // such a folder are neither listed nor found by alta. As `run` does with its folder and `run --resume` with the folder
+    // of its session, the folder of the command and the folder of each session an argument names become transient
+    // projects of this host: kept in memory, never written.
+    private async Task KnowSessionFoldersAsync(CliHost host, string folder, IReadOnlyList<string> arguments)
+    {
+        await host.Host.ProjectCatalog.GetOrAddTransientAsync(folder, processToken).ConfigureAwait(false);
+        foreach (var argument in arguments)
+        {
+            // A session id alone, or the value of an option (--session-id=<id>).
+            var value = argument.StartsWith("--", StringComparison.Ordinal) && argument.IndexOf('=', StringComparison.Ordinal) is var equals and > 0
+                ? argument[(equals + 1)..]
+                : argument;
+            if (Guid.TryParse(value, out _))
+            {
+                await host.Host.RuntimeService.TryGetResumableSessionAsync(value, processToken).ConfigureAwait(false);
+            }
         }
     }
 

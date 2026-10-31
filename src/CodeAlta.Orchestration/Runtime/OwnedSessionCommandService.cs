@@ -190,6 +190,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         if (enableAsks) runtime.RunAsks = Asks;
         Fallback = new SessionFallbackCoordinator(this, runtime);
         runtime.RunFailureFallback = Fallback.TryClaim;
+        Adaptive = new AdaptiveTurnCoordinator(this, runtime);
+        runtime.RunEventObserver = Adaptive.Observe;
         runtime.OwnedWork = HasWork;
         runtime.CancelOwnedSend = CancelSend;
     }
@@ -226,11 +228,14 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 return true;
         }
 
-        return Fallback.IsRunning(sessionId);
+        return Fallback.IsRunning(sessionId) || Adaptive.IsRunning(sessionId);
     }
 
     /// <summary>Gets what goes on with the next model of a session's tier when a run fails on its provider.</summary>
     internal SessionFallbackCoordinator Fallback { get; }
+
+    /// <summary>Gets what chooses the model of the turns of the sessions on Adaptive.</summary>
+    internal AdaptiveTurnCoordinator Adaptive { get; }
 
     /// <summary>Gets the command-owned restricted ask service, disabled unless explicitly configured.</summary>
     public OwnedSessionAskService Asks { get; }
@@ -946,6 +951,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                             OnPermissionRequest = operation.PermissionExecution is null ? _runtime.Permissions.CreateSendDefaultPermissionHandler(policy) : null,
                         };
                         if (SendStarting is { } starting) await starting(operation.SessionId, operation.Execution.Token).ConfigureAwait(false);
+                        // What the run does is followed from here: a session on Adaptive is decided at its end.
+                        Adaptive.BeginRun(prepared.Session.SessionId, operation.Request.Provenance);
                         operation.SendInvocation.Launch(() => operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
                             operation.PermissionExecution, operation.Execution.Token, operation.AskExecution, operation.AskSubmission));
                         if (await operation.SendInvocation.Outcome.ConfigureAwait(false) is { } sendFailure) ExceptionDispatchInfo.Throw(sendFailure);
@@ -1032,6 +1039,15 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             var selection = operation.Request.Selection;
             // An image needs a model that reads images; a file is given to any model in a form it reads.
             var hasImages = operation.Request.Images?.Any(OwnedPromptImages.IsImage) == true;
+            // A session on Adaptive: CodeAlta chooses the model of a turn the user starts (not of a prompt the host sends),
+            // when its provider offers it; a prompt with images keeps the model chosen for them.
+            if (operation.Request.Provenance is null && operation.Request.Images is not { Count: > 0 }
+                && await Adaptive.ChooseTurnSelectionAsync(session, selection, project is null ? null : WorkFolder(session, project),
+                    operation.Execution.Token).ConfigureAwait(false) is { } adaptive && adaptive != selection)
+            {
+                var offered = await GetSelectionChoicesCoreAsync(operation.SessionId, CancellationToken.None, observedOnly: false).ConfigureAwait(false);
+                if (offered is not null && IsValidSelection(offered, adaptive)) selection = adaptive;
+            }
             if (selection is not null)
             {
                 var choices = await GetSelectionChoicesCoreAsync(operation.SessionId, CancellationToken.None,
@@ -1310,6 +1326,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         }
         // A fallback that waits stops waiting and lets its failure through.
         _ = Fallback.CloseAsync();
+        _ = Adaptive.CloseAsync();
         // Release every control before joining any of them. No cancellation callback runs under _gate.
         try { Asks.CloseAdmission(); }
         catch (Exception failure)

@@ -570,6 +570,21 @@ test("a card that schedules a resume after a limit offers it, and the cards of i
   assert.equal(plain.resumeOffer, undefined);
 });
 
+test("the cards of Adaptive are shown and titled by what it did, other information is not", () => {
+  const items = buildTimelineItems([
+    entry({ eventType: "sessionUpdate", kind: "Info", offset: "20", text: "The turn changed code: Haiku 5.5 checks the change against the request.",
+      details: JSON.stringify({ adaptive: "recheck" }) }),
+    entry({ eventType: "sessionUpdate", kind: "Info", offset: "21", text: "Continued on Claude Code Opus 5.5 high: the last test run failed (exit code 1).",
+      details: JSON.stringify({ adaptive: "escalation" }) }),
+    entry({ eventType: "sessionUpdate", kind: "Warning", offset: "22", text: "Adaptive did not continue the turn: no model of the complex tier is ready.",
+      details: JSON.stringify({ adaptive: "escalation" }) }),
+    entry({ eventType: "sessionUpdate", kind: "Info", offset: "23", text: "Something else.", details: JSON.stringify({ adaptive: "other" }) }),
+  ]);
+  assert.deepEqual(items.map(item => [item.title, item.icon, item.category]),
+    [["Adaptive · Recheck", "model", "status"], ["Adaptive · Escalation", "model", "status"], ["Adaptive · Escalation", "model", "error"]]);
+  assert.equal(items[0].markdown, "The turn changed code: Haiku 5.5 checks the change against the request.");
+});
+
 test("raw persistence records are not rendered as unavailable provider cards", () => {
   const items = buildTimelineItems([
     entry({ eventType: "raw", text: null, details: null, bodyOmitted: true }),

@@ -45,6 +45,12 @@ public static class AgentPromptProvenance
     /// <summary>The result of a Code Mode script that went on in the background after its tool call.</summary>
     public const string Workflow = "workflow";
 
+    /// <summary>The prompt that asks a session on Adaptive to check the change of its turn against the request.</summary>
+    public const string AdaptiveRecheck = "adaptive-recheck";
+
+    /// <summary>The prompt that continues on a stronger model a turn of a session on Adaptive that ended in visible trouble.</summary>
+    public const string AdaptiveEscalation = "adaptive-escalation";
+
     /// <summary>The longest identifier, in characters.</summary>
     public const int MaxLength = 64;
 
@@ -60,6 +66,8 @@ public static class AgentPromptProvenance
         [Plugin] = "Plugin",
         [Provider] = "Provider",
         [Workflow] = "Workflow",
+        [AdaptiveRecheck] = "Adaptive Recheck",
+        [AdaptiveEscalation] = "Adaptive Escalation",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>Gets the identifiers this version knows, with a display name of their own.</summary>

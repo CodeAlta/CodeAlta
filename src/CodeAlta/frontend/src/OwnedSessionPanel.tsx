@@ -47,7 +47,8 @@ import { ProviderChooser } from "./ProviderChooser";
 import { useProviderName } from "./ProviderIcon";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerModelPicker } from "./ComposerModelPicker";
-import { composerTierEntries, tierLabels, useTiers, type TierName } from "./modelTiers";
+import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore, useTiers, type TierName } from "./modelTiers";
+import { AdaptiveSetupDialog } from "./AdaptiveSetup";
 import { ComposerSurface, ComposerSelectionFields, ModelOptionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { showToast } from "./appToaster";
 import { PermissionModeSelect } from "./PermissionModeSelect";
@@ -284,6 +285,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
           setChoicesNotice(`Session choices unavailable (${value.status}).`); return;
         }
         setChoices(value);
+        // A provider that lists its models now is ready: what the tiers give, read while it was not, is read again.
+        if (value.models.length) void tierStore.refresh(epoch, { sessionId });
         const verified = selections.get(epoch, sessionId, value);
         const retained = selections.current(epoch, sessionId);
         // A temporarily empty catalog must not silently replace an unsent preference.
@@ -1098,25 +1101,44 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // The tiers of the space of the session: its own, or the global ones.
   const tierState = useTiers(epoch, { sessionId });
   const composerTiers = composerTierEntries(tierState, t);
-  // Records the tier the session runs on, or that its model was chosen by hand; the choices then name it.
+  const composerAdaptive = composerAdaptiveEntry(tierState, t);
+  const [adaptiveSetup, setAdaptiveSetup] = useState(false);
+  // Records the tier the session runs on, or that its model was chosen by hand; the choices then name it. A session on
+  // Adaptive leaves it: its model is pinned.
   async function recordTier(tier: string | null) {
     const signal = scope.current?.signal;
     const result = await sessions.setTier({ expectedEpoch: epoch, sessionId, tier }, { signal }).catch(() => null);
-    if (signal?.aborted) return;
+    if (signal?.aborted) return false;
     if (result?.status !== "ok" || result.epoch !== epoch || result.sessionId !== sessionId) {
       showToast({ message: t("The tier was not changed ({status}).", { status: result?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return false;
+    }
+    setChoices(current => current && current.sessionId === sessionId ? { ...current, tier: result.tier, adaptive: null } : current);
+    return true;
+  }
+  // Adaptive takes the model of the tier of its turns, as that tier does, and CodeAlta then chooses the model of each
+  // turn. Adaptive that is not set up is not chosen: the user is offered its settings.
+  async function chooseAdaptive() {
+    if (!tierState?.adaptive || !tierState.adaptiveReady) { setAdaptiveSetup(true); return; }
+    if (!await chooseTier(tierState.adaptive.code)) return;
+    const signal = scope.current?.signal;
+    const result = await sessions.setAdaptive({ expectedEpoch: epoch, sessionId }, { signal }).catch(() => null);
+    if (signal?.aborted) return;
+    if (result?.status === "not_ready") { setAdaptiveSetup(true); return; }
+    if (result?.status !== "ok" || result.epoch !== epoch || result.sessionId !== sessionId) {
+      showToast({ message: t("Adaptive was not chosen ({status}).", { status: result?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
       return;
     }
-    setChoices(current => current && current.sessionId === sessionId ? { ...current, tier: result.tier } : current);
+    setChoices(current => current && current.sessionId === sessionId ? { ...current, tier: result.tier, adaptive: true } : current);
   }
   // A tier takes the model it gives now: of the session's provider at once, of another provider through a switch of
-  // provider, as the provider list does. The session then falls back along that tier.
-  async function chooseTier(tier: string) {
-    if (!canAdmit() || !scope.current || scope.current.signal.aborted || !activeChoices || !selected || selectionDisabled) return;
+  // provider, as the provider list does. The session then falls back along that tier. True once the tier is recorded.
+  async function chooseTier(tier: string): Promise<boolean> {
+    if (!canAdmit() || !scope.current || scope.current.signal.aborted || !activeChoices || !selected || selectionDisabled) return false;
     const choice = tierState?.choices[tier as TierName];
     if (!choice) {
       showToast({ message: t("No model of the {tier} tier is ready.", { tier: t(tierLabels[tier as TierName] ?? "Standard") }), intent: "warning", icon: "warning-sign", timeout: 6000 });
-      return;
+      return false;
     }
     const signal = scope.current.signal;
     if (choice.providerKey === selected.providerKey) {
@@ -1124,33 +1146,32 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       const next = model && choice.reasoning ? changeSelection(activeChoices, model, "reasoningEffort", choice.reasoning) ?? model : model;
       if (!next || !selections.set(epoch, sessionId, activeChoices, next)) {
         showToast({ message: t("The choice was not changed: choose an available model and agent prompt first."), intent: "warning", icon: "warning-sign", timeout: 6000 });
-        return;
+        return false;
       }
       setSelection(next); setChoicesNotice("");
-      await recordTier(tier);
-      return;
+      return await recordTier(tier);
     }
     const entry = runtimeState?.kind === "ready" ? runtimeState.snapshot : null;
     if (!entry || entry.coordinatorTransitionInProgress || entry.entry?.activeRunId || entry.entry?.queueDrainInProgress || entry.entry?.isRetiring) {
       showToast({ message: t("The tier was not changed ({status}).", { status: "busy" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
-      return;
+      return false;
     }
     setProviderBusy(true);
     try {
       const offered = await sessions.providerChoices({ expectedEpoch: epoch, sessionId }, { signal });
-      if (signal.aborted) return;
+      if (signal.aborted) return false;
       const status = offered.status !== "ok" || offered.epoch !== epoch || !offered.runtimeInstanceId || !offered.revision ? offered.status
         : !offered.providers.some(provider => provider.id === choice.providerKey) ? "provider_unavailable" : null;
       const switched = status ? null : await sessions.selectProvider({ expectedEpoch: epoch, sessionId, providerKey: choice.providerKey,
         expectedProviderKey: offered.providerKey!, runtimeInstanceId: offered.runtimeInstanceId!, attachmentGeneration: offered.attachmentGeneration,
         revision: offered.revision! }, { signal });
-      if (signal.aborted) return;
+      if (signal.aborted) return false;
       if (status || switched?.status !== "ok") {
         showToast({ message: t("The tier was not changed ({status}).", { status: status ?? switched?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
-        return;
+        return false;
       }
       const value = await sessions.choices({ expectedEpoch: epoch, sessionId }, { signal });
-      if (signal.aborted || !capability.canMutate() || value.epoch !== epoch || value.sessionId !== sessionId || value.status !== "ok" || !value.current) return;
+      if (signal.aborted || !capability.canMutate() || value.epoch !== epoch || value.sessionId !== sessionId || value.status !== "ok" || !value.current) return false;
       const base = { ...value.current, agentPromptId: selected.agentPromptId ?? value.current.agentPromptId };
       const model = changeSelection(value, base, "modelId", choice.modelId) ?? base;
       const next = choice.reasoning ? changeSelection(value, model, "reasoningEffort", choice.reasoning) ?? model : model;
@@ -1158,9 +1179,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       setChoices(value); setChoicesNotice("");
       loadModelChoices();
       void runtimeScope.current?.refresh();
-      await recordTier(tier);
+      return await recordTier(tier);
     } catch {
       if (!signal.aborted) showToast({ message: t("The tier was not changed ({status}).", { status: "selection_unconfirmed" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return false;
     } finally { setProviderBusy(false); }
   }
   // The permission mode applies at once, also to a turn that runs: what waits for an answer and the new mode grants is
@@ -1452,7 +1474,11 @@ ${value}` : value);
       <ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy} openRequest={selectionOpenRequest} notice={spaceProblem}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selectedProviderName, providerKey: selected?.providerKey, modelId: selected?.modelId,
-        model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
+        // A session on Adaptive names the model its next turn runs on, the one of the tier of its turns, which CodeAlta
+        // gives it again after a turn that went on a stronger model.
+        model: activeChoices?.adaptive && adaptiveChoice(tierState) ? `${t("Adaptive")} · ${adaptiveChoice(tierState)!.modelName}`
+          : (activeChoices?.adaptive ? `${t("Adaptive")} · ` : "")
+            + (selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model")),
         reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary, review: shownReview?.effective ?? null,
         sandbox: sessionSandboxSummary(shownSandbox?.reply), subSessions: shownOptions?.subSessions ?? null,
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })
@@ -1479,10 +1505,12 @@ ${value}` : value);
           // A provider chosen by hand is not a model of a tier.
           if (value.tier) void recordTier(null);
         }} />}
-      model={<ComposerModelPicker id={`composer-model-${sessionId}`} value={selected?.modelId ?? null} models={activeChoices?.models ?? noModels} providerKey={selected?.providerKey}
+      model={<><ComposerModelPicker id={`composer-model-${sessionId}`} value={selected?.modelId ?? null} models={activeChoices?.models ?? noModels} providerKey={selected?.providerKey}
         disabled={invalidEpoch || !!pending} loading={loadingChoices} onChange={modelId => select("modelId", modelId)}
-        tiers={composerTiers} currentTier={activeChoices?.tier ?? null} onChooseTier={tier => void chooseTier(tier)}
-        title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />}
+        tiers={composerTiers} currentTier={activeChoices?.adaptive ? adaptiveTier : activeChoices?.tier ?? null} onChooseTier={tier => void chooseTier(tier)}
+        adaptive={composerAdaptive} onChooseAdaptive={() => void chooseAdaptive()}
+        title={activeChoices?.adaptive ? t("CodeAlta chooses the model of each turn") : selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />
+        <AdaptiveSetupDialog isOpen={adaptiveSetup} onClose={() => setAdaptiveSetup(false)} /></>}
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} complete={!!selectedModel?.effortsComplete} model={selectedModel?.name} disabled={selectionDisabled}
         onChange={value => select("reasoningEffort", value)} />}
       modelOptions={selectedModel?.options?.length ? <ModelOptionFields sessionId={sessionId} options={selectedModel.options} disabled={selectionDisabled || optionBusy}

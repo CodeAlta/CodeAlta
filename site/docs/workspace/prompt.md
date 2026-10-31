@@ -61,7 +61,7 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
 </figure>
 
 - **Agent prompt**: built-in prompts, then yours and the project's (see [Agent Prompts](../prompts.md)). A new session starts with the agent prompt of its [space](../spaces.md), **Default** unless you changed it; a prompt you pick, such as **Plan**, is for that session only.
-- **Model**: type part of a name or id in the search box and press `Enter`. [Model tiers](../model-tiers.md) come first, with the model each gives now. **Settings > Models** sets how many models the list shows.
+- **Model**: type part of a name or id in the search box and press `Enter`. [Model tiers](../model-tiers.md) come first, with the model each gives now, then [Adaptive](../model-tiers.md#adaptive-experimental), where CodeAlta chooses the model of each turn. **Settings > Models** sets how many models the list shows.
 - **Reasoning effort**: the efforts of the model. For Claude Code, Copilot and the Anthropic API, a model that lists none has none. With other providers, an effort the model does not list is marked **Unverified**.
 - **Model options**, for a model whose provider offers some, such as **Context** and **Fast** for Cursor's models: a list or a switch under the reasoning effort. An option belongs to the model: it applies to every session of the provider that uses this model.
 - **Review before commit**: **On**, **Off**, or **Default** (the setting of **Settings > Sessions**). See [Review before commit](../reviews.md#review-before-commit).
@@ -69,7 +69,7 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
 - **More options**, at the end of the picker: options that are rarely changed. **Sub-sessions**, on by default, lets the agent [delegate](../sessions/delegation.md) to sessions of its own; off, it does all the work itself, is not told about sub-agents and has no tool to start them. A change applies from the next prompt. **Context size**, for a model that offers several, sets the [input limit](../model-providers/readme.md#context-and-compaction) of the session. The section opens by itself when an option is not its default, and a struck-through mark on the chip shows a session without sub-sessions.
 
 <figure class="alta-figure my-4" style="max-width: 24rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-model-search.webp" alt="The model list of the picker of CodeAlta Desktop filtered by a search box" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-model-search.webp" alt="The model list of the picker of CodeAlta Desktop: the Complex, Standard and Quick tiers and Adaptive at the top, then the models filtered by a search box" loading="lazy">
   <figcaption class="small text-secondary mt-2">Type in the search box of the model list to find a model.</figcaption>
 </figure>
 
@@ -126,6 +126,11 @@ CodeAlta Desktop shows LaTeX math in messages and documents: `$…$` or `\(…\)
 - **Copy and source**: a selection that holds formulas copies their LaTeX. A displayed equation has **LaTeX** and **MathML** buttons under the pointer (MathML pastes into Word as an equation), and **Source**, which shows its LaTeX in its place; a diagram has **Source** too.
 - **In the prompt** and in the Markdown files of the [code editor](code.md#code-editor): formulas are colored as you type, and the one that holds the caret is drawn above it. Its **✎** button opens it in the equation editor.
 - **Equation editor**: `Alt+=` (`Ctrl+Alt+=` on macOS), `/equation` or **Insert equation** in the **⋯** menu. Type the formula as it looks (`/` makes a fraction, `^` a superscript, `sqrt` a root, `alpha` a Greek letter) or open its keyboard of symbols; its LaTeX is kept below it, and can be edited there. Choose **Inline** or **Display**, then **Insert** (`Ctrl+Enter`). With the caret in a formula, the editor opens on it and **Replace** writes it back.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-math-editor.webp" alt="A Markdown file as text in the code editor of CodeAlta Desktop: its formulas colored, and the Maxwell equations that hold the caret drawn above them with the edit button" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A Markdown file in the code editor: the formulas are colored, and the one that holds the caret is drawn above it as you type.</figcaption>
+</figure>
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-equation-editor.webp" alt="The Edit equation window of CodeAlta Desktop over a session: the formula drawn in its field, its LaTeX below, Inline or Display, and Replace; in the prompt below, the formula is colored and drawn above the caret with its edit button" loading="lazy">
