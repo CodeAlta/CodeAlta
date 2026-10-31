@@ -286,10 +286,11 @@ import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore } from "./modelTiers";
 import { AdaptiveSetupDialog } from "./AdaptiveSetup";
 import { cloudPlace, deletedSessionWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
-import { cloudOf, inCloud, providerHasCloudSessions, runCloudStart, type CloudStartState } from "./cloudSessions/cloudSessions";
+import { bringBackCommand, cloudOf, inCloud, pendingCloudStartKey, providerHasCloudSessions, readPendingCloudStart, runCloudStart, type CloudStartState,
+  type PendingCloudStart } from "./cloudSessions/cloudSessions";
 import { BringHereDialog, CloudAccountChoice, CloudReadiness, CloudStartProgress, type CloudAccount } from "./cloudSessions/CloudStart";
 import { CloudMark, CloudOriginLine, CloudSessionPane, type CloudContinueRequest, type CloudTerminalRunner } from "./cloudSessions/CloudSessionPane";
-import { cloudSessions as cloudSessionsApi, type CloudContinueResponse } from "#neoastra";
+import { cloudSessions as cloudSessionsApi, type CloudContinueResponse, type CloudStartResponse } from "#neoastra";
 import { typeResumeCommand } from "./claudeCodeOpen/claudeCodeOpen";
 import { createPreparedWorktrees } from "./worktrees/preparedWorktrees";
 import { WorktreePreparation } from "./worktrees/WorktreePreparation";
@@ -2952,11 +2953,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // used for the cloud, else the first one of the space.
   const draftProviderKey = draftChoices.value.providerKey;
   useEffect(() => {
-    if (!draftCloud || !draftChoices.ready || cloudAccounts.some(account => account.id === draftProviderKey)) return;
+    // Not waiting for the provider being left to be ready: its catalog may never load.
+    if (!draftCloud || cloudAccounts.some(account => account.id === draftProviderKey)) return;
     const last = (() => { try { return localStorage.getItem(cloudProviderKey); } catch { return null; } })();
     const next = cloudAccounts.find(account => account.id === last) ?? cloudAccounts[0];
     if (next) { invalidateCreation(); draftChoices.change("providerKey", next.id); }
-  }, [draftCloud, draftChoices.ready, draftProviderKey, cloudAccounts]);
+  }, [draftCloud, draftProviderKey, cloudAccounts]);
   // Adaptive chosen in the draft while it is not set up: the user is offered its settings.
   const [draftAdaptiveSetup, setDraftAdaptiveSetup] = useState(false);
   // The sandbox of the new session: what its settings give (its model, its provider, its project, its space, every
@@ -3733,7 +3735,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (created?.status !== "ok" || !created.terminal) return say("The terminal could not be started.");
     showTerminal(created.terminal);
     const refusal = typeResumeCommand(terminalWorkspace.hub, { id: created.terminal.id, profile: created.terminal.profile },
-      { resumeCommand: reply.command, configDir: reply.configDirectory, windows: reply.windows, home: reply.home });
+      { resumeCommand: bringBackCommand(reply.command, reply.executable, { windows: reply.windows, home: reply.home }), configDir: reply.configDirectory,
+        windows: reply.windows, home: reply.home });
     return refusal ? say(refusal) : null;
   }
   function openScopeSession(scope: string | null, session: WorkspaceSession, action: SessionAction) {
@@ -4617,22 +4620,34 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const requestId = crypto.randomUUID();
     setCloudStart({ requestId, projectId: project.id, step: "starting", outcome: null });
     try { localStorage.setItem(cloudProviderKey, providerKey); } catch { /* The first account is offered next time. */ }
+    // A reload while Claude Code starts the session finds this start again, rather than letting it be sent a second time.
+    const pending: PendingCloudStart = { requestId, projectId: project.id, epoch };
+    try { localStorage.setItem(pendingCloudStartKey, JSON.stringify({ ...pending, task })); } catch { /* A reload then forgets it. */ }
     const outcome = await runCloudStart(cloudSessionsApi, { expectedEpoch: epoch, requestId, projectId: project.id, providerKey,
       spaceId: spacesState.available ? spaceId : null, title: null, task },
       step => setCloudStart(current => current?.requestId === requestId && !current.outcome ? { ...current, step } : current));
+    await finishCloudStart(pending, task, outcome);
+  }
+  // A start that ended: its session is opened and the prompt that started it emptied, or why there is none is shown.
+  async function finishCloudStart(pending: PendingCloudStart, task: string | null, outcome: CloudStartResponse) {
+    const say = (key: MessageKey) => translate(shownLocale.current, key);
+    try { if (readPendingCloudStart(() => localStorage.getItem(pendingCloudStartKey))?.requestId === pending.requestId) localStorage.removeItem(pendingCloudStartKey); }
+    catch { /* Nothing kept. */ }
     if (!creationAlive.current) return;
+    const { requestId, projectId: id } = pending;
     if ((outcome.status === "created" || outcome.status === "existing") && outcome.sessionId) {
       setCloudStart(current => current?.requestId === requestId ? null : current);
-      // The session holds the task now: the prompt starts empty again, unless it was changed meanwhile.
-      if (localDrafts.peek(scope)?.revision === typed.revision) {
+      // The session holds the task now: the prompt starts empty again, unless it says something else meanwhile.
+      const scope = `local-draft:${JSON.stringify(id)}`;
+      if (task !== null && localDrafts.peek(scope)?.text.trim() === task) {
         localDrafts.edit(scope, "");
-        persistDraft((_key, value) => localStorage.setItem(`codealta.desktop.localPrompt.${JSON.stringify(project.id)}`, value),
-          () => localStorage.removeItem(`codealta.desktop.localPrompt.${JSON.stringify(project.id)}`), scope, "");
+        persistDraft((_key, value) => localStorage.setItem(`codealta.desktop.localPrompt.${JSON.stringify(id)}`, value),
+          () => localStorage.removeItem(`codealta.desktop.localPrompt.${JSON.stringify(id)}`), scope, "");
       }
       const fresh = await refreshProjects(creationRefresh.current.signal);
       const row = fresh?.sessions.find(session => session.id === outcome.sessionId);
       if (!creationAlive.current) return;
-      if (row && selectedScope.current === project.id && selectedSessionId.current === null) {
+      if (row && selectedScope.current === id && selectedSessionId.current === null) {
         keptSession.current = row.id;
         revealSessionLatest.current(row);
       } else showToast({ message: say("The cloud session was started. It is listed with the sessions of its project."), intent: "success", icon: "tick", timeout: 8000,
@@ -4641,6 +4656,32 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     }
     setCloudStart(current => current?.requestId === requestId ? { ...current, outcome } : current);
   }
+  // A start the window waited for before a reload: followed again while the host that runs it is the same, said to be
+  // lost otherwise, since the host that ran Claude Code is gone with its terminal.
+  const resumedCloudStart = useRef(false);
+  useEffect(() => {
+    const epoch = owned ? status?.hostEpoch : null;
+    if (!epoch || resumedCloudStart.current) return;
+    resumedCloudStart.current = true;
+    let stored: string | null = null;
+    try { stored = localStorage.getItem(pendingCloudStartKey); } catch { return; }
+    const pending = readPendingCloudStart(() => stored);
+    if (!pending) return;
+    let task: string | null = null;
+    try { task = typeof JSON.parse(stored!).task === "string" ? JSON.parse(stored!).task.trim() : null; } catch { /* No task kept. */ }
+    const lost: CloudStartResponse = { status: "lost", epoch: null, requestId: pending.requestId, sessionId: null, cloudSessionId: null, url: null, message: null, terminalId: null, step: null };
+    if (pending.epoch !== epoch) {
+      setCloudStart({ requestId: pending.requestId, projectId: pending.projectId, step: null, outcome: lost });
+      try { localStorage.removeItem(pendingCloudStartKey); } catch { /* Nothing kept. */ }
+      return;
+    }
+    setCloudStart({ requestId: pending.requestId, projectId: pending.projectId, step: "starting", outcome: null });
+    // Its answer went with the page: the host keeps its outcome by request.
+    void runCloudStart({ start: () => new Promise<CloudStartResponse>(() => { }), startState: cloudSessionsApi.startState },
+      { expectedEpoch: epoch, requestId: pending.requestId, projectId: pending.projectId, providerKey: "", spaceId: null, title: null, task: "" },
+      step => setCloudStart(current => current?.requestId === pending.requestId && !current.outcome ? { ...current, step } : current))
+      .then(outcome => finishCloudStart(pending, task, outcome.status === "unknown" ? lost : outcome));
+  }, [owned, status?.hostEpoch]);
   function stopCloudStart() {
     const start = cloudStart;
     const epoch = status?.hostEpoch;
@@ -5645,6 +5686,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 cloud={owned && cloudOf(row) ? { provider: providerName(providerLogos, row.providerKey) ?? row.providerKey ?? null,
                   projectPath: listing.projects.find(project => project.id === row.projectId)?.path ?? null, onOpenLink: url => openCloudLink(url, row.id),
                   onChanged: refreshSessionList, onTerminal: reply => runCloudReturnInTerminal(row, reply),
+                  folderBusy: listing.sessions.some(other => other.id !== row.id && other.projectId === row.projectId && !other.worktreePath && runningSessionIds.has(other.id)),
                   continueRequest: cloudContinueAsk?.sessionId === row.id ? cloudContinueAsk.request : null } : null}
                 automation={row.automationId ? (() => {
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
@@ -6271,7 +6313,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
    * a menu to open Continue here). Null where it cannot be acted on.
    */
   cloud?: Readonly<{ provider: string | null; projectPath: string | null; onOpenLink: (url: string) => void; onChanged: () => void;
-    onTerminal: CloudTerminalRunner; continueRequest: CloudContinueRequest | null }> | null;
+    onTerminal: CloudTerminalRunner; continueRequest: CloudContinueRequest | null; folderBusy: boolean }> | null;
   /** A draft prompt to send once this session's composer holds it. */
   autoSend?: { text: string; images?: number; consume: () => void } | null;
   /** The automation that started the session, named on the card of the prompt it sent. */
@@ -6561,7 +6603,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
       // A session in the cloud has no conversation here: Claude Code keeps it on Anthropic's machines until it is brought back.
       : inCloud(session) && cloud && status?.hostEpoch
       ? <CloudSessionPane epoch={status.hostEpoch} session={session} provider={cloud.provider} projectPath={cloud.projectPath} canMutate={!!mutation?.capability.canMutate()}
-        onOpenLink={cloud.onOpenLink} onChanged={cloud.onChanged} onTerminal={cloud.onTerminal} continueRequest={cloud.continueRequest} />
+        onOpenLink={cloud.onOpenLink} onChanged={cloud.onChanged} onTerminal={cloud.onTerminal} continueRequest={cloud.continueRequest} folderBusy={cloud.folderBusy} />
       : <>
         {lineage}
         {cloud && <CloudOriginLine session={session} onOpenLink={cloud.onOpenLink} />}

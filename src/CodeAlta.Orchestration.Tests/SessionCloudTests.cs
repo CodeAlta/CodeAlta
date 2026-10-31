@@ -106,6 +106,46 @@ public sealed class SessionCloudTests
     }
 
     [TestMethod]
+    public async Task ASessionInTheCloud_IsNeitherForkedNorQueued_AndAReturnAskedAnotherWay_KeepsItsConversation()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new CloudProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        var sessionId = (await host.Commands.CreateCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, "Fix it", new NoTerminal(), null)
+            .WaitAsync(Timeout)).Session!.SessionId;
+        SessionViewDescriptor? session = null;
+        await foreach (var listed in host.RuntimeService.ListRecoverableSessionsAsync(cancellationToken: CancellationToken.None))
+            if (listed.SessionId == sessionId) session = listed;
+
+        // Nothing makes a local conversation of it: a fork, nor a prompt queued for later.
+        Assert.AreEqual(SessionRuntimeService.InCloudCode,
+            (await host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = sessionId }).WaitAsync(Timeout)).Status);
+        await Assert.ThrowsExactlyAsync<SessionInCloudException>(() => host.RuntimeService.QueuePromptAsync(session!, "later", "queue", null).WaitAsync(Timeout));
+
+        // A return begun in a terminal, then asked without it before the terminal wrote anything: the same conversation.
+        var command = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: true).WaitAsync(Timeout);
+        var reserved = command.Command!.Split(' ')[^1];
+        var continued = await host.Commands.ContinueCloudSessionHereAsync(sessionId, null, fromTerminal: false).WaitAsync(Timeout);
+        Assert.AreEqual("ok", continued.Status, continued.Message);
+        Assert.AreEqual(reserved, provider.Conversation, "The conversation the terminal was given: it is not lost for another one.");
+    }
+
+    [TestMethod]
+    public async Task ACloudSessionBroughtFromItsLinkTwiceAtOnce_IsRecordedOnce()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new CloudProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        var link = CloudProvider.CloudId;
+        var both = await Task.WhenAll(
+            host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, link),
+            host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, link)).WaitAsync(Timeout);
+        CollectionAssert.AreEquivalent(new[] { "created", "existing" }, both.Select(static result => result.Status).ToArray(),
+            string.Join(", ", both.Select(static result => $"{result.Status} {result.Message}")));
+        Assert.AreEqual(both[0].Session!.SessionId, both[1].Session!.SessionId, "The same session for both.");
+    }
+
+    [TestMethod]
     public async Task ACloudSessionBroughtBackInATerminal_GivesTheCommand_ThenReadsWhatItWrote_IntoTheSameConversation()
     {
         using var temp = TempDirectory.Create();
@@ -330,8 +370,8 @@ public sealed class SessionCloudTests
                 (_, writtenUsers, writtenAssistants) => JsonDocument.Parse($$"""{"kind":"fake","users":{{users + writtenUsers}},"assistants":{{assistants + writtenAssistants}}}""").RootElement.Clone());
         }
 
-        public (string Command, string? ConfigDirectory) BringBackCommand(string cloudSessionId, string conversationId)
-            => ($"claude --teleport {cloudSessionId} --session-id {conversationId}", null);
+        public (string Command, string? ConfigDirectory, string? Executable) BringBackCommand(string cloudSessionId, string conversationId)
+            => ($"claude --teleport {cloudSessionId} --session-id {conversationId}", null, null);
 
         public (string Id, string Url)? FindCloudSession(string text)
             => text.StartsWith("session_", StringComparison.Ordinal) ? (text, "https://claude.ai/code/" + text) : null;

@@ -81,7 +81,7 @@ public sealed partial class SessionRuntimeService
             var token = lifetime.Token;
             token.ThrowIfCancellationRequested();
             if (_entries.ContainsKey(candidate.SessionId) || _transitions.ContainsKey(candidate.SessionId)
-                || _remoteControlWanted.ContainsKey(candidate.SessionId)) return "session_in_use";
+                || _remoteControlWanted.ContainsKey(candidate.SessionId) || _cloudWork.ContainsKey(candidate.SessionId)) return "session_in_use";
             if ((await Permissions.ListWaitingSessionsAsync().ConfigureAwait(false)).Contains(candidate.SessionId, StringComparer.OrdinalIgnoreCase)
                 || (await Permissions.ListAsync().ConfigureAwait(false)).Any(item => string.Equals(item.Handle.SessionId, candidate.SessionId, StringComparison.OrdinalIgnoreCase)))
                 return "interaction_pending";
@@ -190,7 +190,8 @@ public sealed partial class SessionRuntimeService
         if (hostClaim is null) return null;
         var jobClaim = Jobs.TryReserveRetirement(sessionId);
         var runtimeClaim = jobClaim is null ? null : TryClaimRuntimeRetirement(sessionId);
-        if (runtimeClaim is null || _entries.ContainsKey(sessionId) || _transitions.ContainsKey(sessionId) || _remoteControlWanted.ContainsKey(sessionId))
+        if (runtimeClaim is null || _entries.ContainsKey(sessionId) || _transitions.ContainsKey(sessionId) || _remoteControlWanted.ContainsKey(sessionId)
+            || _cloudWork.ContainsKey(sessionId))
         {
             runtimeClaim?.Dispose();
             jobClaim?.Dispose();

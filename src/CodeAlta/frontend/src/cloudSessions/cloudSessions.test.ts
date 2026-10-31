@@ -3,8 +3,8 @@ import test from "node:test";
 import type { CloudReadinessResponse, CloudSessionDetailsResponse, CloudStartRequest, CloudStartResponse } from "#neoastra";
 import { translate } from "../localization";
 import { cloudPlace, persistWorkPlaces, restoreWorkPlaces, withWorkPlace } from "../worktrees/worktrees";
-import { claudeAiLink, cloudMessages, cloudOf, continueFailure, inCloud, pastedCloudSession, providerHasCloudSessions, readinessLines, runCloudStart, sendFailure,
-  startFailure, startStepKey } from "./cloudSessions";
+import { bringBackCommand, claudeAiLink, cloudMessages, cloudOf, continueFailure, inCloud, pastedCloudSession, providerHasCloudSessions, readinessLines,
+  readPendingCloudStart, runCloudStart, sendFailure, startFailure, startStepKey } from "./cloudSessions";
 
 const en = (key: Parameters<typeof translate>[1], parameters?: Readonly<Record<string, string | number>>) => translate("en", key, parameters);
 const id = "session_01QK5u8xRwDmhdvgs5BDTzPp";
@@ -93,6 +93,14 @@ test("a start reports its steps while it runs, and a lost answer is read again b
   };
   const read = await runCloudStart(lost as never, request, () => { }, async () => { await new Promise(resolve => setImmediate(resolve)); });
   assert.deepEqual([read.status, read.message], ["failed", "no"]);
+
+  // The answer never comes: the outcome the host keeps ends the wait.
+  const silent = { start: () => new Promise<CloudStartResponse>(() => { }), startState: async () => started() };
+  assert.equal((await runCloudStart(silent as never, request, () => { }, async () => { await new Promise(resolve => setImmediate(resolve)); })).status, "created");
+
+  // A host that no longer knows the request once the answer was lost: the start is lost, and the window is not held.
+  const forgotten = { start: async () => { throw new Error("closed"); }, startState: async () => started({ status: "unknown" }) };
+  assert.equal((await runCloudStart(forgotten as never, request, () => { }, async () => { await new Promise(resolve => setImmediate(resolve)); })).status, "lost");
 });
 
 test("the card lists the task first, then what was sent", () => {
@@ -104,6 +112,21 @@ test("the card lists the task first, then what was sent", () => {
   ]);
   assert.deepEqual(cloudMessages({ ...details, status: "not_cloud" }), []);
   assert.deepEqual(cloudMessages(null), []);
+});
+
+test("a return in a terminal runs the executable of the provider, quoted for the shell", () => {
+  const command = "claude --teleport session_01QK5u8xRwDmhdvgs5BDTzPp --session-id 0f0e0d0c-0b0a-4908-8706-050403020100";
+  assert.equal(bringBackCommand(command, "C:\\Users\\me\\.alta\\cache\\claude.exe", { windows: true, home: "C:\\Users\\me" }),
+    "& \"$HOME\\.alta\\cache\\claude.exe\" --teleport session_01QK5u8xRwDmhdvgs5BDTzPp --session-id 0f0e0d0c-0b0a-4908-8706-050403020100");
+  assert.equal(bringBackCommand(command, "/opt/claude bin/claude", { windows: false, home: "/home/me" }).startsWith("\"/opt/claude bin/claude\" --teleport "), true);
+  assert.equal(bringBackCommand(command, null, { windows: true, home: null }), command, "Without an executable: claude, as the host wrote it.");
+});
+
+test("a start a reload finds is read back whole, and anything else is none", () => {
+  const pending = { requestId: "r", projectId: "p", epoch: "e" };
+  assert.deepEqual(readPendingCloudStart(() => JSON.stringify({ ...pending, task: "Fix it" })), pending);
+  for (const raw of [null, "", "{", "[]", JSON.stringify({ requestId: "r", projectId: "p" }), JSON.stringify({ ...pending, epoch: 3 }), "x".repeat(2000)])
+    assert.equal(readPendingCloudStart(() => raw), null, String(raw).slice(0, 20));
 });
 
 test("the cloud place of a project is kept, and read back as the cloud", () => {

@@ -2918,6 +2918,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     var current = await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(session.SessionId, actorCancellationToken).ConfigureAwait(false);
                     if (current is null || current.CreatedAt != session.CreatedAt)
                         throw new InvalidOperationException("The queued prompt's session generation no longer exists.");
+                    // A prompt queued for a session in the cloud would never run here: it is refused as a send is.
+                    if (await RunsInCloudAsync(session, actorCancellationToken).ConfigureAwait(false)) throw new SessionInCloudException(session.SessionId);
                     var timestamp = DateTimeOffset.UtcNow;
                     var item = new SessionViewQueuedPrompt
                     {

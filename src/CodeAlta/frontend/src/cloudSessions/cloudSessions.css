@@ -57,6 +57,7 @@ button.project-context-place[data-cloud] { border-color: color-mix(in srgb, var(
 .cloud-session-note svg { flex: none; margin-top: 2px; }
 .cloud-session-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .cloud-session-busy { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); }
+.cloud-session-busy-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .cloud-session-terminal { display: grid; gap: 8px; padding: 10px 12px; border-radius: 6px; background: color-mix(in srgb, var(--cloud) 10%, transparent); }
 .cloud-session-terminal > p { display: flex; align-items: flex-start; gap: 8px; margin: 0; line-height: 19px; }
 .cloud-session-terminal > p > svg { flex: none; margin-top: 3px; color: var(--cloud); }

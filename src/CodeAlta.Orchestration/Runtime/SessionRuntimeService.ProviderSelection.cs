@@ -48,6 +48,8 @@ public sealed partial class SessionRuntimeService
                     || (await Permissions.ListOwnedUserInputsAsync(expected.SessionId, token).ConfigureAwait(false)).Entries.Count != 0) return "interaction_pending";
                 var session = await ResolveOwnedSessionBodyAsync(expected.SessionId, token).ConfigureAwait(false);
                 if (session is null || session.Status == Catalog.SessionViewStatus.Archived) return "session_missing";
+                // A session in the cloud keeps the account of Claude Code that reaches its cloud session until it is back.
+                if (_cloudWork.ContainsKey(expected.SessionId) || await RunsInCloudAsync(session, token).ConfigureAwait(false)) return InCloudCode;
                 if (session.ResolvedProviderKey != expected.ProviderKey
                     || session.UpdatedAt.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture) != expected.Revision) return "stale_selection";
                 var target = _agentHub.SelectionProviders.SingleOrDefault(provider => provider.ProviderId.Value == providerKey && provider.IsEnabled);

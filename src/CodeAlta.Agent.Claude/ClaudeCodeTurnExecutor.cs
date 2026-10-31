@@ -279,8 +279,8 @@ internal sealed class ClaudeCodeTurnExecutor :
         => ClaudeCodeExternalTurns.ReadBroughtBack(_options.ResolveConfigRoot(), conversationId, workingDirectory, users, assistants, fromTerminal, cancellationToken);
 
     /// <inheritdoc />
-    public (string Command, string? ConfigDirectory) BringBackCommand(string cloudSessionId, string conversationId)
-        => (ClaudeCodeCloud.TeleportCommand(cloudSessionId, conversationId), _options.ResolveConfigDirectory());
+    public (string Command, string? ConfigDirectory, string? Executable) BringBackCommand(string cloudSessionId, string conversationId)
+        => (ClaudeCodeCloud.TeleportCommand(cloudSessionId, conversationId), _options.ResolveConfigDirectory(), _options.ResolveExecutable().Path);
 
     /// <inheritdoc />
     public (string Id, string Url)? FindCloudSession(string text)

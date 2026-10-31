@@ -27,7 +27,7 @@ const api: CloudSessionsApi = {
     return { status: sendStatus, message: sendStatus === "ok" ? null : "Session is archived" }; },
   continueHere: async (request: ContinueRequest) => { calls.push(`continue worktree=${request.worktree} terminal=${request.fromTerminal}`);
     return { status: continueStatus, message: continueStatus === "failed" ? "Could not fetch the branch claude/fix-login" : null, changedFiles: 0, command: null,
-      configDirectory: null, folder: null, windows: true, home: null }; },
+      configDirectory: null, folder: null, windows: true, home: null, executable: null }; },
   start: async () => { throw new Error("not used"); }, startState: async () => { throw new Error("not used"); },
   cancelStart: async () => ({ status: "ok", message: null }), bringHere: async () => { throw new Error("not used"); },
 };

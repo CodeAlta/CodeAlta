@@ -1,5 +1,6 @@
 import type { CloudContinueResponse, CloudReadinessResponse, CloudSessionDetailsResponse, CloudStartRequest, CloudStartResponse, WorkspaceSession, cloudSessions as cloudSessionsApi } from "#neoastra";
 import type { MessageKey } from "../localization";
+import { quotePath, type CliShell } from "../claudeCli/claudeCli";
 
 /** The calls of the host for cloud sessions; tests give their own. */
 export type CloudSessionsApi = Pick<typeof cloudSessionsApi, "readiness" | "start" | "startState" | "cancelStart" | "bringHere" | "details" | "send" | "continueHere">;
@@ -93,6 +94,7 @@ export function startFailure(status: string, message: string | null | undefined)
   const key: MessageKey = status === "needs_claude_ai" ? "Cloud sessions need Claude Code signed in with a claude.ai account (Pro, Max, Team or Enterprise)."
     : status === "terminal_unavailable" ? "Claude Code needs a terminal to start a cloud session, and none could be opened."
     : status === "canceled" ? "The start was stopped. Nothing was sent to the cloud."
+    : status === "lost" ? "CodeAlta lost track of the start. Look for the session in the list of the project, or on claude.ai, before you send again."
     : status === "unrecorded" ? "The cloud session runs, but CodeAlta could not record it. Open it on claude.ai, or bring it here."
     : status === "unavailable" || status === "provider_unavailable" ? "This provider cannot run sessions in the cloud."
     : status === "project_missing" ? "The project is no longer there."
@@ -139,32 +141,52 @@ export type CloudStartState = Readonly<{ requestId: string; projectId: string; s
 
 /**
  * Starts a cloud session and follows it: the host answers once the session exists, or why there is none, and says
- * meanwhile where it is. An answer that is lost (the window waited too long) is read again by its request.
+ * meanwhile where it is. Its outcome is taken from whichever comes first, the answer of the start or the state the
+ * host keeps by request, so that an answer that is late or lost never holds the window. A host that no longer knows
+ * the request after the answer was lost (it restarted) ends it as `lost`.
  */
 export async function runCloudStart(api: Pick<CloudSessionsApi, "start" | "startState">, request: CloudStartRequest, onStep: (step: string) => void,
   wait: (milliseconds: number) => Promise<void> = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))): Promise<CloudStartResponse> {
-  let done = false;
-  const follow = (async () => {
-    while (!done) {
-      await wait(400);
-      if (done) return;
-      const state = await api.startState({ expectedEpoch: request.expectedEpoch, requestId: request.requestId }, { timeoutMilliseconds: 5000 }).catch(() => null);
-      if (!done && state?.status === "running" && state.step) onStep(state.step);
-    }
-  })();
-  try {
-    return await api.start(request, { timeoutMilliseconds: 30 * 60_000 });
-  } catch {
-    // The answer was lost: the start goes on in the host, which keeps its outcome.
-    for (;;) {
-      const state = await api.startState({ expectedEpoch: request.expectedEpoch, requestId: request.requestId }, { timeoutMilliseconds: 5000 }).catch(() => null);
-      if (state && state.status !== "running") return state;
-      await wait(1000);
-    }
-  } finally {
-    done = true;
-    await follow;
+  // Undefined while the answer is awaited, null once it was lost.
+  let answer: CloudStartResponse | null | undefined;
+  void api.start(request, { timeoutMilliseconds: 30 * 60_000 }).then(value => { answer = value; }, () => { answer = null; });
+  for (let unknown = 0; ;) {
+    if (answer) return answer;
+    await wait(400);
+    if (answer) return answer;
+    const state = await api.startState({ expectedEpoch: request.expectedEpoch, requestId: request.requestId }, { timeoutMilliseconds: 5000 }).catch(() => null);
+    if (answer) return answer;
+    if (state?.status === "running") { if (state.step) onStep(state.step); continue; }
+    if (state && state.status !== "unknown") return state;
+    if (answer === null && ++unknown >= 5) return { status: "lost", epoch: null, requestId: request.requestId, sessionId: null, cloudSessionId: null, url: null,
+      message: null, terminalId: null, step: null };
   }
+}
+
+/**
+ * The command a terminal is given to bring a cloud session back: the one of the host, which starts with `claude`, run
+ * with the executable of the provider when the host names it, as the sign-in command of a provider is.
+ */
+export function bringBackCommand(command: string, executable: string | null | undefined, shell: CliShell): string {
+  if (!executable?.trim() || !command.startsWith("claude ")) return command;
+  const program = quotePath(executable, shell);
+  return `${shell.windows ? `& ${program}` : program} ${command.slice("claude ".length)}`;
+}
+
+/** A start of a cloud session the window waits for, kept so that a reload finds it again. */
+export type PendingCloudStart = Readonly<{ requestId: string; projectId: string; epoch: string }>;
+export const pendingCloudStartKey = "codealta.desktop.cloudStart.v1";
+
+/** The start a reload finds, as it was stored; anything else is none. */
+export function readPendingCloudStart(read: () => string | null): PendingCloudStart | null {
+  try {
+    const raw = read();
+    if (!raw || raw.length > 1024) return null;
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const text = (item: unknown) => typeof item === "string" && item.length > 0 && item.length <= 256;
+    return value && text(value.requestId) && text(value.projectId) && text(value.epoch)
+      ? { requestId: value.requestId as string, projectId: value.projectId as string, epoch: value.epoch as string } : null;
+  } catch { return null; }
 }
 
 /** A message the user sent to the cloud session, or the task it started with. */

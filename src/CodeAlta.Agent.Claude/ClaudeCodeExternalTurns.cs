@@ -173,7 +173,7 @@ internal static class ClaudeCodeExternalTurns
     /// <param name="cancellationToken">Stops the read.</param>
     /// <returns>
     /// The turns with <see cref="AgentExternalTurnsStatus.Read"/>; <see cref="AgentExternalTurnsStatus.Missing"/> when the
-    /// transcript is not there.
+    /// transcript is not there, or has no continuation entry yet.
     /// </returns>
     /// <exception cref="ArgumentException">An argument is empty, or <paramref name="conversationId"/> is not an identifier of the CLI.</exception>
     /// <exception cref="OperationCanceledException">The read was stopped.</exception>
@@ -189,7 +189,9 @@ internal static class ClaudeCodeExternalTurns
 
         var path = Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(configRoot, workingDirectory), conversationId + TranscriptExtension);
         var result = ClaudeCodeTranscriptReader.ReadTeleported(path, cancellationToken);
-        if (result.Status == ClaudeCodeTranscriptReadStatus.Missing)
+        // Claude Code writes its continuation entry once the conversation of the cloud is whole: a transcript without it
+        // is one it is still writing, or left unfinished, and is not brought back.
+        if (result.Status == ClaudeCodeTranscriptReadStatus.Missing || !result.ContinuationFound)
         {
             return AgentExternalTurns.Missing;
         }

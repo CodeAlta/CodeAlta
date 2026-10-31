@@ -46,6 +46,13 @@ internal static partial class ClaudeCodeCloud
     [GeneratedRegex(@"(?<![A-Za-z0-9_])(?:session|cse)_[A-Za-z0-9]{8,64}(?![A-Za-z0-9_])", RegexOptions.CultureInvariant)]
     private static partial Regex CloudSessionIdInText();
 
+    // The address of the session the CLI printed (View: https://claude.ai/code/<id>?…), and its resume line.
+    [GeneratedRegex(@"https://claude\.ai/code/(?<id>(?:session|cse)_[A-Za-z0-9]{8,64})(?![A-Za-z0-9_])", RegexOptions.CultureInvariant)]
+    private static partial Regex CloudSessionLink();
+
+    [GeneratedRegex(@"--teleport\s+(?<id>(?:session|cse)_[A-Za-z0-9]{8,64})(?![A-Za-z0-9_])", RegexOptions.CultureInvariant)]
+    private static partial Regex CloudSessionResume();
+
     /// <summary>Whether a text is the identifier of a cloud session (<c>session_…</c> or <c>cse_…</c>).</summary>
     public static bool IsCloudSessionId(string? id) => id is { Length: <= 80 } && CloudSessionIdPattern().IsMatch(id);
 
@@ -83,13 +90,13 @@ internal static partial class ClaudeCodeCloud
             throw new ArgumentException($"The task of a cloud session is between 1 and {MaxTaskLength} characters.", nameof(task));
         }
 
-        return new ClaudeCodeLaunch(executable, [$"--cloud={task.Trim()}"], workingDirectory, ClaudeCodeLauncher.CreateEnvironment(options, null, withoutApiKey: true));
+        return new ClaudeCodeLaunch(executable, [$"--cloud={task.Trim()}"], workingDirectory, CloudEnvironment(options));
     }
 
     /// <summary>How a message is sent to a cloud session: <c>claude -p --cloud &lt;id&gt; --output-format json</c>, the message on its input.</summary>
     public static ClaudeCodeLaunch SendLaunch(string executable, ClaudeCodeModelProviderRuntimeOptions options, string workingDirectory, string cloudSessionId)
         => new(executable, ["-p", $"--cloud={Checked(cloudSessionId)}", "--output-format", "json"], workingDirectory,
-            ClaudeCodeLauncher.CreateEnvironment(options, null, withoutApiKey: true));
+            CloudEnvironment(options));
 
     /// <summary>
     /// How a cloud session is brought back: <c>claude -p /cost --teleport &lt;id&gt; --session-id=&lt;uuid&gt;</c>. The
@@ -98,7 +105,7 @@ internal static partial class ClaudeCodeCloud
     public static ClaudeCodeLaunch TeleportLaunch(string executable, ClaudeCodeModelProviderRuntimeOptions options, string workingDirectory,
         string cloudSessionId, string conversationId)
         => new(executable, ["-p", "/cost", "--teleport", Checked(cloudSessionId), $"--session-id={CheckedConversation(conversationId)}", "--output-format", "json"],
-            workingDirectory, ClaudeCodeLauncher.CreateEnvironment(options, null, withoutApiKey: true));
+            workingDirectory, CloudEnvironment(options));
 
     /// <summary>The command that brings a cloud session back in a terminal, into the conversation given.</summary>
     public static string TeleportCommand(string cloudSessionId, string conversationId)
@@ -125,7 +132,6 @@ internal static partial class ClaudeCodeCloud
     /// <summary>Reads what <c>claude --cloud</c> wrote on its screen. What it prints is for people: what is not found is left out.</summary>
     public static ClaudeCodeCloudScreen ReadScreen(IReadOnlyList<string> rows)
     {
-        // The rows a terminal wrapped are joined back: a long address may be split.
         var lines = rows.Select(static row => row.TrimEnd()).Where(static row => !row.StartsWith("[process exited", StringComparison.Ordinal)).ToList();
         var created = lines.FindIndex(static line => line.Contains(CreatedMarker, StringComparison.Ordinal));
         string? title = null;
@@ -133,9 +139,16 @@ internal static partial class ClaudeCodeCloud
         if (created >= 0)
         {
             title = Clean(lines[created][(lines[created].IndexOf(CreatedMarker, StringComparison.Ordinal) + CreatedMarker.Length)..]);
-            var after = string.Concat(lines.Skip(created));
-            var match = CloudSessionIdInText().Match(after);
-            sessionId = match.Success ? match.Value : null;
+            // The identity is the one of the address the CLI printed, never a word of the title: the rows of the address are
+            // joined back when the terminal wrapped it, up to the next row that has a label of its own (Resume with: …).
+            // Its resume line must name the same session when it names one.
+            var after = lines.Skip(created + 1).ToList();
+            var view = after.FindIndex(static line => line.Contains("https://claude.ai/code/", StringComparison.Ordinal));
+            var address = view < 0 ? string.Empty
+                : string.Concat(after.Skip(view).TakeWhile((line, index) => index == 0 || line.Length > 0 && !line.Contains(':', StringComparison.Ordinal)));
+            var link = CloudSessionLink().Match(address) is { Success: true } found ? found.Groups["id"].Value : null;
+            var resume = after.Select(static line => CloudSessionResume().Match(line)).FirstOrDefault(static match => match.Success)?.Groups["id"].Value;
+            sessionId = link is not null && resume is not null && !string.Equals(link, resume, StringComparison.Ordinal) ? null : link ?? resume;
         }
 
         var noteStart = lines.FindIndex(static line => line.Contains("is not on GitHub", StringComparison.Ordinal));
@@ -233,21 +246,22 @@ internal static partial class ClaudeCodeCloud
         {
             var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
             var error = process.StandardError.ReadToEndAsync(CancellationToken.None);
-            try
-            {
-                if (input is not null) await process.StandardInput.WriteAsync(input.AsMemory(), cancellationToken).ConfigureAwait(false);
-                process.StandardInput.Close();
-            }
-            catch (IOException)
-            {
-                // It ended before it read its input: what it wrote says why.
-            }
-
+            // The time limit covers the whole run, the writing of its input included: a CLI that does not read is ended too.
             using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             limit.CancelAfter(timeout);
             var timedOut = false;
             try
             {
+                try
+                {
+                    if (input is not null) await process.StandardInput.WriteAsync(input.AsMemory(), limit.Token).ConfigureAwait(false);
+                    process.StandardInput.Close();
+                }
+                catch (IOException)
+                {
+                    // It ended before it read its input: what it wrote says why.
+                }
+
                 await process.WaitForExitAsync(limit.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -269,6 +283,15 @@ internal static partial class ClaudeCodeCloud
 
     /// <summary>How long a bring-back may take: the CLI fetches the branch of the session.</summary>
     public static TimeSpan TeleportTimeLimit => TeleportTimeout;
+
+    // The environment of a command of the cloud: the one of the provider, and never an API key, the variables of the
+    // provider included: a cloud session runs on the claude.ai account the CLI is signed in to.
+    private static Dictionary<string, string?> CloudEnvironment(ClaudeCodeModelProviderRuntimeOptions options)
+    {
+        var environment = ClaudeCodeLauncher.CreateEnvironment(options, null, withoutApiKey: true);
+        environment[ClaudeCodeApiKey.Variable] = null;
+        return environment;
+    }
 
     private static string Checked(string cloudSessionId)
         => IsCloudSessionId(cloudSessionId) ? cloudSessionId : throw new ArgumentException("A cloud session is named session_… or cse_….", nameof(cloudSessionId));

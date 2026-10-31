@@ -127,12 +127,13 @@ internal interface IAgentProviderCloudSessions
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// The command that brings a cloud session back in a terminal, into the conversation given, and the account folder
-    /// it is run with (null when the provider leaves it to the environment).
+    /// The command that brings a cloud session back in a terminal, into the conversation given (it starts with
+    /// <c>claude</c>), the account folder it is run with (null when the provider leaves it to the environment), and the
+    /// executable the provider runs, to type in the place of <c>claude</c> (null when it is not known).
     /// </summary>
     /// <param name="cloudSessionId">The cloud session.</param>
     /// <param name="conversationId">The conversation it is brought into.</param>
-    (string Command, string? ConfigDirectory) BringBackCommand(string cloudSessionId, string conversationId);
+    (string Command, string? ConfigDirectory, string? Executable) BringBackCommand(string cloudSessionId, string conversationId);
 
     /// <summary>Reads the cloud session a text a user pasted names: its identifier, or its link.</summary>
     /// <param name="text">The text.</param>

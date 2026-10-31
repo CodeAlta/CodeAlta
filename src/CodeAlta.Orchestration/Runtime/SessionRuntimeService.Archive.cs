@@ -117,7 +117,7 @@ public sealed partial class SessionRuntimeService
     // Why a session cannot be archived now, or null. Runs on the actor of the session.
     private async Task<string?> ArchiveRefusalAsync(string sessionId, CancellationToken token)
     {
-        if (_transitions.ContainsKey(sessionId)) return "session_in_use";
+        if (_transitions.ContainsKey(sessionId) || _cloudWork.ContainsKey(sessionId)) return "session_in_use";
         if (_entries.TryGetValue(sessionId, out var entry) && (entry.HasActiveRun || entry.QueueDrainInProgress
             || entry.Attachment.IsRetiring || entry.PendingAgentPromptId is not null
             // The tasks of its provider report to it.

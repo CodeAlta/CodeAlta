@@ -578,6 +578,21 @@ public sealed partial class SessionViewJournalStore
     private static AgentRawEvent CreateStateEvent(SessionViewDescriptor session, SessionViewLocalState state)
         => CreateCompactStateEvent(session, CompactForJournal(state));
 
+    /// <summary>
+    /// The record of the local state of a session, to be appended with other records of its journal in one write, so that
+    /// they are kept or lost together. The row of the session is projected again from its journal after such a write.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="state">Its local state.</param>
+    /// <returns>The record.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static AgentEvent CreateLocalStateRecord(SessionViewDescriptor session, SessionViewLocalState state)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(state);
+        return CreateStateEvent(session, state);
+    }
+
     // The record of a state already compacted for the journal (CompactForJournal).
     private static AgentRawEvent CreateCompactStateEvent(SessionViewDescriptor session, SessionViewLocalState compact)
         => new(

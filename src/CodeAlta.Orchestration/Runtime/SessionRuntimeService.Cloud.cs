@@ -60,8 +60,9 @@ public sealed record CloudSessionSendResult(string Status, string? Message = nul
 /// <param name="Command">For a bring-back in a terminal: the command to type there.</param>
 /// <param name="ConfigDirectory">For a bring-back in a terminal: the account folder the command is run with, or null.</param>
 /// <param name="Folder">The folder the session is brought into.</param>
+/// <param name="Executable">For a bring-back in a terminal: the executable the provider runs, to type in the place of <c>claude</c>, or null.</param>
 public sealed record CloudSessionContinueResult(string Status, string? Message = null, int ChangedFiles = 0, string? Command = null, string? ConfigDirectory = null,
-    string? Folder = null);
+    string? Folder = null, string? Executable = null);
 
 /// <summary>What a session holds of the cloud session it runs as, for its tab.</summary>
 /// <param name="Id">The cloud session.</param>
@@ -76,8 +77,9 @@ public sealed record CloudSessionContinueResult(string Status, string? Message =
 /// <param name="ContinuedAt">When it was brought back; null while it runs in the cloud.</param>
 /// <param name="ProjectId">The project of the session, or null.</param>
 /// <param name="InTerminal">Whether the return in progress waits on the user, who brings it back in a terminal.</param>
+/// <param name="Worktree">The worktree the session works in, or null for the folder of its project.</param>
 public sealed record CloudSessionDetails(string Id, string? Url, string? Title, string? Task, string? Branch, DateTimeOffset? StartedAt, string? Note,
-    IReadOnlyList<SessionCloudMessage> Sent, bool Continuing, DateTimeOffset? ContinuedAt, string? ProjectId = null, bool InTerminal = false);
+    IReadOnlyList<SessionCloudMessage> Sent, bool Continuing, DateTimeOffset? ContinuedAt, string? ProjectId = null, bool InTerminal = false, string? Worktree = null);
 
 public sealed partial class SessionRuntimeService
 {
@@ -104,6 +106,9 @@ public sealed partial class SessionRuntimeService
 
     // A cloud session is started, sent to or brought back one request at a time per session.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _cloudWork = new(StringComparer.OrdinalIgnoreCase);
+
+    // Records the cloud sessions brought from a link one at a time, so that one is never recorded twice.
+    private readonly SemaphoreSlim _cloudAdoption = new(1, 1);
 
     /// <summary>
     /// Starts a cloud session of a project with its provider (Claude Code: <c>claude --cloud</c> in a terminal of the host),
@@ -186,15 +191,24 @@ public sealed partial class SessionRuntimeService
             if (await _agentHub.GetCloudSessionsAsync(provider.ProviderId, CancellationToken.None).ConfigureAwait(false) is not { } found)
                 return new CloudSessionStartResult("unavailable", Message: "This provider cannot run sessions in the cloud.");
             if (found.Cloud.FindCloudSession(link) is not { } cloud) return new CloudSessionStartResult("invalid_link");
-            await foreach (var listed in ListRecoverableSessionsAsync(CancellationToken.None).ConfigureAwait(false))
+            // One at a time: two requests for the same cloud session record it once, and the second is given that session.
+            await _cloudAdoption.WaitAsync().ConfigureAwait(false);
+            try
             {
-                if (listed.Cloud is { } known && string.Equals(known.Id, cloud.Id, StringComparison.Ordinal))
-                    return new CloudSessionStartResult("existing", listed, cloud.Id, cloud.Url);
-            }
+                await foreach (var listed in ListRecoverableSessionsAsync(CancellationToken.None).ConfigureAwait(false))
+                {
+                    if (listed.Cloud is { } known && string.Equals(known.Id, cloud.Id, StringComparison.Ordinal))
+                        return new CloudSessionStartResult("existing", listed, cloud.Id, cloud.Url);
+                }
 
-            var session = await RecordCloudSessionAsync(project, provider, found.Runtime, space, title, task: null, await ReadBranchAsync(project.ProjectPath).ConfigureAwait(false),
-                new AgentCloudStart("created", cloud.Id, cloud.Url)).ConfigureAwait(false);
-            return new CloudSessionStartResult("created", session, cloud.Id, cloud.Url);
+                var session = await RecordCloudSessionAsync(project, provider, found.Runtime, space, title, task: null, await ReadBranchAsync(project.ProjectPath).ConfigureAwait(false),
+                    new AgentCloudStart("created", cloud.Id, cloud.Url)).ConfigureAwait(false);
+                return new CloudSessionStartResult("created", session, cloud.Id, cloud.Url);
+            }
+            finally
+            {
+                _cloudAdoption.Release();
+            }
         }, CancellationToken.None).ConfigureAwait(false);
     }
 
@@ -285,7 +299,7 @@ public sealed partial class SessionRuntimeService
         var local = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false);
         return local?.Cloud is { Id.Length: > 0 } cloud
             ? new CloudSessionDetails(cloud.Id, cloud.Url, cloud.Title, cloud.Task, cloud.Branch, cloud.StartedAt, cloud.Note, cloud.Sent ?? [],
-                cloud.Continuing is not null, cloud.ContinuedAt, session.ProjectRef, cloud.Continuing?.FromTerminal == true)
+                cloud.Continuing is not null, cloud.ContinuedAt, session.ProjectRef, cloud.Continuing?.FromTerminal == true, session.WorktreeDirectory)
             : null;
     }
 
@@ -386,7 +400,12 @@ public sealed partial class SessionRuntimeService
 
         // The return in progress is taken up as it was reserved; a new one is reserved with its folder and conversation.
         var reserved = cloud.Continuing;
-        if (reserved is null || (worktree is not null && !string.Equals(reserved.Folder, worktree, StringComparison.OrdinalIgnoreCase)) || reserved.FromTerminal != fromTerminal)
+        // Another way of bringing back the same return keeps its conversation and its folder: what a terminal wrote there
+        // is read in the way it was written, and a return not written yet goes on the way asked now.
+        if (reserved is not null && reserved.FromTerminal != fromTerminal && (worktree is null || string.Equals(reserved.Folder, worktree, StringComparison.OrdinalIgnoreCase))
+            && !TranscriptWritten(reserved))
+            reserved = reserved with { FromTerminal = fromTerminal };
+        if (reserved is null || (worktree is not null && !string.Equals(reserved.Folder, worktree, StringComparison.OrdinalIgnoreCase)))
         {
             var folder = worktree ?? session.WorktreeDirectory ?? session.WorkingDirectory;
             if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return new CloudSessionContinueResult("failed", "The folder of the session is not there.");
@@ -415,9 +434,9 @@ public sealed partial class SessionRuntimeService
 
             if (fromTerminal && !TranscriptWritten(reserved))
             {
-                var (command, configDirectory) = provider.BringBackCommand(cloud.Id, reserved.ConversationId);
+                var (command, configDirectory, executable) = provider.BringBackCommand(cloud.Id, reserved.ConversationId);
                 succeeded = true; // The reservation stays: the user runs the command, then asks again.
-                return new CloudSessionContinueResult("terminal", Command: command, ConfigDirectory: configDirectory, Folder: reserved.Folder);
+                return new CloudSessionContinueResult("terminal", Command: command, ConfigDirectory: configDirectory, Folder: reserved.Folder, Executable: executable);
             }
 
             if (!fromTerminal && !TranscriptWritten(reserved))
@@ -499,24 +518,23 @@ public sealed partial class SessionRuntimeService
                     },
                     DateTimeOffset.UtcNow,
                     token).ConfigureAwait(false);
+                // The turns, the state after them and the cloud state that says the session is back are one write: a
+                // failure or a crash leaves none of them, and the reservation takes the return up again.
+                var local = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false) ?? new SessionViewLocalState();
+                var cloud = local.Cloud?.Copy() ?? throw new InvalidOperationException("The session has no cloud session.");
+                cloud.Continuing = null;
+                cloud.ContinuedAt = DateTimeOffset.UtcNow;
+                local.Cloud = cloud;
                 IReadOnlyList<AgentEvent> events = [.. prepared.Events, FileSystemAgentSessionStore.CreateSummarySnapshotEvent(
-                    summary with { Summary = prepared.Preview ?? summary.Summary, UpdatedAt = DateTimeOffset.UtcNow })];
+                    summary with { Summary = prepared.Preview ?? summary.Summary, UpdatedAt = DateTimeOffset.UtcNow }),
+                    SessionViewJournalStore.CreateLocalStateRecord(session, local)];
                 await store.AppendEventsAsync(summary.ProtocolFamily, summary.ProviderKey, sessionId, events, token).ConfigureAwait(false);
+                session.Cloud = cloud.ToListing();
             }
             catch
             {
                 DeleteSavedImages(saved);
                 throw;
-            }
-
-            var local = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false) ?? new SessionViewLocalState();
-            if (local.Cloud is { } cloud)
-            {
-                cloud = cloud.Copy();
-                cloud.Continuing = null;
-                cloud.ContinuedAt = DateTimeOffset.UtcNow;
-                local.Cloud = cloud;
-                await _sessionViewCatalog.JournalStore.AppendStateAsync(session, local, token).ConfigureAwait(false);
             }
 
             return true;

@@ -6,7 +6,7 @@ import { RemoteLinkQr } from "../RemoteLinkQr";
 import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
 import { resumeCommandLine } from "../claudeCodeOpen/claudeCodeOpen";
-import { cloudMessages, cloudOf, continueFailure, sendFailure, type CloudSessionsApi } from "./cloudSessions";
+import { bringBackCommand, cloudMessages, cloudOf, continueFailure, sendFailure, type CloudSessionsApi } from "./cloudSessions";
 
 /** A request of a menu or a command to open Continue here, until the pane opened it. */
 export type CloudContinueRequest = Readonly<{ done: () => void }>;
@@ -22,13 +22,15 @@ export type CloudTerminalRunner = (reply: CloudContinueResponse) => Promise<stri
  * Anthropic's machines (followed on claude.ai or the Claude app), the messages sent to it, a prompt that sends more,
  * and Continue here, which brings the conversation back to this computer.
  */
-export function CloudSessionPane({ epoch, session, provider, projectPath, canMutate, api = cloudSessionsHost, onOpenLink, onChanged, onTerminal, continueRequest = null }: {
+export function CloudSessionPane({ epoch, session, provider, projectPath, canMutate, folderBusy = false, api = cloudSessionsHost, onOpenLink, onChanged, onTerminal, continueRequest = null }: {
   epoch: string; session: WorkspaceSession;
   /** The name of the account of Claude Code the session runs with. */
   provider: string | null;
   /** The folder of the project, where Continue here can bring the session. */
   projectPath: string | null;
   canMutate: boolean;
+  /** Whether another session works in the folder of the project now: Continue here then recommends a new worktree. */
+  folderBusy?: boolean;
   api?: CloudSessionsApi;
   onOpenLink: (url: string) => void;
   /** The session changed in the host: its list is read again. */
@@ -78,7 +80,8 @@ export function CloudSessionPane({ epoch, session, provider, projectPath, canMut
     if (!message || sending || busy || !canMutate) return;
     setSending(true); setSendError(null);
     void api.send({ expectedEpoch: epoch, sessionId: session.id, text: message }, { timeoutMilliseconds: 120_000 }).then(reply => {
-      if (reply.status === "ok") { setText(""); read(); return; }
+      // What was typed meanwhile stays: only the message that was sent leaves the prompt.
+      if (reply.status === "ok") { setText(current => current.trim() === message ? "" : current); read(); return; }
       const failure = sendFailure(reply.status, reply.message);
       setSendError([t(failure.key), failure.said].filter(Boolean).join(" "));
     }, () => setSendError(t("The request did not reach CodeAlta. Try again."))).finally(() => setSending(false));
@@ -108,7 +111,11 @@ export function CloudSessionPane({ epoch, session, provider, projectPath, canMut
             <Button disabled={!canMutate || bringing} onClick={() => setContinuing(true)}>{t("Continue here…")}</Button>
           </div>
         </div>
-        : busy ? <p className="cloud-session-busy" role="status"><Spinner size={14} />{t("The conversation is being brought here…")}</p>
+        : busy ? <div className="cloud-session-busy-row">
+            <p className="cloud-session-busy" role="status"><Spinner size={14} />{t("The conversation is being brought here…")}</p>
+            {/* A return that was interrupted (CodeAlta closed meanwhile) is taken up again from here. */}
+            <Button size="small" disabled={!canMutate} data-cloud-continue onClick={() => setContinuing(true)}>{t("Continue here…")}</Button>
+          </div>
           : <div className="cloud-session-actions">
             <Button intent="primary" icon={<AppIcon name="download" size={15} />} disabled={!canMutate} data-cloud-continue onClick={() => setContinuing(true)}>{t("Continue here…")}</Button>
           </div>}
@@ -122,15 +129,15 @@ export function CloudSessionPane({ epoch, session, provider, projectPath, canMut
       </ol>
     </div>
     <div className="cloud-session-prompt">
-      <TextArea fill autoResize value={text} disabled={!canMutate || busy && !inTerminal} aria-label={t("Message the cloud session")} placeholder={t("Message the cloud session…")}
+      <TextArea fill autoResize value={text} disabled={!canMutate || busy} aria-label={t("Message the cloud session")} placeholder={t("Message the cloud session…")}
         onChange={event => setText(event.currentTarget.value)}
         onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} />
-      <Button intent="primary" icon={<AppIcon name="send" size={16} />} loading={sending} disabled={!text.trim() || !canMutate || busy && !inTerminal} aria-label={t("Send to the cloud")}
+      <Button intent="primary" icon={<AppIcon name="send" size={16} />} loading={sending} disabled={!text.trim() || !canMutate || busy} aria-label={t("Send to the cloud")}
         title={t("Send to the cloud")} data-cloud-send onClick={send} />
       {sendError ? <p className="cloud-session-error" role="alert">{sendError}</p>
         : <p className="cloud-session-hint">{t("Claude answers on claude.ai and in the Claude app.")}</p>}
     </div>
-    {continuing && <ContinueHereDialog epoch={epoch} session={session} title={title} projectPath={projectPath} api={api} onTerminal={onTerminal}
+    {continuing && <ContinueHereDialog epoch={epoch} session={session} title={title} projectPath={projectPath} folderBusy={folderBusy} api={api} onTerminal={onTerminal}
       onClose={done => { setContinuing(false); read(); if (done) onChanged(); }} />}
   </div>;
 }
@@ -160,8 +167,10 @@ type ContinueStep = "choose" | "running" | "terminal" | "failed";
  * has changes Claude Code's checkout would meet), then Claude Code brings the conversation back. When it refuses, the
  * same return can be made in a terminal, then brought into the session.
  */
-export function ContinueHereDialog({ epoch, session, title, projectPath, api = cloudSessionsHost, onTerminal, onClose }: {
+export function ContinueHereDialog({ epoch, session, title, projectPath, folderBusy = false, api = cloudSessionsHost, onTerminal, onClose }: {
   epoch: string; session: WorkspaceSession; title: string; projectPath: string | null;
+  /** Whether another session works in the folder of the project now. */
+  folderBusy?: boolean;
   api?: CloudSessionsApi;
   onTerminal?: CloudTerminalRunner;
   /** Closes it: `done` when the session was brought here. */
@@ -185,7 +194,8 @@ export function ContinueHereDialog({ epoch, session, title, projectPath, api = c
     return () => abort.abort();
   }, [api, epoch, session.projectId, session.providerKey]);
   const dirty = (readiness?.changed ?? 0) > 0;
-  const inWorktree = worktree ?? dirty;
+  // The folder of the project is switched to another branch: not under another session that works there.
+  const inWorktree = worktree ?? (dirty || folderBusy);
   const run = (fromTerminal: boolean) => {
     setStep("running"); setError(null);
     void api.continueHere({ expectedEpoch: epoch, sessionId: session.id, worktree: !reserved.current && inWorktree, fromTerminal }, { timeoutMilliseconds: 10 * 60_000 })
@@ -196,8 +206,8 @@ export function ContinueHereDialog({ epoch, session, title, projectPath, api = c
           // The terminal tab is where the user goes on: the dialog leaves it, and the card brings the conversation in afterwards.
           const refusal = onTerminal ? await onTerminal(reply) : t("No terminal can be opened from here.");
           if (!refusal) { onClose(false); return; }
-          setTerminalCommand({ note: refusal, command: reply.command ? resumeCommandLine({ resumeCommand: reply.command, configDir: reply.configDirectory, windows: reply.windows,
-            home: reply.home }) : "" });
+          setTerminalCommand({ note: refusal, command: reply.command ? resumeCommandLine({ resumeCommand: bringBackCommand(reply.command, reply.executable,
+            { windows: reply.windows, home: reply.home }), configDir: reply.configDirectory, windows: reply.windows, home: reply.home }) : "" });
           setStep("terminal");
           return;
         }
@@ -217,7 +227,9 @@ export function ContinueHereDialog({ epoch, session, title, projectPath, api = c
       {step !== "terminal" && !reserved.current && <RadioGroup className="cloud-continue-place" label={t("Where")} selectedValue={inWorktree ? "worktree" : "project"} disabled={running}
         onChange={event => setWorktree(event.currentTarget.value === "worktree")}>
         <Radio value="worktree" labelElement={<span className="cloud-continue-choice"><strong>{t("New worktree")}</strong>
-          <small>{dirty ? t("Recommended: the folder of the project has changes that are not committed.") : t("A checkout of its own: the folder of the project stays as it is.")}</small></span>} />
+          <small>{dirty ? t("Recommended: the folder of the project has changes that are not committed.")
+            : folderBusy ? t("Recommended: another session works in the folder of the project.")
+            : t("A checkout of its own: the folder of the project stays as it is.")}</small></span>} />
         <Radio value="project" disabled={dirty} labelElement={<span className="cloud-continue-choice"><strong>{t("Project folder")}</strong>
           <small id={`${id}-project`}>{changedReason ? `${changedReason}: ${t("commit them first, or choose a new worktree.")}`
             : projectPath ? t("{folder}: switches it to the branch of the session.", { folder: projectPath }) : t("Switches it to the branch of the session.")}</small></span>} />

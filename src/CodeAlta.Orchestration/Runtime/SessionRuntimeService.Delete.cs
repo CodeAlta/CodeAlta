@@ -139,7 +139,7 @@ public sealed partial class SessionRuntimeService
             || (await Permissions.ListAsync().ConfigureAwait(false)).Any(item => string.Equals(item.Handle.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)))
             return true;
         return await GetActorForWork(sessionId).QueryAsync(_ => ValueTask.FromResult(
-            _transitions.ContainsKey(sessionId) || _remoteControlWanted.ContainsKey(sessionId)
+            _transitions.ContainsKey(sessionId) || _remoteControlWanted.ContainsKey(sessionId) || _cloudWork.ContainsKey(sessionId)
             || _entries.TryGetValue(sessionId, out var entry)
             && (entry.HasActiveRun || entry.QueueDrainInProgress || entry.BackgroundTasks.Any(task => task.Outcome is null))), CancellationToken.None).ConfigureAwait(false);
     }
@@ -205,7 +205,8 @@ public sealed partial class SessionRuntimeService
         var actor = GetActorForWork(sessionId);
         var preparation = await actor.QueryAsync(_ =>
         {
-            if (_transitions.ContainsKey(sessionId)) return ValueTask.FromResult((Busy: true, Work: (Task?)null));
+            // A cloud session being brought here, or a message being sent to it, holds the session as a run does.
+            if (_transitions.ContainsKey(sessionId) || _cloudWork.ContainsKey(sessionId)) return ValueTask.FromResult((Busy: true, Work: (Task?)null));
             if (!_entries.TryGetValue(sessionId, out var entry)) return ValueTask.FromResult((Busy: false, Work: (Task?)null));
             if (entry.HasActiveRun || entry.QueueDrainInProgress || projectSessions is not null
                 && (_remoteControlWanted.ContainsKey(sessionId) || entry.BackgroundTasks.Any(task => task.Outcome is null)))
@@ -239,7 +240,7 @@ public sealed partial class SessionRuntimeService
         if (preparation.Work is not null) await preparation.Work.ConfigureAwait(false);
         var outcome = await actor.QueryAsync(async token =>
         {
-            if (_transitions.ContainsKey(sessionId) || _entries.ContainsKey(sessionId)) return "session_in_use";
+            if (_transitions.ContainsKey(sessionId) || _entries.ContainsKey(sessionId) || _cloudWork.ContainsKey(sessionId)) return "session_in_use";
             var checkedScope = await ValidateAsync(token).ConfigureAwait(false);
             if (checkedScope != "ok") return checkedScope;
             return await _agentSessionCatalog.DeleteSessionAsync(sessionId, token).ConfigureAwait(false)

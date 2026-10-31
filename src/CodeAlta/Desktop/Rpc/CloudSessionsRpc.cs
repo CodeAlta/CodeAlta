@@ -30,6 +30,7 @@ internal sealed class CloudSessionsService
     private readonly string? _epoch;
     private readonly ConcurrentDictionary<string, Start> _starts = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _startOrder = new();
+    private readonly ConcurrentDictionary<string, byte> _continuing = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Creates an unavailable service, for a window without an owned host.</summary>
     internal CloudSessionsService() { }
@@ -99,7 +100,8 @@ internal sealed class CloudSessionsService
         Keep(request.RequestId);
         try
         {
-            var project = await FindProjectAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
+            // Once admitted the start is the host's: a caller that stops waiting does not leave it without an outcome.
+            var project = await FindProjectAsync(request.ProjectId, CancellationToken.None).ConfigureAwait(false);
             if (project is null) return start.End(CloudStartResponse.Of("project_missing", request.RequestId));
             if (FindProvider(request.ProviderKey) is not { } provider) return start.End(CloudStartResponse.Of("provider_unavailable", request.RequestId));
             var terminal = (CreateTerminal ?? (projectId => new DesktopInteractiveTerminal(_terminals!, projectId)))(project.Id);
@@ -112,6 +114,11 @@ internal sealed class CloudSessionsService
         catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
         {
             return start.End(CloudStartResponse.Of("failed", request.RequestId) with { Message = exception.Message });
+        }
+        finally
+        {
+            // Every start that was admitted ends with an outcome, whatever stopped it: startState then says it.
+            start.End(CloudStartResponse.Of("failed", request.RequestId));
         }
     }
 
@@ -186,33 +193,51 @@ internal sealed class CloudSessionsService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return CloudContinueResponse.Of(refused);
         if (string.IsNullOrWhiteSpace(request.SessionId) || request.SessionId.Length > 128) return CloudContinueResponse.Of("invalid_request");
-        string? worktree = null;
-        string? branch = null;
-        if (request.Worktree)
+        // One return of a session at a time from this window: a second one would make a second worktree.
+        if (!_continuing.TryAdd(request.SessionId, 0)) return CloudContinueResponse.Of("busy");
+        try
         {
-            var details = await _commands!.GetCloudSessionAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
-            if (details is null || details.ContinuedAt is not null) return CloudContinueResponse.Of("not_cloud");
-            // A return that is already reserved (in a terminal, asked again) keeps the folder it reserved.
-            if (!details.Continuing)
+            string? worktree = null;
+            string? branch = null;
+            ProjectDescriptor? project = null;
+            if (request.Worktree)
             {
-                var session = await FindProjectAsync(details.ProjectId, cancellationToken).ConfigureAwait(false);
-                if (session is null) return CloudContinueResponse.Of("project_missing");
-                var created = await _worktrees!.CreateAsync(session, null, null, cancellationToken).ConfigureAwait(false);
-                if (!created.Succeeded || created.Folder is null) return CloudContinueResponse.Of("worktree_failed") with { Message = created.Message };
-                (worktree, branch) = (created.Folder, created.Branch);
+                var details = await _commands!.GetCloudSessionAsync(request.SessionId, CancellationToken.None).ConfigureAwait(false);
+                if (details is null || details.ContinuedAt is not null) return CloudContinueResponse.Of("not_cloud");
+                // A return already reserved (in a terminal, asked again) keeps the folder it reserved; a session already in
+                // a worktree (an earlier return failed after it went there) is brought back there.
+                if (!details.Continuing && details.Worktree is null)
+                {
+                    project = await FindProjectAsync(details.ProjectId, CancellationToken.None).ConfigureAwait(false);
+                    if (project is null) return CloudContinueResponse.Of("project_missing");
+                    var created = await _worktrees!.CreateAsync(project, null, null, CancellationToken.None).ConfigureAwait(false);
+                    if (!created.Succeeded || created.Folder is null) return CloudContinueResponse.Of("worktree_failed") with { Message = created.Message };
+                    (worktree, branch) = (created.Folder, created.Branch);
+                }
             }
-        }
 
-        var result = await _commands!.ContinueCloudSessionHereAsync(request.SessionId, worktree, request.FromTerminal).ConfigureAwait(false);
-        if (result.Status == "ok" && worktree is not null && branch is not null)
+            var result = await _commands!.ContinueCloudSessionHereAsync(request.SessionId, worktree, request.FromTerminal).ConfigureAwait(false);
+            if (result.Status == "ok" && worktree is not null && branch is not null)
+            {
+                // Claude Code checked out the branch of the cloud session there: the branch made for the worktree is not used.
+                var head = (await GitAsync(worktree, ["rev-parse", "--abbrev-ref", "HEAD"], CancellationToken.None).ConfigureAwait(false))?.Trim();
+                if (head is { Length: > 0 } && head != branch) await GitAsync(worktree, ["branch", "-d", branch], CancellationToken.None).ConfigureAwait(false);
+            }
+            else if (result.Status is not ("ok" or "terminal") && worktree is not null && project is not null)
+            {
+                // Refused before the session went there: the worktree made for it is not left behind.
+                var after = await _commands.GetCloudSessionAsync(request.SessionId, CancellationToken.None).ConfigureAwait(false);
+                if (after?.Worktree is null || !string.Equals(Path.GetFullPath(after.Worktree), Path.GetFullPath(worktree), StringComparison.OrdinalIgnoreCase))
+                    await _worktrees!.RemoveAsync(project.ProjectPath, worktree, force: false, deleteBranch: true, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            return new(result.Status, result.Message, result.ChangedFiles, result.Command, result.ConfigDirectory, result.Folder, OperatingSystem.IsWindows(),
+                ClaudeCodeConversationWire.Home()) { Executable = result.Executable };
+        }
+        finally
         {
-            // Claude Code checked out the branch of the cloud session there: the branch made for the worktree is not used.
-            var head = (await GitAsync(worktree, ["rev-parse", "--abbrev-ref", "HEAD"], CancellationToken.None).ConfigureAwait(false))?.Trim();
-            if (head is { Length: > 0 } && head != branch) await GitAsync(worktree, ["branch", "-d", branch], CancellationToken.None).ConfigureAwait(false);
+            _continuing.TryRemove(request.SessionId, out _);
         }
-
-        return new(result.Status, result.Message, result.ChangedFiles, result.Command, result.ConfigDirectory, result.Folder, OperatingSystem.IsWindows(),
-            ClaudeCodeConversationWire.Home());
     }
 
     private string? Refuse(string? expectedEpoch)
@@ -345,5 +370,8 @@ internal sealed record CloudContinueRequest(string ExpectedEpoch, string Session
 internal sealed record CloudContinueResponse(string Status, string? Message, int ChangedFiles, string? Command, string? ConfigDirectory, string? Folder, bool Windows,
     string? Home)
 {
+    /// <summary>For a bring-back in a terminal: the executable the provider runs, typed in the place of <c>claude</c>, or null.</summary>
+    public string? Executable { get; init; }
+
     internal static CloudContinueResponse Of(string status) => new(status, null, 0, null, null, null, OperatingSystem.IsWindows(), null);
 }

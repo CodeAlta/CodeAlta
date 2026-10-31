@@ -53,6 +53,22 @@ public sealed class ClaudeCodeCloudTests
     }
 
     [TestMethod]
+    public void TheIdentityOfAStartedSession_IsTheOneOfItsAddress_NeverAWordOfItsTitle()
+    {
+        // A title that names another session, and the next row glued to the end of the address.
+        var titled = ClaudeCodeCloud.ReadScreen(["Created cloud session: Investigate session_01AAAAAAAAAA", $"View: https://claude.ai/code/{CloudId}",
+            $"Resume with: claude --teleport {CloudId}"]);
+        Assert.AreEqual(CloudId, titled.SessionId);
+        var resumeOnly = ClaudeCodeCloud.ReadScreen(["Created cloud session: Fix it", $"Resume with: claude --teleport {CloudId}"]);
+        Assert.AreEqual(CloudId, resumeOnly.SessionId);
+        // An address and a resume line that disagree name no session: the start is not taken for one it did not create.
+        var mixed = ClaudeCodeCloud.ReadScreen(["Created cloud session: Fix it", $"View: https://claude.ai/code/{CloudId}", "Resume with: claude --teleport session_01BBBBBBBBBB"]);
+        Assert.IsFalse(mixed.Created);
+        Assert.IsNull(mixed.SessionId);
+        Assert.IsFalse(ClaudeCodeCloud.ReadScreen(["Created cloud session: session_01AAAAAAAAAA"]).Created, "A title alone names no session.");
+    }
+
+    [TestMethod]
     public void ALinkOrAnIdentifier_NamesACloudSession_AndNothingElseDoes()
     {
         Assert.AreEqual(CloudId, ClaudeCodeCloud.FindCloudSessionId(CloudId));
@@ -81,6 +97,14 @@ public sealed class ClaudeCodeCloudTests
         Assert.IsNull(start.Environment["CLAUDECODE"], "Not a child of the Claude Code session CodeAlta may run in.");
         Assert.IsNull(start.Environment["CLAUDE_CODE_CHILD_SESSION"]);
         Assert.AreEqual("from-the-provider", start.Environment["CLAUDE_CODE_OAUTH_TOKEN"]);
+        var keyed = new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude",
+            EnvironmentVariables = new Dictionary<string, string> { [ClaudeCodeApiKey.Variable] = "sk-ant-from-the-provider" },
+        };
+        foreach (var launch in new[] { ClaudeCodeCloud.StartLaunch("/bin/claude", keyed, "/repo", "x"), ClaudeCodeCloud.SendLaunch("/bin/claude", keyed, "/repo", CloudId),
+                     ClaudeCodeCloud.TeleportLaunch("/bin/claude", keyed, "/repo", CloudId, Conversation) })
+            Assert.IsNull(launch.Environment[ClaudeCodeApiKey.Variable], "Not even a key the provider sets.");
         Assert.IsFalse(start.Environment.ContainsKey("CLAUDE_AGENT_SDK_CLIENT_APP"), "Not a process of the Agent SDK.");
 
         CollectionAssert.AreEqual(new[] { "-p", $"--cloud={CloudId}", "--output-format", "json" },
@@ -167,12 +191,17 @@ public sealed class ClaudeCodeCloudTests
     }
 
     [TestMethod]
-    public void ATranscriptWithoutTheContinuationEntry_GivesAllItsTurns_AndAMissingOneGivesNone()
+    public void ATranscriptWithoutTheContinuationEntry_IsNotBroughtBack_NorAMissingOne()
     {
         using var directory = TestTempDirectory.Create();
         var transcript = Transcript.For(directory, Conversation);
+        // Claude Code is still writing it, or left it unfinished: what is there is not taken for the whole conversation.
         transcript.Write([.. TeleportedLines(transcript).Take(4)]);
-        Assert.AreEqual(2, ClaudeCodeExternalTurns.ReadBroughtBack(directory.Path, Conversation, directory.Path, 0, 0, false, CancellationToken.None).Turns.Count);
+        Assert.AreEqual(AgentExternalTurnsStatus.Missing,
+            ClaudeCodeExternalTurns.ReadBroughtBack(directory.Path, Conversation, directory.Path, 0, 0, false, CancellationToken.None).Status);
+        transcript.Write([]);
+        Assert.AreEqual(AgentExternalTurnsStatus.Missing,
+            ClaudeCodeExternalTurns.ReadBroughtBack(directory.Path, Conversation, directory.Path, 0, 0, false, CancellationToken.None).Status, "An empty one neither.");
         Assert.AreEqual(AgentExternalTurnsStatus.Missing,
             ClaudeCodeExternalTurns.ReadBroughtBack(directory.Path, Guid.NewGuid().ToString(), directory.Path, 0, 0, false, CancellationToken.None).Status);
         Assert.ThrowsExactly<ArgumentException>(() => ClaudeCodeExternalTurns.ReadBroughtBack(directory.Path, "..\\x", directory.Path, 0, 0, false, CancellationToken.None));

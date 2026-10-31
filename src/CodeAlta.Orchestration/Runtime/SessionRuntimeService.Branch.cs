@@ -155,6 +155,8 @@ public sealed partial class SessionRuntimeService
         using var lineage = ClaimRetentionWork(request.SessionId, request.ParentSessionId, request.CreatedBy?.SourceSessionId);
         var source = await ResolveOwnedSessionBodyAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
         if (source is null) return new("session_missing");
+        // A session in the cloud has no conversation here to fork until it is back.
+        if (await RunsInCloudAsync(source, cancellationToken).ConfigureAwait(false)) return new(InCloudCode);
         var active = await ReadActiveRunIdAsync(request.SessionId).ConfigureAwait(false);
         // A session without sub-sessions forks none; a fork has the options of its source, narrowed by those of the session that forks it.
         var forkOptions = await GetCreatedSessionOptionsAsync(source.Options, request.CreatedBy?.SourceSessionId, cancellationToken).ConfigureAwait(false);
