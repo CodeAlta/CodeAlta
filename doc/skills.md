@@ -8,7 +8,7 @@ are offered for reading. CodeAlta reads the Agent Skills format, so skills writt
 | Part | Where |
 | --- | --- |
 | Discovery, validation, shadowing, enablement, cache | `src/CodeAlta.Catalog/Skills/` (`SkillCatalog`, `SkillCatalogQuery`, `SkillFrontmatterReader`) |
-| Built-in skills | `src/CodeAlta.Catalog/BuiltinSkills/` (`codealta-plugin-runtime`, `document-conversion`) |
+| Built-in skills | `src/CodeAlta.Catalog/BuiltinSkills/` (`codealta-plugin-runtime`, `document-conversion`, `ultra-profiler`) |
 | The prompt's skill list | `AgentInstructionTemplateProvider` (`src/CodeAlta.Orchestration/Runtime`) |
 | Activation | `SessionRuntimeService`, `alta skill` (`src/CodeAlta.LiveTool`) |
 | Preferred skills | `DesktopSkillUsage` (`src/CodeAlta/Desktop`), from the Statistics plugin |
