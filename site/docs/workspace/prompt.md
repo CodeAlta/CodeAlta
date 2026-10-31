@@ -128,6 +128,11 @@ CodeAlta Desktop shows LaTeX math in messages and documents: `$…$` or `\(…\)
 - **Equation editor**: `Alt+=` (`Ctrl+Alt+=` on macOS), `/equation` or **Insert equation** in the **⋯** menu. Type the formula as it looks (`/` makes a fraction, `^` a superscript, `sqrt` a root, `alpha` a Greek letter) or open its keyboard of symbols; its LaTeX is kept below it, and can be edited there. Choose **Inline** or **Display**, then **Insert** (`Ctrl+Enter`). With the caret in a formula, the editor opens on it and **Replace** writes it back.
 
 <figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-math-editor.webp" alt="A Markdown file as text in the code editor of CodeAlta Desktop: its formulas colored, and the Maxwell equations that hold the caret drawn above them with the edit button" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A Markdown file in the code editor: the formulas are colored, and the one that holds the caret is drawn above it as you type.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-equation-editor.webp" alt="The Edit equation window of CodeAlta Desktop over a session: the formula drawn in its field, its LaTeX below, Inline or Display, and Replace; in the prompt below, the formula is colored and drawn above the caret with its edit button" loading="lazy">
   <figcaption class="small text-secondary mt-2">The equation editor opened with <code>Alt+=</code> on a formula of the prompt, which is drawn above the caret as it is written.</figcaption>
 </figure>

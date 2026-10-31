@@ -332,13 +332,25 @@ CodeAlta TUI does not load server skills, and skills of servers run by the Claud
 
 ## Servers and tools of a session
 
-In CodeAlta Desktop, click the MCP status above the prompt (`MCP 3/3 · active tools 12`) to see what the session has:
+In CodeAlta Desktop, click the MCP status above the prompt (`MCP 3/3 · active tools 12`) to see what the session has.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-mcp-session.webp" alt="The MCP in this session window of CodeAlta Desktop: one server of two in use, 20 active tools of 43, one server to activate; the ultramcp server marked All tools and In use, with its tools and their descriptions, each with a green dot" loading="lazy">
+  <figcaption class="small text-secondary mt-2"><strong>In this session</strong>: the server the session uses, activated with all its tools.</figcaption>
+</figure>
+
+The window shows:
 
 - A summary: the servers the session uses, its active tools, the servers it could activate and those turned off.
 - Each server, with its state (**In use**, **Available**, **Turned off**), its transport and the file that defines it. **All tools** marks a server activated as a whole.
 - Its tools, with their descriptions: a green dot for a tool the session has, an empty one for a tool it can activate. Click a tool for its arguments and the name agents call it by.
 - **In this session** keeps what the session has, **All servers** shows every tool; the search box finds a server or a tool by its name or description.
 - **MCP settings** opens the [MCP Servers page](#mcp-servers-page).
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-mcp-tools.webp" alt="The MCP in this session window on All servers, searched for screenshot: the codealta-dev server, available, with two tools; take_screenshot opened on the name agents call it by and the table of its arguments" loading="lazy">
+  <figcaption class="small text-secondary mt-2"><strong>All servers</strong> searched for a tool: a click on it shows its arguments and the name agents call it by.</figcaption>
+</figure>
 
 Nothing connects to a server: the tools are the ones CodeAlta listed last, when a session activated the server or **Test** ran in Settings. A server never listed says so.
 
