@@ -204,7 +204,8 @@ The 51 tasks under the locked protocol of the kit (`benchmarks/swe-bench-pro`), 
 | CodeAlta on HARD-51 | Resolved | Estimated cost | Of Opus | Quality: Opus / other | Tests: Opus / other | Preferred, Opus : other |
 | --- | --- | --- | --- | --- | --- | --- |
 | Opus 5.5 `xhigh` | 50/51 | $76.30 | 100% | – | – | – |
-| **Haiku 5.5 `high` + recheck + escalation** | **48/51** | **$7.09** | **9%** | **3.61 / 3.33** | **3.55 / 3.76** | **29 : 22** |
+| **Haiku 5.5 `high` + recheck + escalation**, run 1 | **48/51** | **$7.09** | **9%** | **3.61 / 3.33** | **3.55 / 3.76** | **29 : 22** |
+| **Haiku 5.5 `high` + recheck + escalation**, run 2 | **44/51** | **$4.51** | **6%** | **3.63 / 3.41** | **3.51 / 4.02** | **30 : 21** |
 | Haiku 5.5 `high` + escalation | 46/51 | $5.07 | 7% | 3.86 / 2.86 | 3.76 / 2.92 | 43 : 8 |
 | Haiku 5.5 `high` | 43/51 | $1.98 | 3% | 3.82 / 2.86 | 3.75 / 2.94 | 43 : 7 |
 | Sonnet 5.5 `high` | 40/51 | $9.16 | 12% | 3.96 / 2.57 | 3.88 / 1.67 | 48 : 3 |
@@ -212,11 +213,11 @@ The 51 tasks under the locked protocol of the kit (`benchmarks/swe-bench-pro`), 
 - **On real repositories the cheap model's code is weaker, until it rechecks it.** Haiku alone resolved 43 tasks, but the judge preferred Opus's patch on 43 of 51, even on most tasks both resolved: unhandled edge cases, error paths that report success, missing regression tests. One recheck turn on every task that changed code (47 of 51) took its patches to a few tenths of Opus's, with tests judged better, and 48 tasks resolved, for 9% of Opus's cost. The small scenarios had not shown the gap on Anthropic: their fixtures are too small.
 - **The escalation** fired on 5 tasks (4 runs ended without an answer, 1 with a failing last test run) and added about two tasks for $3.
 - **A higher tier is not always better:** Sonnet 5.5 at `high` was the weakest, with almost no tests.
-- Each configuration ran once; between attempts a configuration varies by a task or two.
+- The best configuration ran twice: 48 then 44 tasks resolved (46 on average, 90%, against 50 for Opus), for $7.09 then $4.51, with the same quality both times; the other configurations ran once, and a configuration varies by up to four tasks between attempts.
 
 ### Recommendation
 
-Do not ship `adaptive` as a prompt: a prompt does not move a session. Build the **host support** (`.alta/plans/2026-10-31-adaptive-host-routing.md`): an Adaptive choice of the model list where CodeAlta runs each user turn on the tier its kind calls for, has a turn that changed code recheck its change against the request, continues a turn that ends in visible trouble on `complex`, and shows the model of each turn. With Haiku 5.5 on code, the recheck and an escalation to Opus 5.5, that resolved 48 of 51 HARD-51 tasks for 9% of the cost of Opus, with patches judged close to Opus's. The code tier stays a setting: on Codex, Luna's code stayed weak even with a recheck, and Terra kept Sol's quality for ~15% of its cost. The project prompts of this trial stay as they are, for reference, and are not made built-in.
+Do not ship `adaptive` as a prompt: a prompt does not move a session. Build the **host support** (`.alta/plans/2026-10-31-adaptive-host-routing.md`): an Adaptive choice of the model list where CodeAlta runs each user turn on the tier its kind calls for, has a turn that changed code recheck its change against the request, continues a turn that ends in visible trouble on `complex`, and shows the model of each turn. With Haiku 5.5 on code, the recheck and an escalation to Opus 5.5, that resolved 46 of 51 HARD-51 tasks on average over two runs (48 and 44) for 6–9% of the cost of Opus, with patches judged a few tenths below Opus's and tests judged better. The code tier stays a setting: on Codex, Luna's code stayed weak even with a recheck, and Terra kept Sol's quality for ~15% of its cost. The project prompts of this trial stay as they are, for reference, and are not made built-in.
 
 ## Steps
 

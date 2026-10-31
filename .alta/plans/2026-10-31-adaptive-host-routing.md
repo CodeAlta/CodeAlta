@@ -12,7 +12,7 @@ Today a session runs on the model the user chose; the trial of #273 (`.alta/plan
 | CodeAlta on HARD-51 | Resolved | Cost of Opus | Patch quality against Opus (blind judge, 1–5) | Judge preferred (Opus : other) |
 | --- | --- | --- | --- | --- |
 | Opus 5.5 `xhigh` on every turn | 50/51 | 100% | – | – |
-| **Haiku 5.5, a recheck turn after code changes, escalation to Opus on visible trouble** | **48/51** | **9%** | **3.33 against 3.61** | **29 : 22** |
+| **Haiku 5.5, a recheck turn after code changes, escalation to Opus on visible trouble** (two runs) | **48 and 44 of 51** | **6–9%** | **3.33 and 3.41 against 3.61 and 3.63** | **29 : 22 and 30 : 21** |
 | Haiku 5.5, escalation only | 46/51 | 7% | 2.86 against 3.86 | 43 : 8 |
 | Haiku 5.5 alone | 43/51 | 3% | 2.86 against 3.82 | 43 : 7 |
 | Sonnet 5.5 `high` alone | 40/51 | 12% | 2.57 against 3.96 | 48 : 3 |
@@ -94,7 +94,7 @@ When this is done, the model list of the composer offers **Adaptive** beside the
 
 - **A family whose cheap model is too weak for code:** Luna in the trial. The code tier setting covers it; the defaults could later depend on the family once HARD-51 runs on more providers.
 - **The blind spot of a cheap model:** a bug worked around at its caller passes its own tests; only `complex` fixed it in the trial. A user who wants that safety sets the code tier to `complex`.
-- **One attempt per configuration on HARD-51:** results vary by a task or two between attempts; the best configuration was run twice.
+- **Variance on HARD-51:** the best configuration resolved 48 then 44 tasks in two attempts, against 50 for Opus in one; its quality was the same both times. A user who needs every task solved keeps Opus on code, or sets the code tier to `complex` and keeps the recheck.
 
 ## Evidence
 
