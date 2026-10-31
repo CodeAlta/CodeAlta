@@ -2420,7 +2420,9 @@ svg.pele {
 .prompt-math { color: var(--accent) !important; }
 .prompt-math-preview { display: flex; align-items: center; gap: 6px; width: max-content; max-width: min(560px, 80vw); max-height: 220px; overflow: auto; padding: 6px 8px;
   border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel); box-shadow: 0 4px 14px rgba(0, 0, 0, .22); }
-.prompt-math-preview-formula { flex: 1; min-width: 0; padding: 2px 0; overflow-x: auto; overflow-y: hidden; }
+/* The 2 px on the right hold KaTeX's stacked boxes (aligned rows, fractions), which reach that far past their width:
+   without them, a scroll bar shows under a formula that fits. */
+.prompt-math-preview-formula { flex: 1; min-width: 0; padding: 2px 2px 2px 0; overflow-x: auto; overflow-y: hidden; }
 .prompt-math-preview-formula .katex { font-size: 1.15em; }
 .prompt-math-preview-formula .katex-display { margin: 0; }
 .prompt-math-preview-formula .katex-error { color: var(--red) !important; font-size: 12px; }

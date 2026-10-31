@@ -5,8 +5,10 @@ import { createRoot } from "react-dom/client";
 import { EditorSurface, type EditorSurfaceHandle, type SurfaceDocument } from "./editor/EditorSurface";
 import { PromptEditor, type PromptInput } from "./PromptEditor";
 
-// A Markdown file and a C# file that holds a `$`: only the first one has formulas.
-const documents: SurfaceDocument[] = [{ id: 1, path: "notes.md", text: "Energy $E=mc^2$ here", generation: 1 }, { id: 2, path: "Price.cs", text: "var price = \"$x$\";", generation: 1 }];
+// A Markdown file and a C# file that holds a `$`: only the first one has formulas. The third has aligned rows, which
+// KaTeX stacks in boxes that reach 2 px past their width.
+const documents: SurfaceDocument[] = [{ id: 1, path: "notes.md", text: "Energy $E=mc^2$ here", generation: 1 }, { id: 2, path: "Price.cs", text: "var price = \"$x$\";", generation: 1 },
+  { id: 3, path: "maxwell.md", text: "$$\\begin{aligned} \\nabla \\cdot E &= \\frac{\\rho}{\\varepsilon_0} \\\\ \\nabla \\cdot B &= 0 \\end{aligned}$$", generation: 1 }];
 const surface = createRef<EditorSurfaceHandle>();
 const surfaceRoot = createRoot(document.getElementById("editor")!);
 const showDocument = (active: number) => surfaceRoot.render(createElement(EditorSurface, { documents, active, readOnly: false, wrap: true, minimap: false, label: "Editor",
@@ -31,6 +33,8 @@ Object.assign(window, { mathFixture: {
   editorCaret(column: number) { surface.current!.reveal(1, column); },
   editorText: (id: number) => surface.current?.read(id)?.text ?? null,
   editorPreview: () => !!document.querySelector("#editor .prompt-math-preview .katex"),
+  // The formula of the preview needs no horizontal scroll bar of its own.
+  editorPreviewFits() { const cell = document.querySelector<HTMLElement>("#editor .prompt-math-preview-formula")!; return cell.scrollWidth <= cell.clientWidth; },
   editorTinted: () => document.querySelectorAll("#editor .prompt-math").length,
   caret(offset: number) { input!.focus(); input!.setSelectionRange(offset, offset); },
   preview() {
