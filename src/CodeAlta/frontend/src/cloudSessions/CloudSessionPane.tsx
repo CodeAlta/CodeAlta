@@ -189,13 +189,15 @@ export function ContinueHereDialog({ epoch, session, title, projectPath, folderB
   useEffect(() => {
     if (!session.projectId) return;
     const abort = new AbortController();
-    void api.readiness({ expectedEpoch: epoch, projectId: session.projectId, providerKey: session.providerKey ?? null }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
+    void api.readiness({ expectedEpoch: epoch, projectId: session.projectId, providerKey: session.providerKey ?? null, sessionId: session.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
       .then(reply => { if (!abort.signal.aborted && reply.status === "ok") setReadiness(reply); }, () => { /* The folder is offered without what it holds. */ });
     return () => abort.abort();
   }, [api, epoch, session.projectId, session.providerKey]);
   const dirty = (readiness?.changed ?? 0) > 0;
   // The folder of the project is switched to another branch: not under another session that works there.
-  const inWorktree = worktree ?? (dirty || folderBusy);
+  // The host knows the sessions at work in every window; this one knows those it watches.
+  const busyFolder = folderBusy || readiness?.folderBusy === true;
+  const inWorktree = worktree ?? (dirty || busyFolder);
   const run = (fromTerminal: boolean) => {
     setStep("running"); setError(null);
     void api.continueHere({ expectedEpoch: epoch, sessionId: session.id, worktree: !reserved.current && inWorktree, fromTerminal }, { timeoutMilliseconds: 10 * 60_000 })
@@ -228,7 +230,7 @@ export function ContinueHereDialog({ epoch, session, title, projectPath, folderB
         onChange={event => setWorktree(event.currentTarget.value === "worktree")}>
         <Radio value="worktree" labelElement={<span className="cloud-continue-choice"><strong>{t("New worktree")}</strong>
           <small>{dirty ? t("Recommended: the folder of the project has changes that are not committed.")
-            : folderBusy ? t("Recommended: another session works in the folder of the project.")
+            : busyFolder ? t("Recommended: another session works in the folder of the project.")
             : t("A checkout of its own: the folder of the project stays as it is.")}</small></span>} />
         <Radio value="project" disabled={dirty} labelElement={<span className="cloud-continue-choice"><strong>{t("Project folder")}</strong>
           <small id={`${id}-project`}>{changedReason ? `${changedReason}: ${t("commit them first, or choose a new worktree.")}`

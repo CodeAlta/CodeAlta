@@ -81,7 +81,10 @@ internal sealed class CloudSessionsService
             gitHub = (await GitAsync(folder, ["remote", "get-url", "origin"], cancellationToken).ConfigureAwait(false))?.Contains("github.com", StringComparison.OrdinalIgnoreCase) == true;
         }
 
-        return new CloudReadinessResponse("ok", _epoch, repository, branch, unpushed, changed, gitHub, AccountOf(request.ProviderKey), OperatingSystem.IsWindows());
+        return new CloudReadinessResponse("ok", _epoch, repository, branch, unpushed, changed, gitHub, AccountOf(request.ProviderKey), OperatingSystem.IsWindows())
+        {
+            FolderBusy = await _commands!.IsFolderAtWorkAsync(folder, request.SessionId).ConfigureAwait(false),
+        };
     }
 
     /// <summary>
@@ -216,7 +219,17 @@ internal sealed class CloudSessionsService
                 }
             }
 
-            var result = await _commands!.ContinueCloudSessionHereAsync(request.SessionId, worktree, request.FromTerminal).ConfigureAwait(false);
+            CloudSessionContinueResult result;
+            try
+            {
+                result = await _commands!.ContinueCloudSessionHereAsync(request.SessionId, worktree, request.FromTerminal).ConfigureAwait(false);
+            }
+            catch when (worktree is not null && project is not null)
+            {
+                await RemoveUnusedWorktreeAsync(request.SessionId, project, worktree).ConfigureAwait(false);
+                throw;
+            }
+
             if (result.Status == "ok" && worktree is not null && branch is not null)
             {
                 // Claude Code checked out the branch of the cloud session there: the branch made for the worktree is not used.
@@ -224,12 +237,7 @@ internal sealed class CloudSessionsService
                 if (head is { Length: > 0 } && head != branch) await GitAsync(worktree, ["branch", "-d", branch], CancellationToken.None).ConfigureAwait(false);
             }
             else if (result.Status is not ("ok" or "terminal") && worktree is not null && project is not null)
-            {
-                // Refused before the session went there: the worktree made for it is not left behind.
-                var after = await _commands.GetCloudSessionAsync(request.SessionId, CancellationToken.None).ConfigureAwait(false);
-                if (after?.Worktree is null || !string.Equals(Path.GetFullPath(after.Worktree), Path.GetFullPath(worktree), StringComparison.OrdinalIgnoreCase))
-                    await _worktrees!.RemoveAsync(project.ProjectPath, worktree, force: false, deleteBranch: true, CancellationToken.None).ConfigureAwait(false);
-            }
+                await RemoveUnusedWorktreeAsync(request.SessionId, project, worktree).ConfigureAwait(false);
 
             return new(result.Status, result.Message, result.ChangedFiles, result.Command, result.ConfigDirectory, result.Folder, OperatingSystem.IsWindows(),
                 ClaudeCodeConversationWire.Home()) { Executable = result.Executable };
@@ -237,6 +245,21 @@ internal sealed class CloudSessionsService
         finally
         {
             _continuing.TryRemove(request.SessionId, out _);
+        }
+    }
+
+    // A worktree made for a return that was refused before the session went there is not left behind.
+    private async Task RemoveUnusedWorktreeAsync(string sessionId, ProjectDescriptor project, string worktree)
+    {
+        try
+        {
+            var after = await _commands!.GetCloudSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+            if (after?.Worktree is null || !string.Equals(Path.GetFullPath(after.Worktree), Path.GetFullPath(worktree), StringComparison.OrdinalIgnoreCase))
+                await _worktrees!.RemoveAsync(project.ProjectPath, worktree, force: false, deleteBranch: true, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            // It stays listed in the worktrees of the project, where it can be removed.
         }
     }
 
@@ -307,7 +330,11 @@ internal sealed class CloudSessionsService
 }
 
 /// <summary>Asks what a project and a provider allow before a cloud session starts.</summary>
-internal sealed record CloudReadinessRequest(string ExpectedEpoch, string ProjectId, string? ProviderKey);
+internal sealed record CloudReadinessRequest(string ExpectedEpoch, string ProjectId, string? ProviderKey)
+{
+    /// <summary>The session that asks (Continue here), which is not counted among those at work in the folder, or null.</summary>
+    public string? SessionId { get; init; }
+}
 
 /// <summary>
 /// What a project and a provider allow before a cloud session starts. <paramref name="Account"/> is <c>subscription</c>,
@@ -317,6 +344,9 @@ internal sealed record CloudReadinessResponse(string Status, string? Epoch, bool
     bool Windows)
 {
     internal static CloudReadinessResponse Refused(string status) => new(status, null, false, null, null, 0, false, "unknown", OperatingSystem.IsWindows());
+
+    /// <summary>Whether another session of this host is at work in the folder of the project now.</summary>
+    public bool FolderBusy { get; init; }
 }
 
 /// <summary>Starts a cloud session of a project with a provider; <paramref name="RequestId"/> is a GUID the page gives it.</summary>

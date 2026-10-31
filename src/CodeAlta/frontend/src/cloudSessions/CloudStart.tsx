@@ -23,7 +23,7 @@ export function CloudReadiness({ epoch, projectId, providerKey, provider, api = 
   useEffect(() => {
     const abort = new AbortController();
     setReadiness(null);
-    void api.readiness({ expectedEpoch: epoch, projectId, providerKey }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
+    void api.readiness({ expectedEpoch: epoch, projectId, providerKey, sessionId: null }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
       .then(reply => { if (!abort.signal.aborted && reply.status === "ok") setReadiness(reply); }, () => { /* Claude Code says what it refuses when it starts. */ });
     return () => abort.abort();
   }, [api, epoch, projectId, providerKey]);
@@ -69,7 +69,7 @@ export function CloudStartProgress({ step, outcome, onStop, onShowTerminal, onOp
         {outcome.terminalId && onShowTerminal && <Button icon={<AppIcon name="terminal" size={15} />} onClick={() => onShowTerminal(outcome.terminalId!)}>{t("Show the terminal")}</Button>}
         <Button onClick={onClose}>{t("Close")}</Button>
       </div>
-      {outcome.status !== "unrecorded" && <p className="detail">{t("The prompt keeps its text: nothing was sent.")}</p>}
+      {outcome.status !== "unrecorded" && outcome.status !== "lost" && <p className="detail">{t("The prompt keeps its text: nothing was sent.")}</p>}
     </>}
   </div>;
 }

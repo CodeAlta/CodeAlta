@@ -17,7 +17,7 @@ const opened: string[] = [];
 let sendStatus = "ok";
 let continueStatus = "failed";
 const sent: { text: string; at: string }[] = [{ text: "Also add a regression test", at: "2026-10-31T21:40:00Z" }];
-const readiness: CloudReadinessResponse = { status: "ok", epoch: "e", repository: true, branch: "main", unpushed: 2, changed: 3, gitHub: true, account: "subscription", windows: true };
+const readiness: CloudReadinessResponse = { status: "ok", epoch: "e", repository: true, branch: "main", unpushed: 2, changed: 3, gitHub: true, account: "subscription", windows: true, folderBusy: false };
 const details = (): CloudSessionDetailsResponse => ({ status: "ok", id, url, title: "Fix the flaky login test", task: "Fix the flaky login test in src/auth/login.ts",
   branch: "main", startedAt: "2026-10-31T21:11:00Z", note: null, sent: [...sent], continuing: false, continuedAt: null, inTerminal: false });
 const api: CloudSessionsApi = {

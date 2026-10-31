@@ -51,6 +51,16 @@ public sealed partial class OwnedSessionCommandService
         catch (ObjectDisposedException) { return new("closed"); }
     }
 
+    /// <summary>Gets whether another session of this host is at work in a folder now: a turn of it runs there.</summary>
+    /// <param name="folder">The folder.</param>
+    /// <param name="exceptSessionId">The session that asks, which is not counted, or null.</param>
+    /// <returns>True when such a session works there; false when the owner is closing.</returns>
+    public async Task<bool> IsFolderAtWorkAsync(string folder, string? exceptSessionId)
+    {
+        try { return await _runtime.IsFolderAtWorkAsync(folder, exceptSessionId).ConfigureAwait(false); }
+        catch (ObjectDisposedException) { return false; }
+    }
+
     /// <summary>Reads what a session holds of the cloud session it runs as, or ran as.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="cancellationToken">Ends the read.</param>

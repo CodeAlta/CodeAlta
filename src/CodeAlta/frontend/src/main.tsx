@@ -292,6 +292,7 @@ import { BringHereDialog, CloudAccountChoice, CloudReadiness, CloudStartProgress
 import { CloudMark, CloudOriginLine, CloudSessionPane, type CloudContinueRequest, type CloudTerminalRunner } from "./cloudSessions/CloudSessionPane";
 import { cloudSessions as cloudSessionsApi, type CloudContinueResponse, type CloudStartResponse } from "#neoastra";
 import { typeResumeCommand } from "./claudeCodeOpen/claudeCodeOpen";
+import { shellTakesCliCommand } from "./claudeCli/claudeCli";
 import { createPreparedWorktrees } from "./worktrees/preparedWorktrees";
 import { WorktreePreparation } from "./worktrees/WorktreePreparation";
 import { editorFailure, removalReason, removalReply } from "./worktrees/worktreeInventory";
@@ -3734,9 +3735,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
     if (created?.status !== "ok" || !created.terminal) return say("The terminal could not be started.");
     showTerminal(created.terminal);
+    // The executable of the provider is typed in the form of PowerShell or a POSIX shell: another shell gets `claude` as it is.
+    const shell = { windows: reply.windows, home: reply.home };
+    const resumeCommand = shellTakesCliCommand(created.terminal.profile, reply.windows) ? bringBackCommand(reply.command, reply.executable, shell) : reply.command;
     const refusal = typeResumeCommand(terminalWorkspace.hub, { id: created.terminal.id, profile: created.terminal.profile },
-      { resumeCommand: bringBackCommand(reply.command, reply.executable, { windows: reply.windows, home: reply.home }), configDir: reply.configDirectory,
-        windows: reply.windows, home: reply.home });
+      { resumeCommand, configDir: reply.configDirectory, windows: reply.windows, home: reply.home });
     return refusal ? say(refusal) : null;
   }
   function openScopeSession(scope: string | null, session: WorkspaceSession, action: SessionAction) {
@@ -4677,9 +4680,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     }
     setCloudStart({ requestId: pending.requestId, projectId: pending.projectId, step: "starting", outcome: null });
     // Its answer went with the page: the host keeps its outcome by request.
-    void runCloudStart({ start: () => new Promise<CloudStartResponse>(() => { }), startState: cloudSessionsApi.startState },
+    void runCloudStart(cloudSessionsApi,
       { expectedEpoch: epoch, requestId: pending.requestId, projectId: pending.projectId, providerKey: "", spaceId: null, title: null, task: "" },
-      step => setCloudStart(current => current?.requestId === pending.requestId && !current.outcome ? { ...current, step } : current))
+      step => setCloudStart(current => current?.requestId === pending.requestId && !current.outcome ? { ...current, step } : current), undefined, true)
       .then(outcome => finishCloudStart(pending, task, outcome.status === "unknown" ? lost : outcome));
   }, [owned, status?.hostEpoch]);
   function stopCloudStart() {

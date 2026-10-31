@@ -105,6 +105,14 @@ public sealed class ClaudeCodeCloudTests
         foreach (var launch in new[] { ClaudeCodeCloud.StartLaunch("/bin/claude", keyed, "/repo", "x"), ClaudeCodeCloud.SendLaunch("/bin/claude", keyed, "/repo", CloudId),
                      ClaudeCodeCloud.TeleportLaunch("/bin/claude", keyed, "/repo", CloudId, Conversation) })
             Assert.IsNull(launch.Environment[ClaudeCodeApiKey.Variable], "Not even a key the provider sets.");
+        var lower = new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude",
+            EnvironmentVariables = new Dictionary<string, string> { ["anthropic_api_key"] = "sk-ant-lower" },
+        };
+        var spelled = ClaudeCodeCloud.SendLaunch("/bin/claude", lower, "/repo", CloudId).Environment;
+        Assert.IsFalse(spelled.Any(static pair => string.Equals(pair.Key, ClaudeCodeApiKey.Variable, StringComparison.OrdinalIgnoreCase) && pair.Value is not null),
+            "Nor one spelled in other letters.");
         Assert.IsFalse(start.Environment.ContainsKey("CLAUDE_AGENT_SDK_CLIENT_APP"), "Not a process of the Agent SDK.");
 
         CollectionAssert.AreEqual(new[] { "-p", $"--cloud={CloudId}", "--output-format", "json" },

@@ -289,6 +289,9 @@ internal static partial class ClaudeCodeCloud
     private static Dictionary<string, string?> CloudEnvironment(ClaudeCodeModelProviderRuntimeOptions options)
     {
         var environment = ClaudeCodeLauncher.CreateEnvironment(options, null, withoutApiKey: true);
+        // Any spelling of it: the environment of Windows does not tell case apart.
+        foreach (var name in environment.Keys.Where(static name => string.Equals(name, ClaudeCodeApiKey.Variable, StringComparison.OrdinalIgnoreCase)).ToList())
+            environment.Remove(name);
         environment[ClaudeCodeApiKey.Variable] = null;
         return environment;
     }

@@ -9,7 +9,7 @@ import { bringBackCommand, claudeAiLink, cloudMessages, cloudOf, continueFailure
 const en = (key: Parameters<typeof translate>[1], parameters?: Readonly<Record<string, string | number>>) => translate("en", key, parameters);
 const id = "session_01QK5u8xRwDmhdvgs5BDTzPp";
 const readiness = (change: Partial<CloudReadinessResponse> = {}): CloudReadinessResponse => ({ status: "ok", epoch: "e", repository: true, branch: "main", unpushed: 0,
-  changed: 0, gitHub: true, account: "subscription", windows: true, ...change });
+  changed: 0, gitHub: true, account: "subscription", windows: true, folderBusy: false, ...change });
 const started = (change: Partial<CloudStartResponse> = {}): CloudStartResponse => ({ status: "created", epoch: "e", requestId: "r", sessionId: "s", cloudSessionId: id,
   url: `https://claude.ai/code/${id}`, message: null, terminalId: null, step: null, ...change });
 
@@ -98,6 +98,16 @@ test("a start reports its steps while it runs, and a lost answer is read again b
   const silent = { start: () => new Promise<CloudStartResponse>(() => { }), startState: async () => started() };
   assert.equal((await runCloudStart(silent as never, request, () => { }, async () => { await new Promise(resolve => setImmediate(resolve)); })).status, "created");
 
+  // A reading of the state that hangs does not hold an answer that came.
+  const stuck = { start: async () => started(), startState: () => new Promise<CloudStartResponse>(() => { }) };
+  assert.equal((await runCloudStart(stuck as never, request, () => { }, async () => { await new Promise(resolve => setImmediate(resolve)); })).status, "created");
+
+  // After a reload there is no answer to wait for: a request the host does not know ends as lost.
+  let asked = false;
+  const reloaded = { start: async () => { asked = true; return started(); }, startState: async () => started({ status: "unknown" }) };
+  assert.equal((await runCloudStart(reloaded as never, request, () => { }, async () => { await new Promise(resolve => setImmediate(resolve)); }, true)).status, "lost");
+  assert.equal(asked, false, "Nothing is started again.");
+
   // A host that no longer knows the request once the answer was lost: the start is lost, and the window is not held.
   const forgotten = { start: async () => { throw new Error("closed"); }, startState: async () => started({ status: "unknown" }) };
   assert.equal((await runCloudStart(forgotten as never, request, () => { }, async () => { await new Promise(resolve => setImmediate(resolve)); })).status, "lost");
@@ -125,7 +135,8 @@ test("a return in a terminal runs the executable of the provider, quoted for the
 test("a start a reload finds is read back whole, and anything else is none", () => {
   const pending = { requestId: "r", projectId: "p", epoch: "e" };
   assert.deepEqual(readPendingCloudStart(() => JSON.stringify({ ...pending, task: "Fix it" })), pending);
-  for (const raw of [null, "", "{", "[]", JSON.stringify({ requestId: "r", projectId: "p" }), JSON.stringify({ ...pending, epoch: 3 }), "x".repeat(2000)])
+  assert.deepEqual(readPendingCloudStart(() => JSON.stringify({ ...pending, task: "x".repeat(16_000) })), pending, "with the longest task");
+  for (const raw of [null, "", "{", "[]", JSON.stringify({ requestId: "r", projectId: "p" }), JSON.stringify({ ...pending, epoch: 3 }), "x".repeat(300_000)])
     assert.equal(readPendingCloudStart(() => raw), null, String(raw).slice(0, 20));
 });
 

@@ -146,15 +146,20 @@ export type CloudStartState = Readonly<{ requestId: string; projectId: string; s
  * the request after the answer was lost (it restarted) ends it as `lost`.
  */
 export async function runCloudStart(api: Pick<CloudSessionsApi, "start" | "startState">, request: CloudStartRequest, onStep: (step: string) => void,
-  wait: (milliseconds: number) => Promise<void> = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))): Promise<CloudStartResponse> {
-  // Undefined while the answer is awaited, null once it was lost.
-  let answer: CloudStartResponse | null | undefined;
-  void api.start(request, { timeoutMilliseconds: 30 * 60_000 }).then(value => { answer = value; }, () => { answer = null; });
+  wait: (milliseconds: number) => Promise<void> = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
+  /** Follows a start whose request was sent before a reload: there is no answer to wait for, only what the host keeps. */
+  recovering = false): Promise<CloudStartResponse> {
+  // Undefined while the answer is awaited, null once it was lost (or, recovering, never to come).
+  let answer: CloudStartResponse | null | undefined = recovering ? null : undefined;
+  let answered!: (value: CloudStartResponse) => void;
+  const arrived = new Promise<CloudStartResponse>(resolve => { answered = resolve; });
+  if (!recovering) void api.start(request, { timeoutMilliseconds: 30 * 60_000 }).then(value => { answer = value; answered(value); }, () => { answer = null; });
+  // The answer ends the wait at any moment: a reading of the state that hangs does not hold it.
+  const until = <T>(work: Promise<T>) => Promise.race([work, arrived.then(() => undefined)]);
   for (let unknown = 0; ;) {
+    await until(wait(400));
     if (answer) return answer;
-    await wait(400);
-    if (answer) return answer;
-    const state = await api.startState({ expectedEpoch: request.expectedEpoch, requestId: request.requestId }, { timeoutMilliseconds: 5000 }).catch(() => null);
+    const state = await until(api.startState({ expectedEpoch: request.expectedEpoch, requestId: request.requestId }, { timeoutMilliseconds: 5000 }).catch(() => null));
     if (answer) return answer;
     if (state?.status === "running") { if (state.step) onStep(state.step); continue; }
     if (state && state.status !== "unknown") return state;
@@ -181,7 +186,8 @@ export const pendingCloudStartKey = "codealta.desktop.cloudStart.v1";
 export function readPendingCloudStart(read: () => string | null): PendingCloudStart | null {
   try {
     const raw = read();
-    if (!raw || raw.length > 1024) return null;
+    // The task is kept with it (16,000 characters at most, escaped in JSON).
+    if (!raw || raw.length > 200_000) return null;
     const value = JSON.parse(raw) as Record<string, unknown>;
     const text = (item: unknown) => typeof item === "string" && item.length > 0 && item.length <= 256;
     return value && text(value.requestId) && text(value.projectId) && text(value.epoch)

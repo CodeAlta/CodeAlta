@@ -412,14 +412,18 @@ public sealed partial class SessionRuntimeService
             reserved = new SessionCloudContinuing(Guid.NewGuid().ToString(), folder, worktree is not null, fromTerminal);
         }
 
-        if (!fromTerminal || !TranscriptWritten(reserved))
+        // From here the way of the reservation decides: a conversation a terminal wrote is read as it was written.
+        var terminal = reserved.FromTerminal;
+        if (!terminal || !TranscriptWritten(reserved))
         {
             // Teleport fails without a word on a change of a tracked file: it is said here first.
             var changed = await CountTrackedChangesAsync(reserved.Folder).ConfigureAwait(false);
             if (changed > 0) return new CloudSessionContinueResult("uncommitted_changes", ChangedFiles: changed, Folder: reserved.Folder);
         }
 
-        await UpdateCloudStateAsync(session, current => current.Continuing = reserved).ConfigureAwait(false);
+        // Reserved on the actor of the session, which finds it still there: a deletion made meanwhile wins, and nothing is run.
+        if (!await UpdateCloudStateAsync(session, current => current.Continuing = reserved, whileInCloud: true).ConfigureAwait(false))
+            return new CloudSessionContinueResult("not_cloud");
         var succeeded = false;
         try
         {
@@ -432,14 +436,14 @@ public sealed partial class SessionRuntimeService
                 session = await ResolveOwnedSessionBodyAsync(sessionId, CancellationToken.None).ConfigureAwait(false) ?? session;
             }
 
-            if (fromTerminal && !TranscriptWritten(reserved))
+            if (terminal && !TranscriptWritten(reserved))
             {
                 var (command, configDirectory, executable) = provider.BringBackCommand(cloud.Id, reserved.ConversationId);
                 succeeded = true; // The reservation stays: the user runs the command, then asks again.
                 return new CloudSessionContinueResult("terminal", Command: command, ConfigDirectory: configDirectory, Folder: reserved.Folder, Executable: executable);
             }
 
-            if (!fromTerminal && !TranscriptWritten(reserved))
+            if (!terminal && !TranscriptWritten(reserved))
             {
                 var returned = await provider.BringCloudSessionBackAsync(cloud.Id, reserved.ConversationId, reserved.Folder, CancellationToken.None).ConfigureAwait(false);
                 if (returned.Status != "ok") return new CloudSessionContinueResult(returned.Status, returned.Message, Folder: reserved.Folder);
@@ -456,7 +460,7 @@ public sealed partial class SessionRuntimeService
             }
 
             if (read.Status != AgentExternalTurnsStatus.Read)
-                return new CloudSessionContinueResult(fromTerminal ? "not_found" : "failed", "The conversation of the cloud session was not written on this computer.",
+                return new CloudSessionContinueResult(terminal ? "not_found" : "failed", "The conversation of the cloud session was not written on this computer.",
                     Folder: reserved.Folder);
             await WriteBroughtBackTurnsAsync(session, providerId, runtime, reserved, read).ConfigureAwait(false);
             succeeded = true;
@@ -544,13 +548,15 @@ public sealed partial class SessionRuntimeService
         PublishSessionLifecycleEvent(sessionId);
     }
 
-    // Changes the cloud state of a session on its actor, from its last state.
-    private async Task UpdateCloudStateAsync(SessionViewDescriptor session, Action<SessionCloudState> change)
+    // Changes the cloud state of a session on its actor, from its last state; false when the session is gone (deleted,
+    // archived), or, with whileInCloud, no longer in the cloud.
+    private async Task<bool> UpdateCloudStateAsync(SessionViewDescriptor session, Action<SessionCloudState> change, bool whileInCloud = false)
     {
-        await GetActorForWork(session.SessionId).QueryAsync(async token =>
+        var changed = await GetActorForWork(session.SessionId).QueryAsync(async token =>
         {
+            if (await ResolveOwnedSessionBodyAsync(session.SessionId, token).ConfigureAwait(false) is not { Status: not SessionViewStatus.Archived }) return false;
             var local = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, token).ConfigureAwait(false);
-            if (local?.Cloud is not { } cloud) return false;
+            if (local?.Cloud is not { } cloud || whileInCloud && cloud.ContinuedAt is not null) return false;
             cloud = cloud.Copy();
             change(cloud);
             local.Cloud = cloud;
@@ -558,8 +564,32 @@ public sealed partial class SessionRuntimeService
             session.Cloud = cloud.ToListing();
             return true;
         }, CancellationToken.None).ConfigureAwait(false);
+        if (!changed) return false;
         await _agentSessionCatalog.NotifySessionUpdatedAsync(session.SessionId, CancellationToken.None).ConfigureAwait(false);
         if (await ResolveOwnedSessionBodyAsync(session.SessionId, CancellationToken.None).ConfigureAwait(false) is { } updated) PublishSessionCatalogEvent(updated);
+        return true;
+    }
+
+    /// <summary>Gets whether another session of this host is at work in a folder now: a turn of it runs there.</summary>
+    /// <param name="folder">The folder.</param>
+    /// <param name="exceptSessionId">The session that asks, which is not counted, or null.</param>
+    /// <returns>True when such a session works there.</returns>
+    internal async Task<bool> IsFolderAtWorkAsync(string folder, string? exceptSessionId)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return false;
+        var target = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var running = _entries.Where(pair => !string.Equals(pair.Key, exceptSessionId, StringComparison.OrdinalIgnoreCase) && !pair.Value.IsTerminated && pair.Value.HasActiveRun)
+            .Select(static pair => pair.Key).ToList();
+        foreach (var id in running)
+        {
+            var session = await ResolveOwnedSessionBodyAsync(id, CancellationToken.None).ConfigureAwait(false);
+            var where = session?.WorktreeDirectory ?? session?.WorkingDirectory;
+            if (where is not null && string.Equals(Path.GetFullPath(where).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), target,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>Gets whether a session runs in the cloud now: nothing starts a local conversation of it.</summary>
